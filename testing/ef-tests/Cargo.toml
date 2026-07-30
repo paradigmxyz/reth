@@ -16,6 +16,7 @@ ef-tests = []
 asm-keccak = ["alloy-primitives/asm-keccak", "revm/asm-keccak"]
 
 [dependencies]
+reth-chain-state.workspace = true
 reth-chainspec.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-primitives-traits = { workspace = true, features = ["rayon"] }
@@ -23,11 +24,21 @@ reth-consensus.workspace = true
 reth-db = { workspace = true, features = ["mdbx", "test-utils", "disable-lock"] }
 reth-db-api.workspace = true
 reth-db-common.workspace = true
+reth-engine-primitives.workspace = true
+reth-engine-tree = { workspace = true, features = ["test-utils"] }
+reth-ethereum-engine-primitives.workspace = true
+reth-node-ethereum.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-evm.workspace = true
-reth-evm-ethereum.workspace = true
+reth-evm-ethereum = { workspace = true, features = ["test-utils"] }
 reth-ethereum-consensus.workspace = true
-reth-revm.workspace = true
+reth-ethereum-payload-builder.workspace = true
+reth-payload-builder.workspace = true
+reth-payload-primitives.workspace = true
+reth-payload-validator.workspace = true
+reth-revm = { workspace = true, features = ["test-utils"] }
+reth-storage-api.workspace = true
+reth-tasks.workspace = true
 reth-tracing.workspace = true
 reth-trie.workspace = true
 reth-trie-db.workspace = true
@@ -38,6 +49,9 @@ alloy-primitives.workspace = true
 alloy-eips.workspace = true
 alloy-consensus.workspace = true
 alloy-genesis.workspace = true
+alloy-rpc-types-engine.workspace = true
+
+tokio = { workspace = true, features = ["sync"] }
 
 walkdir.workspace = true
 serde.workspace = true

@@ -14,6 +14,7 @@ use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, KeccakKeyHasher,
     MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
+use revm::database::BundleState;
 
 /// Mock state for testing
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
@@ -43,6 +44,58 @@ impl StateProviderTest {
     /// Insert a block hash.
     pub fn insert_block_hash(&mut self, block_number: u64, block_hash: B256) {
         self.block_hash.insert(block_number, block_hash);
+    }
+
+    /// Apply a [`BundleState`] from execution output to this in-memory provider.
+    ///
+    /// For each account in the bundle:
+    /// - If destroyed with no new state, remove it entirely.
+    /// - If it has updated info, apply balance/nonce/code changes.
+    /// - Apply all storage slot changes (present values).
+    /// - Register any new contracts.
+    pub fn apply_bundle_state(&mut self, bundle: &BundleState) {
+        // Apply new contracts first so bytecode lookups work.
+        for (hash, bytecode) in &bundle.contracts {
+            self.contracts.insert(*hash, Bytecode(bytecode.clone()));
+        }
+
+        for (address, bundle_account) in bundle.state() {
+            // Account was destroyed and not re-created.
+            if bundle_account.status.was_destroyed() && bundle_account.info.is_none() {
+                self.accounts.remove(address);
+                continue;
+            }
+
+            if let Some(ref info) = bundle_account.info {
+                let (storage, account) =
+                    self.accounts.entry(*address).or_insert_with(|| {
+                        (HashMap::default(), Account::default())
+                    });
+
+                account.balance = info.balance;
+                account.nonce = info.nonce;
+                account.bytecode_hash = if info.is_empty_code_hash() {
+                    None
+                } else {
+                    Some(info.code_hash)
+                };
+
+                // If the account was destroyed and re-created, clear old storage.
+                if bundle_account.status.was_destroyed() {
+                    storage.clear();
+                }
+
+                // Apply storage changes.
+                for (slot, storage_slot) in &bundle_account.storage {
+                    let key = B256::from(*slot);
+                    if storage_slot.present_value.is_zero() {
+                        storage.remove(&key);
+                    } else {
+                        storage.insert(key, storage_slot.present_value);
+                    }
+                }
+            }
+        }
     }
 }
 

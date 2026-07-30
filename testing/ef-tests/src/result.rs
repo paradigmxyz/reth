@@ -90,6 +90,28 @@ impl CaseResult {
     }
 }
 
+/// Serialize CaseResults as a JSON array to stdout.
+pub fn print_json_array(results: &[CaseResult]) {
+    use serde_json::json;
+    let arr: Vec<_> = results
+        .iter()
+        .map(|r| {
+            let (pass, error) = match &r.result {
+                Ok(()) => (true, String::new()),
+                Err(Error::Skipped) => (true, String::new()),
+                Err(e) => (false, e.to_string()),
+            };
+            json!({
+                "name": r.desc,
+                "pass": pass,
+                "fork": "",
+                "error": error,
+            })
+        })
+        .collect();
+    println!("{}", serde_json::to_string(&arr).unwrap());
+}
+
 /// Assert that all the given tests passed and print the results to stdout.
 pub(crate) fn assert_tests_pass(suite_name: &str, path: &Path, results: &[CaseResult]) {
     let (passed, failed, skipped) = categorize_results(results);

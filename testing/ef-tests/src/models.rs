@@ -454,6 +454,127 @@ pub struct AccessListItem {
 /// Access list.
 pub type AccessList = Vec<AccessListItem>;
 
+/// The definition of a blockchain test with engine payloads.
+///
+/// This is the `blockchain_test_engine` fixture format, which uses
+/// `engineNewPayloads` instead of raw RLP blocks.
+#[derive(Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EngineTest {
+    /// Genesis block header.
+    pub genesis_block_header: Header,
+    /// The test pre-state.
+    pub pre: State,
+    /// The expected post state.
+    pub post_state: Option<BTreeMap<Address, Account>>,
+    /// Hash of the best block.
+    pub lastblockhash: B256,
+    /// Network spec.
+    pub network: ForkSpec,
+    /// Engine new payload entries.
+    pub engine_new_payloads: Vec<EngineNewPayload>,
+}
+
+/// A single `engineNewPayloads` entry in the engine test fixture.
+///
+/// The `params` array follows the Engine API calling convention:
+///   - `params[0]`: the [`ExecutionPayloadV3`](alloy_rpc_types_engine::ExecutionPayloadV3) object
+///   - `params[1]`: versioned hashes (`Vec<B256>`)
+///   - `params[2]`: parent beacon block root (`B256`)
+///   - `params[3]`: execution requests (`Vec<Bytes>`)  -- only for V4+
+#[derive(Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EngineNewPayload {
+    /// The raw params array, kept as `serde_json::Value` for flexible parsing.
+    pub params: Vec<serde_json::Value>,
+    /// The `newPayload` version (e.g. 4 for `engine_newPayloadV4`).
+    ///
+    /// Fixture files encode this as a string (e.g. `"4"`).
+    #[serde(deserialize_with = "deserialize_string_u64")]
+    pub new_payload_version: u64,
+    /// The `forkchoiceUpdated` version (e.g. 3 for `engine_forkchoiceUpdatedV3`).
+    ///
+    /// Fixture files encode this as a string (e.g. `"3"`).
+    #[serde(deserialize_with = "deserialize_string_u64")]
+    pub forkchoice_updated_version: u64,
+    /// If set, the payload is expected to be invalid with this error description.
+    #[serde(default)]
+    pub validation_error: Option<String>,
+    /// If set, the RPC should return this JSON-RPC error code (e.g. -32602).
+    ///
+    /// Fixture files encode this as a string (e.g. `"-32602"`) or it may be absent.
+    #[serde(default, deserialize_with = "deserialize_optional_string_i64")]
+    pub error_code: Option<i64>,
+}
+
+/// Deserialize a `u64` that may be encoded as either a JSON number or a JSON
+/// string (the fixture format uses strings).
+pub(crate) fn deserialize_string_u64<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de;
+
+    struct StringOrU64;
+    impl<'de> de::Visitor<'de> for StringOrU64 {
+        type Value = u64;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("a u64 or a string representing a u64")
+        }
+
+        fn visit_u64<E: de::Error>(self, v: u64) -> Result<u64, E> {
+            Ok(v)
+        }
+
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<u64, E> {
+            v.parse().map_err(de::Error::custom)
+        }
+    }
+
+    deserializer.deserialize_any(StringOrU64)
+}
+
+/// Deserialize an `Option<i64>` that may be encoded as a JSON number, a JSON
+/// string, or `null` (the fixture format uses strings for error codes).
+pub(crate) fn deserialize_optional_string_i64<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de;
+
+    struct OptionalStringOrI64;
+    impl<'de> de::Visitor<'de> for OptionalStringOrI64 {
+        type Value = Option<i64>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("null, an i64, or a string representing an i64")
+        }
+
+        fn visit_none<E: de::Error>(self) -> Result<Option<i64>, E> {
+            Ok(None)
+        }
+
+        fn visit_unit<E: de::Error>(self) -> Result<Option<i64>, E> {
+            Ok(None)
+        }
+
+        fn visit_i64<E: de::Error>(self, v: i64) -> Result<Option<i64>, E> {
+            Ok(Some(v))
+        }
+
+        fn visit_u64<E: de::Error>(self, v: u64) -> Result<Option<i64>, E> {
+            Ok(Some(v as i64))
+        }
+
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<Option<i64>, E> {
+            v.parse().map(Some).map_err(de::Error::custom)
+        }
+    }
+
+    deserializer.deserialize_any(OptionalStringOrI64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
