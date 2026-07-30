@@ -1434,8 +1434,7 @@ where
         if !self.persistence_state.in_progress() {
             if let Some(new_tip_num) = self.find_disk_reorg()? {
                 self.remove_blocks(new_tip_num)
-            } else if self.should_persist() {
-                let input = self.get_save_blocks_input(PersistTarget::Threshold)?;
+            } else if let Some(input) = self.get_save_blocks_input(PersistTarget::Threshold) {
                 self.persist_blocks(input);
             }
         }
@@ -1473,16 +1472,11 @@ where
                 continue
             }
 
-            let canonical_head_number = self.state.tree_state.canonical_block_number();
-            if self.persistence_state.last_persisted_block.number == canonical_head_number &&
-                self.persistence_state.last_state_trie_persisted_block.number ==
-                    canonical_head_number
-            {
+            let Some(input) = self.get_save_blocks_input(PersistTarget::Head) else {
                 debug!(target: "engine::tree", "persistence complete, signaling termination");
                 return Ok(())
-            }
+            };
 
-            let input = self.get_save_blocks_input(PersistTarget::Head)?;
             debug!(target: "engine::tree", count = input.persist_rest_blocks().len(), "persisting remaining blocks before shutdown");
             self.persist_blocks(input);
         }
@@ -2101,58 +2095,61 @@ where
         );
     }
 
-    /// Returns true if the canonical chain length minus the last persisted
-    /// block is greater than the persistence threshold,
-    /// backfill is not running, and no payload is currently being built.
-    pub const fn should_persist(&self) -> bool {
-        if self.building_payload {
-            return false
-        }
-
-        if !self.backfill_sync_state.is_idle() {
-            // can't persist if backfill is running
-            return false
-        }
-
-        let prev_db_tip = self.persistence_state.last_persisted_block.number;
-        let canonical_head_number = self.state.tree_state.canonical_block_number();
-        canonical_head_number.saturating_sub(prev_db_tip) > self.config.persistence_threshold() &&
-            canonical_head_number.saturating_sub(self.config.memory_block_buffer_target()) >
-                prev_db_tip
-    }
-
-    /// Returns the blocks and frontiers for the next persistence cycle.
-    fn get_save_blocks_input(
-        &self,
-        target: PersistTarget,
-    ) -> Result<SaveBlocksInput<N>, AdvancePersistenceError> {
+    /// Returns the blocks and frontiers for the next persistence cycle, if one should start.
+    ///
+    /// Threshold persistence honors the normal scheduling gates and retains the configured
+    /// in-memory block buffer. Head persistence bypasses those gates during shutdown and returns
+    /// `None` once both persistence frontiers have reached the canonical head.
+    fn get_save_blocks_input(&self, target: PersistTarget) -> Option<SaveBlocksInput<N>> {
         // We will calculate the state root using the database, so we need to be sure there are no
         // changes
         debug_assert!(!self.persistence_state.in_progress());
 
-        let mut blocks = Vec::new();
-        let mut current_hash = self.state.tree_state.canonical_block_hash();
         let prev_partial_state_trie = self.persistence_state.last_state_trie_persisted_block.number;
         let prev_db_tip = self.persistence_state.last_persisted_block.number;
         let canonical_head_number = self.state.tree_state.canonical_block_number();
 
-        let new_db_tip = match target {
-            PersistTarget::Head => canonical_head_number,
-            PersistTarget::Threshold => canonical_head_number
-                .saturating_sub(self.config.memory_block_buffer_target())
-                .max(prev_db_tip),
+        let (new_db_tip, new_partial_state_trie) = match target {
+            PersistTarget::Head => (canonical_head_number, canonical_head_number),
+            PersistTarget::Threshold => {
+                if self.building_payload || !self.backfill_sync_state.is_idle() {
+                    return None
+                }
+
+                if canonical_head_number.saturating_sub(prev_db_tip) <=
+                    self.config.persistence_threshold()
+                {
+                    return None
+                }
+
+                let new_db_tip =
+                    canonical_head_number.saturating_sub(self.config.memory_block_buffer_target());
+                if new_db_tip <= prev_db_tip {
+                    return None
+                }
+
+                let new_partial_state_trie = new_db_tip
+                    .saturating_sub(self.config.num_state_masking_blocks())
+                    .max(prev_partial_state_trie);
+                (new_db_tip, new_partial_state_trie)
+            }
         };
 
-        let new_partial_state_trie = match target {
-            PersistTarget::Head => new_db_tip,
-            PersistTarget::Threshold => new_db_tip
-                .saturating_sub(self.config.num_state_masking_blocks())
-                .max(prev_partial_state_trie),
-        };
         debug_assert!(
-            new_db_tip > prev_db_tip || new_partial_state_trie > prev_partial_state_trie,
-            "at least one persistence frontier must advance when saving"
+            new_db_tip >= prev_db_tip,
+            "disk reorg must be resolved before saving blocks"
         );
+        debug_assert!(
+            new_partial_state_trie >= prev_partial_state_trie,
+            "disk reorg must be resolved before saving state/trie"
+        );
+
+        if new_db_tip == prev_db_tip && new_partial_state_trie == prev_partial_state_trie {
+            return None
+        }
+
+        let mut blocks = Vec::new();
+        let mut current_hash = self.state.tree_state.canonical_block_hash();
 
         debug!(
             target: "engine::tree",
@@ -2180,7 +2177,7 @@ where
         // Reverse the order so that the oldest block comes first
         blocks.reverse();
 
-        Ok(SaveBlocksInput::new(
+        Some(SaveBlocksInput::new(
             blocks,
             prev_db_tip,
             prev_partial_state_trie,
