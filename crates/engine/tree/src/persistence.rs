@@ -7,10 +7,9 @@ use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     providers::ProviderNodeTypes, BalProvider, BlockExecutionWriter, BlockHashReader,
     ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksInput,
-    StageCheckpointReader,
 };
 use reth_prune::{PrunerError, PrunerWithFactory};
-use reth_stages_api::{MetricEvent, MetricEventsSender, StageId};
+use reth_stages_api::{MetricEvent, MetricEventsSender};
 use reth_tasks::spawn_os_thread;
 use std::{
     sync::{
@@ -139,21 +138,14 @@ where
         let provider_rw = self.provider.database_provider_rw()?;
 
         let new_tip_hash = provider_rw.block_hash(new_tip_num)?;
-        provider_rw.remove_block_and_execution_above(new_tip_num)?;
-        let last_state_trie_block =
-            provider_rw.get_stage_checkpoint(StageId::Finish)?.map(|checkpoint| {
-                checkpoint
-                    .finish_stage_checkpoint()
-                    .and_then(|finish| finish.partial_state_trie())
-                    .unwrap_or(checkpoint.block_number)
-            });
+        let frontiers = provider_rw.remove_block_and_execution_above(new_tip_num)?;
         provider_rw.commit()?;
 
         debug!(target: "engine::persistence", ?new_tip_num, ?new_tip_hash, "Removed blocks from disk");
         self.metrics.remove_blocks_above_duration_seconds.record(start_time.elapsed());
         Ok(PersistenceResult {
-            last_block: new_tip_hash.map(|hash| BlockNumHash { hash, number: new_tip_num }),
-            last_state_trie_block,
+            last_block: new_tip_hash.map(|hash| BlockNumHash { hash, number: frontiers.db_tip }),
+            last_state_trie_block: Some(frontiers.partial_state_trie),
             commit_duration: None,
         })
     }
@@ -703,7 +695,9 @@ mod tests {
         let pf = provider_factory.clone();
         let reorg_handle = std::thread::spawn(move || {
             let provider_rw = pf.database_provider_rw().unwrap();
-            provider_rw.remove_block_and_execution_above(1).unwrap();
+            let frontiers = provider_rw.remove_block_and_execution_above(1).unwrap();
+            assert_eq!(frontiers.db_tip, 1);
+            assert_eq!(frontiers.partial_state_trie, 1);
             provider_rw.commit().unwrap();
 
             let provider_rw = pf.database_provider_rw().unwrap();
