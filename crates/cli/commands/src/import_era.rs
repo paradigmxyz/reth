@@ -93,16 +93,18 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
         let mut hash_collector = Collector::new(config.stages.etl.file_size, config.stages.etl.dir);
 
         let static_file_provider = provider_factory.static_file_provider();
+        // The chain's first block, which is not necessarily 0: reth supports a non-zero genesis.
+        let genesis_block_number = static_file_provider.genesis_block_number();
         let headers_tip = static_file_provider
             .get_highest_static_file_block(StaticFileSegment::Headers)
-            .unwrap_or_default();
+            .unwrap_or(genesis_block_number);
 
         // With `--with-receipts`, resume from the receipts tip so files covering already-imported
         // headers are re-read to backfill their receipts.
         let resume_block = if self.with_receipts {
             let receipts_tip = static_file_provider
                 .get_highest_static_file_block(StaticFileSegment::Receipts)
-                .unwrap_or_default();
+                .unwrap_or(genesis_block_number);
             headers_tip.min(receipts_tip)
         } else {
             headers_tip

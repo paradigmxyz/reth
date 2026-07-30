@@ -277,20 +277,21 @@ where
 
     let static_file_provider = provider_factory.static_file_provider();
 
+    // The chain's first block, which is not necessarily 0: reth supports a non-zero genesis.
+    let genesis_block_number = static_file_provider.genesis_block_number();
+
     // Consistency check of expected headers in static files vs DB is done on provider::sync_gap
     // when poll_execute_ready is polled.
     let headers_tip = static_file_provider
         .get_highest_static_file_block(StaticFileSegment::Headers)
-        .unwrap_or_default();
+        .unwrap_or(genesis_block_number);
 
     // When backfilling receipts, resume from the receipts tip so blocks whose headers were already
     // imported still get their receipts; only blocks above `headers_tip` are written in full.
     let receipts_tip = store_receipts
         .then(|| static_file_provider.get_highest_static_file_block(StaticFileSegment::Receipts));
     let mut height = match receipts_tip {
-        Some(tip) => headers_tip.min(
-            tip.unwrap_or(static_file_provider.genesis_block_number()),
-        ),
+        Some(tip) => headers_tip.min(tip.unwrap_or(genesis_block_number)),
         None => headers_tip,
     };
 
@@ -316,9 +317,9 @@ where
             let target = provider
                 .get_stage_checkpoint(StageId::Execution)?
                 .map(|checkpoint| checkpoint.block_number)
-                .unwrap_or_default();
+                .unwrap_or(genesis_block_number);
 
-            if target == 0 {
+            if target <= genesis_block_number {
                 eyre::bail!(
                     "receipt import repairs the receipt static files of an already-executed \
                      range, but this database has executed no blocks. Sync the node first, or \
@@ -356,11 +357,13 @@ where
         })
         .transpose()?;
 
-    // A segment that doesn't exist yet starts at genesis, which holds no receipts of its own. The
-    // backfill resumes at block 1, so seed that entry or the writer rejects the first append.
+    // A segment that doesn't exist yet holds no receipts for genesis, which has none of its own.
+    // The backfill resumes at the block after it, so seed that entry the way `init_genesis` does,
+    // or the writer rejects the first append. Setting the range directly rather than incrementing
+    // also covers a genesis that doesn't sit on a static file boundary.
     if matches!(receipts_tip, Some(None)) {
         let mut writer = static_file_provider.latest_writer(StaticFileSegment::Receipts)?;
-        writer.increment_block(0)?;
+        writer.user_header_mut().set_block_range(genesis_block_number, genesis_block_number);
         writer.commit()?;
     }
 
