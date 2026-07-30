@@ -127,7 +127,7 @@ async fn main() -> Result<()> {
     match cli.command {
         Command::Fetch(args) => {
             let fixture = resolve_fixture(&config, &base, &args).await?;
-            println!("{}", fixture.tests.display());
+            println!("{}", fixture.revision);
         }
         Command::List(args) => {
             let fixture = resolve_fixture(&config, &base, &args.fixture).await?;

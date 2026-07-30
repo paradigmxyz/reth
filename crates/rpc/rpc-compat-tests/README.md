@@ -3,16 +3,25 @@
 This crate runs the `ethereum/execution-apis` RPC compatibility fixtures against an embedded Reth
 node without Hive, Docker, or Go.
 
-The default configuration resolves `ethereum/execution-apis/main` on every online fetch and caches
-the fixture by its exact commit SHA. If that SHA is already cached it is reused without downloading
-the archive again. The runner imports `chain.rlp`, applies `headfcu.json`, executes every selected
-`.io` conversation over raw HTTP, and writes JSON and JUnit reports. Its embedded node computes
-state roots for `eth_simulateV1` responses.
+The default configuration resolves `ethereum/execution-apis` branch `main` on every online fetch
+and caches the fixture by its exact commit SHA. If that SHA is already cached it is reused without
+downloading the archive again. Both `repository` and `branch` are configurable, so the same runner
+can test an execution-apis fork. The runner imports `chain.rlp`, applies `headfcu.json`, executes
+every selected `.io` conversation over raw HTTP, and writes JSON and JUnit reports. Its embedded
+node computes state roots for `eth_simulateV1` responses.
 
 ```console
 cargo run -p reth-rpc-compat-tests --bin reth-rpc-compat -- fetch
 cargo run -p reth-rpc-compat-tests --bin reth-rpc-compat -- check --offline
 cargo run -p reth-rpc-compat-tests --bin reth-rpc-compat -- run --offline
+```
+
+For example, point the fixture resolver at a fork in `rpc-compat.toml`:
+
+```toml
+[fixture]
+repository = "example/execution-apis"
+branch = "feature/rpc-tests"
 ```
 
 Useful controls include:
@@ -21,7 +30,7 @@ Useful controls include:
 # Local fixture override and method filter
 reth-rpc-compat run --fixture ../execution-apis --include 'eth_getBlockBy*'
 
-# Reproducible upstream revision override
+# Reproducible commit override (bypasses branch resolution)
 reth-rpc-compat fetch --revision 50d1e5e0b6f5a5046e45421e5c84497ab6e55e6c
 
 # Outcome controls

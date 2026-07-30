@@ -42,8 +42,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cargo run --locked -p reth-rpc-compat-tests --bin reth-rpc-compat --no-default-features -- fetch
-          echo "revision=$(cat .cache/rpc-compat/.resolved-main)" >> "$GITHUB_OUTPUT"
+          revision="$(
+            cargo run --locked -p reth-rpc-compat-tests --bin reth-rpc-compat --no-default-features -- fetch
+          )"
+          echo "revision=$revision"
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
       - name: Save fixture cache
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:

@@ -103,10 +103,8 @@ impl Config {
 pub struct FixtureConfig {
     /// `GitHub` repository in `owner/name` form.
     pub repository: String,
-    /// Commit, tag, or branch to resolve.
-    pub revision: String,
-    /// Resolve the configured revision to the latest commit before consulting the cache.
-    pub track_latest: bool,
+    /// Branch to resolve to its latest commit on every online fetch.
+    pub branch: String,
     /// Optional environment variable containing a `GitHub` API token.
     pub github_token_env: Option<String>,
     /// Optional SHA-256 of the downloaded archive.
@@ -125,8 +123,7 @@ impl Default for FixtureConfig {
     fn default() -> Self {
         Self {
             repository: "ethereum/execution-apis".to_string(),
-            revision: "main".to_string(),
-            track_latest: false,
+            branch: "main".to_string(),
             github_token_env: Some("GITHUB_TOKEN".to_string()),
             sha256: None,
             archive_url: None,

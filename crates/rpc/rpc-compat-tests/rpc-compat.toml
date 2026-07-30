@@ -1,7 +1,6 @@
 [fixture]
 repository = "ethereum/execution-apis"
-revision = "main"
-track_latest = true
+branch = "main"
 github_token_env = "GITHUB_TOKEN"
 cache_dir = "../../../.cache/rpc-compat"
 tests_dir = "tests"

@@ -34,33 +34,31 @@ pub async fn resolve(
         return from_local(&absolute(base, path), &config.tests_dir)
     }
 
-    let requested = revision_override.unwrap_or(&config.revision);
-    if requested.is_empty() ||
-        !requested.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
-    {
-        return Err(eyre!("fixture revision contains unsupported characters: {requested:?}"))
-    }
+    validate_repository(&config.repository)?;
     let cache_root = absolute(base, &config.cache_dir);
-    let pointer = cache_root.join(format!(".resolved-{requested}"));
-    let revision = if config.track_latest && revision_override.is_none() {
+    let pointer = cache_root.join(resolution_pointer_name(&config.repository, &config.branch));
+    let revision = if let Some(revision) = revision_override {
+        validate_revision(revision)?;
+        revision.to_string()
+    } else {
+        validate_branch(&config.branch)?;
         if offline {
             fs::read_to_string(&pointer)
                 .wrap_err_with(|| {
                     format!(
-                        "no cached resolution for {requested}; run `fetch` without --offline first"
+                        "no cached resolution for {}/{}; run `fetch` without --offline first",
+                        config.repository, config.branch
                     )
                 })?
                 .trim()
                 .to_string()
         } else {
-            resolve_revision(config, requested).await?
+            resolve_revision(config, &config.branch).await?
         }
-    } else {
-        requested.to_string()
     };
     let destination = cache_root.join(&revision);
     if let Ok(fixture) = from_local(&destination, &config.tests_dir) {
-        if config.track_latest && !offline {
+        if revision_override.is_none() && !offline {
             fs::create_dir_all(&cache_root)?;
             fs::write(&pointer, &revision)?;
         }
@@ -104,15 +102,18 @@ pub async fn resolve(
         .path();
     fs::rename(&extracted, &destination)
         .wrap_err_with(|| format!("failed to move fixture into cache {}", destination.display()))?;
-    if config.track_latest {
+    if revision_override.is_none() {
         fs::write(&pointer, &revision)?;
     }
     let fixture = from_local(&destination, &config.tests_dir)?;
     Ok(Fixture { revision, ..fixture })
 }
 
-async fn resolve_revision(config: &FixtureConfig, revision: &str) -> Result<String> {
-    let url = format!("https://api.github.com/repos/{}/commits/{revision}", config.repository);
+async fn resolve_revision(config: &FixtureConfig, branch: &str) -> Result<String> {
+    let (owner, repository) = repository_parts(&config.repository)?;
+    let mut url =
+        reqwest::Url::parse(&format!("https://api.github.com/repos/{owner}/{repository}/commits"))?;
+    url.path_segments_mut().map_err(|_| eyre!("GitHub API URL cannot be a base"))?.push(branch);
     let mut request = reqwest::Client::new()
         .get(url)
         .header("user-agent", "reth-rpc-compat")
@@ -138,6 +139,41 @@ async fn resolve_revision(config: &FixtureConfig, revision: &str) -> Result<Stri
         .ok_or_else(|| eyre!("fixture revision lookup did not return a commit SHA"))
 }
 
+fn validate_repository(repository: &str) -> Result<()> {
+    repository_parts(repository).map(|_| ())
+}
+
+fn repository_parts(repository: &str) -> Result<(&str, &str)> {
+    let Some((owner, name)) = repository.split_once('/') else {
+        return Err(eyre!("fixture repository must use owner/name form: {repository:?}"))
+    };
+    if owner.is_empty() || name.is_empty() || name.contains('/') {
+        return Err(eyre!("fixture repository must use owner/name form: {repository:?}"))
+    }
+    Ok((owner, name))
+}
+
+fn validate_branch(branch: &str) -> Result<()> {
+    if branch.is_empty() || branch.chars().any(char::is_control) {
+        return Err(eyre!("fixture branch is invalid: {branch:?}"))
+    }
+    Ok(())
+}
+
+fn validate_revision(revision: &str) -> Result<()> {
+    if revision.is_empty() ||
+        !revision.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
+    {
+        return Err(eyre!("fixture revision contains unsupported characters: {revision:?}"))
+    }
+    Ok(())
+}
+
+fn resolution_pointer_name(repository: &str, branch: &str) -> String {
+    let digest = Sha256::digest(format!("{repository}\0{branch}"));
+    format!(".resolved-{digest:x}")
+}
+
 fn from_local(path: &Path, tests_dir: &Path) -> Result<Fixture> {
     let (root, tests) = if path.join("chain.rlp").is_file() {
         (path.parent().unwrap_or(path).to_path_buf(), path.to_path_buf())
@@ -157,5 +193,18 @@ fn absolute(base: &Path, path: &Path) -> PathBuf {
         path.to_path_buf()
     } else {
         base.join(path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolution_pointer_name;
+
+    #[test]
+    fn resolution_pointer_is_scoped_to_repository_and_branch() {
+        let upstream = resolution_pointer_name("ethereum/execution-apis", "main");
+        assert_eq!(upstream, resolution_pointer_name("ethereum/execution-apis", "main"));
+        assert_ne!(upstream, resolution_pointer_name("example/execution-apis", "main"));
+        assert_ne!(upstream, resolution_pointer_name("ethereum/execution-apis", "feature/rpc"));
     }
 }
