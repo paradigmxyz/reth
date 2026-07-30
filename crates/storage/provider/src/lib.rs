@@ -24,7 +24,7 @@ pub mod providers;
 pub use providers::{
     DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, HistoricalStateProvider,
     HistoricalStateProviderRef, LatestStateProvider, LatestStateProviderRef, ProviderFactory,
-    PruneShardOutcome, PrunedIndices, SaveBlocksMode, StaticFileAccess, StaticFileProviderBuilder,
+    PruneShardOutcome, PrunedIndices, SaveBlocksInput, StaticFileAccess, StaticFileProviderBuilder,
     StaticFileWriteCtx, StaticFileWriter,
 };
 

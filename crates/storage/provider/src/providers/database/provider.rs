@@ -1,3 +1,4 @@
+use super::SaveBlocksInput;
 use crate::{
     providers::{
         database::{chain::ChainStorage, metrics, DatabaseProviderMetrics},
@@ -59,7 +60,7 @@ use reth_primitives_traits::{
 use reth_prune_types::{
     PruneCheckpoint, PruneMode, PruneModes, PruneSegment, MINIMUM_UNWIND_SAFE_DISTANCE,
 };
-use reth_stages_types::{StageCheckpoint, StageId};
+use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, BlockBodyReader, MetadataProvider, MetadataWriter,
@@ -164,9 +165,9 @@ impl<DB: Database, N: NodeTypes> From<DatabaseProviderRW<DB, N>>
     }
 }
 
-/// Mode for [`DatabaseProvider::save_blocks`].
+/// Mode for [`DatabaseProvider::save_blocks_inner`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SaveBlocksMode {
+enum SaveBlocksMode {
     /// Full mode: write block structure + receipts + state + trie.
     /// Used by engine/production code.
     Full,
@@ -178,7 +179,7 @@ pub enum SaveBlocksMode {
 
 impl SaveBlocksMode {
     /// Returns `true` if this is [`SaveBlocksMode::Full`].
-    pub const fn with_state(self) -> bool {
+    const fn with_state(self) -> bool {
         matches!(self, Self::Full)
     }
 }
@@ -568,25 +569,51 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         }
     }
 
-    /// Writes executed blocks and state to storage.
+    /// Advances the independent persistence frontiers described by [`SaveBlocksInput`].
     ///
-    /// This method parallelizes static file (SF) writes with MDBX writes.
-    /// The SF thread writes headers, transactions, senders (if SF), and receipts (if SF, Full mode
-    /// only). The main thread writes MDBX data (indices, state, trie - Full mode only).
-    ///
-    /// Use [`SaveBlocksMode::Full`] for production (includes receipts, state, trie).
-    /// Use [`SaveBlocksMode::BlocksOnly`] for block structure only (used by `insert_block`).
-    #[instrument(level = "debug", target = "providers::db", skip_all, fields(block_count = blocks.len()))]
-    pub fn save_blocks(
-        &self,
-        blocks: Vec<ExecutedBlock<N::Primitives>>,
-        save_mode: SaveBlocksMode,
-    ) -> ProviderResult<()> {
-        if blocks.is_empty() {
-            debug!(target: "providers::db", "Attempted to write empty block range");
-            return Ok(())
+    /// Ordinary block data and hashed-state/trie updates advance independently according to the
+    /// ranges derived by the input.
+    #[instrument(level = "debug", target = "providers::db", skip_all, fields(block_count = input.persist_rest_blocks().len()))]
+    pub fn save_blocks(&self, input: &SaveBlocksInput<N::Primitives>) -> ProviderResult<()> {
+        let (db_tip, partial_state_trie) = self
+            .get_stage_checkpoint(StageId::Finish)?
+            .map(|checkpoint| {
+                let partial_state_trie = checkpoint
+                    .finish_stage_checkpoint()
+                    .and_then(|finish| finish.partial_state_trie())
+                    .unwrap_or(checkpoint.block_number);
+                (checkpoint.block_number, partial_state_trie)
+            })
+            .unwrap_or_default();
+
+        if db_tip != input.prev_db_tip() || partial_state_trie != input.prev_partial_state_trie() {
+            return Err(ProviderError::other(std::io::Error::other(format!(
+                "persistence frontiers do not match Finish checkpoint: expected database/state-trie tips #{}/{}, got #{}/{}",
+                input.prev_db_tip(),
+                input.prev_partial_state_trie(),
+                db_tip,
+                partial_state_trie,
+            ))))
         }
 
+        self.save_blocks_inner(
+            input.persist_rest_blocks(),
+            input.state_trie_blocks(),
+            input.state_trie_masking_blocks(),
+            (input.new_partial_state_trie() < input.new_db_tip())
+                .then_some(input.new_partial_state_trie()),
+            SaveBlocksMode::Full,
+        )
+    }
+
+    fn save_blocks_inner(
+        &self,
+        blocks: &[ExecutedBlock<N::Primitives>],
+        state_trie_blocks: &[ExecutedBlock<N::Primitives>],
+        state_trie_masking_blocks: &[ExecutedBlock<N::Primitives>],
+        partial_state_trie: Option<BlockNumber>,
+        save_mode: SaveBlocksMode,
+    ) -> ProviderResult<()> {
         let total_start = Instant::now();
         let block_count = blocks.len() as u64;
         let first_number = blocks.first().unwrap().recovered_block().number();
@@ -605,7 +632,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let tx_nums: SmallVec<[TxNumber; 4]> = {
             let mut nums = SmallVec::with_capacity(blocks.len());
             let mut current = first_tx_num;
-            for block in &blocks {
+            for block in blocks {
                 nums.push(current);
                 current += block.recovered_block().body().transaction_count() as u64;
             }
@@ -637,7 +664,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 let start = Instant::now();
                 sf_result = Some(
                     sf_provider
-                        .write_blocks_data(&blocks, &tx_nums, sf_ctx, runtime)
+                        .write_blocks_data(blocks, &tx_nums, sf_ctx, runtime)
                         .map(|()| start.elapsed()),
                 );
             });
@@ -649,7 +676,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     let start = Instant::now();
                     rocksdb_result = Some(
                         rocksdb_provider
-                            .write_blocks_data(&blocks, &tx_nums, rocksdb_ctx, runtime)
+                            .write_blocks_data(blocks, &tx_nums, rocksdb_ctx, runtime)
                             .map(|()| start.elapsed()),
                     );
                 });
@@ -724,20 +751,33 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
             // Write all hashed state and trie updates in single batches.
             // This reduces cursor open/close overhead from N calls to 1.
-            if save_mode.with_state() {
-                // Blocks are oldest-to-newest, merge_batch expects newest-to-oldest.
+            if save_mode.with_state() && !state_trie_blocks.is_empty() {
                 let start = Instant::now();
-                let merged_hashed_state = HashedPostStateSorted::merge_batch(
-                    blocks.iter().rev().map(|b| b.trie_data().sorted.hashed_state),
-                );
+                let batch = state_trie_blocks
+                    .iter()
+                    .map(|block| block.trie_data.get().sorted.hashed_state.as_ref())
+                    .collect::<Vec<_>>();
+                let mask = state_trie_masking_blocks
+                    .iter()
+                    .map(|block| block.trie_data.get().sorted.hashed_state.as_ref())
+                    .collect::<Vec<_>>();
+                let merged_hashed_state =
+                    HashedPostStateSorted::disjointed_merge_batch(&batch, &mask);
                 if !merged_hashed_state.is_empty() {
                     self.write_hashed_state(&merged_hashed_state)?;
                 }
                 timings.write_hashed_state += start.elapsed();
 
                 let start = Instant::now();
-                let merged_trie =
-                    TrieUpdatesSorted::merge_batch(blocks.iter().rev().map(|b| b.trie_updates()));
+                let batch = state_trie_blocks
+                    .iter()
+                    .map(|block| block.trie_data.get().sorted.trie_updates.as_ref())
+                    .collect::<Vec<_>>();
+                let mask = state_trie_masking_blocks
+                    .iter()
+                    .map(|block| block.trie_data.get().sorted.trie_updates.as_ref())
+                    .collect::<Vec<_>>();
+                let merged_trie = TrieUpdatesSorted::disjointed_merge_batch(&batch, &mask);
                 if !merged_trie.is_empty() {
                     self.write_trie_updates_sorted(&merged_trie)?;
                 }
@@ -754,6 +794,16 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // Update pipeline progress
             let start = Instant::now();
             self.update_pipeline_stages(last_block_number, false)?;
+            if save_mode.with_state() {
+                let checkpoint = match partial_state_trie {
+                    Some(partial_state_trie) => StageCheckpoint::new(last_block_number)
+                        .with_finish_stage_checkpoint(FinishCheckpoint {
+                            partial_state_trie: Some(partial_state_trie),
+                        }),
+                    None => StageCheckpoint::new(last_block_number),
+                };
+                self.save_stage_checkpoint(StageId::Finish, checkpoint)?;
+            }
             timings.update_pipeline_stages = start.elapsed();
 
             timings.mdbx = mdbx_start.elapsed();
@@ -3411,8 +3461,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
             ComputedTrieData::default(),
         );
 
-        // Delegate to save_blocks with BlocksOnly mode (skips receipts/state/trie)
-        self.save_blocks(vec![executed_block], SaveBlocksMode::BlocksOnly)?;
+        self.save_blocks_inner(
+            std::slice::from_ref(&executed_block),
+            &[],
+            &[],
+            None,
+            SaveBlocksMode::BlocksOnly,
+        )?;
 
         // Return the body indices
         self.block_body_indices(block_number)?
@@ -3839,6 +3894,8 @@ mod tests {
         map::{AddressMap, B256Map},
         U256,
     };
+    #[cfg(feature = "partial-persistence")]
+    use reth_chain_state::test_utils::TestBlockBuilder;
     use reth_chain_state::ExecutedBlock;
     use reth_db_api::models::StorageSettings;
     use reth_ethereum_primitives::Receipt;
@@ -3873,6 +3930,26 @@ mod tests {
                     },
                 )]),
             }],
+        )
+    }
+
+    /// Seeds block zero through the writer core because [`SaveBlocksInput`] only describes
+    /// advancing an existing persistence frontier.
+    fn save_genesis<TX, N>(
+        provider: &DatabaseProvider<TX, N>,
+        genesis: &ExecutedBlock<N::Primitives>,
+    ) -> ProviderResult<()>
+    where
+        TX: DbTx + DbTxMut + 'static,
+        N: NodeTypesForProvider,
+    {
+        assert_eq!(genesis.recovered_block().number(), 0);
+        provider.save_blocks_inner(
+            std::slice::from_ref(genesis),
+            std::slice::from_ref(genesis),
+            &[],
+            None,
+            SaveBlocksMode::Full,
         )
     }
 
@@ -4375,6 +4452,224 @@ mod tests {
         assert_eq!(storage_entries2.len(), 0, "Storage address2 should be empty after wipe");
 
         provider_rw.commit().unwrap();
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn test_save_blocks_only_masks_trie_with_deferred_blocks() {
+        use reth_trie::{
+            updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
+            BranchNodeCompact, HashedPostStateSorted, HashedStorageSorted,
+        };
+
+        fn branch(mask: u16) -> BranchNodeCompact {
+            BranchNodeCompact::new(mask, 0, 0, vec![], None)
+        }
+
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v1());
+
+        let mut test_block_builder = TestBlockBuilder::eth().with_state();
+        let genesis = test_block_builder.get_executed_blocks(0..1).next().unwrap();
+        let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..3).collect();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        save_genesis(&provider_rw, &genesis).unwrap();
+        provider_rw.commit().unwrap();
+
+        let kept_account = B256::with_last_byte(0x11);
+        let masked_account = B256::with_last_byte(0x12);
+        let kept_storage = B256::with_last_byte(0x21);
+        let masked_storage = B256::with_last_byte(0x22);
+        let kept_slot = B256::with_last_byte(0x31);
+        let masked_slot = B256::with_last_byte(0x32);
+        let kept_account_node = Nibbles::from_nibbles([0x1, 0x2]);
+        let masked_account_node = Nibbles::from_nibbles([0x1, 0x3]);
+        let kept_storage_node = Nibbles::from_nibbles([0x2, 0x1]);
+        let masked_storage_node = Nibbles::from_nibbles([0x2, 0x2]);
+        let full_persist_base = &blocks[0];
+        let deferred_trie_base = &blocks[1];
+
+        let full_persist_hashed_state = HashedPostStateSorted::new(
+            vec![
+                (kept_account, Some(Account::default())),
+                (masked_account, Some(Account { nonce: 1, ..Default::default() })),
+            ],
+            B256Map::from_iter([
+                (
+                    kept_storage,
+                    HashedStorageSorted {
+                        wiped: false,
+                        storage_slots: vec![(kept_slot, U256::from(1))],
+                    },
+                ),
+                (
+                    masked_storage,
+                    HashedStorageSorted {
+                        wiped: false,
+                        storage_slots: vec![(masked_slot, U256::from(2))],
+                    },
+                ),
+            ]),
+        );
+        let full_persist_trie_updates = TrieUpdatesSorted::new(
+            vec![
+                (kept_account_node, Some(branch(0b0000_1111_0000_1111))),
+                (masked_account_node, Some(branch(0b1111_0000_1111_0000))),
+            ],
+            B256Map::from_iter([
+                (
+                    kept_storage,
+                    StorageTrieUpdatesSorted {
+                        is_deleted: false,
+                        storage_nodes: vec![(kept_storage_node, Some(branch(0b1010)))],
+                    },
+                ),
+                (
+                    masked_storage,
+                    StorageTrieUpdatesSorted {
+                        is_deleted: false,
+                        storage_nodes: vec![(masked_storage_node, Some(branch(0b0101)))],
+                    },
+                ),
+            ]),
+        );
+
+        let full_persist_block = ExecutedBlock::new(
+            Arc::clone(&full_persist_base.recovered_block),
+            Arc::clone(&full_persist_base.execution_output),
+            ComputedTrieData::new(
+                Arc::new(full_persist_hashed_state),
+                Arc::new(full_persist_trie_updates),
+            ),
+        );
+
+        let deferred_trie_hashed_state = HashedPostStateSorted::new(
+            vec![(masked_account, Some(Account { nonce: 3, ..Default::default() }))],
+            B256Map::from_iter([(
+                masked_storage,
+                HashedStorageSorted {
+                    wiped: false,
+                    storage_slots: vec![(masked_slot, U256::from(4))],
+                },
+            )]),
+        );
+        let deferred_trie_updates = TrieUpdatesSorted::new(
+            vec![(masked_account_node, Some(branch(0b0011_0011)))],
+            B256Map::from_iter([(
+                masked_storage,
+                StorageTrieUpdatesSorted {
+                    is_deleted: false,
+                    storage_nodes: vec![(masked_storage_node, Some(branch(0b1100)))],
+                },
+            )]),
+        );
+        let deferred_trie_block = ExecutedBlock::new(
+            Arc::clone(&deferred_trie_base.recovered_block),
+            Arc::clone(&deferred_trie_base.execution_output),
+            ComputedTrieData::new(
+                Arc::new(deferred_trie_hashed_state),
+                Arc::new(deferred_trie_updates),
+            ),
+        );
+
+        let provider_rw = factory.provider_rw().unwrap();
+        let input = SaveBlocksInput::new(vec![full_persist_block, deferred_trie_block], 0, 0, 2, 1);
+        provider_rw.save_blocks(&input).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        let tx = provider.tx_ref();
+        let finish_checkpoint = provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
+        assert_eq!(finish_checkpoint.block_number, 2);
+        assert_eq!(
+            finish_checkpoint.finish_stage_checkpoint().unwrap().partial_state_trie,
+            Some(1)
+        );
+        assert!(provider.block_hash(2).unwrap().is_some());
+
+        let mut hashed_accounts = tx.cursor_read::<tables::HashedAccounts>().unwrap();
+        assert!(hashed_accounts.seek_exact(kept_account).unwrap().is_some());
+        assert!(hashed_accounts.seek_exact(masked_account).unwrap().is_none());
+
+        let mut hashed_storages = tx.cursor_dup_read::<tables::HashedStorages>().unwrap();
+        assert!(hashed_storages.seek_by_key_subkey(kept_storage, kept_slot).unwrap().is_some());
+        assert!(hashed_storages
+            .walk_dup(Some(masked_storage), None)
+            .unwrap()
+            .next()
+            .transpose()
+            .unwrap()
+            .is_none());
+
+        let mut account_trie = tx.cursor_read::<tables::AccountsTrie>().unwrap();
+        assert!(account_trie.seek_exact(StoredNibbles(kept_account_node)).unwrap().is_some());
+        assert!(account_trie.seek_exact(StoredNibbles(masked_account_node)).unwrap().is_none());
+
+        let mut storage_trie = tx.cursor_dup_read::<tables::StoragesTrie>().unwrap();
+        let kept_entries: Vec<_> = storage_trie
+            .walk_dup(Some(kept_storage), None)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(kept_entries.len(), 1);
+        assert_eq!(kept_entries[0].1.nibbles.0, kept_storage_node);
+
+        let masked_entries: Vec<_> = storage_trie
+            .walk_dup(Some(masked_storage), None)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert!(masked_entries.is_empty());
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn test_save_blocks_partial_cycles_do_not_duplicate_static_file_writes() {
+        let factory = create_test_provider_factory();
+        let mut test_block_builder = TestBlockBuilder::eth().with_state();
+
+        let genesis = test_block_builder.get_executed_blocks(0..1).next().unwrap();
+        let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..5).collect();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        save_genesis(&provider_rw, &genesis).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        let input = SaveBlocksInput::new(blocks[..2].to_vec(), 0, 0, 2, 2);
+        provider_rw.save_blocks(&input).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        let input = SaveBlocksInput::new(blocks[2..].to_vec(), 2, 2, 4, 2);
+        provider_rw.save_blocks(&input).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        let stale_input = SaveBlocksInput::new(vec![blocks[0].clone()], 0, 0, 1, 1);
+        let err = provider_rw.save_blocks(&stale_input).unwrap_err();
+        assert!(err.to_string().contains("persistence frontiers do not match Finish checkpoint"));
+        drop(provider_rw);
+
+        let provider = factory.provider().unwrap();
+        let finish_checkpoint = provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
+        assert_eq!(finish_checkpoint.block_number, 4);
+        assert_eq!(
+            finish_checkpoint.finish_stage_checkpoint().unwrap().partial_state_trie,
+            Some(2)
+        );
+
+        let static_files = factory.static_file_provider();
+        assert_eq!(static_files.get_highest_static_file_block(StaticFileSegment::Headers), Some(4));
+        assert_eq!(
+            static_files.get_highest_static_file_block(StaticFileSegment::Transactions),
+            Some(4)
+        );
+        assert_eq!(
+            static_files.get_highest_static_file_block(StaticFileSegment::Receipts),
+            Some(4)
+        );
     }
 
     #[test]
@@ -4942,7 +5237,7 @@ mod tests {
             Default::default(),
         );
 
-        let genesis_executed = ExecutedBlock::new(
+        let genesis_executed: ExecutedBlock = ExecutedBlock::new(
             Arc::new(genesis.try_recover().unwrap()),
             Arc::new(BlockExecutionOutput::new(
                 BlockExecutionResult {
@@ -4956,7 +5251,7 @@ mod tests {
             ComputedTrieData::default(),
         );
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.save_blocks(vec![genesis_executed], SaveBlocksMode::Full).unwrap();
+        save_genesis(&provider_rw, &genesis_executed).unwrap();
         provider_rw.commit().unwrap();
 
         let mut blocks: Vec<ExecutedBlock> = Vec::new();
@@ -5020,7 +5315,8 @@ mod tests {
         }
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.save_blocks(blocks, SaveBlocksMode::Full).unwrap();
+        let input = SaveBlocksInput::new(blocks, 0, 0, num_blocks, num_blocks);
+        provider_rw.save_blocks(&input).unwrap();
         provider_rw.commit().unwrap();
 
         let provider = factory.provider().unwrap();
