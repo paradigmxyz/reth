@@ -112,16 +112,14 @@ Networking:
           The UDP IPv6 address to use for devp2p peer discovery version 5. Overwritten by `RLPx` address, if it's also IPv6
 
       --discovery.v5.port <DISCOVERY_V5_PORT>
-          The UDP IPv4 port to use for devp2p peer discovery version 5. Not used unless `--addr` is IPv4, or `--discovery.v5.addr` is set
+          The UDP IPv4 port to use for devp2p peer discovery version 5. Not used unless `--addr` is IPv4, or `--discovery.v5.addr` is set.
 
-          [default: 9200]
+          If not provided, discv5 uses the same port as discv4 (`--discovery.port`).
 
       --discovery.v5.port.ipv6 <DISCOVERY_V5_PORT_IPV6>
           The UDP IPv6 port to use for devp2p peer discovery version 5. Not used unless `--addr` is IPv6, or `--discovery.addr.ipv6` is set.
 
-          If not provided, discovery V5 defaults to same port as discovery V4 (--discovery.port).
-
-          [default: 9200]
+          If not provided, discv5 uses the same port as discv4 (`--discovery.port`).
 
       --discovery.v5.lookup-interval <DISCOVERY_V5_LOOKUP_INTERVAL>
           The interval in seconds at which to carry out periodic lookup queries, for the whole run of the program
