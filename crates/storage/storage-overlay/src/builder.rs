@@ -609,7 +609,6 @@ mod tests {
         let (factory, blocks) = setup_frontiers(3, 3);
         let manager = OverlayManager::default();
         manager.insert_block(blocks[1].clone());
-        manager.insert_block(blocks[3].clone());
         let provider = factory.provider().unwrap();
 
         let overlay = manager

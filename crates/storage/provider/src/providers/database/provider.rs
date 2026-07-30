@@ -3532,8 +3532,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockExecutionWriter
         // that is why it is deleted afterwards.
         self.remove_blocks_above(block)?;
 
-        // Keep the finish checkpoint's trie frontier aligned with the highest trie data that is
-        // still durably materialized after truncation.
         self.update_finish_checkpoint_after_remove(block)?;
 
         Ok(Chain::new(blocks, execution_state, BTreeMap::new()))
@@ -3549,8 +3547,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockExecutionWriter
         // that is why it is deleted afterwards.
         self.remove_blocks_above(block)?;
 
-        // Keep the finish checkpoint's trie frontier aligned with the highest trie data that is
-        // still durably materialized after truncation.
         self.update_finish_checkpoint_after_remove(block)?;
 
         Ok(())

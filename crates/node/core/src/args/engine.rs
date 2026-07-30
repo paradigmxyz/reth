@@ -851,21 +851,6 @@ mod tests {
     }
 
     #[test]
-    fn engine_args_default_thresholds_match_expected_defaults() {
-        let args = EngineArgs::default();
-
-        assert_eq!(args.persistence_threshold, DEFAULT_PERSISTENCE_THRESHOLD);
-        assert_eq!(args.num_state_masking_blocks, DEFAULT_NUM_STATE_MASKING_BLOCKS);
-        assert_eq!(args.memory_block_buffer_target, None);
-        assert_eq!(args.memory_block_buffer_target(), DEFAULT_MEMORY_BLOCK_BUFFER_TARGET);
-        assert_eq!(args.persistence_backpressure_threshold, None);
-        assert_eq!(
-            args.persistence_backpressure_threshold(),
-            DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD
-        );
-    }
-
-    #[test]
     fn sender_recovery_cache_is_disabled_by_default_and_can_be_enabled() {
         let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
         assert!(!args.sender_recovery_cache_enabled);

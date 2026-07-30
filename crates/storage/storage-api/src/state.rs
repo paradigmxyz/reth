@@ -36,19 +36,11 @@ pub type StateProviderBox = Box<dyn StateProvider + Send + 'static>;
 /// `state_trie_tip`, but updates shadowed by the masking range can be absent from the database.
 /// Callers must overlay the in-memory state for `state_trie_tip + 1..=finish_tip` to construct the
 /// complete state at `finish_tip`.
+#[expect(missing_debug_implementations)]
 pub struct LatestDatabaseState {
     provider: StateProviderBox,
     state_trie_tip: BlockNumHash,
     finish_tip: BlockNumHash,
-}
-
-impl core::fmt::Debug for LatestDatabaseState {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("LatestDatabaseState")
-            .field("state_trie_tip", &self.state_trie_tip)
-            .field("finish_tip", &self.finish_tip)
-            .finish_non_exhaustive()
-    }
 }
 
 impl LatestDatabaseState {

@@ -108,21 +108,21 @@ const CHANGESET_CACHE_RETENTION_BLOCKS: u64 = 64;
 pub struct StateProviderBuilder<N: NodePrimitives, P> {
     /// The provider factory used to create providers.
     provider_factory: P,
-    /// The persisted block hash on which the in-memory blocks are anchored.
-    anchor: B256,
-    /// The blocks that form the chain from the anchor to target and are in memory.
+    /// The historical block hash to fetch state from.
+    historical: B256,
+    /// The blocks that form the chain from historical to target and are in memory.
     overlay: Option<Vec<ExecutedBlock<N>>>,
 }
 
 impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
-    /// Creates a new state provider from the provider factory, persisted anchor hash and optional
+    /// Creates a new state provider from the provider factory, historical block hash and optional
     /// overlaid blocks.
     pub const fn new(
         provider_factory: P,
-        anchor: B256,
+        historical: B256,
         overlay: Option<Vec<ExecutedBlock<N>>>,
     ) -> Self {
-        Self { provider_factory, anchor, overlay }
+        Self { provider_factory, historical, overlay }
     }
 }
 
@@ -133,7 +133,7 @@ where
     /// Creates a new state provider from this builder.
     pub fn build(&self) -> ProviderResult<StateProviderBox> {
         let Some(mut overlay) = self.overlay.clone() else {
-            return self.provider_factory.state_by_block_hash(self.anchor)
+            return self.provider_factory.state_by_block_hash(self.historical)
         };
 
         // Under partial persistence, the database exposes a hybrid latest view: state/trie data
@@ -145,7 +145,7 @@ where
             let state_trie_tip = latest.state_trie_tip();
             let finish_tip = latest.finish_tip();
             if let Some(overlay_len) = latest_database_overlay_len(
-                self.anchor,
+                self.historical,
                 overlay.len(),
                 state_trie_tip,
                 finish_tip,
@@ -160,7 +160,7 @@ where
             }
         }
 
-        let mut provider = self.provider_factory.state_by_block_hash(self.anchor)?;
+        let mut provider = self.provider_factory.state_by_block_hash(self.historical)?;
         provider = Box::new(MemoryOverlayStateProvider::new(provider, overlay));
         Ok(provider)
     }
@@ -702,6 +702,7 @@ where
         runtime: reth_tasks::Runtime,
     ) -> Self {
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
+
         Self {
             provider,
             consensus,
@@ -1759,12 +1760,6 @@ where
                 assert!(
                     state_trie_tip < canonical_head_number,
                     "state/trie persistence cannot be ahead of the database tip"
-                );
-                debug!(
-                    target: "engine::tree",
-                    ?state_trie_tip,
-                    ?canonical_head_number,
-                    "rewinding partial persistence before final shutdown save"
                 );
                 self.remove_blocks(state_trie_tip);
                 continue
@@ -3752,10 +3747,14 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone,
     {
-        if let Some((anchor, blocks)) = self.state.tree_state.blocks_by_hash(hash) {
-            debug!(target: "engine::tree", %hash, %anchor, "found canonical state for block in memory, creating provider builder");
+        if let Some((historical, blocks)) = self.state.tree_state.blocks_by_hash(hash) {
+            debug!(target: "engine::tree", %hash, %historical, "found canonical state for block in memory, creating provider builder");
             // the block leads back to the canonical chain
-            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), anchor, Some(blocks))))
+            return Ok(Some(StateProviderBuilder::new(
+                self.provider.clone(),
+                historical,
+                Some(blocks),
+            )))
         }
 
         // Check if the block is persisted

@@ -589,6 +589,8 @@ async fn test_tree_persist_blocks() {
     let received_action =
         test_harness.action_rx.recv().expect("Failed to receive save blocks action");
     if let PersistenceAction::SaveBlocks(input, _) = received_action {
+        // only blocks.len() - tree_config.memory_block_buffer_target() will be
+        // persisted
         let expected_persist_len = blocks.len() - tree_config.memory_block_buffer_target() as usize;
         assert_eq!(input.persist_rest_blocks().len(), expected_persist_len);
         assert_eq!(input.persist_rest_blocks(), &blocks[..expected_persist_len]);
@@ -1045,10 +1047,10 @@ async fn test_tree_state_on_new_head_reorg() {
     reth_tracing::init_test_tracing();
     let chain_spec = MAINNET.clone();
 
-    // Set the persistence threshold to 2 while retaining one block in memory.
+    // Set persistence_threshold to 1
     let mut test_harness = TestHarness::new(chain_spec);
     test_harness.tree.config =
-        test_harness.tree.config.with_persistence_threshold(2).with_memory_block_buffer_target(1);
+        test_harness.tree.config.with_persistence_threshold(1).with_memory_block_buffer_target(1);
     let mut test_block_builder = TestBlockBuilder::eth();
     let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..6).collect();
 
@@ -1086,7 +1088,8 @@ async fn test_tree_state_on_new_head_reorg() {
 
     // let's attempt to persist and check that it attempts to save blocks
     //
-    // The canonical head is still block 3, so retaining one block persists through block 2.
+    // since in-memory block buffer target and persistence_threshold are both 1, this should
+    // save all but the current tip of the canonical chain (up to blocks[1])
     test_harness.tree.advance_persistence().unwrap();
     let current_action = test_harness.tree.persistence_state.current_action().cloned();
     assert_eq!(

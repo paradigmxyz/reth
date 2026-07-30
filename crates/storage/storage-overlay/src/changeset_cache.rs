@@ -29,7 +29,6 @@ use reth_trie_common::updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted};
 use reth_trie_db::{DatabaseTrieCursorFactory, TrieTableAdapter};
 use std::{
     collections::{BTreeMap, HashMap},
-    fmt,
     ops::RangeInclusive,
     sync::Arc,
 };
@@ -109,18 +108,11 @@ where
     let tip_input = cache.logical_tip_input(provider, db_tip_block, resolver)?.unwrap_or_default();
 
     // Step 1: Get the trie changesets for the target block from cache
-    let changesets = cache.get_or_compute_range_with_resolver(
-        provider,
-        block_number..=block_number,
-        resolver,
-    )?;
+    let changesets = cache.get_or_compute(provider, block_number, resolver)?;
 
     // Step 2: Get the trie reverts for the state after the target block using the cache
-    let reverts = cache.get_or_compute_range_with_resolver(
-        provider,
-        (block_number + 1)..=db_tip_block,
-        resolver,
-    )?;
+    let reverts =
+        cache.get_or_compute_range(provider, (block_number + 1)..=db_tip_block, resolver)?;
 
     // Step 3: Create an InMemoryTrieCursorFactory with the reverts
     // This gives us the trie state as it was after the target block was processed
@@ -175,7 +167,7 @@ pub(crate) struct ChangesetCache {
     inner: Arc<RwLock<ChangesetCacheInner>>,
 }
 
-pub(crate) trait StateTrieOverlayResolver: fmt::Debug + Send + Sync {
+pub(crate) trait StateTrieOverlayResolver: Send + Sync {
     fn overlay_for_parent(
         &self,
         parent_hash: B256,
@@ -236,11 +228,11 @@ impl ChangesetCache {
     /// # Returns
     ///
     /// Changesets for the block, either from cache or computed on-the-fly.
-    #[cfg(test)]
     pub(crate) fn get_or_compute<P>(
         &self,
         provider: &P,
         block_number: BlockNumber,
+        resolver: Option<&dyn StateTrieOverlayResolver>,
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
         P: DBProvider
@@ -250,7 +242,7 @@ impl ChangesetCache {
             + StageCheckpointReader
             + StorageSettingsCache,
     {
-        self.get_or_compute_range_with_resolver(provider, block_number..=block_number, None)
+        self.get_or_compute_range(provider, block_number..=block_number, resolver)
     }
 
     /// Gets or computes trie reverts for a range of blocks.
@@ -279,24 +271,7 @@ impl ChangesetCache {
     /// - Database access fails
     /// - Block hash lookup fails
     /// - Changeset computation fails
-    #[cfg(test)]
     pub(crate) fn get_or_compute_range<P>(
-        &self,
-        provider: &P,
-        range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Arc<TrieUpdatesSorted>>
-    where
-        P: DBProvider
-            + ChangeSetReader
-            + StorageChangeSetReader
-            + BlockNumReader
-            + StageCheckpointReader
-            + StorageSettingsCache,
-    {
-        self.get_or_compute_range_with_resolver(provider, range, None)
-    }
-
-    pub(crate) fn get_or_compute_range_with_resolver<P>(
         &self,
         provider: &P,
         range: RangeInclusive<BlockNumber>,
@@ -1126,7 +1101,7 @@ mod tests {
         let provider = fixture.hybrid_factory.provider().unwrap();
         let cache = ChangesetCache::new();
 
-        let error = cache.get_or_compute_range(&provider, 2..=3).unwrap_err();
+        let error = cache.get_or_compute_range(&provider, 2..=3, None).unwrap_err();
 
         assert!(
             error.to_string().contains("requires a state trie overlay manager"),
@@ -1167,7 +1142,7 @@ mod tests {
         reth_trie_db::with_adapter!(provider, |A| seed_tip_trie_tables::<_, A>(&*provider));
 
         let cache = ChangesetCache::new();
-        let trie_revert = cache.get_or_compute_range(&*provider, 1..=1).unwrap();
+        let trie_revert = cache.get_or_compute_range(&*provider, 1..=1, None).unwrap();
 
         provider
             .tx_ref()
@@ -1224,7 +1199,7 @@ mod tests {
             );
         }
 
-        let accumulated = cache.get_or_compute_range(&*provider, 1..=2).unwrap();
+        let accumulated = cache.get_or_compute_range(&*provider, 1..=2, None).unwrap();
         assert_eq!(accumulated.account_nodes_ref(), &[(path, Some(older_node))]);
     }
 
@@ -1306,11 +1281,11 @@ mod tests {
         assert!(storage_revert.storage_nodes_ref().is_empty());
 
         let cache = ChangesetCache::new();
-        let from_cache_api = cache.get_or_compute_range(&*provider, 1..=3).unwrap();
+        let from_cache_api = cache.get_or_compute_range(&*provider, 1..=3, None).unwrap();
         assert_eq!(*from_cache_api, actual);
         assert_eq!(cache.inner.read().entries.len(), 1);
 
-        let block_changesets = cache.get_or_compute(&*provider, 2).unwrap();
+        let block_changesets = cache.get_or_compute(&*provider, 2, None).unwrap();
         assert_eq!(*block_changesets, legacy_compute_block_trie_changesets(&*provider, 2));
         assert_eq!(cache.inner.read().entries.len(), 2);
     }

@@ -813,23 +813,7 @@ impl TreeConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        TreeConfig, DEFAULT_MEMORY_BLOCK_BUFFER_TARGET, DEFAULT_NUM_STATE_MASKING_BLOCKS,
-        DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD, DEFAULT_PERSISTENCE_THRESHOLD,
-    };
-
-    #[test]
-    fn default_thresholds_match_constants() {
-        let config = TreeConfig::default();
-
-        assert_eq!(config.persistence_threshold(), DEFAULT_PERSISTENCE_THRESHOLD);
-        assert_eq!(config.num_state_masking_blocks(), DEFAULT_NUM_STATE_MASKING_BLOCKS);
-        assert_eq!(config.memory_block_buffer_target(), DEFAULT_MEMORY_BLOCK_BUFFER_TARGET);
-        assert_eq!(
-            config.persistence_backpressure_threshold(),
-            DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD
-        );
-    }
+    use super::TreeConfig;
 
     #[test]
     fn txpool_prewarming_is_disabled_by_default_and_can_be_enabled() {

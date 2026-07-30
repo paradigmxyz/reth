@@ -506,8 +506,7 @@ mod tests {
                     stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
                         processed,
                         total
-                    })),
-                    ..
+                    }))
                 },
                 done: true
             }) if block_number == previous_stage && processed == total &&
@@ -547,8 +546,7 @@ mod tests {
                     stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
                         processed,
                         total
-                    })),
-                    ..
+                    }))
                 },
                 done: true
             }) if block_number == previous_stage && processed == total &&
@@ -590,8 +588,7 @@ mod tests {
                     stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
                         processed,
                         total
-                    })),
-                    ..
+                    }))
                 },
                 done: true
             }) if block_number == previous_stage && processed == total &&

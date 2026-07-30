@@ -42,7 +42,7 @@ pub struct OverlayManager<N: NodePrimitives = EthPrimitives> {
     blocks: Arc<DashMap<B256, ExecutedBlock<N>>>,
     overlays: Arc<DashMap<OverlayCacheKey, OverlayCacheEntry>>,
     changeset_cache: ChangesetCache,
-    preserved_sparse_trie: Arc<Mutex<PreservedSparseTrieState>>,
+    preserved_sparse_trie: Arc<Mutex<Option<PreservedSparseTrie>>>,
     #[cfg(feature = "rayon")]
     worker_pool: Option<Arc<WorkerPool>>,
     metrics: StateTrieOverlayMetrics,
@@ -58,45 +58,6 @@ struct StateTrieOverlayMetrics {
     overlay_cache_reuses: Counter,
     /// Number of overlay cache entries populated by computing an overlay.
     overlay_cache_fills: Counter,
-}
-
-/// Current state of the sparse trie owned by the overlay manager.
-#[allow(clippy::large_enum_variant)]
-#[derive(Debug, Default)]
-enum PreservedSparseTrieState {
-    /// No sparse trie has been preserved yet.
-    #[default]
-    Empty,
-    /// A sparse trie is available for reuse.
-    Available(PreservedSparseTrie),
-    /// A sparse trie has been taken by a state-root task.
-    InUse,
-}
-
-impl PreservedSparseTrieState {
-    /// Takes the available preserved sparse trie, marking it as in use.
-    fn take(&mut self) -> Option<PreservedSparseTrie> {
-        match core::mem::take(self) {
-            Self::Available(trie) => {
-                *self = Self::InUse;
-                Some(trie)
-            }
-            state => {
-                *self = state;
-                None
-            }
-        }
-    }
-
-    /// Stores an available preserved trie.
-    fn store(&mut self, trie: PreservedSparseTrie) {
-        *self = Self::Available(trie);
-    }
-
-    /// Clears the sparse trie state.
-    fn clear(&mut self) {
-        *self = Self::Empty;
-    }
 }
 
 impl<N: NodePrimitives> Default for OverlayManager<N> {
@@ -155,7 +116,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
             + StageCheckpointReader
             + StorageSettingsCache,
     {
-        self.changeset_cache.get_or_compute_range_with_resolver(provider, range, Some(self))
+        self.changeset_cache.get_or_compute_range(provider, range, Some(self))
     }
 
     /// Evicts cached changesets for blocks below `up_to_block`.
@@ -180,19 +141,19 @@ impl<N: NodePrimitives> OverlayManager<N> {
         compute_block_trie_updates(&self.changeset_cache, Some(self), provider, block_number)
     }
 
-    /// Takes the preserved sparse trie if present, marking it as in use.
+    /// Takes the preserved sparse trie if present.
     pub fn take_sparse_trie(&self) -> Option<PreservedSparseTrie> {
         self.preserved_sparse_trie.lock().take()
     }
 
     /// Stores a preserved sparse trie for later reuse.
     pub fn store_sparse_trie(&self, trie: PreservedSparseTrie) {
-        self.preserved_sparse_trie.lock().store(trie);
+        *self.preserved_sparse_trie.lock() = Some(trie);
     }
 
     /// Clears any preserved sparse trie state.
     pub fn clear_sparse_trie(&self) {
-        self.preserved_sparse_trie.lock().clear();
+        *self.preserved_sparse_trie.lock() = None;
     }
 
     /// Waits until the sparse trie lock becomes available.
@@ -866,7 +827,7 @@ mod tests {
     }
 
     #[test]
-    fn taking_sparse_trie_marks_it_in_use_until_stored_or_cleared() {
+    fn taking_sparse_trie_removes_it() {
         let manager = OverlayManager::<EthPrimitives>::default();
         let state_root = B256::with_last_byte(1);
         let other_state_root = B256::with_last_byte(2);
@@ -882,9 +843,6 @@ mod tests {
         assert_eq!(preserved.state_root(), state_root);
         assert_eq!(preserved.anchor_hash(), anchor_hash);
         assert!(preserved.into_trie_for(other_state_root).unwrap().is_none());
-        assert!(manager.take_sparse_trie().is_none());
-
-        manager.clear_sparse_trie();
         assert!(manager.take_sparse_trie().is_none());
     }
 

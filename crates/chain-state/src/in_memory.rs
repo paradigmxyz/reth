@@ -821,8 +821,8 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     /// trie updates) to be performed outside the critical validation path by a background task.
     /// This can improve latency for time-sensitive operations like block validation.
     ///
-    /// If the data hasn't been populated when [`Self::trie_data()`] is called, the caller waits for
-    /// the background task to publish it.
+    /// If the data hasn't been populated when [`Self::trie_data()`] is called, the caller waits
+    /// for the background task to publish it.
     ///
     /// Use [`Self::new()`] instead when trie data is already computed and available immediately.
     pub const fn with_deferred_trie_data(
