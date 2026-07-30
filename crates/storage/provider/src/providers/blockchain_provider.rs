@@ -1,7 +1,7 @@
 use crate::{
     providers::{
-        ConsistentProvider, OverlayBuilder, OverlayStateProvider, OverlayStateProviderFactory,
-        ProviderNodeTypes, RocksDBProvider, StaticFileProvider, StaticFileProviderRWRefMut,
+        ConsistentProvider, OverlayStateProvider, OverlayStateProviderFactory, ProviderNodeTypes,
+        RocksDBProvider, StaticFileProvider, StaticFileProviderRWRefMut,
     },
     AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
@@ -186,12 +186,10 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         // via changesets, then the merged in-memory delta applies on top.
         let overlay_factory = OverlayStateProviderFactory::new(
             self.database.clone(),
-            OverlayBuilder::<N::Primitives>::new(
-                matched.anchor().hash,
-                self.database.changeset_cache(),
-            )
-            .with_hashed_state_overlay(Some(merged.state))
-            .with_trie_updates_overlay(Some(merged.nodes)),
+            self.database
+                .overlay_manager()
+                .overlay_builder(matched.anchor().hash)
+                .with_immediate_state_trie_overlay(merged.state, merged.nodes),
         );
         reth_storage_api::DatabaseProviderROFactory::database_provider_ro(&overlay_factory)
             .map(Some)
@@ -219,7 +217,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         let Some(block_hash) = block_hash else { return Ok(None) };
         let overlay_factory = OverlayStateProviderFactory::new(
             self.database.clone(),
-            OverlayBuilder::<N::Primitives>::new(block_hash, self.database.changeset_cache()),
+            self.database.overlay_manager().overlay_builder(block_hash),
         );
         reth_storage_api::DatabaseProviderROFactory::database_provider_ro(&overlay_factory)
             .map(Some)
@@ -1017,7 +1015,7 @@ mod tests {
             create_test_provider_factory, create_test_provider_factory_with_chain_spec,
             MockNodeTypesWithDB,
         },
-        BlockWriter, CanonChainTracker, ProviderFactory, SaveBlocksMode,
+        BlockWriter, CanonChainTracker, ProviderFactory, SaveBlocksInput,
     };
     use alloy_consensus::constants::EMPTY_ROOT_HASH;
     use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
@@ -1241,7 +1239,14 @@ mod tests {
 
                 // Push to disk
                 let provider_rw = hook_provider.database_provider_rw().unwrap();
-                provider_rw.save_blocks(vec![lowest_memory_block], SaveBlocksMode::Full).unwrap();
+                let input = SaveBlocksInput::new(
+                    vec![lowest_memory_block],
+                    state.anchor().number,
+                    state.anchor().number,
+                    block_number,
+                    block_number,
+                );
+                provider_rw.save_blocks(&input).unwrap();
                 provider_rw.commit().unwrap();
 
                 // Remove from memory

@@ -7,7 +7,7 @@ use crate::{
         PersistTarget, TreeConfig,
     },
 };
-use reth_trie_db::ChangesetCache;
+use reth_storage_overlay::OverlayManager;
 
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::{
@@ -19,7 +19,7 @@ use alloy_rpc_types_engine::{
     ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1, ForkchoiceState,
 };
 use assert_matches::assert_matches;
-use reth_chain_state::{test_utils::TestBlockBuilder, BlockState, StateTrieOverlayManager};
+use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
 use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
 use reth_ethereum_consensus::EthBeaconConsensus;
@@ -206,8 +206,7 @@ impl TestHarness {
 
         let (from_tree_tx, from_tree_rx) = unbounded_channel();
         let runtime = reth_tasks::Runtime::test();
-        let state_trie_overlays =
-            StateTrieOverlayManager::new(runtime.state_trie_overlay_worker_pool());
+        let overlay_manager = OverlayManager::new(runtime.state_trie_overlay_worker_pool());
 
         let header = chain_spec.genesis_header().clone();
         let header = SealedHeader::seal_slow(header);
@@ -217,7 +216,7 @@ impl TestHarness {
             tree_config.invalid_header_hit_eviction_threshold(),
             header.num_hash(),
             EngineApiKind::Ethereum,
-            state_trie_overlays.clone(),
+            overlay_manager.clone(),
         );
         let canonical_in_memory_state = CanonicalInMemoryState::with_head(header, None, None);
 
@@ -225,7 +224,6 @@ impl TestHarness {
         let payload_builder = PayloadBuilderHandle::new(to_payload_service);
 
         let evm_config = MockEvmConfig::default();
-        let changeset_cache = ChangesetCache::new();
         let engine_validator = BasicEngineValidator::new(
             provider.clone(),
             consensus.clone(),
@@ -233,8 +231,7 @@ impl TestHarness {
             payload_validator,
             tree_config.clone(),
             Box::new(NoopInvalidBlockHook::default()),
-            changeset_cache.clone(),
-            state_trie_overlays,
+            overlay_manager,
             runtime.clone(),
         );
 
@@ -251,7 +248,6 @@ impl TestHarness {
             tree_config,
             EngineApiKind::Ethereum,
             evm_config,
-            changeset_cache,
             runtime,
         );
 
@@ -288,9 +284,9 @@ impl TestHarness {
             parent_hash = hash;
         }
 
-        let state_trie_overlays = StateTrieOverlayManager::default();
+        let overlay_manager = self.tree.state.tree_state.overlay_manager.clone();
         for block in &blocks {
-            state_trie_overlays.insert_block(block.clone());
+            overlay_manager.insert_block(block.clone());
         }
 
         self.tree.state.tree_state = TreeState {
@@ -299,7 +295,7 @@ impl TestHarness {
             current_canonical_head: blocks.last().unwrap().recovered_block().num_hash(),
             parent_to_child,
             engine_kind: EngineApiKind::Ethereum,
-            state_trie_overlays,
+            overlay_manager,
         };
 
         let last_executed_block = blocks.last().unwrap().clone();
@@ -432,7 +428,7 @@ impl ValidatorTestHarness {
         let provider = harness.provider.clone();
         let payload_validator = MockEngineValidator;
         let evm_config = MockEvmConfig::default();
-        let changeset_cache = ChangesetCache::new();
+        let overlay_manager = harness.tree.state.tree_state.overlay_manager.clone();
 
         let validator = BasicEngineValidator::new(
             provider,
@@ -441,8 +437,7 @@ impl ValidatorTestHarness {
             payload_validator,
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
-            changeset_cache,
-            StateTrieOverlayManager::default(),
+            overlay_manager,
             reth_tasks::Runtime::test(),
         );
 
@@ -585,12 +580,14 @@ async fn test_tree_persist_blocks() {
 
     let received_action =
         test_harness.action_rx.recv().expect("Failed to receive save blocks action");
-    if let PersistenceAction::SaveBlocks(saved_blocks, _) = received_action {
+    if let PersistenceAction::SaveBlocks(input, _) = received_action {
         // only blocks.len() - tree_config.memory_block_buffer_target() will be
         // persisted
         let expected_persist_len = blocks.len() - tree_config.memory_block_buffer_target() as usize;
-        assert_eq!(saved_blocks.len(), expected_persist_len);
-        assert_eq!(saved_blocks, blocks[..expected_persist_len]);
+        assert_eq!(input.persist_rest_blocks().len(), expected_persist_len);
+        assert_eq!(input.persist_rest_blocks(), &blocks[..expected_persist_len]);
+        assert_eq!(input.prev_db_tip(), input.prev_partial_state_trie());
+        assert_eq!(input.new_db_tip(), input.new_partial_state_trie());
     } else {
         panic!("unexpected action received {received_action:?}");
     }
@@ -1010,10 +1007,10 @@ async fn test_tree_state_on_new_head_reorg() {
 
     // get rid of the prev action
     let received_action = test_harness.action_rx.recv().unwrap();
-    let PersistenceAction::SaveBlocks(saved_blocks, sender) = received_action else {
+    let PersistenceAction::SaveBlocks(input, sender) = received_action else {
         panic!("received wrong action");
     };
-    assert_eq!(saved_blocks, vec![blocks[0].clone(), blocks[1].clone()]);
+    assert_eq!(input.persist_rest_blocks(), &blocks[..2]);
 
     // send the response so we can advance again
     sender
@@ -2291,15 +2288,14 @@ mod forkchoice_updated_tests {
                 break;
             }
 
-            if let Ok(PersistenceAction::SaveBlocks(saved_blocks, sender)) =
+            if let Ok(PersistenceAction::SaveBlocks(input, sender)) =
                 action_rx.recv_timeout(std::time::Duration::from_millis(100))
             {
-                if let Some(last) = saved_blocks.last() {
-                    last_persisted_number = last.recovered_block().number;
-                }
+                let last = input.last_block();
+                last_persisted_number = last.number;
                 sender
                     .send(PersistenceResult {
-                        last_block: saved_blocks.last().map(|b| b.recovered_block().num_hash()),
+                        last_block: Some(last),
                         commit_duration: Some(Duration::ZERO),
                     })
                     .unwrap();
