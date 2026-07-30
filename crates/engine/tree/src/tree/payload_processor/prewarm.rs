@@ -11,11 +11,8 @@
 //! 2. Prewarming tasks execute transactions in parallel using shared caches
 //! 3. When actual block execution happens, it benefits from the warmed cache
 
-use super::bal_prewarm_pool::BalPrewarmPool;
+use super::{bal_prewarm_pool::BalPrewarmPool, StateRootHintStream, StateRootUpdateStream};
 use crate::tree::{
-    payload_processor::multiproof::{
-        StateRootHashedUpdateStream, StateRootHintStream, StateRootStreams,
-    },
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
     PayloadExecutionCache, SavedCache, StateProviderBuilder,
@@ -44,12 +41,25 @@ use tokio::sync::oneshot;
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 
 /// Determines the prewarming mode: transaction-based, BAL-based, or skipped.
+///
+/// Each variant carries the state-root capability its producers use, so the capability dies
+/// with the workers instead of outliving them.
 #[derive(Debug)]
 pub enum PrewarmMode<Tx> {
     /// Prewarm by executing transactions from a stream, each paired with its block index.
-    Transactions(Receiver<(usize, Tx)>),
+    Transactions {
+        /// Stream of transactions pending prewarm execution.
+        pending: Receiver<(usize, Tx)>,
+        /// Best-effort access hints emitted by the prewarm workers.
+        hints: Option<StateRootHintStream>,
+    },
     /// Prewarm by prefetching slots from a Block Access List.
-    BlockAccessList(Arc<DecodedBal>),
+    BlockAccessList {
+        /// The decoded block access list.
+        bal: Arc<DecodedBal>,
+        /// Authoritative pre-hashed updates derived from the BAL.
+        updates: Option<StateRootUpdateStream>,
+    },
     /// Transaction prewarming is skipped (e.g. small blocks where the overhead exceeds the
     /// benefit). No workers are spawned.
     Skipped,
@@ -71,8 +81,6 @@ where
     execution_cache: PayloadExecutionCache,
     /// Context provided to execution tasks
     ctx: PrewarmContext<N, P, Evm>,
-    /// State-root streams used for prewarm hints and BAL-derived authoritative updates.
-    state_root_streams: StateRootStreams,
     /// Receiver for events produced by tx execution
     actions_rx: Receiver<PrewarmTaskEvent<N::Receipt>>,
     /// Parent span for tracing
@@ -90,7 +98,6 @@ where
         executor: Runtime,
         execution_cache: PayloadExecutionCache,
         ctx: PrewarmContext<N, P, Evm>,
-        state_root_streams: StateRootStreams,
     ) -> (Self, Sender<PrewarmTaskEvent<N::Receipt>>) {
         let (actions_tx, actions_rx) = channel();
 
@@ -102,14 +109,7 @@ where
         );
 
         (
-            Self {
-                executor,
-                execution_cache,
-                ctx,
-                state_root_streams,
-                actions_rx,
-                parent_span: Span::current(),
-            },
+            Self { executor, execution_cache, ctx, actions_rx, parent_span: Span::current() },
             actions_tx,
         )
     }
@@ -335,11 +335,12 @@ where
         &self,
         decoded_bal: Arc<DecodedBal>,
         actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
+        hashed_update_stream: Option<StateRootUpdateStream>,
     ) {
         let bal = decoded_bal.as_bal();
         if bal.is_empty() {
-            if let Some(hashed_update_stream) = self.state_root_streams.hashed_update_stream() {
-                hashed_update_stream.on_updates_finished();
+            if let Some(hashed_update_stream) = hashed_update_stream {
+                hashed_update_stream.finish();
             }
             let _ =
                 actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
@@ -353,7 +354,6 @@ where
         );
 
         let ctx = self.ctx.clone();
-        let hashed_update_stream = self.state_root_streams.hashed_update_stream();
         let executor = self.executor.clone();
         let parent_span = Span::current();
         let stream_parent_span = parent_span;
@@ -386,7 +386,7 @@ where
                     });
                 });
 
-                hashed_update_stream.on_updates_finished();
+                hashed_update_stream.finish();
                 let _ = stream_tx.send(());
             });
         } else {
@@ -413,7 +413,7 @@ where
             let provider_builder = ctx.provider.clone();
             let build = Arc::new(move || provider_builder.build());
 
-            pool.begin_block(build, caches);
+            pool.begin_block(build, caches, ctx.env.txpool_snapshot.clone());
             for account in prefetch_bal.as_bal() {
                 pool.warm_account(account.address);
                 for change in &account.storage_changes {
@@ -452,13 +452,15 @@ where
     where
         Tx: ExecutableTxFor<Evm> + Send + 'static,
     {
-        // Spawn execution tasks based on mode
+        // Spawn execution tasks based on mode. The state-root capabilities arrive inside the
+        // mode and move into the spawned producers, so they die with the producers instead of
+        // living for the full lifetime of this task.
         match mode {
-            PrewarmMode::Transactions(pending) => {
-                self.spawn_txs_prewarm(pending, actions_tx, self.state_root_streams.hint_stream());
+            PrewarmMode::Transactions { pending, hints } => {
+                self.spawn_txs_prewarm(pending, actions_tx, hints);
             }
-            PrewarmMode::BlockAccessList(bal) => {
-                self.run_bal_prewarm(bal, actions_tx);
+            PrewarmMode::BlockAccessList { bal, updates } => {
+                self.run_bal_prewarm(bal, actions_tx, updates);
             }
             PrewarmMode::Skipped => {
                 let _ = actions_tx
@@ -580,7 +582,10 @@ where
         // Use the caches to create a new provider with caching
         if let Some(saved_cache) = &self.saved_cache {
             let caches = saved_cache.cache().clone();
-            state_provider = Box::new(CachedStateProvider::new_prewarm(state_provider, caches));
+            state_provider = Box::new(
+                CachedStateProvider::new_prewarm(state_provider, caches)
+                    .with_txpool_snapshot(self.env.txpool_snapshot.clone()),
+            );
         }
 
         let state_provider = StateProviderDatabase::new(state_provider);
@@ -640,7 +645,7 @@ where
         parent_span: &Span,
         provider: &mut Option<Box<dyn AccountReader>>,
         account_changes: &alloy_eip7928::AccountChanges,
-        hashed_update_stream: &StateRootHashedUpdateStream,
+        hashed_update_stream: &StateRootUpdateStream,
     ) {
         if self.disable_bal_parallel_state_root {
             return;
@@ -653,6 +658,9 @@ where
             return;
         }
 
+        // If there are any storage changes we can assume that the resulting account info will be
+        // non-empty, so the account will exist, and therefore we can pre-emptively send out storage
+        // changes to start processing them before potentially hitting the db in the next step.
         if !account_changes.storage_changes.is_empty() {
             let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
             let mut storage_map = reth_trie::HashedStorage::new(false);
@@ -694,7 +702,10 @@ where
                     match (self.disable_bal_batch_io, &self.saved_cache) {
                         (false, Some(saved)) => {
                             let caches = saved.cache().clone();
-                            Box::new(CachedStateProvider::new_prewarm(inner, caches))
+                            Box::new(
+                                CachedStateProvider::new_prewarm(inner, caches)
+                                    .with_txpool_snapshot(self.env.txpool_snapshot.clone()),
+                            )
                         }
                         _ => Box::new(inner),
                     };
@@ -707,11 +718,23 @@ where
         };
 
         let account = account_fields.into_account(existing_account);
-
         let hashed_address = hashed_address.unwrap_or_else(|| keccak256(address));
-        let mut hashed_state = reth_trie::HashedPostState::default();
-        hashed_state.accounts.insert(hashed_address, Some(account));
 
+        // It is possible for the resulting account info to be empty. This can happen when, in the
+        // same block:
+        // * tx1: A new account is funded
+        // * tx2: CREATE2 is called on the new account, SELFDESTRUCT is called within the init code
+        //
+        // In this case the account will have only balance_changes, one for funding and the second
+        // setting balance back to zero. The resulting account is fully empty, we mark it as None
+        // with no storage changes to indicate that it should be deleted if nothing else.
+        //
+        // We assume that if the account info is all zero then it can't have storage, so we don't
+        // have to explicitly check for empty storage.
+        let account = (!account.is_empty()).then_some(account);
+
+        let mut hashed_state = reth_trie::HashedPostState::default();
+        hashed_state.accounts.insert(hashed_address, account);
         hashed_update_stream.on_hashed_state_update(hashed_state);
     }
 }

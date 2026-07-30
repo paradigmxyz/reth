@@ -24,10 +24,9 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
         block_id: BlockId,
     ) -> impl Future<Output = Result<Option<BlockAccessList>, Self::Error>> + Send {
         async move {
-            let block = self
-                .recovered_block(block_id)
-                .await?
-                .ok_or_else(|| EthApiError::HeaderNotFound(block_id))?;
+            let Some(block) = self.recovered_block(block_id).await? else {
+                return Ok(None);
+            };
 
             if let Some(cached_bal) =
                 self.cache().get_bal(block.hash()).await.map_err(Self::Error::from_eth_err)?

@@ -109,6 +109,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             new_transaction_receiver: Some(self.new_transaction_notifier.subscribe()),
             last_priority: None,
             skip_blobs: false,
+            allow_updates_out_of_order: false,
         }
     }
 

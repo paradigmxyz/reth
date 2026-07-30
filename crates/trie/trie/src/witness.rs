@@ -18,7 +18,7 @@ use reth_trie_common::{
     DecodedMultiProofV2, ExecutionWitnessMode, HashedPostState, MultiProofTargetsV2, ProofV2Target,
     TrieNodeV2,
 };
-use reth_trie_sparse::{LeafUpdate, SparseStateTrie, SparseTrie as _};
+use reth_trie_sparse::{LeafUpdate, SparseStateTrie, SparseTrie as _, TrieNodeEpoch};
 
 /// State transition witness for the trie.
 #[derive(Debug)]
@@ -200,12 +200,12 @@ where
                         .storage_trie_mut(&hashed_address)
                         .expect("storage trie was revealed from multiproof");
                     storage_trie
-                        .update_leaves(slot_updates, |key, min_len| {
+                        .update_leaves(slot_updates, |key, parent| {
                             targets
                                 .storage_targets
                                 .entry(hashed_address)
                                 .or_default()
-                                .push(ProofV2Target::new(key).with_min_len(min_len));
+                                .push(ProofV2Target::new(key).with_parent(parent));
                         })
                         .map_err(|err| {
                             SparseStateTrieErrorKind::SparseStorageTrie(
@@ -251,7 +251,7 @@ where
 
             let storage_root =
                 if let Some(storage_trie) = sparse_trie.storage_trie_mut(&hashed_address) {
-                    storage_trie.root()
+                    storage_trie.root(TrieNodeEpoch::UNMODIFIED)
                 } else {
                     let record_root_node = !self.mode.is_canonical() ||
                         state
@@ -283,8 +283,8 @@ where
 
                 sparse_trie
                     .trie_mut()
-                    .update_leaves(account_updates, |key, min_len| {
-                        targets.account_targets.push(ProofV2Target::new(key).with_min_len(min_len));
+                    .update_leaves(account_updates, |key, parent| {
+                        targets.account_targets.push(ProofV2Target::new(key).with_parent(parent));
                     })
                     .map_err(SparseStateTrieErrorKind::from)?;
 

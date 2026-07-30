@@ -608,6 +608,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     last_sent_latest_block: None,
                 };
 
+                let supports_snap = session.conn.supports_snap();
                 self.spawn(session);
 
                 let client_version = client_id.into();
@@ -644,6 +645,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     direction,
                     timeout,
                     range_info: remote_range_info,
+                    supports_snap,
                 })
             }
             PendingSessionEvent::Disconnected { remote_addr, session_id, direction, error } => {
@@ -779,6 +781,8 @@ pub enum SessionEvent<N: NetworkPrimitives> {
         timeout: Arc<AtomicU64>,
         /// The range info for the peer.
         range_info: Option<BlockRangeInfo>,
+        /// Whether the connection negotiated `snap/2` and can serve [`PeerRequest::GetSnap`].
+        supports_snap: bool,
     },
     /// The peer was already connected with another session.
     AlreadyConnected {

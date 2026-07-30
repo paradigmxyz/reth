@@ -14,7 +14,7 @@ use alloy_rpc_types_engine::{
 use error::{InsertBlockError, InsertBlockFatalError, InsertBlockValidationError};
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, MemoryOverlayStateProvider,
-    NewCanonicalChain, StateTrieOverlayManager,
+    NewCanonicalChain,
 };
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
@@ -36,9 +36,9 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
+use reth_storage_overlay::OverlayManager;
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
-use reth_trie::{prefix_set::TriePrefixSetsMut, ComputedTrieData};
-use reth_trie_db::ChangesetCache;
+use reth_trie::ComputedTrieData;
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Duration};
@@ -63,6 +63,7 @@ pub mod state_root_strategy;
 #[cfg(test)]
 mod tests;
 mod trie_updates;
+mod txpool_prewarm;
 pub mod types;
 
 use crate::{persistence::PersistenceResult, tree::error::AdvancePersistenceError};
@@ -75,9 +76,13 @@ pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
 pub use reth_execution_cache::{
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider,
-    ExecutionCache, PayloadExecutionCache, SavedCache,
+    ExecutionCache, PayloadExecutionCache, SavedCache, TxPoolPrewarmCacheSnapshot,
 };
-pub use types::{ValidationOutcome, ValidationOutput};
+pub use txpool_prewarm::{
+    Source as TxPoolPrewarmSource, Transaction as TxPoolPrewarmTransaction,
+    Transactions as TxPoolPrewarmTransactions,
+};
+pub use types::{ExecutionEnv, ValidationOutcome, ValidationOutput};
 
 pub mod state;
 
@@ -94,7 +99,7 @@ pub(crate) const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 
 /// The minimum number of blocks to retain in the changeset cache after eviction.
 ///
-/// This ensures that recent trie changesets are kept in memory for potential reorgs,
+/// This ensures that recent changesets are kept in memory for potential reorgs,
 /// even when the finalized block is not set (e.g., on L2s like Optimism).
 const CHANGESET_CACHE_RETENTION_BLOCKS: u64 = 64;
 
@@ -142,6 +147,8 @@ where
 pub struct EngineApiTreeState<N: NodePrimitives> {
     /// Tracks the state of the blockchain tree.
     tree_state: TreeState<N>,
+    /// Whether the next sparse trie task should attempt cache pruning during trie preservation.
+    pending_sparse_trie_prune: bool,
     /// Tracks the forkchoice state updates received by the CL.
     forkchoice_state_tracker: ForkchoiceStateTracker,
     /// Buffer of detached blocks.
@@ -158,7 +165,7 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
         invalid_header_hit_eviction_threshold: u8,
         canonical_block: BlockNumHash,
         engine_kind: EngineApiKind,
-        state_trie_overlays: StateTrieOverlayManager<N>,
+        overlay_manager: OverlayManager<N>,
     ) -> Self {
         Self {
             invalid_headers: InvalidHeaderCache::new(
@@ -166,7 +173,8 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
                 invalid_header_hit_eviction_threshold,
             ),
             buffer: BlockBuffer::new(block_buffer_limit),
-            tree_state: TreeState::new(canonical_block, engine_kind, state_trie_overlays),
+            tree_state: TreeState::new(canonical_block, engine_kind, overlay_manager),
+            pending_sparse_trie_prune: false,
             forkchoice_state_tracker: ForkchoiceStateTracker::default(),
         }
     }
@@ -174,6 +182,39 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
     /// Returns a reference to the tree state.
     pub const fn tree_state(&self) -> &TreeState<N> {
         &self.tree_state
+    }
+
+    /// Returns whether sparse trie pruning is pending.
+    pub const fn pending_sparse_trie_prune(&self) -> bool {
+        self.pending_sparse_trie_prune
+    }
+
+    /// Sets whether sparse trie pruning is pending for the next sparse trie task.
+    pub const fn set_pending_sparse_trie_prune(&mut self, pending: bool) {
+        self.pending_sparse_trie_prune = pending;
+    }
+
+    /// Takes a pending sparse trie prune request, if any, and snapshots the in-memory parent chain
+    /// ending at `parent_hash`.
+    ///
+    /// `None` means no prune request is pending. `Some(Vec::new())` means a prune was requested,
+    /// but no in-memory parent-chain blocks were found for the parent hash; the sparse trie task
+    /// should still prune nodes cached before the current block's epoch.
+    pub fn take_sparse_trie_prune_blocks(
+        &mut self,
+        parent_hash: B256,
+    ) -> Option<Vec<ExecutedBlock<N>>> {
+        if !self.pending_sparse_trie_prune {
+            return None
+        }
+
+        self.pending_sparse_trie_prune = false;
+        Some(
+            self.tree_state
+                .blocks_by_hash(parent_hash)
+                .map(|(_, blocks)| blocks)
+                .unwrap_or_default(),
+        )
     }
 
     /// Returns true if the block has been marked as invalid.
@@ -308,8 +349,6 @@ where
     engine_kind: EngineApiKind,
     /// The EVM configuration.
     evm_config: C,
-    /// Changeset cache for in-memory trie changesets
-    changeset_cache: ChangesetCache,
     /// Timing statistics for executed blocks, keyed by block hash.
     /// Stored here (not in `ExecutedBlock`) to avoid leaking observability concerns into the block
     /// type. Entries are removed when blocks are persisted or invalidated.
@@ -317,9 +356,6 @@ where
     /// Set when an FCU with payload attributes is received, cleared on the next FCU without.
     /// Suppresses persistence cycles during payload building.
     building_payload: bool,
-    /// Retained paths from the latest persistence cleanup to apply during the next sparse trie
-    /// cache preservation.
-    pending_sparse_trie_prune: Option<TriePrefixSetsMut>,
     /// Task runtime for spawning blocking work on named, reusable threads.
     runtime: reth_tasks::Runtime,
 }
@@ -346,7 +382,6 @@ where
             .field("metrics", &self.metrics)
             .field("engine_kind", &self.engine_kind)
             .field("evm_config", &self.evm_config)
-            .field("changeset_cache", &self.changeset_cache)
             .field("execution_timing_stats", &self.execution_timing_stats.len())
             .field("runtime", &self.runtime)
             .finish()
@@ -388,7 +423,6 @@ where
         config: TreeConfig,
         engine_kind: EngineApiKind,
         evm_config: C,
-        changeset_cache: ChangesetCache,
         runtime: reth_tasks::Runtime,
     ) -> Self {
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
@@ -410,10 +444,8 @@ where
             incoming_tx,
             engine_kind,
             evm_config,
-            changeset_cache,
             execution_timing_stats: B256Map::default(),
             building_payload: false,
-            pending_sparse_trie_prune: None,
             runtime,
         }
     }
@@ -431,11 +463,10 @@ where
         persistence: PersistenceHandle<N>,
         payload_builder: PayloadBuilderHandle<T>,
         canonical_in_memory_state: CanonicalInMemoryState<N>,
-        state_trie_overlays: StateTrieOverlayManager<N>,
+        overlay_manager: OverlayManager<N>,
         config: TreeConfig,
         kind: EngineApiKind,
         evm_config: C,
-        changeset_cache: ChangesetCache,
         runtime: reth_tasks::Runtime,
     ) -> (Sender<FromEngine<EngineApiRequest<T, N>, N::Block>>, UnboundedReceiver<EngineApiEvent<N>>)
     {
@@ -454,7 +485,7 @@ where
             config.invalid_header_hit_eviction_threshold(),
             header.num_hash(),
             kind,
-            state_trie_overlays,
+            overlay_manager,
         );
 
         let task = Self::new(
@@ -470,7 +501,6 @@ where
             config,
             kind,
             evm_config,
-            changeset_cache,
             runtime,
         );
         let incoming = task.incoming_tx.clone();
@@ -503,13 +533,19 @@ where
             .saturating_sub(self.persistence_state.last_persisted_block.number)
     }
 
+    /// How many blocks beyond the configured in-memory buffer are awaiting persistence.
+    const fn persistence_backpressure_gap(&self) -> u64 {
+        self.persistence_gap().saturating_sub(self.config.memory_block_buffer_target())
+    }
+
     /// Returns `true` when the main loop should stop draining the tree input channel.
     ///
-    /// This is the case when persistence is already running and the gap between the canonical tip
-    /// and the last persisted block has reached the configured threshold.
+    /// This is the case when persistence is already running and the number of blocks beyond the
+    /// configured in-memory buffer has reached the configured threshold.
     const fn should_backpressure(&self) -> bool {
         self.persistence_state.in_progress() &&
-            self.persistence_gap() >= self.config.persistence_backpressure_threshold()
+            self.persistence_backpressure_gap() >=
+                self.config.persistence_backpressure_threshold()
     }
 
     /// Run the engine API handler.
@@ -521,18 +557,19 @@ where
             //
             // 1. Non-blocking poll for persistence completion. If the background flush already
             //    landed, absorb the result now so the gap calculation below is fresh.
-            // 2. Decide how to wait for the next event. When the canonical-to-persisted gap exceeds
-            //    the backpressure threshold we only block on the persistence receiver, leaving new
-            //    engine requests sitting in the unbounded upstream channel.
+            // 2. Decide how to wait for the next event. When the canonical-to-persisted gap beyond
+            //    the in-memory buffer reaches the backpressure threshold we only block on the
+            //    persistence receiver, leaving new engine requests sitting in the unbounded
+            //    upstream channel.
             // 3. Handle the event (engine message or persistence completion) and kick off a new
             //    persistence cycle if the threshold is met again.
             //
-            // The net effect: when the persistence gap exceeds the threshold, we stop
-            // processing incoming messages and let them queue in the channel. This is only a
-            // soft form of backpressure: it delays replies and, more importantly, prevents
-            // executing further blocks that would pile up in the persistence queue - where each
-            // block carries heavier state (eg. trie updates) than the raw payload sitting in the
-            // engine channel.
+            // The net effect: when the unbuffered persistence gap reaches the threshold, we stop
+            // processing incoming messages and let them queue in the channel. This is only a soft
+            // form of backpressure: it delays replies and, more importantly, prevents executing
+            // further blocks that would pile up in the persistence queue - where each block
+            // carries heavier state (eg. trie updates) than the raw payload sitting in the engine
+            // channel.
             //
             // Standard Ethereum CLs won't truly back off - the engine API has no
             // backpressure semantics, and CLs typically timeout after ≈8s and resend - so
@@ -719,6 +756,8 @@ where
         &mut self,
         payload: T::ExecutionData,
     ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError> {
+        let _thread_resource_usage =
+            self.metrics.engine.new_payload.measure_thread_resource_usage();
         trace!(target: "engine::tree", "invoked new payload");
 
         // start timing for the new payload process
@@ -1198,7 +1237,7 @@ where
     /// processing is complete. Returns `None` if the head is not canonical and processing
     /// should continue.
     fn handle_canonical_head(
-        &self,
+        &mut self,
         state: ForkchoiceState,
         attrs: &Option<T::PayloadAttributes>, // Changed to reference
     ) -> ProviderResult<Option<TreeOutcome<OnForkChoiceUpdated>>> {
@@ -1227,6 +1266,8 @@ where
             // safe or finalized hashes are invalid
             return Ok(Some(TreeOutcome::new(outcome)));
         }
+
+        self.payload_validator.on_canonical_head_changed(state.head_block_hash, &self.state);
 
         // Process payload attributes if the head is already canonical
         if let Some(attr) = attrs {
@@ -1365,7 +1406,7 @@ where
         debug!(target: "engine::tree", ?new_tip_num, last_persisted_block_number=?self.persistence_state.last_persisted_block.number, "Removing blocks using persistence task");
         if new_tip_num < self.persistence_state.last_persisted_block.number {
             debug!(target: "engine::tree", ?new_tip_num, "Starting remove blocks job");
-            self.pending_sparse_trie_prune = None;
+            self.state.set_pending_sparse_trie_prune(false);
             let (tx, rx) = crossbeam_channel::bounded(1);
             let _ = self.persistence.remove_blocks_above(new_tip_num, tx);
             self.persistence_state.start_remove(new_tip_num, rx);
@@ -1494,7 +1535,7 @@ where
         debug!(target: "engine::tree", ?last_persisted_block_hash, ?last_persisted_block_number, elapsed=?start_time.elapsed(), "Finished persisting, calling finish");
         self.persistence_state.finish(last_persisted_block_hash, last_persisted_block_number);
 
-        // Evict trie changesets for blocks below the eviction threshold.
+        // Evict cached changesets for blocks below the eviction threshold.
         // Keep at least CHANGESET_CACHE_RETENTION_BLOCKS from the persisted tip, and also respect
         // the finalized block if set.
         let min_threshold =
@@ -1514,7 +1555,7 @@ where
             eviction_threshold,
             "Evicting changesets below threshold"
         );
-        self.changeset_cache.evict(eviction_threshold);
+        self.state.tree_state.overlay_manager.evict_cached_changesets(eviction_threshold);
 
         self.on_new_persisted_block()?;
 
@@ -1741,7 +1782,12 @@ where
                                         BeaconOnNewPayloadError::Internal(Box::new(e))
                                     }))
                                 {
-                                    error!(target: "engine::tree", payload=?num_hash, elapsed=?start.elapsed(), "Failed to send event: {err:?}");
+                                    error!(
+                                        target: "engine::tree",
+                                        payload=?num_hash,
+                                        elapsed=?latency,
+                                        "Failed to send event: {err:?}"
+                                    );
                                     self.metrics
                                         .engine
                                         .failed_new_payload_response_deliveries
@@ -1816,7 +1862,7 @@ where
         if ctrl.is_unwind() {
             // the node reset so we need to clear everything above that height so that backfill
             // height is the new canonical block.
-            self.pending_sparse_trie_prune = None;
+            self.state.set_pending_sparse_trie_prune(false);
             self.state.tree_state.reset(backfill_num_hash)
         } else {
             self.state.tree_state.remove_until(
@@ -2059,7 +2105,7 @@ where
     }
 
     /// Returns true if the canonical chain length minus the last persisted
-    /// block is greater than or equal to the persistence threshold,
+    /// block is greater than the persistence threshold,
     /// backfill is not running, and no payload is currently being built.
     pub const fn should_persist(&self) -> bool {
         if self.building_payload {
@@ -2145,35 +2191,13 @@ where
             number: self.persistence_state.last_persisted_block.number,
             hash: self.persistence_state.last_persisted_block.hash,
         });
-        self.pending_sparse_trie_prune = self.sparse_trie_retained_paths_for_in_memory_blocks();
+        self.state.set_pending_sparse_trie_prune(self.should_prune_sparse_trie());
         Ok(())
     }
 
-    /// Builds sparse trie retained paths from all blocks still present in the in-memory tree.
-    fn sparse_trie_retained_paths_for_in_memory_blocks(&self) -> Option<TriePrefixSetsMut> {
-        if self.config.skip_state_root() ||
-            self.config.state_root_fallback() ||
-            !self.config.use_state_root_task()
-        {
-            return None
-        }
-
-        let mut retained_paths = TriePrefixSetsMut::default();
-        for block in self.state.tree_state.blocks_by_hash.values() {
-            let trie_data = block.trie_data();
-            let Some(changed_paths) = trie_data.changed_paths.as_deref() else {
-                // Custom state-root strategies may not track changed paths, so this is an
-                // expected way to opt out of pruning, not an anomaly.
-                debug!(
-                    target: "engine::tree",
-                    block = ?block.recovered_block().num_hash(),
-                    "Skipping sparse trie prune because changed paths for in-memory block are unknown"
-                );
-                return None
-            };
-            retained_paths.extend_ref(changed_paths);
-        }
-        Some(retained_paths)
+    /// Returns whether sparse trie pruning should be attempted by the next sparse trie task.
+    const fn should_prune_sparse_trie(&self) -> bool {
+        self.config.use_state_root_task()
     }
 
     /// Return an [`ExecutedBlock`] from database or in-memory state by hash.
@@ -2207,11 +2231,11 @@ where
             "computing block trie updates",
         );
         let db_provider = self.provider.database_provider_ro()?;
-        let trie_updates = reth_trie_db::compute_block_trie_updates(
-            &self.changeset_cache,
-            &db_provider,
-            block.number(),
-        )?;
+        let trie_updates = self
+            .state
+            .tree_state
+            .overlay_manager
+            .compute_block_trie_updates(&db_provider, block.number())?;
 
         let sorted_hashed_state = Arc::new(hashed_state.into_sorted());
         let sorted_trie_updates = Arc::new(trie_updates);
@@ -2700,7 +2724,7 @@ where
             let old_first = old.first().map(|first| first.recovered_block().num_hash());
             trace!(target: "engine::tree", ?new_first, ?old_first, "Reorg detected, new and old first blocks");
 
-            self.pending_sparse_trie_prune = None;
+            self.state.set_pending_sparse_trie_prune(false);
             self.update_reorg_metrics(old.len(), old_first);
             self.reinsert_reorged_blocks(new.clone());
             self.reinsert_reorged_blocks(old.clone());
@@ -2709,6 +2733,7 @@ where
         // update the tracked in-memory state with the new chain
         self.canonical_in_memory_state.update_chain(chain_update);
         self.canonical_in_memory_state.set_canonical_head(tip.clone());
+        self.payload_validator.on_canonical_head_changed(tip.hash(), &self.state);
 
         // Update metrics based on new tip
         self.metrics.tree.canonical_chain_height.set(tip.number() as f64);
@@ -3014,11 +3039,7 @@ where
         // as this indicates there's already a canonical block at that height.
         let is_fork = block_id.block.number <= self.state.tree_state.current_canonical_head.number;
 
-        let ctx = TreeCtx::new(
-            &mut self.state,
-            &self.canonical_in_memory_state,
-            &mut self.pending_sparse_trie_prune,
-        );
+        let ctx = TreeCtx::new(&mut self.state, &self.canonical_in_memory_state);
 
         let start = Instant::now();
 
@@ -3282,7 +3303,7 @@ where
     /// Note: At this point, the fork choice update is considered to be VALID, however, we can still
     /// return an error if the payload attributes are invalid.
     fn process_payload_attributes(
-        &self,
+        &mut self,
         attributes: T::PayloadAttributes,
         head: &N::BlockHeader,
         state: ForkchoiceState,
@@ -3299,17 +3320,11 @@ where
         //    payloadAttributes is not null and the forkchoice state has been updated successfully.
         //    The build process is specified in the Payload building section.
 
-        let cache = if self.config.share_execution_cache_with_payload_builder() {
-            self.payload_validator.cache_for(state.head_block_hash)
-        } else {
-            None
-        };
-
-        let state_root_handle = self.payload_validator.payload_state_root_handle_for(
+        let resources = self.payload_validator.payload_builder_resources(
             state.head_block_hash,
             head,
             attributes.timestamp(),
-            &self.state,
+            &mut self.state,
         );
 
         // send the payload to the builder and return the receiver for the pending payload
@@ -3317,8 +3332,7 @@ where
         let pending_payload_id = self.payload_builder.send_new_payload(BuildNewPayload {
             parent_hash: state.head_block_hash,
             attributes,
-            cache,
-            state_root_handle,
+            resources,
         });
 
         // Client software MUST respond to this method call in the following way:

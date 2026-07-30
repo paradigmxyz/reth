@@ -7,7 +7,7 @@
 #   BENCH_COMMENT_ID  – GitHub comment ID to update
 #   BENCH_GH_TOKEN    – GitHub token for API auth
 #   BENCH_ACTOR       – User who triggered the benchmark
-#   BENCH_JOB_URL     – URL to the Actions job page
+#   BENCH_RUN_URL     – URL to the Actions run summary
 #   BENCH_CONFIG      – Config line (blocks, warmup, refs)
 #   GITHUB_REPOSITORY – owner/repo
 
@@ -19,8 +19,8 @@ if [ -z "${BENCH_COMMENT_ID:-}" ] || [ -z "${BENCH_GH_TOKEN:-}" ]; then
   exit 0
 fi
 
-BODY=$(printf 'cc @%s\n\n🚀 Benchmark started! [View job](%s)\n\n⏳ **Status:** %s\n\n%s' \
-  "${BENCH_ACTOR:-}" "${BENCH_JOB_URL:-}" "$STATUS" "${BENCH_CONFIG:-}")
+BODY=$(printf 'cc @%s\n\n🚀 Benchmark started! [View run](%s)\n\n⏳ **Status:** %s\n\n%s' \
+  "${BENCH_ACTOR:-}" "${BENCH_RUN_URL:-}" "$STATUS" "${BENCH_CONFIG:-}")
 
 PAYLOAD=$(jq -n --arg body "$BODY" '{body: $body}')
 

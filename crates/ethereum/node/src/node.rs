@@ -509,6 +509,7 @@ fn jit_runtime_config(jit: &JitArgs) -> RuntimeConfig {
         dump_dir: default_config.dump_dir,
         debug_assertions: jit.debug,
         blocking: jit.blocking,
+        single_error: default_config.single_error,
         no_dedup: default_config.no_dedup,
         no_dse: default_config.no_dse,
         gas_params: default_config.gas_params,
@@ -606,7 +607,10 @@ where
         let jit = &ctx.config().jit;
         let dump_dir = jit.debug.then(|| ctx.config().datadir().data_dir().join("jit"));
 
-        let (evm_config, revmc_metrics) = build_evm_config(ctx.chain_spec(), jit, dump_dir)?;
+        let (mut evm_config, revmc_metrics) = build_evm_config(ctx.chain_spec(), jit, dump_dir)?;
+        if let Some(cache) = ctx.sender_recovery_cache() {
+            evm_config = evm_config.with_sender_recovery_cache(cache.clone());
+        }
 
         #[cfg(not(feature = "jit"))]
         let _ = revmc_metrics;
