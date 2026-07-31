@@ -106,6 +106,7 @@ members = [
     "crates/storage/nippy-jar/",
     "crates/storage/provider/",
     "crates/storage/storage-api/",
+    "crates/storage/storage-overlay/",
     "crates/tasks/",
     "crates/tokio-util/",
     "crates/tracing/",
@@ -413,6 +414,7 @@ reth-static-file = { path = "crates/static-file/static-file" }
 reth-static-file-types = { path = "crates/static-file/types", default-features = false }
 reth-storage-api = { path = "crates/storage/storage-api", default-features = false }
 reth-storage-errors = { path = "crates/storage/errors", default-features = false }
+reth-storage-overlay = { path = "crates/storage/storage-overlay" }
 reth-tasks = { path = "crates/tasks" }
 reth-testing-utils = { path = "testing/testing-utils" }
 reth-tokio-util = { path = "crates/tokio-util" }
@@ -445,33 +447,33 @@ alloy-trie = { version = "0.9.4", default-features = false }
 
 alloy-hardforks = "0.4.7"
 
-alloy-consensus = { version = "2.1.1", default-features = false }
-alloy-contract = { version = "2.1.1", default-features = false }
-alloy-eips = { version = "2.1.1", default-features = false }
-alloy-genesis = { version = "2.1.1", default-features = false }
-alloy-json-rpc = { version = "2.1.1", default-features = false }
-alloy-network = { version = "2.1.1", default-features = false }
-alloy-network-primitives = { version = "2.1.1", default-features = false }
-alloy-provider = { version = "2.1.1", features = ["reqwest", "debug-api"], default-features = false }
-alloy-pubsub = { version = "2.1.1", default-features = false }
-alloy-rpc-client = { version = "2.1.1", default-features = false }
-alloy-rpc-types = { version = "2.1.1", features = ["eth"], default-features = false }
-alloy-rpc-types-admin = { version = "2.1.1", default-features = false }
-alloy-rpc-types-anvil = { version = "2.1.1", default-features = false }
-alloy-rpc-types-beacon = { version = "2.1.1", default-features = false }
-alloy-rpc-types-debug = { version = "2.1.1", default-features = false }
-alloy-rpc-types-engine = { version = "2.1.1", default-features = false }
-alloy-rpc-types-eth = { version = "2.1.1", default-features = false }
-alloy-rpc-types-mev = { version = "2.1.1", default-features = false }
-alloy-rpc-types-trace = { version = "2.1.1", default-features = false }
-alloy-rpc-types-txpool = { version = "2.1.1", default-features = false }
-alloy-serde = { version = "2.1.1", default-features = false }
-alloy-signer = { version = "2.1.1", default-features = false }
-alloy-signer-local = { version = "2.1.1", default-features = false }
-alloy-transport = { version = "2.1.1" }
-alloy-transport-http = { version = "2.1.1", features = ["reqwest-rustls-tls"], default-features = false }
-alloy-transport-ipc = { version = "2.1.1", default-features = false }
-alloy-transport-ws = { version = "2.1.1", default-features = false }
+alloy-consensus = { version = "2.2.0", default-features = false }
+alloy-contract = { version = "2.2.0", default-features = false }
+alloy-eips = { version = "2.2.0", default-features = false }
+alloy-genesis = { version = "2.2.0", default-features = false }
+alloy-json-rpc = { version = "2.2.0", default-features = false }
+alloy-network = { version = "2.2.0", default-features = false }
+alloy-network-primitives = { version = "2.2.0", default-features = false }
+alloy-provider = { version = "2.2.0", features = ["reqwest", "debug-api"], default-features = false }
+alloy-pubsub = { version = "2.2.0", default-features = false }
+alloy-rpc-client = { version = "2.2.0", default-features = false }
+alloy-rpc-types = { version = "2.2.0", features = ["eth"], default-features = false }
+alloy-rpc-types-admin = { version = "2.2.0", default-features = false }
+alloy-rpc-types-anvil = { version = "2.2.0", default-features = false }
+alloy-rpc-types-beacon = { version = "2.2.0", default-features = false }
+alloy-rpc-types-debug = { version = "2.2.0", default-features = false }
+alloy-rpc-types-engine = { version = "2.2.0", default-features = false }
+alloy-rpc-types-eth = { version = "2.2.0", default-features = false }
+alloy-rpc-types-mev = { version = "2.2.0", default-features = false }
+alloy-rpc-types-trace = { version = "2.2.0", default-features = false }
+alloy-rpc-types-txpool = { version = "2.2.0", default-features = false }
+alloy-serde = { version = "2.2.0", default-features = false }
+alloy-signer = { version = "2.2.0", default-features = false }
+alloy-signer-local = { version = "2.2.0", default-features = false }
+alloy-transport = { version = "2.2.0" }
+alloy-transport-http = { version = "2.2.0", features = ["reqwest-rustls-tls"], default-features = false }
+alloy-transport-ipc = { version = "2.2.0", default-features = false }
+alloy-transport-ws = { version = "2.2.0", default-features = false }
 
 # misc
 either = { version = "1.16.0", default-features = false }
@@ -531,7 +533,7 @@ tracing-appender = "0.2.5"
 url = { version = "2.3", default-features = false }
 zstd = "0.13"
 byteorder = "1"
-fixed-cache = { version = "0.1.10", features = ["stats"] }
+fixed-cache = { version = "0.1.10", default-features = false, features = ["alloc"] }
 moka = "0.12"
 tar-no-std = { version = "0.4.2", default-features = false }
 miniz_oxide = { version = "0.9.0", default-features = false }

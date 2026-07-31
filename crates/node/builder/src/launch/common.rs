@@ -81,13 +81,13 @@ use reth_stages::{
     StageId, StageSet,
 };
 use reth_static_file::{blocks_per_file_for_prune_distance, StaticFileProducer, StaticFileSegment};
+use reth_storage_overlay::OverlayManager;
 use reth_tasks::TaskExecutor;
 use reth_tracing::{
     throttle,
     tracing::{debug, error, info, warn},
 };
 use reth_transaction_pool::TransactionPool;
-use reth_trie_db::ChangesetCache;
 use std::{num::NonZeroUsize, sync::Arc, thread::available_parallelism, time::Duration};
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedSender},
@@ -475,7 +475,7 @@ where
     /// check.**
     pub async fn create_provider_factory<N, Evm>(
         &self,
-        changeset_cache: ChangesetCache,
+        overlay_manager: OverlayManager<N::Primitives>,
         rocksdb_provider: Option<RocksDBProvider>,
         disabled_stages: &[StageId],
     ) -> eyre::Result<ProviderFactory<N>>
@@ -537,7 +537,7 @@ where
         )?
         .with_prune_modes(prune_config.segments)
         .with_minimum_pruning_distance(prune_config.minimum_pruning_distance)
-        .with_changeset_cache(changeset_cache)
+        .with_overlay_manager(overlay_manager)
         .with_bal_store(bal_store);
 
         // Check consistency between the database and static files, returning
@@ -610,7 +610,7 @@ where
     /// Creates a new [`ProviderFactory`] and attaches it to the launch context.
     pub async fn with_provider_factory<N, Evm>(
         self,
-        changeset_cache: ChangesetCache,
+        overlay_manager: OverlayManager<N::Primitives>,
         rocksdb_provider: Option<RocksDBProvider>,
         disabled_stages: &[StageId],
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<ChainSpec>, ProviderFactory<N>>>>
@@ -619,7 +619,7 @@ where
         Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
         let factory = self
-            .create_provider_factory::<N, Evm>(changeset_cache, rocksdb_provider, disabled_stages)
+            .create_provider_factory::<N, Evm>(overlay_manager, rocksdb_provider, disabled_stages)
             .await?;
         let ctx = LaunchContextWith {
             inner: self.inner,

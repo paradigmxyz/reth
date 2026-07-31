@@ -14,7 +14,7 @@ use alloy_rpc_types_engine::{
 use error::{InsertBlockError, InsertBlockFatalError, InsertBlockValidationError};
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, MemoryOverlayStateProvider,
-    NewCanonicalChain, StateTrieOverlayManager,
+    NewCanonicalChain,
 };
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
@@ -30,15 +30,15 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
-    DatabaseProviderFactory, HashedPostStateProvider, ProviderError, StageCheckpointReader,
-    StateProviderBox, StateProviderFactory, StateReader, StorageChangeSetReader,
-    StorageSettingsCache, TransactionVariant,
+    DatabaseProviderFactory, HashedPostStateProvider, ProviderError, SaveBlocksInput,
+    StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
+    StorageChangeSetReader, StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
+use reth_storage_overlay::OverlayManager;
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie::ComputedTrieData;
-use reth_trie_db::ChangesetCache;
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Duration};
@@ -63,6 +63,7 @@ pub mod state_root_strategy;
 #[cfg(test)]
 mod tests;
 mod trie_updates;
+mod txpool_prewarm;
 pub mod types;
 
 use crate::{persistence::PersistenceResult, tree::error::AdvancePersistenceError};
@@ -75,7 +76,11 @@ pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
 pub use reth_execution_cache::{
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider,
-    ExecutionCache, PayloadExecutionCache, SavedCache,
+    ExecutionCache, PayloadExecutionCache, SavedCache, TxPoolPrewarmCacheSnapshot,
+};
+pub use txpool_prewarm::{
+    Source as TxPoolPrewarmSource, Transaction as TxPoolPrewarmTransaction,
+    Transactions as TxPoolPrewarmTransactions,
 };
 pub use types::{ExecutionEnv, ValidationOutcome, ValidationOutput};
 
@@ -94,7 +99,7 @@ pub(crate) const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 
 /// The minimum number of blocks to retain in the changeset cache after eviction.
 ///
-/// This ensures that recent trie changesets are kept in memory for potential reorgs,
+/// This ensures that recent changesets are kept in memory for potential reorgs,
 /// even when the finalized block is not set (e.g., on L2s like Optimism).
 const CHANGESET_CACHE_RETENTION_BLOCKS: u64 = 64;
 
@@ -160,7 +165,7 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
         invalid_header_hit_eviction_threshold: u8,
         canonical_block: BlockNumHash,
         engine_kind: EngineApiKind,
-        state_trie_overlays: StateTrieOverlayManager<N>,
+        overlay_manager: OverlayManager<N>,
     ) -> Self {
         Self {
             invalid_headers: InvalidHeaderCache::new(
@@ -168,7 +173,7 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
                 invalid_header_hit_eviction_threshold,
             ),
             buffer: BlockBuffer::new(block_buffer_limit),
-            tree_state: TreeState::new(canonical_block, engine_kind, state_trie_overlays),
+            tree_state: TreeState::new(canonical_block, engine_kind, overlay_manager),
             pending_sparse_trie_prune: false,
             forkchoice_state_tracker: ForkchoiceStateTracker::default(),
         }
@@ -194,7 +199,7 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
     ///
     /// `None` means no prune request is pending. `Some(Vec::new())` means a prune was requested,
     /// but no in-memory parent-chain blocks were found for the parent hash; the sparse trie task
-    /// should still prune using the current block's hashed post state.
+    /// should still prune nodes cached before the current block's epoch.
     pub fn take_sparse_trie_prune_blocks(
         &mut self,
         parent_hash: B256,
@@ -344,8 +349,6 @@ where
     engine_kind: EngineApiKind,
     /// The EVM configuration.
     evm_config: C,
-    /// Changeset cache for in-memory trie changesets
-    changeset_cache: ChangesetCache,
     /// Timing statistics for executed blocks, keyed by block hash.
     /// Stored here (not in `ExecutedBlock`) to avoid leaking observability concerns into the block
     /// type. Entries are removed when blocks are persisted or invalidated.
@@ -379,7 +382,6 @@ where
             .field("metrics", &self.metrics)
             .field("engine_kind", &self.engine_kind)
             .field("evm_config", &self.evm_config)
-            .field("changeset_cache", &self.changeset_cache)
             .field("execution_timing_stats", &self.execution_timing_stats.len())
             .field("runtime", &self.runtime)
             .finish()
@@ -421,7 +423,6 @@ where
         config: TreeConfig,
         engine_kind: EngineApiKind,
         evm_config: C,
-        changeset_cache: ChangesetCache,
         runtime: reth_tasks::Runtime,
     ) -> Self {
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
@@ -443,7 +444,6 @@ where
             incoming_tx,
             engine_kind,
             evm_config,
-            changeset_cache,
             execution_timing_stats: B256Map::default(),
             building_payload: false,
             runtime,
@@ -463,11 +463,10 @@ where
         persistence: PersistenceHandle<N>,
         payload_builder: PayloadBuilderHandle<T>,
         canonical_in_memory_state: CanonicalInMemoryState<N>,
-        state_trie_overlays: StateTrieOverlayManager<N>,
+        overlay_manager: OverlayManager<N>,
         config: TreeConfig,
         kind: EngineApiKind,
         evm_config: C,
-        changeset_cache: ChangesetCache,
         runtime: reth_tasks::Runtime,
     ) -> (Sender<FromEngine<EngineApiRequest<T, N>, N::Block>>, UnboundedReceiver<EngineApiEvent<N>>)
     {
@@ -476,6 +475,7 @@ where
 
         let persistence_state = PersistenceState {
             last_persisted_block: BlockNumHash::new(best_block_number, header.hash()),
+            last_state_trie_persisted_block: BlockNumHash::new(best_block_number, header.hash()),
             rx: None,
         };
 
@@ -486,7 +486,7 @@ where
             config.invalid_header_hit_eviction_threshold(),
             header.num_hash(),
             kind,
-            state_trie_overlays,
+            overlay_manager,
         );
 
         let task = Self::new(
@@ -502,7 +502,6 @@ where
             config,
             kind,
             evm_config,
-            changeset_cache,
             runtime,
         );
         let incoming = task.incoming_tx.clone();
@@ -1269,6 +1268,8 @@ where
             return Ok(Some(TreeOutcome::new(outcome)));
         }
 
+        self.payload_validator.on_canonical_head_changed(state.head_block_hash, &self.state);
+
         // Process payload attributes if the head is already canonical
         if let Some(attr) = attrs {
             let tip = self
@@ -1415,22 +1416,12 @@ where
 
     /// Helper method to save blocks and set the persistence state. This ensures we keep track of
     /// the current persistence action while we're saving blocks.
-    fn persist_blocks(&mut self, blocks_to_persist: Vec<ExecutedBlock<N>>) {
-        if blocks_to_persist.is_empty() {
-            debug!(target: "engine::tree", "Returned empty set of blocks to persist");
-            return
-        }
+    fn persist_blocks(&mut self, input: SaveBlocksInput<N>) {
+        let highest_num_hash = input.last_block();
+        debug!(target: "engine::tree", count=input.persist_rest_blocks().len(), blocks = ?input.persist_rest_blocks().iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
 
-        // NOTE: checked non-empty above
-        let highest_num_hash = blocks_to_persist
-            .iter()
-            .max_by_key(|block| block.recovered_block().number())
-            .map(|b| b.recovered_block().num_hash())
-            .expect("Checked non-empty persisting blocks");
-
-        debug!(target: "engine::tree", count=blocks_to_persist.len(), blocks = ?blocks_to_persist.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
         let (tx, rx) = crossbeam_channel::bounded(1);
-        let _ = self.persistence.save_blocks(blocks_to_persist, tx);
+        let _ = self.persistence.save_blocks(input, tx);
 
         self.persistence_state.start_save(highest_num_hash, rx);
     }
@@ -1443,10 +1434,8 @@ where
         if !self.persistence_state.in_progress() {
             if let Some(new_tip_num) = self.find_disk_reorg()? {
                 self.remove_blocks(new_tip_num)
-            } else if self.should_persist() {
-                let blocks_to_persist =
-                    self.get_canonical_blocks_to_persist(PersistTarget::Threshold)?;
-                self.persist_blocks(blocks_to_persist);
+            } else if let Some(input) = self.get_save_blocks_input(PersistTarget::Threshold) {
+                self.persist_blocks(input);
             }
         }
 
@@ -1475,17 +1464,24 @@ where
                 debug!(target: "engine::tree", ?action, "waiting for in-flight persistence");
                 let result = rx.recv().map_err(|_| AdvancePersistenceError::ChannelClosed)?;
                 self.on_persistence_complete(result, start_time)?;
+                continue
             }
 
-            let blocks_to_persist = self.get_canonical_blocks_to_persist(PersistTarget::Head)?;
+            // Persistence can finish against a branch that the in-memory canonical chain has
+            // reorged away from. Unwind that stale disk branch before building a head-targeted
+            // save.
+            if let Some(new_tip_num) = self.find_disk_reorg()? {
+                self.remove_blocks(new_tip_num);
+                continue
+            }
 
-            if blocks_to_persist.is_empty() {
+            let Some(input) = self.get_save_blocks_input(PersistTarget::Head) else {
                 debug!(target: "engine::tree", "persistence complete, signaling termination");
                 return Ok(())
-            }
+            };
 
-            debug!(target: "engine::tree", count = blocks_to_persist.len(), "persisting remaining blocks before shutdown");
-            self.persist_blocks(blocks_to_persist);
+            debug!(target: "engine::tree", count = input.persist_rest_blocks().len(), "persisting remaining blocks before shutdown");
+            self.persist_blocks(input);
         }
     }
 
@@ -1522,20 +1518,18 @@ where
         self.metrics.engine.persistence_duration.record(start_time.elapsed());
 
         let commit_duration = result.commit_duration;
-        let Some(BlockNumHash {
-            hash: last_persisted_block_hash,
-            number: last_persisted_block_number,
-        }) = result.last_block
-        else {
-            // if this happened, then we persisted no blocks because we sent an empty vec of blocks
-            warn!(target: "engine::tree", "Persistence task completed but did not persist any blocks");
-            return Ok(())
-        };
+        let last_persisted_block = result.last_block;
+        let last_persisted_block_number = last_persisted_block.number;
+        let last_state_trie_persisted_block = result.last_state_trie_block;
+        debug_assert!(
+            last_state_trie_persisted_block.number <= last_persisted_block.number,
+            "state/trie frontier cannot exceed the last persisted block"
+        );
 
-        debug!(target: "engine::tree", ?last_persisted_block_hash, ?last_persisted_block_number, elapsed=?start_time.elapsed(), "Finished persisting, calling finish");
-        self.persistence_state.finish(last_persisted_block_hash, last_persisted_block_number);
+        debug!(target: "engine::tree", ?last_persisted_block, ?last_state_trie_persisted_block, elapsed=?start_time.elapsed(), "Finished persisting, calling finish");
+        self.persistence_state.finish(last_persisted_block, last_state_trie_persisted_block);
 
-        // Evict trie changesets for blocks below the eviction threshold.
+        // Evict cached changesets for blocks below the eviction threshold.
         // Keep at least CHANGESET_CACHE_RETENTION_BLOCKS from the persisted tip, and also respect
         // the finalized block if set.
         let min_threshold =
@@ -1555,7 +1549,7 @@ where
             eviction_threshold,
             "Evicting changesets below threshold"
         );
-        self.changeset_cache.evict(eviction_threshold);
+        self.state.tree_state.overlay_manager.evict_cached_changesets(eviction_threshold);
 
         self.on_new_persisted_block()?;
 
@@ -1782,7 +1776,12 @@ where
                                         BeaconOnNewPayloadError::Internal(Box::new(e))
                                     }))
                                 {
-                                    error!(target: "engine::tree", payload=?num_hash, elapsed=?start.elapsed(), "Failed to send event: {err:?}");
+                                    error!(
+                                        target: "engine::tree",
+                                        payload=?num_hash,
+                                        elapsed=?latency,
+                                        "Failed to send event: {err:?}"
+                                    );
                                     self.metrics
                                         .engine
                                         .failed_new_payload_response_deliveries
@@ -1881,7 +1880,7 @@ where
             // update the tracked chain height, after backfill sync both the canonical height and
             // persisted height are the same
             self.state.tree_state.set_canonical_head(new_head.num_hash());
-            self.persistence_state.finish(new_head.hash(), new_head.number());
+            self.persistence_state.finish(new_head.num_hash(), new_head.num_hash());
 
             // update the tracked canonical head
             self.canonical_in_memory_state.set_canonical_head(new_head);
@@ -2099,70 +2098,95 @@ where
         );
     }
 
-    /// Returns true if the canonical chain length minus the last persisted
-    /// block is greater than the persistence threshold,
-    /// backfill is not running, and no payload is currently being built.
-    pub const fn should_persist(&self) -> bool {
-        if self.building_payload {
-            return false
-        }
-
-        if !self.backfill_sync_state.is_idle() {
-            // can't persist if backfill is running
-            return false
-        }
-
-        let min_block = self.persistence_state.last_persisted_block.number;
-        self.state.tree_state.canonical_block_number().saturating_sub(min_block) >
-            self.config.persistence_threshold()
-    }
-
-    /// Returns a batch of consecutive canonical blocks to persist in the range
-    /// `(last_persisted_number .. target]`. The expected order is oldest -> newest.
-    fn get_canonical_blocks_to_persist(
-        &self,
-        target: PersistTarget,
-    ) -> Result<Vec<ExecutedBlock<N>>, AdvancePersistenceError> {
+    /// Returns the blocks and frontiers for the next persistence cycle, if one should start.
+    ///
+    /// Threshold persistence honors the normal scheduling gates and retains the configured
+    /// in-memory block buffer. Head persistence bypasses those gates during shutdown and returns
+    /// `None` once both persistence frontiers have reached the canonical head.
+    fn get_save_blocks_input(&self, target: PersistTarget) -> Option<SaveBlocksInput<N>> {
         // We will calculate the state root using the database, so we need to be sure there are no
         // changes
         debug_assert!(!self.persistence_state.in_progress());
 
-        let mut blocks_to_persist = Vec::new();
-        let mut current_hash = self.state.tree_state.canonical_block_hash();
-        let last_persisted_number = self.persistence_state.last_persisted_block.number;
+        let prev_partial_state_trie = self.persistence_state.last_state_trie_persisted_block.number;
+        let prev_db_tip = self.persistence_state.last_persisted_block.number;
         let canonical_head_number = self.state.tree_state.canonical_block_number();
 
-        let target_number = match target {
-            PersistTarget::Head => canonical_head_number,
+        let (new_db_tip, new_partial_state_trie) = match target {
+            PersistTarget::Head => (canonical_head_number, canonical_head_number),
             PersistTarget::Threshold => {
-                canonical_head_number.saturating_sub(self.config.memory_block_buffer_target())
+                if self.building_payload || !self.backfill_sync_state.is_idle() {
+                    return None
+                }
+
+                if canonical_head_number.saturating_sub(prev_db_tip) <=
+                    self.config.persistence_threshold()
+                {
+                    return None
+                }
+
+                let new_db_tip =
+                    canonical_head_number.saturating_sub(self.config.memory_block_buffer_target());
+                if new_db_tip <= prev_db_tip {
+                    return None
+                }
+
+                let new_partial_state_trie = new_db_tip
+                    .saturating_sub(self.config.num_state_masking_blocks())
+                    .max(prev_partial_state_trie);
+                (new_db_tip, new_partial_state_trie)
             }
         };
+
+        debug_assert!(
+            new_db_tip >= prev_db_tip,
+            "disk reorg must be resolved before saving blocks"
+        );
+        debug_assert!(
+            new_partial_state_trie >= prev_partial_state_trie,
+            "disk reorg must be resolved before saving state/trie"
+        );
+
+        if new_db_tip == prev_db_tip && new_partial_state_trie == prev_partial_state_trie {
+            return None
+        }
+
+        let mut blocks = Vec::new();
+        let mut current_hash = self.state.tree_state.canonical_block_hash();
 
         debug!(
             target: "engine::tree",
             ?current_hash,
-            ?last_persisted_number,
+            ?prev_partial_state_trie,
+            ?prev_db_tip,
             ?canonical_head_number,
-            ?target_number,
-            "Returning canonical blocks to persist"
+            ?new_partial_state_trie,
+            ?new_db_tip,
+            target = ?target,
+            "Returning save input"
         );
         while let Some(block) = self.state.tree_state.blocks_by_hash.get(&current_hash) {
-            if block.recovered_block().number() <= last_persisted_number {
+            if block.recovered_block().number() <= prev_partial_state_trie {
                 break;
             }
 
-            if block.recovered_block().number() <= target_number {
-                blocks_to_persist.push(block.clone());
+            if block.recovered_block().number() <= new_db_tip {
+                blocks.push(block.clone());
             }
 
             current_hash = block.recovered_block().parent_hash();
         }
 
         // Reverse the order so that the oldest block comes first
-        blocks_to_persist.reverse();
+        blocks.reverse();
 
-        Ok(blocks_to_persist)
+        Some(SaveBlocksInput::new(
+            blocks,
+            prev_db_tip,
+            prev_partial_state_trie,
+            new_db_tip,
+            new_partial_state_trie,
+        ))
     }
 
     /// This clears the blocks from the in-memory tree state that have been persisted to the
@@ -2173,6 +2197,8 @@ where
     ///
     /// Assumes that `finish` has been called on the `persistence_state` at least once
     fn on_new_persisted_block(&mut self) -> ProviderResult<()> {
+        let in_memory_persisted_block = self.persistence_state.last_state_trie_persisted_block;
+
         // If we have an on-disk reorg, we need to handle it first before touching the in-memory
         // state.
         if let Some(remove_above) = self.find_disk_reorg()? {
@@ -2181,11 +2207,11 @@ where
         }
 
         let finalized = self.state.forkchoice_state_tracker.last_valid_finalized();
-        self.remove_before(self.persistence_state.last_persisted_block, finalized)?;
-        self.canonical_in_memory_state.remove_persisted_blocks(BlockNumHash {
-            number: self.persistence_state.last_persisted_block.number,
-            hash: self.persistence_state.last_persisted_block.hash,
-        });
+        self.remove_before(in_memory_persisted_block, finalized)?;
+        self.canonical_in_memory_state.remove_persisted_blocks_until(
+            self.persistence_state.last_persisted_block,
+            in_memory_persisted_block.number,
+        );
         self.state.set_pending_sparse_trie_prune(self.should_prune_sparse_trie());
         Ok(())
     }
@@ -2226,11 +2252,11 @@ where
             "computing block trie updates",
         );
         let db_provider = self.provider.database_provider_ro()?;
-        let trie_updates = reth_trie_db::compute_block_trie_updates(
-            &self.changeset_cache,
-            &db_provider,
-            block.number(),
-        )?;
+        let trie_updates = self
+            .state
+            .tree_state
+            .overlay_manager
+            .compute_block_trie_updates(&db_provider, block.number())?;
 
         let sorted_hashed_state = Arc::new(hashed_state.into_sorted());
         let sorted_trie_updates = Arc::new(trie_updates);
@@ -2728,6 +2754,7 @@ where
         // update the tracked in-memory state with the new chain
         self.canonical_in_memory_state.update_chain(chain_update);
         self.canonical_in_memory_state.set_canonical_head(tip.clone());
+        self.payload_validator.on_canonical_head_changed(tip.hash(), &self.state);
 
         // Update metrics based on new tip
         self.metrics.tree.canonical_chain_height.set(tip.number() as f64);

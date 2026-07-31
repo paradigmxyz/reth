@@ -12,7 +12,7 @@ workspace = true
 
 [dependencies]
 # reth
-reth-chain-state = { workspace = true, features = ["rayon"] }
+reth-chain-state.workspace = true
 reth-chainspec = { workspace = true, optional = true }
 reth-consensus.workspace = true
 reth-db.workspace = true
@@ -28,14 +28,14 @@ reth-primitives-traits = { workspace = true, features = ["rayon", "dashmap"] }
 reth-ethereum-primitives.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
-reth-revm = { workspace = true, features = ["optional-balance-check"] }
+reth-revm = { workspace = true, features = ["optional-balance-check", "optional-no-base-fee"] }
 reth-stages-api.workspace = true
+reth-storage-overlay = { workspace = true, features = ["rayon"] }
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-trie-parallel.workspace = true
 reth-trie-sparse = { workspace = true, features = ["std", "metrics"] }
 reth-trie.workspace = true
 reth-trie-common.workspace = true
-reth-trie-db.workspace = true
 
 # alloy
 alloy-evm.workspace = true
@@ -50,6 +50,7 @@ revm.workspace = true
 
 # common
 futures.workspace = true
+parking_lot.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "macros"] }
 moka = { workspace = true, features = ["sync"] }
@@ -60,7 +61,6 @@ reth-metrics = { workspace = true, features = ["common"] }
 
 # misc
 indexmap.workspace = true
-itertools.workspace = true
 schnellru.workspace = true
 rayon.workspace = true
 tracing.workspace = true
@@ -122,7 +122,6 @@ test-utils = [
     "reth-tracing",
     "reth-trie/test-utils",
     "reth-trie-common/test-utils",
-    "reth-trie-db/test-utils",
     "reth-trie-sparse/test-utils",
     "reth-prune-types?/test-utils",
     "reth-trie-parallel/test-utils",
