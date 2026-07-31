@@ -549,8 +549,10 @@ where
         let partial_trie_unwind = partial_trie_unwind_target(
             factory.database_provider_ro()?.get_stage_checkpoint(StageId::Finish)?,
         )?;
-        // The partial state-trie recovery must run first so Merkle's unwind can retain the
-        // complete changed branch. A lower storage-layer target is unwound afterwards.
+        // Recover the partial state trie first. Its unwind enables
+        // `walk_all_changed_branch_children`, which is more expensive than a normal unwind, so
+        // it only runs to the partial trie target. A lower storage-layer target is then unwound
+        // normally.
         let storage_unwind = [rocksdb_unwind, static_file_unwind].into_iter().flatten().min();
         let storage_unwind = storage_unwind.filter(|unwind_block| {
             partial_trie_unwind.is_none_or(|partial_trie| *unwind_block < partial_trie)
