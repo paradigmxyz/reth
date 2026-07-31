@@ -90,9 +90,10 @@ pub enum MerkleStage {
         incremental_threshold: u64,
     },
     /// The unwind portion of the merkle stage.
-    Unwind,
-    /// The unwind portion that walks every child of a changed branch path.
-    UnwindWithChangedBranchChildren,
+    Unwind {
+        /// Whether every child of a changed branch path should be walked.
+        walk_all_changed_branch_children: bool,
+    },
     /// Able to execute and unwind. Used for tests
     #[cfg(any(test, feature = "test-utils"))]
     Both {
@@ -117,12 +118,12 @@ impl MerkleStage {
 
     /// Stage default for the [`MerkleStage::Unwind`].
     pub const fn default_unwind() -> Self {
-        Self::Unwind
+        Self::new_unwind(false)
     }
 
-    /// Stage unwind that visits every child of changed branch paths.
-    pub const fn unwind_with_changed_branch_children() -> Self {
-        Self::UnwindWithChangedBranchChildren
+    /// Create a new instance of [`MerkleStage::Unwind`].
+    pub const fn new_unwind(walk_all_changed_branch_children: bool) -> Self {
+        Self::Unwind { walk_all_changed_branch_children }
     }
 
     /// Create new instance of [`MerkleStage::Execution`].
@@ -181,7 +182,7 @@ where
     fn id(&self) -> StageId {
         match self {
             Self::Execution { .. } => StageId::MerkleExecute,
-            Self::Unwind | Self::UnwindWithChangedBranchChildren => StageId::MerkleUnwind,
+            Self::Unwind { .. } => StageId::MerkleUnwind,
             #[cfg(any(test, feature = "test-utils"))]
             Self::Both { .. } => StageId::Other("MerkleBoth"),
         }
@@ -190,7 +191,7 @@ where
     /// Execute the stage.
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         let (threshold, incremental_threshold) = match self {
-            Self::Unwind | Self::UnwindWithChangedBranchChildren => {
+            Self::Unwind { .. } => {
                 info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
                 return Ok(ExecOutput::done(StageCheckpoint::new(input.target())))
             }
@@ -384,8 +385,12 @@ where
             info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
             return Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
         }
-        let walk_all_changed_branch_children =
-            matches!(self, Self::UnwindWithChangedBranchChildren);
+        let walk_all_changed_branch_children = match self {
+            Self::Unwind { walk_all_changed_branch_children } => *walk_all_changed_branch_children,
+            #[cfg(any(test, feature = "test-utils"))]
+            Self::Both { .. } => false,
+            Self::Execution { .. } => unreachable!(),
+        };
 
         let mut entities_checkpoint =
             input.checkpoint.entities_stage_checkpoint().unwrap_or(EntitiesCheckpoint {

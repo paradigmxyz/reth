@@ -572,7 +572,7 @@ where
                 )
                 .builder();
                 let stages = if walk_all_changed_branch_children {
-                    stages.set(MerkleStage::unwind_with_changed_branch_children())
+                    stages.set(MerkleStage::new_unwind(true))
                 } else {
                     stages
                 };
