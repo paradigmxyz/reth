@@ -146,13 +146,14 @@ where
                 self.historical,
                 overlay.len(),
                 overlay.iter().map(|block| block.recovered_block().num_hash()),
-            ) {
-                overlay.truncate(overlay_len);
-                let mut provider = latest.into_provider();
-                if !overlay.is_empty() {
-                    provider = Box::new(MemoryOverlayStateProvider::new(provider, overlay));
-                }
-                return Ok(provider)
+            )
+        {
+            overlay.truncate(overlay_len);
+            let mut provider = latest.into_provider();
+            if !overlay.is_empty() {
+                provider = Box::new(MemoryOverlayStateProvider::new(provider, overlay));
+            }
+            return Ok(provider)
         }
 
         let mut provider = self.provider_factory.state_by_block_hash(self.historical)?;
