@@ -58,7 +58,7 @@ use std::{
     },
     time::Duration,
 };
-use tracing::{debug, debug_span, error, instrument, trace};
+use tracing::{debug, debug_span, error, instrument, trace, warn};
 
 #[cfg(feature = "metrics")]
 use crate::proof_task_metrics::{
@@ -80,6 +80,37 @@ type V2StorageProofCalculator<'a, Provider> = proof_v2::StorageProofCalculator<
     InstrumentedTrieCursor<'a, <Provider as TrieCursorFactory>::StorageTrieCursor<'a>>,
     InstrumentedHashedCursor<'a, <Provider as HashedCursorFactory>::StorageCursor<'a>>,
 >;
+
+/// Reopen the provider once so workers can recover from a persistence handoff that raced their
+/// initial read-only snapshot.
+const PROVIDER_INIT_RETRIES: usize = 1;
+
+/// Opens a proof worker provider, retrying once with a fresh database snapshot.
+///
+/// Proof workers keep their provider for their entire lifetime. Retrying initialization avoids
+/// permanently losing a worker when persistence hands a block from the live overlay to the
+/// database between opening the read-only transaction and constructing the overlay.
+fn open_proof_worker_provider<Factory>(factory: &Factory) -> ProviderResult<Factory::Provider>
+where
+    Factory: DatabaseProviderROFactory,
+{
+    for attempt in 0..=PROVIDER_INIT_RETRIES {
+        match factory.database_provider_ro() {
+            Ok(provider) => return Ok(provider),
+            Err(error) if attempt < PROVIDER_INIT_RETRIES => {
+                warn!(
+                    target: "trie::proof_task",
+                    ?error,
+                    attempt = attempt + 1,
+                    "Failed to initialize proof worker provider, retrying with a fresh snapshot"
+                );
+            }
+            Err(error) => return Err(error),
+        }
+    }
+
+    unreachable!("provider initialization retry loop always returns")
+}
 
 /// Tracks worker availability counts.
 ///
@@ -628,7 +659,7 @@ where
     /// continue operating and the system degrades gracefully.
     fn run(mut self) -> ProviderResult<()> {
         // Create provider from factory
-        let provider = self.task_ctx.factory.database_provider_ro()?;
+        let provider = open_proof_worker_provider(&self.task_ctx.factory)?;
         let proof_tx = ProofTaskTx::new(provider, self.worker_id);
 
         trace!(
@@ -845,7 +876,7 @@ where
     /// If this function panics, the worker thread terminates but other workers
     /// continue operating and the system degrades gracefully.
     fn run(mut self) -> ProviderResult<()> {
-        let provider = self.task_ctx.factory.database_provider_ro()?;
+        let provider = open_proof_worker_provider(&self.task_ctx.factory)?;
 
         trace!(
             target: "trie::proof_task",
@@ -1163,6 +1194,24 @@ mod tests {
     use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
     use std::sync::Arc;
 
+    #[derive(Clone)]
+    struct RetryingFactory {
+        attempts: Arc<AtomicUsize>,
+        failures_before_success: usize,
+    }
+
+    impl DatabaseProviderROFactory for RetryingFactory {
+        type Provider = ();
+
+        fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
+            let attempt = self.attempts.fetch_add(1, Ordering::Relaxed);
+            if attempt < self.failures_before_success {
+                return Err(ProviderError::BlockHashNotFound(B256::ZERO))
+            }
+            Ok(())
+        }
+    }
+
     fn test_ctx<Factory>(factory: Factory) -> ProofTaskCtx<Factory> {
         ProofTaskCtx::new(factory)
     }
@@ -1190,5 +1239,27 @@ mod tests {
 
         // Workers shut down automatically when handle is dropped
         drop(proof_handle);
+    }
+
+    #[test]
+    fn retries_provider_initialization_once() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let factory = RetryingFactory { attempts: attempts.clone(), failures_before_success: 1 };
+
+        open_proof_worker_provider(&factory).expect("second provider attempt should succeed");
+
+        assert_eq!(attempts.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn returns_provider_initialization_error_after_retry() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let factory = RetryingFactory { attempts: attempts.clone(), failures_before_success: 2 };
+
+        assert!(matches!(
+            open_proof_worker_provider(&factory),
+            Err(ProviderError::BlockHashNotFound(B256::ZERO))
+        ));
+        assert_eq!(attempts.load(Ordering::Relaxed), 2);
     }
 }
