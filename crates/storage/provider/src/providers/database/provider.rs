@@ -785,6 +785,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     HashedPostStateSorted::disjointed_merge_batch(&batch, &mask);
                 if !merged_hashed_state.is_empty() {
                     self.write_hashed_state(&merged_hashed_state)?;
+                    timings.hashed_post_state_updates_written =
+                        merged_hashed_state.total_len() as u64;
                 }
                 timings.write_hashed_state += start.elapsed();
 

@@ -83,6 +83,8 @@ pub struct DatabaseProviderMetrics {
     save_blocks_write_state: Histogram,
     /// Duration of `write_hashed_state` in `save_blocks`
     save_blocks_write_hashed_state: Histogram,
+    /// Total number of hashed post-state updates written in `save_blocks`
+    save_blocks_hashed_post_state_updates_written_total: Counter,
     /// Duration of `write_trie_updates` in `save_blocks`
     save_blocks_write_trie_updates: Histogram,
     /// Total number of trie entries modified in `save_blocks`
@@ -139,6 +141,7 @@ pub(crate) struct SaveBlocksTimings {
     pub insert_block: Duration,
     pub write_state: Duration,
     pub write_hashed_state: Duration,
+    pub hashed_post_state_updates_written: u64,
     pub write_trie_updates: Duration,
     pub trie_entries_modified: u64,
     pub update_history_indices: Duration,
@@ -182,6 +185,8 @@ impl DatabaseProviderMetrics {
         self.save_blocks_insert_block.record(timings.insert_block);
         self.save_blocks_write_state.record(timings.write_state);
         self.save_blocks_write_hashed_state.record(timings.write_hashed_state);
+        self.save_blocks_hashed_post_state_updates_written_total
+            .increment(timings.hashed_post_state_updates_written);
         self.save_blocks_write_trie_updates.record(timings.write_trie_updates);
         self.save_blocks_trie_entries_modified_total.increment(timings.trie_entries_modified);
         self.save_blocks_update_history_indices.record(timings.update_history_indices);
