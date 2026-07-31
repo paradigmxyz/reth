@@ -97,7 +97,15 @@ where
         // the database commit in a previous stage run. So, our only solution is to unwind the
         // static files and proceed from the database expected height.
         Ordering::Greater => {
-            let highest_db_block = provider.tx_ref().entries::<tables::BlockBodyIndices>()? as u64;
+            // The truncation target is the highest block number present in the database, NOT
+            // the table's row count: the two only coincide when the table is contiguous from
+            // block 0, and a wrong target corrupts the segment's block range.
+            let highest_db_block = provider
+                .tx_ref()
+                .cursor_read::<tables::BlockBodyIndices>()?
+                .last()?
+                .map(|(block, _)| block)
+                .unwrap_or_default();
             let mut static_file_producer =
                 static_file_provider.latest_writer(StaticFileSegment::Transactions)?;
             static_file_producer
