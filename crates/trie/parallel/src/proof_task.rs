@@ -140,8 +140,6 @@ pub struct ProofWorkerHandle {
     account_work_tx: CrossbeamSender<AccountWorkerJob>,
     /// Reports terminal worker failures to the sparse trie task.
     worker_failure_rx: CrossbeamReceiver<StateRootTaskError>,
-    /// Set when a worker fails before it can process queued work.
-    worker_failed: Arc<AtomicBool>,
     /// Per-worker availability flags for storage workers. Used to determine whether to chunk
     /// multiproofs.
     storage_availability: Arc<AvailabilitySheet>,
@@ -185,7 +183,6 @@ impl ProofWorkerHandle {
         let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
         let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
         let (worker_failure_tx, worker_failure_rx) = unbounded::<StateRootTaskError>();
-        let worker_failed = Arc::new(AtomicBool::new(false));
 
         let cached_storage_roots = Arc::<DashMap<_, _>>::default();
 
@@ -213,7 +210,6 @@ impl ProofWorkerHandle {
         let storage_avail = storage_availability.clone();
         let storage_roots = cached_storage_roots.clone();
         let storage_failure_tx = worker_failure_tx.clone();
-        let storage_failed = worker_failed.clone();
         let storage_parent_span = tracing::Span::current();
         runtime.spawn_blocking_named("storage-workers", move || {
             let worker_id = AtomicUsize::new(0);
@@ -239,7 +235,6 @@ impl ProofWorkerHandle {
                     cursor_metrics,
                 );
                 if let Err(error) = worker.run() {
-                    storage_failed.store(true, Ordering::Release);
                     error!(
                         target: "trie::proof_task",
                         worker_id,
@@ -257,7 +252,6 @@ impl ProofWorkerHandle {
         let account_tx = storage_work_tx.clone();
         let account_avail = account_availability.clone();
         let account_failure_tx = worker_failure_tx;
-        let account_failed = worker_failed.clone();
         let account_parent_span = tracing::Span::current();
         runtime.spawn_blocking_named("account-workers", move || {
             let worker_id = AtomicUsize::new(0);
@@ -284,7 +278,6 @@ impl ProofWorkerHandle {
                     cursor_metrics,
                 );
                 if let Err(error) = worker.run() {
-                    account_failed.store(true, Ordering::Release);
                     error!(
                         target: "trie::proof_task",
                         worker_id,
@@ -302,7 +295,6 @@ impl ProofWorkerHandle {
             storage_work_tx,
             account_work_tx,
             worker_failure_rx,
-            worker_failed,
             storage_availability,
             account_availability,
             storage_worker_count,
@@ -316,16 +308,6 @@ impl ProofWorkerHandle {
     /// initialization, because jobs accepted while that worker was starting cannot be completed.
     pub fn take_worker_failure_rx(&mut self) -> CrossbeamReceiver<StateRootTaskError> {
         std::mem::replace(&mut self.worker_failure_rx, crossbeam_channel::never())
-    }
-
-    /// Returns an error if a worker failed before it could process queued work.
-    fn ensure_workers_healthy(&self) -> Result<(), ProviderError> {
-        if self.worker_failed.load(Ordering::Acquire) {
-            return Err(ProviderError::other(std::io::Error::other(
-                "proof worker pool failed during initialization",
-            )))
-        }
-        Ok(())
     }
 
     /// Returns `true` if more than one storage worker is currently idle.
@@ -367,7 +349,6 @@ impl ProofWorkerHandle {
         proof_result_sender: CrossbeamSender<StorageProofResultMessage>,
     ) -> Result<(), ProviderError> {
         let hashed_address = input.hashed_address;
-        self.ensure_workers_healthy()?;
         self.storage_work_tx
             .send(StorageWorkerJob::StorageProof { input, proof_result_sender })
             .map_err(|err| {
@@ -390,7 +371,6 @@ impl ProofWorkerHandle {
         &self,
         input: AccountMultiproofInput,
     ) -> Result<(), ProviderError> {
-        self.ensure_workers_healthy()?;
         self.account_work_tx
             .send(AccountWorkerJob::AccountMultiproof { input: Box::new(input) })
             .map_err(|err| {
@@ -1230,25 +1210,5 @@ mod tests {
 
         // Workers shut down automatically when handle is dropped
         drop(proof_handle);
-    }
-
-    #[test]
-    fn failed_workers_reject_dispatch() {
-        let (storage_work_tx, _) = unbounded();
-        let (account_work_tx, _) = unbounded();
-        let (_, worker_failure_rx) = unbounded();
-        let handle = ProofWorkerHandle {
-            storage_work_tx,
-            account_work_tx,
-            worker_failure_rx,
-            worker_failed: Arc::new(AtomicBool::new(true)),
-            storage_availability: Arc::new(AvailabilitySheet::new(0)),
-            account_availability: Arc::new(AvailabilitySheet::new(0)),
-            storage_worker_count: 0,
-            account_worker_count: 0,
-        };
-
-        let error = handle.ensure_workers_healthy().expect_err("worker pool should be failed");
-        assert!(error.to_string().contains("proof worker pool failed during initialization"));
     }
 }
