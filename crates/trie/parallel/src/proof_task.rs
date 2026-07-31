@@ -16,7 +16,7 @@
 //!    `ProofWorkerHandle`. The job carries a `ProofResultContext` so the worker knows how to send
 //!    the result back.
 //! 2. A worker receives the job, runs the proof, and sends a `ProofResultMessage` through the
-//!    provided result sender.
+//!    provided `ProofResultSender`.
 //! 3. The `SparseTrieCacheTask` receives the message and proceeds with its state-root logic.
 //!
 //! Each job gets its own direct channel so results go straight back to the `SparseTrieCacheTask`.
@@ -26,7 +26,7 @@
 //! SparseTrieCacheTask -> ProofWorkerHandle -> Storage/Account Worker
 //!        ^                       |
 //!        |                       v
-//! ProofResultMessage <-- CrossbeamSender<ProofResultMessage>
+//! ProofResultMessage <-- ProofResultSender
 //! ```
 
 use crate::{
@@ -170,7 +170,7 @@ impl ProofWorkerHandle {
         runtime: &Runtime,
         task_ctx: ProofTaskCtx<Factory>,
         halve_workers: bool,
-        proof_result_tx: CrossbeamSender<ProofResultMessage>,
+        proof_result_tx: ProofResultSender,
     ) -> Self
     where
         Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -491,6 +491,13 @@ where
     }
 }
 
+/// Channel used by worker threads to deliver proof results back to
+/// `SparseTrieCacheTask`.
+///
+/// Workers use this sender to deliver proof results or terminal initialization errors directly to
+/// `SparseTrieCacheTask`.
+pub type ProofResultSender = CrossbeamSender<ProofResultMessage>;
+
 /// Message containing a completed proof result with metadata for direct delivery to
 /// `SparseTrieCacheTask`.
 ///
@@ -513,7 +520,7 @@ pub struct ProofResultMessage {
 #[derive(Debug, Clone)]
 pub struct ProofResultContext {
     /// Channel sender for result delivery
-    pub sender: CrossbeamSender<ProofResultMessage>,
+    pub sender: ProofResultSender,
     /// Original state update that triggered this proof
     pub state: HashedPostState,
     /// Calculation start time for measuring elapsed duration
@@ -523,7 +530,7 @@ pub struct ProofResultContext {
 impl ProofResultContext {
     /// Creates a new proof result context.
     pub const fn new(
-        sender: CrossbeamSender<ProofResultMessage>,
+        sender: ProofResultSender,
         state: HashedPostState,
         start_time: Instant,
     ) -> Self {

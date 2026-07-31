@@ -22,7 +22,8 @@ use reth_trie_common::{MultiProofTargetsV2, ProofV2Target, ProofV2TargetParent};
 use reth_trie_parallel::{
     error::StateRootTaskError,
     proof_task::{
-        AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
+        AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofResultSender,
+        ProofWorkerHandle,
     },
 };
 use reth_trie_sparse::{
@@ -35,7 +36,7 @@ use tracing::{debug, debug_span, error, instrument, trace_span};
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
 pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaParallelSparseTrie> {
     /// Sender for proof results.
-    proof_result_tx: CrossbeamSender<ProofResultMessage>,
+    proof_result_tx: ProofResultSender,
     /// Receiver for proof results directly from workers.
     proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
     /// Receives updates from execution and prewarming.
@@ -136,7 +137,7 @@ where
         cancel_rx: CrossbeamReceiver<()>,
         final_hashed_state_tx: std::sync::mpsc::Sender<Arc<HashedPostState>>,
         proof_worker_handle: ProofWorkerHandle,
-        proof_result_tx: CrossbeamSender<ProofResultMessage>,
+        proof_result_tx: ProofResultSender,
         proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
         metrics: SparseTrieTaskMetrics,
         trie: SparseStateTrie<A, S>,
