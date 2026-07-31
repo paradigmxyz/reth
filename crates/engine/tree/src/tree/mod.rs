@@ -141,65 +141,25 @@ where
         // newer. That view is a valid base only if this in-memory chain covers both frontiers.
         // Keep every block after the state/trie frontier, including blocks through Finish, so
         // masked state is still supplied by the in-memory provider.
-        if let Some(latest) = self.provider_factory.latest_database_state()? {
-            let state_trie_tip = latest.state_trie_tip();
-            let finish_tip = latest.finish_tip();
-            if let Some(overlay_len) = latest_database_overlay_len(
+        if let Some(latest) = self.provider_factory.latest_database_state()? &&
+            let Some(overlay_len) = latest.overlay_len(
                 self.historical,
                 overlay.len(),
-                state_trie_tip,
-                finish_tip,
                 overlay.iter().map(|block| block.recovered_block().num_hash()),
-            ) {
-                overlay.truncate(overlay_len);
-                let mut provider = latest.into_provider();
-                if !overlay.is_empty() {
-                    provider = Box::new(MemoryOverlayStateProvider::new(provider, overlay));
-                }
-                return Ok(provider)
+            )
+        {
+            overlay.truncate(overlay_len);
+            let mut provider = latest.into_provider();
+            if !overlay.is_empty() {
+                provider = Box::new(MemoryOverlayStateProvider::new(provider, overlay));
             }
+            return Ok(provider)
         }
 
         let mut provider = self.provider_factory.state_by_block_hash(self.historical)?;
         provider = Box::new(MemoryOverlayStateProvider::new(provider, overlay));
         Ok(provider)
     }
-}
-
-/// Returns the number of newest in-memory blocks that must be overlaid on the latest database
-/// state when the captured chain covers both durable frontiers.
-///
-/// The anchor is treated as the virtual element immediately after the oldest in-memory block.
-/// Because `overlay` uses newest-to-oldest positions, Finish must occur at or before the state/trie
-/// frontier. The returned position excludes the state/trie frontier itself and thus retains exactly
-/// the blocks after it.
-fn latest_database_overlay_len(
-    anchor_hash: B256,
-    overlay_len: usize,
-    state_trie_tip: BlockNumHash,
-    finish_tip: BlockNumHash,
-    overlay: impl IntoIterator<Item = BlockNumHash>,
-) -> Option<usize> {
-    if state_trie_tip.number > finish_tip.number {
-        return None
-    }
-
-    let mut state_trie_position = (state_trie_tip.hash == anchor_hash).then_some(overlay_len);
-    let mut finish_position = (finish_tip.hash == anchor_hash).then_some(overlay_len);
-    for (position, block) in overlay.into_iter().enumerate() {
-        if block == state_trie_tip {
-            state_trie_position = Some(position);
-        }
-        if block == finish_tip {
-            finish_position = Some(position);
-        }
-        if state_trie_position.is_some() && finish_position.is_some() {
-            break
-        }
-    }
-
-    let state_trie_position = state_trie_position?;
-    (finish_position? <= state_trie_position).then_some(state_trie_position)
 }
 
 #[cfg(test)]
@@ -211,7 +171,7 @@ mod state_provider_builder_tests {
     use reth_primitives_traits::Account;
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory, BlockWriter,
-        PruneCheckpointWriter, StateWriter, StorageSettings,
+        LatestDatabaseState, PruneCheckpointWriter, StateWriter, StorageSettings,
     };
     use reth_prune::{PruneCheckpoint, PruneMode, PruneSegment};
     use reth_trie::{HashedPostStateSorted, HashedStorageSorted};
@@ -234,7 +194,13 @@ mod state_provider_builder_tests {
         ];
 
         assert_eq!(
-            latest_database_overlay_len(hash(2), blocks.len(), blocks[3], blocks[1], blocks,),
+            LatestDatabaseState::overlay_len_for(
+                hash(2),
+                blocks.len(),
+                blocks[3],
+                blocks[1],
+                blocks,
+            ),
             Some(3)
         );
     }
@@ -248,7 +214,7 @@ mod state_provider_builder_tests {
         ];
 
         assert_eq!(
-            latest_database_overlay_len(
+            LatestDatabaseState::overlay_len_for(
                 hash(2),
                 blocks.len(),
                 BlockNumHash::new(2, hash(2)),
@@ -268,7 +234,13 @@ mod state_provider_builder_tests {
         ];
 
         assert_eq!(
-            latest_database_overlay_len(hash(4), blocks.len(), blocks[1], blocks[1], blocks),
+            LatestDatabaseState::overlay_len_for(
+                hash(4),
+                blocks.len(),
+                blocks[1],
+                blocks[1],
+                blocks,
+            ),
             Some(1)
         );
     }
@@ -282,7 +254,7 @@ mod state_provider_builder_tests {
         ];
 
         assert_eq!(
-            latest_database_overlay_len(
+            LatestDatabaseState::overlay_len_for(
                 hash(2),
                 blocks.len(),
                 blocks[1],
@@ -302,7 +274,13 @@ mod state_provider_builder_tests {
         ];
 
         assert_eq!(
-            latest_database_overlay_len(hash(3), blocks.len(), blocks[0], blocks[1], blocks,),
+            LatestDatabaseState::overlay_len_for(
+                hash(3),
+                blocks.len(),
+                blocks[0],
+                blocks[1],
+                blocks,
+            ),
             None
         );
     }
@@ -380,37 +358,43 @@ mod state_provider_builder_tests {
         provider_rw.commit()?;
 
         let provider = BlockchainProvider::new(factory)?;
+        provider
+            .canonical_in_memory_state()
+            .update_chain(NewCanonicalChain::Commit { new: blocks[1..].to_vec() });
         let overlay = blocks[1..].iter().rev().cloned().collect::<Vec<_>>();
-        let state = StateProviderBuilder::<EthPrimitives, _>::new(
-            provider,
+        let builder_state = StateProviderBuilder::<EthPrimitives, _>::new(
+            provider.clone(),
             blocks[0].recovered_block().hash(),
             Some(overlay),
         )
         .build()?;
+        let hash_state = provider.state_by_block_hash(blocks[3].recovered_block().hash())?;
 
-        // The newest block in memory supplies state after Finish.
-        let overlay_address = block_builder.signer;
-        assert_eq!(
-            state.basic_account(&overlay_address)?,
-            blocks[3].execution_output.account(&overlay_address).expect("account changed")
-        );
-        let overlay_storage_address = Address::new([0xaa; 20]);
-        let overlay_slot = B256::from(U256::from(1));
-        assert_eq!(
-            state.storage(overlay_storage_address, overlay_slot)?,
-            blocks[3]
-                .execution_output
-                .storage(&overlay_storage_address, overlay_slot.into())
-                .map(Some)
-                .expect("storage changed")
-        );
+        for state in [builder_state, hash_state] {
+            // The newest block in memory supplies state after Finish.
+            let overlay_address = block_builder.signer;
+            assert_eq!(
+                state.basic_account(&overlay_address)?,
+                blocks[3].execution_output.account(&overlay_address).expect("account changed")
+            );
+            let overlay_storage_address = Address::new([0xaa; 20]);
+            let overlay_slot = B256::from(U256::from(1));
+            assert_eq!(
+                state.storage(overlay_storage_address, overlay_slot)?,
+                blocks[3]
+                    .execution_output
+                    .storage(&overlay_storage_address, overlay_slot.into())
+                    .map(Some)
+                    .expect("storage changed")
+            );
 
-        // Block 2 supplies state inside the masking gap, even though block 3 is newer.
-        assert_eq!(state.basic_account(&masked_address)?, Some(masked_account));
-        assert_eq!(state.storage(masked_address, masked_slot)?, Some(masked_value));
+            // Block 2 supplies state inside the masking gap, even though block 3 is newer.
+            assert_eq!(state.basic_account(&masked_address)?, Some(masked_account));
+            assert_eq!(state.storage(masked_address, masked_slot)?, Some(masked_value));
 
-        assert_eq!(state.basic_account(&database_address)?, Some(database_account));
-        assert_eq!(state.storage(database_address, database_slot)?, Some(database_value));
+            assert_eq!(state.basic_account(&database_address)?, Some(database_account));
+            assert_eq!(state.storage(database_address, database_slot)?, Some(database_value));
+        }
 
         Ok(())
     }
