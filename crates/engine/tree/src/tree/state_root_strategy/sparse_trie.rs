@@ -22,7 +22,8 @@ use reth_trie_common::{MultiProofTargetsV2, ProofV2Target, ProofV2TargetParent};
 use reth_trie_parallel::{
     error::StateRootTaskError,
     proof_task::{
-        AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
+        AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofResultSender,
+        ProofWorkerHandle,
     },
 };
 use reth_trie_sparse::{
@@ -35,11 +36,9 @@ use tracing::{debug, debug_span, error, instrument, trace_span};
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
 pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaParallelSparseTrie> {
     /// Sender for proof results.
-    proof_result_tx: CrossbeamSender<ProofResultMessage>,
+    proof_result_tx: ProofResultSender,
     /// Receiver for proof results directly from workers.
     proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
-    /// Receives terminal worker initialization failures.
-    worker_failure_rx: CrossbeamReceiver<StateRootTaskError>,
     /// Receives updates from execution and prewarming.
     updates: CrossbeamReceiver<SparseTrieTaskMessage>,
     /// Fires (by disconnecting) when the consumer drops its cancel guard, meaning nobody is
@@ -144,8 +143,8 @@ where
         new_epoch: TrieNodeEpoch,
         chunk_size: usize,
     ) -> Self {
-        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
-        let worker_failure_rx = proof_worker_handle.take_worker_failure_rx();
+        let proof_result_tx = proof_worker_handle.proof_result_sender();
+        let proof_result_rx = proof_worker_handle.take_proof_result_rx();
         let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
 
         let parent_span = tracing::Span::current();
@@ -158,7 +157,6 @@ where
         Self {
             proof_result_tx,
             proof_result_rx,
-            worker_failure_rx,
             updates: hashed_state_rx,
             cancel_rx,
             proof_worker_handle,
@@ -302,9 +300,6 @@ where
                     };
                     self.on_proof_results(result, &mut t)?;
                 },
-                recv(self.worker_failure_rx) -> error => {
-                    return Err(error.expect("proof worker failure sender dropped"))
-                },
                 recv(self.cancel_rx) -> _ => return Err(StateRootTaskError::Canceled),
             }
 
@@ -331,9 +326,6 @@ where
                         unreachable!("we own the sender half")
                     };
                     self.on_proof_results(result, &mut t)?;
-                },
-                recv(self.worker_failure_rx) -> error => {
-                    return Err(error.expect("proof worker failure sender dropped"))
                 },
                 recv(self.cancel_rx) -> _ => return Err(StateRootTaskError::Canceled),
             }
@@ -567,12 +559,13 @@ where
         &mut self,
         message: ProofResultMessage,
     ) -> Result<DecodedMultiProofV2, StateRootTaskError> {
+        let result = message.result?;
         debug_assert!(
             self.in_flight_proof_batches > 0,
             "received proof result without an in-flight proof batch"
         );
         self.in_flight_proof_batches = self.in_flight_proof_batches.saturating_sub(1);
-        message.result
+        Ok(result)
     }
 
     fn process_new_updates(&mut self) -> SparseTrieResult<()> {

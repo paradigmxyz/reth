@@ -138,8 +138,10 @@ pub struct ProofWorkerHandle {
     storage_work_tx: CrossbeamSender<StorageWorkerJob>,
     /// Direct sender to account worker pool
     account_work_tx: CrossbeamSender<AccountWorkerJob>,
-    /// Reports terminal worker failures to the sparse trie task.
-    worker_failure_rx: CrossbeamReceiver<StateRootTaskError>,
+    /// Sends proof results and terminal worker failures to the sparse trie task.
+    proof_result_tx: ProofResultSender,
+    /// Receiver for proof results and terminal worker failures.
+    proof_result_rx: Option<CrossbeamReceiver<ProofResultMessage>>,
     /// Per-worker availability flags for storage workers. Used to determine whether to chunk
     /// multiproofs.
     storage_availability: Arc<AvailabilitySheet>,
@@ -182,7 +184,7 @@ impl ProofWorkerHandle {
     {
         let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
         let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
-        let (worker_failure_tx, worker_failure_rx) = unbounded::<StateRootTaskError>();
+        let (proof_result_tx, proof_result_rx) = unbounded::<ProofResultMessage>();
 
         let cached_storage_roots = Arc::<DashMap<_, _>>::default();
 
@@ -209,7 +211,7 @@ impl ProofWorkerHandle {
         let storage_task_ctx = task_ctx.clone();
         let storage_avail = storage_availability.clone();
         let storage_roots = cached_storage_roots.clone();
-        let storage_failure_tx = worker_failure_tx.clone();
+        let storage_result_tx = proof_result_tx.clone();
         let storage_parent_span = tracing::Span::current();
         runtime.spawn_blocking_named("storage-workers", move || {
             let worker_id = AtomicUsize::new(0);
@@ -241,9 +243,13 @@ impl ProofWorkerHandle {
                         ?error,
                         "Storage worker failed"
                     );
-                    let _ = storage_failure_tx.send(StateRootTaskError::ProofWorker(format!(
-                        "storage worker {worker_id}: {error}"
-                    )));
+                    let _ = storage_result_tx.send(ProofResultMessage {
+                        result: Err(StateRootTaskError::ProofWorker(format!(
+                            "storage worker {worker_id}: {error}"
+                        ))),
+                        elapsed: Duration::ZERO,
+                        state: Default::default(),
+                    });
                 }
             });
         });
@@ -251,7 +257,7 @@ impl ProofWorkerHandle {
         let account_rt = runtime.clone();
         let account_tx = storage_work_tx.clone();
         let account_avail = account_availability.clone();
-        let account_failure_tx = worker_failure_tx;
+        let account_result_tx = proof_result_tx.clone();
         let account_parent_span = tracing::Span::current();
         runtime.spawn_blocking_named("account-workers", move || {
             let worker_id = AtomicUsize::new(0);
@@ -284,9 +290,13 @@ impl ProofWorkerHandle {
                         ?error,
                         "Account worker failed"
                     );
-                    let _ = account_failure_tx.send(StateRootTaskError::ProofWorker(format!(
-                        "account worker {worker_id}: {error}"
-                    )));
+                    let _ = account_result_tx.send(ProofResultMessage {
+                        result: Err(StateRootTaskError::ProofWorker(format!(
+                            "account worker {worker_id}: {error}"
+                        ))),
+                        elapsed: Duration::ZERO,
+                        state: Default::default(),
+                    });
                 }
             });
         });
@@ -294,7 +304,8 @@ impl ProofWorkerHandle {
         Self {
             storage_work_tx,
             account_work_tx,
-            worker_failure_rx,
+            proof_result_tx,
+            proof_result_rx: Some(proof_result_rx),
             storage_availability,
             account_availability,
             storage_worker_count,
@@ -302,12 +313,17 @@ impl ProofWorkerHandle {
         }
     }
 
-    /// Takes the receiver used to report terminal worker failures.
+    /// Returns a sender for proof results.
+    pub fn proof_result_sender(&self) -> ProofResultSender {
+        self.proof_result_tx.clone()
+    }
+
+    /// Takes the receiver used for proof results and terminal worker failures.
     ///
     /// The sparse trie task must stop rather than wait for results once a worker fails during
     /// initialization, because jobs accepted while that worker was starting cannot be completed.
-    pub fn take_worker_failure_rx(&mut self) -> CrossbeamReceiver<StateRootTaskError> {
-        std::mem::replace(&mut self.worker_failure_rx, crossbeam_channel::never())
+    pub const fn take_proof_result_rx(&mut self) -> CrossbeamReceiver<ProofResultMessage> {
+        self.proof_result_rx.take().expect("proof result receiver already taken")
     }
 
     /// Returns `true` if more than one storage worker is currently idle.
@@ -495,10 +511,11 @@ where
     }
 }
 
-/// Channel used by worker threads to deliver `ProofResultMessage` items back to
+/// Channel used by worker threads to deliver proof results back to
 /// `SparseTrieCacheTask`.
 ///
-/// Workers use this sender to deliver proof results directly to `SparseTrieCacheTask`.
+/// Workers use this sender to deliver proof results or terminal initialization errors directly to
+/// `SparseTrieCacheTask`.
 pub type ProofResultSender = CrossbeamSender<ProofResultMessage>;
 
 /// Message containing a completed proof result with metadata for direct delivery to
