@@ -812,11 +812,10 @@ where
                     // it and inserted it
                     if self.blob_store.contains(*transaction.hash()).is_ok_and(|c| c) {
                         if let Some(stored_availability) =
-                            self.blob_store.cell_availability(*transaction.hash()).ok().flatten()
+                            self.blob_store.cell_availability(*transaction.hash()).ok().flatten() &&
+                            let Some(availability) = transaction.blob_cell_availability()
                         {
-                            if let Some(availability) = transaction.blob_cell_availability() {
-                                let _ = availability.set(stored_availability);
-                            }
+                            let _ = availability.set(stored_availability);
                         }
                     } else {
                         return Err(InvalidPoolTransactionError::Eip4844(
