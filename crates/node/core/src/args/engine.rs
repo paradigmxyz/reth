@@ -8,7 +8,7 @@ use eyre::ensure;
 use reth_cli_util::{parse_duration_from_secs_or_ms, parsers::format_duration_as_secs_or_ms};
 use reth_engine_primitives::{
     TreeConfig, DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
-    DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
+    DEFAULT_NUM_STATE_MASKING_BLOCKS, DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
 };
 use std::{sync::OnceLock, time::Duration};
 
@@ -27,6 +27,7 @@ static ENGINE_DEFAULTS: OnceLock<DefaultEngineValues> = OnceLock::new();
 pub struct DefaultEngineValues {
     persistence_threshold: u64,
     persistence_backpressure_threshold: u64,
+    num_state_masking_blocks: u64,
     memory_block_buffer_target: u64,
     invalid_header_hit_eviction_threshold: u8,
     state_cache_disabled: bool,
@@ -77,6 +78,12 @@ impl DefaultEngineValues {
     /// Set the default persistence backpressure threshold
     pub const fn with_persistence_backpressure_threshold(mut self, v: u64) -> Self {
         self.persistence_backpressure_threshold = v;
+        self
+    }
+
+    /// Set the default number of state masking blocks.
+    pub const fn with_num_state_masking_blocks(mut self, v: u64) -> Self {
+        self.num_state_masking_blocks = v;
         self
     }
 
@@ -257,6 +264,7 @@ impl Default for DefaultEngineValues {
         Self {
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
             persistence_backpressure_threshold: DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
+            num_state_masking_blocks: DEFAULT_NUM_STATE_MASKING_BLOCKS,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
             invalid_header_hit_eviction_threshold: DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD,
             state_cache_disabled: false,
@@ -317,6 +325,21 @@ pub struct EngineArgs {
     /// This value must be greater than `--engine.persistence-threshold`.
     #[arg(long = "engine.persistence-backpressure-threshold")]
     pub persistence_backpressure_threshold: Option<u64>,
+
+    /// Configure how many of the blocks being persisted should only mask state/trie writes instead
+    /// of durably persisting their state/trie updates in the current cycle.
+    #[cfg_attr(
+        feature = "partial-persistence",
+        arg(
+            long = "engine.num-state-masking-blocks",
+            default_value_t = DefaultEngineValues::get_global().num_state_masking_blocks
+        )
+    )]
+    #[cfg_attr(
+        not(feature = "partial-persistence"),
+        arg(skip = DefaultEngineValues::get_global().num_state_masking_blocks)
+    )]
+    pub num_state_masking_blocks: u64,
 
     /// Configure the target number of blocks to keep in memory.
     ///
@@ -563,6 +586,7 @@ impl Default for EngineArgs {
         let DefaultEngineValues {
             persistence_threshold,
             persistence_backpressure_threshold: _,
+            num_state_masking_blocks,
             memory_block_buffer_target: _,
             invalid_header_hit_eviction_threshold,
             state_cache_disabled,
@@ -595,6 +619,7 @@ impl Default for EngineArgs {
         Self {
             persistence_threshold,
             persistence_backpressure_threshold: None,
+            num_state_masking_blocks,
             memory_block_buffer_target: None,
             invalid_header_hit_eviction_threshold,
             state_root_task_compare_updates,
@@ -670,6 +695,17 @@ impl EngineArgs {
             self.persistence_threshold,
         );
         ensure!(
+            self.num_state_masking_blocks == 0 ||
+                matches!(
+                    self.num_state_masking_blocks.checked_add(memory_block_buffer_target),
+                    Some(window) if window < self.persistence_threshold
+                ),
+            "--engine.num-state-masking-blocks ({}) + --engine.memory-block-buffer-target ({}) must be less than --engine.persistence-threshold ({})",
+            self.num_state_masking_blocks,
+            memory_block_buffer_target,
+            self.persistence_threshold,
+        );
+        ensure!(
             !self.state_cache_disabled || !self.txpool_prewarming_enabled,
             "--engine.txpool-prewarming conflicts with --engine.disable-state-cache"
         );
@@ -690,6 +726,7 @@ impl EngineArgs {
             .with_persistence_backpressure_threshold(self.persistence_backpressure_threshold())
             .with_persistence_threshold(self.persistence_threshold)
             .with_memory_block_buffer_target(self.memory_block_buffer_target())
+            .with_num_state_masking_blocks(self.num_state_masking_blocks)
             .with_invalid_header_hit_eviction_threshold(self.invalid_header_hit_eviction_threshold)
             .without_state_cache(self.state_cache_disabled)
             .without_prewarming(self.prewarming_disabled)
@@ -843,6 +880,7 @@ mod tests {
         let args = EngineArgs {
             persistence_threshold: 100,
             persistence_backpressure_threshold: Some(101),
+            num_state_masking_blocks: DEFAULT_NUM_STATE_MASKING_BLOCKS,
             memory_block_buffer_target: Some(50),
             invalid_header_hit_eviction_threshold: 7,
             legacy_state_root_task_enabled: true,
@@ -954,6 +992,57 @@ mod tests {
         let err = args.validate().unwrap_err().to_string();
         assert!(err.contains("engine.memory-block-buffer-target"));
         assert!(err.contains("engine.persistence-threshold"));
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn test_parse_num_state_masking_blocks() {
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.persistence-threshold",
+            "13",
+            "--engine.num-state-masking-blocks",
+            "7",
+        ])
+        .args;
+
+        assert_eq!(args.tree_config().num_state_masking_blocks(), 7);
+    }
+
+    #[cfg(not(feature = "partial-persistence"))]
+    #[test]
+    fn num_state_masking_blocks_is_hidden_without_partial_persistence() {
+        assert!(CommandParser::<EngineArgs>::try_parse_from([
+            "reth",
+            "--engine.num-state-masking-blocks",
+            "1",
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn validate_rejects_state_masking_window_at_or_above_threshold() {
+        let args = EngineArgs {
+            persistence_threshold: 4,
+            num_state_masking_blocks: 2,
+            memory_block_buffer_target: Some(2),
+            ..EngineArgs::default()
+        };
+
+        let err = args.validate().unwrap_err().to_string();
+        assert!(err.contains("engine.num-state-masking-blocks"));
+    }
+
+    #[test]
+    fn validate_rejects_overflowing_state_masking_window() {
+        let args = EngineArgs {
+            persistence_threshold: 7,
+            num_state_masking_blocks: u64::MAX,
+            ..EngineArgs::default()
+        };
+
+        let err = args.validate().unwrap_err().to_string();
+        assert!(err.contains("engine.num-state-masking-blocks"));
     }
 
     #[test]
