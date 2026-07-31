@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -eo pipefail
 
-fixture_variant="${1:-osaka}"
+fixture_variant="${1:-amsterdam}"
 
 case "${fixture_variant}" in
     amsterdam)
