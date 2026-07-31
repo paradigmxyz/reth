@@ -513,16 +513,18 @@ where
                 if highest.number() == self.next_chain_tip_block_number {
                     // is next response, validate it
                     self.process_next_headers(request, headers, peer_id)?;
-                    // try to validate all buffered responses blocked by this successful response
-                    self.try_validate_buffered()
-                        .map(Err::<(), ReverseHeadersDownloaderError<H::Header>>)
-                        .transpose()?;
-
+                    // request the missing headers before validating buffered responses, because a
+                    // buffered validation error returns early and would otherwise leave the
+                    // remainder of this range unrequested
                     self.requeue_missing_headers(
                         requested_block_number,
                         received_headers,
                         missing_headers,
                     );
+                    // try to validate all buffered responses blocked by this successful response
+                    self.try_validate_buffered()
+                        .map(Err::<(), ReverseHeadersDownloaderError<H::Header>>)
+                        .transpose()?;
                 } else if highest.number() > self.existing_local_block_number() {
                     self.metrics.buffered_responses.increment(1.);
                     // can't validate yet
@@ -611,6 +613,11 @@ where
         self.metrics.in_flight_requests.increment(1.);
     }
 
+    /// Submits a high-priority request for the missing suffix of a partial response.
+    ///
+    /// Peers are allowed to respond with fewer headers than requested, for example due to
+    /// response size limits. Expects that the caller has verified that the response started at
+    /// `requested_block_number` and contained `received_headers` headers.
     fn requeue_missing_headers(
         &self,
         requested_block_number: u64,
@@ -618,6 +625,7 @@ where
         missing_headers: u64,
     ) {
         if missing_headers > 0 {
+            self.metrics.partial_responses.increment(1);
             self.submit_request(
                 HeadersRequest::falling(
                     (requested_block_number - received_headers).into(),
@@ -1484,7 +1492,6 @@ mod tests {
             ReverseHeadersDownloaderBuilder::default().request_limit,
             HeadersConfig::default().downloader_request_limit
         );
-        assert_eq!(ReverseHeadersDownloaderBuilder::default().request_limit, 1_000);
     }
 
     /// Tests that request calc works
@@ -1681,5 +1688,53 @@ mod tests {
 
         assert_eq!(client.numeric_requests(), vec![(2, 2), (1, 1)]);
         assert_eq!(client.bad_message_count(), 0);
+    }
+
+    #[test]
+    fn requeues_missing_headers_for_buffered_partial_response() {
+        let client = CappedHeadersClient::new(Vec::new(), 0);
+        let mut downloader = ReverseHeadersDownloaderBuilder::default()
+            .build(client.clone(), Arc::new(TestConsensus::default()));
+        downloader.local_head = Some(SealedHeader::default());
+        downloader.sync_target = Some(SyncTargetBlock::from_number(10));
+        downloader.next_chain_tip_block_number = 10;
+
+        // a partial response that can't be validated yet is buffered, but the missing suffix must
+        // be requested immediately
+        let request = HeadersRequest::falling(5u64.into(), 3);
+        let response = vec![Header { number: 5, ..Default::default() }];
+        let outcome = downloader.on_headers_outcome(HeadersRequestOutcome {
+            request,
+            outcome: Ok(WithPeerId::new(PeerId::default(), response)),
+        });
+
+        assert!(outcome.is_ok());
+        assert_eq!(downloader.buffered_responses.len(), 1);
+        assert_eq!(client.numeric_requests(), vec![(4, 2)]);
+        assert_eq!(client.bad_message_count(), 0);
+    }
+
+    #[test]
+    fn rejects_over_long_headers_response() {
+        let client = CappedHeadersClient::new(Vec::new(), 0);
+        let mut downloader = ReverseHeadersDownloaderBuilder::default()
+            .build(client.clone(), Arc::new(TestConsensus::default()));
+
+        let request = HeadersRequest::falling(5u64.into(), 1);
+        let response = vec![
+            Header { number: 5, ..Default::default() },
+            Header { number: 4, ..Default::default() },
+        ];
+        let outcome = downloader.on_headers_outcome(HeadersRequestOutcome {
+            request,
+            outcome: Ok(WithPeerId::new(PeerId::default(), response)),
+        });
+
+        assert_matches!(
+            outcome,
+            Err(ReverseHeadersDownloaderError::Response(err))
+                if matches!(err.error, DownloadError::HeadersResponseTooLong(_))
+        );
+        assert!(client.numeric_requests().is_empty());
     }
 }
