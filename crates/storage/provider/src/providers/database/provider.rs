@@ -19,7 +19,7 @@ use crate::{
     BlockReader, BlockWriter, ChainStateBlockReader, ChainStateBlockWriter, DBProvider,
     EitherReader, EitherWriter, EitherWriterDestination, EvmStateInit, HashingWriter,
     HeaderProvider, HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef,
-    HistoryWriter, LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError,
+    HistoryWriter, LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, PersistenceFrontiers, ProviderError,
     PruneCheckpointReader, PruneCheckpointWriter, RawRocksDBBatch, RevertsInit, RocksBatchArg,
     RocksDBProviderFactory, StageCheckpointReader, StateProviderBox, StateWriter,
     StaticFileProviderFactory, StatsReader, StorageReader, StorageTrieWriter, TransactionVariant,
@@ -2393,6 +2393,38 @@ impl<TX: DbTxMut, N: NodeTypes> StageCheckpointWriter for DatabaseProvider<TX, N
     }
 }
 
+impl<TX: DbTxMut + DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
+    /// Updates pipeline checkpoints after an unwind while preserving an explicitly lagging
+    /// state/trie frontier.
+    fn update_pipeline_stages_after_unwind(
+        &self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<PersistenceFrontiers> {
+        let partial_state_trie = self
+            .get_stage_checkpoint(StageId::Finish)?
+            .map(|checkpoint| {
+                checkpoint
+                    .finish_stage_checkpoint()
+                    .and_then(|finish| finish.partial_state_trie())
+                    .unwrap_or(checkpoint.block_number)
+            })
+            .unwrap_or(block_number)
+            .min(block_number);
+
+        self.update_pipeline_stages(block_number, true)?;
+        if partial_state_trie < block_number {
+            self.save_stage_checkpoint(
+                StageId::Finish,
+                StageCheckpoint::new(block_number).with_finish_stage_checkpoint(FinishCheckpoint {
+                    partial_state_trie: Some(partial_state_trie),
+                }),
+            )?;
+        }
+
+        Ok(PersistenceFrontiers { db_tip: block_number, partial_state_trie })
+    }
+}
+
 impl<TX: DbTx + 'static, N: NodeTypes> StorageReader for DatabaseProvider<TX, N> {
     fn plain_state_storages(
         &self,
@@ -3436,12 +3468,15 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockExecutionWriter
         self.remove_blocks_above(block)?;
 
         // Update pipeline progress
-        self.update_pipeline_stages(block, true)?;
+        self.update_pipeline_stages_after_unwind(block)?;
 
         Ok(Chain::new(blocks, execution_state, BTreeMap::new()))
     }
 
-    fn remove_block_and_execution_above(&self, block: BlockNumber) -> ProviderResult<()> {
+    fn remove_block_and_execution_above(
+        &self,
+        block: BlockNumber,
+    ) -> ProviderResult<PersistenceFrontiers> {
         self.unwind_trie_state_from(block + 1)?;
 
         // remove execution res
@@ -3452,9 +3487,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockExecutionWriter
         self.remove_blocks_above(block)?;
 
         // Update pipeline progress
-        self.update_pipeline_stages(block, true)?;
-
-        Ok(())
+        self.update_pipeline_stages_after_unwind(block)
     }
 }
 
@@ -4750,6 +4783,37 @@ mod tests {
         assert_eq!(
             static_files.get_highest_static_file_block(StaticFileSegment::Receipts),
             Some(4)
+        );
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn remove_block_and_execution_above_returns_persistence_frontiers() {
+        let factory = create_test_provider_factory();
+        let mut test_block_builder = TestBlockBuilder::eth().with_state();
+
+        let genesis = test_block_builder.get_executed_blocks(0..1).next().unwrap();
+        let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..5).collect();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        save_genesis(&provider_rw, &genesis).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        let input = SaveBlocksInput::new(blocks, 0, 0, 4, 2);
+        provider_rw.save_blocks(&input).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        let frontiers = provider_rw.remove_block_and_execution_above(3).unwrap();
+        assert_eq!(frontiers, PersistenceFrontiers { db_tip: 3, partial_state_trie: 2 });
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        let checkpoint = provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
+        assert_eq!(
+            checkpoint.finish_stage_checkpoint().and_then(|finish| finish.partial_state_trie()),
+            Some(2)
         );
     }
 
