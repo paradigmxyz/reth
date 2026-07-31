@@ -138,10 +138,6 @@ pub struct ProofWorkerHandle {
     storage_work_tx: CrossbeamSender<StorageWorkerJob>,
     /// Direct sender to account worker pool
     account_work_tx: CrossbeamSender<AccountWorkerJob>,
-    /// Sends proof results and terminal worker failures to the sparse trie task.
-    proof_result_tx: ProofResultSender,
-    /// Receiver for proof results and terminal worker failures.
-    proof_result_rx: Option<CrossbeamReceiver<ProofResultMessage>>,
     /// Per-worker availability flags for storage workers. Used to determine whether to chunk
     /// multiproofs.
     storage_availability: Arc<AvailabilitySheet>,
@@ -174,6 +170,7 @@ impl ProofWorkerHandle {
         runtime: &Runtime,
         task_ctx: ProofTaskCtx<Factory>,
         halve_workers: bool,
+        proof_result_tx: ProofResultSender,
     ) -> Self
     where
         Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -184,8 +181,6 @@ impl ProofWorkerHandle {
     {
         let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
         let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
-        let (proof_result_tx, proof_result_rx) = unbounded::<ProofResultMessage>();
-
         let cached_storage_roots = Arc::<DashMap<_, _>>::default();
 
         let divisor = if halve_workers { 2 } else { 1 };
@@ -257,7 +252,7 @@ impl ProofWorkerHandle {
         let account_rt = runtime.clone();
         let account_tx = storage_work_tx.clone();
         let account_avail = account_availability.clone();
-        let account_result_tx = proof_result_tx.clone();
+        let account_result_tx = proof_result_tx;
         let account_parent_span = tracing::Span::current();
         runtime.spawn_blocking_named("account-workers", move || {
             let worker_id = AtomicUsize::new(0);
@@ -304,26 +299,11 @@ impl ProofWorkerHandle {
         Self {
             storage_work_tx,
             account_work_tx,
-            proof_result_tx,
-            proof_result_rx: Some(proof_result_rx),
             storage_availability,
             account_availability,
             storage_worker_count,
             account_worker_count,
         }
-    }
-
-    /// Returns a sender for proof results.
-    pub fn proof_result_sender(&self) -> ProofResultSender {
-        self.proof_result_tx.clone()
-    }
-
-    /// Takes the receiver used for proof results and terminal worker failures.
-    ///
-    /// The sparse trie task must stop rather than wait for results once a worker fails during
-    /// initialization, because jobs accepted while that worker was starting cannot be completed.
-    pub const fn take_proof_result_rx(&mut self) -> CrossbeamReceiver<ProofResultMessage> {
-        self.proof_result_rx.take().expect("proof result receiver already taken")
     }
 
     /// Returns `true` if more than one storage worker is currently idle.
@@ -1220,7 +1200,8 @@ mod tests {
         let ctx = test_ctx(factory);
 
         let runtime = reth_tasks::Runtime::test();
-        let proof_handle = ProofWorkerHandle::new(&runtime, ctx, false);
+        let (proof_result_tx, _) = unbounded();
+        let proof_handle = ProofWorkerHandle::new(&runtime, ctx, false, proof_result_tx);
 
         // Verify handle can be cloned
         let _cloned_handle = proof_handle.clone();

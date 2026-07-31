@@ -136,15 +136,15 @@ where
         updates: CrossbeamReceiver<StateRootMessage>,
         cancel_rx: CrossbeamReceiver<()>,
         final_hashed_state_tx: std::sync::mpsc::Sender<Arc<HashedPostState>>,
-        mut proof_worker_handle: ProofWorkerHandle,
+        proof_worker_handle: ProofWorkerHandle,
+        proof_result_tx: ProofResultSender,
+        proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
         metrics: SparseTrieTaskMetrics,
         trie: SparseStateTrie<A, S>,
         parent_state_root: B256,
         new_epoch: TrieNodeEpoch,
         chunk_size: usize,
     ) -> Self {
-        let proof_result_tx = proof_worker_handle.proof_result_sender();
-        let proof_result_rx = proof_worker_handle.take_proof_result_rx();
         let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
 
         let parent_span = tracing::Span::current();
@@ -1231,8 +1231,13 @@ mod tests {
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
                 .overlay_builder(anchor_hash),
         );
-        let proof_worker_handle =
-            ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);
+        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
+        let proof_worker_handle = ProofWorkerHandle::new(
+            &runtime,
+            ProofTaskCtx::new(overlay_factory),
+            false,
+            proof_result_tx.clone(),
+        );
 
         let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
         let trie = SparseStateTrie::default()
@@ -1249,6 +1254,8 @@ mod tests {
             cancel_rx,
             std::sync::mpsc::channel().0,
             proof_worker_handle,
+            proof_result_tx,
+            proof_result_rx,
             SparseTrieTaskMetrics::default(),
             trie,
             parent_state_root,
@@ -1276,8 +1283,13 @@ mod tests {
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
                 .overlay_builder(anchor_hash),
         );
-        let proof_worker_handle =
-            ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);
+        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
+        let proof_worker_handle = ProofWorkerHandle::new(
+            &runtime,
+            ProofTaskCtx::new(overlay_factory),
+            false,
+            proof_result_tx.clone(),
+        );
 
         let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
         let trie = SparseStateTrie::default()
@@ -1293,6 +1305,8 @@ mod tests {
             cancel_rx,
             std::sync::mpsc::channel().0,
             proof_worker_handle,
+            proof_result_tx,
+            proof_result_rx,
             SparseTrieTaskMetrics::default(),
             trie,
             B256::from([0x55; 32]),
@@ -1354,8 +1368,13 @@ mod tests {
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
                 .overlay_builder(anchor_hash),
         );
-        let proof_worker_handle =
-            ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);
+        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
+        let proof_worker_handle = ProofWorkerHandle::new(
+            &runtime,
+            ProofTaskCtx::new(overlay_factory),
+            false,
+            proof_result_tx.clone(),
+        );
 
         let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
         let trie = SparseStateTrie::default()
@@ -1371,6 +1390,8 @@ mod tests {
             cancel_rx,
             std::sync::mpsc::channel().0,
             proof_worker_handle,
+            proof_result_tx,
+            proof_result_rx,
             SparseTrieTaskMetrics::default(),
             trie,
             B256::from([0x55; 32]),
@@ -1398,8 +1419,13 @@ mod tests {
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
                 .overlay_builder(anchor_hash),
         );
-        let proof_worker_handle =
-            ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);
+        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
+        let proof_worker_handle = ProofWorkerHandle::new(
+            &runtime,
+            ProofTaskCtx::new(overlay_factory),
+            false,
+            proof_result_tx.clone(),
+        );
 
         let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
         let trie = SparseStateTrie::default()
@@ -1415,6 +1441,8 @@ mod tests {
             cancel_rx,
             std::sync::mpsc::channel().0,
             proof_worker_handle,
+            proof_result_tx,
+            proof_result_rx,
             SparseTrieTaskMetrics::default(),
             trie,
             B256::from([0x55; 32]),
