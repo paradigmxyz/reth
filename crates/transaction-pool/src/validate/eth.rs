@@ -953,12 +953,6 @@ where
         self.fork_tracker
             .tx_gas_limit_cap
             .store(tx_gas_limit_cap, std::sync::atomic::Ordering::Relaxed);
-        // EIP-2780: the decomposed intrinsic gas model is config-gated, so it is read from the
-        // EVM config rather than derived from the fork alone.
-        self.fork_tracker.amsterdam_eip2780.store(
-            evm_env.cfg_env.is_amsterdam_eip2780_enabled(),
-            std::sync::atomic::Ordering::Relaxed,
-        );
     }
 
     fn max_gas_limit(&self) -> u64 {
@@ -1040,8 +1034,6 @@ pub struct EthTransactionValidatorBuilder<Client, Evm> {
     osaka: bool,
     /// Fork indicator whether we are in the Amsterdam hardfork.
     amsterdam: bool,
-    /// Whether the EVM config enables the EIP-2780 decomposed intrinsic gas model.
-    amsterdam_eip2780: bool,
     /// Timestamp of the tip block.
     tip_timestamp: u64,
     /// Max blob count at the block's timestamp.
@@ -1134,7 +1126,6 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             prague: chain_spec.is_prague_active_at_timestamp(tip.timestamp()),
             osaka: chain_spec.is_osaka_active_at_timestamp(tip.timestamp()),
             amsterdam: chain_spec.is_amsterdam_active_at_timestamp(tip.timestamp()),
-            amsterdam_eip2780: evm_env.cfg_env.is_amsterdam_eip2780_enabled(),
 
             tip_timestamp: tip.timestamp(),
 
@@ -1221,12 +1212,8 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
     }
 
     /// Set the Amsterdam fork.
-    ///
-    /// This also toggles the EIP-2780 intrinsic gas model, which is enabled by default from
-    /// Amsterdam onwards.
     pub const fn set_amsterdam(mut self, amsterdam: bool) -> Self {
         self.amsterdam = amsterdam;
-        self.amsterdam_eip2780 = amsterdam;
         self
     }
 
@@ -1365,7 +1352,6 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             prague,
             osaka,
             amsterdam,
-            amsterdam_eip2780,
             tip_timestamp,
             eip2718,
             eip1559,
@@ -1393,7 +1379,6 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             prague: AtomicBool::new(prague),
             osaka: AtomicBool::new(osaka),
             amsterdam: AtomicBool::new(amsterdam),
-            amsterdam_eip2780: AtomicBool::new(amsterdam_eip2780),
             tip_timestamp: AtomicU64::new(tip_timestamp),
             max_blob_count: AtomicU64::new(max_blob_count),
             max_initcode_size: AtomicUsize::new(max_initcode_size),
@@ -1460,11 +1445,6 @@ pub struct ForkTracker {
     pub osaka: AtomicBool,
     /// Tracks if amsterdam is activated at the block's timestamp.
     pub amsterdam: AtomicBool,
-    /// Tracks whether the EVM config enables the EIP-2780 decomposed intrinsic gas model.
-    ///
-    /// This mirrors [`Cfg::is_amsterdam_eip2780_enabled`], which is a config flag rather than a
-    /// pure fork check, so it is tracked separately from [`Self::amsterdam`].
-    pub amsterdam_eip2780: AtomicBool,
     /// Tracks max blob count per transaction at the block's timestamp.
     pub max_blob_count: AtomicU64,
     /// Tracks the timestamp of the tip block.
@@ -1501,11 +1481,6 @@ impl ForkTracker {
         self.amsterdam.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    /// Returns `true` if the EIP-2780 decomposed intrinsic gas model is enabled.
-    pub fn is_amsterdam_eip2780_enabled(&self) -> bool {
-        self.amsterdam_eip2780.load(std::sync::atomic::Ordering::Relaxed)
-    }
-
     /// Returns the timestamp of the tip block.
     pub fn tip_timestamp(&self) -> u64 {
         self.tip_timestamp.load(std::sync::atomic::Ordering::Relaxed)
@@ -1536,8 +1511,8 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
     };
 
     // EIP-2780 replaces the flat intrinsic base cost with a decomposed one that depends on
-    // `tx.to` and `tx.value`. It is config-gated, so it is tracked separately from the fork.
-    let eip2780 = fork_tracker.is_amsterdam_eip2780_enabled().then(|| {
+    // `tx.to` and `tx.value`.
+    let eip2780 = fork_tracker.is_amsterdam_activated().then(|| {
         revm::context_interface::cfg::gas_params::Eip2780TxInfo {
             value: transaction.value(),
             // Self-transfer: a `Call` whose recipient is the sender itself.
@@ -1638,17 +1613,12 @@ mod tests {
             prague: true.into(),
             osaka: true.into(),
             amsterdam: true.into(),
-            amsterdam_eip2780: true.into(),
             tip_timestamp: 0.into(),
             max_blob_count: 0.into(),
             max_initcode_size: AtomicUsize::new(MAX_INITCODE_SIZE),
             tx_gas_limit_cap: AtomicU64::new(0),
         };
-        let pre_amsterdam = || ForkTracker {
-            amsterdam: false.into(),
-            amsterdam_eip2780: false.into(),
-            ..amsterdam()
-        };
+        let pre_amsterdam = || ForkTracker { amsterdam: false.into(), ..amsterdam() };
 
         // Self-transfer: base cost only (12k), where pre-Amsterdam it pays the flat 21k.
         let self_transfer = eip1559_tx(sender, sender, 1, 15_000);
@@ -1681,7 +1651,6 @@ mod tests {
             prague: false.into(),
             osaka: false.into(),
             amsterdam: false.into(),
-            amsterdam_eip2780: false.into(),
             tip_timestamp: 0.into(),
             max_blob_count: 0.into(),
             max_initcode_size: AtomicUsize::new(MAX_INITCODE_SIZE),
