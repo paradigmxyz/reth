@@ -38,6 +38,8 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     proof_result_tx: CrossbeamSender<ProofResultMessage>,
     /// Receiver for proof results directly from workers.
     proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
+    /// Receives terminal worker initialization failures.
+    worker_failure_rx: CrossbeamReceiver<StateRootTaskError>,
     /// Receives updates from execution and prewarming.
     updates: CrossbeamReceiver<SparseTrieTaskMessage>,
     /// Fires (by disconnecting) when the consumer drops its cancel guard, meaning nobody is
@@ -135,7 +137,7 @@ where
         updates: CrossbeamReceiver<StateRootMessage>,
         cancel_rx: CrossbeamReceiver<()>,
         final_hashed_state_tx: std::sync::mpsc::Sender<Arc<HashedPostState>>,
-        proof_worker_handle: ProofWorkerHandle,
+        mut proof_worker_handle: ProofWorkerHandle,
         metrics: SparseTrieTaskMetrics,
         trie: SparseStateTrie<A, S>,
         parent_state_root: B256,
@@ -143,6 +145,7 @@ where
         chunk_size: usize,
     ) -> Self {
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
+        let worker_failure_rx = proof_worker_handle.take_worker_failure_rx();
         let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
 
         let parent_span = tracing::Span::current();
@@ -155,6 +158,7 @@ where
         Self {
             proof_result_tx,
             proof_result_rx,
+            worker_failure_rx,
             updates: hashed_state_rx,
             cancel_rx,
             proof_worker_handle,
@@ -298,6 +302,9 @@ where
                     };
                     self.on_proof_results(result, &mut t)?;
                 },
+                recv(self.worker_failure_rx) -> error => {
+                    return Err(error.expect("proof worker failure sender dropped"))
+                },
                 recv(self.cancel_rx) -> _ => return Err(StateRootTaskError::Canceled),
             }
 
@@ -324,6 +331,9 @@ where
                         unreachable!("we own the sender half")
                     };
                     self.on_proof_results(result, &mut t)?;
+                },
+                recv(self.worker_failure_rx) -> error => {
+                    return Err(error.expect("proof worker failure sender dropped"))
                 },
                 recv(self.cancel_rx) -> _ => return Err(StateRootTaskError::Canceled),
             }
