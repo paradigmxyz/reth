@@ -87,8 +87,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
     {
         info!(target: "reth::cli", "reth {} starting", version_metadata().short_version);
 
-        let Environment { provider_factory, config, .. } =
-            self.env.init::<N>(AccessRights::RW, runtime)?;
+        // Receipt backfill expects Receipts to trail Execution, so skip the normal consistency
+        // check that would unwind execution before the repair.
+        let access =
+            if self.with_receipts { AccessRights::RwInconsistent } else { AccessRights::RW };
+        let Environment { provider_factory, config, .. } = self.env.init::<N>(access, runtime)?;
 
         let mut hash_collector = Collector::new(config.stages.etl.file_size, config.stages.etl.dir);
 
