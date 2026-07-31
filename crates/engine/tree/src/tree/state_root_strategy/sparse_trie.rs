@@ -1120,13 +1120,19 @@ enum SparseTrieTaskMessage {
 mod tests {
     use super::*;
     use alloy_primitives::{keccak256, Address, B256, U256};
+    use reth_db_common::init::init_genesis;
     use reth_provider::{
         providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory,
-        ChainSpecProvider,
     };
     use reth_storage_overlay::OverlayManager;
     use reth_trie_parallel::proof_task::ProofTaskCtx;
     use reth_trie_sparse::ArenaParallelSparseTrie;
+
+    fn drain_sparse_trie_tasks(runtime: &Runtime) {
+        for task_name in ["trie-hashing", "storage-workers", "account-workers"] {
+            runtime.spawn_blocking_named(task_name, || {}).get();
+        }
+    }
 
     #[test]
     fn test_run_hashing_task_hashed_state_update_forwards() {
@@ -1225,7 +1231,7 @@ mod tests {
     fn run_returns_parent_root_without_revealing_blind_trie_when_no_state_updates() {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
-        let anchor_hash = provider_factory.chain_spec().genesis_hash();
+        let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
         let overlay_factory = OverlayStateProviderFactory::new(
             provider_factory,
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
@@ -1271,13 +1277,16 @@ mod tests {
         assert_eq!(outcome.state_root, parent_state_root);
         assert!(outcome.trie_updates.is_empty());
         assert!(task.trie.state_trie_ref().is_none(), "blind trie should not be revealed");
+
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
     }
 
     #[test]
     fn stall_check_waits_for_in_flight_proofs_then_reports_pending_updates() {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
-        let anchor_hash = provider_factory.chain_spec().genesis_hash();
+        let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
         let overlay_factory = OverlayStateProviderFactory::new(
             provider_factory,
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
@@ -1356,13 +1365,16 @@ mod tests {
         assert!(!error.contains("pending_storage_leaves"));
         assert!(!error.contains("pending_account_updates"));
         assert!(!error.contains(&format!("{slot:?}")));
+
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
     }
 
     #[test]
     fn run_errors_when_cancel_guard_drops_before_updates_finish() {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
-        let anchor_hash = provider_factory.chain_spec().genesis_hash();
+        let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
         let overlay_factory = OverlayStateProviderFactory::new(
             provider_factory,
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
@@ -1407,13 +1419,15 @@ mod tests {
         assert!(matches!(error, StateRootTaskError::Canceled));
 
         drop(updates_tx);
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
     }
 
     #[test]
     fn run_ignores_hints_queued_after_updates_finish() {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
-        let anchor_hash = provider_factory.chain_spec().genesis_hash();
+        let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
         let overlay_factory = OverlayStateProviderFactory::new(
             provider_factory,
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
@@ -1472,5 +1486,8 @@ mod tests {
         handle.join().unwrap();
 
         assert!(result.expect("state root task stalled on a late hint").is_ok());
+
+        drop(updates_tx);
+        drain_sparse_trie_tasks(&runtime);
     }
 }
