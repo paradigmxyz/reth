@@ -163,7 +163,7 @@ impl AnyNode {
     pub fn node_record(&self) -> Option<NodeRecord> {
         match self {
             Self::NodeRecord(record) => Some(*record),
-            Self::Enr(enr) => NodeRecord::try_from(enr).ok().filter(|record| record.tcp_port != 0),
+            Self::Enr(enr) => NodeRecord::try_from(enr).ok().filter(NodeRecord::has_rlpx_endpoint),
             Self::PeerId(_) | Self::TrustedPeer(_) => None,
         }
     }
