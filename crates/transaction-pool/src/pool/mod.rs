@@ -1712,8 +1712,9 @@ mod tests {
         sidecar: BlobTransactionSidecarVariant,
     ) -> TxHash {
         let mut generator = TransactionGenerator::new(rand::rng());
-        let mut transaction = generator.gen_eip4844_pooled();
-        transaction.set_blob_sidecar(sidecar);
+        let transaction = generator.gen_eip4844_pooled();
+        let mut transaction =
+            EthPooledTransaction::try_from_eip4844(transaction.into_consensus(), sidecar).unwrap();
         let hash = *transaction.hash();
         let EthBlobTransactionSidecar::Present(sidecar) = transaction.take_blob() else {
             unreachable!("blob sidecar was just attached")
@@ -1744,7 +1745,12 @@ mod tests {
         let hash = add_blob_transaction(&pool, test_blob_sidecar());
 
         assert_eq!(
-            pool.pool.get(&hash).unwrap().transaction.blob_cell_availability(),
+            pool.pool
+                .get(&hash)
+                .unwrap()
+                .transaction
+                .blob_cell_availability()
+                .and_then(|availability| availability.get()),
             Some(BlobCellAvailability::empty())
         );
     }
@@ -1763,7 +1769,12 @@ mod tests {
         );
 
         assert_eq!(
-            pool.pool.get(&hash).unwrap().transaction.blob_cell_availability(),
+            pool.pool
+                .get(&hash)
+                .unwrap()
+                .transaction
+                .blob_cell_availability()
+                .and_then(|availability| availability.get()),
             Some(BlobCellAvailability::full())
         );
     }
@@ -1785,7 +1796,15 @@ mod tests {
         );
         let hash = add_blob_transaction(&pool, test_blob_sidecar());
 
-        assert_eq!(pool.pool.get(&hash).unwrap().transaction.blob_cell_availability(), None);
+        assert_eq!(
+            pool.pool
+                .get(&hash)
+                .unwrap()
+                .transaction
+                .blob_cell_availability()
+                .and_then(|availability| availability.get()),
+            None
+        );
     }
 
     #[test]

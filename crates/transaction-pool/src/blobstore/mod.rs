@@ -11,6 +11,7 @@ pub use mem::InMemoryBlobStore;
 pub use noop::NoopBlobStore;
 use std::{
     fmt,
+    ops::Deref,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc, OnceLock,
@@ -108,6 +109,11 @@ impl BlobSidecar {
         &self.sidecar
     }
 
+    /// Returns whether this is an EIP-7594 sidecar.
+    pub const fn is_eip7594(&self) -> bool {
+        self.sidecar.is_eip7594()
+    }
+
     /// Returns the shared availability handle.
     pub const fn availability(&self) -> &BlobCellAvailabilityHandle {
         &self.availability
@@ -116,6 +122,14 @@ impl BlobSidecar {
     /// Consumes the wrapper and returns the sidecar and publication handle.
     pub fn into_parts(self) -> (BlobTransactionSidecarVariant, BlobCellAvailabilityHandle) {
         (self.sidecar, self.availability)
+    }
+}
+
+impl Deref for BlobSidecar {
+    type Target = BlobTransactionSidecarVariant;
+
+    fn deref(&self) -> &Self::Target {
+        &self.sidecar
     }
 }
 

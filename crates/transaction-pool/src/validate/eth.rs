@@ -810,11 +810,13 @@ where
                     // is stripped from the transaction and not included in a block.
                     // check if the blob is in the store, if it's included we previously validated
                     // it and inserted it
-                    if let Some(stored_availability) =
-                        self.blob_store.cell_availability(*transaction.hash()).ok().flatten()
-                    {
-                        if let Some(availability) = transaction.blob_cell_availability_handle() {
-                            let _ = availability.set(stored_availability);
+                    if self.blob_store.contains(*transaction.hash()).is_ok_and(|c| c) {
+                        if let Some(stored_availability) =
+                            self.blob_store.cell_availability(*transaction.hash()).ok().flatten()
+                        {
+                            if let Some(availability) = transaction.blob_cell_availability() {
+                                let _ = availability.set(stored_availability);
+                            }
                         }
                     } else {
                         return Err(InvalidPoolTransactionError::Eip4844(
@@ -829,19 +831,19 @@ where
                     if self.eip7594 {
                         // Standard Ethereum behavior
                         if self.fork_tracker.is_osaka_activated() {
-                            if sidecar.sidecar().is_eip4844() {
+                            if sidecar.is_eip4844() {
                                 return Err(InvalidPoolTransactionError::Eip4844(
                                     Eip4844PoolTransactionError::UnexpectedEip4844SidecarAfterOsaka,
                                 ))
                             }
-                        } else if sidecar.sidecar().is_eip7594() && !self.allow_7594_sidecars() {
+                        } else if sidecar.is_eip7594() && !self.allow_7594_sidecars() {
                             return Err(InvalidPoolTransactionError::Eip4844(
                                 Eip4844PoolTransactionError::UnexpectedEip7594SidecarBeforeOsaka,
                             ))
                         }
                     } else {
                         // EIP-7594 disabled: always reject v1 sidecars, accept v0
-                        if sidecar.sidecar().is_eip7594() {
+                        if sidecar.is_eip7594() {
                             return Err(InvalidPoolTransactionError::Eip4844(
                                 Eip4844PoolTransactionError::Eip7594SidecarDisallowed,
                             ))
@@ -849,9 +851,7 @@ where
                     }
 
                     // validate the blob
-                    if let Err(err) =
-                        transaction.validate_blob(sidecar.sidecar(), self.kzg_settings.get())
-                    {
+                    if let Err(err) = transaction.validate_blob(&sidecar, self.kzg_settings.get()) {
                         return Err(InvalidPoolTransactionError::Eip4844(
                             Eip4844PoolTransactionError::InvalidEip4844Blob(err),
                         ))
@@ -1585,7 +1585,10 @@ mod tests {
         assert!(res.is_ok());
         let tx = pool.get(transaction.hash());
         let tx = tx.unwrap();
-        assert_eq!(tx.transaction.blob_cell_availability(), None);
+        assert_eq!(
+            tx.transaction.blob_cell_availability().and_then(|availability| availability.get()),
+            None
+        );
     }
 
     fn assert_missing_blob_sidecar_uses_stored_availability(
@@ -1604,7 +1607,10 @@ mod tests {
         .build(blob_store);
 
         assert!(validator.validate_eip4844(&mut transaction).unwrap().is_none());
-        assert_eq!(transaction.blob_cell_availability(), Some(expected));
+        assert_eq!(
+            transaction.blob_cell_availability().and_then(|availability| availability.get()),
+            Some(expected)
+        );
     }
 
     #[test]

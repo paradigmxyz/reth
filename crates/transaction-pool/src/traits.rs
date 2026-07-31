@@ -51,9 +51,7 @@
 //! - Conversion from consensus to pooled always fails
 
 use crate::{
-    blobstore::{
-        BlobCellAvailability, BlobCellAvailabilityHandle, BlobSidecar, BlobStore, BlobStoreError,
-    },
+    blobstore::{BlobCellAvailabilityHandle, BlobSidecar, BlobStore, BlobStoreError},
     error::{InvalidPoolTransactionError, PoolError, PoolResult, RawPoolTransactionError},
     pool::{
         state::SubPool, BestTransactionFilter, NewTransactionEvent, TransactionEvents,
@@ -1491,13 +1489,8 @@ pub trait EthPoolTransaction: PoolTransaction {
     /// Extracts the blob sidecar from the transaction.
     fn take_blob(&mut self) -> EthBlobTransactionSidecar;
 
-    /// Returns the blob cell availability currently cached for this transaction.
-    fn blob_cell_availability(&self) -> Option<BlobCellAvailability> {
-        None
-    }
-
     /// Returns the shared blob cell availability handle, if this is a blob transaction.
-    fn blob_cell_availability_handle(&self) -> Option<&BlobCellAvailabilityHandle> {
+    fn blob_cell_availability(&self) -> Option<&BlobCellAvailabilityHandle> {
         None
     }
 
@@ -1598,20 +1591,9 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
         &self.transaction
     }
 
-    /// Attaches a blob sidecar using this transaction's shared availability handle.
-    pub fn set_blob_sidecar(&mut self, sidecar: BlobTransactionSidecarVariant) {
-        let availability = self
-            .blob_cell_availability
-            .as_ref()
-            .expect("blob transactions have an availability handle")
-            .clone();
-        self.blob_sidecar =
-            EthBlobTransactionSidecar::Present(BlobSidecar::new(sidecar, availability));
-    }
-
-    /// Returns the blob cell availability currently cached for this transaction.
-    pub fn blob_cell_availability(&self) -> Option<BlobCellAvailability> {
-        self.blob_cell_availability.as_ref().and_then(BlobCellAvailabilityHandle::get)
+    /// Returns the shared blob cell availability handle, if this is a blob transaction.
+    pub const fn blob_cell_availability(&self) -> Option<&BlobCellAvailabilityHandle> {
+        self.blob_cell_availability.as_ref()
     }
 }
 
@@ -1646,7 +1628,10 @@ impl PoolTransaction for EthPooledTransaction {
                 let tx = TransactionSigned::from(tx);
                 let tx = Recovered::new_unchecked(tx, signer);
                 let mut pooled = Self::new(tx, encoded_length);
-                pooled.set_blob_sidecar(blob);
+                if let Some(availability) = pooled.blob_cell_availability.clone() {
+                    pooled.blob_sidecar =
+                        EthBlobTransactionSidecar::Present(BlobSidecar::new(blob, availability));
+                }
                 pooled
             }
             tx => {
@@ -1779,12 +1764,8 @@ impl EthPoolTransaction for EthPooledTransaction {
         }
     }
 
-    fn blob_cell_availability(&self) -> Option<BlobCellAvailability> {
+    fn blob_cell_availability(&self) -> Option<&BlobCellAvailabilityHandle> {
         Self::blob_cell_availability(self)
-    }
-
-    fn blob_cell_availability_handle(&self) -> Option<&BlobCellAvailabilityHandle> {
-        self.blob_cell_availability.as_ref()
     }
 
     fn try_into_pooled_eip4844(
@@ -2050,7 +2031,7 @@ mod tests {
         assert_eq!(pooled_tx.encoded_length, 200);
         assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::None);
         assert!(pooled_tx.blob_cell_availability.is_none());
-        assert_eq!(pooled_tx.blob_cell_availability(), None);
+        assert_eq!(pooled_tx.blob_cell_availability().and_then(|handle| handle.get()), None);
         assert_eq!(pooled_tx.cost, U256::from(100) + U256::from(10 * 1000));
     }
 
@@ -2074,7 +2055,7 @@ mod tests {
         assert_eq!(pooled_tx.encoded_length, 200);
         assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::None);
         assert!(pooled_tx.blob_cell_availability.is_none());
-        assert_eq!(pooled_tx.blob_cell_availability(), None);
+        assert_eq!(pooled_tx.blob_cell_availability().and_then(|handle| handle.get()), None);
         assert_eq!(pooled_tx.cost, expected_cost);
     }
 
@@ -2098,7 +2079,7 @@ mod tests {
         assert_eq!(pooled_tx.encoded_length, 200);
         assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::None);
         assert!(pooled_tx.blob_cell_availability.is_none());
-        assert_eq!(pooled_tx.blob_cell_availability(), None);
+        assert_eq!(pooled_tx.blob_cell_availability().and_then(|handle| handle.get()), None);
         assert_eq!(pooled_tx.cost, U256::from(100) + U256::from(10 * 1000));
     }
 
@@ -2124,7 +2105,7 @@ mod tests {
         assert_eq!(pooled_tx.encoded_length, 300);
         assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::Missing);
         assert!(pooled_tx.blob_cell_availability.is_some());
-        assert_eq!(pooled_tx.blob_cell_availability(), None);
+        assert_eq!(pooled_tx.blob_cell_availability().and_then(|handle| handle.get()), None);
         let expected_cost =
             U256::from(100) + U256::from(10 * 1000) + U256::from(5 * DATA_GAS_PER_BLOB);
         assert_eq!(pooled_tx.cost, expected_cost);
@@ -2146,11 +2127,14 @@ mod tests {
         let transaction = Recovered::new_unchecked(tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction, 300);
 
-        assert_eq!(pooled_tx.blob_cell_availability(), None);
+        assert_eq!(pooled_tx.blob_cell_availability().and_then(|handle| handle.get()), None);
 
         let availability = pooled_tx.blob_cell_availability.as_ref().unwrap();
         availability.set(BlobCellAvailability::full()).unwrap();
-        assert_eq!(pooled_tx.blob_cell_availability(), Some(BlobCellAvailability::full()));
+        assert_eq!(
+            pooled_tx.blob_cell_availability().and_then(|handle| handle.get()),
+            Some(BlobCellAvailability::full())
+        );
         assert!(availability.set(BlobCellAvailability::default()).is_err());
     }
 
@@ -2174,7 +2158,7 @@ mod tests {
         assert_eq!(pooled_tx.encoded_length, 200);
         assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::None);
         assert!(pooled_tx.blob_cell_availability.is_none());
-        assert_eq!(pooled_tx.blob_cell_availability(), None);
+        assert_eq!(pooled_tx.blob_cell_availability().and_then(|handle| handle.get()), None);
         assert_eq!(pooled_tx.cost, U256::from(100) + U256::from(10 * 1000));
     }
 
