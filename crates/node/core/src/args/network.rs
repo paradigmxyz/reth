@@ -27,7 +27,7 @@ use reth_net_banlist::IpFilter;
 use reth_net_nat::{NatResolver, DEFAULT_NET_IF_NAME};
 use reth_network::{
     transactions::{
-        config::{TransactionIngressPolicy, TransactionPropagationKind},
+        config::{TransactionIngressPolicy, TransactionPropagationKind, TransactionServePolicy},
         constants::{
             tx_fetcher::{
                 DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH, DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
@@ -87,6 +87,8 @@ pub struct DefaultNetworkArgs {
     pub tx_propagation_policy: TransactionPropagationKind,
     /// Default transaction ingress policy.
     pub tx_ingress_policy: TransactionIngressPolicy,
+    /// Default transaction serve policy.
+    pub tx_serve_policy: TransactionServePolicy,
     /// Default transaction propagation mode.
     pub propagation_mode: TransactionPropagationMode,
     /// Default enforce ENR fork ID setting.
@@ -195,6 +197,12 @@ impl DefaultNetworkArgs {
         self
     }
 
+    /// Set the default transaction serve policy.
+    pub const fn with_tx_serve_policy(mut self, v: TransactionServePolicy) -> Self {
+        self.tx_serve_policy = v;
+        self
+    }
+
     /// Set the default transaction propagation mode.
     pub const fn with_propagation_mode(mut self, v: TransactionPropagationMode) -> Self {
         self.propagation_mode = v;
@@ -227,6 +235,7 @@ impl Default for DefaultNetworkArgs {
             tx_channel_memory_limit_bytes: DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
             tx_propagation_policy: TransactionPropagationKind::default(),
             tx_ingress_policy: TransactionIngressPolicy::default(),
+            tx_serve_policy: TransactionServePolicy::default(),
             propagation_mode: TransactionPropagationMode::Sqrt,
             enforce_enr_fork_id: false,
         }
@@ -392,6 +401,15 @@ pub struct NetworkArgs {
     #[arg(long = "tx-ingress-policy", default_value_t = DefaultNetworkArgs::get_global().tx_ingress_policy)]
     pub tx_ingress_policy: TransactionIngressPolicy,
 
+    /// Transaction serve policy
+    ///
+    /// Determines which peers `GetPooledTransactions` requests are served for. Peers that are
+    /// not served receive an empty response. Only peers passed to `--trusted-peers` count as
+    /// trusted; peers added at runtime with `admin_addPeer` do not. Pair with
+    /// `--tx-propagation-policy trusted` to avoid announcing transactions that will not be served.
+    #[arg(long = "tx-serve-policy", default_value_t = DefaultNetworkArgs::get_global().tx_serve_policy)]
+    pub tx_serve_policy: TransactionServePolicy,
+
     /// Disable transaction pool gossip
     ///
     /// Disables gossiping of transactions in the mempool to peers. This can be omitted for
@@ -533,6 +551,7 @@ impl NetworkArgs {
             max_pending_pool_imports: self.max_pending_pool_imports,
             propagation_mode: self.propagation_mode,
             ingress_policy: self.tx_ingress_policy,
+            serve_policy: self.tx_serve_policy,
             tx_channel_memory_limit_bytes: self.tx_channel_memory_limit_bytes,
         }
     }
@@ -711,6 +730,7 @@ impl Default for NetworkArgs {
             tx_channel_memory_limit_bytes,
             tx_propagation_policy,
             tx_ingress_policy,
+            tx_serve_policy,
             propagation_mode,
             enforce_enr_fork_id,
         } = DefaultNetworkArgs::get_global().clone();
@@ -742,6 +762,7 @@ impl Default for NetworkArgs {
             net_if: None,
             tx_propagation_policy,
             tx_ingress_policy,
+            tx_serve_policy,
             disable_tx_gossip: false,
             propagation_mode,
             required_block_hashes: vec![],
