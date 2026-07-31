@@ -1057,6 +1057,41 @@ mod tests {
         assert!(fetcher.peers[&peer_id].state.is_idle());
     }
 
+    #[tokio::test]
+    async fn test_partial_header_response_triggers_followup() {
+        let (mut fetcher, peer_id) = fetcher_with_peer();
+
+        let (followup_tx, _followup_rx) = oneshot::channel();
+        fetcher.queued_requests.push_back(DownloadRequest::GetBlockHeaders {
+            request: HeadersRequest::falling(1u64.into(), 1),
+            response: followup_tx,
+            priority: Priority::High,
+        });
+
+        let (response_tx, mut response_rx) = oneshot::channel();
+        fetcher.inflight_headers_requests.insert(
+            peer_id,
+            Request { request: HeadersRequest::falling(2u64.into(), 2), response: response_tx },
+        );
+        fetcher.peers.get_mut(&peer_id).unwrap().state = PeerState::GetBlockHeaders;
+
+        let header = Header { number: 2, ..Default::default() };
+        let outcome = fetcher.on_block_headers_response(peer_id, Ok(vec![header]));
+
+        let Some(BlockResponseOutcome::Request(
+            dispatched_peer,
+            BlockRequest::GetBlockHeaders(request),
+        )) = outcome
+        else {
+            panic!("expected a header followup request")
+        };
+        assert_eq!(dispatched_peer, peer_id);
+        assert_eq!(request.start_block, 1u64.into());
+        assert_eq!(request.limit, 1);
+        assert!(!fetcher.peers[&peer_id].last_response_likely_bad);
+        assert!(response_rx.try_recv().is_ok());
+    }
+
     #[test]
     fn test_peer_is_better_none_requirement() {
         let peer1 = Peer {
