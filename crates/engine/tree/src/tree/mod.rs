@@ -141,13 +141,11 @@ where
         // newer. That view is a valid base only if this in-memory chain covers both frontiers.
         // Keep every block after the state/trie frontier, including blocks through Finish, so
         // masked state is still supplied by the in-memory provider.
-        if let Some(latest) = self.provider_factory.latest_database_state()?
-            && let Some(overlay_len) = latest.overlay_len(
+        if let Some(latest) = self.provider_factory.latest_database_state()? &&
+            let Some(overlay_len) = latest.overlay_len(
                 self.historical,
                 overlay.len(),
-                overlay
-                    .iter()
-                    .map(|block| block.recovered_block().num_hash()),
+                overlay.iter().map(|block| block.recovered_block().num_hash()),
             )
         {
             overlay.truncate(overlay_len);
@@ -155,7 +153,7 @@ where
             if !overlay.is_empty() {
                 provider = Box::new(MemoryOverlayStateProvider::new(provider, overlay));
             }
-            return Ok(provider);
+            return Ok(provider)
         }
 
         let mut provider = self.provider_factory.state_by_block_hash(self.historical)?;
