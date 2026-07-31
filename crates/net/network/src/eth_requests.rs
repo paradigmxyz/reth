@@ -859,7 +859,7 @@ mod tests {
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_storage_api::noop::NoopProvider;
     use reth_transaction_pool::blobstore::{
-        BlobCellAvailability, BlobSidecar, BlobStoreCleanupStat, BlobStoreError,
+        BlobCellAvailability, BlobStoreCleanupStat, BlobStoreError, PooledBlobSidecar,
     };
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
@@ -874,16 +874,16 @@ mod tests {
     }
 
     impl BlobStore for CountingBlobStore {
-        fn insert(&self, _tx: B256, data: BlobSidecar) -> Result<(), BlobStoreError> {
+        fn insert(&self, _tx: B256, data: PooledBlobSidecar) -> Result<(), BlobStoreError> {
             let availability = BlobCellAvailability::for_sidecar(data.sidecar());
-            let _ = data.availability().set(availability);
+            data.availability().publish(availability);
             Ok(())
         }
 
-        fn insert_all(&self, txs: Vec<(B256, BlobSidecar)>) -> Result<(), BlobStoreError> {
+        fn insert_all(&self, txs: Vec<(B256, PooledBlobSidecar)>) -> Result<(), BlobStoreError> {
             for (_, data) in txs {
                 let availability = BlobCellAvailability::for_sidecar(data.sidecar());
-                let _ = data.availability().set(availability);
+                data.availability().publish(availability);
             }
             Ok(())
         }

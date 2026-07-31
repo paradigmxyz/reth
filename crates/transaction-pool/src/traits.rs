@@ -51,7 +51,7 @@
 //! - Conversion from consensus to pooled always fails
 
 use crate::{
-    blobstore::{BlobCellAvailabilityHandle, BlobSidecar, BlobStore, BlobStoreError},
+    blobstore::{BlobCellAvailabilityHandle, BlobStore, BlobStoreError, PooledBlobSidecar},
     error::{InvalidPoolTransactionError, PoolError, PoolResult, RawPoolTransactionError},
     pool::{
         state::SubPool, BestTransactionFilter, NewTransactionEvent, TransactionEvents,
@@ -1629,8 +1629,9 @@ impl PoolTransaction for EthPooledTransaction {
                 let tx = Recovered::new_unchecked(tx, signer);
                 let mut pooled = Self::new(tx, encoded_length);
                 if let Some(availability) = pooled.blob_cell_availability.clone() {
-                    pooled.blob_sidecar =
-                        EthBlobTransactionSidecar::Present(BlobSidecar::new(blob, availability));
+                    pooled.blob_sidecar = EthBlobTransactionSidecar::Present(
+                        PooledBlobSidecar::new(blob, availability),
+                    );
                 }
                 pooled
             }
@@ -1828,7 +1829,7 @@ pub enum EthBlobTransactionSidecar {
     ///
     /// The sidecar is required for validating the transaction but is not included
     /// in blocks (only the blob hashes are included in the consensus format).
-    Present(BlobSidecar),
+    Present(PooledBlobSidecar),
 }
 
 impl EthBlobTransactionSidecar {
@@ -2130,12 +2131,13 @@ mod tests {
         assert_eq!(pooled_tx.blob_cell_availability().and_then(|handle| handle.get()), None);
 
         let availability = pooled_tx.blob_cell_availability.as_ref().unwrap();
-        availability.set(BlobCellAvailability::full()).unwrap();
+        availability.publish(BlobCellAvailability::full());
         assert_eq!(
             pooled_tx.blob_cell_availability().and_then(|handle| handle.get()),
             Some(BlobCellAvailability::full())
         );
-        assert!(availability.set(BlobCellAvailability::default()).is_err());
+        availability.publish(BlobCellAvailability::default());
+        assert_eq!(availability.get(), Some(BlobCellAvailability::full()));
     }
 
     #[test]

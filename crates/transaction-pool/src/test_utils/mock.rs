@@ -1,7 +1,7 @@
 //! Mock types.
 
 use crate::{
-    blobstore::BlobSidecar,
+    blobstore::PooledBlobSidecar,
     identifier::{SenderIdentifiers, TransactionId},
     pool::txpool::TxPool,
     traits::TransactionOrigin,
@@ -918,10 +918,9 @@ impl alloy_consensus::Transaction for MockTransaction {
 impl EthPoolTransaction for MockTransaction {
     fn take_blob(&mut self) -> EthBlobTransactionSidecar {
         match self {
-            Self::Eip4844 { sidecar, .. } => EthBlobTransactionSidecar::Present(BlobSidecar::new(
-                sidecar.clone(),
-                Default::default(),
-            )),
+            Self::Eip4844 { sidecar, .. } => EthBlobTransactionSidecar::Present(
+                PooledBlobSidecar::new(sidecar.clone(), Default::default()),
+            ),
             _ => EthBlobTransactionSidecar::None,
         }
     }

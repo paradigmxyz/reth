@@ -83,19 +83,22 @@ impl BlobCellAvailabilityHandle {
     }
 
     /// Publishes the stored availability.
-    pub fn set(&self, availability: BlobCellAvailability) -> Result<(), BlobCellAvailability> {
-        self.0.set(availability)
+    ///
+    /// The first published value wins; repeated publishes are intentionally ignored
+    /// (e.g. when a transaction is re-validated while its blob is already in the store).
+    pub fn publish(&self, availability: BlobCellAvailability) {
+        let _ = self.0.set(availability);
     }
 }
 
 /// A blob sidecar paired with the handle used to publish its stored cell availability.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BlobSidecar {
+pub struct PooledBlobSidecar {
     sidecar: BlobTransactionSidecarVariant,
     availability: BlobCellAvailabilityHandle,
 }
 
-impl BlobSidecar {
+impl PooledBlobSidecar {
     /// Creates a sidecar that publishes availability through the given handle.
     pub const fn new(
         sidecar: BlobTransactionSidecarVariant,
@@ -125,7 +128,7 @@ impl BlobSidecar {
     }
 }
 
-impl Deref for BlobSidecar {
+impl Deref for PooledBlobSidecar {
     type Target = BlobTransactionSidecarVariant;
 
     fn deref(&self) -> &Self::Target {
@@ -133,7 +136,7 @@ impl Deref for BlobSidecar {
     }
 }
 
-impl From<BlobTransactionSidecarVariant> for BlobSidecar {
+impl From<BlobTransactionSidecarVariant> for PooledBlobSidecar {
     fn from(sidecar: BlobTransactionSidecarVariant) -> Self {
         Self::new(sidecar, Default::default())
     }
@@ -147,10 +150,10 @@ impl From<BlobTransactionSidecarVariant> for BlobSidecar {
 /// Note: this is Clone because it is expected to be wrapped in an Arc.
 pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     /// Inserts the blob sidecar into the store
-    fn insert(&self, tx: B256, data: BlobSidecar) -> Result<(), BlobStoreError>;
+    fn insert(&self, tx: B256, data: PooledBlobSidecar) -> Result<(), BlobStoreError>;
 
     /// Inserts multiple blob sidecars into the store
-    fn insert_all(&self, txs: Vec<(B256, BlobSidecar)>) -> Result<(), BlobStoreError>;
+    fn insert_all(&self, txs: Vec<(B256, PooledBlobSidecar)>) -> Result<(), BlobStoreError>;
 
     /// Deletes the blob sidecar from the store
     fn delete(&self, tx: B256) -> Result<(), BlobStoreError>;

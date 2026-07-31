@@ -2,7 +2,7 @@
 
 use super::constants::DEFAULT_MAX_TX_INPUT_BYTES;
 use crate::{
-    blobstore::{BlobSidecar, BlobStore},
+    blobstore::{BlobStore, PooledBlobSidecar},
     error::{
         Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
     },
@@ -794,7 +794,7 @@ where
     pub fn validate_eip4844(
         &self,
         transaction: &mut Tx,
-    ) -> Result<Option<BlobSidecar>, InvalidPoolTransactionError> {
+    ) -> Result<Option<PooledBlobSidecar>, InvalidPoolTransactionError> {
         let mut maybe_blob_sidecar = None;
 
         // heavy blob tx validation
@@ -815,7 +815,7 @@ where
                             self.blob_store.cell_availability(*transaction.hash()).ok().flatten() &&
                             let Some(availability) = transaction.blob_cell_availability()
                         {
-                            let _ = availability.set(stored_availability);
+                            availability.publish(stored_availability);
                         }
                     } else {
                         return Err(InvalidPoolTransactionError::Eip4844(
@@ -1509,7 +1509,7 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
 mod tests {
     use super::*;
     use crate::{
-        blobstore::{BlobCellAvailability, BlobSidecar, BlobStore, InMemoryBlobStore},
+        blobstore::{BlobCellAvailability, BlobStore, InMemoryBlobStore, PooledBlobSidecar},
         error::PoolErrorKind,
         test_utils::TransactionBuilder,
         traits::PoolTransaction,
@@ -1598,7 +1598,7 @@ mod tests {
         let encoded_length = tx.encode_2718_len();
         let mut transaction = EthPooledTransaction::new(tx, encoded_length);
         let blob_store = InMemoryBlobStore::default();
-        blob_store.insert(*transaction.hash(), BlobSidecar::from(sidecar)).unwrap();
+        blob_store.insert(*transaction.hash(), PooledBlobSidecar::from(sidecar)).unwrap();
         let validator = EthTransactionValidatorBuilder::new(
             MockEthProvider::default().with_genesis_block(),
             test_evm_config(),

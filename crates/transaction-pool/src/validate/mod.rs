@@ -1,7 +1,7 @@
 //! Transaction validation abstractions.
 
 use crate::{
-    blobstore::BlobSidecar,
+    blobstore::PooledBlobSidecar,
     error::InvalidPoolTransactionError,
     identifier::{SenderId, TransactionId},
     traits::{PoolTransaction, TransactionOrigin},
@@ -117,13 +117,13 @@ pub enum ValidTransaction<T> {
         /// The valid EIP-4844 transaction.
         transaction: T,
         /// The extracted sidecar of that transaction
-        sidecar: BlobSidecar,
+        sidecar: PooledBlobSidecar,
     },
 }
 
 impl<T> ValidTransaction<T> {
     /// Creates a new valid transaction with an optional sidecar.
-    pub fn new(transaction: T, sidecar: Option<BlobSidecar>) -> Self {
+    pub fn new(transaction: T, sidecar: Option<PooledBlobSidecar>) -> Self {
         if let Some(sidecar) = sidecar {
             Self::ValidWithSidecar { transaction, sidecar }
         } else {

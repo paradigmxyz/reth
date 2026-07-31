@@ -66,7 +66,7 @@
 //!    category (2.) and become pending.
 
 use crate::{
-    blobstore::{BlobSidecar, BlobStore},
+    blobstore::{BlobStore, PooledBlobSidecar},
     error::{PoolError, PoolErrorKind, PoolResult},
     identifier::{SenderId, SenderIdentifiers, TransactionId},
     metrics::BlobStoreMetrics,
@@ -1299,7 +1299,7 @@ where
     }
 
     /// Inserts a blob transaction into the blob store
-    fn insert_blob(&self, hash: TxHash, blob: BlobSidecar) {
+    fn insert_blob(&self, hash: TxHash, blob: PooledBlobSidecar) {
         debug!(target: "txpool", "[{:?}] storing blob sidecar", hash);
         match self.blob_store.insert(hash, blob) {
             Ok(()) => {
@@ -1366,7 +1366,7 @@ struct AddedTransactionMeta<T: PoolTransaction> {
     /// The transaction that was added to the pool
     added: AddedTransaction<T>,
     /// Optional blob sidecar for EIP-4844 transactions
-    blob_sidecar: Option<BlobSidecar>,
+    blob_sidecar: Option<PooledBlobSidecar>,
 }
 
 /// Tracks an added transaction and all graph changes caused by adding it.
@@ -1671,8 +1671,8 @@ impl<T: PoolTransaction> OnNewCanonicalStateOutcome<T> {
 mod tests {
     use crate::{
         blobstore::{
-            BlobCellAvailability, BlobSidecar, BlobStore, DiskFileBlobStore,
-            DiskFileBlobStoreConfig, InMemoryBlobStore,
+            BlobCellAvailability, BlobStore, DiskFileBlobStore, DiskFileBlobStoreConfig,
+            InMemoryBlobStore, PooledBlobSidecar,
         },
         identifier::SenderId,
         test_utils::{MockTransaction, OkValidator, TestPoolBuilder, TransactionGenerator},
@@ -1848,7 +1848,7 @@ mod tests {
                     bytecode_hash: None,
                     transaction: ValidTransaction::ValidWithSidecar {
                         transaction: tx,
-                        sidecar: BlobSidecar::from(sidecar.clone()),
+                        sidecar: PooledBlobSidecar::from(sidecar.clone()),
                     },
                     propagate: true,
                     authorities: None,
