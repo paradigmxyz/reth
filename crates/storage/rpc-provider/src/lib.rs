@@ -1323,7 +1323,7 @@ where
         if bundle_state
             .state()
             .values()
-            .any(|account| account.was_destroyed() && account.info.is_some())
+            .any(|account| account.was_destroyed() && account.original_info.is_some())
         {
             return Err(ProviderError::UnsupportedProvider)
         }
