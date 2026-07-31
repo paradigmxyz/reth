@@ -157,5 +157,5 @@ module.exports = async function ({ core, context, chartSha, grafanaUrl, logsUrl,
     if (errors.trim()) md += '\n' + errors + '\n';
   } catch {}
 
-  await core.summary.addRaw(md).write();
+  await core.summary.addRaw(md).write({ overwrite: true });
 };

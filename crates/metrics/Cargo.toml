@@ -24,5 +24,8 @@ tokio = { workspace = true, features = ["full"], optional = true }
 futures = { workspace = true, optional = true }
 tokio-util = { workspace = true, optional = true }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
+
 [features]
 common = ["tokio", "futures", "tokio-util", "reth-primitives-traits"]

@@ -18,3 +18,7 @@ reth-transaction-pool.workspace = true
 # alloy
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
+
+[dev-dependencies]
+reth-transaction-pool = { workspace = true, features = ["test-utils"] }
+alloy-primitives = { workspace = true, features = ["getrandom"] }

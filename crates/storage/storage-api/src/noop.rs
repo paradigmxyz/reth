@@ -7,8 +7,9 @@ use crate::{
     BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader,
     ChangeSetReader, HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider,
     PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader,
-    StateProofProvider, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
-    StateRootProvider, StorageRootProvider, TransactionVariant, TransactionsProvider,
+    StateProofProvider, StateProvider, StateProviderBox, StateProviderFactory,
+    StateRangeProviderFactory, StateRangeView, StateReader, StateRootProvider, StorageRootProvider,
+    TransactionVariant, TransactionsProvider,
 };
 
 #[cfg(feature = "db-api")]
@@ -114,6 +115,12 @@ impl<ChainSpec, N> Clone for NoopProvider<ChainSpec, N> {
 impl<ChainSpec, N> BalProvider for NoopProvider<ChainSpec, N> {
     fn bal_store(&self) -> &BalStoreHandle {
         &self.bal_store
+    }
+}
+
+impl<ChainSpec, N> StateRangeProviderFactory for NoopProvider<ChainSpec, N> {
+    fn state_range_provider(&self, _state_root: B256) -> ProviderResult<Option<StateRangeView>> {
+        Ok(None)
     }
 }
 
