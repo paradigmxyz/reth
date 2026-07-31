@@ -873,13 +873,22 @@ mod tests {
     use alloy_consensus::{Header, Receipt as RlpReceipt, ReceiptWithBloom, TxLegacy, TxType};
     use alloy_primitives::{Address, Bytes, Log, Signature, B256};
     use reth_db_common::init::init_genesis;
-    use reth_era::era1::types::execution::{
-        CompressedBody, CompressedHeader, CompressedReceipts, TotalDifficulty,
+    use reth_era::{
+        era1::types::execution::{
+            CompressedBody, CompressedHeader, CompressedReceipts, TotalDifficulty,
+        },
+        ere::types::execution::{
+            CompressedBody as EreCompressedBody, CompressedHeader as EreCompressedHeader,
+            CompressedSlimReceipts, SlimReceipt,
+        },
     };
     use reth_ethereum_primitives::{Block, BlockBody, Receipt, TransactionSigned};
     use reth_provider::{
-        test_utils::create_test_provider_factory, DatabaseProviderFactory, ReceiptProvider,
-        StageCheckpointReader, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
+        test_utils::{
+            create_test_provider_factory, create_test_provider_factory_with_genesis_block_number,
+        },
+        DatabaseProviderFactory, ReceiptProvider, StageCheckpointReader, StaticFileProviderFactory,
+        StaticFileSegment, StaticFileWriter,
     };
     use reth_prune_types::{PruneMode, PruneModes, ReceiptsLogPruneConfig};
     use std::{cell::Cell, path::Path};
@@ -928,6 +937,16 @@ mod tests {
         ))
     }
 
+    /// Builds an `.ere` block tuple carrying canonical slim receipts.
+    fn ere_block_tuple(number: u64, receipts: &[SlimReceipt]) -> EreBlockTuple {
+        let header = Header { number, ..Default::default() };
+        EreBlockTuple::new(
+            EreCompressedHeader::from_rlp(&alloy_rlp::encode(&header)).unwrap(),
+            EreCompressedBody::from_rlp(&alloy_rlp::encode(BlockBody::default())).unwrap(),
+        )
+        .with_receipts(CompressedSlimReceipts::from_receipts(receipts).unwrap())
+    }
+
     struct TestEra;
 
     impl<R> EraBlockReader<Header, BlockBody, R> for TestEra {
@@ -952,6 +971,21 @@ mod tests {
         ) -> eyre::Result<impl Iterator<Item = eyre::Result<(Header, BlockBody, Option<Vec<R>>)>>>
         {
             Ok([1, 2].into_iter().map(|number| {
+                Ok((Header { number, ..Default::default() }, BlockBody::default(), Some(vec![])))
+            }))
+        }
+    }
+
+    /// Empty receipts for the two blocks immediately after a genesis at block 100.
+    struct TestEraWithNonZeroGenesis;
+
+    impl<R> EraBlockReader<Header, BlockBody, R> for TestEraWithNonZeroGenesis {
+        fn blocks<M: EraMeta + ?Sized>(
+            _meta: &M,
+            _decode_receipts: bool,
+        ) -> eyre::Result<impl Iterator<Item = eyre::Result<(Header, BlockBody, Option<Vec<R>>)>>>
+        {
+            Ok([101, 102].into_iter().map(|number| {
                 Ok((Header { number, ..Default::default() }, BlockBody::default(), Some(vec![])))
             }))
         }
@@ -1187,6 +1221,72 @@ mod tests {
         assert_eq!(
             static_file_provider.get_highest_static_file_block(StaticFileSegment::Receipts),
             Some(2)
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn receipt_import_backfills_an_absent_segment_after_non_zero_genesis() {
+        const GENESIS: u64 = 100;
+
+        let pf = create_test_provider_factory_with_genesis_block_number(GENESIS);
+        let static_file_provider = pf.static_file_provider();
+        let folder = tempdir().unwrap();
+        let mut hash_collector = Collector::new(4096, Some(folder.path().to_owned()));
+
+        {
+            let mut writer =
+                static_file_provider.get_writer(GENESIS, StaticFileSegment::Transactions).unwrap();
+            writer.user_header_mut().set_block_range(GENESIS, GENESIS);
+            writer.commit().unwrap();
+        }
+
+        let provider = pf.database_provider_rw().unwrap();
+        {
+            let mut writer =
+                static_file_provider.get_writer(GENESIS, StaticFileSegment::Headers).unwrap();
+            let genesis = Header { number: GENESIS, ..Default::default() };
+            writer.user_header_mut().set_block_range(GENESIS, GENESIS);
+            writer
+                .append_header_direct(&genesis, genesis.difficulty, &genesis.hash_slow())
+                .unwrap();
+
+            let meta = TestMeta { marked: Cell::new(false) };
+            process::<TestEraWithNonZeroGenesis, _, Block, _, _>(
+                &meta,
+                &mut writer,
+                None,
+                &provider,
+                &mut hash_collector,
+                GENESIS..=102,
+                ImportPolicy { headers_tip: GENESIS, is_receipt_verifiable: &|_| true },
+            )
+            .unwrap();
+            writer.commit().unwrap();
+        }
+        provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(102)).unwrap();
+        provider.commit().unwrap();
+
+        assert_eq!(static_file_provider.genesis_block_number(), GENESIS);
+        assert_eq!(
+            static_file_provider.get_highest_static_file_block(StaticFileSegment::Receipts),
+            None
+        );
+
+        let stream = futures_util::stream::iter(vec![Ok(TestMeta { marked: Cell::new(false) })]);
+        let height = import::<TestEraWithNonZeroGenesis, _, _, _, Block, _, _>(
+            stream,
+            &pf,
+            &mut hash_collector,
+            None,
+            true,
+            &|_| true,
+        )
+        .unwrap();
+
+        assert_eq!(height, 102);
+        assert_eq!(
+            static_file_provider.get_highest_static_file_block(StaticFileSegment::Receipts),
+            Some(102)
         );
     }
 
@@ -1596,6 +1696,52 @@ mod tests {
         assert_eq!(receipts.len(), 1);
         assert!(receipts[0].success);
         assert_eq!(receipts[0].cumulative_gas_used, 21_000);
+    }
+
+    #[test]
+    fn decodes_typed_ere_receipts_into_node_receipts() {
+        let logs = vec![Log::new_unchecked(
+            Address::repeat_byte(0x11),
+            vec![B256::repeat_byte(0x22)],
+            Bytes::from_static(b"typed"),
+        )];
+        let slim = vec![
+            SlimReceipt {
+                tx_type: TxType::Eip2930,
+                status: Eip658Value::Eip658(true),
+                cumulative_gas_used: 21_000,
+                logs: logs.clone(),
+            },
+            SlimReceipt {
+                tx_type: TxType::Eip1559,
+                status: Eip658Value::Eip658(false),
+                cumulative_gas_used: 42_000,
+                logs: vec![],
+            },
+        ];
+        let tuple = ere_block_tuple(12_965_000, &slim);
+
+        let (_, _, receipts) =
+            Ere::decode_with_receipts::<Header, BlockBody, Receipt, E2sError>(Ok(tuple), true)
+                .unwrap();
+
+        assert_eq!(
+            receipts,
+            Some(vec![
+                Receipt {
+                    tx_type: TxType::Eip2930,
+                    success: true,
+                    cumulative_gas_used: 21_000,
+                    logs,
+                },
+                Receipt {
+                    tx_type: TxType::Eip1559,
+                    success: false,
+                    cumulative_gas_used: 42_000,
+                    logs: vec![],
+                },
+            ])
+        );
     }
 
     #[test]
