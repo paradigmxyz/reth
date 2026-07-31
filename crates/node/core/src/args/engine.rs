@@ -585,7 +585,6 @@ impl Default for EngineArgs {
     fn default() -> Self {
         let DefaultEngineValues {
             persistence_threshold,
-            num_state_masking_blocks,
             persistence_backpressure_threshold: _,
             num_state_masking_blocks,
             memory_block_buffer_target: _,
@@ -927,8 +926,6 @@ mod tests {
             "100",
             "--engine.persistence-backpressure-threshold",
             "101",
-            "--engine.num-state-masking-blocks",
-            "25",
             "--engine.memory-block-buffer-target",
             "50",
             "--engine.invalid-header-cache-hit-eviction-threshold",
@@ -967,23 +964,6 @@ mod tests {
         .args;
 
         assert_eq!(parsed_args, args);
-    }
-
-    #[test]
-    fn test_parse_num_state_masking_blocks() {
-        let args = CommandParser::<EngineArgs>::parse_from([
-            "reth",
-            "--engine.persistence-threshold",
-            "8",
-            "--engine.num-state-masking-blocks",
-            "7",
-            "--engine.memory-block-buffer-target",
-            "0",
-        ])
-        .args;
-
-        assert_eq!(args.num_state_masking_blocks, 7);
-        assert_eq!(args.tree_config().num_state_masking_blocks(), 7);
     }
 
     #[test]
@@ -1089,34 +1069,6 @@ mod tests {
         ]);
 
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn validate_rejects_state_masking_window_at_or_above_threshold() {
-        let args = EngineArgs {
-            persistence_threshold: 4,
-            num_state_masking_blocks: 2,
-            memory_block_buffer_target: Some(2),
-            ..EngineArgs::default()
-        };
-
-        let err = args.validate().unwrap_err().to_string();
-        assert!(err.contains("engine.num-state-masking-blocks"));
-        assert!(err.contains("engine.memory-block-buffer-target"));
-        assert!(err.contains("engine.persistence-threshold"));
-    }
-
-    #[test]
-    fn validate_allows_zero_persistence_threshold_when_masking_is_disabled() {
-        let args = EngineArgs {
-            persistence_threshold: 0,
-            num_state_masking_blocks: 0,
-            memory_block_buffer_target: Some(0),
-            ..EngineArgs::default()
-        };
-
-        args.validate().unwrap();
-        assert_eq!(args.tree_config().persistence_threshold(), 0);
     }
 
     #[test]

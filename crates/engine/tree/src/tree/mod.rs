@@ -1827,39 +1827,11 @@ where
         );
         self.state.tree_state.overlay_manager.evict_cached_changesets(eviction_threshold);
 
-        self.on_new_persisted_block(last_state_trie_persisted_block)?;
+        self.on_new_persisted_block()?;
 
         self.purge_timing_stats(last_persisted_block_number, commit_duration);
 
         Ok(())
-    }
-
-    /// Returns the highest block that can be dropped from memory after persistence completes.
-    fn last_state_trie_persisted_block(
-        &self,
-        last_block: BlockNumHash,
-        last_state_trie_block: Option<u64>,
-    ) -> ProviderResult<BlockNumHash> {
-        let Some(last_state_trie_block) = last_state_trie_block else { return Ok(last_block) };
-        debug_assert!(
-            last_state_trie_block <= last_block.number,
-            "state/trie frontier cannot exceed the last persisted block"
-        );
-        if last_state_trie_block >= last_block.number {
-            return Ok(last_block)
-        }
-
-        let hash = self
-            .canonical_in_memory_state
-            .hash_by_number(last_state_trie_block)
-            .map(Ok)
-            .unwrap_or_else(|| {
-                self.provider
-                    .block_hash(last_state_trie_block)?
-                    .ok_or_else(|| ProviderError::HeaderNotFound(last_state_trie_block.into()))
-            })?;
-
-        Ok(BlockNumHash::new(last_state_trie_block, hash))
     }
 
     /// Handles a message from the engine.

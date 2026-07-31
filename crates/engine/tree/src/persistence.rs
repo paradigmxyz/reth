@@ -7,10 +7,9 @@ use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     providers::ProviderNodeTypes, BalProvider, BlockExecutionWriter, BlockHashReader,
     ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksInput,
-    StageCheckpointReader,
 };
 use reth_prune::{PrunerError, PrunerWithFactory};
-use reth_stages_api::{MetricEvent, MetricEventsSender, StageId};
+use reth_stages_api::{MetricEvent, MetricEventsSender};
 use reth_tasks::spawn_os_thread;
 use std::{
     sync::{
@@ -169,7 +168,6 @@ where
             input.first_persist_rest_block().map(|block| block.recovered_block().num_hash());
         let last_block = input.last_block();
         let block_count = input.persist_rest_blocks().len();
-        let last_state_trie_block = Some(input.new_partial_state_trie());
 
         let pending_finalized = self.pending_finalized_block.take();
         let pending_safe = self.pending_safe_block.take();
@@ -421,10 +419,11 @@ mod tests {
         test_utils::{create_test_provider_factory, MockNodeTypes},
         AccountReader, BalConfig, BalNotificationStream, BalStore, BalStoreHandle,
         ChainSpecProvider, HeaderProvider, InMemoryBalStore, ProviderError, ProviderResult, RawBal,
-        StorageSettingsCache, TryIntoHistoricalStateProvider,
+        StageCheckpointReader, StorageSettingsCache, TryIntoHistoricalStateProvider,
     };
     use reth_prune::Pruner;
     use reth_prune_types::PruneMode;
+    use reth_stages_api::StageId;
     use reth_storage_overlay::OverlayManager;
     use tokio::sync::mpsc::unbounded_channel;
 
@@ -688,8 +687,11 @@ mod tests {
             .recv_timeout(std::time::Duration::from_secs(10))
             .expect("remove-blocks persistence timed out");
 
-        assert_eq!(result.last_block, Some(blocks[REORG_TIP].recovered_block().num_hash()));
-        assert_eq!(result.last_state_trie_block, Some(STATE_TRIE_TIP as u64));
+        assert_eq!(result.last_block, blocks[REORG_TIP].recovered_block().num_hash());
+        assert_eq!(
+            result.last_state_trie_block,
+            blocks[STATE_TRIE_TIP].recovered_block().num_hash()
+        );
         drop(handle);
 
         let provider = provider_factory.provider().unwrap();

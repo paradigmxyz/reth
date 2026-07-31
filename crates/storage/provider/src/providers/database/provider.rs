@@ -4886,11 +4886,15 @@ mod tests {
     #[cfg(feature = "partial-persistence")]
     #[test]
     fn remove_block_and_execution_above_returns_persistence_frontiers() {
-        let factory = create_test_provider_factory();
+        let overlay_manager = OverlayManager::default();
+        let factory = create_test_provider_factory().with_overlay_manager(overlay_manager.clone());
         let mut test_block_builder = TestBlockBuilder::eth().with_state();
 
         let genesis = test_block_builder.get_executed_blocks(0..1).next().unwrap();
         let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..5).collect();
+        for block in &blocks {
+            overlay_manager.insert_block(block.clone());
+        }
 
         let provider_rw = factory.provider_rw().unwrap();
         save_genesis(&provider_rw, &genesis).unwrap();

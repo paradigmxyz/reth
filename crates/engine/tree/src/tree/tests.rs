@@ -608,7 +608,7 @@ fn on_new_persisted_block_queues_sparse_trie_prune_request() {
     let persisted = blocks[0].recovered_block().num_hash();
     test_harness.tree.persistence_state.finish(persisted, persisted);
 
-    test_harness.tree.on_new_persisted_block(persisted).unwrap();
+    test_harness.tree.on_new_persisted_block().unwrap();
 
     assert!(test_harness.tree.state.pending_sparse_trie_prune());
 }
@@ -620,7 +620,7 @@ fn on_new_persisted_block_queues_sparse_trie_prune_with_in_memory_blocks() {
     let persisted = blocks[0].recovered_block().num_hash();
     test_harness.tree.persistence_state.finish(persisted, persisted);
 
-    test_harness.tree.on_new_persisted_block(persisted).unwrap();
+    test_harness.tree.on_new_persisted_block().unwrap();
 
     assert!(test_harness.tree.state.pending_sparse_trie_prune());
 }
@@ -640,7 +640,7 @@ fn on_new_persisted_block_skips_sparse_trie_prune_when_state_root_task_disabled(
         let persisted = blocks[0].recovered_block().num_hash();
         test_harness.tree.persistence_state.finish(persisted, persisted);
 
-        test_harness.tree.on_new_persisted_block(persisted).unwrap();
+        test_harness.tree.on_new_persisted_block().unwrap();
 
         assert!(!test_harness.tree.state.pending_sparse_trie_prune());
     }
@@ -700,8 +700,8 @@ fn remove_blocks_retains_partial_state_trie_suffix_in_memory() {
     }
     sender
         .send(PersistenceResult {
-            last_block: Some(blocks[REORG_TIP].recovered_block().num_hash()),
-            last_state_trie_block: Some(STATE_TRIE_TIP as u64),
+            last_block: blocks[REORG_TIP].recovered_block().num_hash(),
+            last_state_trie_block: blocks[STATE_TRIE_TIP].recovered_block().num_hash(),
             commit_duration: None,
         })
         .unwrap();
@@ -1252,8 +1252,8 @@ async fn test_get_save_blocks_input() {
     let last_persisted_block_number = 3;
     let last_persisted_block =
         blocks[last_persisted_block_number as usize].recovered_block.num_hash();
-    test_harness.tree.persistence_state.last_state_trie_persisted_block =
-        blocks[last_persisted_block_number as usize].recovered_block.num_hash();
+    test_harness.tree.persistence_state.last_persisted_block = last_persisted_block;
+    test_harness.tree.persistence_state.last_state_trie_persisted_block = last_persisted_block;
 
     let persistence_threshold = 4;
     let memory_block_buffer_target = 3;
@@ -1262,7 +1262,6 @@ async fn test_get_save_blocks_input() {
         .with_memory_block_buffer_target(memory_block_buffer_target);
 
     let input = test_harness.tree.get_save_blocks_input(PersistTarget::Threshold).unwrap();
-    let blocks_to_persist = input.persist_rest_blocks();
 
     let expected_blocks_to_persist_length: usize =
         (canonical_head_number - memory_block_buffer_target - last_persisted_block_number)
