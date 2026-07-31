@@ -324,9 +324,6 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 
     /// Removes blocks from the in-memory state through `remove_until` while still reporting the
     /// provided block as the persisted tip.
-    ///
-    /// This is used when block bodies/plain state have been persisted further than trie data, so a
-    /// suffix still needs to remain in memory for trie-backed operations.
     pub fn remove_persisted_blocks_until(
         &self,
         persisted_num_hash: BlockNumHash,

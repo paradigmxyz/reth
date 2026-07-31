@@ -1710,8 +1710,7 @@ where
         if !self.persistence_state.in_progress() {
             if let Some(new_tip_num) = self.find_disk_reorg()? {
                 self.remove_blocks(new_tip_num)
-            } else if self.should_persist() {
-                let input = self.get_save_blocks_input(PersistTarget::Threshold)?;
+            } else if let Some(input) = self.get_save_blocks_input(PersistTarget::Threshold) {
                 self.persist_blocks(input);
             }
         }
@@ -1744,28 +1743,19 @@ where
                 continue
             }
 
+            // Persistence can finish against a branch that the in-memory canonical chain has
+            // reorged away from. Unwind that stale disk branch before building a head-targeted
+            // save.
             if let Some(new_tip_num) = self.find_disk_reorg()? {
                 self.remove_blocks(new_tip_num);
                 continue
             }
 
-            let canonical_head_number = self.state.tree_state.canonical_block_number();
-            if self.persistence_state.last_persisted_block.number == canonical_head_number {
-                let state_trie_tip = self.persistence_state.last_state_trie_persisted_block.number;
-                if state_trie_tip == canonical_head_number {
-                    debug!(target: "engine::tree", "persistence complete, signaling termination");
-                    return Ok(())
-                }
+            let Some(input) = self.get_save_blocks_input(PersistTarget::Head) else {
+                debug!(target: "engine::tree", "persistence complete, signaling termination");
+                return Ok(())
+            };
 
-                assert!(
-                    state_trie_tip < canonical_head_number,
-                    "state/trie persistence cannot be ahead of the database tip"
-                );
-                self.remove_blocks(state_trie_tip);
-                continue
-            }
-
-            let input = self.get_save_blocks_input(PersistTarget::Head)?;
             debug!(target: "engine::tree", count = input.persist_rest_blocks().len(), "persisting remaining blocks before shutdown");
             self.persist_blocks(input);
         }
@@ -1804,28 +1794,15 @@ where
         self.metrics.engine.persistence_duration.record(start_time.elapsed());
 
         let commit_duration = result.commit_duration;
-        let Some(BlockNumHash {
-            hash: last_persisted_block_hash,
-            number: last_persisted_block_number,
-        }) = result.last_block
-        else {
-            // if this happened, then we persisted no blocks because we sent an empty vec of blocks
-            warn!(target: "engine::tree", "Persistence task completed but did not persist any blocks");
-            return Ok(())
-        };
-
-        let last_persisted_block =
-            BlockNumHash::new(last_persisted_block_number, last_persisted_block_hash);
-        let last_state_trie_persisted_block = self
-            .last_state_trie_persisted_block(last_persisted_block, result.last_state_trie_block)?;
-
-        debug!(
-            target: "engine::tree",
-            ?last_persisted_block,
-            ?last_state_trie_persisted_block,
-            elapsed=?start_time.elapsed(),
-            "Finished persisting, calling finish"
+        let last_persisted_block = result.last_block;
+        let last_persisted_block_number = last_persisted_block.number;
+        let last_state_trie_persisted_block = result.last_state_trie_block;
+        debug_assert!(
+            last_state_trie_persisted_block.number <= last_persisted_block.number,
+            "state/trie frontier cannot exceed the last persisted block"
         );
+
+        debug!(target: "engine::tree", ?last_persisted_block, ?last_state_trie_persisted_block, elapsed=?start_time.elapsed(), "Finished persisting, calling finish");
         self.persistence_state.finish(last_persisted_block, last_state_trie_persisted_block);
 
         // Evict cached changesets for blocks below the eviction threshold.
@@ -2425,69 +2402,61 @@ where
         );
     }
 
-    /// Returns true if the canonical chain length minus the last persisted
-    /// block is greater than the persistence threshold,
-    /// backfill is not running, and no payload is currently being built.
-    pub const fn should_persist(&self) -> bool {
-        if self.building_payload {
-            return false
-        }
-
-        if !self.backfill_sync_state.is_idle() {
-            // can't persist if backfill is running
-            return false
-        }
-
-        let prev_db_tip = self.persistence_state.last_persisted_block.number;
-        let canonical_head_number = self.state.tree_state.canonical_block_number();
-        canonical_head_number.saturating_sub(prev_db_tip) > self.config.persistence_threshold() &&
-            canonical_head_number.saturating_sub(self.effective_memory_block_buffer_target()) >
-                prev_db_tip
-    }
-
-    /// Returns the in-memory block buffer used for threshold persistence.
+    /// Returns the blocks and frontiers for the next persistence cycle, if one should start.
     ///
-    /// A masking suffix requires at least one unpersisted block so a later shutdown can advance
-    /// the database and fully flush state/trie data in the same persistence operation.
-    const fn effective_memory_block_buffer_target(&self) -> u64 {
-        let configured_target = self.config.memory_block_buffer_target();
-        if self.config.num_state_masking_blocks() > 0 && configured_target == 0 {
-            1
-        } else {
-            configured_target
-        }
-    }
-
-    /// Returns the blocks and frontiers for the next persistence cycle.
-    fn get_save_blocks_input(
-        &self,
-        target: PersistTarget,
-    ) -> Result<SaveBlocksInput<N>, AdvancePersistenceError> {
+    /// Threshold persistence honors the normal scheduling gates and retains the configured
+    /// in-memory block buffer. Head persistence bypasses those gates during shutdown and returns
+    /// `None` once both persistence frontiers have reached the canonical head.
+    fn get_save_blocks_input(&self, target: PersistTarget) -> Option<SaveBlocksInput<N>> {
         // We will calculate the state root using the database, so we need to be sure there are no
         // changes
         debug_assert!(!self.persistence_state.in_progress());
 
-        let mut blocks = Vec::new();
-        let mut current_hash = self.state.tree_state.canonical_block_hash();
         let prev_partial_state_trie = self.persistence_state.last_state_trie_persisted_block.number;
         let prev_db_tip = self.persistence_state.last_persisted_block.number;
         let canonical_head_number = self.state.tree_state.canonical_block_number();
 
-        let new_db_tip = match target {
-            PersistTarget::Head => canonical_head_number,
-            PersistTarget::Threshold => canonical_head_number
-                .saturating_sub(self.effective_memory_block_buffer_target())
-                .max(prev_db_tip),
-        };
-        debug_assert!(new_db_tip > prev_db_tip, "database tip must advance when saving");
+        let (new_db_tip, new_partial_state_trie) = match target {
+            PersistTarget::Head => (canonical_head_number, canonical_head_number),
+            PersistTarget::Threshold => {
+                if self.building_payload || !self.backfill_sync_state.is_idle() {
+                    return None
+                }
 
-        let new_partial_state_trie = match target {
-            // Graceful shutdown leaves the database fully consistent at the canonical head.
-            PersistTarget::Head => new_db_tip,
-            PersistTarget::Threshold => new_db_tip
-                .saturating_sub(self.config.num_state_masking_blocks())
-                .max(prev_partial_state_trie),
+                if canonical_head_number.saturating_sub(prev_db_tip) <=
+                    self.config.persistence_threshold()
+                {
+                    return None
+                }
+
+                let new_db_tip =
+                    canonical_head_number.saturating_sub(self.config.memory_block_buffer_target());
+                if new_db_tip <= prev_db_tip {
+                    return None
+                }
+
+                let new_partial_state_trie = new_db_tip
+                    .saturating_sub(self.config.num_state_masking_blocks())
+                    .max(prev_partial_state_trie);
+                (new_db_tip, new_partial_state_trie)
+            }
         };
+
+        debug_assert!(
+            new_db_tip >= prev_db_tip,
+            "disk reorg must be resolved before saving blocks"
+        );
+        debug_assert!(
+            new_partial_state_trie >= prev_partial_state_trie,
+            "disk reorg must be resolved before saving state/trie"
+        );
+
+        if new_db_tip == prev_db_tip && new_partial_state_trie == prev_partial_state_trie {
+            return None
+        }
+
+        let mut blocks = Vec::new();
+        let mut current_hash = self.state.tree_state.canonical_block_hash();
 
         debug!(
             target: "engine::tree",
@@ -2515,7 +2484,7 @@ where
         // Reverse the order so that the oldest block comes first
         blocks.reverse();
 
-        Ok(SaveBlocksInput::new(
+        Some(SaveBlocksInput::new(
             blocks,
             prev_db_tip,
             prev_partial_state_trie,
@@ -2531,10 +2500,9 @@ where
     /// even if trie persistence only advanced through an earlier block.
     ///
     /// Assumes that `finish` has been called on the `persistence_state` at least once
-    fn on_new_persisted_block(
-        &mut self,
-        in_memory_persisted_block: BlockNumHash,
-    ) -> ProviderResult<()> {
+    fn on_new_persisted_block(&mut self) -> ProviderResult<()> {
+        let in_memory_persisted_block = self.persistence_state.last_state_trie_persisted_block;
+
         // If we have an on-disk reorg, we need to handle it first before touching the in-memory
         // state.
         if let Some(remove_above) = self.find_disk_reorg()? {

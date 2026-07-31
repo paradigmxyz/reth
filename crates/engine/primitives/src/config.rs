@@ -6,8 +6,7 @@ use core::time::Duration;
 /// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
 pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 7;
 
-/// Maximum number of consecutive canonical blocks whose non-trie outputs may be persisted ahead
-/// of trie persistence.
+/// Number of persisted blocks whose state/trie writes are masked by an in-memory suffix.
 pub const DEFAULT_NUM_STATE_MASKING_BLOCKS: u64 = 0;
 
 /// Maximum number of blocks beyond the in-memory buffer target awaiting persistence before engine
@@ -60,9 +59,12 @@ const fn assert_state_masking_invariant(
     num_state_masking_blocks: u64,
     memory_block_buffer_target: u64,
 ) {
+    let valid_window = match num_state_masking_blocks.checked_add(memory_block_buffer_target) {
+        Some(window) => window < persistence_threshold,
+        None => false,
+    };
     debug_assert!(
-        num_state_masking_blocks == 0 ||
-            num_state_masking_blocks + memory_block_buffer_target < persistence_threshold,
+        num_state_masking_blocks == 0 || valid_window,
         "num_state_masking_blocks + memory_block_buffer_target must be less than persistence_threshold",
     );
 }
@@ -813,7 +815,7 @@ impl TreeConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::TreeConfig;
+    use super::{TreeConfig, DEFAULT_NUM_STATE_MASKING_BLOCKS};
 
     #[test]
     fn txpool_prewarming_is_disabled_by_default_and_can_be_enabled() {
@@ -846,23 +848,29 @@ mod tests {
     }
 
     #[test]
+    fn state_masking_is_disabled_by_default() {
+        assert_eq!(
+            TreeConfig::default().num_state_masking_blocks(),
+            DEFAULT_NUM_STATE_MASKING_BLOCKS
+        );
+    }
+
+    #[test]
     #[should_panic(
         expected = "num_state_masking_blocks + memory_block_buffer_target must be less than persistence_threshold"
     )]
     fn rejects_state_masking_window_at_or_above_persistence_threshold() {
         let _ = TreeConfig::default()
             .with_persistence_threshold(4)
-            .with_num_state_masking_blocks(2)
-            .with_memory_block_buffer_target(2);
+            .with_memory_block_buffer_target(2)
+            .with_num_state_masking_blocks(2);
     }
 
     #[test]
-    fn allows_zero_persistence_threshold_when_masking_is_disabled() {
-        let config =
-            TreeConfig::default().with_persistence_threshold(0).with_memory_block_buffer_target(0);
-
-        assert_eq!(config.persistence_threshold(), 0);
-        assert_eq!(config.num_state_masking_blocks(), 0);
-        assert_eq!(config.memory_block_buffer_target(), 0);
+    #[should_panic(
+        expected = "num_state_masking_blocks + memory_block_buffer_target must be less than persistence_threshold"
+    )]
+    fn rejects_overflowing_state_masking_window() {
+        let _ = TreeConfig::default().with_num_state_masking_blocks(u64::MAX);
     }
 }
