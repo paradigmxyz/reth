@@ -7968,8 +7968,9 @@ dependencies = [
 
 [[package]]
 name = "reth-codecs"
-version = "0.5.2"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=dbcc4ae95b19316fd0187f2c20b9cb65dbb4f70e#dbcc4ae95b19316fd0187f2c20b9cb65dbb4f70e"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f0dd7f542fbcae0e490ebe13f3eababcc05547375246ff7f62700b533cf3f01"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -7988,8 +7989,9 @@ dependencies = [
 
 [[package]]
 name = "reth-codecs-derive"
-version = "0.5.2"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=dbcc4ae95b19316fd0187f2c20b9cb65dbb4f70e#dbcc4ae95b19316fd0187f2c20b9cb65dbb4f70e"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7e508fcbb8cb775639dbbb56b81b62756d4322f28e76c60a52aa32575f993fe"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9704,8 +9706,9 @@ dependencies = [
 
 [[package]]
 name = "reth-primitives-traits"
-version = "0.5.2"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=dbcc4ae95b19316fd0187f2c20b9cb65dbb4f70e#dbcc4ae95b19316fd0187f2c20b9cb65dbb4f70e"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4666a8d5b246650b23e6767a45e46334d352557f473e91c2ea7211cc29291cca"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -10231,8 +10234,9 @@ dependencies = [
 
 [[package]]
 name = "reth-rpc-traits"
-version = "0.5.2"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=dbcc4ae95b19316fd0187f2c20b9cb65dbb4f70e#dbcc4ae95b19316fd0187f2c20b9cb65dbb4f70e"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b417a50d3fa9b58bb1a22e46fb47e0866006f24abffa1fbe75ae60116b5b2efa"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -10781,8 +10785,9 @@ dependencies = [
 
 [[package]]
 name = "reth-zstd-compressors"
-version = "0.5.2"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=dbcc4ae95b19316fd0187f2c20b9cb65dbb4f70e#dbcc4ae95b19316fd0187f2c20b9cb65dbb4f70e"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "80addacffc5df9398c55919f8993922d2b688f2aa5753708fdd658ca3cc63e39"
 dependencies = [
  "zstd",
 ]
@@ -10921,8 +10926,9 @@ dependencies = [
 
 [[package]]
 name = "revm-inspectors"
-version = "0.41.2"
-source = "git+https://github.com/paradigmxyz/revm-inspectors?rev=7d69f6f340d0dab378254004ab0474cfc3dd73f0#7d69f6f340d0dab378254004ab0474cfc3dd73f0"
+version = "0.42.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3958b5de5c2c08c6a49b8d94f6ead3e9cd7980c43d6ed240aa3d6485d53269b5"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
