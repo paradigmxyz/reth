@@ -487,9 +487,7 @@ impl NetworkArgs {
 
     /// Returns the resolved bootnodes if any are provided.
     pub fn resolved_bootnodes(&self) -> Option<Vec<NodeRecord>> {
-        self.bootnodes.clone().map(|bootnodes| {
-            bootnodes.into_iter().filter_map(|node| node.resolve_blocking().ok()).collect()
-        })
+        self.bootnodes.as_deref().map(resolve_bootnodes)
     }
 
     /// Returns the max inbound peers (2:1 ratio).
@@ -546,8 +544,9 @@ impl NetworkArgs {
     /// Configured Bootnodes are prioritized, if unset, the chain spec bootnodes are used
     /// Priority order for bootnodes configuration:
     /// 1. --bootnodes flag
-    /// 2. Network preset flags (e.g. --holesky)
-    /// 3. default to mainnet nodes
+    /// 2. `bootnodes` in the config file
+    /// 3. Network preset flags (e.g. --holesky)
+    /// 4. default to mainnet nodes
     pub fn network_config<N: NetworkPrimitives>(
         &self,
         config: &Config,
@@ -565,6 +564,9 @@ impl NetworkArgs {
         let discovery_addr = self.resolved_discovery_addr(listener_addr);
         let chain_bootnodes = self
             .resolved_bootnodes()
+            .or_else(|| {
+                (!config.bootnodes.is_empty()).then(|| resolve_bootnodes(&config.bootnodes))
+            })
             .unwrap_or_else(|| chain_spec.bootnodes().unwrap_or_else(mainnet_nodes));
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
 
@@ -1144,6 +1146,11 @@ impl Default for DiscoveryArgs {
     }
 }
 
+/// Resolves the hosts of the given peers, dropping the ones that fail to resolve.
+fn resolve_bootnodes(bootnodes: &[TrustedPeer]) -> Vec<NodeRecord> {
+    bootnodes.iter().filter_map(|node| node.resolve_blocking().ok()).collect()
+}
+
 /// Parse a block number=hash pair or just a hash into `BlockNumHash`
 fn parse_block_num_hash(s: &str) -> Result<BlockNumHash, String> {
     if let Some((num_str, hash_str)) = s.split_once('=') {
@@ -1628,5 +1635,32 @@ mod tests {
 
         // Cleanup
         let _ = fs::remove_file(&peers_file);
+    }
+
+    #[test]
+    fn network_config_prefers_cli_bootnodes_over_config_file() {
+        let enr = "enr:-IS4QHCYrYZbAKWCBRlAy5zzaDZXJBGkcnh4MHcBFZntXNFrdvJjX04jRzjzCBOonrkTfj499SZuOh8R33Ls8RRcy5wBgmlkgnY0gmlwhH8AAAGJc2VjcDI1NmsxoQPKY0yuDUmstAHYpMa2_oxVtw0RW_QAdpzBQA8yWM0xOIN1ZHCCdl8";
+        let enode = "enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303";
+        let config = Config { bootnodes: vec![enr.parse().unwrap()], ..Default::default() };
+        let secret_key = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
+
+        let boot_nodes = |args: &NetworkArgs| {
+            args.network_config::<reth_network::EthNetworkPrimitives>(
+                &config,
+                MAINNET.clone(),
+                secret_key,
+                PathBuf::from("peers.json"),
+                Runtime::test(),
+            )
+            .boot_nodes_iter()
+            .cloned()
+            .collect::<Vec<_>>()
+        };
+
+        let args = NetworkArgs { no_persist_peers: true, ..Default::default() };
+        assert_eq!(boot_nodes(&args), vec![enr.parse::<TrustedPeer>().unwrap()]);
+
+        let args = NetworkArgs { bootnodes: Some(vec![enode.parse().unwrap()]), ..args };
+        assert_eq!(boot_nodes(&args), vec![enode.parse::<TrustedPeer>().unwrap()]);
     }
 }
