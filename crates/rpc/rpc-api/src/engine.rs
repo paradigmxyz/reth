@@ -422,6 +422,14 @@ pub trait EngineEthApi<TxReq: RpcObject, B: RpcObject, R: RpcObject> {
         block_number: Option<BlockId>,
     ) -> RpcResult<EIP1186AccountProofResponse>;
 
+    /// Returns the account and storage values of the specified targets including Merkle proofs.
+    #[method(name = "getMultiProof")]
+    async fn get_multi_proof(
+        &self,
+        targets: Vec<(Address, Vec<B256>)>,
+        block_number: Option<BlockId>,
+    ) -> RpcResult<Vec<EIP1186AccountProofResponse>>;
+
     /// Returns the EIP-7928 block access list for a block by hash.
     #[method(name = "getBlockAccessListByBlockHash")]
     async fn block_access_list_by_block_hash(&self, hash: B256) -> RpcResult<Option<Value>>;
