@@ -10,6 +10,8 @@ use reth_evm::ConfigureEvm;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{BlockReader, StateProviderFactory, StateReader};
 use reth_revm::{cached::CachedReads, db::State};
+#[cfg(test)]
+use reth_storage_overlay::OverlayManager;
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -365,7 +367,7 @@ mod tests {
                 provider_builder: StateProviderBuilder::new(
                     MockEthProvider::default(),
                     parent_hash,
-                    None,
+                    OverlayManager::default(),
                 ),
             };
             self.commands.send(Command::Start { parent_hash, job }).unwrap();

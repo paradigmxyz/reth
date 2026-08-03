@@ -13,7 +13,9 @@ use alloy_consensus::{
 };
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
-use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStateProviderRef};
+use reth_chain_state::{
+    BlockState, CanonicalInMemoryState, MemoryOverlayStateProvider, MemoryOverlayStateProviderRef,
+};
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::ExecutionOutcome;
@@ -29,6 +31,7 @@ use reth_storage_api::{
     StateProviderBox, StorageChangeSetReader, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
+use reth_storage_overlay::OverlayManager;
 use revm::database::states::PlainStorageRevert;
 use std::{
     ops::{Add, Bound, RangeBounds, RangeInclusive, Sub},
@@ -51,6 +54,8 @@ pub struct ConsistentProvider<N: ProviderNodeTypes> {
     head_block: Option<Arc<BlockState<N::Primitives>>>,
     /// In-memory canonical state. This is not a snapshot, and can change! Use with caution.
     canonical_in_memory_state: CanonicalInMemoryState<N::Primitives>,
+    /// Shared in-memory overlay state.
+    overlay_manager: OverlayManager<N::Primitives>,
 }
 
 impl<N: ProviderNodeTypes> ConsistentProvider<N> {
@@ -71,8 +76,9 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         // working under an older view), while the in-memory state may have deleted them
         // entirely. Resulting in gaps on the range.
         let head_block = state.head_state();
+        let overlay_manager = storage_provider_factory.overlay_manager().clone();
         let storage_provider = storage_provider_factory.database_provider_ro()?;
-        Ok(Self { storage_provider, head_block, canonical_in_memory_state: state })
+        Ok(Self { storage_provider, head_block, canonical_in_memory_state: state, overlay_manager })
     }
 
     // Helper function to convert range bounds
@@ -247,6 +253,18 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         &self,
         state: &BlockState<N::Primitives>,
     ) -> ProviderResult<MemoryOverlayStateProviderRef<'_, N::Primitives>> {
+        let db_tip_number = self.storage_provider.last_block_number()?;
+        let db_tip = self
+            .storage_provider
+            .block_hash(db_tip_number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(db_tip_number.into()))?;
+        if let Some((anchor_hash, in_memory)) =
+            self.overlay_manager.state_provider_blocks(state.hash(), db_tip)
+        {
+            let historical = self.history_by_block_hash_ref(anchor_hash)?;
+            return Ok(MemoryOverlayStateProviderRef::new(historical, in_memory))
+        }
+
         let anchor_hash = state.anchor().hash;
         let latest_historical = self.history_by_block_hash_ref(anchor_hash)?;
         let in_memory = state.chain().map(|block_state| block_state.block()).collect();
@@ -451,10 +469,24 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             self.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
         self.ensure_canonical_block(block_number)?;
 
-        let Self { storage_provider, head_block, .. } = self;
+        let Self { storage_provider, head_block, overlay_manager, .. } = self;
         if let Some(Some(block_state)) =
             head_block.as_ref().map(|b| b.block_on_chain(block_hash.into()))
         {
+            let db_tip_number = storage_provider.last_block_number()?;
+            let db_tip = storage_provider
+                .block_hash(db_tip_number)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(db_tip_number.into()))?;
+            if let Some((anchor_hash, in_memory)) =
+                overlay_manager.state_provider_blocks(block_state.hash(), db_tip)
+            {
+                let anchor_number = storage_provider
+                    .block_number(anchor_hash)?
+                    .ok_or(ProviderError::BlockHashNotFound(anchor_hash))?;
+                let historical = storage_provider.try_into_history_at_block(anchor_number)?;
+                return Ok(MemoryOverlayStateProvider::new(historical, in_memory).boxed())
+            }
+
             let anchor_hash = block_state.anchor().hash;
             let block_number = storage_provider
                 .block_number(anchor_hash)?

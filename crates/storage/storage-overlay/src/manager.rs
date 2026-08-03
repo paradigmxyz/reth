@@ -101,6 +101,11 @@ impl<N: NodePrimitives> OverlayManager<N> {
         OverlayBuilder::new(parent_hash, self.clone())
     }
 
+    /// Returns whether `hash` is tracked as an in-memory block.
+    pub fn contains_block(&self, hash: B256) -> bool {
+        self.blocks.contains_key(&hash)
+    }
+
     /// Gets or computes cached changesets for an inclusive block range.
     pub fn get_or_compute_cached_changesets_range<P>(
         &self,
@@ -399,7 +404,39 @@ impl<N: NodePrimitives> OverlayManager<N> {
     /// Returns `None` if `parent_hash` is not `preferred_anchor` and the manager does not contain a
     /// block for `parent_hash`, meaning there is no in-memory parent chain to inspect.
     pub fn anchor_for_parent(&self, parent_hash: B256, preferred_anchor: B256) -> Option<B256> {
-        Self::anchor_for_parent_in(self.blocks.as_ref(), parent_hash, preferred_anchor)
+        self.state_provider_blocks(parent_hash, preferred_anchor).map(|(anchor, _)| anchor)
+    }
+
+    /// Returns the historical anchor and in-memory blocks needed to provide state at `parent_hash`.
+    ///
+    /// If `preferred_anchor` is on the in-memory parent chain, only blocks after that anchor are
+    /// returned. Otherwise, all available in-memory blocks are returned and their first missing
+    /// parent is used as the anchor. Blocks are ordered newest to oldest.
+    pub fn state_provider_blocks(
+        &self,
+        parent_hash: B256,
+        preferred_anchor: B256,
+    ) -> Option<(B256, Vec<ExecutedBlock<N>>)> {
+        if parent_hash == preferred_anchor {
+            return Some((preferred_anchor, Vec::new()))
+        }
+
+        let mut hash = parent_hash;
+        let mut blocks = Vec::new();
+
+        loop {
+            let block = self.blocks.get(&hash)?;
+            let parent_hash = block.recovered_block().parent_hash();
+            blocks.push(block.clone());
+
+            if parent_hash == preferred_anchor {
+                return Some((preferred_anchor, blocks))
+            }
+            if !self.blocks.contains_key(&parent_hash) {
+                return Some((parent_hash, blocks))
+            }
+            hash = parent_hash;
+        }
     }
 
     /// Returns true if `hash` is in the parent chain segment from `anchor_hash` inclusive to
@@ -430,13 +467,9 @@ impl<N: NodePrimitives> OverlayManager<N> {
         }
 
         let mut hash = parent_hash;
-
         loop {
             let block_parent_hash = blocks.get(&hash)?.recovered_block().parent_hash();
-            if block_parent_hash == preferred_anchor {
-                return Some(block_parent_hash)
-            }
-            if !blocks.contains_key(&block_parent_hash) {
+            if block_parent_hash == preferred_anchor || !blocks.contains_key(&block_parent_hash) {
                 return Some(block_parent_hash)
             }
             hash = block_parent_hash;
@@ -768,6 +801,25 @@ mod tests {
             manager.anchor_for_parent(blocks[2].recovered_block().hash(), db_tip_hash),
             Some(db_tip_hash)
         );
+    }
+
+    #[test]
+    fn state_provider_blocks_uses_suffix_after_preferred_anchor() {
+        let manager = OverlayManager::default();
+        let blocks = test_blocks();
+        for block in &blocks {
+            manager.insert_block(block.clone());
+        }
+
+        let (anchor, suffix) = manager
+            .state_provider_blocks(
+                blocks[2].recovered_block().hash(),
+                blocks[1].recovered_block().hash(),
+            )
+            .unwrap();
+
+        assert_eq!(anchor, blocks[1].recovered_block().hash());
+        assert_eq!(suffix, vec![blocks[2].clone()]);
     }
 
     #[test]
