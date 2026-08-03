@@ -23,12 +23,11 @@ pub use config::DnsDiscoveryConfig;
 use enr::Enr;
 pub use error::ParseDnsEntryError;
 use reth_ethereum_forks::{EnrForkIdEntry, ForkId};
-use reth_network_peers::{pk2id, NodeRecord};
+use reth_network_peers::NodeRecord;
 use schnellru::{ByLength, LruMap};
 use secp256k1::SecretKey;
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
-    net::IpAddr,
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
@@ -390,13 +389,8 @@ pub enum DnsDiscoveryEvent {
 
 /// Converts an [Enr] into a [`NodeRecord`]
 fn convert_enr_node_record(enr: &Enr<SecretKey>) -> Option<DnsNodeRecordUpdate> {
-    let node_record = NodeRecord {
-        address: enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from))?,
-        tcp_port: enr.tcp4().or_else(|| enr.tcp6())?,
-        udp_port: enr.udp4().or_else(|| enr.udp6())?,
-        id: pk2id(&enr.public_key()),
-    }
-    .into_ipv4_mapped();
+    // DNS discovery yields RLPx dial targets, so records without a tcp endpoint are skipped.
+    let node_record = NodeRecord::try_from(enr).ok().filter(NodeRecord::has_rlpx_endpoint)?;
 
     let fork_id =
         enr.get_decodable::<EnrForkIdEntry>(b"eth").transpose().ok().flatten().map(Into::into);
@@ -416,7 +410,10 @@ mod tests {
     use reth_chainspec::MAINNET;
     use reth_ethereum_forks::{EthereumHardfork, ForkHash};
     use secp256k1::rand::thread_rng;
-    use std::{future::poll_fn, net::Ipv4Addr};
+    use std::{
+        future::poll_fn,
+        net::{IpAddr, Ipv4Addr},
+    };
 
     fn entry_hash(entry_txt: &str) -> String {
         BASE32_NOPAD.encode(&keccak256(entry_txt.as_bytes()).as_slice()[..16])

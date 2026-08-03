@@ -103,6 +103,8 @@ pub struct HeaderDownloaderMetrics {
     pub total_flushed: Counter,
     /// Number of items that were successfully downloaded
     pub total_downloaded: Counter,
+    /// Number of responses that contained fewer headers than requested
+    pub partial_responses: Counter,
     /// The number of requests (can contain more than 1 item) currently in-flight.
     pub in_flight_requests: Gauge,
     /// The number of responses (can contain more than 1 item) in the internal buffer of the
