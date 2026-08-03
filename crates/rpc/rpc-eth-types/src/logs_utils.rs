@@ -2,7 +2,7 @@
 //!
 //! Log parsing for building filter.
 
-use alloy_consensus::{transaction::TxHashRef, TxReceipt};
+use alloy_consensus::{transaction::TxHashRef, BlockHeader, TxReceipt};
 use alloy_eips::BlockNumHash;
 use alloy_primitives::TxHash;
 use alloy_rpc_types_eth::{Filter, Log};
@@ -10,7 +10,7 @@ use jsonrpsee_types::ErrorObject;
 use reth_chainspec::ChainInfo;
 use reth_errors::ProviderError;
 use reth_primitives_traits::{
-    BlockBody, NodePrimitives, RecoveredBlock, SealedBlock, SignedTransaction,
+    BlockBody, NodePrimitives, RecoveredBlock, SealedHeaderFor, SignedTransaction,
 };
 use reth_rpc_convert::{RpcConvert, RpcLog};
 use reth_storage_api::{BlockReader, ProviderBlock};
@@ -71,22 +71,21 @@ pub enum ProviderOrBlock<'a, P: BlockReader> {
 
 /// Appends all matching and converted logs of a block's receipts.
 /// If the log matches, look up the corresponding transaction hash.
-#[expect(clippy::too_many_arguments)]
 pub fn append_matching_block_logs<P, C, E>(
     all_logs: &mut Vec<RpcLog<C::Network>>,
     converter: &C,
     provider_or_block: ProviderOrBlock<'_, P>,
     filter: &Filter,
-    block_num_hash: BlockNumHash,
+    header: &SealedHeaderFor<C::Primitives>,
     receipts: &[P::Receipt],
     removed: bool,
-    block_timestamp: u64,
 ) -> Result<(), E>
 where
     P: BlockReader<Transaction: SignedTransaction>,
     C: RpcConvert<Primitives: NodePrimitives<Block = ProviderBlock<P>>>,
     E: From<ProviderError> + From<ErrorObject<'static>>,
 {
+    let block_num_hash = header.num_hash();
     if !filter.matches_block(&block_num_hash) {
         return Ok(());
     }
@@ -150,7 +149,7 @@ where
                     transaction_index: Some(receipt_idx as u64),
                     log_index: Some(log_index),
                     removed,
-                    block_timestamp: Some(block_timestamp),
+                    block_timestamp: Some(header.timestamp()),
                 };
                 matching_logs.push(log);
             }
@@ -162,21 +161,7 @@ where
         return Ok(())
     }
 
-    let converted_logs = match provider_or_block {
-        ProviderOrBlock::Block(block) => {
-            converter.convert_logs(matching_logs, block.sealed_block())
-        }
-        ProviderOrBlock::Provider(provider) => {
-            let block = provider
-                .block_by_hash(block_num_hash.hash)?
-                .ok_or(ProviderError::BlockBodyIndicesNotFound(block_num_hash.number))?;
-            converter.convert_logs(
-                matching_logs,
-                &SealedBlock::new_unchecked(block, block_num_hash.hash),
-            )
-        }
-    }
-    .map_err(Into::into)?;
+    let converted_logs = converter.convert_logs(matching_logs, header).map_err(Into::into)?;
     all_logs.extend(converted_logs);
 
     Ok(())

@@ -4,7 +4,7 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Sealable, TxHash};
 use alloy_rpc_types_eth::{
-    BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, PendingTransactionFilterKind,
+    Filter, FilterBlockOption, FilterChanges, FilterId, PendingTransactionFilterKind,
 };
 use async_trait::async_trait;
 use futures::{
@@ -492,24 +492,21 @@ where
                     return Err(ProviderError::HeaderNotFound(block_hash.into()).into())
                 };
 
-                // Read number and timestamp from cached block or provider header
-                let (block_number, block_timestamp) = if let Some(block) = &maybe_block {
-                    (block.header().number(), block.header().timestamp())
+                let header = if let Some(block) = &maybe_block {
+                    block.clone_sealed_header()
                 } else {
                     let header = self
                         .provider()
                         .header_by_hash_or_number(block_hash.into())?
                         .ok_or_else(|| ProviderError::HeaderNotFound(block_hash.into()))?;
-                    (header.number(), header.timestamp())
+                    SealedHeader::new(header, block_hash)
                 };
 
                 // Check if the block has been pruned (EIP-4444)
                 let earliest_block = self.provider().earliest_block_number()?;
-                if block_number < earliest_block {
+                if header.number() < earliest_block {
                     return Err(EthApiError::PrunedHistoryUnavailable.into());
                 }
-
-                let block_num_hash = BlockNumHash::new(block_number, block_hash);
 
                 let mut all_logs = Vec::new();
                 append_matching_block_logs::<_, _, EthFilterError>(
@@ -519,10 +516,9 @@ where
                         .map(ProviderOrBlock::Block)
                         .unwrap_or_else(|| ProviderOrBlock::Provider(self.provider())),
                     &filter,
-                    block_num_hash,
+                    &header,
                     &receipts,
                     false,
-                    block_timestamp,
                 )?;
                 Ok(all_logs)
             }
@@ -547,17 +543,15 @@ where
                         if pending_block.block.number() > info.best_number {
                             // only consider the pending block if it is ahead of the chain
                             let mut all_logs = Vec::new();
-                            let timestamp = pending_block.block.timestamp();
-                            let block_num_hash = pending_block.block.num_hash();
+                            let header = pending_block.block.clone_sealed_header();
                             append_matching_block_logs::<_, _, EthFilterError>(
                                 &mut all_logs,
                                 self.eth_api.converter(),
                                 ProviderOrBlock::<Eth::Provider>::Block(pending_block.block),
                                 &filter,
-                                block_num_hash,
+                                &header,
                                 &pending_block.receipts,
                                 false, // removed = false for pending blocks
-                                timestamp,
                             )?;
                             return Ok(all_logs)
                         }
@@ -740,10 +734,9 @@ where
                     .map(ProviderOrBlock::Block)
                     .unwrap_or_else(|| ProviderOrBlock::Provider(self.provider())),
                 filter,
-                num_hash,
+                &header,
                 &receipts,
                 false,
-                header.timestamp(),
             )?;
 
             // size check but only if range is multiple blocks, so we always return all

@@ -44,7 +44,7 @@ pub trait EthSubscriptions:
                         .map(|(tx, receipt)| (*tx.tx_hash(), receipt)),
                     removed,
                 );
-                let result = converter.convert_logs(logs, block.sealed_block());
+                let result = converter.convert_logs(logs, block.sealed_header());
                 match result {
                     Ok(logs) => all_logs.extend(logs),
                     Err(err) => {

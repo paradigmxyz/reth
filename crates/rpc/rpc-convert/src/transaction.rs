@@ -48,7 +48,7 @@ pub trait ReceiptConverter<N: NodePrimitives>: Debug + 'static {
     fn convert_logs(
         &self,
         logs: Vec<Log>,
-        block: &SealedBlock<N::Block>,
+        header: &SealedHeaderFor<N>,
     ) -> Result<Vec<Self::RpcLog>, Self::Error>;
 
     /// Converts primitive receipts from `block` to RPC representations.
@@ -169,7 +169,7 @@ pub trait RpcConvert: Send + Sync + Unpin + Debug + DynClone + 'static {
     fn convert_logs(
         &self,
         logs: Vec<Log>,
-        block: &SealedBlock<BlockTy<Self::Primitives>>,
+        header: &SealedHeaderFor<Self::Primitives>,
     ) -> Result<Vec<RpcLog<Self::Network>>, Self::Error>;
 
     /// Converts primitive receipts from `block` to RPC representations.
@@ -739,9 +739,9 @@ where
     fn convert_logs(
         &self,
         logs: Vec<Log>,
-        block: &SealedBlock<BlockTy<Self::Primitives>>,
+        header: &SealedHeaderFor<Self::Primitives>,
     ) -> Result<Vec<RpcLog<Self::Network>>, Self::Error> {
-        self.receipt_converter.convert_logs(logs, block)
+        self.receipt_converter.convert_logs(logs, header)
     }
 
     fn convert_receipts(
