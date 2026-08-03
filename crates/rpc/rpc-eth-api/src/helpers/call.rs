@@ -203,9 +203,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     };
 
                     let (result, results) = if trace_transfers {
-                        // prepare inspector to capture transfer inside the evm so they are recorded
-                        // and included in logs
-                        let inspector = TransferInspector::new(false).with_logs(true);
+                        // Collect transfer operations without inserting synthetic logs into the
+                        // journal; they are appended only to the RPC simulation result below.
+                        let inspector = TransferInspector::new(false);
                         let evm = this
                             .evm_config()
                             .evm_with_env_and_inspector(&mut db, evm_env, inspector);
@@ -227,6 +227,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             chain_id,
                             this.compute_state_root_for_eth_simulate(),
                             this.converter(),
+                            true,
                         )
                         .map_err(map_err)?
                     } else {
@@ -249,6 +250,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             chain_id,
                             this.compute_state_root_for_eth_simulate(),
                             this.converter(),
+                            false,
                         )
                         .map_err(map_err)?
                     };
