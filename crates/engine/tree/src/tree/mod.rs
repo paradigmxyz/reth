@@ -681,12 +681,18 @@ where
         }
     }
 
-    /// Blocks until the next event is ready: either an incoming engine message or a persistence
-    /// completion (if one is in progress).
+    /// Blocks until the next event that can safely be processed is ready.
     ///
-    /// Uses biased selection to prioritize persistence completion to update in-memory state and
-    /// unblock further writes.
+    /// A pending persisted handoff only accepts the notification that all active payload builds
+    /// have finished. This keeps queued engine messages from starting replacement payload jobs
+    /// before the handoff can reclaim the in-memory overlay. Otherwise, uses biased selection to
+    /// prioritize persistence completion to update in-memory state and unblock further writes.
     fn wait_for_event(&mut self) -> LoopEvent<T, N> {
+        if self.pending_persisted_handoff.is_some() {
+            self.metrics.engine.backpressure_active.set(0.0);
+            return self.wait_for_payload_build_finished();
+        }
+
         // Take ownership of persistence rx if present
         let maybe_persistence = self.persistence_state.rx.take();
 
@@ -733,6 +739,14 @@ where
                     Err(_) => LoopEvent::Disconnected,
                 },
             }
+        }
+    }
+
+    /// Blocks until the final active payload build completes.
+    fn wait_for_payload_build_finished(&self) -> LoopEvent<T, N> {
+        match self.payload_build_finished.recv() {
+            Ok(()) => LoopEvent::PayloadBuildFinished,
+            Err(_) => LoopEvent::Disconnected,
         }
     }
 

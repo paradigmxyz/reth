@@ -708,6 +708,64 @@ fn persistence_handoff_waits_for_active_payload_jobs() {
 }
 
 #[test]
+fn pending_persisted_handoff_blocks_engine_messages_until_payload_build_finishes() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
+    let mut test_harness = TestHarness::with_config(
+        MAINNET.clone(),
+        TreeConfig::default().with_has_enough_parallelism(true),
+    )
+    .with_blocks(blocks.clone());
+    let persisted = blocks[0].recovered_block().num_hash();
+    let payload_build = test_harness.tree.payload_builds.acquire();
+
+    test_harness
+        .tree
+        .on_persistence_complete(
+            PersistenceResult {
+                last_block: persisted,
+                last_state_trie_block: persisted,
+                commit_duration: Some(Duration::ZERO),
+            },
+            Instant::now(),
+        )
+        .unwrap();
+    assert!(test_harness.tree.pending_persisted_handoff.is_some());
+
+    // Forkchoice updates received while the handoff is pending could start replacement payload
+    // builds and keep the final completion notification from reaching the tree. Queue a generic
+    // engine message to prove the gate leaves every message upstream until then.
+    test_harness.to_tree_tx.send(FromEngine::Event(FromOrchestrator::BackfillSyncStarted)).unwrap();
+
+    let (started_tx, started_rx) = std::sync::mpsc::sync_channel(0);
+    let (event_tx, event_rx) = std::sync::mpsc::sync_channel(1);
+    std::thread::scope(|scope| {
+        let tree = &mut test_harness.tree;
+        scope.spawn(move || {
+            started_tx.send(()).unwrap();
+            event_tx
+                .send(matches!(tree.wait_for_event(), super::LoopEvent::PayloadBuildFinished))
+                .unwrap();
+        });
+
+        started_rx.recv().unwrap();
+        assert!(
+            event_rx.recv_timeout(Duration::from_millis(100)).is_err(),
+            "a pending handoff must prevent queued engine messages from being processed"
+        );
+
+        drop(payload_build);
+        assert_eq!(event_rx.recv_timeout(Duration::from_secs(1)), Ok(true));
+    });
+
+    test_harness.tree.on_payload_build_finished().unwrap();
+    assert!(test_harness.tree.pending_persisted_handoff.is_none());
+    assert_matches!(
+        test_harness.tree.wait_for_event(),
+        super::LoopEvent::EngineMessage(FromEngine::Event(FromOrchestrator::BackfillSyncStarted))
+    );
+}
+
+#[test]
 fn persist_until_complete_updates_frontiers_without_in_memory_handoff() {
     let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
     let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
