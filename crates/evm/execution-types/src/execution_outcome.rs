@@ -1,5 +1,5 @@
 use crate::{BlockExecutionOutput, BlockExecutionResult};
-use alloc::{vec, vec::Vec};
+use alloc::{sync::Arc, vec, vec::Vec};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{
     logs_bloom,
@@ -44,15 +44,20 @@ impl ChangedAccount {
 ///
 /// The `ExecutionOutcome` structure aggregates the state changes over an arbitrary number of
 /// blocks, capturing the resulting state, receipts, and requests following the execution.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(bound(serialize = "T: serde::Serialize", deserialize = "T: serde::Deserialize<'de>"))
+)]
 pub struct ExecutionOutcome<T = reth_ethereum_primitives::Receipt> {
     /// Bundle state with reverts.
     pub bundle: BundleState,
     /// The collection of receipts.
     /// Outer vector stores receipts for each block sequentially.
     /// The inner vector stores receipts ordered by transaction number.
-    pub receipts: Vec<Vec<T>>,
+    #[cfg_attr(feature = "serde", serde(with = "serde_receipts"))]
+    pub receipts: Vec<Arc<Vec<T>>>,
     /// First block of bundle state.
     pub first_block: BlockNumber,
     /// The collection of EIP-7685 requests.
@@ -62,6 +67,17 @@ pub struct ExecutionOutcome<T = reth_ethereum_primitives::Receipt> {
     /// A transaction may have zero or more requests, so the length of the inner vector is not
     /// guaranteed to be the same as the number of transactions.
     pub requests: Vec<Requests>,
+}
+
+impl<T> Clone for ExecutionOutcome<T> {
+    fn clone(&self) -> Self {
+        Self {
+            bundle: self.bundle.clone(),
+            receipts: self.receipts.clone(),
+            first_block: self.first_block,
+            requests: self.requests.clone(),
+        }
+    }
 }
 
 impl<T> Default for ExecutionOutcome<T> {
@@ -75,6 +91,64 @@ impl<T> Default for ExecutionOutcome<T> {
     }
 }
 
+#[cfg(feature = "serde")]
+mod serde_receipts {
+    use alloc::{sync::Arc, vec::Vec};
+    use core::{fmt, marker::PhantomData};
+    use serde::{
+        de::{Deserialize, SeqAccess, Visitor},
+        ser::{Serialize, SerializeSeq},
+        Deserializer, Serializer,
+    };
+
+    pub(super) fn serialize<T, S>(
+        receipts: &Vec<Arc<Vec<T>>>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        T: Serialize,
+        S: Serializer,
+    {
+        let mut seq = serializer.serialize_seq(Some(receipts.len()))?;
+        for block_receipts in receipts {
+            seq.serialize_element(block_receipts.as_ref())?;
+        }
+        seq.end()
+    }
+
+    pub(super) fn deserialize<'de, T, D>(deserializer: D) -> Result<Vec<Arc<Vec<T>>>, D::Error>
+    where
+        T: Deserialize<'de>,
+        D: Deserializer<'de>,
+    {
+        struct ReceiptsVisitor<T>(PhantomData<T>);
+
+        impl<'de, T> Visitor<'de> for ReceiptsVisitor<T>
+        where
+            T: Deserialize<'de>,
+        {
+            type Value = Vec<Arc<Vec<T>>>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a sequence of block receipt sequences")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let mut receipts = Vec::with_capacity(seq.size_hint().unwrap_or_default());
+                while let Some(block_receipts) = seq.next_element::<Vec<T>>()? {
+                    receipts.push(Arc::new(block_receipts));
+                }
+                Ok(receipts)
+            }
+        }
+
+        deserializer.deserialize_seq(ReceiptsVisitor(PhantomData))
+    }
+}
+
 impl<T> ExecutionOutcome<T> {
     /// Creates a new `ExecutionOutcome`.
     ///
@@ -82,7 +156,7 @@ impl<T> ExecutionOutcome<T> {
     /// bundle state, receipts, first block number, and EIP-7685 requests.
     pub const fn new(
         bundle: BundleState,
-        receipts: Vec<Vec<T>>,
+        receipts: Vec<Arc<Vec<T>>>,
         first_block: BlockNumber,
         requests: Vec<Requests>,
     ) -> Self {
@@ -97,7 +171,7 @@ impl<T> ExecutionOutcome<T> {
         state_init: BundleStateInit,
         revert_init: RevertsInit,
         contracts_init: impl IntoIterator<Item = (B256, Bytecode)>,
-        receipts: Vec<Vec<T>>,
+        receipts: Vec<Arc<Vec<T>>>,
         first_block: BlockNumber,
         requests: Vec<Requests>,
     ) -> Self {
@@ -135,7 +209,7 @@ impl<T> ExecutionOutcome<T> {
     pub fn single(block_number: u64, output: BlockExecutionOutput<T>) -> Self {
         Self {
             bundle: output.state,
-            receipts: vec![output.result.receipts],
+            receipts: vec![Arc::new(output.result.receipts)],
             first_block: block_number,
             requests: vec![output.result.requests],
         }
@@ -154,7 +228,7 @@ impl<T> ExecutionOutcome<T> {
             requests: Vec::with_capacity(results.len()),
         };
         for result in results {
-            value.receipts.push(result.receipts);
+            value.receipts.push(Arc::new(result.receipts));
             value.requests.push(result.requests);
         }
         value
@@ -233,23 +307,23 @@ impl<T> ExecutionOutcome<T> {
         block_number: BlockNumber,
         f: impl FnOnce(&[T]) -> B256,
     ) -> Option<B256> {
-        Some(f(self.receipts.get(self.block_number_to_index(block_number)?)?))
+        Some(f(self.receipts.get(self.block_number_to_index(block_number)?)?.as_slice()))
     }
 
     /// Returns reference to receipts.
-    pub const fn receipts(&self) -> &Vec<Vec<T>> {
+    pub const fn receipts(&self) -> &Vec<Arc<Vec<T>>> {
         &self.receipts
     }
 
     /// Returns mutable reference to receipts.
-    pub const fn receipts_mut(&mut self) -> &mut Vec<Vec<T>> {
+    pub const fn receipts_mut(&mut self) -> &mut Vec<Arc<Vec<T>>> {
         &mut self.receipts
     }
 
     /// Return all block receipts
     pub fn receipts_by_block(&self, block_number: BlockNumber) -> &[T] {
         let Some(index) = self.block_number_to_index(block_number) else { return &[] };
-        &self.receipts[index]
+        self.receipts[index].as_slice()
     }
 
     /// Returns an iterator over receipt slices, one per block.
@@ -312,10 +386,7 @@ impl<T> ExecutionOutcome<T> {
     /// # Panics
     ///
     /// If the target block number is not included in the state block range.
-    pub fn split_at(self, at: BlockNumber) -> (Option<Self>, Self)
-    where
-        T: Clone,
-    {
+    pub fn split_at(self, at: BlockNumber) -> (Option<Self>, Self) {
         if at == self.first_block {
             return (None, self)
         }
@@ -367,7 +438,7 @@ impl<T> ExecutionOutcome<T> {
     }
 
     /// Create a new instance with updated receipts.
-    pub fn with_receipts(mut self, receipts: Vec<Vec<T>>) -> Self {
+    pub fn with_receipts(mut self, receipts: Vec<Arc<Vec<T>>>) -> Self {
         self.receipts = receipts;
         self
     }
@@ -424,7 +495,7 @@ impl<T> From<(BlockExecutionOutput<T>, BlockNumber)> for ExecutionOutcome<T> {
 
 #[cfg(feature = "serde-bincode-compat")]
 pub(super) mod serde_bincode_compat {
-    use alloc::{borrow::Cow, vec::Vec};
+    use alloc::{borrow::Cow, sync::Arc, vec::Vec};
     use alloy_eips::eip7685::Requests;
     use alloy_primitives::{BlockNumber, Bytes};
     use reth_primitives_traits::Receipt;
@@ -487,12 +558,14 @@ pub(super) mod serde_bincode_compat {
                     .receipts
                     .into_iter()
                     .map(|vec| {
-                        vec.into_iter()
-                            .map(|rlp| {
-                                T::decode(&mut rlp.as_ref())
-                                    .expect("invalid RLP for receipt in serde_bincode_compat")
-                            })
-                            .collect()
+                        Arc::new(
+                            vec.into_iter()
+                                .map(|rlp| {
+                                    T::decode(&mut rlp.as_ref())
+                                        .expect("invalid RLP for receipt in serde_bincode_compat")
+                                })
+                                .collect(),
+                        )
                     })
                     .collect(),
                 first_block: value.first_block,
@@ -579,12 +652,12 @@ mod tests {
         );
 
         // Create a Receipts object with a vector of receipt vectors
-        let receipts = vec![vec![Some(reth_ethereum_primitives::Receipt {
+        let receipts = vec![Arc::new(vec![Some(reth_ethereum_primitives::Receipt {
             tx_type: TxType::Legacy,
             cumulative_gas_used: 46913,
             logs: vec![],
             success: true,
-        })]];
+        })])];
 
         // Create a Requests object with a vector of requests
         let requests = vec![Requests::new(vec![bytes!("dead"), bytes!("beef"), bytes!("beebee")])];
@@ -638,12 +711,12 @@ mod tests {
     #[test]
     fn test_block_number_to_index() {
         // Create a Receipts object with a vector of receipt vectors
-        let receipts = vec![vec![Some(reth_ethereum_primitives::Receipt {
+        let receipts = vec![Arc::new(vec![Some(reth_ethereum_primitives::Receipt {
             tx_type: TxType::Legacy,
             cumulative_gas_used: 46913,
             logs: vec![],
             success: true,
-        })]];
+        })])];
 
         // Define the first block number
         let first_block = 123;
@@ -670,12 +743,12 @@ mod tests {
     #[test]
     fn test_get_logs() {
         // Create a Receipts object with a vector of receipt vectors
-        let receipts = vec![vec![reth_ethereum_primitives::Receipt {
+        let receipts = vec![Arc::new(vec![reth_ethereum_primitives::Receipt {
             tx_type: TxType::Legacy,
             cumulative_gas_used: 46913,
             logs: vec![Log::<LogData>::default()],
             success: true,
-        }]];
+        }])];
 
         // Define the first block number
         let first_block = 123;
@@ -699,12 +772,12 @@ mod tests {
     #[test]
     fn test_receipts_by_block() {
         // Create a Receipts object with a vector of receipt vectors
-        let receipts = vec![vec![Some(reth_ethereum_primitives::Receipt {
+        let receipts = vec![Arc::new(vec![Some(reth_ethereum_primitives::Receipt {
             tx_type: TxType::Legacy,
             cumulative_gas_used: 46913,
             logs: vec![Log::<LogData>::default()],
             success: true,
-        })]];
+        })])];
 
         // Define the first block number
         let first_block = 123;
@@ -736,12 +809,12 @@ mod tests {
     #[test]
     fn test_receipts_len() {
         // Create a Receipts object with a vector of receipt vectors
-        let receipts = vec![vec![Some(reth_ethereum_primitives::Receipt {
+        let receipts = vec![Arc::new(vec![Some(reth_ethereum_primitives::Receipt {
             tx_type: TxType::Legacy,
             cumulative_gas_used: 46913,
             logs: vec![Log::<LogData>::default()],
             success: true,
-        })]];
+        })])];
 
         // Create an empty Receipts object
         let receipts_empty = vec![];
@@ -790,7 +863,8 @@ mod tests {
         };
 
         // Create a Receipts object with a vector of receipt vectors
-        let receipts = vec![vec![Some(receipt.clone())], vec![Some(receipt.clone())]];
+        let receipts =
+            vec![Arc::new(vec![Some(receipt.clone())]), Arc::new(vec![Some(receipt.clone())])];
 
         // Define the first block number
         let first_block = 123;
@@ -811,7 +885,7 @@ mod tests {
         assert!(exec_res.revert_to(123));
 
         // Assert that the receipts are properly cut after reverting to the initial block number.
-        assert_eq!(exec_res.receipts, vec![vec![Some(receipt)]]);
+        assert_eq!(exec_res.receipts, vec![Arc::new(vec![Some(receipt)])]);
 
         // Assert that the requests are properly cut after reverting to the initial block number.
         assert_eq!(exec_res.requests, vec![Requests::new(vec![request])]);
@@ -836,7 +910,7 @@ mod tests {
         };
 
         // Create a Receipts object containing the receipt.
-        let receipts = vec![vec![Some(receipt.clone())]];
+        let receipts = vec![Arc::new(vec![Some(receipt.clone())])];
 
         // Create a request.
         let request = bytes!("deadbeef");
@@ -859,7 +933,10 @@ mod tests {
             exec_res,
             ExecutionOutcome {
                 bundle: Default::default(),
-                receipts: vec![vec![Some(receipt.clone())], vec![Some(receipt)]],
+                receipts: vec![
+                    Arc::new(vec![Some(receipt.clone())]),
+                    Arc::new(vec![Some(receipt)])
+                ],
                 requests: vec![Requests::new(vec![request.clone()]), Requests::new(vec![request])],
                 first_block: 123,
             }
@@ -878,9 +955,9 @@ mod tests {
 
         // Create a Receipts object with a vector of receipt vectors
         let receipts = vec![
-            vec![Some(receipt.clone())],
-            vec![Some(receipt.clone())],
-            vec![Some(receipt.clone())],
+            Arc::new(vec![Some(receipt.clone())]),
+            Arc::new(vec![Some(receipt.clone())]),
+            Arc::new(vec![Some(receipt.clone())]),
         ];
 
         // Define the first block number
@@ -907,7 +984,7 @@ mod tests {
         // Define the expected lower ExecutionOutcome after splitting
         let lower_execution_outcome = ExecutionOutcome {
             bundle: Default::default(),
-            receipts: vec![vec![Some(receipt.clone())]],
+            receipts: vec![Arc::new(vec![Some(receipt.clone())])],
             requests: vec![Requests::new(vec![request.clone()])],
             first_block,
         };
@@ -915,7 +992,7 @@ mod tests {
         // Define the expected higher ExecutionOutcome after splitting
         let higher_execution_outcome = ExecutionOutcome {
             bundle: Default::default(),
-            receipts: vec![vec![Some(receipt.clone())], vec![Some(receipt)]],
+            receipts: vec![Arc::new(vec![Some(receipt.clone())]), Arc::new(vec![Some(receipt)])],
             requests: vec![Requests::new(vec![request.clone()]), Requests::new(vec![request])],
             first_block: 124,
         };

@@ -27,7 +27,7 @@ pub(crate) fn to_execution_outcome(
 ) -> ExecutionOutcome {
     ExecutionOutcome {
         bundle: block_execution_output.state.clone(),
-        receipts: vec![block_execution_output.receipts.clone()],
+        receipts: vec![Arc::new(block_execution_output.receipts.clone())],
         first_block: block_number,
         requests: vec![block_execution_output.requests.clone()],
     }

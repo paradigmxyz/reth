@@ -410,9 +410,9 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         self.signer_execute_account_info.nonce = final_nonce;
 
         let execution_outcome =
-            ExecutionOutcome::new(bundle_state, vec![vec![]], block.number, Vec::new());
+            ExecutionOutcome::new(bundle_state, vec![Arc::new(vec![])], block.number, Vec::new());
 
-        execution_outcome.with_receipts(vec![receipts])
+        execution_outcome.with_receipts(vec![Arc::new(receipts)])
     }
 }
 

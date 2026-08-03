@@ -1765,7 +1765,8 @@ impl<Tx: DbTx + 'static, N: NodeTypesForProvider> StateReader for DatabaseProvid
             state_provider,
         )?;
 
-        let receipts = self.receipts_by_tx_range(from_transaction_num..=to_transaction_num)?;
+        let receipts =
+            Arc::new(self.receipts_by_tx_range(from_transaction_num..=to_transaction_num)?);
 
         Ok(Some(ExecutionOutcome::new_init(
             state,
@@ -3183,7 +3184,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     block_receipts.push(receipts_iter.next().unwrap().1);
                 }
             }
-            receipts.push(block_receipts);
+            receipts.push(Arc::new(block_receipts));
         }
 
         self.remove_receipts_from(from_transaction_num, block)?;
@@ -4167,7 +4168,11 @@ mod tests {
         provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
-                &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
+                &ExecutionOutcome {
+                    first_block: 0,
+                    receipts: vec![Arc::new(vec![])],
+                    ..Default::default()
+                },
                 crate::OriginalValuesKnown::No,
                 StateWriteConfig::default(),
             )
@@ -4200,7 +4205,11 @@ mod tests {
         provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
-                &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
+                &ExecutionOutcome {
+                    first_block: 0,
+                    receipts: vec![Arc::new(vec![])],
+                    ..Default::default()
+                },
                 crate::OriginalValuesKnown::No,
                 StateWriteConfig::default(),
             )
@@ -4237,7 +4246,11 @@ mod tests {
         provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
-                &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
+                &ExecutionOutcome {
+                    first_block: 0,
+                    receipts: vec![Arc::new(vec![])],
+                    ..Default::default()
+                },
                 crate::OriginalValuesKnown::No,
                 StateWriteConfig::default(),
             )
@@ -4275,7 +4288,11 @@ mod tests {
         provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
-                &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
+                &ExecutionOutcome {
+                    first_block: 0,
+                    receipts: vec![Arc::new(vec![])],
+                    ..Default::default()
+                },
                 crate::OriginalValuesKnown::No,
                 StateWriteConfig::default(),
             )
@@ -4345,7 +4362,11 @@ mod tests {
         provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
-                &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
+                &ExecutionOutcome {
+                    first_block: 0,
+                    receipts: vec![Arc::new(vec![])],
+                    ..Default::default()
+                },
                 crate::OriginalValuesKnown::No,
                 StateWriteConfig::default(),
             )
@@ -4932,12 +4953,12 @@ mod tests {
         let write_receipts = |provider_rw: DatabaseProviderRW<_, _>, block: u64| {
             let outcome = ExecutionOutcome {
                 first_block: block,
-                receipts: vec![vec![Receipt {
+                receipts: vec![Arc::new(vec![Receipt {
                     tx_type: Default::default(),
                     success: true,
                     cumulative_gas_used: block, // identifier to assert against
                     logs: vec![],
-                }]],
+                }])],
                 ..Default::default()
             };
             provider_rw
@@ -5067,7 +5088,11 @@ mod tests {
         provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
-                &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
+                &ExecutionOutcome {
+                    first_block: 0,
+                    receipts: vec![Arc::new(vec![])],
+                    ..Default::default()
+                },
                 crate::OriginalValuesKnown::No,
                 StateWriteConfig::default(),
             )
@@ -5193,8 +5218,14 @@ mod tests {
         );
         reverts_init.insert(1, block_reverts);
 
-        let execution_outcome =
-            ExecutionOutcome::new_init(state_init, reverts_init, [], vec![vec![]], 1, vec![]);
+        let execution_outcome = ExecutionOutcome::new_init(
+            state_init,
+            reverts_init,
+            [],
+            vec![Arc::new(vec![])],
+            1,
+            vec![],
+        );
 
         provider_rw
             .write_state(
@@ -5393,7 +5424,8 @@ mod tests {
             .revert_storage(1, address, vec![(slot, U256::ZERO)])
             .build();
 
-        let execution_outcome = ExecutionOutcome::new(bundle.clone(), vec![vec![]], 1, Vec::new());
+        let execution_outcome =
+            ExecutionOutcome::new(bundle.clone(), vec![Arc::new(vec![])], 1, Vec::new());
 
         provider_rw
             .tx
@@ -5807,7 +5839,8 @@ mod tests {
             .revert_storage(1, address, vec![(slot, U256::ZERO)])
             .build();
 
-        let execution_outcome = ExecutionOutcome::new(bundle.clone(), vec![vec![]], 1, Vec::new());
+        let execution_outcome =
+            ExecutionOutcome::new(bundle.clone(), vec![Arc::new(vec![])], 1, Vec::new());
 
         provider_rw
             .write_state(

@@ -14,7 +14,10 @@ use reth_node_types::NodeTypes;
 use reth_primitives_traits::{Account, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_trie::root::{state_root_unhashed, storage_root_unhashed};
 use revm::{database::BundleState, state::AccountInfo};
-use std::{str::FromStr, sync::LazyLock};
+use std::{
+    str::FromStr,
+    sync::{Arc, LazyLock},
+};
 
 /// Assert genesis block
 pub fn assert_genesis_block<DB: Database, N: NodeTypes>(
@@ -202,7 +205,7 @@ fn block1(
             .revert_account_info(number, account2, Some(None))
             .state_storage(account1, HashMap::from_iter([(slot, (U256::ZERO, U256::from(10)))]))
             .build(),
-        vec![vec![Receipt {
+        vec![Arc::new(vec![Receipt {
             tx_type: TxType::Eip2930,
             success: true,
             cumulative_gas_used: 300,
@@ -211,7 +214,7 @@ fn block1(
                 vec![B256::with_last_byte(1), B256::with_last_byte(2)],
                 Bytes::default(),
             )],
-        }]],
+        }])],
         number,
         Vec::new(),
     );
@@ -256,7 +259,7 @@ fn block2(
             )
             .revert_storage(number, account, Vec::from([(slot, U256::from(10))]))
             .build(),
-        vec![vec![Receipt {
+        vec![Arc::new(vec![Receipt {
             tx_type: TxType::Eip1559,
             success: false,
             cumulative_gas_used: 400,
@@ -265,7 +268,7 @@ fn block2(
                 vec![B256::with_last_byte(3), B256::with_last_byte(4)],
                 Bytes::default(),
             )],
-        }]],
+        }])],
         number,
         Vec::new(),
     );
@@ -319,7 +322,7 @@ fn block3(
     }
     let execution_outcome = ExecutionOutcome::new(
         bundle_state_builder.build(),
-        vec![vec![Receipt {
+        vec![Arc::new(vec![Receipt {
             tx_type: TxType::Eip1559,
             success: true,
             cumulative_gas_used: 400,
@@ -328,7 +331,7 @@ fn block3(
                 vec![B256::with_last_byte(3), B256::with_last_byte(4)],
                 Bytes::default(),
             )],
-        }]],
+        }])],
         number,
         Vec::new(),
     );
@@ -402,7 +405,7 @@ fn block4(
     }
     let execution_outcome = ExecutionOutcome::new(
         bundle_state_builder.build(),
-        vec![vec![Receipt {
+        vec![Arc::new(vec![Receipt {
             tx_type: TxType::Eip1559,
             success: true,
             cumulative_gas_used: 400,
@@ -411,7 +414,7 @@ fn block4(
                 vec![B256::with_last_byte(3), B256::with_last_byte(4)],
                 Bytes::default(),
             )],
-        }]],
+        }])],
         number,
         Vec::new(),
     );
@@ -482,7 +485,7 @@ fn block5(
     }
     let execution_outcome = ExecutionOutcome::new(
         bundle_state_builder.build(),
-        vec![vec![Receipt {
+        vec![Arc::new(vec![Receipt {
             tx_type: TxType::Eip1559,
             success: true,
             cumulative_gas_used: 400,
@@ -491,7 +494,7 @@ fn block5(
                 vec![B256::with_last_byte(3), B256::with_last_byte(4)],
                 Bytes::default(),
             )],
-        }]],
+        }])],
         number,
         Vec::new(),
     );
