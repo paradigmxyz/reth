@@ -402,17 +402,17 @@ impl<N: NodePrimitives> OverlayManager<N> {
         Self::anchor_for_parent_in(self.blocks.as_ref(), parent_hash, preferred_anchor)
     }
 
-    /// Returns the in-memory parent chain from newest to oldest and its first missing parent.
-    pub(crate) fn blocks_for_parent(&self, parent_hash: B256) -> (B256, Vec<ExecutedBlock<N>>) {
-        let mut historical = parent_hash;
+    /// Returns the in-memory parent chain from newest to oldest.
+    pub(crate) fn blocks_for_parent(&self, parent_hash: B256) -> Vec<ExecutedBlock<N>> {
+        let mut hash = parent_hash;
         let mut blocks = Vec::new();
 
-        while let Some(block) = self.blocks.get(&historical) {
-            historical = block.recovered_block().parent_hash();
+        while let Some(block) = self.blocks.get(&hash) {
+            hash = block.recovered_block().parent_hash();
             blocks.push(block.clone());
         }
 
-        (historical, blocks)
+        blocks
     }
 
     /// Returns true if `hash` is in the parent chain segment from `anchor_hash` inclusive to

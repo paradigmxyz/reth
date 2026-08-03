@@ -158,7 +158,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         let in_memory = state.chain().map(|block_state| block_state.block()).collect();
         let database_provider = self.database.database_provider_ro()?;
         let (anchor_hash, in_memory) =
-            get_anchored_overlay(&database_provider, state.anchor().hash, in_memory)?;
+            get_anchored_overlay(&database_provider, state.hash(), in_memory)?;
         let historical = self.database.history_by_block_hash(anchor_hash)?;
         Ok(MemoryOverlayStateProvider::new(historical, in_memory))
     }

@@ -236,7 +236,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     ) -> ProviderResult<MemoryOverlayStateProviderRef<'_, N::Primitives>> {
         let in_memory = state.chain().map(|block_state| block_state.block()).collect();
         let (anchor_hash, in_memory) =
-            get_anchored_overlay(&self.storage_provider, state.anchor().hash, in_memory)?;
+            get_anchored_overlay(&self.storage_provider, state.hash(), in_memory)?;
 
         // The selected anchor can be a retained block that also exists in the database. Looking
         // it up through this consistent view would resolve the same in-memory chain again.
@@ -448,7 +448,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         {
             let in_memory = block_state.chain().map(|block_state| block_state.block()).collect();
             let (anchor_hash, in_memory) =
-                get_anchored_overlay(&storage_provider, block_state.anchor().hash, in_memory)?;
+                get_anchored_overlay(&storage_provider, block_hash, in_memory)?;
             let block_number = storage_provider
                 .block_number(anchor_hash)?
                 .ok_or(ProviderError::BlockHashNotFound(anchor_hash))?;

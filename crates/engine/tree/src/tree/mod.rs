@@ -108,21 +108,21 @@ const CHANGESET_CACHE_RETENTION_BLOCKS: u64 = 64;
 pub struct StateProviderBuilder<N: NodePrimitives, P> {
     /// The provider factory used to create providers.
     provider_factory: P,
-    /// The historical block hash to fetch state from.
-    historical: B256,
-    /// The blocks that form the chain from historical to target and are in memory.
+    /// Hash of the post-state to build.
+    parent_hash: B256,
+    /// In-memory blocks that may be required to build the parent state.
     overlay: Option<Vec<ExecutedBlock<N>>>,
 }
 
 impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
-    /// Creates a new state provider from the provider factory, historical block hash and optional
+    /// Creates a new state provider from the provider factory, post-state hash, and optional
     /// overlaid blocks.
     pub const fn new(
         provider_factory: P,
-        historical: B256,
+        parent_hash: B256,
         overlay: Option<Vec<ExecutedBlock<N>>>,
     ) -> Self {
-        Self { provider_factory, historical, overlay }
+        Self { provider_factory, parent_hash, overlay }
     }
 }
 
@@ -134,12 +134,12 @@ where
     /// Creates a new state provider from this builder.
     pub fn build(&self) -> ProviderResult<StateProviderBox> {
         let Some(overlay) = self.overlay.clone() else {
-            return self.provider_factory.state_by_block_hash(self.historical)
+            return self.provider_factory.state_by_block_hash(self.parent_hash)
         };
 
         let database_provider = self.provider_factory.database_provider_ro()?;
         let (historical, overlay) =
-            get_anchored_overlay(&database_provider, self.historical, overlay)?;
+            get_anchored_overlay(&database_provider, self.parent_hash, overlay)?;
         let provider = self.provider_factory.state_by_block_hash(historical)?;
         Ok(Box::new(MemoryOverlayStateProvider::new(provider, overlay)))
     }
@@ -3419,11 +3419,7 @@ where
         if let Some((historical, blocks)) = self.state.tree_state.blocks_by_hash(hash) {
             debug!(target: "engine::tree", %hash, %historical, "found canonical state for block in memory, creating provider builder");
             // the block leads back to the canonical chain
-            return Ok(Some(StateProviderBuilder::new(
-                self.provider.clone(),
-                historical,
-                Some(blocks),
-            )))
+            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, Some(blocks))))
         }
 
         // Check if the block is persisted
