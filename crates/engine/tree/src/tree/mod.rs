@@ -367,7 +367,7 @@ where
     payload_build_finished: Receiver<()>,
     /// A durable persistence completion whose destructive in-memory handoff is deferred until
     /// payload jobs finish.
-    pending_persisted_handoff: Option<PersistedHandoff>,
+    pending_persisted_handoff: Option<PersistenceResult>,
     /// Task runtime for spawning blocking work on named, reusable threads.
     runtime: reth_tasks::Runtime,
 }
@@ -1589,49 +1589,47 @@ where
         &mut self,
         result: PersistenceResult,
         start_time: Instant,
-    ) -> PersistedHandoff {
+    ) -> PersistenceResult {
         self.metrics.engine.persistence_duration.record(start_time.elapsed());
 
-        let commit_duration = result.commit_duration;
-        let last_persisted_block = result.last_block;
-        let last_state_trie_persisted_block = result.last_state_trie_block;
+        let last_block = result.last_block;
+        let last_state_trie_block = result.last_state_trie_block;
         debug_assert!(
-            last_state_trie_persisted_block.number <= last_persisted_block.number,
+            last_state_trie_block.number <= last_block.number,
             "state/trie frontier cannot exceed the last persisted block"
         );
 
-        debug!(target: "engine::tree", ?last_persisted_block, ?last_state_trie_persisted_block, elapsed=?start_time.elapsed(), "Finished persisting, calling finish");
-        self.persistence_state.finish(last_persisted_block, last_state_trie_persisted_block);
+        debug!(target: "engine::tree", ?last_block, ?last_state_trie_block, elapsed=?start_time.elapsed(), "Finished persisting, calling finish");
+        self.persistence_state.finish(last_block, last_state_trie_block);
 
-        PersistedHandoff { last_persisted_block, last_state_trie_persisted_block, commit_duration }
+        result
     }
 
     /// Applies the destructive in-memory portion of a completed persistence operation.
     fn on_persisted_handoff(
         &mut self,
-        handoff: PersistedHandoff,
+        handoff: PersistenceResult,
     ) -> Result<(), AdvancePersistenceError> {
-        if handoff.last_persisted_block != self.persistence_state.last_persisted_block ||
-            handoff.last_state_trie_persisted_block !=
+        if handoff.last_block != self.persistence_state.last_persisted_block ||
+            handoff.last_state_trie_block !=
                 self.persistence_state.last_state_trie_persisted_block
         {
             debug!(
                 target: "engine::tree",
-                handoff_last_block = ?handoff.last_persisted_block,
+                handoff_last_block = ?handoff.last_block,
                 current_last_block = ?self.persistence_state.last_persisted_block,
                 "Discarding stale persisted handoff"
             );
             return Ok(())
         }
 
-        let PersistedHandoff { last_persisted_block, commit_duration, .. } = handoff;
-        let last_persisted_block_number = last_persisted_block.number;
+        let PersistenceResult { last_block, commit_duration, .. } = handoff;
+        let last_block_number = last_block.number;
 
         // Evict cached changesets for blocks below the eviction threshold.
         // Keep at least CHANGESET_CACHE_RETENTION_BLOCKS from the persisted tip, and also respect
         // the finalized block if set.
-        let min_threshold =
-            last_persisted_block_number.saturating_sub(CHANGESET_CACHE_RETENTION_BLOCKS);
+        let min_threshold = last_block_number.saturating_sub(CHANGESET_CACHE_RETENTION_BLOCKS);
         let eviction_threshold =
             if let Some(finalized) = self.canonical_in_memory_state.get_finalized_num_hash() {
                 // Use the minimum of finalized block and retention threshold to be conservative
@@ -1642,7 +1640,7 @@ where
             };
         debug!(
             target: "engine::tree",
-            last_persisted = last_persisted_block_number,
+            last_persisted = last_block_number,
             finalized_number = ?self.canonical_in_memory_state.get_finalized_num_hash().map(|f| f.number),
             eviction_threshold,
             "Evicting changesets below threshold"
@@ -1651,7 +1649,7 @@ where
 
         self.on_new_persisted_block()?;
 
-        self.purge_timing_stats(last_persisted_block_number, commit_duration);
+        self.purge_timing_stats(last_block_number, commit_duration);
 
         Ok(())
     }
@@ -1659,7 +1657,7 @@ where
     /// Finishes a persisted handoff.
     fn finish_persisted_handoff(
         &mut self,
-        handoff: PersistedHandoff,
+        handoff: PersistenceResult,
     ) -> Result<(), AdvancePersistenceError> {
         self.on_persisted_handoff(handoff)
     }
@@ -3635,17 +3633,6 @@ impl Drop for PayloadBuildLease {
             let _ = self.finished_tx.try_send(());
         }
     }
-}
-
-/// The in-memory cleanup that follows a durable persistence completion.
-#[derive(Debug)]
-struct PersistedHandoff {
-    /// Highest block persisted by the completed operation.
-    last_persisted_block: BlockNumHash,
-    /// Highest state/trie frontier persisted by the completed operation.
-    last_state_trie_persisted_block: BlockNumHash,
-    /// Time spent committing the completed operation.
-    commit_duration: Option<Duration>,
 }
 
 /// Block inclusion can be valid, accepted, or invalid. Invalid blocks are returned as an error
