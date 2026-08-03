@@ -42,14 +42,13 @@ pub trait ReceiptConverter<N: NodePrimitives>: Debug + 'static {
     /// Error that may occur during conversion.
     type Error;
 
-    /// Converts RPC logs using metadata from their block.
-    ///
-    /// Implementations must preserve the number and order of the input logs.
-    fn convert_logs(
+    /// Converts an RPC log using its primitive receipt and block header.
+    fn convert_log(
         &self,
-        logs: Vec<Log>,
+        log: Log,
+        receipt: &N::Receipt,
         header: &SealedHeaderFor<N>,
-    ) -> Result<Vec<Self::RpcLog>, Self::Error>;
+    ) -> Result<Self::RpcLog, Self::Error>;
 
     /// Converts primitive receipts from `block` to RPC representations.
     fn convert_receipts(
@@ -163,14 +162,13 @@ pub trait RpcConvert: Send + Sync + Unpin + Debug + DynClone + 'static {
         evm_env: &EvmEnvFor<Self::Evm>,
     ) -> Result<TxEnvFor<Self::Evm>, Self::Error>;
 
-    /// Converts RPC logs using metadata from their block.
-    ///
-    /// Implementations must preserve the number and order of the input logs.
-    fn convert_logs(
+    /// Converts an RPC log using its primitive receipt and block header.
+    fn convert_log(
         &self,
-        logs: Vec<Log>,
+        log: Log,
+        receipt: &<Self::Primitives as NodePrimitives>::Receipt,
         header: &SealedHeaderFor<Self::Primitives>,
-    ) -> Result<Vec<RpcLog<Self::Network>>, Self::Error>;
+    ) -> Result<RpcLog<Self::Network>, Self::Error>;
 
     /// Converts primitive receipts from `block` to RPC representations.
     fn convert_receipts(
@@ -736,12 +734,13 @@ where
         self.tx_env_converter.convert_tx_env(request, evm_env).map_err(Into::into)
     }
 
-    fn convert_logs(
+    fn convert_log(
         &self,
-        logs: Vec<Log>,
+        log: Log,
+        receipt: &<Self::Primitives as NodePrimitives>::Receipt,
         header: &SealedHeaderFor<Self::Primitives>,
-    ) -> Result<Vec<RpcLog<Self::Network>>, Self::Error> {
-        self.receipt_converter.convert_logs(logs, header)
+    ) -> Result<RpcLog<Self::Network>, Self::Error> {
+        self.receipt_converter.convert_log(log, receipt, header)
     }
 
     fn convert_receipts(

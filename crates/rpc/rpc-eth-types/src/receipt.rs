@@ -119,12 +119,13 @@ where
     type RpcLog = Log;
     type Error = EthApiError;
 
-    fn convert_logs(
+    fn convert_log(
         &self,
-        logs: Vec<Log>,
+        log: Log,
+        _receipt: &N::Receipt,
         _header: &SealedHeaderFor<N>,
-    ) -> Result<Vec<Self::RpcLog>, Self::Error> {
-        Ok(logs)
+    ) -> Result<Self::RpcLog, Self::Error> {
+        Ok(log)
     }
 
     fn convert_receipts(

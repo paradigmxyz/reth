@@ -34,17 +34,16 @@ pub trait EthSubscriptions:
             let mut all_logs = Vec::new();
 
             for (block, receipts, removed) in reverted.chain(committed) {
-                let logs = logs_utils::matching_block_logs_with_tx_hashes(
+                let result = logs_utils::matching_block_logs_with_tx_hashes(
+                    converter,
                     &filter,
-                    block.num_hash(),
-                    block.timestamp(),
+                    block.sealed_header(),
                     block
                         .transactions_recovered()
                         .zip(receipts.iter())
                         .map(|(tx, receipt)| (*tx.tx_hash(), receipt)),
                     removed,
                 );
-                let result = converter.convert_logs(logs, block.sealed_header());
                 match result {
                     Ok(logs) => all_logs.extend(logs),
                     Err(err) => {
