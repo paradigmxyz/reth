@@ -1,8 +1,7 @@
 //! A simple diskstore for blobs
 
 use crate::blobstore::{
-    BlobCellAvailability, BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize,
-    PooledBlobSidecar,
+    BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize, PooledBlobSidecar,
 };
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
@@ -214,32 +213,15 @@ impl DiskFileBlobStore {
 
 impl BlobStore for DiskFileBlobStore {
     fn insert(&self, tx: B256, data: PooledBlobSidecar) -> Result<(), BlobStoreError> {
-        let (data, availability) = data.into_parts();
-        let stored_availability = BlobCellAvailability::for_sidecar(&data);
-        self.inner.insert_one(tx, data)?;
-        availability.publish(stored_availability);
-        Ok(())
+        self.inner.insert_one(tx, data.into_sidecar())
     }
 
     fn insert_all(&self, txs: Vec<(B256, PooledBlobSidecar)>) -> Result<(), BlobStoreError> {
         if txs.is_empty() {
             return Ok(())
         }
-        let mut availability_handles = Vec::with_capacity(txs.len());
-        let txs = txs
-            .into_iter()
-            .map(|(tx, data)| {
-                let (data, availability) = data.into_parts();
-                let stored_availability = BlobCellAvailability::for_sidecar(&data);
-                availability_handles.push((availability, stored_availability));
-                (tx, data)
-            })
-            .collect();
-        self.inner.insert_many(txs)?;
-        for (availability, stored_availability) in availability_handles {
-            availability.publish(stored_availability);
-        }
-        Ok(())
+        let txs = txs.into_iter().map(|(tx, data)| (tx, data.into_sidecar())).collect();
+        self.inner.insert_many(txs)
     }
 
     fn delete(&self, tx: B256) -> Result<(), BlobStoreError> {
@@ -951,41 +933,6 @@ mod tests {
         assert!(store.is_cached(&tx));
         let retrieved_blob = store.get(tx).unwrap().map(Arc::unwrap_or_clone).unwrap();
         assert_eq!(retrieved_blob, blob);
-    }
-
-    #[test]
-    fn disk_insert_publishes_availability_for_sidecar_variant() {
-        let (store, _dir) = tmp_store();
-        let sidecars = [
-            (rng_blobs(1).pop().unwrap().1, BlobCellAvailability::empty()),
-            (eip7594_single_blob_sidecar().0, BlobCellAvailability::full()),
-        ];
-
-        for (sidecar, expected) in sidecars {
-            let tx = TxHash::random();
-            let sidecar = PooledBlobSidecar::from(sidecar);
-            let availability = sidecar.availability().clone();
-            store.insert(tx, sidecar).unwrap();
-
-            assert_eq!(availability.get(), Some(expected));
-            assert_eq!(store.cell_availability(tx).unwrap(), Some(expected));
-        }
-    }
-
-    #[test]
-    fn disk_insert_all_publishes_availability_for_sidecar_variant() {
-        let (store, _dir) = tmp_store();
-        let tx_a = TxHash::random();
-        let tx_b = TxHash::random();
-        let sidecar_a = PooledBlobSidecar::from(rng_blobs(1).pop().unwrap().1);
-        let sidecar_b = PooledBlobSidecar::from(eip7594_single_blob_sidecar().0);
-        let availability_a = sidecar_a.availability().clone();
-        let availability_b = sidecar_b.availability().clone();
-
-        store.insert_all(vec![(tx_a, sidecar_a), (tx_b, sidecar_b)]).unwrap();
-
-        assert_eq!(availability_a.get(), Some(BlobCellAvailability::empty()));
-        assert_eq!(availability_b.get(), Some(BlobCellAvailability::full()));
     }
 
     #[test]

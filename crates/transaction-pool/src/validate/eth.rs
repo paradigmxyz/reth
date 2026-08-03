@@ -811,12 +811,7 @@ where
                     // check if the blob is in the store, if it's included we previously validated
                     // it and inserted it
                     if self.blob_store.contains(*transaction.hash()).is_ok_and(|c| c) {
-                        if let Some(stored_availability) =
-                            self.blob_store.cell_availability(*transaction.hash()).ok().flatten() &&
-                            let Some(availability) = transaction.blob_cell_availability()
-                        {
-                            availability.publish(stored_availability);
-                        }
+                        // validated transaction is already in the store
                     } else {
                         return Err(InvalidPoolTransactionError::Eip4844(
                             Eip4844PoolTransactionError::MissingEip4844BlobSidecar,
@@ -1549,18 +1544,13 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
 mod tests {
     use super::*;
     use crate::{
-        blobstore::{BlobCellAvailability, BlobStore, InMemoryBlobStore, PooledBlobSidecar},
-        error::PoolErrorKind,
-        test_utils::TransactionBuilder,
-        traits::PoolTransaction,
-        CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionPool,
+        blobstore::InMemoryBlobStore, error::PoolErrorKind, test_utils::TransactionBuilder,
+        traits::PoolTransaction, CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionPool,
     };
     use alloy_consensus::Transaction;
     use alloy_eips::{
         eip2718::{Decodable2718, Encodable2718},
         eip2930::{AccessList, AccessListItem},
-        eip4844::BlobTransactionSidecar,
-        eip7594::{BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant},
     };
     use alloy_primitives::{hex, Address, B256, U256};
     use reth_ethereum_primitives::PooledTransactionVariant;
@@ -1692,49 +1682,7 @@ mod tests {
         let res = pool.add_external_transaction(transaction.clone()).await;
         assert!(res.is_ok());
         let tx = pool.get(transaction.hash());
-        let tx = tx.unwrap();
-        assert_eq!(
-            tx.transaction.blob_cell_availability().and_then(|availability| availability.get()),
-            None
-        );
-    }
-
-    fn assert_missing_blob_sidecar_uses_stored_availability(
-        sidecar: BlobTransactionSidecarVariant,
-        expected: BlobCellAvailability,
-    ) {
-        let tx = TransactionBuilder::default().into_eip4844().try_into_recovered().unwrap();
-        let encoded_length = tx.encode_2718_len();
-        let mut transaction = EthPooledTransaction::new(tx, encoded_length);
-        let blob_store = InMemoryBlobStore::default();
-        blob_store.insert(*transaction.hash(), PooledBlobSidecar::from(sidecar)).unwrap();
-        let validator = EthTransactionValidatorBuilder::new(
-            MockEthProvider::default().with_genesis_block(),
-            test_evm_config(),
-        )
-        .build(blob_store);
-
-        assert!(validator.validate_eip4844(&mut transaction).unwrap().is_none());
-        assert_eq!(
-            transaction.blob_cell_availability().and_then(|availability| availability.get()),
-            Some(expected)
-        );
-    }
-
-    #[test]
-    fn missing_eip4844_sidecar_uses_empty_stored_availability() {
-        assert_missing_blob_sidecar_uses_stored_availability(
-            BlobTransactionSidecarVariant::Eip4844(BlobTransactionSidecar::default()),
-            BlobCellAvailability::empty(),
-        );
-    }
-
-    #[test]
-    fn missing_eip7594_sidecar_uses_full_stored_availability() {
-        assert_missing_blob_sidecar_uses_stored_availability(
-            BlobTransactionSidecarVariant::Eip7594(BlobTransactionSidecarEip7594::default()),
-            BlobCellAvailability::full(),
-        );
+        assert!(tx.is_some());
     }
 
     #[test]

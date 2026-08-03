@@ -604,6 +604,7 @@ where
                         (transaction, Some(sidecar))
                     }
                 };
+
                 let tx = ValidPoolTransaction {
                     transaction,
                     transaction_id,
@@ -745,7 +746,7 @@ where
         // Handle blob sidecar storage and notifications for EIP-4844 transactions
         if let Some(sidecar) = meta.blob_sidecar {
             let hash = *meta.added.hash();
-            self.on_new_blob_sidecar(&hash, sidecar.sidecar());
+            self.on_new_blob_sidecar(&hash, &sidecar);
             self.insert_blob(hash, sidecar);
         }
 
@@ -1301,16 +1302,11 @@ where
     /// Inserts a blob transaction into the blob store
     fn insert_blob(&self, hash: TxHash, blob: PooledBlobSidecar) {
         debug!(target: "txpool", "[{:?}] storing blob sidecar", hash);
-        match self.blob_store.insert(hash, blob) {
-            Ok(()) => {
-                self.update_blob_store_metrics();
-            }
-            Err(err) => {
-                warn!(target: "txpool", %err, "[{:?}] failed to insert blob", hash);
-                self.blob_store_metrics.blobstore_failed_inserts.increment(1);
-                self.update_blob_store_metrics();
-            }
+        if let Err(err) = self.blob_store.insert(hash, blob) {
+            warn!(target: "txpool", %err, "[{:?}] failed to insert blob", hash);
+            self.blob_store_metrics.blobstore_failed_inserts.increment(1);
         }
+        self.update_blob_store_metrics();
     }
 
     /// Delete a blob from the blob store
@@ -1670,146 +1666,45 @@ impl<T: PoolTransaction> OnNewCanonicalStateOutcome<T> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        blobstore::{
-            BlobCellAvailability, BlobStore, DiskFileBlobStore, DiskFileBlobStoreConfig,
-            InMemoryBlobStore, PooledBlobSidecar,
-        },
+        blobstore::{BlobStore, InMemoryBlobStore, PooledBlobSidecar},
         identifier::SenderId,
-        test_utils::{MockTransaction, OkValidator, TestPoolBuilder, TransactionGenerator},
+        test_utils::{MockTransaction, TestPoolBuilder},
         validate::ValidTransaction,
-        BlockInfo, CoinbaseTipOrdering, EthBlobTransactionSidecar, EthPoolTransaction,
-        EthPooledTransaction, Pool, PoolConfig, PoolTransaction, SubPoolLimit, TransactionOrigin,
-        TransactionValidationOutcome, U256,
+        BlockInfo, PoolConfig, SubPoolLimit, TransactionOrigin, TransactionValidationOutcome, U256,
     };
-    use alloy_consensus::Transaction as _;
-    use alloy_eips::{
-        eip4844::BlobTransactionSidecar,
-        eip7594::{BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant},
-    };
-    use alloy_primitives::{Address, TxHash};
+    use alloy_eips::{eip4844::BlobTransactionSidecar, eip7594::BlobTransactionSidecarVariant};
+    use alloy_primitives::Address;
     use std::{fs, path::PathBuf};
-
-    fn test_blob_sidecar() -> BlobTransactionSidecarVariant {
-        let json_content = fs::read_to_string(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data/blob1.json"),
-        )
-        .expect("failed to read blob test data");
-        let json_value: serde_json::Value =
-            serde_json::from_str(&json_content).expect("failed to deserialize blob test data");
-        let blobs = vec![json_value["data"].as_str().expect("missing blob data").to_string()];
-
-        BlobTransactionSidecarVariant::Eip4844(
-            BlobTransactionSidecar::try_from_blobs_hex(blobs).unwrap(),
-        )
-    }
-
-    fn add_blob_transaction<S: BlobStore>(
-        pool: &Pool<
-            OkValidator<EthPooledTransaction>,
-            CoinbaseTipOrdering<EthPooledTransaction>,
-            S,
-        >,
-        sidecar: BlobTransactionSidecarVariant,
-    ) -> TxHash {
-        let mut generator = TransactionGenerator::new(rand::rng());
-        let transaction = generator.gen_eip4844_pooled();
-        let mut transaction =
-            EthPooledTransaction::try_from_eip4844(transaction.into_consensus(), sidecar).unwrap();
-        let hash = *transaction.hash();
-        let EthBlobTransactionSidecar::Present(sidecar) = transaction.take_blob() else {
-            unreachable!("blob sidecar was just attached")
-        };
-        let result = pool.pool.add_transactions(
-            TransactionOrigin::External,
-            [TransactionValidationOutcome::Valid {
-                balance: U256::MAX,
-                state_nonce: transaction.nonce(),
-                bytecode_hash: None,
-                transaction: ValidTransaction::ValidWithSidecar { transaction, sidecar },
-                propagate: true,
-                authorities: None,
-            }],
-        );
-        result.into_iter().next().unwrap().unwrap();
-        hash
-    }
-
-    #[test]
-    fn successful_eip4844_blob_insert_sets_empty_cell_availability() {
-        let pool = Pool::new(
-            OkValidator::default(),
-            CoinbaseTipOrdering::default(),
-            InMemoryBlobStore::default(),
-            PoolConfig::default(),
-        );
-        let hash = add_blob_transaction(&pool, test_blob_sidecar());
-
-        assert_eq!(
-            pool.pool
-                .get(&hash)
-                .unwrap()
-                .transaction
-                .blob_cell_availability()
-                .and_then(|availability| availability.get()),
-            Some(BlobCellAvailability::empty())
-        );
-    }
-
-    #[test]
-    fn successful_eip7594_blob_insert_sets_full_cell_availability() {
-        let pool = Pool::new(
-            OkValidator::default(),
-            CoinbaseTipOrdering::default(),
-            InMemoryBlobStore::default(),
-            PoolConfig::default(),
-        );
-        let hash = add_blob_transaction(
-            &pool,
-            BlobTransactionSidecarVariant::Eip7594(BlobTransactionSidecarEip7594::default()),
-        );
-
-        assert_eq!(
-            pool.pool
-                .get(&hash)
-                .unwrap()
-                .transaction
-                .blob_cell_availability()
-                .and_then(|availability| availability.get()),
-            Some(BlobCellAvailability::full())
-        );
-    }
-
-    #[test]
-    fn failed_blob_insert_leaves_cell_availability_unset() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let blob_dir = temp_dir.path().join("blobs");
-        let blob_store =
-            DiskFileBlobStore::open(&blob_dir, DiskFileBlobStoreConfig::default()).unwrap();
-        fs::remove_dir(&blob_dir).unwrap();
-        fs::write(&blob_dir, []).unwrap();
-
-        let pool = Pool::new(
-            OkValidator::default(),
-            CoinbaseTipOrdering::default(),
-            blob_store,
-            PoolConfig::default(),
-        );
-        let hash = add_blob_transaction(&pool, test_blob_sidecar());
-
-        assert_eq!(
-            pool.pool
-                .get(&hash)
-                .unwrap()
-                .transaction
-                .blob_cell_availability()
-                .and_then(|availability| availability.get()),
-            None
-        );
-    }
 
     #[test]
     fn test_discard_blobs_on_blob_tx_eviction() {
-        let sidecar = test_blob_sidecar();
+        let blobs = {
+            // Read the contents of the JSON file into a string.
+            let json_content = fs::read_to_string(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data/blob1.json"),
+            )
+            .expect("Failed to read the blob data file");
+
+            // Parse the JSON contents into a serde_json::Value.
+            let json_value: serde_json::Value =
+                serde_json::from_str(&json_content).expect("Failed to deserialize JSON");
+
+            // Extract blob data from JSON and convert it to Blob.
+            vec![
+                // Extract the "data" field from the JSON and parse it as a string.
+                json_value
+                    .get("data")
+                    .unwrap()
+                    .as_str()
+                    .expect("Data is not a valid string")
+                    .to_string(),
+            ]
+        };
+
+        // Generate a BlobTransactionSidecar from the blobs.
+        let sidecar = BlobTransactionSidecarVariant::Eip4844(
+            BlobTransactionSidecar::try_from_blobs_hex(blobs).unwrap(),
+        );
 
         // Define the maximum limit for blobs in the sub-pool.
         let blob_limit = SubPoolLimit::new(1000, usize::MAX);

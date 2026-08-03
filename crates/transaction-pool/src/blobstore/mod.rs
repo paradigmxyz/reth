@@ -13,8 +13,8 @@ use std::{
     fmt,
     ops::Deref,
     sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc, OnceLock,
+        atomic::{AtomicU64, AtomicUsize, Ordering},
+        Arc,
     },
 };
 pub use tracker::{BlobStoreCanonTracker, BlobStoreUpdates};
@@ -26,83 +26,69 @@ mod noop;
 mod tracker;
 
 /// Blob cell availability stored for a transaction.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-#[repr(transparent)]
-pub struct BlobCellAvailability(B128);
+#[derive(Debug, Clone, Default)]
+pub struct BlobCellAvailability(Arc<[AtomicU64; 2]>);
 
 impl BlobCellAvailability {
-    /// Empty availability for sidecars that do not contain cells.
-    pub const EMPTY: Self = Self(B128::new([0; 16]));
-
-    /// Full availability for all blob cells in a stored full sidecar.
-    pub const FULL: Self = Self(B128::new([0xff; 16]));
-
     /// Creates a new availability mask from the raw cell bitmask.
-    pub const fn new(mask: B128) -> Self {
-        Self(mask)
+    pub fn new(mask: B128) -> Self {
+        let mask = u128::from(mask);
+        Self(Arc::new([AtomicU64::new((mask >> 64) as u64), AtomicU64::new(mask as u64)]))
     }
 
     /// Returns empty availability.
-    pub const fn empty() -> Self {
-        Self::EMPTY
+    pub fn empty() -> Self {
+        Self::default()
     }
 
     /// Returns full availability for all blob cells.
-    pub const fn full() -> Self {
-        Self::FULL
-    }
-
-    /// Returns the cell availability provided by the sidecar variant.
-    pub const fn for_sidecar(sidecar: &BlobTransactionSidecarVariant) -> Self {
-        if sidecar.is_eip7594() {
-            Self::FULL
-        } else {
-            Self::EMPTY
-        }
+    pub fn full() -> Self {
+        Self::new(B128::from(u128::MAX))
     }
 
     /// Returns the raw cell bitmask.
-    pub const fn mask(self) -> B128 {
-        self.0
+    ///
+    /// Reads are intentionally cheap and eventually consistent. Concurrent updates may briefly
+    /// expose an in-flight mask, which is sufficient for transaction announcements.
+    pub fn get(&self) -> B128 {
+        let high = self.0[0].load(Ordering::Relaxed) as u128;
+        let low = self.0[1].load(Ordering::Relaxed) as u128;
+        B128::from((high << 64) | low)
+    }
+
+    /// Updates the cell availability mask.
+    pub fn set(&self, mask: B128) {
+        let mask = u128::from(mask);
+        self.0[0].store((mask >> 64) as u64, Ordering::Relaxed);
+        self.0[1].store(mask as u64, Ordering::Relaxed);
     }
 
     /// Returns true if all blob cells are available.
-    pub fn is_full(self) -> bool {
-        self == Self::FULL
+    pub fn is_full(&self) -> bool {
+        self.get() == B128::from(u128::MAX)
     }
 }
 
-/// Shared publication handle for a blob sidecar's cell availability.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct BlobCellAvailabilityHandle(Arc<OnceLock<BlobCellAvailability>>);
-
-impl BlobCellAvailabilityHandle {
-    /// Returns the published availability, if the sidecar has been stored.
-    pub fn get(&self) -> Option<BlobCellAvailability> {
-        self.0.get().copied()
-    }
-
-    /// Publishes the stored availability.
-    ///
-    /// The first published value wins; repeated publishes are intentionally ignored
-    /// (e.g. when a transaction is re-validated while its blob is already in the store).
-    pub fn publish(&self, availability: BlobCellAvailability) {
-        let _ = self.0.set(availability);
+impl PartialEq for BlobCellAvailability {
+    fn eq(&self, other: &Self) -> bool {
+        self.get() == other.get()
     }
 }
 
-/// A blob sidecar paired with the handle used to publish its stored cell availability.
+impl Eq for BlobCellAvailability {}
+
+/// A blob sidecar paired with its shared cell availability.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PooledBlobSidecar {
     sidecar: BlobTransactionSidecarVariant,
-    availability: BlobCellAvailabilityHandle,
+    availability: BlobCellAvailability,
 }
 
 impl PooledBlobSidecar {
-    /// Creates a sidecar that publishes availability through the given handle.
+    /// Creates a sidecar with the given shared cell availability.
     pub const fn new(
         sidecar: BlobTransactionSidecarVariant,
-        availability: BlobCellAvailabilityHandle,
+        availability: BlobCellAvailability,
     ) -> Self {
         Self { sidecar, availability }
     }
@@ -117,14 +103,14 @@ impl PooledBlobSidecar {
         self.sidecar.is_eip7594()
     }
 
-    /// Returns the shared availability handle.
-    pub const fn availability(&self) -> &BlobCellAvailabilityHandle {
+    /// Returns the shared cell availability.
+    pub const fn availability(&self) -> &BlobCellAvailability {
         &self.availability
     }
 
-    /// Consumes the wrapper and returns the sidecar and publication handle.
-    pub fn into_parts(self) -> (BlobTransactionSidecarVariant, BlobCellAvailabilityHandle) {
-        (self.sidecar, self.availability)
+    /// Consumes the wrapper and returns the sidecar.
+    pub fn into_sidecar(self) -> BlobTransactionSidecarVariant {
+        self.sidecar
     }
 }
 
@@ -138,7 +124,8 @@ impl Deref for PooledBlobSidecar {
 
 impl From<BlobTransactionSidecarVariant> for PooledBlobSidecar {
     fn from(sidecar: BlobTransactionSidecarVariant) -> Self {
-        Self::new(sidecar, Default::default())
+        // TODO: Initialize this with the actual mask once sparse sidecars are supported.
+        Self::new(sidecar, BlobCellAvailability::full())
     }
 }
 
@@ -173,14 +160,6 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
 
     /// Checks if the given transaction hash is in the blob store.
     fn contains(&self, tx: B256) -> Result<bool, BlobStoreError>;
-
-    /// Returns the stored cell availability for the transaction.
-    ///
-    /// Full-sidecar stores can use this default. Sparse stores should override it with their exact
-    /// stored mask.
-    fn cell_availability(&self, tx: B256) -> Result<Option<BlobCellAvailability>, BlobStoreError> {
-        self.get(tx).map(|sidecar| sidecar.as_deref().map(BlobCellAvailability::for_sidecar))
-    }
 
     /// Retrieves all decoded blob data for the given transaction hashes.
     ///
