@@ -115,6 +115,7 @@ impl PeersManager {
             ban_list,
             ban_duration,
             backoff_durations,
+            bootnodes: _,
             trusted_nodes,
             trusted_nodes_only,
             trusted_nodes_resolution_interval,

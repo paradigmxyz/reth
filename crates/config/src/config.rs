@@ -1200,4 +1200,12 @@ connect_trusted_nodes_only = true
             assert!(conf.peers.trusted_nodes.contains(&node));
         }
     }
+
+    #[test]
+    fn test_can_support_bootnodes() {
+        let enr = "enr:-IS4QHCYrYZbAKWCBRlAy5zzaDZXJBGkcnh4MHcBFZntXNFrdvJjX04jRzjzCBOonrkTfj499SZuOh8R33Ls8RRcy5wBgmlkgnY0gmlwhH8AAAGJc2VjcDI1NmsxoQPKY0yuDUmstAHYpMa2_oxVtw0RW_QAdpzBQA8yWM0xOIN1ZHCCdl8";
+        let config: Config = toml::from_str(&format!("[peers]\nbootnodes = [\"{enr}\"]")).unwrap();
+
+        assert_eq!(config.peers.bootnodes, Some(vec![TrustedPeer::from_str(enr).unwrap()]));
+    }
 }

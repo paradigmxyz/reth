@@ -543,11 +543,12 @@ impl NetworkArgs {
     /// The `default_peers_file` will be used as the default location to store the persistent peers
     /// file if `no_persist_peers` is false, and there is no provided `peers_file`.
     ///
-    /// Configured Bootnodes are prioritized, if unset, the chain spec bootnodes are used
+    /// Configured bootnodes are prioritized, if unset, the chain spec bootnodes are used
     /// Priority order for bootnodes configuration:
     /// 1. --bootnodes flag
-    /// 2. Network preset flags (e.g. --holesky)
-    /// 3. default to mainnet nodes
+    /// 2. `[peers].bootnodes` in reth.toml
+    /// 3. Network preset flags (e.g. --holesky)
+    /// 4. default to mainnet nodes
     pub fn network_config<N: NetworkPrimitives>(
         &self,
         config: &Config,
@@ -565,6 +566,11 @@ impl NetworkArgs {
         let discovery_addr = self.resolved_discovery_addr(listener_addr);
         let chain_bootnodes = self
             .resolved_bootnodes()
+            .or_else(|| {
+                config.peers.bootnodes.clone().map(|bootnodes| {
+                    bootnodes.into_iter().filter_map(|node| node.resolve_blocking().ok()).collect()
+                })
+            })
             .unwrap_or_else(|| chain_spec.bootnodes().unwrap_or_else(mainnet_nodes));
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
 
@@ -1628,5 +1634,45 @@ mod tests {
 
         // Cleanup
         let _ = fs::remove_file(&peers_file);
+    }
+
+    #[test]
+    fn network_config_uses_toml_bootnodes_when_cli_is_unset() {
+        let bootnode = "enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303?discport=30301";
+        let bootnode: TrustedPeer = bootnode.parse().unwrap();
+        let mut config = Config::default();
+        config.peers.bootnodes = Some(vec![bootnode.clone()]);
+
+        let args = NetworkArgs::default();
+        let builder = args.network_config::<reth_network::EthNetworkPrimitives>(
+            &config,
+            MAINNET.clone(),
+            SecretKey::from_byte_array(&[1u8; 32]).unwrap(),
+            std::env::temp_dir().join("reth_bootnodes_test"),
+            Runtime::test(),
+        );
+
+        assert_eq!(builder.boot_nodes_iter().collect::<Vec<_>>(), vec![&bootnode]);
+    }
+
+    #[test]
+    fn cli_bootnodes_override_toml_bootnodes() {
+        let toml_bootnode = "enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303?discport=30301";
+        let cli_bootnode = "enode://1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439@10.3.58.7:30303?discport=30301";
+        let cli_bootnode: TrustedPeer = cli_bootnode.parse().unwrap();
+        let mut config = Config::default();
+        config.peers.bootnodes = Some(vec![toml_bootnode.parse().unwrap()]);
+        let args =
+            NetworkArgs { bootnodes: Some(vec![cli_bootnode.clone()]), ..Default::default() };
+
+        let builder = args.network_config::<reth_network::EthNetworkPrimitives>(
+            &config,
+            MAINNET.clone(),
+            SecretKey::from_byte_array(&[1u8; 32]).unwrap(),
+            std::env::temp_dir().join("reth_bootnodes_test"),
+            Runtime::test(),
+        );
+
+        assert_eq!(builder.boot_nodes_iter().collect::<Vec<_>>(), vec![&cli_bootnode]);
     }
 }

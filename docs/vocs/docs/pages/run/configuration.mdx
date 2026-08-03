@@ -282,6 +282,9 @@ In the top level of the section you can configure trusted nodes, and how often r
 # How often reth will attempt to make outgoing connections,
 # if there is room for more peers
 refill_slots_interval = '5s'
+# Optional enode URLs or ENRs for P2P discovery bootstrap.
+# If unset, the network-specific defaults are used.
+# bootnodes = ["enr:-..."]
 # A list of ENRs for trusted peers, which are peers reth will always try to connect to.
 trusted_nodes = []
 # Whether reth will only attempt to connect to the peers specified above,

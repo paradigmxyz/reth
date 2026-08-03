@@ -129,6 +129,9 @@ pub struct PeersConfig {
     /// How often to recheck free slots for outbound connections.
     #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
     pub refill_slots_interval: Duration,
+    /// Nodes used to bootstrap P2P discovery.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub bootnodes: Option<Vec<TrustedPeer>>,
     /// Trusted nodes to connect to or accept from
     pub trusted_nodes: Vec<TrustedPeer>,
     /// Connect to or accept from trusted nodes only?
@@ -193,6 +196,7 @@ impl Default for PeersConfig {
     fn default() -> Self {
         Self {
             refill_slots_interval: Duration::from_millis(5_000),
+            bootnodes: None,
             connection_info: Default::default(),
             reputation_weights: Default::default(),
             ban_list: Default::default(),
