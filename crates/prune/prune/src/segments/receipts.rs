@@ -156,6 +156,7 @@ mod tests {
             let prune_mode = PruneMode::Before(to_block);
             let mut limiter = PruneLimiter::default().set_deleted_entries_limit(10);
             let input = PruneInput {
+                genesis_block_number: 0,
                 previous_checkpoint: db
                     .factory
                     .provider()

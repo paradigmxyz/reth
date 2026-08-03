@@ -90,7 +90,7 @@ impl RocksDBProvider {
 
     /// Heals the `TransactionHashNumbers` table.
     ///
-    /// - Fast path: if checkpoint == 0, clear any stale data and return
+    /// - Fast path: if checkpoint is at the genesis block, clear any stale data and return
     /// - If `sf_tip` < checkpoint, return unwind target (static files behind)
     /// - If `sf_tip` == checkpoint, nothing to do
     /// - If `sf_tip` > checkpoint, heal via transaction ranges in batches
@@ -106,22 +106,27 @@ impl RocksDBProvider {
                 Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
             >,
     {
+        // The chain starts at the genesis block, which is non-zero on some chains: it is both
+        // the "nothing indexed yet" checkpoint value and the floor for static file tips.
+        let genesis_block = provider.static_file_provider().genesis_block_number();
+
         let checkpoint = provider
             .get_stage_checkpoint(StageId::TransactionLookup)?
             .map(|cp| cp.block_number)
-            .unwrap_or(0);
+            .unwrap_or(genesis_block);
 
         let sf_tip = provider
             .static_file_provider()
             .get_highest_static_file_block(StaticFileSegment::Transactions)
-            .unwrap_or(0);
+            .unwrap_or(genesis_block);
 
-        // Fast path: clear any stale data and return.
-        if checkpoint == 0 {
+        // Fast path: nothing indexed yet (genesis has no transactions) — clear any stale data
+        // and return.
+        if checkpoint == genesis_block {
             if self.first::<tables::TransactionHashNumbers>()?.is_some() {
                 tracing::info!(
                     target: "reth::providers::rocksdb",
-                    "TransactionHashNumbers: checkpoint is 0, clearing stale data"
+                    "TransactionHashNumbers: checkpoint is at genesis, clearing stale data"
                 );
                 self.clear::<tables::TransactionHashNumbers>()?;
             }
@@ -268,15 +273,20 @@ impl RocksDBProvider {
             + StorageChangeSetReader
             + ChainSpecProvider,
     {
+        // See `heal_transaction_hash_numbers`: the genesis block (non-zero on some chains) is
+        // the "nothing indexed yet" checkpoint value and the floor for static file tips —
+        // defaulting the tip to 0 would produce a spurious unwind-to-0 signal below.
+        let genesis_block = provider.static_file_provider().genesis_block_number();
+
         let checkpoint = provider
             .get_stage_checkpoint(StageId::IndexStorageHistory)?
             .map(|cp| cp.block_number)
-            .unwrap_or(0);
+            .unwrap_or(genesis_block);
 
         let sf_tip = provider
             .static_file_provider()
             .get_highest_static_file_block(StaticFileSegment::StorageChangeSets)
-            .unwrap_or(0);
+            .unwrap_or(genesis_block);
 
         if sf_tip < checkpoint {
             // This should never happen in normal operation - static files are always
@@ -296,16 +306,17 @@ impl RocksDBProvider {
         }
 
         // Fast path: clear and re-insert genesis history.
-        if checkpoint == 0 {
+        if checkpoint == genesis_block {
             tracing::info!(
                 target: "reth::providers::rocksdb",
-                "StoragesHistory: checkpoint is 0, clearing stale data"
+                "StoragesHistory: checkpoint is at genesis, clearing stale data"
             );
             self.clear::<tables::StoragesHistory>()?;
 
             let chain_spec = provider.chain_spec();
             let genesis = chain_spec.genesis();
-            let list = tables::BlockNumberList::new([0]).expect("single block always fits");
+            let list =
+                tables::BlockNumberList::new([genesis_block]).expect("single block always fits");
             for (addr, account) in &genesis.alloc {
                 if let Some(storage) = &account.storage {
                     for key in storage.keys() {
@@ -381,15 +392,18 @@ impl RocksDBProvider {
             + ChangeSetReader
             + ChainSpecProvider,
     {
+        // See `heal_storages_history` for why these default to the genesis block.
+        let genesis_block = provider.static_file_provider().genesis_block_number();
+
         let checkpoint = provider
             .get_stage_checkpoint(StageId::IndexAccountHistory)?
             .map(|cp| cp.block_number)
-            .unwrap_or(0);
+            .unwrap_or(genesis_block);
 
         let sf_tip = provider
             .static_file_provider()
             .get_highest_static_file_block(StaticFileSegment::AccountChangeSets)
-            .unwrap_or(0);
+            .unwrap_or(genesis_block);
 
         if sf_tip < checkpoint {
             // This should never happen in normal operation - static files are always
@@ -409,16 +423,17 @@ impl RocksDBProvider {
         }
 
         // Fast path: clear and re-insert genesis history.
-        if checkpoint == 0 {
+        if checkpoint == genesis_block {
             tracing::info!(
                 target: "reth::providers::rocksdb",
-                "AccountsHistory: checkpoint is 0, clearing stale data"
+                "AccountsHistory: checkpoint is at genesis, clearing stale data"
             );
             self.clear::<tables::AccountsHistory>()?;
 
             let chain_spec = provider.chain_spec();
             let genesis = chain_spec.genesis();
-            let list = tables::BlockNumberList::new([0]).expect("single block always fits");
+            let list =
+                tables::BlockNumberList::new([genesis_block]).expect("single block always fits");
             for addr in genesis.alloc.keys() {
                 self.put::<tables::AccountsHistory>(ShardedKey::last(*addr), &list)?;
             }

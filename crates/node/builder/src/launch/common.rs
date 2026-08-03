@@ -550,16 +550,17 @@ where
 
         if let Some(unwind_block) = unwind_target {
             // Highly unlikely to happen, and given its destructive nature, it's better to panic
-            // instead. Unwinding to 0 would leave MDBX with a huge free list size.
+            // instead. Unwinding the whole chain would leave MDBX with a huge free list size.
+            // The genesis block is the floor on chains with a non-zero genesis.
             let inconsistency_source = match (rocksdb_unwind, static_file_unwind) {
                 (Some(_), Some(_)) => "RocksDB and static file",
                 (Some(_), None) => "RocksDB",
                 (None, Some(_)) => "static file",
                 (None, None) => unreachable!(),
             };
-            assert_ne!(
-                unwind_block, 0,
-                "A {} inconsistency was found that would trigger an unwind to block 0",
+            assert!(
+                unwind_block > factory.static_file_provider().genesis_block_number(),
+                "A {} inconsistency was found that would trigger an unwind to the genesis block ({unwind_block})",
                 inconsistency_source
             );
 

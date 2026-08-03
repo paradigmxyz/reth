@@ -312,6 +312,7 @@ mod tests {
             let result = ReceiptsByLogs::new(receipts_log_filter).prune(
                 &provider,
                 PruneInput {
+                    genesis_block_number: 0,
                     previous_checkpoint: db
                         .factory
                         .provider()

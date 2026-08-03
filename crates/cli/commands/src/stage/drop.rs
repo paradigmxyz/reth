@@ -22,7 +22,7 @@ use reth_provider::{
     StorageSettingsCache,
 };
 use reth_prune::PruneSegment;
-use reth_stages::StageId;
+use reth_stages::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use std::sync::Arc;
 
@@ -63,6 +63,10 @@ impl<C: ChainSpecParser> Command<C> {
         // have deleted them, BUT before we have committed the checkpoints to the database, we'd
         // lose essential data.
         let static_file_provider = tool.provider_factory.static_file_provider();
+        // Dropping a stage truncates its static file segment back to the genesis block, which
+        // is non-zero on some chains: block counts are relative to it and it is the lowest
+        // valid truncation target.
+        let genesis_block = static_file_provider.genesis_block_number();
         for segment in static_file_segments {
             if let Some(highest_block) = static_file_provider.get_highest_static_file_block(segment)
             {
@@ -70,34 +74,34 @@ impl<C: ChainSpecParser> Command<C> {
 
                 match segment {
                     StaticFileSegment::Headers => {
-                        writer.prune_headers(highest_block)?;
+                        writer.prune_headers(highest_block.saturating_sub(genesis_block))?;
                     }
                     StaticFileSegment::Transactions => {
                         let to_delete = static_file_provider
                             .get_highest_static_file_tx(segment)
                             .map(|tx_num| tx_num + 1)
                             .unwrap_or_default();
-                        writer.prune_transactions(to_delete, 0)?;
+                        writer.prune_transactions(to_delete, genesis_block)?;
                     }
                     StaticFileSegment::Receipts => {
                         let to_delete = static_file_provider
                             .get_highest_static_file_tx(segment)
                             .map(|tx_num| tx_num + 1)
                             .unwrap_or_default();
-                        writer.prune_receipts(to_delete, 0)?;
+                        writer.prune_receipts(to_delete, genesis_block)?;
                     }
                     StaticFileSegment::TransactionSenders => {
                         let to_delete = static_file_provider
                             .get_highest_static_file_tx(segment)
                             .map(|tx_num| tx_num + 1)
                             .unwrap_or_default();
-                        writer.prune_transaction_senders(to_delete, 0)?;
+                        writer.prune_transaction_senders(to_delete, genesis_block)?;
                     }
                     StaticFileSegment::AccountChangeSets => {
-                        writer.prune_account_changesets(highest_block)?;
+                        writer.prune_account_changesets(genesis_block)?;
                     }
                     StaticFileSegment::StorageChangeSets => {
-                        writer.prune_storage_changesets(highest_block)?;
+                        writer.prune_storage_changesets(genesis_block)?;
                     }
                 }
             }
@@ -111,7 +115,7 @@ impl<C: ChainSpecParser> Command<C> {
                 tx.clear::<tables::CanonicalHeaders>()?;
                 tx.clear::<tables::Headers<HeaderTy<N>>>()?;
                 tx.clear::<tables::HeaderNumbers>()?;
-                reset_stage_checkpoint(tx, StageId::Headers)?;
+                reset_stage_checkpoint(tx, StageId::Headers, genesis_block)?;
 
                 insert_genesis_header(&provider_rw, &self.env.chain)?;
             }
@@ -122,7 +126,7 @@ impl<C: ChainSpecParser> Command<C> {
                 tx.clear::<tables::TransactionBlocks>()?;
                 tx.clear::<tables::BlockOmmers<HeaderTy<N>>>()?;
                 tx.clear::<tables::BlockWithdrawals>()?;
-                reset_stage_checkpoint(tx, StageId::Bodies)?;
+                reset_stage_checkpoint(tx, StageId::Bodies, genesis_block)?;
 
                 insert_genesis_header(&provider_rw, &self.env.chain)?;
             }
@@ -130,14 +134,14 @@ impl<C: ChainSpecParser> Command<C> {
                 tx.clear::<tables::TransactionSenders>()?;
                 // Reset pruned numbers to not count them in the next rerun's stage progress
                 reset_prune_checkpoint(tx, PruneSegment::SenderRecovery)?;
-                reset_stage_checkpoint(tx, StageId::SenderRecovery)?;
+                reset_stage_checkpoint(tx, StageId::SenderRecovery, genesis_block)?;
             }
             StageEnum::Execution => {
                 if provider_rw.cached_storage_settings().use_hashed_state() {
                     tx.clear::<tables::HashedAccounts>()?;
                     tx.clear::<tables::HashedStorages>()?;
-                    reset_stage_checkpoint(tx, StageId::AccountHashing)?;
-                    reset_stage_checkpoint(tx, StageId::StorageHashing)?;
+                    reset_stage_checkpoint(tx, StageId::AccountHashing, genesis_block)?;
+                    reset_stage_checkpoint(tx, StageId::StorageHashing, genesis_block)?;
                 } else {
                     tx.clear::<tables::PlainAccountState>()?;
                     tx.clear::<tables::PlainStorageState>()?;
@@ -149,34 +153,34 @@ impl<C: ChainSpecParser> Command<C> {
 
                 reset_prune_checkpoint(tx, PruneSegment::Receipts)?;
                 reset_prune_checkpoint(tx, PruneSegment::ContractLogs)?;
-                reset_stage_checkpoint(tx, StageId::Execution)?;
+                reset_stage_checkpoint(tx, StageId::Execution, genesis_block)?;
 
                 let alloc = &self.env.chain.genesis().alloc;
                 insert_genesis_state(&provider_rw, alloc.iter())?;
             }
             StageEnum::AccountHashing => {
                 tx.clear::<tables::HashedAccounts>()?;
-                reset_stage_checkpoint(tx, StageId::AccountHashing)?;
+                reset_stage_checkpoint(tx, StageId::AccountHashing, genesis_block)?;
             }
             StageEnum::StorageHashing => {
                 tx.clear::<tables::HashedStorages>()?;
-                reset_stage_checkpoint(tx, StageId::StorageHashing)?;
+                reset_stage_checkpoint(tx, StageId::StorageHashing, genesis_block)?;
             }
             StageEnum::Hashing => {
                 // Clear hashed accounts
                 tx.clear::<tables::HashedAccounts>()?;
-                reset_stage_checkpoint(tx, StageId::AccountHashing)?;
+                reset_stage_checkpoint(tx, StageId::AccountHashing, genesis_block)?;
 
                 // Clear hashed storages
                 tx.clear::<tables::HashedStorages>()?;
-                reset_stage_checkpoint(tx, StageId::StorageHashing)?;
+                reset_stage_checkpoint(tx, StageId::StorageHashing, genesis_block)?;
             }
             StageEnum::Merkle => {
                 tx.clear::<tables::AccountsTrie>()?;
                 tx.clear::<tables::StoragesTrie>()?;
 
-                reset_stage_checkpoint(tx, StageId::MerkleExecute)?;
-                reset_stage_checkpoint(tx, StageId::MerkleUnwind)?;
+                reset_stage_checkpoint(tx, StageId::MerkleExecute, genesis_block)?;
+                reset_stage_checkpoint(tx, StageId::MerkleUnwind, genesis_block)?;
 
                 tx.delete::<tables::StageCheckpointProgresses>(
                     StageId::MerkleExecute.to_string(),
@@ -193,7 +197,7 @@ impl<C: ChainSpecParser> Command<C> {
                     tx.clear::<tables::AccountsHistory>()?;
                 }
 
-                reset_stage_checkpoint(tx, StageId::IndexAccountHistory)?;
+                reset_stage_checkpoint(tx, StageId::IndexAccountHistory, genesis_block)?;
 
                 insert_genesis_account_history(
                     &provider_rw,
@@ -210,7 +214,7 @@ impl<C: ChainSpecParser> Command<C> {
                     tx.clear::<tables::StoragesHistory>()?;
                 }
 
-                reset_stage_checkpoint(tx, StageId::IndexStorageHistory)?;
+                reset_stage_checkpoint(tx, StageId::IndexStorageHistory, genesis_block)?;
 
                 insert_genesis_storage_history(
                     &provider_rw,
@@ -228,12 +232,15 @@ impl<C: ChainSpecParser> Command<C> {
 
                 reset_prune_checkpoint(tx, PruneSegment::TransactionLookup)?;
 
-                reset_stage_checkpoint(tx, StageId::TransactionLookup)?;
+                reset_stage_checkpoint(tx, StageId::TransactionLookup, genesis_block)?;
                 insert_genesis_header(&provider_rw, &self.env.chain)?;
             }
         }
 
-        tx.put::<tables::StageCheckpoints>(StageId::Finish.to_string(), Default::default())?;
+        tx.put::<tables::StageCheckpoints>(
+            StageId::Finish.to_string(),
+            StageCheckpoint::new(genesis_block),
+        )?;
 
         provider_rw.commit()?;
 
@@ -261,8 +268,12 @@ fn reset_prune_checkpoint(
 fn reset_stage_checkpoint(
     tx: &Tx<reth_db::mdbx::RW>,
     stage_id: StageId,
+    genesis_block: u64,
 ) -> Result<(), DatabaseError> {
-    tx.put::<tables::StageCheckpoints>(stage_id.to_string(), Default::default())?;
+    // Checkpoints reset to the genesis block, matching what `init_genesis` writes on a fresh
+    // datadir — a 0 checkpoint on a non-zero genesis chain trips the startup consistency
+    // check into pre-genesis unwind targets.
+    tx.put::<tables::StageCheckpoints>(stage_id.to_string(), StageCheckpoint::new(genesis_block))?;
 
     Ok(())
 }

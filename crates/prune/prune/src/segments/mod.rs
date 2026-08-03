@@ -153,6 +153,9 @@ pub struct PruneInput {
     pub(crate) to_block: BlockNumber,
     /// Limits pruning of a segment.
     pub(crate) limiter: PruneLimiter,
+    /// The genesis block number: without a checkpoint, pruning ranges start here since no data
+    /// exists below it (non-zero on some chains).
+    pub(crate) genesis_block_number: BlockNumber,
 }
 
 impl PruneInput {
@@ -223,14 +226,14 @@ impl PruneInput {
     /// Returns the start of the next block range.
     ///
     /// 1. If checkpoint exists, use next block.
-    /// 2. If checkpoint doesn't exist, use block 0.
+    /// 2. If checkpoint doesn't exist, use the genesis block.
     pub(crate) fn get_start_next_block_range(&self) -> u64 {
         self.previous_checkpoint
             .and_then(|checkpoint| checkpoint.block_number)
             // Checkpoint exists, prune from the next block after the highest pruned one
             .map(|block_number| block_number + 1)
             // No checkpoint exists, prune from genesis
-            .unwrap_or(0)
+            .unwrap_or(self.genesis_block_number)
     }
 }
 
@@ -248,6 +251,7 @@ mod tests {
     #[test]
     fn test_prune_input_get_next_tx_num_range_no_to_block() {
         let input = PruneInput {
+            genesis_block_number: 0,
             previous_checkpoint: None,
             to_block: 10,
             limiter: PruneLimiter::default(),
@@ -264,6 +268,7 @@ mod tests {
     #[test]
     fn test_prune_input_get_next_tx_num_range_no_tx() {
         let input = PruneInput {
+            genesis_block_number: 0,
             previous_checkpoint: None,
             to_block: 10,
             limiter: PruneLimiter::default(),
@@ -302,6 +307,7 @@ mod tests {
     fn test_prune_input_get_next_tx_num_range_valid() {
         // Create a new prune input
         let input = PruneInput {
+            genesis_block_number: 0,
             previous_checkpoint: None,
             to_block: 10,
             limiter: PruneLimiter::default(),
@@ -344,6 +350,7 @@ mod tests {
     fn test_prune_input_get_next_tx_checkpoint_without_tx_number() {
         // Create a prune input with a previous checkpoint without a tx number (unexpected)
         let input = PruneInput {
+            genesis_block_number: 0,
             previous_checkpoint: Some(PruneCheckpoint {
                 block_number: Some(5),
                 tx_number: None,
@@ -420,6 +427,7 @@ mod tests {
 
         // Create a prune input with a previous checkpoint that is the last tx number
         let input = PruneInput {
+            genesis_block_number: 0,
             previous_checkpoint: Some(PruneCheckpoint {
                 block_number: Some(5),
                 tx_number: Some(max_range),

@@ -1896,6 +1896,12 @@ impl<TX: DbTx + 'static, N: NodeTypes> BlockNumReader for DatabaseProvider<TX, N
         self.static_file_provider.last_block_number()
     }
 
+    fn earliest_block_number(&self) -> ProviderResult<BlockNumber> {
+        // The trait default returns 0, which does not exist on chains with a non-zero
+        // genesis; the earliest available block is the lowest non-expired one.
+        Ok(self.static_file_provider.earliest_history_height())
+    }
+
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
         Ok(self.tx.get::<tables::HeaderNumbers>(hash)?)
     }

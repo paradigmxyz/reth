@@ -188,6 +188,7 @@ mod tests {
             let segment = SenderRecovery::new(prune_mode);
             let mut limiter = PruneLimiter::default().set_deleted_entries_limit(10);
             let input = PruneInput {
+                genesis_block_number: 0,
                 previous_checkpoint: db
                     .factory
                     .provider()

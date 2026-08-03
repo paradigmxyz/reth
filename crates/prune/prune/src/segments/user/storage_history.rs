@@ -219,12 +219,13 @@ impl StorageHistory {
         trace!(target: "pruner", deleted = %pruned_changesets, %done, "Pruned storage history (changesets)");
 
         // The table walk can stop in the middle of a block, so the interrupted block has to be
-        // pruned again on the next run.
+        // pruned again on the next run. Floor at the genesis block: on chains with a non-zero
+        // genesis block, an interruption on it must not report a checkpoint below genesis.
         let last_pruned_block = last_changeset_pruned_block.map(|block_number| {
             if done {
                 block_number
             } else {
-                block_number.saturating_sub(1)
+                block_number.saturating_sub(1).max(input.genesis_block_number)
             }
         });
 
@@ -419,6 +420,7 @@ mod tests {
             let mut limiter =
                 PruneLimiter::default().set_deleted_entries_limit(deleted_entries_limit);
             let input = PruneInput {
+                genesis_block_number: 0,
                 previous_checkpoint: db
                     .factory
                     .provider()
@@ -600,7 +602,12 @@ mod tests {
         let deleted_entries_limit = 14; // 14/2 = 7 storage entries before limit
         let limiter = PruneLimiter::default().set_deleted_entries_limit(deleted_entries_limit);
 
-        let input = PruneInput { previous_checkpoint: None, to_block: 10, limiter };
+        let input = PruneInput {
+            previous_checkpoint: None,
+            to_block: 10,
+            limiter,
+            genesis_block_number: 0,
+        };
         let segment = StorageHistory::new(prune_mode);
 
         let provider = db.factory.database_provider_rw().unwrap();
@@ -650,6 +657,7 @@ mod tests {
 
         // Run prune again to complete - should finish processing block 5 and 6
         let input2 = PruneInput {
+            genesis_block_number: 0,
             previous_checkpoint: Some(checkpoint),
             to_block: 10,
             limiter: PruneLimiter::default().set_deleted_entries_limit(100), // high limit
@@ -750,8 +758,12 @@ mod tests {
 
         let to_block = 50u64;
         let prune_mode = PruneMode::Before(to_block);
-        let input =
-            PruneInput { previous_checkpoint: None, to_block, limiter: PruneLimiter::default() };
+        let input = PruneInput {
+            previous_checkpoint: None,
+            to_block,
+            limiter: PruneLimiter::default(),
+            genesis_block_number: 0,
+        };
         let segment = StorageHistory::new(prune_mode);
 
         let provider = db.factory.database_provider_rw().unwrap();
@@ -855,6 +867,7 @@ mod tests {
 
         let run_prune = |checkpoint: PruneCheckpoint, limit: usize| {
             let input = PruneInput {
+                genesis_block_number: 0,
                 previous_checkpoint: Some(checkpoint),
                 to_block,
                 limiter: PruneLimiter::default().set_deleted_entries_limit(limit),

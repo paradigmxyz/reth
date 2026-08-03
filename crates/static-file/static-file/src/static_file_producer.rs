@@ -120,7 +120,8 @@ where
         }
 
         debug_assert!(targets.is_contiguous_to_highest_static_files(
-            self.provider.static_file_provider().get_highest_static_files()
+            self.provider.static_file_provider().get_highest_static_files(),
+            self.provider.static_file_provider().genesis_block_number()
         ));
 
         self.event_sender.notify(StaticFileProducerEvent::Started { targets: targets.clone() });
@@ -224,7 +225,13 @@ where
         highest_static_file: Option<BlockNumber>,
         finalized_block_number: BlockNumber,
     ) -> Option<RangeInclusive<BlockNumber>> {
-        let range = highest_static_file.map_or(0, |block| block + 1)..=finalized_block_number;
+        // An empty segment starts producing at the genesis block, which is non-zero on some
+        // chains — starting at 0 would fail the writer's genesis-aligned first append.
+        let first_block = highest_static_file.map_or_else(
+            || self.provider.static_file_provider().genesis_block_number(),
+            |block| block + 1,
+        );
+        let range = first_block..=finalized_block_number;
         (!range.is_empty()).then_some(range)
     }
 }

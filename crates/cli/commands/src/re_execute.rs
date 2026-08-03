@@ -97,7 +97,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
         let components = components(provider_factory.chain_spec());
 
-        let min_block = self.from;
+        // Blocks at or below the genesis block (non-zero on some chains) cannot be
+        // re-executed; the default `--from 1` means "from the start of the chain".
+        let min_block =
+            self.from.max(provider_factory.static_file_provider().genesis_block_number() + 1);
         let best_block = DatabaseProviderFactory::database_provider_ro(&provider_factory)?
             .best_block_number()?;
         let mut max_block = best_block;

@@ -173,9 +173,14 @@ where
                 .get_prune_checkpoint(PruneSegment::SenderRecovery)?
                 .ok_or(StageError::MissingPruneCheckpoint(PruneSegment::SenderRecovery))?;
 
-            // `unwrap_or_default` is safe because we know that genesis block doesn't have any
-            // transactions and senders
-            result.checkpoint = StageCheckpoint::new(checkpoint.block_number.unwrap_or_default());
+            // Falling back to the genesis block is safe because it has no transactions and
+            // senders. A 0 fallback would push the stage checkpoint below genesis on chains
+            // with a non-zero genesis block, stalling every downstream stage.
+            result.checkpoint = StageCheckpoint::new(
+                checkpoint
+                    .block_number
+                    .unwrap_or_else(|| provider.static_file_provider().genesis_block_number()),
+            );
         }
 
         Ok(result)

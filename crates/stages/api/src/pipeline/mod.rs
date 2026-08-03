@@ -9,7 +9,8 @@ use reth_primitives_traits::constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH;
 use reth_provider::{
     providers::ProviderNodeTypes, BlockHashReader, BlockNumReader, ChainStateBlockReader,
     ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, ProviderFactory,
-    PruneCheckpointReader, StageCheckpointReader, StageCheckpointWriter, StorageSettingsCache,
+    PruneCheckpointReader, StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
+    StorageSettingsCache,
 };
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
@@ -305,6 +306,9 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         to: BlockNumber,
         bad_block: Option<BlockNumber>,
     ) -> Result<(), PipelineError> {
+        // Never unwind below the genesis block, which is non-zero on some chains.
+        let to = to.max(self.provider_factory.static_file_provider().genesis_block_number());
+
         // Add validation before starting unwind
         let (latest_block, prune_modes, checkpoints) = {
             let provider = self.provider_factory.provider()?;
