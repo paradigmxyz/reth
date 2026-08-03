@@ -470,7 +470,7 @@ where
 /// `blocks`, that tip becomes the historical anchor and only blocks newer than it are retained.
 /// Otherwise, the original `historical` anchor and all blocks are retained. Matching the tip hash,
 /// rather than only its number, preserves the correct state across same-height forks.
-pub fn select_historical_anchor<P, N>(
+pub fn get_anchored_overlay<P, N>(
     provider: &P,
     historical: B256,
     mut blocks: Vec<ExecutedBlock<N>>,
@@ -573,7 +573,7 @@ mod tests {
     }
 
     #[test]
-    fn select_historical_anchor_uses_durable_tip_overlap() {
+    fn get_anchored_overlay_uses_durable_tip_overlap() {
         let mut block_builder = TestBlockBuilder::eth();
         let blocks = block_builder.get_executed_blocks(1..4).collect::<Vec<_>>();
         let in_memory = vec![blocks[2].clone(), blocks[1].clone(), blocks[0].clone()];
@@ -585,7 +585,7 @@ mod tests {
             blocks[1].recovered_block().header().clone(),
         );
         let (anchor, selected) =
-            select_historical_anchor(&provider, historical, in_memory.clone()).unwrap();
+            get_anchored_overlay(&provider, historical, in_memory.clone()).unwrap();
         assert_eq!(anchor, blocks[1].recovered_block().hash());
         assert_eq!(selected, vec![blocks[2].clone()]);
 
@@ -595,7 +595,7 @@ mod tests {
             blocks[2].recovered_block().header().clone(),
         );
         let (anchor, selected) =
-            select_historical_anchor(&provider, historical, in_memory.clone()).unwrap();
+            get_anchored_overlay(&provider, historical, in_memory.clone()).unwrap();
         assert_eq!(anchor, blocks[2].recovered_block().hash());
         assert!(selected.is_empty());
 
@@ -609,7 +609,7 @@ mod tests {
             alternate_tip.recovered_block().header().clone(),
         );
         let (anchor, selected) =
-            select_historical_anchor(&provider, historical, in_memory.clone()).unwrap();
+            get_anchored_overlay(&provider, historical, in_memory.clone()).unwrap();
         assert_eq!(anchor, historical);
         assert_eq!(selected, in_memory);
     }

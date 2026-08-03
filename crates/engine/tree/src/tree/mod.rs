@@ -36,7 +36,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
-use reth_storage_overlay::{select_historical_anchor, OverlayManager};
+use reth_storage_overlay::{get_anchored_overlay, OverlayManager};
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie::ComputedTrieData;
 use revm::interpreter::debug_unreachable;
@@ -137,7 +137,7 @@ where
         };
 
         let (historical, overlay) =
-            select_historical_anchor(&self.provider_factory, self.historical, overlay)?;
+            get_anchored_overlay(&self.provider_factory, self.historical, overlay)?;
         let provider = self.provider_factory.state_by_block_hash(historical)?;
         Ok(Box::new(MemoryOverlayStateProvider::new(provider, overlay)))
     }
