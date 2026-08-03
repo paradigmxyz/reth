@@ -487,8 +487,8 @@ impl NetworkArgs {
 
     /// Returns the resolved bootnodes if any are provided.
     pub fn resolved_bootnodes(&self) -> Option<Vec<NodeRecord>> {
-        self.bootnodes.clone().map(|bootnodes| {
-            bootnodes.into_iter().filter_map(|node| node.resolve_blocking().ok()).collect()
+        self.bootnodes.as_deref().map(|bootnodes| {
+            bootnodes.iter().filter_map(|node| node.resolve_blocking().ok()).collect()
         })
     }
 
