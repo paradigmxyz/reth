@@ -95,11 +95,10 @@ impl<N: NodePrimitives> TreeState<N> {
     }
 
     /// Returns all available blocks for the given hash that lead back to the canonical chain, from
-    /// newest to oldest, and the parent hash of the oldest returned block. This parent hash is the
-    /// highest persisted block connected to this chain.
+    /// newest to oldest.
     ///
     /// Returns `None` if the block for the given hash is not found.
-    pub fn blocks_by_hash(&self, hash: B256) -> Option<(B256, Vec<ExecutedBlock<N>>)> {
+    pub fn blocks_by_hash(&self, hash: B256) -> Option<Vec<ExecutedBlock<N>>> {
         let block = self.blocks_by_hash.get(&hash).cloned()?;
         let mut parent_hash = block.recovered_block().parent_hash();
         let mut blocks = vec![block];
@@ -108,7 +107,7 @@ impl<N: NodePrimitives> TreeState<N> {
             blocks.push(executed.clone());
         }
 
-        Some((parent_hash, blocks))
+        Some(blocks)
     }
 
     /// Insert executed block into the state.

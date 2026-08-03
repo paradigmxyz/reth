@@ -218,12 +218,7 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
         }
 
         self.pending_sparse_trie_prune = false;
-        Some(
-            self.tree_state
-                .blocks_by_hash(parent_hash)
-                .map(|(_, blocks)| blocks)
-                .unwrap_or_default(),
-        )
+        Some(self.tree_state.blocks_by_hash(parent_hash).unwrap_or_default())
     }
 
     /// Returns true if the block has been marked as invalid.
@@ -3420,18 +3415,9 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone,
     {
-        if let Some((historical, blocks)) = self.state.tree_state.blocks_by_hash(hash) {
-            debug!(target: "engine::tree", %hash, %historical, "found canonical state for block in memory, creating provider builder");
-            // the block leads back to the canonical chain
-            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, Some(blocks))))
-        }
-
-        // Check if the block is persisted
-        if let Some(header) = self.provider.header(hash)? {
-            debug!(target: "engine::tree", %hash, number = %header.number(), "found canonical state for block in database, creating provider builder");
-            // For persisted blocks, we create a builder that will fetch state directly from the
-            // database
-            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)))
+        let overlay = self.state.tree_state.blocks_by_hash(hash);
+        if overlay.is_some() || self.provider.header(hash)?.is_some() {
+            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, overlay)))
         }
 
         debug!(target: "engine::tree", %hash, "no canonical state found for block");
