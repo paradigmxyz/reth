@@ -147,6 +147,15 @@ where
         self.eth.get_proof(address, keys, block_number).instrument(engine_span!()).await
     }
 
+    /// Handler for `eth_getMultiProof`
+    async fn get_multi_proof(
+        &self,
+        targets: Vec<(Address, Vec<B256>)>,
+        block_number: Option<BlockId>,
+    ) -> Result<Vec<EIP1186AccountProofResponse>> {
+        self.eth.get_multi_proof(targets, block_number).instrument(engine_span!()).await
+    }
+
     /// Handler for `eth_getBlockAccessListByBlockHash`
     async fn block_access_list_by_block_hash(&self, hash: B256) -> Result<Option<Value>> {
         self.eth.block_access_list_by_block_hash(hash).instrument(engine_span!()).await
