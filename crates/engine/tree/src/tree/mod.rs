@@ -41,7 +41,7 @@ use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie::ComputedTrieData;
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
-use std::{fmt::Debug, ops, sync::Arc, time::Duration};
+use std::{collections::VecDeque, fmt::Debug, ops, sync::Arc, time::Duration};
 
 use crossbeam_channel::{Receiver, Sender};
 use tokio::sync::{
@@ -327,6 +327,8 @@ where
     incoming_tx: Sender<FromEngine<EngineApiRequest<T, N>, N::Block>>,
     /// Incoming engine API requests.
     incoming: Receiver<FromEngine<EngineApiRequest<T, N>, N::Block>>,
+    /// Messages deferred while persistence backpressure is active.
+    deferred_engine_messages: VecDeque<FromEngine<EngineApiRequest<T, N>, N::Block>>,
     /// Outgoing events that are emitted to the handler.
     outgoing: UnboundedSender<EngineApiEvent<N>>,
     /// Channels to the persistence layer.
@@ -373,6 +375,7 @@ where
             .field("payload_validator", &self.payload_validator)
             .field("state", &self.state)
             .field("incoming_tx", &self.incoming_tx)
+            .field("deferred_engine_messages", &self.deferred_engine_messages.len())
             .field("persistence", &self.persistence)
             .field("persistence_state", &self.persistence_state)
             .field("backfill_sync_state", &self.backfill_sync_state)
@@ -432,6 +435,7 @@ where
             consensus,
             payload_validator,
             incoming,
+            deferred_engine_messages: VecDeque::new(),
             outgoing,
             persistence,
             persistence_state,
@@ -539,7 +543,8 @@ where
         self.persistence_gap().saturating_sub(self.config.memory_block_buffer_target())
     }
 
-    /// Returns `true` when the main loop should stop draining the tree input channel.
+    /// Returns `true` when the main loop should stop processing messages that can add more work to
+    /// the persistence queue.
     ///
     /// This is the case when persistence is already running and the number of blocks beyond the
     /// configured in-memory buffer has reached the configured threshold.
@@ -559,25 +564,17 @@ where
             // 1. Non-blocking poll for persistence completion. If the background flush already
             //    landed, absorb the result now so the gap calculation below is fresh.
             // 2. Decide how to wait for the next event. When the canonical-to-persisted gap beyond
-            //    the in-memory buffer reaches the backpressure threshold we only block on the
-            //    persistence receiver, leaving new engine requests sitting in the unbounded
-            //    upstream channel.
+            //    the in-memory buffer reaches the backpressure threshold, keep answering standard
+            //    consensus requests with SYNCING while waiting for persistence. Messages that can
+            //    add more work are deferred until persistence catches up.
             // 3. Handle the event (engine message or persistence completion) and kick off a new
             //    persistence cycle if the threshold is met again.
             //
             // The net effect: when the unbuffered persistence gap reaches the threshold, we stop
-            // processing incoming messages and let them queue in the channel. This is only a soft
-            // form of backpressure: it delays replies and, more importantly, prevents executing
-            // further blocks that would pile up in the persistence queue - where each block
-            // carries heavier state (eg. trie updates) than the raw payload sitting in the engine
-            // channel.
-            //
-            // Standard Ethereum CLs won't truly back off - the engine API has no
-            // backpressure semantics, and CLs typically timeout after ≈8s and resend - so
-            // this cannot prevent the incoming channel from growing under sustained load.
-            // But it shifts the bottleneck to the lighter-weight incoming queue rather than
-            // the costlier persistence pipeline. Other clients that respect reply latency
-            // can treat the delayed responses as a signal to chill out.
+            // executing new blocks that would pile up heavier state such as trie updates in the
+            // persistence queue. Standard newPayload and forkchoiceUpdated calls still get prompt
+            // SYNCING responses, which avoids consensus-layer timeouts and duplicate retries while
+            // making it explicit that the execution layer has not applied the request.
             match self.try_poll_persistence() {
                 Ok(true) => {
                     if let Err(err) = self.advance_persistence() {
@@ -639,21 +636,97 @@ where
         }
     }
 
-    /// Blocks until the in-flight persistence task completes, used when we are under
-    /// backpressure.
+    /// Blocks until the in-flight persistence task completes while keeping standard consensus
+    /// requests responsive.
     ///
-    /// Unlike `wait_for_event`, this deliberately does not read from the tree input channel. Any
-    /// requests sent to the tree remain queued upstream until persistence catches up.
+    /// newPayload and forkchoiceUpdated receive an immediate SYNCING response because applying
+    /// either request could add more unpersisted state. Other messages are deferred in arrival
+    /// order and processed once persistence catches up.
     fn wait_for_persistence_event(&mut self) -> LoopEvent<T, N> {
         let maybe_persistence = self.persistence_state.rx.take();
 
         if let Some((persistence_rx, start_time, _action)) = maybe_persistence {
-            match persistence_rx.recv() {
-                Ok(result) => LoopEvent::PersistenceComplete { result, start_time },
-                Err(_) => LoopEvent::Disconnected,
+            loop {
+                crossbeam_channel::select_biased! {
+                    recv(persistence_rx) -> result => {
+                        return match result {
+                            Ok(result) => LoopEvent::PersistenceComplete { result, start_time },
+                            Err(_) => LoopEvent::Disconnected,
+                        }
+                    },
+                    recv(self.incoming) -> msg => {
+                        match msg {
+                            Ok(msg) => {
+                                if let Some(msg) = self.respond_to_backpressured_message(msg) {
+                                    self.deferred_engine_messages.push_back(msg);
+                                }
+                            }
+                            Err(_) => return LoopEvent::Disconnected,
+                        }
+                    },
+                }
             }
         } else {
             self.wait_for_event()
+        }
+    }
+
+    /// Responds to standard consensus requests without applying them while persistence
+    /// backpressure is active. Returns messages that must be processed later.
+    fn respond_to_backpressured_message(
+        &mut self,
+        msg: FromEngine<EngineApiRequest<T, N>, N::Block>,
+    ) -> Option<FromEngine<EngineApiRequest<T, N>, N::Block>> {
+        match msg {
+            FromEngine::Request(EngineApiRequest::Beacon(
+                BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx },
+            )) => {
+                let start = Instant::now();
+                let has_attrs = payload_attrs.is_some();
+                let output: Result<TreeOutcome<OnForkChoiceUpdated>, ProviderError> =
+                    Ok(TreeOutcome::new(OnForkChoiceUpdated::syncing()));
+
+                self.metrics.engine.forkchoice_updated.update_response_metrics(
+                    start,
+                    &mut self.metrics.engine.new_payload.latest_finish_at,
+                    has_attrs,
+                    &output,
+                );
+
+                if let Err(err) = tx.send(output.map(|o| o.outcome).map_err(Into::into)) {
+                    self.metrics.engine.failed_forkchoice_updated_response_deliveries.increment(1);
+                    warn!(target: "engine::tree", ?state, elapsed=?start.elapsed(), "Failed to deliver forkchoiceUpdated backpressure response, receiver dropped (request cancelled): {err:?}");
+                }
+                None
+            }
+            FromEngine::Request(EngineApiRequest::Beacon(BeaconEngineMessage::NewPayload {
+                payload,
+                tx,
+            })) => {
+                let start = Instant::now();
+                let gas_used = payload.gas_used();
+                let num_hash = payload.num_hash();
+                let output: Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError> =
+                    Ok(TreeOutcome::new(PayloadStatus::from_status(PayloadStatusEnum::Syncing)));
+
+                self.metrics.engine.new_payload.update_response_metrics(
+                    start,
+                    &mut self.metrics.engine.forkchoice_updated.latest_finish_at,
+                    &output,
+                    gas_used,
+                );
+
+                if let Err(err) = tx.send(
+                    output
+                        .map(|o| o.outcome)
+                        .map_err(|err| BeaconOnNewPayloadError::Internal(Box::new(err))),
+                ) {
+                    self.metrics.engine.failed_new_payload_response_deliveries.increment(1);
+                    warn!(target: "engine::tree", payload=?num_hash, elapsed=?start.elapsed(), "Failed to deliver newPayload backpressure response, receiver dropped (request cancelled): {err:?}");
+                }
+                None
+            }
+            msg => Some(msg),
         }
     }
 
@@ -663,6 +736,10 @@ where
     /// Uses biased selection to prioritize persistence completion to update in-memory state and
     /// unblock further writes.
     fn wait_for_event(&mut self) -> LoopEvent<T, N> {
+        if let Some(msg) = self.deferred_engine_messages.pop_front() {
+            return LoopEvent::EngineMessage(msg)
+        }
+
         // Take ownership of persistence rx if present
         let maybe_persistence = self.persistence_state.rx.take();
 
