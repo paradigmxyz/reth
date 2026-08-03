@@ -4,6 +4,7 @@ mod blobs;
 mod custom_genesis;
 mod dev;
 mod eth;
+mod filter;
 mod invalid_payload;
 mod p2p;
 mod pool;
