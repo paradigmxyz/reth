@@ -15,7 +15,7 @@
 //! on public-facing RPC endpoints without proper authentication.
 
 use alloy_consensus::Transaction;
-use alloy_eips::{eip1559::calculate_block_gas_limit, eip2718::Decodable2718, eip7685::Requests};
+use alloy_eips::{eip1559::calculate_block_gas_limit, eip2718::Decodable2718};
 use alloy_evm::{Evm, RecoveredTx};
 use alloy_primitives::{
     map::{DefaultHashBuilder, HashSet},
@@ -24,7 +24,7 @@ use alloy_primitives::{
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{
     BlobsBundleV2, ExecutionData, ExecutionPayloadEnvelopeV5, ExecutionPayloadSidecar,
-    ForkchoiceState, PayloadAttributes, PraguePayloadFields,
+    ExecutionPayloadV3, ForkchoiceState, PayloadAttributes, PraguePayloadFields,
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
@@ -32,11 +32,12 @@ use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
 use reth_engine_primitives::ConsensusEngineHandle;
 use reth_errors::RethError;
+use reth_ethereum_engine_primitives::EthBuiltPayload;
 use reth_evm::{execute::BlockBuilder, ConfigureEvm, NextBlockEnvAttributes};
 use reth_payload_primitives::{BuiltPayload, PayloadTypes};
 use reth_primitives_traits::{
     transaction::{recover::try_recover_signers, signed::RecoveryError},
-    AlloyBlockHeader as BlockTrait, HeaderTy, TxTy,
+    AlloyBlockHeader as BlockTrait, Block as _, HeaderTy, TxTy,
 };
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_api::{TestingApiServer, TestingBuildBlockRequestV1};
@@ -45,6 +46,7 @@ use reth_rpc_eth_types::EthApiError;
 use reth_storage_api::{BlockReader, BlockReaderIdExt, HeaderProvider};
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::context::Block;
+use std::sync::Arc;
 use tracing::debug;
 
 /// Testing API handler.
@@ -117,7 +119,7 @@ where
         request: TestingBuildBlockRequestV1,
         skip_invalid_transactions: bool,
         use_pool_transactions: bool,
-    ) -> Result<(Payload::ExecutionData, U256, Option<Requests>), Eth::Error> {
+    ) -> Result<EthBuiltPayload<Evm::Primitives>, Eth::Error> {
         let evm_config = self.evm_config.clone();
         let desired_gas_limit = self.desired_gas_limit;
         let gas_limit_override = self.gas_limit_override;
@@ -268,22 +270,12 @@ where
                     .block_access_list
                     .map(|block_access_list| alloy_rlp::encode(&block_access_list).into());
 
-                // Same conversion the payload types perform for locally built blocks: the
-                // requests are not recoverable from the block, so they are re-attached here.
-                let execution_data =
-                    Payload::block_to_payload(outcome.block.into_sealed_block(), block_access_list);
-                let execution_data = match (requests.clone(), execution_data.sidecar.cancun()) {
-                    (Some(requests), Some(cancun)) => ExecutionData::new(
-                        execution_data.payload,
-                        ExecutionPayloadSidecar::v4(
-                            cancun.clone(),
-                            PraguePayloadFields::new(requests),
-                        ),
-                    ),
-                    _ => execution_data,
-                };
-
-                Ok((execution_data, total_fees, requests))
+                Ok(EthBuiltPayload::new(
+                    Arc::new(outcome.block),
+                    total_fees,
+                    requests,
+                    block_access_list,
+                ))
             })
             .await
     }
@@ -293,28 +285,21 @@ where
         request: TestingBuildBlockRequestV1,
         use_pool_transactions: bool,
     ) -> Result<ExecutionPayloadEnvelopeV5, Eth::Error> {
-        let (execution_data, fees, requests) = self
+        let payload = self
             .build_payload_v1(request, self.skip_invalid_transactions, use_pool_transactions)
             .await?;
-
-        let execution_payload = execution_data
-            .payload
-            .as_v3()
-            .cloned()
-            .ok_or_else(|| {
-                EthApiError::InvalidParams(
-                    "built block predates Cancun and has no V3 execution payload".to_string(),
-                )
-            })
-            .map_err(Eth::Error::from_eth_err)?;
+        let fees = payload.fees();
+        let requests = payload.requests().unwrap_or_default();
+        let block = Arc::unwrap_or_clone(payload.into_block_arc());
+        let block_hash = block.hash();
+        let block = block.into_block().into_ethereum_block();
 
         Ok(ExecutionPayloadEnvelopeV5 {
-            execution_payload,
+            execution_payload: ExecutionPayloadV3::from_block_unchecked(block_hash, &block),
             block_value: fees,
-            // The testing API never attaches blob sidecars.
             blobs_bundle: BlobsBundleV2::empty(),
             should_override_builder: false,
-            execution_requests: requests.unwrap_or_default(),
+            execution_requests: requests,
         })
     }
 
@@ -346,7 +331,7 @@ where
             .unwrap_or_else(|| parent.hash());
 
         let use_pool_transactions = transactions.is_none();
-        let (execution_data, _, _) = self
+        let payload = self
             .build_payload_v1(
                 TestingBuildBlockRequestV1 {
                     parent_block_hash: parent.hash(),
@@ -359,7 +344,18 @@ where
             )
             .await?;
 
-        let block_hash = execution_data.payload.block_hash();
+        let block_hash = payload.block().hash();
+        let requests = payload.requests();
+        let block_access_list = payload.block_access_list().cloned();
+        let block = Arc::unwrap_or_clone(payload.into_block_arc()).into_sealed_block();
+        let execution_data = Payload::block_to_payload(block, block_access_list);
+        let execution_data = match (requests, execution_data.sidecar.cancun()) {
+            (Some(requests), Some(cancun)) => ExecutionData::new(
+                execution_data.payload,
+                ExecutionPayloadSidecar::v4(cancun.clone(), PraguePayloadFields::new(requests)),
+            ),
+            _ => execution_data,
+        };
         let status = self
             .engine_handle
             .new_payload(execution_data)
