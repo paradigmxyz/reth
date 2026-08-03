@@ -303,6 +303,21 @@ where
         })
     }
 
+    fn into_execution_data(payload: EthBuiltPayload<Evm::Primitives>) -> ExecutionData {
+        let requests = payload.requests();
+        let block_access_list = payload.block_access_list().cloned();
+        let block = Arc::unwrap_or_clone(payload.into_block_arc()).into_sealed_block();
+        let execution_data = Payload::block_to_payload(block, block_access_list);
+
+        match (requests, execution_data.sidecar.cancun()) {
+            (Some(requests), Some(cancun)) => ExecutionData::new(
+                execution_data.payload,
+                ExecutionPayloadSidecar::v4(cancun.clone(), PraguePayloadFields::new(requests)),
+            ),
+            _ => execution_data,
+        }
+    }
+
     async fn commit_block_v1(
         &self,
         payload_attributes: PayloadAttributes,
@@ -345,17 +360,7 @@ where
             .await?;
 
         let block_hash = payload.block().hash();
-        let requests = payload.requests();
-        let block_access_list = payload.block_access_list().cloned();
-        let block = Arc::unwrap_or_clone(payload.into_block_arc()).into_sealed_block();
-        let execution_data = Payload::block_to_payload(block, block_access_list);
-        let execution_data = match (requests, execution_data.sidecar.cancun()) {
-            (Some(requests), Some(cancun)) => ExecutionData::new(
-                execution_data.payload,
-                ExecutionPayloadSidecar::v4(cancun.clone(), PraguePayloadFields::new(requests)),
-            ),
-            _ => execution_data,
-        };
+        let execution_data = Self::into_execution_data(payload);
         let status = self
             .engine_handle
             .new_payload(execution_data)
