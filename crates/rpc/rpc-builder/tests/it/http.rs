@@ -381,6 +381,18 @@ where
     )
     .await
     .unwrap();
+    let proofs = EthApiClient::<
+        TransactionRequest,
+        Transaction,
+        Block,
+        Receipt,
+        Header,
+        TransactionSigned,
+    >::get_multi_proof(client, vec![(address, vec![B256::ZERO])], None)
+    .await
+    .unwrap();
+    assert_eq!(proofs.len(), 1);
+    assert_eq!(proofs[0].address, address);
 
     // Unimplemented
     assert!(
