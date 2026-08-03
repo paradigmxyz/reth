@@ -28,7 +28,7 @@ use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     AccountReader, BlockExecutionOutput, BlockNumReader, BlockReader, DatabaseProviderFactory,
-    StageCheckpointReader, StateProviderFactory, StateReader,
+    StageCheckpointReader, StateProviderFactory, StateReader, TryIntoHistoricalStateProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_tasks::{pool::WorkerPool, Runtime};
@@ -92,7 +92,7 @@ impl<N, P, Evm> PrewarmCacheTask<N, P, Evm>
 where
     N: NodePrimitives,
     P: BlockReader + DatabaseProviderFactory + StateProviderFactory + StateReader + Clone + 'static,
-    P::Provider: BlockNumReader + StageCheckpointReader,
+    P::Provider: BlockNumReader + StageCheckpointReader + TryIntoHistoricalStateProvider,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Initializes the task with the given transactions pending execution
@@ -564,7 +564,7 @@ impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
     N: NodePrimitives,
     P: BlockReader + DatabaseProviderFactory + StateProviderFactory + StateReader + Clone + 'static,
-    P::Provider: BlockNumReader + StageCheckpointReader,
+    P::Provider: BlockNumReader + StageCheckpointReader + TryIntoHistoricalStateProvider,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Creates a per-thread EVM for prewarming.

@@ -150,6 +150,7 @@ use reth_provider::{
     ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider,
     ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderBox,
     StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
+    TryIntoHistoricalStateProvider,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
 use reth_storage_overlay::OverlayManager;
@@ -304,6 +305,7 @@ where
     P: DatabaseProviderFactory<
             Provider: BlockReader
                           + StageCheckpointReader
+                          + TryIntoHistoricalStateProvider
                           + PruneCheckpointReader
                           + ChangeSetReader
                           + StorageChangeSetReader
@@ -1786,6 +1788,7 @@ where
     P: DatabaseProviderFactory<
             Provider: BlockReader
                           + StageCheckpointReader
+                          + TryIntoHistoricalStateProvider
                           + PruneCheckpointReader
                           + ChangeSetReader
                           + StorageChangeSetReader

@@ -38,6 +38,7 @@ use reth_storage_api::{
     BlockBodyIndicesProvider, BytecodeReader, DBProvider, DatabaseProviderFactory,
     HashedPostStateProvider, NodePrimitivesProvider, StageCheckpointReader, StateProofProvider,
     StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
+    TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
@@ -1194,6 +1195,17 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> StatePr
 
     fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox>> {
         Ok(Some(Box::new(self.clone())))
+    }
+}
+
+impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static>
+    TryIntoHistoricalStateProvider for MockEthProvider<T, ChainSpec>
+{
+    fn try_into_history_at_block(
+        self,
+        _block_number: BlockNumber,
+    ) -> ProviderResult<StateProviderBox> {
+        Ok(Box::new(self))
     }
 }
 

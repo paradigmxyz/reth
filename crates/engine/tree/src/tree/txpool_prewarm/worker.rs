@@ -10,7 +10,7 @@ use reth_evm::ConfigureEvm;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     BlockNumReader, BlockReader, DatabaseProviderFactory, StageCheckpointReader,
-    StateProviderFactory, StateReader,
+    StateProviderFactory, StateReader, TryIntoHistoricalStateProvider,
 };
 use reth_revm::{cached::CachedReads, db::State};
 use std::{
@@ -67,7 +67,7 @@ impl<N, P, Evm> Worker<N, P, Evm>
 where
     N: NodePrimitives,
     P: BlockReader + DatabaseProviderFactory + StateProviderFactory + StateReader + Clone,
-    P::Provider: BlockNumReader + StageCheckpointReader,
+    P::Provider: BlockNumReader + StageCheckpointReader + TryIntoHistoricalStateProvider,
     Evm: ConfigureEvm<Primitives = N>,
 {
     pub(super) fn new(

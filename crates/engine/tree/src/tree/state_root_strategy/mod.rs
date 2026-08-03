@@ -72,6 +72,7 @@ use reth_provider::{
     providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
     DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider, ProviderError,
     StageCheckpointReader, StateProviderFactory, StateReader, StateRootProvider,
+    TryIntoHistoricalStateProvider,
 };
 use reth_storage_overlay::OverlayManager;
 use reth_tasks::utils::increase_thread_priority;
@@ -825,7 +826,7 @@ where
         + StateReader
         + Clone
         + 'static,
-    P::Provider: BlockNumReader + StageCheckpointReader,
+    P::Provider: BlockNumReader + StageCheckpointReader + TryIntoHistoricalStateProvider,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
         + Clone
         + Send
@@ -1000,7 +1001,7 @@ where
         + Send
         + Sync
         + 'static,
-    P::Provider: BlockNumReader + StageCheckpointReader,
+    P::Provider: BlockNumReader + StageCheckpointReader + TryIntoHistoricalStateProvider,
 {
     fn name(&self) -> &'static str {
         "synchronous"
@@ -1041,7 +1042,7 @@ where
         + Send
         + Sync
         + 'static,
-    P::Provider: BlockNumReader + StageCheckpointReader,
+    P::Provider: BlockNumReader + StageCheckpointReader + TryIntoHistoricalStateProvider,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
         + Clone
         + Send
@@ -1155,7 +1156,7 @@ where
         + Send
         + Sync
         + 'static,
-    P::Provider: BlockNumReader + StageCheckpointReader,
+    P::Provider: BlockNumReader + StageCheckpointReader + TryIntoHistoricalStateProvider,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
         + Clone
         + Send
@@ -1257,7 +1258,7 @@ fn compare_trie_updates_with_serial<N, P>(
 where
     N: NodePrimitives,
     P: BlockReader + DatabaseProviderFactory + StateProviderFactory + StateReader + Clone,
-    P::Provider: BlockNumReader + StageCheckpointReader,
+    P::Provider: BlockNumReader + StageCheckpointReader + TryIntoHistoricalStateProvider,
     OverlayStateProviderFactory<P, N>:
         DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>,
 {

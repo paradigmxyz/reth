@@ -29,10 +29,11 @@ use reth_primitives_traits::{
     FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
 use reth_provider::{
-    BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockNumReader, BlockReader,
-    ChangeSetReader, DatabaseProviderFactory, HashedPostStateProvider, ProviderError,
+    BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockHashReader, BlockNumReader,
+    BlockReader, ChangeSetReader, DatabaseProviderFactory, HashedPostStateProvider, ProviderError,
     SaveBlocksInput, StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
     StorageChangeSetReader, StorageSettingsCache, TransactionVariant,
+    TryIntoHistoricalStateProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
@@ -129,7 +130,7 @@ impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
 impl<N: NodePrimitives, P> StateProviderBuilder<N, P>
 where
     P: BlockReader + DatabaseProviderFactory + StateProviderFactory + StateReader + Clone,
-    P::Provider: BlockNumReader + StageCheckpointReader,
+    P::Provider: BlockNumReader + StageCheckpointReader + TryIntoHistoricalStateProvider,
 {
     /// Creates a new state provider from this builder.
     pub fn build(&self) -> ProviderResult<StateProviderBox> {
@@ -138,9 +139,15 @@ where
         };
 
         let database_provider = self.provider_factory.database_provider_ro()?;
-        let (historical, overlay) =
+        let (anchor_hash, overlay) =
             get_anchored_overlay(&database_provider, self.parent_hash, overlay)?;
-        let provider = self.provider_factory.state_by_block_hash(historical)?;
+        let anchor_number = database_provider
+            .block_number(anchor_hash)?
+            .ok_or(ProviderError::BlockHashNotFound(anchor_hash))?;
+        if database_provider.block_hash(anchor_number)? != Some(anchor_hash) {
+            return Err(ProviderError::BlockHashNotFound(anchor_hash))
+        }
+        let provider = database_provider.try_into_history_at_block(anchor_number)?;
         Ok(Box::new(MemoryOverlayStateProvider::new(provider, overlay)))
     }
 }

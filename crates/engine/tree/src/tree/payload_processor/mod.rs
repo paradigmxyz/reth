@@ -19,7 +19,7 @@ use reth_evm::{
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, BlockReader, DatabaseProviderFactory,
-    StageCheckpointReader, StateProviderFactory, StateReader,
+    StageCheckpointReader, StateProviderFactory, StateReader, TryIntoHistoricalStateProvider,
 };
 use reth_revm::db::BundleState;
 use reth_tasks::Runtime;
@@ -181,7 +181,7 @@ where
             + StateReader
             + Clone
             + 'static,
-        P::Provider: BlockNumReader + StageCheckpointReader,
+        P::Provider: BlockNumReader + StageCheckpointReader + TryIntoHistoricalStateProvider,
     {
         let (prewarm_rx, execution_rx) =
             self.spawn_tx_iterator(transactions, env.transaction_count, parallel_bal_execution);
@@ -351,7 +351,7 @@ where
             + StateReader
             + Clone
             + 'static,
-        P::Provider: BlockNumReader + StageCheckpointReader,
+        P::Provider: BlockNumReader + StageCheckpointReader + TryIntoHistoricalStateProvider,
     {
         // Each mode carries the capability its producers use; the rest is dropped here, so
         // unused capabilities do not keep the state-root task's update channel open.
