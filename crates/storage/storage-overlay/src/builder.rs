@@ -15,7 +15,6 @@ use reth_storage_api::{
 };
 use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted};
 use std::{
-    collections::HashMap,
     ops::RangeInclusive,
     sync::Arc,
     time::{Duration, Instant},
@@ -463,9 +462,9 @@ where
 
 /// Selects the database anchor and in-memory blocks for a state provider.
 ///
-/// `parent_hash` identifies the post-state being built. `blocks` must contain its complete
-/// in-memory ancestry back to a database anchor, but may also contain unrelated blocks. Only the
-/// chain beginning at `parent_hash` is returned, ordered from newest to oldest. During partial
+/// `parent_hash` identifies the post-state being built. `blocks` must be ordered from newest to
+/// oldest and contain its complete in-memory ancestry back to a database anchor. It may start with
+/// blocks newer than `parent_hash`; only the suffix beginning there is returned. During partial
 /// persistence, using the Finish tip as that anchor requires `blocks` to cover the complete
 /// masking segment back through the state/trie tip.
 ///
@@ -498,12 +497,13 @@ where
         return Ok((parent_hash, Vec::new()))
     }
 
-    let mut blocks_by_hash = blocks
-        .into_iter()
-        .map(|block| (block.recovered_block().hash(), block))
-        .collect::<HashMap<_, _>>();
+    let mut blocks = blocks.into_iter();
+    let parent = blocks
+        .find(|block| block.recovered_block().hash() == parent_hash)
+        .ok_or(ProviderError::BlockHashNotFound(parent_hash))?;
+    let mut blocks = std::iter::once(parent).chain(blocks);
     let mut anchor_hash = parent_hash;
-    let mut overlay = Vec::new();
+    let mut overlay = Vec::with_capacity(blocks.size_hint().0);
     let mut covers_finish_tip = state_trie_tip.hash == finish_tip.hash;
 
     loop {
@@ -513,7 +513,9 @@ where
             return Ok((database_anchor, overlay))
         }
 
-        let Some(block) = blocks_by_hash.remove(&anchor_hash) else {
+        let Some(block) =
+            blocks.next().filter(|block| block.recovered_block().hash() == anchor_hash)
+        else {
             // A database block above the state/trie frontier is not a usable base unless the
             // complete masking suffix back to that frontier is available.
             if state_trie_tip.hash != finish_tip.hash &&
