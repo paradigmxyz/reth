@@ -159,13 +159,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         let anchor_hash = match &self.overlay_source {
             Some(OverlaySource::Managed) => {
                 let blocks = self.overlay_manager.blocks_for_parent(self.parent_hash);
-                get_anchored_overlay_at_state_trie_tip(
-                    provider,
-                    self.parent_hash,
-                    blocks,
-                    state_trie_tip_block,
-                )?
-                .0
+                get_anchored_overlay(provider, self.parent_hash, blocks)?.0
             }
             _ => self.parent_hash,
         };
@@ -481,24 +475,6 @@ where
     N: NodePrimitives,
 {
     let (state_trie_tip, _) = database_state_frontiers(provider)?;
-
-    get_anchored_overlay_at_state_trie_tip(provider, parent_hash, blocks, state_trie_tip)
-}
-
-/// Selects the historical anchor and in-memory blocks using a previously read state/trie tip.
-///
-/// This lets [`OverlayBuilder::build_overlay_at_frontiers`] reuse the selector without re-reading
-/// the frontier that keys its cache and reverts.
-fn get_anchored_overlay_at_state_trie_tip<P, N>(
-    provider: &P,
-    parent_hash: B256,
-    blocks: Vec<ExecutedBlock<N>>,
-    state_trie_tip: BlockNumHash,
-) -> ProviderResult<(B256, Vec<ExecutedBlock<N>>)>
-where
-    P: BlockNumReader,
-    N: NodePrimitives,
-{
     let parent_is_persisted = match provider.block_number(parent_hash)? {
         Some(parent_number) if parent_number <= state_trie_tip.number => {
             provider.block_hash(parent_number)? == Some(parent_hash)
