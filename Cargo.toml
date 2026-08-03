@@ -554,7 +554,7 @@ quote = "1.0"
 # tokio
 tokio = { version = "1.52.3", default-features = false }
 tokio-stream = "0.1.11"
-tokio-tungstenite = "0.28.0"
+tokio-tungstenite = "0.29.0"
 tokio-util = { version = "0.7.4", features = ["codec"] }
 
 # async
