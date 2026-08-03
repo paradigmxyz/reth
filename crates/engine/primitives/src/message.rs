@@ -83,6 +83,15 @@ impl OnForkChoiceUpdated {
         }
     }
 
+    /// Creates a new instance of `OnForkChoiceUpdated` if the forkchoice update failed because the
+    /// requested reorg to the head block exceeds the supported reorg depth.
+    pub fn too_deep_reorg() -> Self {
+        Self {
+            forkchoice_status: ForkchoiceStatus::Invalid,
+            fut: Either::Left(futures::future::ready(Err(ForkchoiceUpdateError::TooDeepReorg))),
+        }
+    }
+
     /// Creates a new instance of `OnForkChoiceUpdated` if the forkchoice update was successful but
     /// payload attributes were invalid.
     pub fn invalid_payload_attributes() -> Self {

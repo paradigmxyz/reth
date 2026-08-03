@@ -55,6 +55,8 @@ pub struct SendForkchoiceUpdate<Engine> {
     pub head: BlockReference,
     /// Expected payload status (None means accept any non-error)
     pub expected_status: Option<PayloadStatusEnum>,
+    /// Expected RPC error code (the FCU must fail with this error)
+    pub expected_error_code: Option<i32>,
     /// Node index to send to (None means active node)
     pub node_idx: Option<usize>,
     /// Tracks engine type
@@ -68,12 +70,26 @@ impl<Engine> SendForkchoiceUpdate<Engine> {
         safe: BlockReference,
         head: BlockReference,
     ) -> Self {
-        Self { finalized, safe, head, expected_status: None, node_idx: None, _phantom: PhantomData }
+        Self {
+            finalized,
+            safe,
+            head,
+            expected_status: None,
+            expected_error_code: None,
+            node_idx: None,
+            _phantom: PhantomData,
+        }
     }
 
     /// Set expected status for the FCU response
     pub fn with_expected_status(mut self, status: PayloadStatusEnum) -> Self {
         self.expected_status = Some(status);
+        self
+    }
+
+    /// Expect the FCU to fail with the given RPC error code
+    pub const fn with_expected_error(mut self, code: i32) -> Self {
+        self.expected_error_code = Some(code);
         self
     }
 
@@ -110,9 +126,26 @@ where
             }
 
             let engine = env.node_clients[node_idx].engine.http_client();
-            let fcu_response =
+            let fcu_result =
                 EngineApiClient::<Engine>::fork_choice_updated_v3(&engine, fork_choice_state, None)
-                    .await?;
+                    .await;
+
+            if let Some(expected_code) = self.expected_error_code {
+                return match fcu_result {
+                    Err(jsonrpsee::core::client::Error::Call(err)) if err.code() == expected_code => {
+                        debug!("Node {node_idx}: FCU failed with error {expected_code} as expected");
+                        Ok(())
+                    }
+                    Err(err) => Err(eyre::eyre!(
+                        "Node {node_idx}: expected FCU to fail with error code {expected_code}, got {err:?}"
+                    )),
+                    Ok(response) => Err(eyre::eyre!(
+                        "Node {node_idx}: expected FCU to fail with error code {expected_code}, got response {response:?}"
+                    )),
+                };
+            }
+
+            let fcu_response = fcu_result?;
 
             debug!(
                 "Node {node_idx}: FCU response - status: {:?}, latest_valid_hash: {:?}",
