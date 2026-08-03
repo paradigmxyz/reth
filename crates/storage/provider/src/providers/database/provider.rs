@@ -799,7 +799,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     .collect::<Vec<_>>();
                 let merged_trie = TrieUpdatesSorted::disjointed_merge_batch(&batch, &mask);
                 if !merged_trie.is_empty() {
-                    self.write_trie_updates_sorted(&merged_trie)?;
+                    timings.trie_entries_modified =
+                        self.write_trie_updates_sorted(&merged_trie)? as u64;
                 }
                 timings.write_trie_updates += start.elapsed();
             }

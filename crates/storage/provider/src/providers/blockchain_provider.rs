@@ -156,8 +156,20 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         state: &BlockState<N::Primitives>,
     ) -> ProviderResult<MemoryOverlayStateProvider<N::Primitives>> {
         let anchor_hash = state.anchor().hash;
+        let mut overlay = state.chain().map(|state| state.block()).collect::<Vec<_>>();
+        if let Some(latest) = self.latest_database_state()? &&
+            let Some(overlay_len) = latest.overlay_len(
+                anchor_hash,
+                overlay.len(),
+                overlay.iter().map(|block| block.recovered_block().num_hash()),
+            )
+        {
+            overlay.truncate(overlay_len);
+            return Ok(MemoryOverlayStateProvider::new(latest.into_provider(), overlay))
+        }
+
         let latest_historical = self.database.history_by_block_hash(anchor_hash)?;
-        Ok(state.state_provider(latest_historical))
+        Ok(MemoryOverlayStateProvider::new(latest_historical, overlay))
     }
 
     /// Returns a cursor-backed state view for a state root still only in canonical in-memory
