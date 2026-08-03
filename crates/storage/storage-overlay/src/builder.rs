@@ -159,7 +159,11 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         let anchor_hash = match &self.overlay_source {
             Some(OverlaySource::Managed) => {
                 let blocks = self.overlay_manager.blocks_for_parent(self.parent_hash);
-                get_anchored_overlay(provider, self.parent_hash, blocks)?.0
+                let (database_anchor, blocks) =
+                    get_anchored_overlay(provider, self.parent_hash, blocks)?;
+                // The database anchor can be Finish during partial persistence, but the managed
+                // overlay still begins before the oldest retained masking block.
+                blocks.last().map_or(database_anchor, |block| block.recovered_block().parent_hash())
             }
             _ => self.parent_hash,
         };
@@ -457,14 +461,20 @@ where
     ))
 }
 
-/// Selects the historical anchor and in-memory blocks for a state provider.
+/// Selects the database anchor and in-memory blocks for a state provider.
 ///
 /// `parent_hash` identifies the post-state being built. `blocks` must contain its complete
 /// in-memory ancestry back to a database anchor, but may also contain unrelated blocks. Only the
-/// chain beginning at `parent_hash` is returned, ordered from newest to oldest. The state/trie
-/// persistence frontier is read from `provider`. If it overlaps that chain, it becomes the
-/// historical anchor and only blocks newer than it are retained. A parent already persisted at or
-/// below that frontier needs no overlay.
+/// chain beginning at `parent_hash` is returned, ordered from newest to oldest. During partial
+/// persistence, using the Finish tip as that anchor requires `blocks` to cover the complete
+/// masking segment back through the state/trie tip.
+///
+/// The state/trie and Finish persistence frontiers are read from `provider`. If the chain covers
+/// both, the Finish tip is returned as the database anchor while every block newer than the
+/// state/trie tip is retained. These retained blocks include the masking suffix required to use
+/// the database during partial persistence. If only the state/trie tip overlaps, it is returned as
+/// the database anchor instead. A parent already persisted at or below the state/trie frontier
+/// needs no forward overlay; historical reconstruction, when needed, is handled by the provider.
 pub fn get_anchored_overlay<P, N>(
     provider: &P,
     parent_hash: B256,
@@ -474,14 +484,17 @@ where
     P: BlockNumReader + StageCheckpointReader,
     N: NodePrimitives,
 {
-    let (state_trie_tip, _) = database_state_frontiers(provider)?;
-    let parent_is_persisted = match provider.block_number(parent_hash)? {
+    let (state_trie_tip, finish_tip) = database_state_frontiers(provider)?;
+    let parent_is_at_or_before_state_trie_tip = match provider.block_number(parent_hash)? {
         Some(parent_number) if parent_number <= state_trie_tip.number => {
             provider.block_hash(parent_number)? == Some(parent_hash)
         }
         _ => false,
     };
-    if parent_is_persisted {
+    if parent_is_at_or_before_state_trie_tip {
+        // There is no forward suffix to apply to a target behind this frontier. Consumers that
+        // need trie state for the hybrid database view still perform their normal historical
+        // reconstruction from this anchor.
         return Ok((parent_hash, Vec::new()))
     }
 
@@ -491,13 +504,26 @@ where
         .collect::<HashMap<_, _>>();
     let mut anchor_hash = parent_hash;
     let mut overlay = Vec::new();
+    let mut covers_finish_tip = state_trie_tip.hash == finish_tip.hash;
 
     loop {
         if anchor_hash == state_trie_tip.hash {
-            return Ok((anchor_hash, overlay))
+            let database_anchor =
+                if covers_finish_tip { finish_tip.hash } else { state_trie_tip.hash };
+            return Ok((database_anchor, overlay))
         }
 
         let Some(block) = blocks_by_hash.remove(&anchor_hash) else {
+            // A database block above the state/trie frontier is not a usable base unless the
+            // complete masking suffix back to that frontier is available.
+            if state_trie_tip.hash != finish_tip.hash &&
+                provider
+                    .block_number(anchor_hash)?
+                    .is_some_and(|number| number > state_trie_tip.number)
+            {
+                return Err(ProviderError::BlockHashNotFound(parent_hash))
+            }
+
             return if overlay.is_empty() {
                 Err(ProviderError::BlockHashNotFound(parent_hash))
             } else {
@@ -505,6 +531,7 @@ where
             }
         };
 
+        covers_finish_tip |= anchor_hash == finish_tip.hash;
         anchor_hash = block.recovered_block().parent_hash();
         overlay.push(block);
     }
@@ -531,6 +558,8 @@ struct OverlayBuilderMetrics {
 mod tests {
     use super::*;
     use alloy_primitives::U256;
+    #[cfg(feature = "partial-persistence")]
+    use reth_chain_state::MemoryOverlayStateProvider;
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
     use reth_primitives_traits::Account;
     #[cfg(feature = "partial-persistence")]
@@ -543,7 +572,10 @@ mod tests {
     #[cfg(feature = "partial-persistence")]
     use reth_stages_types::{FinishCheckpoint, StageCheckpoint};
     #[cfg(feature = "partial-persistence")]
-    use reth_storage_api::{PruneCheckpointWriter, StageCheckpointWriter};
+    use reth_storage_api::{
+        PruneCheckpointWriter, StageCheckpointWriter, StateRootProvider,
+        TryIntoHistoricalStateProvider,
+    };
     use reth_trie::{BranchNodeCompact, ComputedTrieData, HashedPostState, HashedStorage, Nibbles};
 
     fn with_unique_trie_data(
@@ -583,6 +615,20 @@ mod tests {
     }
 
     #[cfg(feature = "partial-persistence")]
+    fn empty_trie_blocks() -> Vec<ExecutedBlock<EthPrimitives>> {
+        TestBlockBuilder::eth()
+            .get_executed_blocks(0..5)
+            .map(|block| {
+                ExecutedBlock::new(
+                    Arc::clone(&block.recovered_block),
+                    Arc::clone(&block.execution_output),
+                    ComputedTrieData::new(Default::default(), Default::default()),
+                )
+            })
+            .collect()
+    }
+
+    #[cfg(feature = "partial-persistence")]
     fn setup_frontiers(
         state_trie_tip_index: usize,
         finish_tip_index: usize,
@@ -618,7 +664,7 @@ mod tests {
         let (anchor, selected) =
             get_anchored_overlay(&provider, blocks[4].recovered_block().hash(), in_memory.clone())
                 .unwrap();
-        assert_eq!(anchor, blocks[1].recovered_block().hash());
+        assert_eq!(anchor, blocks[3].recovered_block().hash());
         assert_eq!(selected, vec![blocks[4].clone(), blocks[3].clone(), blocks[2].clone()]);
 
         let (anchor, selected) =
@@ -635,12 +681,17 @@ mod tests {
         assert_eq!(anchor, blocks[1].recovered_block().hash());
         assert!(selected.is_empty());
 
-        let in_memory = vec![blocks[4].clone()];
-        let (anchor, selected) =
-            get_anchored_overlay(&provider, blocks[4].recovered_block().hash(), in_memory.clone())
-                .unwrap();
-        assert_eq!(anchor, blocks[3].recovered_block().hash());
-        assert_eq!(selected, in_memory);
+        let error = get_anchored_overlay(
+            &provider,
+            blocks[4].recovered_block().hash(),
+            vec![blocks[4].clone()],
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            ProviderError::BlockHashNotFound(hash)
+                if hash == blocks[4].recovered_block().hash()
+        ));
 
         let mut block_builder = TestBlockBuilder::eth();
         let alternate_state_trie_tip = block_builder.get_executed_block_with_number(
@@ -665,6 +716,51 @@ mod tests {
             get_anchored_overlay(&provider, parent_hash, in_memory.clone()).unwrap();
         assert_eq!(anchor, blocks[0].recovered_block().hash());
         assert_eq!(selected, in_memory);
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn get_anchored_overlay_uses_finish_without_history() {
+        let factory = create_test_provider_factory();
+        let blocks = empty_trie_blocks();
+        let provider_rw = factory.provider_rw().unwrap();
+        for block in &blocks[..=3] {
+            provider_rw.insert_block(block.recovered_block()).unwrap();
+        }
+        provider_rw
+            .save_stage_checkpoint(
+                StageId::Finish,
+                StageCheckpoint::new(blocks[3].block_number()).with_finish_stage_checkpoint(
+                    FinishCheckpoint { partial_state_trie: Some(blocks[1].block_number()) },
+                ),
+            )
+            .unwrap();
+        provider_rw
+            .save_prune_checkpoint(
+                PruneSegment::AccountHistory,
+                PruneCheckpoint {
+                    block_number: Some(blocks[2].block_number()),
+                    tx_number: None,
+                    prune_mode: PruneMode::Full,
+                },
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        let (anchor, overlay) = get_anchored_overlay(
+            &provider,
+            blocks[4].recovered_block().hash(),
+            vec![blocks[4].clone(), blocks[3].clone(), blocks[2].clone()],
+        )
+        .unwrap();
+        assert_eq!(anchor, blocks[3].recovered_block().hash());
+        assert_eq!(overlay, vec![blocks[4].clone(), blocks[3].clone(), blocks[2].clone()]);
+
+        let anchor_number = provider.block_number(anchor).unwrap().unwrap();
+        let historical = provider.try_into_history_at_block(anchor_number).unwrap();
+        let state_provider = MemoryOverlayStateProvider::new(historical, overlay);
+        state_provider.state_root(HashedPostState::default()).unwrap();
     }
 
     #[cfg(feature = "partial-persistence")]

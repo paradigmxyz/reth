@@ -21,9 +21,12 @@ pub struct MemoryOverlayStateProviderRef<
     'a,
     N: NodePrimitives = reth_ethereum_primitives::EthPrimitives,
 > {
-    /// Historical state provider for state lookups that are not found in memory blocks.
+    /// Database state provider for lookups that are not found in overlay blocks.
     pub(crate) historical: Box<dyn StateProvider + 'a>,
-    /// The collection of executed parent blocks. Expected order is newest to oldest.
+    /// Executed blocks forming the forward state/trie overlay, ordered newest to oldest.
+    ///
+    /// When a partial-persistence chain covers the database Finish tip, this can include the
+    /// masking suffix through that tip even though the base provider is already indexed there.
     pub(crate) in_memory: Cow<'a, [ExecutedBlock<N>]>,
     /// Lazy-loaded in-memory trie data.
     pub(crate) trie_input: OnceLock<TrieInput>,
@@ -34,9 +37,8 @@ impl<'a, N: NodePrimitives> MemoryOverlayStateProviderRef<'a, N> {
     ///
     /// ## Arguments
     ///
-    /// - `in_memory` - the collection of executed ancestor blocks in reverse.
-    /// - `historical` - a historical state provider for the latest ancestor block stored in the
-    ///   database.
+    /// - `in_memory` - executed blocks forming the forward overlay, newest to oldest.
+    /// - `historical` - the database state provider used as the overlay base.
     pub fn new(historical: Box<dyn StateProvider + 'a>, in_memory: Vec<ExecutedBlock<N>>) -> Self {
         Self { historical, in_memory: Cow::Owned(in_memory), trie_input: OnceLock::new() }
     }
@@ -246,9 +248,12 @@ impl<N: NodePrimitives> BytecodeReader for MemoryOverlayStateProviderRef<'_, N> 
 /// well as a reference of the historical state provider for fallback lookups.
 #[expect(missing_debug_implementations)]
 pub struct MemoryOverlayStateProvider<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
-    /// Historical state provider for state lookups that are not found in memory blocks.
+    /// Database state provider for lookups that are not found in overlay blocks.
     pub(crate) historical: StateProviderBox,
-    /// The collection of executed parent blocks. Expected order is newest to oldest.
+    /// Executed blocks forming the forward state/trie overlay, ordered newest to oldest.
+    ///
+    /// When a partial-persistence chain covers the database Finish tip, this can include the
+    /// masking suffix through that tip even though the base provider is already indexed there.
     pub(crate) in_memory: Vec<ExecutedBlock<N>>,
     /// Lazy-loaded in-memory trie data.
     pub(crate) trie_input: OnceLock<TrieInput>,
@@ -259,9 +264,8 @@ impl<N: NodePrimitives> MemoryOverlayStateProvider<N> {
     ///
     /// ## Arguments
     ///
-    /// - `in_memory` - the collection of executed ancestor blocks in reverse.
-    /// - `historical` - a historical state provider for the latest ancestor block stored in the
-    ///   database.
+    /// - `in_memory` - executed blocks forming the forward overlay, newest to oldest.
+    /// - `historical` - the database state provider used as the overlay base.
     pub fn new(historical: StateProviderBox, in_memory: Vec<ExecutedBlock<N>>) -> Self {
         Self { historical, in_memory, trie_input: OnceLock::new() }
     }
