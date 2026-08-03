@@ -161,6 +161,10 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             return Ok(MemoryOverlayStateProvider::new(historical, in_memory))
         }
 
+        // The manager only tracks blocks inserted through `TreeState`. The canonical in-memory
+        // state can also retain an already-persisted block during canonical recovery, or briefly
+        // outlive its manager entry while persistence removes the two views. Use its parent chain
+        // as the overlay in either case.
         let anchor_hash = state.anchor().hash;
         let latest_historical = self.database.history_by_block_hash(anchor_hash)?;
         Ok(state.state_provider(latest_historical))
