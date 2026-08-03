@@ -16,7 +16,8 @@ use futures_util::FutureExt;
 use reth_chain_state::CanonStateNotification;
 use reth_execution_cache::SavedCache;
 use reth_payload_builder::{
-    BuildNewPayload, KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJobGenerator,
+    BuildNewPayload, KeepPayloadJobAlive, PayloadBuilderLease, PayloadId, PayloadJob,
+    PayloadJobGenerator,
 };
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind};
@@ -200,6 +201,7 @@ where
             cached_reads,
             execution_cache: resources.take_execution_cache(),
             state_root_handle: resources.take_state_root_handle(),
+            leases: resources.take_leases(),
             payload_task_guard: self.payload_task_guard.clone(),
             metrics: Default::default(),
             builder: self.builder.clone(),
@@ -390,6 +392,11 @@ where
     execution_cache: Option<SavedCache>,
     /// Optional state-root task handle, shared with the engine.
     state_root_handle: Option<PayloadStateRootHandle>,
+    /// Lifecycle leases shared with the payload-builder service.
+    ///
+    /// Every detached build task clones these so that the loaned resources remain available until
+    /// `try_build` completes, even if the payload job is resolved first.
+    leases: Vec<PayloadBuilderLease>,
     /// metrics for this type
     metrics: PayloadBuilderMetrics,
     /// The type responsible for building payloads.
@@ -417,6 +424,7 @@ where
         let cached_reads = self.cached_reads.take().unwrap_or_default();
         let execution_cache = self.execution_cache.clone();
         let state_root_handle = self.state_root_handle.take();
+        let leases = self.leases.clone();
         let builder = self.builder.clone();
         let executor = self.executor.clone();
         self.executor.spawn_task(async move {
@@ -433,6 +441,7 @@ where
                     best_payload,
                 };
                 let result = builder.try_build(args);
+                drop(leases);
                 let _ = tx.send(result);
             });
         });
@@ -1039,4 +1048,111 @@ fn duration_until(unix_timestamp_secs: u64) -> Duration {
     let unix_now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
     let timestamp = Duration::from_secs(unix_timestamp_secs);
     timestamp.saturating_sub(unix_now)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_payload_builder::EthBuiltPayload;
+    use std::sync::{mpsc, Mutex};
+
+    #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+    struct TestPayloadAttributes;
+
+    impl PayloadAttributes for TestPayloadAttributes {
+        fn payload_id(&self, _parent_hash: &B256) -> PayloadId {
+            PayloadId::default()
+        }
+
+        fn timestamp(&self) -> u64 {
+            0
+        }
+
+        fn withdrawals(&self) -> Option<&Vec<alloy_eips::eip4895::Withdrawal>> {
+            None
+        }
+
+        fn parent_beacon_block_root(&self) -> Option<B256> {
+            None
+        }
+
+        fn slot_number(&self) -> Option<u64> {
+            None
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    struct BlockingPayloadBuilder {
+        started_tx: mpsc::Sender<()>,
+        release_rx: Arc<Mutex<mpsc::Receiver<()>>>,
+    }
+
+    impl PayloadBuilder for BlockingPayloadBuilder {
+        type Attributes = TestPayloadAttributes;
+        type BuiltPayload = EthBuiltPayload;
+
+        fn try_build(
+            &self,
+            _args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
+        ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
+            self.started_tx.send(()).unwrap();
+            self.release_rx.lock().unwrap().recv().unwrap();
+            Err(PayloadBuilderError::MissingPayload)
+        }
+
+        fn build_empty_payload(
+            &self,
+            _config: PayloadConfig<Self::Attributes, HeaderForPayload<Self::BuiltPayload>>,
+        ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
+            Err(PayloadBuilderError::MissingPayload)
+        }
+    }
+
+    struct DropProbe(mpsc::Sender<()>);
+
+    impl Drop for DropProbe {
+        fn drop(&mut self) {
+            let _ = self.0.send(());
+        }
+    }
+
+    #[test]
+    fn detached_build_task_holds_leases_until_try_build_returns() {
+        let runtime = Runtime::test();
+        let _enter = runtime.handle().enter();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let (dropped_tx, dropped_rx) = mpsc::channel();
+        let builder =
+            BlockingPayloadBuilder { started_tx, release_rx: Arc::new(Mutex::new(release_rx)) };
+
+        let mut job = BasicPayloadJob {
+            config: PayloadConfig::new(
+                Arc::new(SealedHeader::new(Default::default(), B256::ZERO)),
+                TestPayloadAttributes,
+                PayloadId::default(),
+            ),
+            executor: runtime.clone(),
+            deadline: Box::pin(tokio::time::sleep(Duration::from_secs(60))),
+            interval: tokio::time::interval(Duration::from_secs(60)),
+            best_payload: PayloadState::Missing,
+            pending_block: None,
+            payload_task_guard: PayloadTaskGuard::new(1),
+            cached_reads: None,
+            execution_cache: None,
+            state_root_handle: None,
+            leases: vec![PayloadBuilderLease::new(DropProbe(dropped_tx))],
+            metrics: Default::default(),
+            builder,
+        };
+
+        job.spawn_build_job();
+        started_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+
+        drop(job);
+        assert!(matches!(dropped_rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+
+        release_tx.send(()).unwrap();
+        dropped_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    }
 }
