@@ -30,10 +30,11 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
-    DatabaseProviderFactory, HashedPostStateProvider, ProviderError, SaveBlocksInput,
-    StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
+    DatabaseProviderFactory, HashedPostStateProvider, ProviderError, PruneCheckpointReader,
+    SaveBlocksInput, StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
     StorageChangeSetReader, StorageSettingsCache, TransactionVariant,
 };
+use reth_prune::PruneSegment;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_storage_overlay::OverlayManager;
@@ -396,6 +397,7 @@ where
         + StateProviderFactory
         + StateReader<Receipt = N::Receipt>
         + HashedPostStateProvider
+        + PruneCheckpointReader
         + BalProvider
         + Clone
         + 'static,
@@ -1310,19 +1312,46 @@ where
 
             // For OpStack, or if explicitly configured, the proposers are allowed to reorg their
             // own chain at will, so we need to always trigger a new payload job if requested.
-            if self.engine_kind.is_opstack() ||
-                self.config.always_process_payload_attributes_on_canonical_head()
-            {
+            let always_trigger_payload_job = self.engine_kind.is_opstack() ||
+                self.config.always_process_payload_attributes_on_canonical_head();
+
+            // According to the Engine API specification, client software MAY skip an update of the
+            // forkchoice state and MUST NOT begin a payload build process if
+            // `forkchoiceState.headBlockHash` references an ancestor of the latest known
+            // finalized block:
+            // <https://github.com/ethereum/execution-apis/blob/bf20b4083284e677db19e7f3871bd669b88354a6/src/engine/paris.md?plain=1#L213>
+            //
+            // The stored finalized block is used because a forkchoice update MAY carry a zero
+            // finalized hash without clearing previously established finality.
+            let head_is_finalized_ancestor = self
+                .canonical_in_memory_state
+                .get_finalized_num_hash()
+                .is_some_and(|finalized| canonical_header.number() <= finalized.number);
+
+            if always_trigger_payload_job || !head_is_finalized_ancestor {
                 // We need to effectively unwind the _canonical_ chain to the FCU's head, which is
                 // part of the canonical chain. We need to update the latest block state to reflect
                 // the canonical ancestor. This ensures that state providers and the transaction
                 // pool operate with the correct chain state after forkchoice update processing, and
                 // new payloads built on the reorg'd head will be added to the tree immediately.
-                if self.config.unwind_canonical_header() {
+                if always_trigger_payload_job && self.config.unwind_canonical_header() {
                     self.update_latest_block_to_canonical_ancestor(&canonical_header)?;
                 }
 
+                // A canonical ancestor above the latest known finalized block can become the
+                // parent of the next block, e.g. when the CL wants to reorg out the current head.
+                // The canonical chain remains untouched here; the block built on the ancestor
+                // triggers the actual reorg once it is inserted via newPayload and FCU'd.
                 if let Some(attr) = attrs {
+                    // Building on the ancestor requires its state: if the required history has
+                    // already been pruned, the requested reorg exceeds the supported depth.
+                    if !always_trigger_payload_job &&
+                        !self.is_historical_state_available(canonical_header.number())?
+                    {
+                        debug!(target: "engine::tree", head = canonical_header.number(), "rejecting canonical ancestor fcu with pruned state");
+                        return Ok(Some(TreeOutcome::new(OnForkChoiceUpdated::too_deep_reorg())));
+                    }
+
                     debug!(target: "engine::tree", head = canonical_header.number(), "handling payload attributes for canonical head");
                     // Clone only when we actually need to process the attributes
                     let updated =
@@ -1330,14 +1359,6 @@ where
                     return Ok(Some(TreeOutcome::new(updated)));
                 }
             }
-
-            // According to the Engine API specification, client software MAY skip an update of the
-            // forkchoice state and MUST NOT begin a payload build process if
-            // `forkchoiceState.headBlockHash` references a `VALID` ancestor of the head
-            // of canonical chain, i.e. the ancestor passed payload validation process
-            // and deemed `VALID`. In the case of such an event, client software MUST
-            // return `{payloadStatus: {status: VALID, latestValidHash:
-            // forkchoiceState.headBlockHash, validationError: null}, payloadId: null}`
 
             // The head block is already canonical and we're not processing payload attributes,
             // so we're not triggering a payload job and can return right away
@@ -2288,6 +2309,23 @@ where
         } else {
             self.provider.is_known(hash)
         }
+    }
+
+    /// Returns `true` if the historical state for the given block is available, i.e. the history
+    /// required to reconstruct it has not been pruned yet.
+    fn is_historical_state_available(&self, block_number: u64) -> ProviderResult<bool> {
+        for segment in [PruneSegment::AccountHistory, PruneSegment::StorageHistory] {
+            if let Some(checkpoint) = self
+                .provider
+                .get_prune_checkpoint(segment)?
+                .and_then(|checkpoint| checkpoint.block_number) &&
+                block_number < checkpoint
+            {
+                return Ok(false)
+            }
+        }
+
+        Ok(true)
     }
 
     /// Return sealed block header from in-memory state or database by hash.

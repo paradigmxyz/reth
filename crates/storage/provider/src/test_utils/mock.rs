@@ -95,6 +95,8 @@ pub struct MockEthProvider<T: NodePrimitives = EthPrimitives, ChainSpec = reth_c
     snap_storage_proof: Arc<Mutex<Option<Vec<Bytes>>>>,
     tx: TxMock,
     prune_modes: Arc<PruneModes>,
+    /// Local prune checkpoint store
+    pub prune_checkpoints: Arc<Mutex<HashMap<PruneSegment, PruneCheckpoint>>>,
 }
 
 /// Optional mock account entries paired with why the range ended.
@@ -137,6 +139,7 @@ where
             snap_storage_proof: self.snap_storage_proof.clone(),
             tx: self.tx.clone(),
             prune_modes: self.prune_modes.clone(),
+            prune_checkpoints: self.prune_checkpoints.clone(),
         }
     }
 }
@@ -164,6 +167,7 @@ impl<T: NodePrimitives> MockEthProvider<T, reth_chainspec::ChainSpec> {
             snap_storage_proof: Default::default(),
             tx: Default::default(),
             prune_modes: Default::default(),
+            prune_checkpoints: Default::default(),
         }
     }
 }
@@ -301,6 +305,11 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
         self.state_roots.lock().push(state_root);
     }
 
+    /// Sets the prune checkpoint for the given segment.
+    pub fn set_prune_checkpoint(&self, segment: PruneSegment, checkpoint: PruneCheckpoint) {
+        self.prune_checkpoints.lock().insert(segment, checkpoint);
+    }
+
     /// Set chain spec.
     pub fn with_chain_spec<C>(self, chain_spec: C) -> MockEthProvider<T, C> {
         MockEthProvider {
@@ -323,6 +332,7 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
             snap_storage_proof: self.snap_storage_proof,
             tx: self.tx,
             prune_modes: self.prune_modes,
+            prune_checkpoints: self.prune_checkpoints,
         }
     }
 
@@ -981,13 +991,13 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> PruneCheckpointReader
 {
     fn get_prune_checkpoint(
         &self,
-        _segment: PruneSegment,
+        segment: PruneSegment,
     ) -> ProviderResult<Option<PruneCheckpoint>> {
-        Ok(None)
+        Ok(self.prune_checkpoints.lock().get(&segment).copied())
     }
 
     fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
-        Ok(vec![])
+        Ok(self.prune_checkpoints.lock().iter().map(|(segment, cp)| (*segment, *cp)).collect())
     }
 }
 
