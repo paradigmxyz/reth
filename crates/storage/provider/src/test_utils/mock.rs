@@ -475,7 +475,7 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Clone + 'static> DatabaseProvi
     type ProviderRW = Self;
 
     fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
-        Err(ConsistentViewError::Syncing { best_block: GotExpected::new(0, 0) }.into())
+        Ok(self.clone())
     }
 
     fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {

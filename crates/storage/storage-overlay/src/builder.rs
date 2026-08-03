@@ -56,6 +56,15 @@ pub enum OverlaySource {
     Managed,
 }
 
+/// Selects the durable frontier used to anchor an in-memory overlay.
+#[derive(Debug, Clone, Copy)]
+pub enum OverlayAnchor {
+    /// Use the Finish tip from a provider that reads the durable database.
+    DatabaseTip,
+    /// Use the partial state/trie persistence frontier.
+    StateTrieTip(BlockNumHash),
+}
+
 /// Builder for calculating trie and hashed-state overlays.
 ///
 /// This stores the overlay manager, overlay configuration, and the logic for resolving overlays
@@ -157,16 +166,14 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         let hashed_state_updates_total_len;
         let anchor_hash = match &self.overlay_source {
             Some(OverlaySource::Managed) => {
-                let parent_is_persisted = provider
-                    .convert_hash_or_number(self.parent_hash.into())?
-                    .is_some_and(|parent_number| parent_number <= state_trie_tip_block.number);
-                if parent_is_persisted {
-                    self.parent_hash
-                } else {
-                    self.overlay_manager
-                        .anchor_for_parent(self.parent_hash, state_trie_tip_block.hash)
-                        .ok_or(ProviderError::BlockHashNotFound(self.parent_hash))?
-                }
+                let (historical, blocks) = self.overlay_manager.blocks_for_parent(self.parent_hash);
+                get_anchored_overlay(
+                    provider,
+                    historical,
+                    blocks,
+                    OverlayAnchor::StateTrieTip(state_trie_tip_block),
+                )?
+                .0
             }
             _ => self.parent_hash,
         };
@@ -466,33 +473,56 @@ where
 
 /// Selects the historical anchor and in-memory blocks for a state provider.
 ///
-/// `blocks` must be ordered from newest to oldest. If the durable database tip is present in
-/// `blocks`, that tip becomes the historical anchor and only blocks newer than it are retained.
-/// Otherwise, the original `historical` anchor and all blocks are retained. Matching the tip hash,
-/// rather than only its number, preserves the correct state across same-height forks.
+/// `blocks` must be ordered from newest to oldest. If the selected durable frontier is present in
+/// `blocks`, that frontier becomes the historical anchor and only blocks newer than it are
+/// retained. Otherwise, the original `historical` anchor and all blocks are retained. A target
+/// that is already persisted at or below the selected frontier needs no overlay. Matching hashes,
+/// rather than only numbers, preserves the correct state across same-height forks.
+///
+/// For [`OverlayAnchor::DatabaseTip`], `provider` must read the durable database rather than an
+/// in-memory view.
 pub fn get_anchored_overlay<P, N>(
     provider: &P,
     historical: B256,
     mut blocks: Vec<ExecutedBlock<N>>,
+    anchor: OverlayAnchor,
 ) -> ProviderResult<(B256, Vec<ExecutedBlock<N>>)>
 where
     P: BlockNumReader,
     N: NodePrimitives,
 {
-    if blocks.is_empty() {
-        return Ok((historical, blocks))
+    let anchor = match anchor {
+        OverlayAnchor::DatabaseTip => {
+            let number = provider.best_block_number()?;
+            let hash = provider
+                .block_hash(number)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
+            BlockNumHash::new(number, hash)
+        }
+        OverlayAnchor::StateTrieTip(anchor) => anchor,
+    };
+
+    let target_hash =
+        blocks.first().map(|block| block.recovered_block().hash()).unwrap_or(historical);
+    let target_is_persisted = match provider.block_number(target_hash)? {
+        Some(number) if number <= anchor.number => {
+            provider.block_hash(number)? == Some(target_hash)
+        }
+        _ => false,
+    };
+    if target_is_persisted {
+        return Ok((target_hash, Vec::new()))
     }
 
-    let tip_number = provider.last_block_number()?;
-    let tip_hash = provider
-        .block_hash(tip_number)?
-        .ok_or_else(|| ProviderError::HeaderNotFound(tip_number.into()))?;
+    if blocks.is_empty() {
+        return Err(ProviderError::BlockHashNotFound(target_hash))
+    }
 
-    if let Some(tip_index) =
-        blocks.iter().position(|block| block.recovered_block().hash() == tip_hash)
+    if let Some(anchor_index) =
+        blocks.iter().position(|block| block.recovered_block().hash() == anchor.hash)
     {
-        blocks.truncate(tip_index);
-        return Ok((tip_hash, blocks))
+        blocks.truncate(anchor_index);
+        return Ok((anchor.hash, blocks))
     }
 
     Ok((historical, blocks))
@@ -584,8 +614,13 @@ mod tests {
             blocks[1].recovered_block().hash(),
             blocks[1].recovered_block().header().clone(),
         );
-        let (anchor, selected) =
-            get_anchored_overlay(&provider, historical, in_memory.clone()).unwrap();
+        let (anchor, selected) = get_anchored_overlay(
+            &provider,
+            historical,
+            in_memory.clone(),
+            OverlayAnchor::DatabaseTip,
+        )
+        .unwrap();
         assert_eq!(anchor, blocks[1].recovered_block().hash());
         assert_eq!(selected, vec![blocks[2].clone()]);
 
@@ -594,8 +629,13 @@ mod tests {
             blocks[2].recovered_block().hash(),
             blocks[2].recovered_block().header().clone(),
         );
-        let (anchor, selected) =
-            get_anchored_overlay(&provider, historical, in_memory.clone()).unwrap();
+        let (anchor, selected) = get_anchored_overlay(
+            &provider,
+            historical,
+            in_memory.clone(),
+            OverlayAnchor::DatabaseTip,
+        )
+        .unwrap();
         assert_eq!(anchor, blocks[2].recovered_block().hash());
         assert!(selected.is_empty());
 
@@ -608,8 +648,13 @@ mod tests {
             alternate_tip.recovered_block().hash(),
             alternate_tip.recovered_block().header().clone(),
         );
-        let (anchor, selected) =
-            get_anchored_overlay(&provider, historical, in_memory.clone()).unwrap();
+        let (anchor, selected) = get_anchored_overlay(
+            &provider,
+            historical,
+            in_memory.clone(),
+            OverlayAnchor::DatabaseTip,
+        )
+        .unwrap();
         assert_eq!(anchor, historical);
         assert_eq!(selected, in_memory);
     }
@@ -637,6 +682,37 @@ mod tests {
         provider_rw.commit().unwrap();
 
         (factory, blocks)
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn get_anchored_overlay_uses_the_selected_partial_persistence_frontier() {
+        let (factory, blocks) = setup_frontiers(1, 3);
+        let provider = factory.provider().unwrap();
+        let historical = blocks[1].recovered_block().parent_hash();
+        let in_memory =
+            vec![blocks[4].clone(), blocks[3].clone(), blocks[2].clone(), blocks[1].clone()];
+
+        let (anchor, selected) = get_anchored_overlay(
+            &provider,
+            historical,
+            in_memory.clone(),
+            OverlayAnchor::DatabaseTip,
+        )
+        .unwrap();
+        assert_eq!(anchor, blocks[3].recovered_block().hash());
+        assert_eq!(selected, vec![blocks[4].clone()]);
+
+        let (state_trie_tip, _) = database_state_frontiers(&provider).unwrap();
+        let (anchor, selected) = get_anchored_overlay(
+            &provider,
+            historical,
+            in_memory,
+            OverlayAnchor::StateTrieTip(state_trie_tip),
+        )
+        .unwrap();
+        assert_eq!(anchor, blocks[1].recovered_block().hash());
+        assert_eq!(selected, vec![blocks[4].clone(), blocks[3].clone(), blocks[2].clone()]);
     }
 
     #[cfg(feature = "partial-persistence")]

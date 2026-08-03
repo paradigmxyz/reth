@@ -31,7 +31,7 @@ use reth_storage_api::{
     StateProviderBox, StorageChangeSetReader, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_storage_overlay::get_anchored_overlay;
+use reth_storage_overlay::{get_anchored_overlay, OverlayAnchor};
 use revm::database::states::PlainStorageRevert;
 use std::{
     ops::{Add, Bound, RangeBounds, RangeInclusive, Sub},
@@ -235,8 +235,12 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         state: &BlockState<N::Primitives>,
     ) -> ProviderResult<MemoryOverlayStateProviderRef<'_, N::Primitives>> {
         let in_memory = state.chain().map(|block_state| block_state.block()).collect();
-        let (anchor_hash, in_memory) =
-            get_anchored_overlay(&self.storage_provider, state.anchor().hash, in_memory)?;
+        let (anchor_hash, in_memory) = get_anchored_overlay(
+            &self.storage_provider,
+            state.anchor().hash,
+            in_memory,
+            OverlayAnchor::DatabaseTip,
+        )?;
 
         // The selected anchor can be a retained block that also exists in the database. Looking
         // it up through this consistent view would resolve the same in-memory chain again.
@@ -447,8 +451,12 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             head_block.as_ref().map(|b| b.block_on_chain(block_hash.into()))
         {
             let in_memory = block_state.chain().map(|block_state| block_state.block()).collect();
-            let (anchor_hash, in_memory) =
-                get_anchored_overlay(&storage_provider, block_state.anchor().hash, in_memory)?;
+            let (anchor_hash, in_memory) = get_anchored_overlay(
+                &storage_provider,
+                block_state.anchor().hash,
+                in_memory,
+                OverlayAnchor::DatabaseTip,
+            )?;
             let block_number = storage_provider
                 .block_number(anchor_hash)?
                 .ok_or(ProviderError::BlockHashNotFound(anchor_hash))?;

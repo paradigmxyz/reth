@@ -8,7 +8,9 @@ use alloy_primitives::B256;
 use crossbeam_channel::{Receiver, RecvTimeoutError, TryRecvError};
 use reth_evm::ConfigureEvm;
 use reth_primitives_traits::NodePrimitives;
-use reth_provider::{BlockReader, StateProviderFactory, StateReader};
+use reth_provider::{
+    BlockNumReader, BlockReader, DatabaseProviderFactory, StateProviderFactory, StateReader,
+};
 use reth_revm::{cached::CachedReads, db::State};
 use std::{
     sync::Arc,
@@ -63,7 +65,8 @@ where
 impl<N, P, Evm> Worker<N, P, Evm>
 where
     N: NodePrimitives,
-    P: BlockReader + StateProviderFactory + StateReader + Clone,
+    P: BlockReader + DatabaseProviderFactory + StateProviderFactory + StateReader + Clone,
+    P::Provider: BlockNumReader,
     Evm: ConfigureEvm<Primitives = N>,
 {
     pub(super) fn new(

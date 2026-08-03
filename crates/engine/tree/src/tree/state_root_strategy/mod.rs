@@ -69,7 +69,7 @@ use reth_primitives_traits::{
     AlloyBlockHeader, FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedHeader,
 };
 use reth_provider::{
-    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockReader,
+    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
     DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider, ProviderError,
     StateProviderFactory, StateReader, StateRootProvider,
 };
@@ -825,6 +825,7 @@ where
         + StateReader
         + Clone
         + 'static,
+    P::Provider: BlockNumReader,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
         + Clone
         + Send
@@ -991,7 +992,15 @@ struct SynchronousStateRootJob<N: NodePrimitives, P> {
 impl<N, P> StateRootJob<N> for SynchronousStateRootJob<N, P>
 where
     N: NodePrimitives,
-    P: BlockReader + StateProviderFactory + StateReader + Clone + Send + Sync + 'static,
+    P: BlockReader
+        + DatabaseProviderFactory
+        + StateProviderFactory
+        + StateReader
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    P::Provider: BlockNumReader,
 {
     fn name(&self) -> &'static str {
         "synchronous"
@@ -1024,8 +1033,15 @@ struct SparseTrieStateRootJob<N: NodePrimitives, P> {
 impl<N, P> SparseTrieStateRootJob<N, P>
 where
     N: NodePrimitives,
-    P: StateProviderFactory + Clone + Send + Sync + 'static,
-    P: BlockReader + StateReader,
+    P: BlockReader
+        + DatabaseProviderFactory
+        + StateProviderFactory
+        + StateReader
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    P::Provider: BlockNumReader,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
         + Clone
         + Send
@@ -1131,7 +1147,15 @@ where
 impl<N, P> StateRootJob<N> for SparseTrieStateRootJob<N, P>
 where
     N: NodePrimitives,
-    P: BlockReader + StateProviderFactory + StateReader + Clone + Send + Sync + 'static,
+    P: BlockReader
+        + DatabaseProviderFactory
+        + StateProviderFactory
+        + StateReader
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    P::Provider: BlockNumReader,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
         + Clone
         + Send
@@ -1232,7 +1256,8 @@ fn compare_trie_updates_with_serial<N, P>(
 ) -> bool
 where
     N: NodePrimitives,
-    P: BlockReader + StateProviderFactory + StateReader + Clone,
+    P: BlockReader + DatabaseProviderFactory + StateProviderFactory + StateReader + Clone,
+    P::Provider: BlockNumReader,
     OverlayStateProviderFactory<P, N>:
         DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>,
 {
