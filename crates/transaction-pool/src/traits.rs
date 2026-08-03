@@ -2117,33 +2117,6 @@ mod tests {
     }
 
     #[test]
-    fn test_eth_pooled_transaction_blob_cell_availability_cache() {
-        let tx = EthereumTxEnvelope::Eip4844(
-            TxEip4844 {
-                max_fee_per_gas: 10,
-                gas_limit: 1000,
-                value: U256::from(100),
-                max_fee_per_blob_gas: 5,
-                blob_versioned_hashes: vec![B256::default()],
-                ..Default::default()
-            }
-            .into_signed(Signature::test_signature()),
-        );
-        let transaction = Recovered::new_unchecked(tx, Default::default());
-        let pooled_tx = EthPooledTransaction::new(transaction, 300);
-
-        let availability = pooled_tx.blob_cell_availability.as_ref().unwrap().clone();
-        assert_eq!(
-            pooled_tx.blob_cell_availability().map(BlobCellAvailability::get),
-            Some(B128::from(u128::MAX))
-        );
-
-        let sparse = B128::from((1u128 << 127) | 1);
-        availability.set(sparse);
-        assert_eq!(pooled_tx.blob_cell_availability().map(BlobCellAvailability::get), Some(sparse));
-    }
-
-    #[test]
     fn test_eth_pooled_transaction_new_eip7702() {
         // Init an EIP-7702 transaction with specific parameters
         let tx = EthereumTxEnvelope::<TxEip4844>::Eip7702(

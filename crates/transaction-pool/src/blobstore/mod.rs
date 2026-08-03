@@ -26,41 +26,20 @@ mod noop;
 mod tracker;
 
 /// Blob cell availability stored for a transaction.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct BlobCellAvailability(Arc<[AtomicU64; 2]>);
 
 impl BlobCellAvailability {
-    /// Creates a new availability mask from the raw cell bitmask.
-    pub fn new(mask: B128) -> Self {
-        let mask = u128::from(mask);
-        Self(Arc::new([AtomicU64::new((mask >> 64) as u64), AtomicU64::new(mask as u64)]))
-    }
-
-    /// Returns empty availability.
-    pub fn empty() -> Self {
-        Self::default()
-    }
-
     /// Returns full availability for all blob cells.
     pub fn full() -> Self {
-        Self::new(B128::from(u128::MAX))
+        Self(Arc::new([AtomicU64::new(u64::MAX), AtomicU64::new(u64::MAX)]))
     }
 
     /// Returns the raw cell bitmask.
-    ///
-    /// Reads are intentionally cheap and eventually consistent. Concurrent updates may briefly
-    /// expose an in-flight mask, which is sufficient for transaction announcements.
     pub fn get(&self) -> B128 {
         let high = self.0[0].load(Ordering::Relaxed) as u128;
         let low = self.0[1].load(Ordering::Relaxed) as u128;
         B128::from((high << 64) | low)
-    }
-
-    /// Updates the cell availability mask.
-    pub fn set(&self, mask: B128) {
-        let mask = u128::from(mask);
-        self.0[0].store((mask >> 64) as u64, Ordering::Relaxed);
-        self.0[1].store(mask as u64, Ordering::Relaxed);
     }
 
     /// Returns true if all blob cells are available.
@@ -341,9 +320,22 @@ pub struct BlobStoreCleanupStat {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_eips::{eip4844::BlobTransactionSidecar, eip7594::BlobTransactionSidecarEip7594};
 
     #[expect(dead_code)]
     struct DynStore {
         store: Box<dyn BlobStore>,
+    }
+
+    #[test]
+    fn pooled_blob_sidecar_defaults_to_full_availability() {
+        let sidecars = [
+            BlobTransactionSidecarVariant::Eip4844(BlobTransactionSidecar::default()),
+            BlobTransactionSidecarVariant::Eip7594(BlobTransactionSidecarEip7594::default()),
+        ];
+
+        for sidecar in sidecars {
+            assert!(PooledBlobSidecar::from(sidecar).availability().is_full());
+        }
     }
 }
