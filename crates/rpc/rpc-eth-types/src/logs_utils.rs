@@ -2,6 +2,7 @@
 //!
 //! Log parsing for building filter.
 
+use crate::EthApiError;
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, TxReceipt};
 use alloy_primitives::TxHash;
 use alloy_rpc_types_eth::{Filter, Log};
@@ -73,7 +74,7 @@ pub enum ProviderOrBlock<'a, P: BlockReader> {
 
 /// Appends all matching and converted logs of a block's receipts.
 /// If the log matches, look up the corresponding transaction hash.
-pub fn append_matching_block_logs<P, C, E>(
+pub fn append_matching_block_logs<P, C>(
     all_logs: &mut Vec<RpcLog<C::Network>>,
     converter: &C,
     provider_or_block: ProviderOrBlock<'_, P>,
@@ -81,11 +82,10 @@ pub fn append_matching_block_logs<P, C, E>(
     header: &SealedHeaderFor<C::Primitives>,
     receipts: &[P::Receipt],
     removed: bool,
-) -> Result<(), E>
+) -> Result<(), EthApiError>
 where
     P: BlockReader<Transaction: SignedTransaction>,
     C: RpcConvert<Primitives: NodePrimitives<Block = ProviderBlock<P>, Receipt = P::Receipt>>,
-    E: From<ProviderError> + From<ErrorObject<'static>>,
 {
     let block_num_hash = header.num_hash();
     if !filter.matches_block(&block_num_hash) {
@@ -151,7 +151,10 @@ where
                     removed,
                     block_timestamp: Some(header.timestamp()),
                 };
-                all_logs.push(converter.convert_log(log, receipt, header).map_err(Into::into)?);
+                let log = converter
+                    .convert_log(log, receipt, header)
+                    .map_err(|err| EthApiError::other(Into::<ErrorObject<'static>>::into(err)))?;
+                all_logs.push(log);
             }
             log_index += 1;
         }

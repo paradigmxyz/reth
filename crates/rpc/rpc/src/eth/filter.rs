@@ -509,7 +509,7 @@ where
                 }
 
                 let mut all_logs = Vec::new();
-                append_matching_block_logs::<_, _, EthFilterError>(
+                append_matching_block_logs(
                     &mut all_logs,
                     self.eth_api.converter(),
                     maybe_block
@@ -544,7 +544,7 @@ where
                             // only consider the pending block if it is ahead of the chain
                             let mut all_logs = Vec::new();
                             let header = pending_block.block.clone_sealed_header();
-                            append_matching_block_logs::<_, _, EthFilterError>(
+                            append_matching_block_logs(
                                 &mut all_logs,
                                 self.eth_api.converter(),
                                 ProviderOrBlock::<Eth::Provider>::Block(pending_block.block),
@@ -727,7 +727,7 @@ where
             range_mode.next().await?
         {
             let num_hash = header.num_hash();
-            append_matching_block_logs::<_, _, EthFilterError>(
+            append_matching_block_logs(
                 &mut all_logs,
                 self.eth_api.converter(),
                 recovered_block
@@ -980,9 +980,6 @@ pub enum EthFilterError {
     /// Error serving request in `eth_` namespace.
     #[error(transparent)]
     EthAPIError(#[from] EthApiError),
-    /// Network-specific RPC conversion error.
-    #[error("RPC conversion failed: {0}")]
-    Rpc(jsonrpsee::types::ErrorObject<'static>),
     /// Error thrown when a spawned task failed to deliver a response.
     #[error("internal filter error")]
     InternalError,
@@ -999,7 +996,6 @@ impl From<EthFilterError> for jsonrpsee::types::error::ErrorObject<'static> {
                 rpc_error_with_code(jsonrpsee::types::error::INTERNAL_ERROR_CODE, err.to_string())
             }
             EthFilterError::EthAPIError(err) => err.into(),
-            EthFilterError::Rpc(err) => err,
             err @ (EthFilterError::InvalidBlockRangeParams |
             EthFilterError::QueryExceedsMaxBlocks(_) |
             EthFilterError::QueryExceedsMaxResults { .. } |
@@ -1013,12 +1009,6 @@ impl From<EthFilterError> for jsonrpsee::types::error::ErrorObject<'static> {
 impl From<ProviderError> for EthFilterError {
     fn from(err: ProviderError) -> Self {
         Self::EthAPIError(err.into())
-    }
-}
-
-impl From<jsonrpsee::types::ErrorObject<'static>> for EthFilterError {
-    fn from(err: jsonrpsee::types::ErrorObject<'static>) -> Self {
-        Self::Rpc(err)
     }
 }
 
