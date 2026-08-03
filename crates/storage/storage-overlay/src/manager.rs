@@ -8,7 +8,7 @@ use crate::{changeset_cache::compute_block_trie_updates, ChangesetCache, Overlay
 use alloy_primitives::{BlockNumber, B256};
 use parking_lot::Mutex;
 use reth_chain_state::{ExecutedBlock, PreservedSparseTrie};
-use reth_errors::ProviderResult;
+use reth_errors::{ProviderError, ProviderResult};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_metrics::{
     metrics::{Counter, Histogram},
@@ -19,7 +19,8 @@ use reth_primitives_traits::{
     AlloyBlockHeader, FastInstant, NodePrimitives,
 };
 use reth_storage_api::{
-    BlockNumReader, ChangeSetReader, DBProvider, StorageChangeSetReader, StorageSettingsCache,
+    BlockHashReader, BlockNumReader, ChangeSetReader, DBProvider, StorageChangeSetReader,
+    StorageSettingsCache,
 };
 #[cfg(feature = "rayon")]
 use reth_tasks::WorkerPool;
@@ -404,7 +405,32 @@ impl<N: NodePrimitives> OverlayManager<N> {
     /// Returns `None` if `parent_hash` is not `preferred_anchor` and the manager does not contain a
     /// block for `parent_hash`, meaning there is no in-memory parent chain to inspect.
     pub fn anchor_for_parent(&self, parent_hash: B256, preferred_anchor: B256) -> Option<B256> {
-        self.state_provider_blocks(parent_hash, preferred_anchor).map(|(anchor, _)| anchor)
+        self.state_provider_blocks_from_anchor(parent_hash, preferred_anchor)
+            .map(|(anchor, _)| anchor)
+    }
+
+    /// Returns the historical anchor and in-memory blocks needed to provide state at `parent_hash`.
+    ///
+    /// Uses the current database tip as the preferred anchor. Returns `None` when `parent_hash` is
+    /// not an in-memory block managed by this instance.
+    pub fn state_provider_blocks<P>(
+        &self,
+        provider: &P,
+        parent_hash: B256,
+    ) -> ProviderResult<Option<(B256, Vec<ExecutedBlock<N>>)>>
+    where
+        P: BlockHashReader + BlockNumReader,
+    {
+        if !self.contains_block(parent_hash) {
+            return Ok(None)
+        }
+
+        let db_tip_number = provider.last_block_number()?;
+        let db_tip = provider
+            .block_hash(db_tip_number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(db_tip_number.into()))?;
+
+        Ok(self.state_provider_blocks_from_anchor(parent_hash, db_tip))
     }
 
     /// Returns the historical anchor and in-memory blocks needed to provide state at `parent_hash`.
@@ -412,7 +438,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
     /// If `preferred_anchor` is on the in-memory parent chain, only blocks after that anchor are
     /// returned. Otherwise, all available in-memory blocks are returned and their first missing
     /// parent is used as the anchor. Blocks are ordered newest to oldest.
-    pub fn state_provider_blocks(
+    fn state_provider_blocks_from_anchor(
         &self,
         parent_hash: B256,
         preferred_anchor: B256,
@@ -812,7 +838,7 @@ mod tests {
         }
 
         let (anchor, suffix) = manager
-            .state_provider_blocks(
+            .state_provider_blocks_from_anchor(
                 blocks[2].recovered_block().hash(),
                 blocks[1].recovered_block().hash(),
             )

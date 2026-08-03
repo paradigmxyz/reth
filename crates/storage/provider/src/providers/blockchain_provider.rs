@@ -154,13 +154,8 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         &self,
         state: &BlockState<N::Primitives>,
     ) -> ProviderResult<MemoryOverlayStateProvider<N::Primitives>> {
-        let db_tip_number = self.database.last_block_number()?;
-        let db_tip = self
-            .database
-            .block_hash(db_tip_number)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(db_tip_number.into()))?;
         if let Some((anchor_hash, in_memory)) =
-            self.database.overlay_manager().state_provider_blocks(state.hash(), db_tip)
+            self.database.overlay_manager().state_provider_blocks(&self.database, state.hash())?
         {
             let historical = self.database.history_by_block_hash(anchor_hash)?;
             return Ok(MemoryOverlayStateProvider::new(historical, in_memory))

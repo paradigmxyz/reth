@@ -127,18 +127,11 @@ where
 {
     /// Creates a new state provider from this builder.
     pub fn build(&self) -> ProviderResult<StateProviderBox> {
-        if self.overlay_manager.contains_block(self.parent_hash) {
-            let db_tip_number = self.provider_factory.last_block_number()?;
-            let db_tip = self
-                .provider_factory
-                .block_hash(db_tip_number)?
-                .ok_or_else(|| ProviderError::HeaderNotFound(db_tip_number.into()))?;
-            if let Some((anchor_hash, overlay)) =
-                self.overlay_manager.state_provider_blocks(self.parent_hash, db_tip)
-            {
-                let historical = self.provider_factory.state_by_block_hash(anchor_hash)?;
-                return Ok(Box::new(MemoryOverlayStateProvider::new(historical, overlay)))
-            }
+        if let Some((anchor_hash, overlay)) =
+            self.overlay_manager.state_provider_blocks(&self.provider_factory, self.parent_hash)?
+        {
+            let historical = self.provider_factory.state_by_block_hash(anchor_hash)?;
+            return Ok(Box::new(MemoryOverlayStateProvider::new(historical, overlay)))
         }
         self.provider_factory.state_by_block_hash(self.parent_hash)
     }

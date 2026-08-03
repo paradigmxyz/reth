@@ -253,13 +253,8 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         &self,
         state: &BlockState<N::Primitives>,
     ) -> ProviderResult<MemoryOverlayStateProviderRef<'_, N::Primitives>> {
-        let db_tip_number = self.storage_provider.last_block_number()?;
-        let db_tip = self
-            .storage_provider
-            .block_hash(db_tip_number)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(db_tip_number.into()))?;
         if let Some((anchor_hash, in_memory)) =
-            self.overlay_manager.state_provider_blocks(state.hash(), db_tip)
+            self.overlay_manager.state_provider_blocks(&self.storage_provider, state.hash())?
         {
             let historical = self.history_by_block_hash_ref(anchor_hash)?;
             return Ok(MemoryOverlayStateProviderRef::new(historical, in_memory))
@@ -473,12 +468,8 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         if let Some(Some(block_state)) =
             head_block.as_ref().map(|b| b.block_on_chain(block_hash.into()))
         {
-            let db_tip_number = storage_provider.last_block_number()?;
-            let db_tip = storage_provider
-                .block_hash(db_tip_number)?
-                .ok_or_else(|| ProviderError::HeaderNotFound(db_tip_number.into()))?;
             if let Some((anchor_hash, in_memory)) =
-                overlay_manager.state_provider_blocks(block_state.hash(), db_tip)
+                overlay_manager.state_provider_blocks(&storage_provider, block_state.hash())?
             {
                 let anchor_number = storage_provider
                     .block_number(anchor_hash)?
