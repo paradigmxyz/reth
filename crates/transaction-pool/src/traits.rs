@@ -1973,7 +1973,7 @@ mod tests {
         EthereumTxEnvelope, SignableTransaction, TxEip1559, TxEip2930, TxEip4844, TxEip7702,
         TxEnvelope, TxLegacy,
     };
-    use alloy_eips::eip4844::DATA_GAS_PER_BLOB;
+    use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, eip7594::BlobCellMask};
     use alloy_primitives::Signature;
 
     #[test]
@@ -2109,7 +2109,7 @@ mod tests {
         assert!(pooled_tx.blob_cell_availability.is_some());
         assert_eq!(
             pooled_tx.blob_cell_availability().map(BlobCellAvailability::get),
-            Some(B128::from(u128::MAX))
+            Some(BlobCellMask::from_bits(u128::MAX))
         );
         let expected_cost =
             U256::from(100) + U256::from(10 * 1000) + U256::from(5 * DATA_GAS_PER_BLOB);

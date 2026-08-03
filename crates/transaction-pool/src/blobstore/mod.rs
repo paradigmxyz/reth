@@ -2,7 +2,7 @@
 
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
-    eip7594::{BlobTransactionSidecarVariant, Cell},
+    eip7594::{BlobCellMask, BlobTransactionSidecarVariant, Cell},
 };
 use alloy_primitives::{TxHash, B128, B256};
 pub use converter::BlobSidecarConverter;
@@ -26,25 +26,34 @@ mod noop;
 mod tracker;
 
 /// Blob cell availability stored for a transaction.
+///
+/// Bit `i` corresponds to cell index `i`. The two words are stored least-significant first: index
+/// `0` contains cells `0..64` and index `1` contains cells `64..128`.
 #[derive(Debug, Clone)]
 pub struct BlobCellAvailability(Arc<[AtomicU64; 2]>);
 
 impl BlobCellAvailability {
+    const LOW_WORD: usize = 0;
+    const HIGH_WORD: usize = 1;
+
     /// Returns full availability for all blob cells.
     pub fn full() -> Self {
         Self(Arc::new([AtomicU64::new(u64::MAX), AtomicU64::new(u64::MAX)]))
     }
 
-    /// Returns the raw cell bitmask.
-    pub fn get(&self) -> B128 {
-        let high = self.0[0].load(Ordering::Relaxed) as u128;
-        let low = self.0[1].load(Ordering::Relaxed) as u128;
-        B128::from((high << 64) | low)
+    /// Returns a snapshot of the available cells.
+    ///
+    /// The two words are loaded independently. Future writers must only add availability bits so
+    /// that a concurrent snapshot can understate availability but never overstate it.
+    pub fn get(&self) -> BlobCellMask {
+        let low = self.0[Self::LOW_WORD].load(Ordering::Relaxed) as u128;
+        let high = self.0[Self::HIGH_WORD].load(Ordering::Relaxed) as u128;
+        BlobCellMask::from_bits((high << 64) | low)
     }
 
     /// Returns true if all blob cells are available.
     pub fn is_full(&self) -> bool {
-        self.get() == B128::from(u128::MAX)
+        self.get().bits() == u128::MAX
     }
 }
 
@@ -337,5 +346,16 @@ mod tests {
         for sidecar in sidecars {
             assert!(PooledBlobSidecar::from(sidecar).availability().is_full());
         }
+    }
+
+    #[test]
+    fn blob_cell_availability_uses_cell_index_bit_order() {
+        let availability =
+            BlobCellAvailability(Arc::new([AtomicU64::new(1), AtomicU64::new(1 << 1)]));
+
+        let mask = availability.get();
+        assert!(mask.contains(0));
+        assert!(mask.contains(65));
+        assert_eq!(mask.count(), 2);
     }
 }
