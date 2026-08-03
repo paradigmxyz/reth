@@ -690,7 +690,10 @@ where
     fn wait_for_event(&mut self) -> LoopEvent<T, N> {
         if self.pending_persisted_handoff.is_some() {
             self.metrics.engine.backpressure_active.set(0.0);
-            return self.wait_for_payload_build_finished();
+            return match self.payload_build_finished.recv() {
+                Ok(()) => LoopEvent::PayloadBuildFinished,
+                Err(_) => LoopEvent::Disconnected,
+            };
         }
 
         // Take ownership of persistence rx if present
@@ -739,14 +742,6 @@ where
                     Err(_) => LoopEvent::Disconnected,
                 },
             }
-        }
-    }
-
-    /// Blocks until the final active payload build completes.
-    fn wait_for_payload_build_finished(&self) -> LoopEvent<T, N> {
-        match self.payload_build_finished.recv() {
-            Ok(()) => LoopEvent::PayloadBuildFinished,
-            Err(_) => LoopEvent::Disconnected,
         }
     }
 
