@@ -124,29 +124,33 @@ where
 
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
+                let block_hash = block.hash();
+                let block_env = evm_env.block_env.clone();
+
+                let inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
+                // single EVM for the whole block so that block-scoped EVM state stays intact
+                let mut evm =
+                    eth_api.evm_config().evm_with_env_and_inspector(&mut db, evm_env, inspector);
+
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
-                let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = *tx.tx_hash();
                     let tx_env = eth_api.evm_config().tx_env(tx);
 
-                    let res = eth_api.inspect(
-                        &mut db,
-                        evm_env.clone(),
-                        tx_env.clone(),
-                        &mut inspector,
-                    )?;
+                    let res = evm.transact(tx_env.clone()).map_err(Eth::Error::from_evm_err)?;
+
+                    let (evm_db, inspector, _) = evm.components_mut();
                     let result = inspector
                         .get_result(
                             Some(TransactionContext {
-                                block_hash: Some(block.hash()),
+                                block_hash: Some(block_hash),
                                 tx_hash: Some(tx_hash),
                                 tx_index: Some(index),
                             }),
                             &tx_env,
-                            &evm_env.block_env,
+                            &block_env,
                             &res,
-                            &mut db,
+                            evm_db,
                         )
                         .map_err(Eth::Error::from_eth_err)?;
 
@@ -155,7 +159,7 @@ where
                         inspector.fuse().map_err(Eth::Error::from_eth_err)?;
                         // need to apply the state changes of this transaction before executing the
                         // next transaction
-                        db.commit(res.state)
+                        evm_db.commit(res.state)
                     }
                 }
 
@@ -245,25 +249,30 @@ where
 
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
-                // replay all transactions prior to the targeted transaction
-                let index = eth_api.replay_transactions_until(
-                    &mut db,
-                    evm_env.clone(),
-                    block_txs,
-                    *tx.tx_hash(),
-                )?;
-
-                let tx_env = eth_api.evm_config().tx_env(&tx);
+                let target_hash = *tx.tx_hash();
 
                 let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
-                let res =
-                    eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?;
+                let mut evm = eth_api.evm_config().evm_with_env_and_inspector(
+                    &mut db,
+                    evm_env,
+                    &mut inspector,
+                );
+
+                let tx_env = eth_api.evm_config().tx_env(&tx);
+                let (index, res) = eth_api.inspect_transaction_in_block(
+                    &mut evm,
+                    block_txs,
+                    target_hash,
+                    tx_env.clone(),
+                )?;
+                let (_, evm_env) = evm.finish();
+
                 let trace = inspector
                     .get_result(
                         Some(TransactionContext {
                             block_hash: Some(block_hash),
                             tx_index: Some(index),
-                            tx_hash: Some(*tx.tx_hash()),
+                            tx_hash: Some(target_hash),
                         }),
                         &tx_env,
                         &evm_env.block_env,
@@ -447,10 +456,10 @@ where
                     let transactions = block.transactions_recovered().take(num_txs);
 
                     // Execute all transactions until index
+                    let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env.clone());
                     for tx in transactions {
                         let tx_env = eth_api.evm_config().tx_env(tx);
-                        let res = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
-                        db.commit(res.state);
+                        evm.transact_commit(tx_env).map_err(Eth::Error::from_evm_err)?;
                     }
                 }
 
@@ -740,21 +749,24 @@ where
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
                 let mut roots = Vec::with_capacity(block.body().transactions().len());
+                // single EVM for the whole block so that block-scoped EVM state stays intact
+                let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env);
                 for tx in block.transactions_recovered() {
                     let tx_env = eth_api.evm_config().tx_env(tx);
-                    {
-                        let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env.clone());
-                        evm.transact_commit(tx_env).map_err(Eth::Error::from_evm_err)?;
-                    }
+                    evm.transact_commit(tx_env).map_err(Eth::Error::from_evm_err)?;
+
+                    let state = evm.db_mut();
                     // Merge transitions into cumulative bundle_state
-                    db.merge_transitions(BundleRetention::PlainState);
+                    state.merge_transitions(BundleRetention::PlainState);
                     // Compute state root from the accumulated state changes
-                    let hashed_state = db
+                    let hashed_state = state
                         .database
-                        .hashed_post_state(&db.bundle_state)
+                        .hashed_post_state(&state.bundle_state)
                         .map_err(Eth::Error::from_eth_err)?;
-                    let root =
-                        db.database.state_root(hashed_state).map_err(Eth::Error::from_eth_err)?;
+                    let root = state
+                        .database
+                        .state_root(hashed_state)
+                        .map_err(Eth::Error::from_eth_err)?;
                     roots.push(root);
                 }
 
