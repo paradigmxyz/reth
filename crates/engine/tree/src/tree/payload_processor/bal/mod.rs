@@ -1,7 +1,7 @@
 //! BAL-driven parallel block execution.
 //!
 //! The engine uses this path when an Amsterdam block carries a decoded EIP-7928
-//! Block-Level Access List (BAL). Workers execute transactions against revm's BAL state. The
+//! Block-Level Access List (BAL). Workers execute transactions against the EVM's BAL state. The
 //! main thread commits worker results to a canonical executor in transaction order.
 //!
 //! Consensus validation checks the BAL item-cost bound before this path runs. This path validates

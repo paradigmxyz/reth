@@ -22,7 +22,6 @@ use std::sync::Arc;
 
 use alloy_genesis::Genesis;
 use alloy_primitives::B256;
-use reth_chain_state::StateTrieOverlayManager;
 use reth_engine_tree::tree::{
     state_root_strategy::{
         DefaultStateRootStrategy, LazyHashedPostState, PayloadStateRootHandle,
@@ -36,8 +35,8 @@ use reth_ethereum::{
     node::{
         builder::{
             rpc::{
-                BasicEngineApiBuilder, BasicEngineValidatorBuilder, ChangesetCache,
-                EngineValidatorBuilder, Identity, RpcAddOns,
+                BasicEngineApiBuilder, BasicEngineValidatorBuilder, EngineValidatorBuilder,
+                Identity, RpcAddOns,
             },
             FullNodeComponents, NodeBuilder, NodeHandle,
         },
@@ -50,6 +49,7 @@ use reth_ethereum::{
 use reth_evm::{revm::context::Block as _, ConfigureEvm};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
 use reth_provider::{BlockExecutionOutput, ProviderResult};
+use reth_storage_overlay::OverlayManager;
 use reth_trie::updates::TrieUpdates;
 
 /// Strategy that returns `B256::ZERO` as the state root from an activation timestamp on, and
@@ -148,13 +148,9 @@ where
         self,
         ctx: &reth_ethereum::node::builder::AddOnsContext<'_, N>,
         tree_config: TreeConfig,
-        changeset_cache: ChangesetCache,
-        state_trie_overlays: StateTrieOverlayManager<EthPrimitives>,
+        overlay_manager: OverlayManager<EthPrimitives>,
     ) -> eyre::Result<Self::EngineValidator> {
-        let validator = self
-            .inner
-            .build_tree_validator(ctx, tree_config, changeset_cache, state_trie_overlays)
-            .await?;
+        let validator = self.inner.build_tree_validator(ctx, tree_config, overlay_manager).await?;
         let state_root_strategy: Arc<dyn StateRootStrategy<EthPrimitives, N::Provider, N::Evm>> =
             self.state_root_strategy;
         Ok(validator.with_state_root_strategy(state_root_strategy))

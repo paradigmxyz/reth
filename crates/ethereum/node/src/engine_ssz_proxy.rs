@@ -15,7 +15,7 @@ use crate::engine_ssz_containers::{
 };
 use alloy_consensus::{Transaction, TxEnvelope};
 use alloy_eips::{eip2718::Decodable2718, eip7685::RequestsOrHash};
-use alloy_primitives::{Bytes, B128, B256, B64};
+use alloy_primitives::{Bytes, B128, B256};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadFieldV2,
     ExecutionPayloadSidecar, ForkchoiceState, PayloadAttributes, PayloadId, PraguePayloadFields,
@@ -299,7 +299,7 @@ fn parse_engine_path(path: &str) -> Option<EngineSszEndpoint> {
             Some(EngineSszEndpoint::NewPayload)
         }
         (Some("engine"), Some("v1"), Some("payloads"), Some(payload_id), None) => {
-            let payload_id = payload_id.parse::<B64>().map(PayloadId::from);
+            let payload_id = payload_id.parse::<PayloadId>();
             Some(EngineSszEndpoint::GetPayload(payload_id))
         }
         (Some("engine"), Some("v1"), Some("forkchoice"), None, None) => {
@@ -317,7 +317,7 @@ enum EngineSszEndpoint {
     Capabilities,
     Identity,
     NewPayload,
-    GetPayload(Result<PayloadId, <B64 as std::str::FromStr>::Err>),
+    GetPayload(Result<PayloadId, <PayloadId as std::str::FromStr>::Err>),
     Forkchoice,
     Blobs(u8),
 }

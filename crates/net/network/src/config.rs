@@ -685,9 +685,13 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         let advertised_ip = nat.clone().and_then(|nat| nat.as_external_ip(listener_addr.port()));
 
         discovery_v5_builder = discovery_v5_builder.map(|mut builder| {
+            let fork_id = chain_spec.fork_id(&head);
             if let Some(network_stack_id) = NetworkStackId::id(&chain_spec) {
-                let fork_id = chain_spec.fork_id(&head);
                 builder = builder.fork(network_stack_id, fork_id)
+            } else {
+                // Custom Ethereum chains are not recognized by `NetworkStackId::id`, but still
+                // use the `eth` key for fork-aware discovery. Preserve any explicit override.
+                builder = builder.fork_if_unset(NetworkStackId::ETH, fork_id)
             }
 
             if let Some(ip) = advertised_ip {
@@ -914,6 +918,45 @@ mod tests {
         let advertised_fork_id = *local_enr
             .get_decodable::<Vec<ForkId>>(fork_key)
             .expect("should read 'odyssey'")
+            .expect("should decode fork id list")
+            .first()
+            .expect("should be non-empty");
+
+        assert_eq!(advertised_fork_id, fork_id);
+    }
+
+    #[test]
+    fn test_discv5_fork_id_custom_chain_id_fallback() {
+        const GENESIS_TIME: u64 = 151_515;
+
+        let genesis = Genesis::default().with_timestamp(GENESIS_TIME);
+
+        let chain_spec = ChainSpecBuilder::default()
+            .chain(Chain::from_id(3151908))
+            .genesis(genesis)
+            .with_fork(EthereumHardfork::Shanghai, ForkCondition::Timestamp(GENESIS_TIME))
+            .build();
+
+        let fork_id = chain_spec.fork_id(&Head {
+            hash: chain_spec.genesis_hash(),
+            number: 0,
+            timestamp: GENESIS_TIME,
+            difficulty: U256::ZERO,
+            total_difficulty: U256::ZERO,
+        });
+
+        let config = builder()
+            .discovery_v5(reth_discv5::Config::builder((Ipv4Addr::LOCALHOST, 30303).into()))
+            .build_with_noop_provider(Arc::new(chain_spec));
+
+        let (local_enr, _, _, _) = build_local_enr(
+            &config.secret_key,
+            &config.discovery_v5_config.expect("should build config"),
+        );
+
+        let advertised_fork_id = *local_enr
+            .get_decodable::<Vec<ForkId>>(NetworkStackId::ETH)
+            .expect("should read 'eth'")
             .expect("should decode fork id list")
             .first()
             .expect("should be non-empty");
