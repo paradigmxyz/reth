@@ -155,18 +155,11 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         let trie_updates_total_len;
         let hashed_state_updates_total_len;
         let anchor_hash = match &self.overlay_source {
-            Some(OverlaySource::Managed) => {
-                let parent_is_persisted = provider
-                    .convert_hash_or_number(self.parent_hash.into())?
-                    .is_some_and(|parent_number| parent_number <= state_trie_tip_block.number);
-                if parent_is_persisted {
-                    self.parent_hash
-                } else {
-                    self.overlay_manager
-                        .anchor_for_parent(self.parent_hash, state_trie_tip_block.hash)
-                        .ok_or(ProviderError::BlockHashNotFound(self.parent_hash))?
-                }
-            }
+            Some(OverlaySource::Managed) => self.overlay_manager.anchor_for_overlay_parent(
+                provider,
+                self.parent_hash,
+                state_trie_tip_block,
+            )?,
             _ => self.parent_hash,
         };
 

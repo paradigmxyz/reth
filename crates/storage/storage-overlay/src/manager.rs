@@ -5,6 +5,7 @@
 //! builds reusable flattened state trie overlays on demand.
 
 use crate::{changeset_cache::compute_block_trie_updates, ChangesetCache, OverlayBuilder};
+use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockNumber, B256};
 use parking_lot::Mutex;
 use reth_chain_state::{ExecutedBlock, PreservedSparseTrie};
@@ -246,10 +247,10 @@ impl<N: NodePrimitives> OverlayManager<N> {
 
         if removed_blocks > 0 {
             let overlays_before = self.overlays.len();
-            let blocks = Arc::clone(&self.blocks);
-            self.overlays.retain(|key, _| {
+            let manager = self.clone();
+            self.overlays.retain(move |key, _| {
                 key.tip_hash != key.anchor_hash &&
-                    Self::anchor_for_parent_in(blocks.as_ref(), key.tip_hash, key.anchor_hash) ==
+                    manager.anchor_for_parent(key.tip_hash, key.anchor_hash) ==
                         Some(key.anchor_hash)
             });
             pruned_overlays = overlays_before.saturating_sub(self.overlays.len());
@@ -409,6 +410,30 @@ impl<N: NodePrimitives> OverlayManager<N> {
             .map(|(anchor, _)| anchor)
     }
 
+    /// Returns the anchor for an overlay whose durable state trie tip is `state_trie_tip_block`.
+    ///
+    /// A persisted parent can be used directly. Otherwise, the manager prefers the durable tip
+    /// when it is on the in-memory parent chain, falling back to the first missing parent.
+    pub fn anchor_for_overlay_parent<P>(
+        &self,
+        provider: &P,
+        parent_hash: B256,
+        state_trie_tip_block: BlockNumHash,
+    ) -> ProviderResult<B256>
+    where
+        P: BlockNumReader,
+    {
+        let parent_is_persisted = provider
+            .convert_hash_or_number(parent_hash.into())?
+            .is_some_and(|parent_number| parent_number <= state_trie_tip_block.number);
+        if parent_is_persisted {
+            return Ok(parent_hash)
+        }
+
+        self.anchor_for_parent(parent_hash, state_trie_tip_block.hash)
+            .ok_or(ProviderError::BlockHashNotFound(parent_hash))
+    }
+
     /// Returns the historical anchor and in-memory blocks needed to provide state at `parent_hash`.
     ///
     /// Uses the current database tip as the preferred anchor. Returns `None` when `parent_hash` is
@@ -480,25 +505,6 @@ impl<N: NodePrimitives> OverlayManager<N> {
 
             let Some(block) = self.blocks.get(&current_hash) else { return false };
             current_hash = block.recovered_block().parent_hash();
-        }
-    }
-
-    fn anchor_for_parent_in(
-        blocks: &DashMap<B256, ExecutedBlock<N>>,
-        parent_hash: B256,
-        preferred_anchor: B256,
-    ) -> Option<B256> {
-        if parent_hash == preferred_anchor {
-            return Some(preferred_anchor)
-        }
-
-        let mut hash = parent_hash;
-        loop {
-            let block_parent_hash = blocks.get(&hash)?.recovered_block().parent_hash();
-            if block_parent_hash == preferred_anchor || !blocks.contains_key(&block_parent_hash) {
-                return Some(block_parent_hash)
-            }
-            hash = block_parent_hash;
         }
     }
 
