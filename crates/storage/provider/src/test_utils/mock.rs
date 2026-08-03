@@ -93,6 +93,8 @@ pub struct MockEthProvider<T: NodePrimitives = EthPrimitives, ChainSpec = reth_c
     snap_account_proof: Arc<Mutex<Option<Vec<Bytes>>>>,
     /// Storage proof returned to snap handler tests.
     snap_storage_proof: Arc<Mutex<Option<Vec<Bytes>>>>,
+    /// Whether recovered block lookups resolve against the local block store.
+    recover_block_senders: Arc<AtomicBool>,
     tx: TxMock,
     prune_modes: Arc<PruneModes>,
 }
@@ -135,6 +137,7 @@ where
             snap_storage_range_requests: self.snap_storage_range_requests.clone(),
             snap_account_proof: self.snap_account_proof.clone(),
             snap_storage_proof: self.snap_storage_proof.clone(),
+            recover_block_senders: self.recover_block_senders.clone(),
             tx: self.tx.clone(),
             prune_modes: self.prune_modes.clone(),
         }
@@ -162,6 +165,7 @@ impl<T: NodePrimitives> MockEthProvider<T, reth_chainspec::ChainSpec> {
             snap_storage_range_requests: Default::default(),
             snap_account_proof: Default::default(),
             snap_storage_proof: Default::default(),
+            recover_block_senders: Default::default(),
             tx: Default::default(),
             prune_modes: Default::default(),
         }
@@ -169,6 +173,16 @@ impl<T: NodePrimitives> MockEthProvider<T, reth_chainspec::ChainSpec> {
 }
 
 impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
+    /// Serves [`BlockReader::recovered_block`] and [`BlockReader::sealed_block_with_senders`]
+    /// from the local block store by recovering signers, instead of always reporting a miss.
+    ///
+    /// Off by default so that existing consumers keep their behavior. Like the rest of this
+    /// mock's state, the flag is shared with all clones, including ones taken before this call.
+    pub fn with_recovered_blocks(self) -> Self {
+        self.recover_block_senders.store(true, Ordering::Relaxed);
+        self
+    }
+
     /// Makes snap state reads return provider errors when `fail` is true.
     pub fn set_snap_state_reads_fail(&self, fail: bool) {
         self.snap_state_reads_fail.store(fail, Ordering::Relaxed);
@@ -321,6 +335,7 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
             snap_storage_range_requests: self.snap_storage_range_requests,
             snap_account_proof: self.snap_account_proof,
             snap_storage_proof: self.snap_storage_proof,
+            recover_block_senders: self.recover_block_senders,
             tx: self.tx,
             prune_modes: self.prune_modes,
         }
@@ -881,18 +896,27 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> BlockRe
 
     fn recovered_block(
         &self,
-        _id: BlockHashOrNumber,
+        id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        Ok(None)
+        if !self.recover_block_senders.load(Ordering::Relaxed) {
+            return Ok(None)
+        }
+        let Some(block) = self.block(id)? else { return Ok(None) };
+        let senders = block.body().recover_signers()?;
+        Ok(Some(match id {
+            // tests often insert blocks under a synthetic hash, so keep the lookup key
+            BlockHashOrNumber::Hash(hash) => RecoveredBlock::new(block, senders, hash),
+            BlockHashOrNumber::Number(_) => RecoveredBlock::new_unhashed(block, senders),
+        }))
     }
 
     fn sealed_block_with_senders(
         &self,
-        _id: BlockHashOrNumber,
-        _transaction_kind: TransactionVariant,
+        id: BlockHashOrNumber,
+        transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        Ok(None)
+        self.recovered_block(id, transaction_kind)
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Self::Block>> {
@@ -1290,9 +1314,108 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> NodePrimitivesProvider
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::Header;
-    use alloy_primitives::BlockHash;
-    use reth_ethereum_primitives::Receipt;
+    use alloy_consensus::{Header, TxLegacy};
+    use alloy_primitives::{BlockHash, Signature, TxKind};
+    use reth_ethereum_primitives::{Receipt, Transaction, TransactionSigned};
+
+    /// Builds a one-transaction block at the given number, signed so senders can be recovered.
+    fn block_with_signed_tx(number: u64) -> reth_ethereum_primitives::Block {
+        let tx = TransactionSigned::new_unhashed(
+            Transaction::Legacy(TxLegacy {
+                gas_limit: 21_000,
+                to: TxKind::Call(Address::ZERO),
+                ..Default::default()
+            }),
+            Signature::test_signature(),
+        );
+        reth_ethereum_primitives::Block {
+            header: Header { number, ..Default::default() },
+            body: alloy_consensus::BlockBody { transactions: vec![tx], ..Default::default() },
+        }
+    }
+
+    #[test]
+    fn test_mock_provider_recovered_block_opt_in() {
+        let provider = MockEthProvider::<EthPrimitives>::new();
+        let hash = BlockHash::random();
+        provider.add_block(hash, block_with_signed_tx(1));
+
+        assert!(provider.block(hash.into()).unwrap().is_some());
+        assert!(provider
+            .recovered_block(hash.into(), TransactionVariant::WithHash)
+            .unwrap()
+            .is_none());
+        assert!(provider
+            .sealed_block_with_senders(hash.into(), TransactionVariant::WithHash)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn test_mock_provider_recovered_block_by_hash() {
+        let provider = MockEthProvider::<EthPrimitives>::new().with_recovered_blocks();
+        // deliberately not the header's own hash: the lookup key must be preserved
+        let synthetic_hash = BlockHash::random();
+        let block = block_with_signed_tx(1);
+        assert_ne!(synthetic_hash, block.header.hash_slow());
+        provider.add_block(synthetic_hash, block);
+
+        let recovered =
+            provider.recovered_block(synthetic_hash.into(), TransactionVariant::WithHash).unwrap();
+        let recovered = recovered.expect("block should resolve");
+        assert_eq!(recovered.hash(), synthetic_hash);
+        assert_eq!(recovered.senders().len(), 1);
+    }
+
+    #[test]
+    fn test_mock_provider_recovered_block_by_number() {
+        let provider = MockEthProvider::<EthPrimitives>::new().with_recovered_blocks();
+        let synthetic_hash = BlockHash::random();
+        let block = block_with_signed_tx(7);
+        let computed_hash = block.header.hash_slow();
+        provider.add_block(synthetic_hash, block);
+
+        let recovered =
+            provider.recovered_block(7u64.into(), TransactionVariant::WithHash).unwrap();
+        let recovered = recovered.expect("block should resolve");
+        // no lookup key to preserve, so the hash comes from the header
+        assert_eq!(recovered.hash(), computed_hash);
+    }
+
+    #[test]
+    fn test_mock_provider_recovered_block_missing() {
+        let provider = MockEthProvider::<EthPrimitives>::new().with_recovered_blocks();
+        provider.add_block(BlockHash::random(), block_with_signed_tx(1));
+
+        assert!(provider
+            .recovered_block(BlockHash::random().into(), TransactionVariant::WithHash)
+            .unwrap()
+            .is_none());
+        assert!(provider
+            .recovered_block(99u64.into(), TransactionVariant::WithHash)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn test_mock_provider_recovered_block_recovery_failure() {
+        let provider = MockEthProvider::<EthPrimitives>::new().with_recovered_blocks();
+        let hash = BlockHash::random();
+        // r = s = 0 is not a recoverable signature
+        let tx = TransactionSigned::new_unhashed(
+            Transaction::Legacy(TxLegacy { gas_limit: 21_000, ..Default::default() }),
+            Signature::new(U256::ZERO, U256::ZERO, false),
+        );
+        provider.add_block(
+            hash,
+            reth_ethereum_primitives::Block {
+                header: Header { number: 1, ..Default::default() },
+                body: alloy_consensus::BlockBody { transactions: vec![tx], ..Default::default() },
+            },
+        );
+
+        assert!(provider.recovered_block(hash.into(), TransactionVariant::WithHash).is_err());
+    }
 
     #[test]
     fn test_mock_provider_receipts() {
