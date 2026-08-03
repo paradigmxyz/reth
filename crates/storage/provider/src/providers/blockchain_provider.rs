@@ -35,6 +35,7 @@ use reth_storage_api::{
     StorageRangeResult,
 };
 use reth_storage_errors::provider::ProviderResult;
+use reth_storage_overlay::select_historical_anchor;
 use reth_trie::{
     hashed_cursor::{HashedCursor, HashedCursorFactory},
     metrics::TrieRootMetrics,
@@ -154,9 +155,11 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         &self,
         state: &BlockState<N::Primitives>,
     ) -> ProviderResult<MemoryOverlayStateProvider<N::Primitives>> {
-        let anchor_hash = state.anchor().hash;
-        let latest_historical = self.database.history_by_block_hash(anchor_hash)?;
-        Ok(state.state_provider(latest_historical))
+        let in_memory = state.chain().map(|block_state| block_state.block()).collect();
+        let (anchor_hash, in_memory) =
+            select_historical_anchor(&self.database, state.anchor().hash, in_memory)?;
+        let historical = self.database.history_by_block_hash(anchor_hash)?;
+        Ok(MemoryOverlayStateProvider::new(historical, in_memory))
     }
 
     /// Returns a cursor-backed state view for a state root still only in canonical in-memory

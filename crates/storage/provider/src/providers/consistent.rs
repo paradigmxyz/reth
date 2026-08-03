@@ -13,7 +13,9 @@ use alloy_consensus::{
 };
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
-use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStateProviderRef};
+use reth_chain_state::{
+    BlockState, CanonicalInMemoryState, MemoryOverlayStateProvider, MemoryOverlayStateProviderRef,
+};
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::ExecutionOutcome;
@@ -29,6 +31,7 @@ use reth_storage_api::{
     StateProviderBox, StorageChangeSetReader, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
+use reth_storage_overlay::select_historical_anchor;
 use revm::database::states::PlainStorageRevert;
 use std::{
     ops::{Add, Bound, RangeBounds, RangeInclusive, Sub},
@@ -111,22 +114,6 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             trace!(target: "providers::blockchain", "Using database state for latest state provider");
             Ok(self.storage_provider.latest())
         }
-    }
-
-    fn history_by_block_hash_ref<'a>(
-        &'a self,
-        block_hash: BlockHash,
-    ) -> ProviderResult<Box<dyn StateProvider + 'a>> {
-        trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
-
-        self.get_in_memory_or_storage_by_block(
-            block_hash.into(),
-            |_| self.storage_provider.history_by_block_hash(block_hash),
-            |block_state| {
-                let state_provider = self.block_state_provider_ref(block_state)?;
-                Ok(Box::new(state_provider))
-            },
-        )
     }
 
     /// Fetches a range of data from both in-memory state and persistent storage while a predicate
@@ -247,10 +234,14 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         &self,
         state: &BlockState<N::Primitives>,
     ) -> ProviderResult<MemoryOverlayStateProviderRef<'_, N::Primitives>> {
-        let anchor_hash = state.anchor().hash;
-        let latest_historical = self.history_by_block_hash_ref(anchor_hash)?;
         let in_memory = state.chain().map(|block_state| block_state.block()).collect();
-        Ok(MemoryOverlayStateProviderRef::new(latest_historical, in_memory))
+        let (anchor_hash, in_memory) =
+            select_historical_anchor(&self.storage_provider, state.anchor().hash, in_memory)?;
+
+        // The selected anchor can be a retained block that also exists in the database. Looking
+        // it up through this consistent view would resolve the same in-memory chain again.
+        let historical = self.storage_provider.history_by_block_hash(anchor_hash)?;
+        Ok(MemoryOverlayStateProviderRef::new(historical, in_memory))
     }
 
     /// Fetches data from either in-memory state or persistent storage for a range of transactions.
@@ -455,12 +446,14 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         if let Some(Some(block_state)) =
             head_block.as_ref().map(|b| b.block_on_chain(block_hash.into()))
         {
-            let anchor_hash = block_state.anchor().hash;
+            let in_memory = block_state.chain().map(|block_state| block_state.block()).collect();
+            let (anchor_hash, in_memory) =
+                select_historical_anchor(&storage_provider, block_state.anchor().hash, in_memory)?;
             let block_number = storage_provider
                 .block_number(anchor_hash)?
                 .ok_or(ProviderError::BlockHashNotFound(anchor_hash))?;
             let latest_historical = storage_provider.try_into_history_at_block(block_number)?;
-            return Ok(Box::new(block_state.state_provider(latest_historical)));
+            return Ok(Box::new(MemoryOverlayStateProvider::new(latest_historical, in_memory)));
         }
         storage_provider.try_into_history_at_block(block_number)
     }

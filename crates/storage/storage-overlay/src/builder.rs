@@ -2,6 +2,7 @@ use crate::OverlayManager;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockHash, BlockNumber, B256};
 use metrics::{Counter, Histogram};
+use reth_chain_state::ExecutedBlock;
 use reth_errors::{ProviderError, ProviderResult};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_metrics::Metrics;
@@ -463,6 +464,40 @@ where
     ))
 }
 
+/// Selects the historical anchor and in-memory blocks for a state provider.
+///
+/// `blocks` must be ordered from newest to oldest. If the durable database tip is present in
+/// `blocks`, that tip becomes the historical anchor and only blocks newer than it are retained.
+/// Otherwise, the original `historical` anchor and all blocks are retained. Matching the tip hash,
+/// rather than only its number, preserves the correct state across same-height forks.
+pub fn select_historical_anchor<P, N>(
+    provider: &P,
+    historical: B256,
+    mut blocks: Vec<ExecutedBlock<N>>,
+) -> ProviderResult<(B256, Vec<ExecutedBlock<N>>)>
+where
+    P: BlockNumReader,
+    N: NodePrimitives,
+{
+    if blocks.is_empty() {
+        return Ok((historical, blocks))
+    }
+
+    let tip_number = provider.last_block_number()?;
+    let tip_hash = provider
+        .block_hash(tip_number)?
+        .ok_or_else(|| ProviderError::HeaderNotFound(tip_number.into()))?;
+
+    if let Some(tip_index) =
+        blocks.iter().position(|block| block.recovered_block().hash() == tip_hash)
+    {
+        blocks.truncate(tip_index);
+        return Ok((tip_hash, blocks))
+    }
+
+    Ok((historical, blocks))
+}
+
 /// Metrics for overlay construction.
 #[derive(Clone, Metrics)]
 #[metrics(scope = "storage.overlay.builder")]
@@ -483,9 +518,11 @@ struct OverlayBuilderMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::BlockHeader;
     use alloy_primitives::U256;
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
     use reth_primitives_traits::Account;
+    use reth_provider::test_utils::MockEthProvider;
     #[cfg(feature = "partial-persistence")]
     use reth_provider::{
         test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
@@ -533,6 +570,48 @@ mod tests {
             .enumerate()
             .map(|(index, block)| with_unique_trie_data(&block, index as u8 + 1))
             .collect()
+    }
+
+    #[test]
+    fn select_historical_anchor_uses_durable_tip_overlap() {
+        let mut block_builder = TestBlockBuilder::eth();
+        let blocks = block_builder.get_executed_blocks(1..4).collect::<Vec<_>>();
+        let in_memory = vec![blocks[2].clone(), blocks[1].clone(), blocks[0].clone()];
+        let historical = blocks[0].recovered_block().parent_hash();
+
+        let provider = MockEthProvider::default();
+        provider.add_header(
+            blocks[1].recovered_block().hash(),
+            blocks[1].recovered_block().header().clone(),
+        );
+        let (anchor, selected) =
+            select_historical_anchor(&provider, historical, in_memory.clone()).unwrap();
+        assert_eq!(anchor, blocks[1].recovered_block().hash());
+        assert_eq!(selected, vec![blocks[2].clone()]);
+
+        let provider = MockEthProvider::default();
+        provider.add_header(
+            blocks[2].recovered_block().hash(),
+            blocks[2].recovered_block().header().clone(),
+        );
+        let (anchor, selected) =
+            select_historical_anchor(&provider, historical, in_memory.clone()).unwrap();
+        assert_eq!(anchor, blocks[2].recovered_block().hash());
+        assert!(selected.is_empty());
+
+        let alternate_tip = block_builder.get_executed_block_with_number(
+            blocks[2].block_number(),
+            blocks[1].recovered_block().hash(),
+        );
+        let provider = MockEthProvider::default();
+        provider.add_header(
+            alternate_tip.recovered_block().hash(),
+            alternate_tip.recovered_block().header().clone(),
+        );
+        let (anchor, selected) =
+            select_historical_anchor(&provider, historical, in_memory.clone()).unwrap();
+        assert_eq!(anchor, historical);
+        assert_eq!(selected, in_memory);
     }
 
     #[cfg(feature = "partial-persistence")]
