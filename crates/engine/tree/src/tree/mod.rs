@@ -36,7 +36,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
-use reth_storage_overlay::{get_anchored_overlay, OverlayAnchor, OverlayManager};
+use reth_storage_overlay::{get_anchored_overlay, OverlayManager};
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie::ComputedTrieData;
 use revm::interpreter::debug_unreachable;
@@ -129,7 +129,7 @@ impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
 impl<N: NodePrimitives, P> StateProviderBuilder<N, P>
 where
     P: BlockReader + DatabaseProviderFactory + StateProviderFactory + StateReader + Clone,
-    P::Provider: BlockNumReader,
+    P::Provider: BlockNumReader + StageCheckpointReader,
 {
     /// Creates a new state provider from this builder.
     pub fn build(&self) -> ProviderResult<StateProviderBox> {
@@ -138,12 +138,8 @@ where
         };
 
         let database_provider = self.provider_factory.database_provider_ro()?;
-        let (historical, overlay) = get_anchored_overlay(
-            &database_provider,
-            self.historical,
-            overlay,
-            OverlayAnchor::DatabaseTip,
-        )?;
+        let (historical, overlay) =
+            get_anchored_overlay(&database_provider, self.historical, overlay)?;
         let provider = self.provider_factory.state_by_block_hash(historical)?;
         Ok(Box::new(MemoryOverlayStateProvider::new(provider, overlay)))
     }

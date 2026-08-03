@@ -10,7 +10,8 @@ use alloy_primitives::{Address, B256};
 use reth_evm::{ConfigureEvm, EvmEnvFor};
 use reth_primitives_traits::{NodePrimitives, TxTy};
 use reth_provider::{
-    BlockNumReader, BlockReader, DatabaseProviderFactory, StateProviderFactory, StateReader,
+    BlockNumReader, BlockReader, DatabaseProviderFactory, StageCheckpointReader,
+    StateProviderFactory, StateReader,
 };
 use std::{fmt::Debug, sync::Arc};
 
@@ -44,7 +45,7 @@ where
         + Send
         + Sync
         + 'static,
-    P::Provider: BlockNumReader,
+    P::Provider: BlockNumReader + StageCheckpointReader,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Spawns the long-lived worker, which owns its mutable read cache and starts a fresh one for

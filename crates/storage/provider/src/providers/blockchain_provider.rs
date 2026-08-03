@@ -35,7 +35,7 @@ use reth_storage_api::{
     StorageRangeResult,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_storage_overlay::{get_anchored_overlay, OverlayAnchor};
+use reth_storage_overlay::get_anchored_overlay;
 use reth_trie::{
     hashed_cursor::{HashedCursor, HashedCursorFactory},
     metrics::TrieRootMetrics,
@@ -156,12 +156,9 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         state: &BlockState<N::Primitives>,
     ) -> ProviderResult<MemoryOverlayStateProvider<N::Primitives>> {
         let in_memory = state.chain().map(|block_state| block_state.block()).collect();
-        let (anchor_hash, in_memory) = get_anchored_overlay(
-            &self.database,
-            state.anchor().hash,
-            in_memory,
-            OverlayAnchor::DatabaseTip,
-        )?;
+        let database_provider = self.database.database_provider_ro()?;
+        let (anchor_hash, in_memory) =
+            get_anchored_overlay(&database_provider, state.anchor().hash, in_memory)?;
         let historical = self.database.history_by_block_hash(anchor_hash)?;
         Ok(MemoryOverlayStateProvider::new(historical, in_memory))
     }
