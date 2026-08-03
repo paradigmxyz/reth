@@ -232,9 +232,9 @@ impl Command {
 
     fn discv4_config(&self, nat: &BootnodeNat, seeds: &BootnodeSeeds) -> Discv4Config {
         let mut builder = Discv4Config::builder();
-        builder
-            .external_ip_resolver(Some(nat.resolver.clone()))
-            .add_boot_nodes(seeds.discv4_records());
+        builder.external_ip_resolver(Some(nat.resolver.clone())).add_boot_nodes(
+            seeds.discv4_records().filter(|record| self.serves_family(record.address, nat)),
+        );
         // the opposite-family address is only served with the `--v5` sibling socket
         if self.v5 &&
             let Some(ip) =
@@ -290,11 +290,9 @@ impl Command {
             tcp_port: enr.tcp4().unwrap_or(0),
             id,
         });
-        let v6 = enr.ip6().zip(enr.udp6()).map(|(ip, udp_port)| NodeRecord {
-            address: ip.into(),
-            udp_port,
-            tcp_port: enr.tcp6().unwrap_or(0),
-            id,
+        let v6 = enr.ip6().zip(enr.udp6()).map(|(ip, udp_port)| {
+            NodeRecord { address: ip.into(), udp_port, tcp_port: enr.tcp6().unwrap_or(0), id }
+                .into_ipv4_mapped()
         });
 
         // an unservable endpoint is kept as a last resort; the startup warning covers it
@@ -349,8 +347,7 @@ impl Command {
         // discv5's bootstrap aborts on an ENR it cannot contact (AddNodeFailed) and wastes a
         // request_enr round-trip on an unreachable enode: seed only what the listen config serves
         let enrs = seeds.enrs.iter().filter(|enr| {
-            let contactable = (bind_ipv4 && enr.udp4_socket().is_some()) ||
-                (bind_ipv6 && enr.udp6_socket().is_some());
+            let contactable = discv5_contactable(enr, bind_ipv4, bind_ipv6);
             if !contactable {
                 warn!("--bootnodes ENR has no endpoint for a served IP family; discv5 will not dial it: {enr}");
             }
@@ -431,6 +428,15 @@ fn fixed_external_ip(nat: &NatResolver) -> eyre::Result<IpAddr> {
             eyre::bail!("--nat can only be repeated with extip:<IP> values");
         }
     }
+}
+
+/// Whether discv5 can dial `enr` with the sockets it binds, mirroring
+/// [`discv5::IpMode::get_contactable_addr`]: a v4-mapped `ip6` is not a canonical IPv6 address, so
+/// discv5 refuses it even though `udp6_socket` returns it.
+fn discv5_contactable(enr: &discv5::Enr, bind_ipv4: bool, bind_ipv6: bool) -> bool {
+    (bind_ipv4 && enr.udp4_socket().is_some()) ||
+        (bind_ipv6 &&
+            enr.udp6_socket().is_some_and(|socket| socket.ip().to_ipv4_mapped().is_none()))
 }
 
 fn log_discv5_enr(discv5: &Discv5) {
@@ -658,6 +664,24 @@ mod tests {
     }
 
     #[test]
+    fn discv4_config_filters_unserved_bootnodes() {
+        let peer_id = "d860a01f9722d78051619d1e2351aba3f43f943f6f00718d1b9baa4101932a1f5011f16bb2b1bb35db20d6fe28fa0bf09636d26a87d31de9ec6203eeedb1f666";
+        let command = Command::parse_from([
+            "reth",
+            "--addr",
+            "0.0.0.0:30303",
+            "--bootnodes",
+            &format!("enode://{peer_id}@[2001:db8::1]:0?discport=30303"),
+        ]);
+        let nat = command.resolved_nat().unwrap();
+        let seeds = command.seed_nodes(&nat).unwrap();
+
+        let config = command.discv4_config(&nat, &seeds);
+
+        assert!(config.bootstrap_nodes.is_empty());
+    }
+
+    #[test]
     fn bootnodes_normalize_and_validate_enodes() {
         let peer_id = "d860a01f9722d78051619d1e2351aba3f43f943f6f00718d1b9baa4101932a1f5011f16bb2b1bb35db20d6fe28fa0bf09636d26a87d31de9ec6203eeedb1f666";
 
@@ -757,6 +781,36 @@ mod tests {
         ]);
         let err = command.seed_nodes(&command.resolved_nat().unwrap()).unwrap_err();
         assert!(err.to_string().contains("no ip+udp endpoint"), "{err}");
+    }
+
+    #[test]
+    fn enr_seed_normalizes_v4_mapped_ip6() {
+        let sk = rng_secret_key();
+        let enr =
+            Enr::builder().ip6("::ffff:1.2.3.4".parse().unwrap()).udp6(30303).build(&sk).unwrap();
+
+        let command = Command::parse_from([
+            "reth",
+            "--addr",
+            "0.0.0.0:30303",
+            "--nat",
+            "extip:9.9.9.9",
+            "--bootnodes",
+            &enr.to_base64(),
+        ]);
+        let nat = command.resolved_nat().unwrap();
+        let seeds = command.seed_nodes(&nat).unwrap();
+        assert_eq!(seeds.enr_records[0].address, "1.2.3.4".parse::<IpAddr>().unwrap());
+        assert_eq!(seeds.enr_records[0].udp_port, 30303);
+        assert_eq!(command.discv4_config(&nat, &seeds).bootstrap_nodes.len(), 1);
+
+        assert!(!discv5_contactable(&seeds.enrs[0], true, true));
+        assert!(!discv5_contactable(&seeds.enrs[0], false, true));
+
+        let canonical =
+            Enr::builder().ip6("2001:db8::9".parse().unwrap()).udp6(30303).build(&sk).unwrap();
+        let canonical = EnrCombinedKeyWrapper::from(canonical).0;
+        assert!(discv5_contactable(&canonical, false, true));
     }
 
     #[test]
