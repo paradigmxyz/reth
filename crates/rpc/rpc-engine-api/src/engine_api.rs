@@ -650,6 +650,10 @@ where
             // Check if the requested range starts before the earliest available block due to pruning/expiry
             let earliest_block = inner.provider.earliest_block_number().unwrap_or(0);
             for num in start..=end {
+                if tx.is_closed() {
+                    return;
+                }
+
                 if num < earliest_block {
                     result.push(None);
                     continue;
