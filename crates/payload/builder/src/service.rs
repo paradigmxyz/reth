@@ -637,15 +637,13 @@ impl PayloadBuilderResources {
 /// Keeps a loaned resource active until the last lease clone is dropped.
 #[derive(Clone)]
 pub struct PayloadBuilderLease {
-    // A mutex lets this lease be shared without requiring the resource itself to be `Sync`.
-    // The resource is dropped when the last lease clone is dropped.
-    _lease: Arc<std::sync::Mutex<Box<dyn Send>>>,
+    _lease: Arc<dyn Send + Sync>,
 }
 
 impl PayloadBuilderLease {
     /// Wraps a lease that releases its resource when the last clone is dropped.
-    pub fn new(lease: impl Send + 'static) -> Self {
-        Self { _lease: Arc::new(std::sync::Mutex::new(Box::new(lease))) }
+    pub fn new(lease: impl Send + Sync + 'static) -> Self {
+        Self { _lease: Arc::new(lease) }
     }
 }
 
