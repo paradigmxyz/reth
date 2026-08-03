@@ -1,13 +1,11 @@
 //! Metadata provider trait for reading and writing node metadata.
 
 use alloc::vec::Vec;
-use reth_db_api::models::{PartialStateTrieUnwindMarker, StorageSettings};
+use reth_db_api::models::StorageSettings;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 
 /// Metadata keys.
 pub mod keys {
-    /// Marker for an in-progress partial state trie unwind.
-    pub const PARTIAL_STATE_TRIE_UNWIND: &str = "partial_state_trie_unwind";
     /// Storage configuration settings for this node.
     pub const STORAGE_SETTINGS: &str = "storage_settings";
 }
@@ -17,13 +15,6 @@ pub mod keys {
 pub trait MetadataProvider: Send {
     /// Get a metadata value by key
     fn get_metadata(&self, key: &str) -> ProviderResult<Option<Vec<u8>>>;
-
-    /// Get the marker for an in-progress partial state trie unwind.
-    fn partial_state_trie_unwind(&self) -> ProviderResult<Option<PartialStateTrieUnwindMarker>> {
-        self.get_metadata(keys::PARTIAL_STATE_TRIE_UNWIND)?
-            .map(|bytes| serde_json::from_slice(&bytes).map_err(ProviderError::other))
-            .transpose()
-    }
 
     /// Get storage settings for this node.
     ///
@@ -45,22 +36,6 @@ pub trait MetadataWriter: Send {
     /// Delete a metadata value.
     fn delete_metadata(&self, _key: &str) -> ProviderResult<()> {
         Err(ProviderError::UnsupportedProvider)
-    }
-
-    /// Write the marker for an in-progress partial state trie unwind.
-    fn write_partial_state_trie_unwind(
-        &self,
-        marker: PartialStateTrieUnwindMarker,
-    ) -> ProviderResult<()> {
-        self.write_metadata(
-            keys::PARTIAL_STATE_TRIE_UNWIND,
-            serde_json::to_vec(&marker).map_err(ProviderError::other)?,
-        )
-    }
-
-    /// Delete the marker for an in-progress partial state trie unwind.
-    fn delete_partial_state_trie_unwind(&self) -> ProviderResult<()> {
-        self.delete_metadata(keys::PARTIAL_STATE_TRIE_UNWIND)
     }
 
     /// Write storage settings for this node

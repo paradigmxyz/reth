@@ -551,7 +551,7 @@ where
         let provider_ro = factory.database_provider_ro()?;
         // Finish is committed before Merkle during unwind, so this marker is authoritative when
         // resuming an interrupted partial trie unwind.
-        let persisted_partial_trie_unwind = provider_ro.partial_state_trie_unwind()?;
+        let persisted_partial_trie_unwind = read_partial_trie_unwind_marker(&provider_ro)?;
         let partial_trie_unwind = partial_trie_unwind_marker(
             persisted_partial_trie_unwind,
             provider_ro.get_stage_checkpoint(StageId::Finish)?,
@@ -638,7 +638,8 @@ where
             if persist_partial_trie_unwind {
                 // The marker must be durable before any unwind stage can commit.
                 let provider_rw = factory.database_provider_rw()?;
-                provider_rw.write_partial_state_trie_unwind(
+                write_partial_trie_unwind_marker(
+                    &provider_rw,
                     partial_trie_unwind.expect("partial trie unwind marker must exist"),
                 )?;
                 provider_rw.commit()?;
@@ -661,7 +662,7 @@ where
 
                         if clear_partial_trie_unwind {
                             let provider_rw = factory.database_provider_rw()?;
-                            provider_rw.delete_partial_state_trie_unwind()?;
+                            delete_partial_trie_unwind_marker(&provider_rw)?;
                             provider_rw.commit()?;
                         }
                     }
@@ -1441,9 +1442,42 @@ fn partial_trie_unwind_marker(
     ))
 }
 
+/// Metadata key for a partial state trie unwind that has not completed yet.
+const PARTIAL_STATE_TRIE_UNWIND_METADATA_KEY: &str = "partial_state_trie_unwind";
+
+fn read_partial_trie_unwind_marker(
+    provider: &impl MetadataProvider,
+) -> ProviderResult<Option<PartialStateTrieUnwindMarker>> {
+    decode_partial_trie_unwind_marker(
+        provider.get_metadata(PARTIAL_STATE_TRIE_UNWIND_METADATA_KEY)?,
+    )
+}
+
+fn decode_partial_trie_unwind_marker(
+    marker: Option<Vec<u8>>,
+) -> ProviderResult<Option<PartialStateTrieUnwindMarker>> {
+    marker.map(|bytes| serde_json::from_slice(&bytes).map_err(ProviderError::other)).transpose()
+}
+
+fn write_partial_trie_unwind_marker(
+    provider: &impl MetadataWriter,
+    marker: PartialStateTrieUnwindMarker,
+) -> ProviderResult<()> {
+    provider.write_metadata(
+        PARTIAL_STATE_TRIE_UNWIND_METADATA_KEY,
+        serde_json::to_vec(&marker).map_err(ProviderError::other)?,
+    )
+}
+
+fn delete_partial_trie_unwind_marker(provider: &impl MetadataWriter) -> ProviderResult<()> {
+    provider.delete_metadata(PARTIAL_STATE_TRIE_UNWIND_METADATA_KEY)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{partial_trie_unwind_marker, LaunchContext, NodeConfig};
+    use super::{
+        decode_partial_trie_unwind_marker, partial_trie_unwind_marker, LaunchContext, NodeConfig,
+    };
     use reth_config::Config;
     use reth_db_api::models::PartialStateTrieUnwindMarker;
     use reth_node_core::args::PruningArgs;
@@ -1577,5 +1611,10 @@ mod tests {
         let error = partial_trie_unwind_marker(Some(marker), None).unwrap_err();
 
         assert!(error.to_string().contains("is not below original Finish"));
+    }
+
+    #[test]
+    fn partial_trie_unwind_marker_rejects_malformed_metadata() {
+        assert!(decode_partial_trie_unwind_marker(Some(vec![0xff])).is_err());
     }
 }

@@ -4083,11 +4083,11 @@ mod tests {
     #[cfg(feature = "partial-persistence")]
     use reth_chain_state::test_utils::TestBlockBuilder;
     use reth_chain_state::ExecutedBlock;
-    use reth_db_api::models::{PartialStateTrieUnwindMarker, StorageSettings};
+    use reth_db_api::models::StorageSettings;
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
     use reth_primitives_traits::SealedBlock;
-    use reth_storage_api::{metadata::keys, MetadataProvider, MetadataWriter};
+    use reth_storage_api::{MetadataProvider, MetadataWriter};
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
         HashedPostState, KeccakKeyHasher, Nibbles, SortedTrieData, StoredNibbles,
@@ -4129,25 +4129,19 @@ mod tests {
     }
 
     #[test]
-    fn partial_state_trie_unwind_metadata_lifecycle() {
+    fn metadata_can_be_deleted() {
         let factory = create_test_provider_factory();
-        let marker =
-            PartialStateTrieUnwindMarker { finish_block_number: 42, partial_state_trie: 21 };
+        let key = "metadata-delete-test";
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.write_partial_state_trie_unwind(marker).unwrap();
+        provider_rw.write_metadata(key, vec![1]).unwrap();
         provider_rw.commit().unwrap();
-        assert_eq!(factory.provider().unwrap().partial_state_trie_unwind().unwrap(), Some(marker));
+        assert_eq!(factory.provider().unwrap().get_metadata(key).unwrap(), Some(vec![1]));
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.delete_partial_state_trie_unwind().unwrap();
+        provider_rw.delete_metadata(key).unwrap();
         provider_rw.commit().unwrap();
-        assert_eq!(factory.provider().unwrap().partial_state_trie_unwind().unwrap(), None);
-
-        let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.write_metadata(keys::PARTIAL_STATE_TRIE_UNWIND, vec![0xff]).unwrap();
-        provider_rw.commit().unwrap();
-        assert!(factory.provider().unwrap().partial_state_trie_unwind().is_err());
+        assert_eq!(factory.provider().unwrap().get_metadata(key).unwrap(), None);
     }
 
     #[test]
