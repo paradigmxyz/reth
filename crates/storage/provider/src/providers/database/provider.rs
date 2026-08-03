@@ -4045,6 +4045,11 @@ impl<TX: DbTxMut, N: NodeTypes> MetadataWriter for DatabaseProvider<TX, N> {
     fn write_metadata(&self, key: &str, value: Vec<u8>) -> ProviderResult<()> {
         self.tx.put::<tables::Metadata>(key.to_string(), value).map_err(Into::into)
     }
+
+    fn delete_metadata(&self, key: &str) -> ProviderResult<()> {
+        self.tx.delete::<tables::Metadata>(key.to_string(), None)?;
+        Ok(())
+    }
 }
 
 impl<TX: Send, N: NodeTypes> StorageSettingsCache for DatabaseProvider<TX, N> {
@@ -4078,11 +4083,11 @@ mod tests {
     #[cfg(feature = "partial-persistence")]
     use reth_chain_state::test_utils::TestBlockBuilder;
     use reth_chain_state::ExecutedBlock;
-    use reth_db_api::models::StorageSettings;
+    use reth_db_api::models::{PartialStateTrieUnwindMarker, StorageSettings};
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
     use reth_primitives_traits::SealedBlock;
-    use reth_storage_api::MetadataWriter;
+    use reth_storage_api::{metadata::keys, MetadataProvider, MetadataWriter};
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
         HashedPostState, KeccakKeyHasher, Nibbles, SortedTrieData, StoredNibbles,
@@ -4121,6 +4126,28 @@ mod tests {
         let end = 9u64;
         let result = provider.receipts_by_block_range(start..=end).unwrap();
         assert_eq!(result, Vec::<Vec<reth_ethereum_primitives::Receipt>>::new());
+    }
+
+    #[test]
+    fn partial_state_trie_unwind_metadata_lifecycle() {
+        let factory = create_test_provider_factory();
+        let marker =
+            PartialStateTrieUnwindMarker { finish_block_number: 42, partial_state_trie: 21 };
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.write_partial_state_trie_unwind(marker).unwrap();
+        provider_rw.commit().unwrap();
+        assert_eq!(factory.provider().unwrap().partial_state_trie_unwind().unwrap(), Some(marker));
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.delete_partial_state_trie_unwind().unwrap();
+        provider_rw.commit().unwrap();
+        assert_eq!(factory.provider().unwrap().partial_state_trie_unwind().unwrap(), None);
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.write_metadata(keys::PARTIAL_STATE_TRIE_UNWIND, vec![0xff]).unwrap();
+        provider_rw.commit().unwrap();
+        assert!(factory.provider().unwrap().partial_state_trie_unwind().is_err());
     }
 
     #[test]

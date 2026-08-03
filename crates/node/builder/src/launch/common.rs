@@ -41,7 +41,9 @@ use rayon::ThreadPoolBuilder;
 use reth_chainspec::{Chain, EthChainSpec, EthereumHardforks};
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_consensus::noop::NoopConsensus;
-use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
+use reth_db_api::{
+    database::Database, database_metrics::DatabaseMetrics, models::PartialStateTrieUnwindMarker,
+};
 use reth_db_common::init::{
     init_genesis_with_settings, init_genesis_with_settings_and_validate, InitStorageError,
 };
@@ -69,10 +71,10 @@ use reth_node_metrics::{
 };
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
-    BalConfig, BalStoreHandle, BlockHashReader, BlockNumReader, DatabaseProviderFactory,
-    InMemoryBalStore, ProviderError, ProviderFactory, ProviderResult, RocksDBProviderFactory,
-    StageCheckpointReader, StaticFileProviderBuilder, StaticFileProviderFactory,
-    StorageSettingsCache,
+    BalConfig, BalStoreHandle, BlockHashReader, BlockNumReader, DBProvider,
+    DatabaseProviderFactory, InMemoryBalStore, MetadataProvider, MetadataWriter, ProviderError,
+    ProviderFactory, ProviderResult, RocksDBProviderFactory, StageCheckpointReader,
+    StaticFileProviderBuilder, StaticFileProviderFactory, StorageSettingsCache,
 };
 use reth_prune::{PruneMode, PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -546,19 +548,29 @@ where
         // the unwind targets for each storage layer if inconsistencies are
         // found.
         let (rocksdb_unwind, static_file_unwind) = factory.check_consistency()?;
-        let partial_trie_unwind = partial_trie_unwind_target(
-            factory.database_provider_ro()?.get_stage_checkpoint(StageId::Finish)?,
+        let provider_ro = factory.database_provider_ro()?;
+        // Finish is committed before Merkle during unwind, so this marker is authoritative when
+        // resuming an interrupted partial trie unwind.
+        let persisted_partial_trie_unwind = provider_ro.partial_state_trie_unwind()?;
+        let partial_trie_unwind = partial_trie_unwind_marker(
+            persisted_partial_trie_unwind,
+            provider_ro.get_stage_checkpoint(StageId::Finish)?,
         )?;
+        drop(provider_ro);
+        let persist_partial_trie_unwind =
+            persisted_partial_trie_unwind.is_none() && partial_trie_unwind.is_some();
+        let partial_trie_unwind_target =
+            partial_trie_unwind.map(|marker| marker.partial_state_trie);
         // Recover the partial state trie first. Its unwind enables
         // `walk_all_changed_branch_children`, which is more expensive than a normal unwind, so
         // it only runs to the partial trie target. A lower storage-layer target is then unwound
         // normally.
         let storage_unwind = [rocksdb_unwind, static_file_unwind].into_iter().flatten().min();
         let storage_unwind = storage_unwind.filter(|unwind_block| {
-            partial_trie_unwind.is_none_or(|partial_trie| *unwind_block < partial_trie)
+            partial_trie_unwind_target.is_none_or(|partial_trie| *unwind_block < partial_trie)
         });
 
-        if partial_trie_unwind.is_some() || storage_unwind.is_some() {
+        if partial_trie_unwind_target.is_some() || storage_unwind.is_some() {
             let build_unwind_pipeline = |walk_all_changed_branch_children| {
                 let (_tip_tx, tip_rx) = watch::channel(B256::ZERO);
                 let stages = DefaultStages::new(
@@ -578,19 +590,27 @@ where
                 } else {
                     stages
                 };
+                let stages = stages.disable_all(disabled_stages);
+                let stages = if walk_all_changed_branch_children {
+                    // Partial trie recovery is not complete until Merkle has unwound.
+                    stages.enable(StageId::MerkleUnwind)
+                } else {
+                    stages
+                };
 
-                PipelineBuilder::default().add_stages(stages.disable_all(disabled_stages)).build(
+                PipelineBuilder::default().add_stages(stages).build(
                     factory.clone(),
                     StaticFileProducer::new(factory.clone(), self.prune_modes()),
                 )
             };
             let mut unwinds = Vec::with_capacity(2);
 
-            if let Some(unwind_block) = partial_trie_unwind {
+            if let Some(unwind_block) = partial_trie_unwind_target {
                 unwinds.push((
                     PipelineTarget::Unwind(unwind_block),
                     "partial state trie".to_owned(),
                     build_unwind_pipeline(true),
+                    true,
                 ));
             }
 
@@ -611,20 +631,39 @@ where
                     PipelineTarget::Unwind(unwind_block),
                     inconsistency_source.to_owned(),
                     build_unwind_pipeline(false),
+                    false,
                 ));
             }
 
+            if persist_partial_trie_unwind {
+                // The marker must be durable before any unwind stage can commit.
+                let provider_rw = factory.database_provider_rw()?;
+                provider_rw.write_partial_state_trie_unwind(
+                    partial_trie_unwind.expect("partial trie unwind marker must exist"),
+                )?;
+                provider_rw.commit()?;
+            }
+
             let (tx, rx) = oneshot::channel();
+            let factory = factory.clone();
 
             // Pipeline should be run as blocking and panic if it fails.
             self.task_executor().spawn_critical_blocking_task("pipeline task", async move {
                 let result: Result<(), reth_stages::PipelineError> = async {
-                    for (unwind_target, inconsistency_source, pipeline) in unwinds {
+                    for (unwind_target, inconsistency_source, pipeline, clear_partial_trie_unwind) in
+                        unwinds
+                    {
                         info!(target: "reth::cli", %unwind_target, %inconsistency_source, "Executing unwind after consistency check.");
                         let (_, result) = pipeline.run_as_fut(Some(unwind_target)).await;
                         result.inspect_err(|err| {
                             error!(target: "reth::cli", %unwind_target, %inconsistency_source, %err, "failed to run unwind");
                         })?;
+
+                        if clear_partial_trie_unwind {
+                            let provider_rw = factory.database_provider_rw()?;
+                            provider_rw.delete_partial_state_trie_unwind()?;
+                            provider_rw.commit()?;
+                        }
                     }
                     Ok(())
                 }
@@ -1366,9 +1405,20 @@ pub fn metrics_hooks<N: NodeTypesWithDB>(provider_factory: &ProviderFactory<N>) 
         .build()
 }
 
-fn partial_trie_unwind_target(
+fn partial_trie_unwind_marker(
+    persisted_marker: Option<PartialStateTrieUnwindMarker>,
     finish_checkpoint: Option<StageCheckpoint>,
-) -> ProviderResult<Option<BlockNumber>> {
+) -> ProviderResult<Option<PartialStateTrieUnwindMarker>> {
+    if let Some(marker) = persisted_marker {
+        if marker.partial_state_trie >= marker.finish_block_number {
+            return Err(ProviderError::other(std::io::Error::other(format!(
+                "partial state trie unwind target #{} is not below original Finish #{}",
+                marker.partial_state_trie, marker.finish_block_number,
+            ))))
+        }
+        return Ok(Some(marker))
+    }
+
     let Some(finish_checkpoint) = finish_checkpoint else { return Ok(None) };
     let Some(partial_state_trie) =
         finish_checkpoint.finish_stage_checkpoint().and_then(|finish| finish.partial_state_trie())
@@ -1383,13 +1433,19 @@ fn partial_trie_unwind_target(
         ))))
     }
 
-    Ok((partial_state_trie < finish_checkpoint.block_number).then_some(partial_state_trie))
+    Ok((partial_state_trie < finish_checkpoint.block_number).then_some(
+        PartialStateTrieUnwindMarker {
+            finish_block_number: finish_checkpoint.block_number,
+            partial_state_trie,
+        },
+    ))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{partial_trie_unwind_target, LaunchContext, NodeConfig};
+    use super::{partial_trie_unwind_marker, LaunchContext, NodeConfig};
     use reth_config::Config;
+    use reth_db_api::models::PartialStateTrieUnwindMarker;
     use reth_node_core::args::PruningArgs;
     use reth_stages::{FinishCheckpoint, StageCheckpoint};
 
@@ -1445,22 +1501,46 @@ mod tests {
     }
 
     #[test]
-    fn partial_trie_unwind_target_uses_partial_finish_checkpoint() {
+    fn partial_trie_unwind_marker_uses_partial_finish_checkpoint() {
         let finish_checkpoint = StageCheckpoint::new(42)
             .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: Some(21) });
-        let expected = finish_checkpoint.finish_stage_checkpoint().unwrap().partial_state_trie();
+        let expected =
+            finish_checkpoint.finish_stage_checkpoint().unwrap().partial_state_trie().map(
+                |partial_state_trie| PartialStateTrieUnwindMarker {
+                    finish_block_number: finish_checkpoint.block_number,
+                    partial_state_trie,
+                },
+            );
 
-        assert_eq!(partial_trie_unwind_target(Some(finish_checkpoint)).unwrap(), expected);
+        assert_eq!(partial_trie_unwind_marker(None, Some(finish_checkpoint)).unwrap(), expected);
 
         let genesis_checkpoint = StageCheckpoint::new(42)
             .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: Some(0) });
-        let expected = genesis_checkpoint.finish_stage_checkpoint().unwrap().partial_state_trie();
+        let expected =
+            genesis_checkpoint.finish_stage_checkpoint().unwrap().partial_state_trie().map(
+                |partial_state_trie| PartialStateTrieUnwindMarker {
+                    finish_block_number: genesis_checkpoint.block_number,
+                    partial_state_trie,
+                },
+            );
 
-        assert_eq!(partial_trie_unwind_target(Some(genesis_checkpoint)).unwrap(), expected);
+        assert_eq!(partial_trie_unwind_marker(None, Some(genesis_checkpoint)).unwrap(), expected);
     }
 
     #[test]
-    fn partial_trie_unwind_target_ignores_non_lagging_or_missing_partial_checkpoint() {
+    fn partial_trie_unwind_marker_resumes_persisted_unwind() {
+        let marker =
+            PartialStateTrieUnwindMarker { finish_block_number: 42, partial_state_trie: 21 };
+
+        assert_eq!(
+            partial_trie_unwind_marker(Some(marker), Some(StageCheckpoint::new(21))).unwrap(),
+            Some(marker)
+        );
+        assert_eq!(partial_trie_unwind_marker(Some(marker), None).unwrap(), Some(marker));
+    }
+
+    #[test]
+    fn partial_trie_unwind_marker_ignores_non_lagging_or_missing_partial_checkpoint() {
         let matching_finish_checkpoint = StageCheckpoint::new(42)
             .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: Some(42) });
         let ahead_finish_checkpoint = StageCheckpoint::new(42)
@@ -1468,22 +1548,34 @@ mod tests {
         let missing_partial_finish_checkpoint = StageCheckpoint::new(42)
             .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: None });
 
-        assert_eq!(partial_trie_unwind_target(Some(matching_finish_checkpoint)).unwrap(), None);
         assert_eq!(
-            partial_trie_unwind_target(Some(missing_partial_finish_checkpoint)).unwrap(),
+            partial_trie_unwind_marker(None, Some(matching_finish_checkpoint)).unwrap(),
             None
         );
-        assert_eq!(partial_trie_unwind_target(None).unwrap(), None);
+        assert_eq!(
+            partial_trie_unwind_marker(None, Some(missing_partial_finish_checkpoint)).unwrap(),
+            None
+        );
+        assert_eq!(partial_trie_unwind_marker(None, None).unwrap(), None);
 
         let partial_frontier = ahead_finish_checkpoint
             .finish_stage_checkpoint()
             .and_then(|finish| finish.partial_state_trie());
-        let result = partial_trie_unwind_target(Some(ahead_finish_checkpoint));
+        let result = partial_trie_unwind_marker(None, Some(ahead_finish_checkpoint));
         if partial_frontier.is_some() {
             let error = result.unwrap_err();
             assert!(error.to_string().contains("ahead of Finish"), "unexpected error: {error}");
         } else {
             assert_eq!(result.unwrap(), None);
         }
+    }
+
+    #[test]
+    fn partial_trie_unwind_marker_rejects_invalid_persisted_marker() {
+        let marker =
+            PartialStateTrieUnwindMarker { finish_block_number: 42, partial_state_trie: 42 };
+        let error = partial_trie_unwind_marker(Some(marker), None).unwrap_err();
+
+        assert!(error.to_string().contains("is not below original Finish"));
     }
 }
