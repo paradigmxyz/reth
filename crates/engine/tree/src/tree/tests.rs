@@ -708,7 +708,27 @@ fn persistence_handoff_waits_for_active_payload_jobs() {
 }
 
 #[test]
-fn backfill_action_waits_for_payload_build_persistence_handoff() {
+fn backfill_action_skips_while_payload_build_is_active() {
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+    let payload_build = test_harness.tree.payload_builds.acquire();
+    let action = BackfillAction::Start(B256::random().into());
+
+    test_harness.tree.emit_event(EngineApiEvent::BackfillAction(action));
+    assert!(test_harness.tree.pending_persisted_handoff.is_none());
+    assert!(test_harness.tree.backfill_sync_state.is_idle());
+    assert!(test_harness.from_tree_rx.try_recv().is_err());
+
+    drop(payload_build);
+    assert!(matches!(test_harness.tree.wait_for_event(), super::LoopEvent::PayloadBuildFinished));
+    test_harness.tree.on_payload_build_finished().unwrap();
+
+    // The skipped action is not queued for a later replay.
+    assert!(test_harness.tree.backfill_sync_state.is_idle());
+    assert!(test_harness.from_tree_rx.try_recv().is_err());
+}
+
+#[test]
+fn backfill_action_skips_while_persisted_handoff_is_pending() {
     let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
     let mut test_harness = TestHarness::with_config(
         MAINNET.clone(),
@@ -730,52 +750,16 @@ fn backfill_action_waits_for_payload_build_persistence_handoff() {
         )
         .unwrap();
 
-    let action = BackfillAction::Start(B256::random().into());
-    test_harness.tree.emit_event(EngineApiEvent::BackfillAction(action.clone()));
-    assert_eq!(test_harness.tree.pending_backfill_action, Some(action.clone()));
-    assert!(test_harness.from_tree_rx.try_recv().is_err());
-
     drop(payload_build);
-    assert!(matches!(test_harness.tree.wait_for_event(), super::LoopEvent::PayloadBuildFinished));
-    test_harness.tree.on_payload_build_finished().unwrap();
+    assert!(!test_harness.tree.payload_builds.is_active());
+    assert!(test_harness.tree.pending_persisted_handoff.is_some());
 
-    assert!(test_harness.tree.pending_backfill_action.is_none());
-    assert!(test_harness.tree.backfill_sync_state.is_pending());
-    let EngineApiEvent::BackfillAction(emitted_action) = test_harness
-        .from_tree_rx
-        .try_recv()
-        .expect("queued backfill action should be emitted after the handoff")
-    else {
-        panic!("expected backfill action")
-    };
-    assert_eq!(emitted_action, action);
-}
+    test_harness
+        .tree
+        .emit_event(EngineApiEvent::BackfillAction(BackfillAction::Start(B256::random().into())));
 
-#[test]
-fn backfill_action_waits_for_active_payload_build() {
-    let mut test_harness = TestHarness::new(MAINNET.clone());
-    let payload_build = test_harness.tree.payload_builds.acquire();
-    let action = BackfillAction::Start(B256::random().into());
-
-    test_harness.tree.emit_event(EngineApiEvent::BackfillAction(action.clone()));
-    assert!(test_harness.tree.pending_persisted_handoff.is_none());
-    assert_eq!(test_harness.tree.pending_backfill_action, Some(action.clone()));
+    assert!(test_harness.tree.backfill_sync_state.is_idle());
     assert!(test_harness.from_tree_rx.try_recv().is_err());
-
-    drop(payload_build);
-    assert!(matches!(test_harness.tree.wait_for_event(), super::LoopEvent::PayloadBuildFinished));
-    test_harness.tree.on_payload_build_finished().unwrap();
-
-    assert!(test_harness.tree.pending_backfill_action.is_none());
-    assert!(test_harness.tree.backfill_sync_state.is_pending());
-    let EngineApiEvent::BackfillAction(emitted_action) = test_harness
-        .from_tree_rx
-        .try_recv()
-        .expect("queued backfill action should be emitted after the payload build")
-    else {
-        panic!("expected backfill action")
-    };
-    assert_eq!(emitted_action, action);
 }
 
 #[test]

@@ -368,8 +368,6 @@ where
     /// A durable persistence completion whose destructive in-memory handoff is deferred until
     /// payload jobs finish.
     pending_persisted_handoff: Option<PersistedHandoff>,
-    /// A backfill request delayed until no payload job can access the in-memory overlay.
-    pending_backfill_action: Option<BackfillAction>,
     /// Task runtime for spawning blocking work on named, reusable threads.
     runtime: reth_tasks::Runtime,
 }
@@ -399,7 +397,6 @@ where
             .field("execution_timing_stats", &self.execution_timing_stats.len())
             .field("payload_builds_active", &self.payload_builds.is_active())
             .field("pending_persisted_handoff", &self.pending_persisted_handoff)
-            .field("pending_backfill_action", &self.pending_backfill_action)
             .field("runtime", &self.runtime)
             .finish()
     }
@@ -467,7 +464,6 @@ where
             payload_builds,
             payload_build_finished,
             pending_persisted_handoff: None,
-            pending_backfill_action: None,
             runtime,
         }
     }
@@ -1660,14 +1656,12 @@ where
         Ok(())
     }
 
-    /// Finishes a persisted handoff and releases any backfill request it was delaying.
+    /// Finishes a persisted handoff.
     fn finish_persisted_handoff(
         &mut self,
         handoff: PersistedHandoff,
     ) -> Result<(), AdvancePersistenceError> {
-        self.on_persisted_handoff(handoff)?;
-        self.emit_pending_backfill_action();
-        Ok(())
+        self.on_persisted_handoff(handoff)
     }
 
     /// Releases work deferred until all payload jobs have finished.
@@ -1678,8 +1672,6 @@ where
 
         if let Some(handoff) = self.pending_persisted_handoff.take() {
             self.finish_persisted_handoff(handoff)?;
-        } else {
-            self.emit_pending_backfill_action();
         }
 
         Ok(())
@@ -1700,7 +1692,6 @@ where
                 }
                 FromOrchestrator::BackfillSyncFinished(ctrl) => {
                     self.on_backfill_sync_finished(ctrl)?;
-                    self.emit_pending_backfill_action();
                 }
                 FromOrchestrator::Terminate { tx } => {
                     debug!(target: "engine::tree", "received terminate request");
@@ -2213,16 +2204,9 @@ where
                 self.persistence_state.in_progress() ||
                 self.pending_persisted_handoff.is_some()
             {
-                // Backfill can remove the same in-memory blocks used by a payload job or a
-                // persisted handoff, so retain the request until they have finished.
-                let EngineApiEvent::BackfillAction(action) = event else {
-                    unreachable!("backfill event must contain a backfill action")
-                };
-                debug!(target: "engine::tree", "deferring backfill while in-memory overlay is in use");
-                if self.pending_backfill_action.replace(action).is_some() {
-                    // A newer sync request supersedes the previously queued target.
-                    debug!(target: "engine::tree", "replaced deferred backfill action");
-                }
+                // Backfill can remove the same in-memory blocks as an active payload job or a
+                // persisted handoff, so it must not start until the next sync trigger.
+                debug!(target: "engine::tree", "skipping backfill while in-memory overlay is in use");
                 return
             }
 
@@ -2234,20 +2218,6 @@ where
         let _ = self.outgoing.send(event).inspect_err(
             |err| error!(target: "engine::tree", "Failed to send internal event: {err:?}"),
         );
-    }
-
-    /// Emits a backfill action delayed while the in-memory overlay was in use.
-    fn emit_pending_backfill_action(&mut self) {
-        if self.payload_builds.is_active() ||
-            self.persistence_state.in_progress() ||
-            self.pending_persisted_handoff.is_some() ||
-            !self.backfill_sync_state.is_idle()
-        {
-            return
-        }
-
-        let Some(action) = self.pending_backfill_action.take() else { return };
-        self.emit_event(EngineApiEvent::BackfillAction(action));
     }
 
     /// Returns the blocks and frontiers for the next persistence cycle, if one should start.
