@@ -22,7 +22,7 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{
     block::BlockExecutor, env::BlockEnvironment, execute::BlockBuilder, ConfigureEvm, Evm,
-    EvmEnvFor, HaltReasonFor, InspectorFor, TransactionEnvMut, TxEnvFor,
+    EvmEnvFor, EvmFor, HaltReasonFor, InspectorFor, TransactionEnvMut, TxEnvFor,
 };
 use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
@@ -796,6 +796,29 @@ pub trait Call:
         I: IntoIterator<Item = Recovered<&'a ProviderTx<Self::Provider>>>,
     {
         let mut evm = self.evm_config().evm_with_env(db, evm_env);
+        self.replay_transactions_until_with_evm(&mut evm, transactions, target_tx_hash)
+    }
+
+    /// Replays all the transactions until the target transaction is found, on the given EVM.
+    ///
+    /// Unlike [`Self::replay_transactions_until`], this executes on a caller provided EVM, so the
+    /// target transaction can then be run on the same EVM, keeping any block-scoped EVM state
+    /// intact. The EVM's inspector configuration is left untouched; see
+    /// [`Self::inspect_transaction_in_block`] to replay without inspection and trace the target.
+    ///
+    /// Note: This assumes the target transaction is in the given iterator.
+    /// Returns the index of the target transaction in the given iterator.
+    fn replay_transactions_until_with_evm<'a, DB, I, Txs>(
+        &self,
+        evm: &mut EvmFor<Self::Evm, DB, I>,
+        transactions: Txs,
+        target_tx_hash: B256,
+    ) -> Result<usize, Self::Error>
+    where
+        DB: Database<Error = EvmDatabaseError<ProviderError>> + DatabaseCommit + core::fmt::Debug,
+        I: InspectorFor<Self::Evm, DB>,
+        Txs: IntoIterator<Item = Recovered<&'a ProviderTx<Self::Provider>>>,
+    {
         let mut index = 0;
         for tx in transactions {
             if *tx.tx_hash() == target_tx_hash {
@@ -808,6 +831,33 @@ pub trait Call:
             index += 1;
         }
         Ok(index)
+    }
+
+    /// Replays all transactions before the target transaction without inspection, then executes
+    /// the target transaction with the configured inspector, all on the given EVM.
+    ///
+    /// Note: This assumes the target transaction is in the given iterator.
+    /// Returns the index of the target transaction in the given iterator and its execution
+    /// result.
+    #[expect(clippy::type_complexity)]
+    fn inspect_transaction_in_block<'a, DB, I, Txs>(
+        &self,
+        evm: &mut EvmFor<Self::Evm, DB, I>,
+        transactions: Txs,
+        target_tx_hash: B256,
+        target_tx_env: TxEnvFor<Self::Evm>,
+    ) -> Result<(usize, ResultAndState<HaltReasonFor<Self::Evm>>), Self::Error>
+    where
+        DB: Database<Error = EvmDatabaseError<ProviderError>> + DatabaseCommit + core::fmt::Debug,
+        I: InspectorFor<Self::Evm, DB>,
+        Txs: IntoIterator<Item = Recovered<&'a ProviderTx<Self::Provider>>>,
+    {
+        evm.disable_inspector();
+        let index = self.replay_transactions_until_with_evm(evm, transactions, target_tx_hash)?;
+        evm.enable_inspector();
+
+        let res = evm.transact(target_tx_env).map_err(Self::Error::from_evm_err)?;
+        Ok((index, res))
     }
 
     ///
