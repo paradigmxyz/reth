@@ -487,7 +487,9 @@ impl NetworkArgs {
 
     /// Returns the resolved bootnodes if any are provided.
     pub fn resolved_bootnodes(&self) -> Option<Vec<NodeRecord>> {
-        self.bootnodes.as_deref().map(resolve_bootnodes)
+        self.bootnodes.clone().map(|bootnodes| {
+            bootnodes.into_iter().filter_map(|node| node.resolve_blocking().ok()).collect()
+        })
     }
 
     /// Returns the max inbound peers (2:1 ratio).
@@ -565,7 +567,13 @@ impl NetworkArgs {
         let chain_bootnodes = self
             .resolved_bootnodes()
             .or_else(|| {
-                (!config.bootnodes.is_empty()).then(|| resolve_bootnodes(&config.bootnodes))
+                (!config.bootnodes.is_empty()).then(|| {
+                    config
+                        .bootnodes
+                        .iter()
+                        .filter_map(|node| node.resolve_blocking().ok())
+                        .collect()
+                })
             })
             .unwrap_or_else(|| chain_spec.bootnodes().unwrap_or_else(mainnet_nodes));
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
@@ -1144,11 +1152,6 @@ impl Default for DiscoveryArgs {
             discv5_bootstrap_lookup_countdown,
         }
     }
-}
-
-/// Resolves the hosts of the given peers, dropping the ones that fail to resolve.
-fn resolve_bootnodes(bootnodes: &[TrustedPeer]) -> Vec<NodeRecord> {
-    bootnodes.iter().filter_map(|node| node.resolve_blocking().ok()).collect()
 }
 
 /// Parse a block number=hash pair or just a hash into `BlockNumHash`
