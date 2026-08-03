@@ -917,7 +917,9 @@ impl alloy_consensus::Transaction for MockTransaction {
 impl EthPoolTransaction for MockTransaction {
     fn take_blob(&mut self) -> EthBlobTransactionSidecar {
         match self {
-            Self::Eip4844 { sidecar, .. } => EthBlobTransactionSidecar::Present(sidecar.clone()),
+            Self::Eip4844 { sidecar, .. } => {
+                EthBlobTransactionSidecar::Present(sidecar.clone().into())
+            }
             _ => EthBlobTransactionSidecar::None,
         }
     }
