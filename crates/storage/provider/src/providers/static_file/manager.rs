@@ -1691,18 +1691,18 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             provider.get_stage_checkpoint(stage_id)?.unwrap_or_default().block_number;
         debug!(target: "reth::providers::static_file", ?stage_id, checkpoint_block_number, "Retrieved stage checkpoint");
 
-        let effective_available_block =
-            Self::effective_available_block(provider, segment, highest_static_file_block)?;
+        let effective_coverage_block =
+            Self::effective_coverage_block(provider, segment, highest_static_file_block)?;
 
         // If the checkpoint is ahead, then we lost static file data. May be data corruption.
-        if checkpoint_block_number > effective_available_block {
+        if checkpoint_block_number > effective_coverage_block {
             info!(
                 target: "reth::providers::static_file",
                 checkpoint_block_number,
-                unwind_target = effective_available_block,
+                unwind_target = effective_coverage_block,
                 "Setting unwind target."
             );
-            return Ok(Some(effective_available_block));
+            return Ok(Some(effective_coverage_block));
         }
 
         // If the checkpoint is ahead, or matches, then nothing to do.
@@ -1831,18 +1831,18 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let checkpoint_block_number =
             provider.get_stage_checkpoint(stage_id)?.unwrap_or_default().block_number;
 
-        let effective_available_block =
-            Self::effective_available_block(provider, segment, highest_static_file_block)?;
+        let effective_coverage_block =
+            Self::effective_coverage_block(provider, segment, highest_static_file_block)?;
 
-        if checkpoint_block_number > effective_available_block {
+        if checkpoint_block_number > effective_coverage_block {
             info!(
                 target: "reth::providers::static_file",
                 checkpoint_block_number,
-                unwind_target = effective_available_block,
+                unwind_target = effective_coverage_block,
                 ?segment,
                 "Setting unwind target."
             );
-            return Ok(Some(effective_available_block))
+            return Ok(Some(effective_coverage_block))
         }
 
         if checkpoint_block_number < highest_static_file_block {
@@ -1869,15 +1869,15 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         Ok(None)
     }
 
-    /// Returns the highest block for which data for this segment is expected to be
-    /// available, taking prune checkpoints into account.
+    /// Returns the highest block accounted for in this segment, either through data
+    /// present in static files or through data intentionally removed by pruning.
     ///
     /// Data below a segment's prune checkpoint has been intentionally deleted, so its
     /// absence from static files is not an inconsistency. Without this, a pruned segment
     /// whose stage checkpoint is ahead of its (empty) static files is treated as data
     /// corruption and triggers an unwind to block 0, which aborts the node on startup.
     /// See <https://github.com/paradigmxyz/reth/issues/23463>.
-    fn effective_available_block<Provider>(
+    fn effective_coverage_block<Provider>(
         provider: &Provider,
         segment: StaticFileSegment,
         highest_static_file_block: BlockNumber,
