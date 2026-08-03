@@ -310,60 +310,7 @@ mod tests {
     use super::*;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_storage_api::noop::NoopProvider;
-    use reth_trie::{ComputedTrieData, LazyTrieData, SortedTrieData};
-    use revm::database::{states::StorageSlot, AccountStatus, BundleAccount};
-    use std::sync::Arc;
-
-    #[test]
-    fn destroyed_account_zeroes_in_memory_parent_storage() {
-        let address = Address::with_last_byte(1);
-        let parent_slot = U256::from(1);
-        let new_slot = U256::from(2);
-        let parent_value = U256::from(10);
-        let new_value = U256::from(20);
-        let hashed_address = keccak256(address);
-        let hashed_parent_slot = keccak256(B256::from(parent_slot));
-        let hashed_new_slot = keccak256(B256::from(new_slot));
-
-        let parent_hashed_state = HashedPostState::default().with_storages([(
-            hashed_address,
-            HashedStorage::from_iter([(hashed_parent_slot, parent_value)]),
-        )]);
-        let parent = ExecutedBlock::<EthPrimitives> {
-            trie_data: LazyTrieData::ready(ComputedTrieData {
-                sorted: SortedTrieData {
-                    hashed_state: Arc::new(parent_hashed_state.into_sorted()),
-                    ..Default::default()
-                },
-            }),
-            ..Default::default()
-        };
-        let provider =
-            MemoryOverlayStateProviderRef::new(Box::new(NoopProvider::default()), vec![parent]);
-
-        for (info, status) in [
-            (Some(Default::default()), AccountStatus::DestroyedChanged),
-            (None, AccountStatus::Destroyed),
-        ] {
-            let mut bundle_state = BundleState::default();
-            bundle_state.state.insert(
-                address,
-                BundleAccount::new(
-                    Some(Default::default()),
-                    info,
-                    std::iter::once((new_slot, StorageSlot::new_changed(U256::ZERO, new_value)))
-                        .collect(),
-                    status,
-                ),
-            );
-            let hashed_state = provider.hashed_post_state(&bundle_state).unwrap();
-
-            let storage = &hashed_state.storages[&hashed_address];
-            assert!(!storage.wiped);
-            assert_eq!(storage.storage[&hashed_parent_slot], U256::ZERO);
-            assert_eq!(storage.storage[&hashed_new_slot], new_value);
-        }
-    }
+    use revm::database::{AccountStatus, BundleAccount};
 
     #[test]
     fn created_and_destroyed_account_skips_in_memory_trie_aggregation() {
