@@ -78,8 +78,9 @@ use reth_prune::{PruneMode, PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_layer::JwtSecret;
 use reth_stages::{
-    sets::DefaultStages, stages::EraImportSource, MetricEvent, PipelineBuilder, PipelineTarget,
-    StageCheckpoint, StageId, StageSet,
+    sets::DefaultStages,
+    stages::{EraImportSource, MerkleStage},
+    MetricEvent, PipelineBuilder, PipelineTarget, StageCheckpoint, StageId, StageSet,
 };
 use reth_static_file::{blocks_per_file_for_prune_distance, StaticFileProducer, StaticFileSegment};
 use reth_storage_overlay::OverlayManager;
@@ -548,69 +549,89 @@ where
         let partial_trie_unwind = partial_trie_unwind_target(
             factory.database_provider_ro()?.get_stage_checkpoint(StageId::Finish)?,
         )?;
+        // Recover the partial state trie first. Its unwind enables
+        // `walk_all_changed_branch_children`, which is more expensive than a normal unwind, so
+        // it only runs to the partial trie target. A lower storage-layer target is then unwound
+        // normally.
+        let storage_unwind = [rocksdb_unwind, static_file_unwind].into_iter().flatten().min();
+        let storage_unwind = storage_unwind.filter(|unwind_block| {
+            partial_trie_unwind.is_none_or(|partial_trie| *unwind_block < partial_trie)
+        });
 
-        // Take the minimum block number to ensure all storage layers are consistent.
-        let unwind_target =
-            [rocksdb_unwind, static_file_unwind, partial_trie_unwind].into_iter().flatten().min();
-
-        if let Some(unwind_block) = unwind_target {
-            let inconsistency_source = [
-                rocksdb_unwind.map(|_| "RocksDB"),
-                static_file_unwind.map(|_| "static file"),
-                partial_trie_unwind.map(|_| "partial state trie"),
-            ]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>()
-            .join(" and ");
-            // A partial frontier at genesis is valid while the first masking window is in memory,
-            // so losing that window requires unwinding to genesis. Keep rejecting block-zero
-            // targets caused only by cross-store inconsistency because that can leave MDBX with a
-            // huge free list.
-            assert!(
-                unwind_block != 0 || partial_trie_unwind == Some(0),
-                "A {inconsistency_source} inconsistency was found that would trigger an unwind to block 0"
-            );
-
-            let unwind_target = PipelineTarget::Unwind(unwind_block);
-
-            info!(target: "reth::cli", %unwind_target, %inconsistency_source, "Executing unwind after consistency check.");
-
-            let (_tip_tx, tip_rx) = watch::channel(B256::ZERO);
-
-            // Builds an unwind-only pipeline
-            let pipeline = PipelineBuilder::default()
-                .add_stages(
-                    DefaultStages::new(
-                        factory.clone(),
-                        tip_rx,
-                        Arc::new(NoopConsensus::default()),
-                        NoopHeaderDownloader::default(),
-                        NoopBodiesDownloader::default(),
-                        NoopEvmConfig::<Evm>::default(),
-                        self.toml_config().stages.clone(),
-                        self.prune_modes(),
-                        None,
-                    )
-                    .builder()
-                    .disable_all(disabled_stages),
+        if partial_trie_unwind.is_some() || storage_unwind.is_some() {
+            let build_unwind_pipeline = |walk_all_changed_branch_children| {
+                let (_tip_tx, tip_rx) = watch::channel(B256::ZERO);
+                let stages = DefaultStages::new(
+                    factory.clone(),
+                    tip_rx,
+                    Arc::new(NoopConsensus::default()),
+                    NoopHeaderDownloader::default(),
+                    NoopBodiesDownloader::default(),
+                    NoopEvmConfig::<Evm>::default(),
+                    self.toml_config().stages.clone(),
+                    self.prune_modes(),
+                    None,
                 )
-                .build(
+                .builder();
+                let stages = if walk_all_changed_branch_children {
+                    stages.set(MerkleStage::new_unwind(true))
+                } else {
+                    stages
+                };
+
+                PipelineBuilder::default().add_stages(stages.disable_all(disabled_stages)).build(
                     factory.clone(),
                     StaticFileProducer::new(factory.clone(), self.prune_modes()),
-                );
+                )
+            };
+            let mut unwinds = Vec::with_capacity(2);
 
-            // Unwinds to block
+            if let Some(unwind_block) = partial_trie_unwind {
+                unwinds.push((
+                    PipelineTarget::Unwind(unwind_block),
+                    "partial state trie".to_owned(),
+                    build_unwind_pipeline(true),
+                ));
+            }
+
+            if let Some(unwind_block) = storage_unwind {
+                // Highly unlikely to happen, and given its destructive nature, it's better to
+                // panic instead. Unwinding to 0 would leave MDBX with a huge free list size.
+                let inconsistency_source = match (rocksdb_unwind, static_file_unwind) {
+                    (Some(_), Some(_)) => "RocksDB and static file",
+                    (Some(_), None) => "RocksDB",
+                    (None, Some(_)) => "static file",
+                    (None, None) => unreachable!(),
+                };
+                assert_ne!(
+                    unwind_block, 0,
+                    "A {inconsistency_source} inconsistency was found that would trigger an unwind to block 0"
+                );
+                unwinds.push((
+                    PipelineTarget::Unwind(unwind_block),
+                    inconsistency_source.to_owned(),
+                    build_unwind_pipeline(false),
+                ));
+            }
+
             let (tx, rx) = oneshot::channel();
 
             // Pipeline should be run as blocking and panic if it fails.
             self.task_executor().spawn_critical_blocking_task("pipeline task", async move {
-                let (_, result) = pipeline.run_as_fut(Some(unwind_target)).await;
+                let result: Result<(), reth_stages::PipelineError> = async {
+                    for (unwind_target, inconsistency_source, pipeline) in unwinds {
+                        info!(target: "reth::cli", %unwind_target, %inconsistency_source, "Executing unwind after consistency check.");
+                        let (_, result) = pipeline.run_as_fut(Some(unwind_target)).await;
+                        result.inspect_err(|err| {
+                            error!(target: "reth::cli", %unwind_target, %inconsistency_source, %err, "failed to run unwind");
+                        })?;
+                    }
+                    Ok(())
+                }
+                .await;
                 let _ = tx.send(result);
             });
-            rx.await?.inspect_err(|err| {
-                error!(target: "reth::cli", %unwind_target, %inconsistency_source, %err, "failed to run unwind")
-            })?;
+            rx.await??;
         }
 
         Ok(factory)
