@@ -1578,7 +1578,7 @@ where
             return Ok(())
         }
 
-        self.finish_persisted_handoff(handoff)
+        self.on_persisted_handoff(handoff)
     }
 
     /// Records a completed persistence operation and returns its deferred in-memory handoff.
@@ -1651,14 +1651,6 @@ where
         Ok(())
     }
 
-    /// Finishes a persisted handoff.
-    fn finish_persisted_handoff(
-        &mut self,
-        handoff: PersistenceResult,
-    ) -> Result<(), AdvancePersistenceError> {
-        self.on_persisted_handoff(handoff)
-    }
-
     /// Releases work deferred until all payload jobs have finished.
     fn on_payload_build_finished(&mut self) -> Result<(), AdvancePersistenceError> {
         if self.payload_builds.is_active() {
@@ -1666,7 +1658,7 @@ where
         }
 
         if let Some(handoff) = self.pending_persisted_handoff.take() {
-            self.finish_persisted_handoff(handoff)?;
+            self.on_persisted_handoff(handoff)?;
         }
 
         Ok(())
