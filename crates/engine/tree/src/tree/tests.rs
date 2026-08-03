@@ -708,6 +708,34 @@ fn persistence_handoff_waits_for_active_payload_jobs() {
 }
 
 #[test]
+fn persist_until_complete_updates_frontiers_without_in_memory_handoff() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+    let persisted = blocks.last().unwrap().recovered_block().num_hash();
+    let persisted_hash = persisted.hash;
+    let (tx, rx) = crossbeam_channel::bounded(1);
+
+    tx.send(PersistenceResult {
+        last_block: persisted,
+        last_state_trie_block: persisted,
+        commit_duration: Some(Duration::ZERO),
+    })
+    .unwrap();
+    test_harness.tree.persistence_state.start_save(persisted, rx);
+
+    test_harness.tree.persist_until_complete().unwrap();
+
+    // Shutdown waits for the durable write, but process teardown does not need the destructive
+    // in-memory handoff that normally follows a completed persistence task.
+    assert_eq!(test_harness.tree.persistence_state.last_persisted_block, persisted);
+    assert_eq!(test_harness.tree.persistence_state.last_state_trie_persisted_block, persisted);
+    assert!(!test_harness.tree.persistence_state.in_progress());
+    assert!(test_harness.tree.pending_persisted_handoff.is_none());
+    assert!(test_harness.tree.state.tree_state.contains_hash(&persisted_hash));
+    assert!(test_harness.tree.canonical_in_memory_state.state_by_hash(persisted_hash).is_some());
+}
+
+#[test]
 fn backfill_action_skips_while_payload_build_is_active() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
     let payload_build = test_harness.tree.payload_builds.acquire();

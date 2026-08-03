@@ -1500,24 +1500,12 @@ where
 
     /// Persists all remaining blocks until none are left.
     fn persist_until_complete(&mut self) -> Result<(), AdvancePersistenceError> {
-        // The process is terminating, so there is no need to wait for payload jobs solely to
-        // reclaim in-memory state. Apply an already-ready handoff, otherwise let process teardown
-        // drop the retained overlay data.
-        if let Some(handoff) = self.pending_persisted_handoff.take() &&
-            !self.payload_builds.is_active()
-        {
-            self.on_persisted_handoff(handoff)?;
-        }
-
         loop {
             // Wait for any in-progress persistence to complete (blocking)
             if let Some((rx, start_time, action)) = self.persistence_state.rx.take() {
                 debug!(target: "engine::tree", ?action, "waiting for in-flight persistence");
                 let result = rx.recv().map_err(|_| AdvancePersistenceError::ChannelClosed)?;
-                let handoff = self.finish_persistence(result, start_time);
-                if !self.payload_builds.is_active() {
-                    self.on_persisted_handoff(handoff)?;
-                }
+                self.finish_persistence(result, start_time);
                 continue
             }
 
