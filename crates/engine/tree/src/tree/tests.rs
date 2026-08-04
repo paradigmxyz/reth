@@ -643,6 +643,229 @@ fn on_new_persisted_block_skips_sparse_trie_prune_when_state_root_task_disabled(
 }
 
 #[test]
+fn payload_build_tracker_notifies_after_last_lease_drops() {
+    let (tracker, finished) = PayloadBuildTracker::new();
+    let first = tracker.acquire();
+    let second = tracker.acquire();
+
+    assert!(tracker.is_active());
+    drop(first);
+    assert!(tracker.is_active());
+    assert!(finished.try_recv().is_err());
+
+    drop(second);
+    assert!(!tracker.is_active());
+    assert_eq!(finished.try_recv(), Ok(()));
+}
+
+#[test]
+fn persistence_handoff_waits_for_active_payload_jobs() {
+    let config = TreeConfig::default()
+        .with_has_enough_parallelism(true)
+        .with_persistence_threshold(0)
+        .with_memory_block_buffer_target(0);
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
+    let mut test_harness =
+        TestHarness::with_config(MAINNET.clone(), config).with_blocks(blocks.clone());
+    let persisted = blocks[0].recovered_block().num_hash();
+    let persisted_hash = persisted.hash;
+    let first = test_harness.tree.payload_builds.acquire();
+    let second = test_harness.tree.payload_builds.acquire();
+
+    test_harness
+        .tree
+        .on_persistence_complete(
+            PersistenceResult {
+                last_block: persisted,
+                last_state_trie_block: persisted,
+                commit_duration: Some(Duration::ZERO),
+            },
+            Instant::now(),
+        )
+        .unwrap();
+
+    // Durability advances immediately, but the in-memory overlay remains available to jobs.
+    assert_eq!(test_harness.tree.persistence_state.last_persisted_block, persisted);
+    assert!(test_harness.tree.pending_persisted_handoff.is_some());
+    assert!(test_harness.tree.state.tree_state.contains_hash(&persisted_hash));
+    assert!(test_harness.tree.canonical_in_memory_state.state_by_hash(persisted_hash).is_some());
+
+    // Do not let another persistence action overwrite the deferred handoff's frontier.
+    test_harness.tree.advance_persistence().unwrap();
+    assert!(!test_harness.tree.persistence_state.in_progress());
+
+    drop(first);
+    assert!(test_harness.tree.payload_build_finished.try_recv().is_err());
+    assert!(test_harness.tree.pending_persisted_handoff.is_some());
+
+    drop(second);
+    assert!(matches!(test_harness.tree.wait_for_event(), super::LoopEvent::PayloadBuildFinished));
+    test_harness.tree.on_payload_build_finished().unwrap();
+
+    assert!(test_harness.tree.pending_persisted_handoff.is_none());
+    assert!(!test_harness.tree.state.tree_state.contains_hash(&persisted_hash));
+    assert!(test_harness.tree.canonical_in_memory_state.state_by_hash(persisted_hash).is_none());
+}
+
+#[test]
+fn pending_persisted_handoff_blocks_engine_messages_until_payload_build_finishes() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
+    let mut test_harness = TestHarness::with_config(
+        MAINNET.clone(),
+        TreeConfig::default().with_has_enough_parallelism(true),
+    )
+    .with_blocks(blocks.clone());
+    let persisted = blocks[0].recovered_block().num_hash();
+    let payload_build = test_harness.tree.payload_builds.acquire();
+
+    test_harness
+        .tree
+        .on_persistence_complete(
+            PersistenceResult {
+                last_block: persisted,
+                last_state_trie_block: persisted,
+                commit_duration: Some(Duration::ZERO),
+            },
+            Instant::now(),
+        )
+        .unwrap();
+    assert!(test_harness.tree.pending_persisted_handoff.is_some());
+
+    // Forkchoice updates received while the handoff is pending could start replacement payload
+    // builds and keep the final completion notification from reaching the tree. Queue a generic
+    // engine message to prove the gate leaves every message upstream until then.
+    test_harness.to_tree_tx.send(FromEngine::Event(FromOrchestrator::BackfillSyncStarted)).unwrap();
+
+    let (started_tx, started_rx) = std::sync::mpsc::sync_channel(0);
+    let (event_tx, event_rx) = std::sync::mpsc::sync_channel(1);
+    std::thread::scope(|scope| {
+        let tree = &mut test_harness.tree;
+        scope.spawn(move || {
+            started_tx.send(()).unwrap();
+            event_tx
+                .send(matches!(tree.wait_for_event(), super::LoopEvent::PayloadBuildFinished))
+                .unwrap();
+        });
+
+        started_rx.recv().unwrap();
+        assert!(
+            event_rx.recv_timeout(Duration::from_millis(100)).is_err(),
+            "a pending handoff must prevent queued engine messages from being processed"
+        );
+
+        drop(payload_build);
+        assert_eq!(event_rx.recv_timeout(Duration::from_secs(1)), Ok(true));
+    });
+
+    test_harness.tree.on_payload_build_finished().unwrap();
+    assert!(test_harness.tree.pending_persisted_handoff.is_none());
+    assert_matches!(
+        test_harness.tree.wait_for_event(),
+        super::LoopEvent::EngineMessage(FromEngine::Event(FromOrchestrator::BackfillSyncStarted))
+    );
+}
+
+#[test]
+fn persist_until_complete_updates_frontiers_without_in_memory_handoff() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+    let persisted = blocks.last().unwrap().recovered_block().num_hash();
+    let persisted_hash = persisted.hash;
+    let (tx, rx) = crossbeam_channel::bounded(1);
+
+    tx.send(PersistenceResult {
+        last_block: persisted,
+        last_state_trie_block: persisted,
+        commit_duration: Some(Duration::ZERO),
+    })
+    .unwrap();
+    test_harness.tree.persistence_state.start_save(persisted, rx);
+
+    test_harness.tree.persist_until_complete().unwrap();
+
+    // Shutdown waits for the durable write, but process teardown does not need the destructive
+    // in-memory handoff that normally follows a completed persistence task.
+    assert_eq!(test_harness.tree.persistence_state.last_persisted_block, persisted);
+    assert_eq!(test_harness.tree.persistence_state.last_state_trie_persisted_block, persisted);
+    assert!(!test_harness.tree.persistence_state.in_progress());
+    assert!(test_harness.tree.pending_persisted_handoff.is_none());
+    assert!(test_harness.tree.state.tree_state.contains_hash(&persisted_hash));
+    assert!(test_harness.tree.canonical_in_memory_state.state_by_hash(persisted_hash).is_some());
+}
+
+#[test]
+fn backfill_action_skips_while_payload_build_is_active() {
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+    let payload_build = test_harness.tree.payload_builds.acquire();
+    let action = BackfillAction::Start(B256::random().into());
+
+    test_harness.tree.emit_event(EngineApiEvent::BackfillAction(action));
+    assert!(test_harness.tree.pending_persisted_handoff.is_none());
+    assert!(test_harness.tree.backfill_sync_state.is_idle());
+    assert!(test_harness.from_tree_rx.try_recv().is_err());
+
+    drop(payload_build);
+    assert!(matches!(test_harness.tree.wait_for_event(), super::LoopEvent::PayloadBuildFinished));
+    test_harness.tree.on_payload_build_finished().unwrap();
+
+    // The skipped action is not queued for a later replay.
+    assert!(test_harness.tree.backfill_sync_state.is_idle());
+    assert!(test_harness.from_tree_rx.try_recv().is_err());
+}
+
+#[test]
+fn backfill_action_skips_while_persisted_handoff_is_pending() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
+    let mut test_harness = TestHarness::with_config(
+        MAINNET.clone(),
+        TreeConfig::default().with_has_enough_parallelism(true),
+    )
+    .with_blocks(blocks.clone());
+    let persisted = blocks[0].recovered_block().num_hash();
+    let payload_build = test_harness.tree.payload_builds.acquire();
+
+    test_harness
+        .tree
+        .on_persistence_complete(
+            PersistenceResult {
+                last_block: persisted,
+                last_state_trie_block: persisted,
+                commit_duration: Some(Duration::ZERO),
+            },
+            Instant::now(),
+        )
+        .unwrap();
+
+    drop(payload_build);
+    assert!(!test_harness.tree.payload_builds.is_active());
+    assert!(test_harness.tree.pending_persisted_handoff.is_some());
+
+    test_harness
+        .tree
+        .emit_event(EngineApiEvent::BackfillAction(BackfillAction::Start(B256::random().into())));
+
+    assert!(test_harness.tree.backfill_sync_state.is_idle());
+    assert!(test_harness.from_tree_rx.try_recv().is_err());
+}
+
+#[test]
+fn configured_persistence_suppression_tracks_payload_job_lifetime() {
+    let config = TreeConfig::default()
+        .with_has_enough_parallelism(true)
+        .with_persistence_threshold(0)
+        .with_memory_block_buffer_target(0)
+        .with_suppress_persistence_during_build(true);
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
+    let test_harness = TestHarness::with_config(MAINNET.clone(), config).with_blocks(blocks);
+    let payload_build = test_harness.tree.payload_builds.acquire();
+
+    assert!(test_harness.tree.get_save_blocks_input(PersistTarget::Threshold).is_none());
+
+    drop(payload_build);
+    assert!(test_harness.tree.get_save_blocks_input(PersistTarget::Threshold).is_some());
+}
+
+#[test]
 fn remove_blocks_clears_pending_sparse_trie_prune_request() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
     test_harness.tree.persistence_state.last_persisted_block =
@@ -690,6 +913,10 @@ fn process_payload_attributes_shares_sparse_trie_during_validation_fallback() {
         panic!("expected build new payload command")
     };
     assert!(input.resources.state_root_handle().is_some());
+    assert!(test_harness.tree.payload_builds.is_active());
+
+    drop(input);
+    assert!(!test_harness.tree.payload_builds.is_active());
 }
 
 #[tokio::test]
