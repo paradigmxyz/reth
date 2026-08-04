@@ -18,7 +18,7 @@ use std::{
     pin::Pin,
     sync::Arc,
 };
-use tracing::info;
+use tracing::{info, warn};
 
 /// Helper adapter type for accessing [`PayloadTypes::ExecutionData`] on [`NodeTypes`].
 pub(crate) type PayloadDataTy<N> = <<N as NodeTypes>::Payload as PayloadTypes>::ExecutionData;
@@ -302,6 +302,16 @@ where
 
         if config.dev.dev {
             info!(target: "reth::cli", "Using local payload attributes builder for dev mode");
+
+            // The flag is applied (and taken) by the ethereum CLI before launch; if it is
+            // still set here, this launch path does not support it.
+            if config.dev.constant_base_fee.is_some() {
+                warn!(
+                    target: "reth::cli",
+                    "--dev.constant-base-fee was not applied; it is only supported by the \
+                     standard ethereum CLI entry point and the base fee will adjust normally"
+                );
+            }
 
             let blockchain_db = handle.node.provider.clone();
             let chain_spec = config.chain.clone();
