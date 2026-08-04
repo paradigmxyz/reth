@@ -1434,7 +1434,7 @@ async fn test_fcu_with_canonical_ancestor_updates_latest_block() {
 }
 
 #[tokio::test]
-async fn test_fcu_with_finalized_canonical_ancestor_is_noop() {
+async fn test_fcu_with_canonical_ancestor_below_finalized_is_rejected() {
     reth_tracing::init_test_tracing();
     let chain_spec = MAINNET.clone();
     let mut test_harness = TestHarness::new(chain_spec.clone());
@@ -1447,10 +1447,44 @@ async fn test_fcu_with_finalized_canonical_ancestor_is_noop() {
     let ancestor = blocks[1].recovered_block();
     test_harness.tree.canonical_in_memory_state.set_finalized(finalized.clone_sealed_header());
 
-    // An FCU to an ancestor of the latest known finalized block is acknowledged without moving
-    // the canonical head and must not start a payload build, even with attributes.
+    // An FCU to an ancestor below the latest known finalized block would reorg out the
+    // finalized block and is rejected, with or without payload attributes.
     let payload_attributes = EthPayloadAttributes {
         timestamp: ancestor.timestamp() + 1,
+        prev_randao: B256::ZERO,
+        suggested_fee_recipient: Default::default(),
+        withdrawals: None,
+        parent_beacon_block_root: None,
+        slot_number: None,
+        target_gas_limit: None,
+    };
+    for attrs in [Some(payload_attributes), None] {
+        let err = test_harness
+            .tree
+            .on_forkchoice_updated(
+                ForkchoiceState {
+                    head_block_hash: ancestor.hash(),
+                    safe_block_hash: B256::ZERO,
+                    finalized_block_hash: B256::ZERO,
+                },
+                attrs,
+            )
+            .unwrap()
+            .outcome
+            .await
+            .unwrap_err();
+
+        assert_matches!(err, ForkchoiceUpdateError::TooDeepReorg);
+    }
+
+    // no payload build is started and the canonical head remains untouched
+    assert!(test_harness.payload_command_rx.try_recv().is_err());
+    assert_eq!(test_harness.tree.state.tree_state.canonical_block_hash(), current_head.hash());
+
+    // the finalized block itself is not below finality and can become the parent of the next
+    // block
+    let payload_attributes = EthPayloadAttributes {
+        timestamp: finalized.timestamp() + 1,
         prev_randao: B256::ZERO,
         suggested_fee_recipient: Default::default(),
         withdrawals: None,
@@ -1462,21 +1496,20 @@ async fn test_fcu_with_finalized_canonical_ancestor_is_noop() {
         .tree
         .on_forkchoice_updated(
             ForkchoiceState {
-                head_block_hash: ancestor.hash(),
+                head_block_hash: finalized.hash(),
                 safe_block_hash: B256::ZERO,
                 finalized_block_hash: B256::ZERO,
             },
             Some(payload_attributes),
         )
-        .unwrap()
-        .outcome
-        .await
         .unwrap();
 
-    assert!(outcome.payload_status.is_valid());
-    assert!(outcome.payload_id.is_none());
-    assert_eq!(test_harness.tree.state.tree_state.canonical_block_hash(), current_head.hash());
-    assert!(test_harness.payload_command_rx.try_recv().is_err());
+    assert_eq!(outcome.outcome.forkchoice_status(), ForkchoiceStatus::Valid);
+    let command = test_harness.payload_command_rx.try_recv().unwrap();
+    let PayloadServiceCommand::BuildNewPayload(input, _, _) = command else {
+        panic!("expected build new payload command")
+    };
+    assert_eq!(input.parent_hash, finalized.hash());
 }
 
 #[tokio::test]
@@ -1588,59 +1621,6 @@ async fn test_fcu_with_canonical_ancestor_beyond_memory_keeps_head() {
         test_harness.tree.canonical_in_memory_state.get_canonical_head().hash(),
         current_head.hash()
     );
-}
-
-#[tokio::test]
-async fn test_fcu_with_canonical_ancestor_with_pruned_state_is_rejected() {
-    reth_tracing::init_test_tracing();
-    let chain_spec = MAINNET.clone();
-    let mut test_harness = TestHarness::new(chain_spec.clone());
-    let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
-    let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..5).collect();
-    test_harness = test_harness.with_blocks(blocks.clone());
-
-    let current_head = blocks[3].recovered_block();
-    let ancestor = blocks[1].recovered_block();
-
-    // The account history below block 3 is pruned, so the state of block 2 required to build on
-    // it is no longer available.
-    test_harness.provider.set_prune_checkpoint(
-        PruneSegment::AccountHistory,
-        PruneCheckpoint {
-            block_number: Some(ancestor.number() + 1),
-            tx_number: None,
-            prune_mode: PruneMode::Distance(0),
-        },
-    );
-
-    let payload_attributes = EthPayloadAttributes {
-        timestamp: ancestor.timestamp() + 1,
-        prev_randao: B256::ZERO,
-        suggested_fee_recipient: Default::default(),
-        withdrawals: None,
-        parent_beacon_block_root: None,
-        slot_number: None,
-        target_gas_limit: None,
-    };
-    let err = test_harness
-        .tree
-        .on_forkchoice_updated(
-            ForkchoiceState {
-                head_block_hash: ancestor.hash(),
-                safe_block_hash: B256::ZERO,
-                finalized_block_hash: B256::ZERO,
-            },
-            Some(payload_attributes),
-        )
-        .unwrap()
-        .outcome
-        .await
-        .unwrap_err();
-
-    assert_matches!(err, ForkchoiceUpdateError::TooDeepReorg);
-    // no payload build is started and the canonical head remains untouched
-    assert!(test_harness.payload_command_rx.try_recv().is_err());
-    assert_eq!(test_harness.tree.state.tree_state.canonical_block_hash(), current_head.hash());
 }
 
 /// Test that verifies the happy path where a new payload extends the canonical chain
