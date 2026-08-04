@@ -8,9 +8,9 @@ use reth_e2e_test_utils::{
     test_rlp_utils::{generate_test_blocks, write_blocks_to_rlp},
     testsuite::{
         actions::{
-            Action, AssertChainTip, AssertMineBlock, CaptureBlock, CaptureBlockOnNode,
-            CompareNodeChainTips, CreateFork, MakeCanonical, ProduceBlocks, ReorgTo,
-            SelectActiveNode, UpdateBlockInfo,
+            Action, AssertChainTip, AssertMineBlock, BlockReference, CaptureBlock,
+            CaptureBlockOnNode, CompareNodeChainTips, CreateFork, FinalizeBlock, MakeCanonical,
+            ProduceBlocks, ReorgTo, SelectActiveNode, UpdateBlockInfo,
         },
         setup::{NetworkSetup, Setup},
         Environment, TestBuilder,
@@ -220,9 +220,16 @@ async fn test_testsuite_create_fork() -> Result<()> {
 
     let test = TestBuilder::new()
         .with_setup(setup)
-        .with_action(ProduceBlocks::<EthEngineTypes>::new(2))
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(1))
+        .with_action(CaptureBlock::new("fork_base"))
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(1))
+        .with_action(CaptureBlock::new("main_tip"))
         .with_action(MakeCanonical::new())
-        .with_action(CreateFork::<EthEngineTypes>::new(1, 3));
+        .with_action(
+            FinalizeBlock::<EthEngineTypes>::new(BlockReference::Tag("fork_base".to_string()))
+                .with_head(BlockReference::Tag("main_tip".to_string())),
+        )
+        .with_action(CreateFork::<EthEngineTypes>::new_from_tag("fork_base", 3));
 
     test.run::<EthereumNode>().await?;
 
@@ -250,9 +257,16 @@ async fn test_testsuite_reorg_with_tagging() -> Result<()> {
 
     let test = TestBuilder::new()
         .with_setup(setup)
-        .with_action(ProduceBlocks::<EthEngineTypes>::new(3)) // produce blocks 1, 2, 3
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(1))
+        .with_action(CaptureBlock::new("fork_base"))
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(2)) // produce blocks 2 and 3
+        .with_action(CaptureBlock::new("main_tip"))
         .with_action(MakeCanonical::new()) // make main chain tip canonical
-        .with_action(CreateFork::<EthEngineTypes>::new(1, 2)) // fork from block 1, produce blocks 2', 3'
+        .with_action(
+            FinalizeBlock::<EthEngineTypes>::new(BlockReference::Tag("fork_base".to_string()))
+                .with_head(BlockReference::Tag("main_tip".to_string())),
+        )
+        .with_action(CreateFork::<EthEngineTypes>::new_from_tag("fork_base", 2)) // fork from block 1, produce blocks 2', 3'
         .with_action(CaptureBlock::new("fork_tip")) // tag fork tip
         .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("fork_tip")); // reorg to fork tip
 
@@ -290,7 +304,10 @@ async fn test_testsuite_deep_reorg() -> Result<()> {
         // receive forkchoiceUpdated with block hash A as head (block A at height 2)
         .with_action(CreateFork::<EthEngineTypes>::new(1, 1))
         .with_action(CaptureBlock::new("blockA_height2"))
-        .with_action(MakeCanonical::new())
+        .with_action(
+            FinalizeBlock::<EthEngineTypes>::new(BlockReference::Tag("block1".to_string()))
+                .with_head(BlockReference::Tag("blockA_height2".to_string())),
+        )
         // receive newPayload with block hash B and height 2
         .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("block1"))
         .with_action(CreateFork::<EthEngineTypes>::new(1, 1))

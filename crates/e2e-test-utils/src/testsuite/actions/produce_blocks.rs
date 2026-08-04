@@ -357,9 +357,7 @@ pub struct BroadcastLatestForkchoice {}
 
 impl<Engine> Action<Engine> for BroadcastLatestForkchoice
 where
-    Engine: EngineTypes + PayloadTypes,
-    Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
-    Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
+    Engine: EngineTypes,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
@@ -367,37 +365,10 @@ where
                 return Err(eyre::eyre!("No node clients available"));
             }
 
-            // use the hash of the newly executed payload if available
-            let head_hash = if let Some(payload_envelope) =
-                &env.active_node_state()?.latest_payload_envelope
-            {
-                let execution_payload_envelope: ExecutionPayloadEnvelopeV3 =
-                    payload_envelope.clone().into();
-                let new_block_hash = execution_payload_envelope
-                    .execution_payload
-                    .payload_inner
-                    .payload_inner
-                    .block_hash;
-                debug!("Using newly executed block hash as head: {new_block_hash}");
-                new_block_hash
-            } else {
-                // fallback to RPC query
-                let rpc_client = &env.node_clients[0].rpc;
-                let current_head_block = EthApiClient::<
-                    TransactionRequest,
-                    Transaction,
-                    Block,
-                    Receipt,
-                    Header,
-                    TransactionSigned,
-                >::block_by_number(
-                    rpc_client, alloy_eips::BlockNumberOrTag::Latest, false
-                )
-                .await?
-                .ok_or_else(|| eyre::eyre!("No latest block found from RPC"))?;
-                debug!("Using RPC latest block hash as head: {}", current_head_block.header.hash);
-                current_head_block.header.hash
-            };
+            let head_hash = env
+                .current_block_info()
+                .ok_or_else(|| eyre::eyre!("No current block information available"))?
+                .hash;
 
             let fork_choice_state = ForkchoiceState {
                 head_block_hash: head_hash,

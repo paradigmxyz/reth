@@ -116,7 +116,10 @@ async fn test_engine_tree_valid_forks_with_older_canonical_head_e2e() -> Result<
         // extend base chain with 5 more blocks to establish a fork point
         .with_action(ProduceBlocks::<EthEngineTypes>::new(5))
         .with_action(CaptureBlock::new("fork_point"))
-        .with_action(MakeCanonical::new())
+        .with_action(
+            FinalizeBlock::<EthEngineTypes>::new(BlockReference::Tag("old_head".to_string()))
+                .with_head(BlockReference::Tag("fork_point".to_string())),
+        )
         // revert to old head to simulate scenario where canonical head is older
         .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("old_head"))
         // create first competing chain (chain A) from fork point with 10 blocks
@@ -153,7 +156,10 @@ async fn test_engine_tree_valid_and_invalid_forks_with_older_canonical_head_e2e(
         // extend base chain with 5 more blocks to establish fork point
         .with_action(ProduceBlocks::<EthEngineTypes>::new(5))
         .with_action(CaptureBlock::new("fork_point"))
-        .with_action(MakeCanonical::new())
+        .with_action(
+            FinalizeBlock::<EthEngineTypes>::new(BlockReference::Tag("old_head".to_string()))
+                .with_head(BlockReference::Tag("fork_point".to_string())),
+        )
         // revert to old head to simulate older canonical head scenario
         .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("old_head"))
         // create chain B (the valid chain) from fork point with 10 blocks
@@ -163,13 +169,13 @@ async fn test_engine_tree_valid_and_invalid_forks_with_older_canonical_head_e2e(
         .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("chain_b_tip"))
         // create chain A (competing chain) - first produce valid blocks, then test invalid
         // scenario
-        .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("fork_point"))
         // producing chain B finalized its blocks, so re-establish finality at the fork point
         // before building below it again
         .with_action(
             FinalizeBlock::<EthEngineTypes>::new(BlockReference::Tag("fork_point".to_string()))
                 .with_head(BlockReference::Tag("chain_b_tip".to_string())),
         )
+        .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("fork_point"))
         .with_action(ProduceBlocks::<EthEngineTypes>::new(10))
         .with_action(CaptureBlock::new("chain_a_tip"))
         // test that FCU to chain A tip returns VALID status (it's a valid competing chain)

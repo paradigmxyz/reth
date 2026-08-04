@@ -5,10 +5,10 @@ use crate::testsuite::{
     BlockInfo, Environment,
 };
 use alloy_primitives::B256;
-use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
+use alloy_rpc_types_engine::ForkchoiceState;
 use eyre::Result;
 use futures_util::future::BoxFuture;
-use reth_node_api::{EngineTypes, PayloadTypes};
+use reth_node_api::EngineTypes;
 use std::marker::PhantomData;
 use tracing::debug;
 
@@ -44,10 +44,7 @@ impl<Engine> ReorgTo<Engine> {
 
 impl<Engine> Action<Engine> for ReorgTo<Engine>
 where
-    Engine: EngineTypes + PayloadTypes,
-    Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
-    Engine::ExecutionPayloadEnvelopeV3:
-        Into<alloy_rpc_types_engine::payload::ExecutionPayloadEnvelopeV3>,
+    Engine: EngineTypes,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
