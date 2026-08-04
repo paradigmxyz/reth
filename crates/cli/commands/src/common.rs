@@ -223,11 +223,14 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             }
 
             // Highly unlikely to happen, and given its destructive nature, it's better to panic
-            // instead.
-            assert_ne!(
-                unwind_target,
-                PipelineTarget::Unwind(0),
-                "A static file <> database inconsistency was found that would trigger an unwind to block 0"
+            // instead. The genesis block is the floor on chains with a non-zero genesis.
+            assert!(
+                !matches!(
+                    unwind_target,
+                    PipelineTarget::Unwind(block)
+                        if block <= factory.static_file_provider().genesis_block_number()
+                ),
+                "A static file <> database inconsistency was found that would trigger an unwind to the genesis block ({unwind_target})"
             );
 
             info!(target: "reth::cli", unwind_target = %unwind_target, "Executing an unwind after a failed storage consistency check.");

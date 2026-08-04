@@ -99,6 +99,7 @@ impl PrunerBuilder {
                 Primitives = <PF::ProviderRW as NodePrimitivesProvider>::Primitives,
             >,
     {
+        let genesis_block_number = provider_factory.static_file_provider().genesis_block_number();
         let segments =
             SegmentSet::from_components(provider_factory.static_file_provider(), self.segments);
 
@@ -109,7 +110,8 @@ impl PrunerBuilder {
             self.delete_limit,
             self.timeout,
             self.finished_exex_height,
-        );
+        )
+        .with_genesis_block_number(genesis_block_number);
         if let Some(distance) = self.minimum_pruning_distance {
             pruner = pruner.with_minimum_pruning_distance(distance);
         }
@@ -135,6 +137,7 @@ impl PrunerBuilder {
             + StorageChangeSetReader
             + RocksDBProviderFactory,
     {
+        let genesis_block_number = static_file_provider.genesis_block_number();
         let segments = SegmentSet::<Provider>::from_components(static_file_provider, self.segments);
 
         let mut pruner = Pruner::new(
@@ -143,7 +146,8 @@ impl PrunerBuilder {
             self.delete_limit,
             self.timeout,
             self.finished_exex_height,
-        );
+        )
+        .with_genesis_block_number(genesis_block_number);
         if let Some(distance) = self.minimum_pruning_distance {
             pruner = pruner.with_minimum_pruning_distance(distance);
         }

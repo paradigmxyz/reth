@@ -132,9 +132,13 @@ pub trait EthFees:
 
             // need to add 1 to the end block to get the correct (inclusive) range
             let end_block_plus = end_block + 1;
-            // Ensure that we would not be querying outside of genesis
-            if end_block_plus < block_count {
-                block_count = end_block_plus;
+            // Ensure that we would not be querying outside of the available chain: the earliest
+            // block is the genesis block, which is non-zero on some chains.
+            let earliest_block =
+                self.provider().earliest_block_number().map_err(Self::Error::from_eth_err)?;
+            let available_blocks = end_block_plus.saturating_sub(earliest_block);
+            if available_blocks < block_count {
+                block_count = available_blocks;
             }
 
             // Fetch the headers and ensure we got all of them

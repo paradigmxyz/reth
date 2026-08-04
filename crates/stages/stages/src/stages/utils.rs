@@ -408,8 +408,9 @@ pub(crate) fn missing_static_data_error<Provider>(
 where
     Provider: BlockReader + StaticFileProviderFactory,
 {
+    let genesis_block = static_file_provider.genesis_block_number();
     let mut last_block =
-        static_file_provider.get_highest_static_file_block(segment).unwrap_or_default();
+        static_file_provider.get_highest_static_file_block(segment).unwrap_or(genesis_block);
 
     // To be extra safe, we make sure that the last tx num matches the last block from its indices.
     // If not, get it.
@@ -419,7 +420,9 @@ where
         {
             break
         }
-        if last_block == 0 {
+        // No data exists below the genesis block, which is non-zero on some chains; walking
+        // further would scan non-existent blocks.
+        if last_block <= genesis_block {
             break
         }
         last_block -= 1;

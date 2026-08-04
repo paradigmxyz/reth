@@ -59,12 +59,21 @@ impl Command {
             return Ok(());
         }
 
-        let tip =
-            provider.get_stage_checkpoint(StageId::Execution)?.map(|c| c.block_number).unwrap_or(0);
-
-        info!(target: "reth::cli", tip, "Chain tip block number");
-
         let sf_provider = provider_factory.static_file_provider();
+        let genesis = sf_provider.genesis_block_number();
+
+        let tip = provider
+            .get_stage_checkpoint(StageId::Execution)?
+            .map(|c| c.block_number)
+            .unwrap_or(genesis);
+
+        info!(target: "reth::cli", tip, genesis, "Chain tip block number");
+
+        if tip < genesis {
+            eyre::bail!(
+                "Invalid chain state: execution checkpoint {tip} is before genesis block {genesis}"
+            );
+        }
 
         for segment in [StaticFileSegment::AccountChangeSets, StaticFileSegment::StorageChangeSets]
         {
@@ -130,15 +139,20 @@ impl Command {
 
         let mut cursor = provider.tx_ref().cursor_read::<tables::AccountChangeSets>()?;
 
+        // Static file segments are genesis-aligned: on chains with a non-zero genesis block
+        // there is no data before the genesis block and the segment's `expected_block_start`
+        // is the genesis block, so migration must not start at 0.
+        let genesis = sf_provider.genesis_block_number();
         let first_block = provider
             .get_prune_checkpoint(PruneSegment::AccountHistory)?
             .and_then(|cp| cp.block_number)
-            .map_or(0, |b| b + 1);
+            .map_or(genesis, |b| b + 1)
+            .max(genesis);
 
         // The writer always starts at the fixed range boundary (e.g. 2500000) which may be
         // earlier than first_block (e.g. 2603897 from prune checkpoint).
         let mut writer = sf_provider.latest_writer(StaticFileSegment::AccountChangeSets)?;
-        if first_block > 0 {
+        if first_block > genesis {
             writer.ensure_at_block(first_block - 1)?;
         }
 
@@ -176,15 +190,18 @@ impl Command {
 
         let mut cursor = provider.tx_ref().cursor_read::<tables::StorageChangeSets>()?;
 
+        // See `migrate_account_changesets`: never start before the genesis block.
+        let genesis = sf_provider.genesis_block_number();
         let first_block = provider
             .get_prune_checkpoint(PruneSegment::StorageHistory)?
             .and_then(|cp| cp.block_number)
-            .map_or(0, |b| b + 1);
+            .map_or(genesis, |b| b + 1)
+            .max(genesis);
 
         // The writer always starts at the fixed range boundary (e.g. 2500000) which may be
         // earlier than first_block (e.g. 2603897 from prune checkpoint).
         let mut writer = sf_provider.latest_writer(StaticFileSegment::StorageChangeSets)?;
-        if first_block > 0 {
+        if first_block > genesis {
             writer.ensure_at_block(first_block - 1)?;
         }
 
@@ -243,15 +260,17 @@ impl Command {
         info!(target: "reth::cli", "Migrating Receipts → static files");
 
         let provider = factory.provider()?.disable_long_read_transaction_safety();
+        // See `migrate_account_changesets`: never start before the genesis block.
+        let genesis = sf_provider.genesis_block_number();
         let prune_start = provider
             .get_prune_checkpoint(PruneSegment::Receipts)?
             .and_then(|cp| cp.block_number)
-            .map_or(0, |b| b + 1);
-        let first_block = prune_start.max(existing.map_or(0, |b| b + 1));
+            .map_or(genesis, |b| b + 1);
+        let first_block = prune_start.max(existing.map_or(genesis, |b| b + 1)).max(genesis);
 
         // The writer always starts at the fixed range boundary (e.g. 2500000) which may be
         // earlier than first_block (e.g. 2603897 from prune checkpoint).
-        if first_block > 0 {
+        if first_block > genesis {
             let mut writer = sf_provider.latest_writer(StaticFileSegment::Receipts)?;
             writer.ensure_at_block(first_block - 1)?;
             writer.commit()?;
@@ -339,30 +358,32 @@ impl Command {
         clear_table!(tables::AccountsTrie);
         clear_table!(tables::StoragesTrie);
 
-        // Reset stage checkpoints so the pipeline rebuilds everything
+        // Reset stage checkpoints so the pipeline rebuilds everything. The lowest valid
+        // checkpoint is the genesis block (non-zero on some chains), matching `init_genesis`.
         info!(target: "reth::cli", "Resetting stage checkpoints");
         let provider_rw = factory.database_provider_rw()?;
+        let genesis = factory.static_file_provider().genesis_block_number();
         for stage in [StageId::SenderRecovery, StageId::MerkleExecute, StageId::MerkleUnwind] {
-            provider_rw.save_stage_checkpoint(stage, StageCheckpoint::new(0))?;
-            info!(target: "reth::cli", %stage, "Checkpoint reset to 0");
+            provider_rw.save_stage_checkpoint(stage, StageCheckpoint::new(genesis))?;
+            info!(target: "reth::cli", %stage, genesis, "Checkpoint reset to genesis");
         }
         provider_rw.save_stage_checkpoint_progress(StageId::MerkleExecute, vec![])?;
 
-        if provider_rw.last_block_number()? > 0 {
+        if provider_rw.last_block_number()? > genesis {
             let first_indices_entry = provider_rw
                 .tx_ref()
                 .cursor_read::<tables::BlockBodyIndices>()?
-                .seek(1)?
+                .seek(genesis + 1)?
                 .map(|(block, _)| block)
                 .ok_or_else(|| eyre::eyre!("no block body indices found"))?;
 
-            // If the first block body indices entry is not block 1, it means that the v1 database
-            // was likely initialized with dummy blocks coming from a dummy chain generated by
-            // `setup_without_evm`.
+            // If the first block body indices entry past genesis is not genesis + 1, it means
+            // that the v1 database was likely initialized with dummy blocks coming from a dummy
+            // chain generated by `setup_without_evm`.
             //
             // In that case, sender recovery starts from the first block that has a corresponding
             // block body indices entry.
-            if first_indices_entry > 1 {
+            if first_indices_entry > genesis + 1 {
                 provider_rw.save_stage_checkpoint(
                     StageId::SenderRecovery,
                     StageCheckpoint::new(first_indices_entry - 1),

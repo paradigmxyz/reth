@@ -132,12 +132,14 @@ where
             input.next_block_range_with_transaction_threshold(provider, self.commit_threshold)?
         else {
             info!(target: "sync::stages::sender_recovery", "No transaction senders to recover");
+            // An empty segment opens at the genesis block — opening at 0 on a chain with a
+            // non-zero genesis block would create a file with an inverted block range.
             EitherWriter::new_senders(
                 provider,
                 provider
                     .static_file_provider()
                     .get_highest_static_file_block(StaticFileSegment::TransactionSenders)
-                    .unwrap_or_default(),
+                    .unwrap_or_else(|| provider.static_file_provider().genesis_block_number()),
             )?
             .ensure_at_block(input.target())?;
             return Ok(ExecOutput {

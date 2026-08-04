@@ -354,7 +354,11 @@ where
         // We'll reuse the matcher across multiple blocks that are traced in parallel
         let matcher = Arc::new(filter.matcher());
         let TraceFilter { from_block, to_block, mut after, count, .. } = filter;
-        let start = from_block.unwrap_or(0);
+        // Omitting `fromBlock` means "from the start of the available chain": the earliest
+        // block is the genesis block, which is non-zero on some chains.
+        let earliest_block =
+            self.provider().earliest_block_number().map_err(Eth::Error::from_eth_err)?;
+        let start = from_block.unwrap_or(earliest_block);
 
         let latest_block = self.provider().best_block_number().map_err(Eth::Error::from_eth_err)?;
         if start > latest_block {
@@ -367,8 +371,6 @@ where
         }
 
         // Check if the requested range overlaps with pruned history (EIP-4444)
-        let earliest_block =
-            self.provider().earliest_block_number().map_err(Eth::Error::from_eth_err)?;
         if start < earliest_block {
             return Err(EthApiError::PrunedHistoryUnavailable {
                 requested: start,

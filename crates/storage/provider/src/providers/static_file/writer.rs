@@ -303,6 +303,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
 
         let static_file_provider = Self::upgrade_provider_to_strong_reference(&reader);
 
+        let genesis = static_file_provider.genesis_block_number();
         let block_range = static_file_provider.find_fixed_range(segment, block);
         let (jar, path) = match static_file_provider.get_segment_provider_for_block(
             segment,
@@ -314,6 +315,17 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 provider.data_path().into(),
             ),
             Err(ProviderError::MissingStaticFileBlock(_, _)) => {
+                // New files never start before genesis. If the requested block's bucket lies
+                // entirely below genesis, fall back to the genesis bucket — otherwise clamping
+                // only the start would produce an inverted range (start > end).
+                let block_range = if block_range.end() < genesis {
+                    let genesis_range = static_file_provider.find_fixed_range(segment, genesis);
+                    SegmentRangeInclusive::new(genesis, genesis_range.end())
+                } else if block_range.start() < genesis {
+                    SegmentRangeInclusive::new(genesis, block_range.end())
+                } else {
+                    block_range
+                };
                 let path = static_file_provider.directory().join(segment.filename(&block_range));
                 (create_jar(segment, &path, block_range), path)
             }
@@ -748,8 +760,27 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         let current_block = if let Some(current_block_number) = self.current_block_number() {
             current_block_number
         } else {
-            self.increment_block(0)?;
-            0
+            // Empty segment: the next appendable block is `expected_block_start`, which is
+            // genesis-aligned and not necessarily 0. The writer is logically positioned one
+            // block before it, so advance from there without materializing block 0.
+            let next_block = self.next_block_number();
+            if advance_to.checked_add(1) == Some(next_block) {
+                // Already positioned: the next append will be at `advance_to + 1`.
+                return Ok(());
+            }
+            if advance_to < next_block {
+                return Err(ProviderError::UnexpectedStaticFileBlockNumber(
+                    self.writer.user_header().segment(),
+                    next_block,
+                    advance_to,
+                ));
+            }
+            // Register the gap as empty blocks (e.g. data pruned below `advance_to`) —
+            // block coverage must stay contiguous for later appends to line up.
+            for block in next_block..=advance_to {
+                self.increment_block(block)?;
+            }
+            return Ok(());
         };
 
         match current_block.cmp(&advance_to) {
@@ -875,6 +906,11 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         let segment = self.writer.user_header().segment();
         debug_assert!(segment.is_change_based());
 
+        // No data exists before the genesis block, so a lower target means "truncate
+        // everything above genesis" — otherwise the backwards file walk below would try to
+        // delete the first file and `set_block_range` would store an inverted range.
+        let last_block = last_block.max(self.reader().genesis_block_number());
+
         // Get the current block range
         let current_block_end = self
             .writer
@@ -976,6 +1012,11 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     fn truncate(&mut self, num_rows: u64, last_block: Option<u64>) -> ProviderResult<()> {
         let mut remaining_rows = num_rows;
         let segment = self.writer.user_header().segment();
+        let genesis = self.reader().genesis_block_number();
+        // No data exists before the genesis block, so a lower target means "truncate
+        // everything above genesis" — otherwise the backwards file walk below would try to
+        // delete the first file and `set_block_range` would store an inverted range.
+        let last_block = last_block.map(|b| b.max(genesis));
         while remaining_rows > 0 {
             let len = if segment.is_block_based() {
                 self.writer.user_header().block_len().unwrap_or_default()
@@ -993,7 +1034,10 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 // * it's a tx-based segment AND `last_block` is lower than the first block of this
                 //   file's block range. Otherwise, having no rows simply means that this block
                 //   range has no transactions, but the file should remain.
-                if block_start != 0 &&
+                //
+                // The first file is the one whose range contains genesis: it starts at genesis
+                // for genesis-aligned files, or below it (bucket floor) for legacy files.
+                if block_start > genesis &&
                     (segment.is_headers() || last_block.is_some_and(|b| b < block_start))
                 {
                     self.delete_current_and_open_previous()?;
@@ -1042,6 +1086,16 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     fn delete_current_and_open_previous(&mut self) -> Result<(), ProviderError> {
         let segment = self.user_header().segment();
         let current_path = self.data_path.clone();
+
+        // The first file (its range contains genesis) has no previous file. Worse, with a
+        // non-zero genesis, `open(expected_block_start - 1)` would resolve back to this very
+        // file and we would delete the file we just re-opened.
+        if self.writer.user_header().expected_block_start() <= self.reader().genesis_block_number()
+        {
+            return Err(ProviderError::other(std::io::Error::other(format!(
+                "refusing to delete the first static file of segment {segment}"
+            ))));
+        }
         let (previous_writer, data_path) = Self::open(
             segment,
             self.writer.user_header().expected_block_start() - 1,

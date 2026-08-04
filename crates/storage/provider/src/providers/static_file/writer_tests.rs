@@ -12,7 +12,9 @@ mod tests {
     use alloy_primitives::{Address, U256};
     use reth_db::{models::AccountBeforeTx, test_utils::create_test_static_files_dir};
     use reth_primitives_traits::Account;
-    use reth_static_file_types::{ChangesetOffset, ChangesetOffsetReader, StaticFileSegment};
+    use reth_static_file_types::{
+        ChangesetOffset, ChangesetOffsetReader, SegmentRangeInclusive, StaticFileSegment,
+    };
     use std::{fs::OpenOptions, io::Write as _, path::PathBuf};
 
     use crate::providers::{
@@ -882,5 +884,119 @@ mod tests {
         );
 
         drop(writer);
+    }
+
+    /// Regression: with a non-zero genesis (e.g. 250), an empty segment's first
+    /// appendable block is the genesis block, not 0. `ensure_at_block` used to
+    /// call `increment_block(0)` on empty segments, failing with
+    /// "trying to append data to ... as block #0 but expected block #250".
+    #[test]
+    fn test_ensure_at_block_with_non_zero_genesis() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let segment = StaticFileSegment::AccountChangeSets;
+
+        let provider: StaticFileProvider<EthPrimitives> =
+            StaticFileProviderBuilder::read_write(&static_dir)
+                .with_blocks_per_file(100)
+                .with_genesis_block_number(250)
+                .build()
+                .unwrap();
+
+        {
+            let mut writer = provider.latest_writer(segment).unwrap();
+
+            // Positioning at genesis - 1 on an empty segment is a no-op: the next
+            // append is already expected at the genesis block.
+            writer.ensure_at_block(249).unwrap();
+
+            // Positioning before that is impossible.
+            assert!(writer.ensure_at_block(248).is_err());
+
+            // Appending the genesis block right after must succeed.
+            writer.append_account_changeset(generate_test_changeset(250, 1), 250).unwrap();
+            writer.commit().unwrap();
+        }
+
+        assert_eq!(provider.get_highest_static_file_block(segment), Some(250));
+
+        // Advancing an empty segment past genesis fills empty blocks from genesis.
+        let segment = StaticFileSegment::StorageChangeSets;
+        let mut writer = provider.latest_writer(segment).unwrap();
+        writer.ensure_at_block(260).unwrap();
+        writer.commit().unwrap();
+        drop(writer);
+
+        assert_eq!(provider.get_highest_static_file_block(segment), Some(260));
+    }
+
+    /// Regression: truncating below a non-zero genesis must clamp at the first file
+    /// instead of deleting it. The old `block_start != 0` guard never matched a
+    /// genesis-aligned first file, and `delete_current_and_open_previous` on the first
+    /// file resolves back to the same file — deleting the data it just re-opened.
+    #[test]
+    fn test_truncate_below_genesis_keeps_first_file() {
+        use alloy_consensus::Header;
+        use alloy_primitives::B256;
+
+        let (static_dir, _) = create_test_static_files_dir();
+
+        let provider: StaticFileProvider<EthPrimitives> =
+            StaticFileProviderBuilder::read_write(&static_dir)
+                .with_blocks_per_file(100)
+                .with_genesis_block_number(250)
+                .build()
+                .unwrap();
+
+        // Changesets across three files (250-299, 300-399, 400-499).
+        let segment = StaticFileSegment::AccountChangeSets;
+        {
+            let mut writer = provider.latest_writer(segment).unwrap();
+            for block in 250..=450 {
+                writer.append_account_changeset(generate_test_changeset(block, 1), block).unwrap();
+            }
+            writer.commit().unwrap();
+        }
+
+        // A target below genesis clamps to genesis: later files are deleted, the first
+        // file survives holding only the genesis block, and appends continue from there.
+        // Pruning is queued and applied on commit.
+        {
+            let mut writer = provider.latest_writer(segment).unwrap();
+            writer.prune_account_changesets(0).unwrap();
+            writer.commit().unwrap();
+        }
+        assert_eq!(provider.get_highest_static_file_block(segment), Some(250));
+
+        {
+            let mut writer = provider.latest_writer(segment).unwrap();
+            writer.append_account_changeset(generate_test_changeset(251, 1), 251).unwrap();
+            writer.commit().unwrap();
+        }
+        assert_eq!(provider.get_highest_static_file_block(segment), Some(251));
+
+        // Headers: pruning more rows than the segment holds (e.g. `stage drop` passing an
+        // absolute block height as a row count) must empty the first file, not delete it.
+        let segment = StaticFileSegment::Headers;
+        {
+            let mut writer = provider.latest_writer(segment).unwrap();
+            for block in 250..=450 {
+                let header = Header { number: block, ..Default::default() };
+                writer.append_header(&header, &B256::ZERO).unwrap();
+            }
+            writer.commit().unwrap();
+        }
+        {
+            let mut writer = provider.latest_writer(segment).unwrap();
+            writer.prune_headers(451).unwrap();
+            writer.commit().unwrap();
+        }
+        assert_eq!(provider.get_highest_static_file_block(segment), None);
+        assert!(
+            static_dir
+                .path()
+                .join(segment.filename(&SegmentRangeInclusive::new(250, 299)))
+                .exists(),
+            "first headers file must survive over-pruning"
+        );
     }
 }

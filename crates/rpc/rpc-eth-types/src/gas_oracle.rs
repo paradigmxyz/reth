@@ -15,7 +15,7 @@ use reth_rpc_server_types::{
         DEFAULT_MAX_GAS_PRICE, MAX_HEADER_HISTORY, MAX_REWARD_PERCENTILE_COUNT, SAMPLE_NUMBER,
     },
 };
-use reth_storage_api::{BlockReaderIdExt, NodePrimitivesProvider};
+use reth_storage_api::{BlockNumReader, BlockReaderIdExt, NodePrimitivesProvider};
 use schnellru::{ByLength, LruMap};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Formatter};
@@ -154,8 +154,12 @@ where
         let mut results = Vec::new();
         let mut populated_blocks = 0;
 
-        // we only check a maximum of 2 * max_block_history, or the number of blocks in the chain
-        let max_blocks = header.number().min(self.oracle_config.max_block_history * 2);
+        // we only check a maximum of 2 * max_block_history, or the number of blocks in the
+        // chain — counted from the earliest available block, since the chain does not
+        // necessarily start at block 0 and walking past its start yields HeaderNotFound.
+        let earliest = self.provider.earliest_block_number()?;
+        let max_blocks =
+            header.number().saturating_sub(earliest).min(self.oracle_config.max_block_history * 2);
 
         for _ in 0..max_blocks {
             // Check if current hash is in cache

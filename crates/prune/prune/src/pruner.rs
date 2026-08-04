@@ -16,7 +16,7 @@ use reth_stages_types::StageId;
 use reth_tokio_util::{EventSender, EventStream};
 use std::time::Duration;
 use tokio::sync::watch;
-use tracing::{debug, instrument};
+use tracing::{debug, instrument, warn};
 
 /// Result of [`Pruner::run`] execution.
 pub type PrunerResult = Result<PrunerOutput, PrunerError>;
@@ -47,6 +47,9 @@ pub struct Pruner<Provider, PF> {
     /// Optional override for the minimum pruning distance. When set, this replaces the
     /// per-segment hardcoded minimums (e.g. `MINIMUM_UNWIND_SAFE_DISTANCE`).
     minimum_pruning_distance: Option<u64>,
+    /// The genesis block number of the chain. No data exists below it, so it is the floor for
+    /// every prune target and range start (non-zero on some chains).
+    genesis_block_number: BlockNumber,
     /// The finished height of all `ExEx`'s.
     finished_exex_height: watch::Receiver<FinishedExExHeight>,
     #[doc(hidden)]
@@ -71,6 +74,7 @@ impl<Provider> Pruner<Provider, ()> {
             delete_limit,
             timeout,
             minimum_pruning_distance: None,
+            genesis_block_number: 0,
             finished_exex_height,
             metrics: Metrics::default(),
             event_sender: Default::default(),
@@ -99,6 +103,7 @@ where
             delete_limit,
             timeout,
             minimum_pruning_distance: None,
+            genesis_block_number: 0,
             finished_exex_height,
             metrics: Metrics::default(),
             event_sender: Default::default(),
@@ -110,6 +115,12 @@ impl<Provider, S> Pruner<Provider, S> {
     /// Sets the minimum pruning distance, overriding per-segment hardcoded minimums.
     pub const fn with_minimum_pruning_distance(mut self, distance: u64) -> Self {
         self.minimum_pruning_distance = Some(distance);
+        self
+    }
+
+    /// Sets the genesis block number, the floor for every prune target and range start.
+    pub const fn with_genesis_block_number(mut self, genesis_block_number: BlockNumber) -> Self {
+        self.genesis_block_number = genesis_block_number;
         self
     }
 }
@@ -144,7 +155,9 @@ where
         else {
             return Ok(PruneProgress::Finished.into())
         };
-        if tip_block_number == 0 {
+        // Only the genesis block exists at (or below) the genesis height, which is non-zero on
+        // some chains — there is nothing to prune yet.
+        if tip_block_number <= self.genesis_block_number {
             self.previous_tip_block_number = Some(tip_block_number);
 
             debug!(target: "pruner", %tip_block_number, "Nothing to prune yet");
@@ -216,6 +229,20 @@ where
                 .transpose()?
                 .flatten()
             {
+                // A target below genesis (e.g. `Distance` larger than the chain's height above
+                // a non-zero genesis) has no data to prune, and a checkpoint must never be
+                // written for a block that does not exist.
+                if to_block < self.genesis_block_number {
+                    warn!(
+                        target: "pruner",
+                        segment = ?segment.segment(),
+                        %to_block,
+                        genesis = self.genesis_block_number,
+                        "Prune target below genesis, skipping"
+                    );
+                    continue
+                }
+
                 // Check if segment has a required stage that must be finished first
                 if let Some(required_stage) = segment.required_stage() &&
                     !is_stage_finished(provider, required_stage)?
@@ -242,7 +269,12 @@ where
                 let previous_checkpoint = provider.get_prune_checkpoint(segment.segment())?;
                 let segment_output = segment.prune(
                     provider,
-                    PruneInput { previous_checkpoint, to_block, limiter: limiter.clone() },
+                    PruneInput {
+                        previous_checkpoint,
+                        to_block,
+                        limiter: limiter.clone(),
+                        genesis_block_number: self.genesis_block_number,
+                    },
                 )?;
                 if let Some(checkpoint) = segment_output.checkpoint {
                     segment

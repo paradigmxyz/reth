@@ -353,6 +353,7 @@ mod tests {
             let segment = TransactionLookup::new(prune_mode);
             let mut limiter = PruneLimiter::default().set_deleted_entries_limit(10);
             let input = PruneInput {
+                genesis_block_number: 0,
                 previous_checkpoint: db
                     .factory
                     .provider()
@@ -492,8 +493,12 @@ mod tests {
 
         let to_block: BlockNumber = 6;
         let prune_mode = PruneMode::Before(to_block);
-        let input =
-            PruneInput { previous_checkpoint: None, to_block, limiter: PruneLimiter::default() };
+        let input = PruneInput {
+            previous_checkpoint: None,
+            to_block,
+            limiter: PruneLimiter::default(),
+            genesis_block_number: 0,
+        };
         let segment = TransactionLookup::new(prune_mode);
 
         // Enable RocksDB storage for transaction hash numbers
@@ -595,7 +600,7 @@ mod tests {
         let mut limiter = PruneLimiter::default().set_deleted_entries_limit(1);
         limiter.increment_deleted_entries_count(); // Exhaust the limit
 
-        let input = PruneInput { previous_checkpoint, to_block, limiter };
+        let input = PruneInput { previous_checkpoint, to_block, limiter, genesis_block_number: 0 };
         let segment = TransactionLookup::new(prune_mode);
 
         let provider = db.factory.database_provider_rw().unwrap();
