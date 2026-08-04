@@ -111,6 +111,7 @@ use reth_fs_util as fs;
 use reth_node_api::NodeTypes;
 use reth_node_core::args::DefaultPruningValues;
 use reth_provider::providers::StaticFileProvider;
+use reth_stages_types::StageId;
 use reth_static_file_types::StaticFileSegment;
 use source::{
     discover_manifest_url, fetch_manifest_from_source, fetch_snapshot_api_entries,
@@ -130,6 +131,7 @@ const RETH_SNAPSHOTS_API_URL: &str = "https://snapshots.reth.rs/api/snapshots";
 const RETH_SNAPSHOTS_SOURCE: &str = "https://snapshots.reth.rs (default)";
 const SNAPSHOT_API_PATH: &str = "/api/snapshots";
 const FORCE_REMOVED_DATADIR_PATHS: &[&str] = &["db", "rocksdb", "static_files", "reth.toml"];
+const REPAIR_STORAGE_VERSION: u64 = 2;
 
 /// Maximum number of simultaneous HTTP downloads across the entire snapshot job.
 const MAX_CONCURRENT_DOWNLOADS: usize = 8;
@@ -148,6 +150,29 @@ pub(crate) enum SelectionPreset {
 struct ResolvedComponents {
     selections: BTreeMap<SnapshotComponentType, ComponentSelection>,
     preset: Option<SelectionPreset>,
+}
+
+/// Per-stage database frontiers that anchor repair selections.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct RepairFrontiers {
+    /// Highest checkpoint across all stages; rejects stale snapshots.
+    highest: u64,
+    /// Bodies stage checkpoint; governs transaction static files.
+    bodies: u64,
+    /// Execution stage checkpoint; governs receipts and changesets.
+    execution: u64,
+}
+
+impl RepairFrontiers {
+    /// Maps each repairable component to the frontier of the stage that writes it.
+    fn as_targets(&self) -> BTreeMap<SnapshotComponentType, u64> {
+        BTreeMap::from([
+            (SnapshotComponentType::Transactions, self.bodies),
+            (SnapshotComponentType::Receipts, self.execution),
+            (SnapshotComponentType::AccountChangesets, self.execution),
+            (SnapshotComponentType::StorageChangesets, self.execution),
+        ])
+    }
 }
 
 /// Global static download defaults
@@ -531,7 +556,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         }
 
         let manifest = self.load_manifest(chain_id).await?;
-        let repair_block = if self.repair_history {
+        let repair_frontiers = if self.repair_history {
             Some(self.validate_repair_target::<N>(
                 &data_dir.db(),
                 &data_dir.static_files(),
@@ -541,7 +566,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             None
         };
         let ResolvedDownload { manifest, selections, preset, planned } =
-            self.resolve_loaded_download(manifest, repair_block)?;
+            self.resolve_loaded_download(manifest, repair_frontiers)?;
         if self.print_plan_json {
             DownloadPlan::from_planned(&manifest, &planned).write_json(std::io::stdout().lock())?;
             return Ok(())
@@ -598,24 +623,24 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 
     async fn resolve_download(&self, chain_id: u64) -> Result<ResolvedDownload> {
         let manifest = self.load_manifest(chain_id).await?;
-        let repair_block = if self.repair_history {
+        let repair_frontiers = if self.repair_history {
             let data_dir = self.env.datadir.clone().resolve_datadir(self.env.chain.chain());
-            let block = self.validated_database_frontier(&data_dir.db())?;
-            check_snapshot_covers_frontier(block, manifest.block)?;
-            Some(block)
+            let frontiers = self.validated_database_frontier(&data_dir.db())?;
+            check_snapshot_covers_frontier(frontiers.highest, manifest.block)?;
+            Some(frontiers)
         } else {
             None
         };
-        self.resolve_loaded_download(manifest, repair_block)
+        self.resolve_loaded_download(manifest, repair_frontiers)
     }
 
     fn resolve_loaded_download(
         &self,
         manifest: SnapshotManifest,
-        repair_block: Option<u64>,
+        repair_frontiers: Option<RepairFrontiers>,
     ) -> Result<ResolvedDownload> {
-        let ResolvedComponents { mut selections, preset } = match repair_block {
-            Some(block) => self.resolve_repair_components(&manifest, block)?,
+        let ResolvedComponents { mut selections, preset } = match repair_frontiers {
+            Some(frontiers) => self.resolve_repair_components(&manifest, &frontiers)?,
             None => self.resolve_components(&manifest)?,
         };
 
@@ -685,15 +710,15 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         Ok(())
     }
 
-    /// Validates the repair target and returns the database frontier.
+    /// Validates the repair target and returns the database frontiers.
     fn validate_repair_target<N: NodeTypes>(
         &self,
         db_path: &Path,
         static_files_path: &Path,
         snapshot_block: u64,
-    ) -> Result<u64> {
-        let synced_block = self.validated_database_frontier(db_path)?;
-        check_snapshot_covers_frontier(synced_block, snapshot_block)?;
+    ) -> Result<RepairFrontiers> {
+        let frontiers = self.validated_database_frontier(db_path)?;
+        check_snapshot_covers_frontier(frontiers.highest, snapshot_block)?;
 
         // Jars are written before checkpoints commit, so after a crash they can hold
         // blocks the checkpoints don't know about; the snapshot must cover those too.
@@ -714,11 +739,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             }
         }
 
-        Ok(synced_block)
+        Ok(frontiers)
     }
 
-    /// Returns the database block frontier after validating its persisted storage layout.
-    fn validated_database_frontier(&self, db_path: &Path) -> Result<u64> {
+    /// Returns the database stage frontiers after validating its persisted storage layout.
+    fn validated_database_frontier(&self, db_path: &Path) -> Result<RepairFrontiers> {
         let db = open_db_read_only(db_path, self.env.db.database_args())?;
         let tx = db.tx()?;
 
@@ -736,21 +761,34 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             );
         }
 
-        // Use the highest stage checkpoint as the persisted database frontier.
+        // Selections anchor to the stage that writes each segment, while the overall
+        // maximum rejects snapshots behind any part of the database.
+        let mut frontiers = RepairFrontiers::default();
         let mut cursor = tx.cursor_read::<tables::StageCheckpoints>()?;
-        let mut synced_block = 0;
         for entry in cursor.walk(None)? {
-            synced_block = synced_block.max(entry?.1.block_number);
+            let (stage, checkpoint) = entry?;
+            frontiers.highest = frontiers.highest.max(checkpoint.block_number);
+            match stage.as_str() {
+                stage if stage == StageId::Bodies.as_str() => {
+                    frontiers.bodies = checkpoint.block_number;
+                }
+                stage if stage == StageId::Execution.as_str() => {
+                    frontiers.execution = checkpoint.block_number;
+                }
+                _ => {}
+            }
         }
-        Ok(synced_block)
+        Ok(frontiers)
     }
 
-    /// Resolves repair selections from the node's prune config at the database frontier.
+    /// Resolves repair selections from the node's prune config at the database frontiers.
     fn resolve_repair_components(
         &self,
         manifest: &SnapshotManifest,
-        repair_block: u64,
+        frontiers: &RepairFrontiers,
     ) -> Result<ResolvedComponents> {
+        self.validate_repair_manifest(manifest)?;
+
         let data_dir = self.env.datadir.clone().resolve_datadir(self.env.chain.chain());
         let config_path = self.env.config.clone().unwrap_or_else(|| data_dir.config());
         // Repair must read the prune modes the node actually runs with;
@@ -763,8 +801,26 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         }
         let config = Config::from_path(&config_path)
             .wrap_err_with(|| format!("Failed to load config from {}", config_path.display()))?;
-        let selections = manifest.repair_history_selections(&config, repair_block)?;
+        let selections = manifest.repair_history_selections(&config, &frontiers.as_targets())?;
         Ok(ResolvedComponents { selections, preset: None })
+    }
+
+    /// Rejects manifests that cannot safely repair the selected datadir.
+    fn validate_repair_manifest(&self, manifest: &SnapshotManifest) -> Result<()> {
+        let chain_id = self.env.chain.chain().id();
+        if manifest.chain_id != chain_id {
+            eyre::bail!(
+                "snapshot manifest is for chain {}, but the selected chain is {chain_id}",
+                manifest.chain_id
+            );
+        }
+        if manifest.storage_version != REPAIR_STORAGE_VERSION {
+            eyre::bail!(
+                "snapshot manifest uses storage version {}; --repair-history requires version {REPAIR_STORAGE_VERSION}",
+                manifest.storage_version
+            );
+        }
+        Ok(())
     }
 
     /// Determines which components to download based on CLI flags or interactive selection.
@@ -1080,7 +1136,6 @@ fn inject_archive_only_components(
     }
 }
 
-/// Returns `true` when RocksDB-backed index stages should be reset after download.
 /// Rejects snapshots that predate the database frontier.
 fn check_snapshot_covers_frontier(synced_block: u64, snapshot_block: u64) -> Result<()> {
     if synced_block > snapshot_block {
@@ -1091,6 +1146,7 @@ fn check_snapshot_covers_frontier(synced_block: u64, snapshot_block: u64) -> Res
     Ok(())
 }
 
+/// Returns `true` when RocksDB-backed index stages should be reset after download.
 fn should_reset_index_stage_checkpoints(
     selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
 ) -> bool {
@@ -1429,19 +1485,31 @@ mod tests {
         ])
         .args;
 
-        let manifest = SnapshotManifest {
-            block: 0,
-            chain_id: 1,
-            storage_version: 2,
-            timestamp: 0,
-            base_url: None,
-            reth_version: None,
-            components: BTreeMap::new(),
-        };
+        let manifest = manifest_with_archive_only_components();
 
-        let err = args.resolve_repair_components(&manifest, 0).err().unwrap();
+        let err =
+            args.resolve_repair_components(&manifest, &RepairFrontiers::default()).err().unwrap();
         assert!(err.to_string().contains("requires an existing config"));
         assert!(!temp.path().join("reth.toml").exists());
+    }
+
+    #[test]
+    fn repair_history_rejects_incompatible_manifests() {
+        let args = CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from([
+            "reth",
+            "--repair-history",
+        ])
+        .args;
+        let mut manifest = manifest_with_archive_only_components();
+
+        manifest.chain_id = HOLESKY.chain.id();
+        let err = args.validate_repair_manifest(&manifest).unwrap_err();
+        assert!(err.to_string().contains("selected chain"));
+
+        manifest.chain_id = MAINNET.chain.id();
+        manifest.storage_version = 1;
+        let err = args.validate_repair_manifest(&manifest).unwrap_err();
+        assert!(err.to_string().contains("requires version 2"));
     }
 
     #[test]
@@ -1477,6 +1545,16 @@ mod tests {
                 reth_stages_types::StageCheckpoint::new(150),
             )
             .unwrap();
+            tx.put::<tables::StageCheckpoints>(
+                StageId::Bodies.to_string(),
+                reth_stages_types::StageCheckpoint::new(120),
+            )
+            .unwrap();
+            tx.put::<tables::StageCheckpoints>(
+                StageId::Execution.to_string(),
+                reth_stages_types::StageCheckpoint::new(90),
+            )
+            .unwrap();
             tx.commit().unwrap();
         }
 
@@ -1486,7 +1564,20 @@ mod tests {
             .unwrap();
         assert!(err.to_string().contains("past the snapshot"));
 
-        args.validate_repair_target::<MockNodeTypes>(&db_path, &static_files_path, 200).unwrap();
+        let frontiers = args
+            .validate_repair_target::<MockNodeTypes>(&db_path, &static_files_path, 200)
+            .unwrap();
+        assert_eq!(frontiers, RepairFrontiers { highest: 150, bodies: 120, execution: 90 });
+
+        let targets = frontiers.as_targets();
+        assert_eq!(targets[&SnapshotComponentType::Transactions], 120);
+        for component in [
+            SnapshotComponentType::Receipts,
+            SnapshotComponentType::AccountChangesets,
+            SnapshotComponentType::StorageChangesets,
+        ] {
+            assert_eq!(targets[&component], 90);
+        }
     }
 
     #[test]
