@@ -30,6 +30,7 @@ use reth_evm_ethereum::MockEvmConfig;
 use reth_payload_builder::PayloadServiceCommand;
 use reth_primitives_traits::Block as _;
 use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStore, RawBal};
+use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
 use reth_tasks::spawn_os_thread;
 use reth_trie_common::ComputedTrieData;
 use std::{
@@ -1512,7 +1513,7 @@ async fn test_fcu_with_canonical_ancestor_below_finalized_is_rejected() {
 }
 
 #[tokio::test]
-async fn test_fcu_with_canonical_ancestor_above_finalized_starts_payload_build() {
+async fn test_fcu_with_canonical_ancestor_above_finalized_unwinds_and_starts_payload_build() {
     reth_tracing::init_test_tracing();
     let chain_spec = MAINNET.clone();
     let mut test_harness = TestHarness::new(chain_spec.clone());
@@ -1520,10 +1521,11 @@ async fn test_fcu_with_canonical_ancestor_above_finalized_starts_payload_build()
     let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..5).collect();
     test_harness = test_harness.with_blocks(blocks.clone());
 
-    let current_head = blocks[3].recovered_block();
     let finalized = blocks[0].recovered_block();
     let ancestor = blocks[2].recovered_block();
     test_harness.tree.canonical_in_memory_state.set_finalized(finalized.clone_sealed_header());
+    let mut canonical_state_notifications =
+        test_harness.tree.canonical_in_memory_state.subscribe_canon_state();
 
     let payload_attributes = EthPayloadAttributes {
         timestamp: ancestor.timestamp() + 1,
@@ -1555,7 +1557,65 @@ async fn test_fcu_with_canonical_ancestor_above_finalized_starts_payload_build()
     };
     assert_eq!(input.parent_hash, ancestor.hash());
 
-    // the canonical chain remains untouched, only the built block reorgs it eventually
+    // the in-memory ancestor is optimistically unwound to through the regular reorg machinery,
+    // notifying listeners about the reverted blocks
+    assert_eq!(test_harness.tree.state.tree_state.canonical_block_hash(), ancestor.hash());
+    assert_eq!(
+        test_harness.tree.canonical_in_memory_state.get_canonical_head().hash(),
+        ancestor.hash()
+    );
+    let notification = canonical_state_notifications.recv().await.unwrap();
+    assert!(notification.reverted().is_some());
+}
+
+#[tokio::test]
+async fn test_fcu_with_canonical_ancestor_beyond_memory_keeps_head() {
+    reth_tracing::init_test_tracing();
+    let chain_spec = MAINNET.clone();
+    let mut test_harness = TestHarness::new(chain_spec.clone());
+    let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
+    let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..5).collect();
+    test_harness = test_harness.with_blocks(blocks.clone());
+
+    let current_head = blocks[3].recovered_block();
+    let ancestor = blocks[0].recovered_block();
+
+    // Evict the ancestor from the in-memory tree state, simulating a canonical block that has
+    // been persisted and pruned from memory.
+    test_harness.tree.state.tree_state.remove_until(ancestor.num_hash(), ancestor.hash(), None);
+    assert!(test_harness.tree.state.tree_state.executed_block_by_hash(ancestor.hash()).is_none());
+
+    let payload_attributes = EthPayloadAttributes {
+        timestamp: ancestor.timestamp() + 1,
+        prev_randao: B256::ZERO,
+        suggested_fee_recipient: Default::default(),
+        withdrawals: None,
+        parent_beacon_block_root: None,
+        slot_number: None,
+        target_gas_limit: None,
+    };
+    let outcome = test_harness
+        .tree
+        .on_forkchoice_updated(
+            ForkchoiceState {
+                head_block_hash: ancestor.hash(),
+                safe_block_hash: B256::ZERO,
+                finalized_block_hash: B256::ZERO,
+            },
+            Some(payload_attributes),
+        )
+        .unwrap();
+
+    assert_eq!(outcome.outcome.forkchoice_status(), ForkchoiceStatus::Valid);
+
+    // a payload build is still started on top of the ancestor
+    let command = test_harness.payload_command_rx.try_recv().unwrap();
+    let PayloadServiceCommand::BuildNewPayload(input, _, _) = command else {
+        panic!("expected build new payload command")
+    };
+    assert_eq!(input.parent_hash, ancestor.hash());
+
+    // but the canonical chain remains untouched, only the built block reorgs it eventually
     assert_eq!(test_harness.tree.state.tree_state.canonical_block_hash(), current_head.hash());
     assert_eq!(
         test_harness.tree.canonical_in_memory_state.get_canonical_head().hash(),
