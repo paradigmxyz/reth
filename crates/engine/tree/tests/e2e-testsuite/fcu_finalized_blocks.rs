@@ -77,8 +77,8 @@ async fn test_reorg_to_fork_behind_finalized() -> Result<()> {
 }
 
 /// Verifies that an FCU to a canonical ancestor at or below the latest known finalized block is
-/// skipped, while an FCU to an ancestor above finality can start a payload build on top of the
-/// ancestor whose block eventually reorgs out the current head.
+/// skipped, while an FCU to an in-memory ancestor above finality optimistically unwinds the
+/// canonical head to it and payloads built on the ancestor extend the unwound chain.
 #[tokio::test]
 async fn test_fcu_to_canonical_ancestor_around_finalized() -> Result<()> {
     reth_tracing::init_test_tracing();
@@ -112,8 +112,8 @@ async fn test_fcu_to_canonical_ancestor_around_finalized() -> Result<()> {
         )
         .with_action(UpdateBlockInfo::default())
         .with_action(AssertChainTip::new(10))
-        // Block 8 is above finality: without payload attributes the FCU is acknowledged, but the
-        // canonical head does not move.
+        // Block 8 is above finality and still in memory: the FCU optimistically unwinds the
+        // canonical head to it, reorging out blocks 9 and 10.
         .with_action(
             SendForkchoiceUpdate::<EthEngineTypes>::new(
                 BlockReference::Tag("block_7".to_string()),
@@ -123,10 +123,9 @@ async fn test_fcu_to_canonical_ancestor_around_finalized() -> Result<()> {
             .with_expected_status(alloy_rpc_types_engine::PayloadStatusEnum::Valid),
         )
         .with_action(UpdateBlockInfo::default())
-        .with_action(AssertChainTip::new(10))
-        // With payload attributes, an FCU to block 8 starts a payload build on top of it:
-        // `CreateFork` drives the full fcu(attrs) -> getPayload -> newPayload flow. Making the
-        // built block canonical reorgs out the previous blocks 9 and 10.
+        .with_action(AssertChainTip::new(8))
+        // A payload built on block 8 extends the unwound chain: `CreateFork` drives the full
+        // fcu(attrs) -> getPayload -> newPayload flow.
         .with_action(CreateFork::<EthEngineTypes>::new_from_tag("block_8", 1))
         .with_action(MakeCanonical::new())
         .with_action(AssertChainTip::new(9));

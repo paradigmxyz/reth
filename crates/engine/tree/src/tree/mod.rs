@@ -1005,6 +1005,9 @@ where
     /// * `ProviderResult<()>` - Ok(()) on success, error if state update fails
     ///
     /// Caution: This unwinds the canonical chain
+    ///
+    /// Note: Unlike [`Self::on_canonical_chain_update`] this resets the head trackers directly
+    /// without emitting canon state notifications.
     fn update_latest_block_to_canonical_ancestor(
         &mut self,
         canonical_header: &SealedHeader<N::BlockHeader>,
@@ -1329,29 +1332,44 @@ where
                 .is_some_and(|finalized| canonical_header.number() <= finalized.number);
 
             if always_trigger_payload_job || !head_is_finalized_ancestor {
-                // We need to effectively unwind the _canonical_ chain to the FCU's head, which is
-                // part of the canonical chain. We need to update the latest block state to reflect
-                // the canonical ancestor. This ensures that state providers and the transaction
-                // pool operate with the correct chain state after forkchoice update processing, and
-                // new payloads built on the reorg'd head will be added to the tree immediately.
-                if always_trigger_payload_job && self.config.unwind_canonical_header() {
-                    self.update_latest_block_to_canonical_ancestor(&canonical_header)?;
+                // Building on the ancestor requires its state: if the required history has
+                // already been pruned, the requested reorg exceeds the supported depth. This is
+                // checked upfront so that a rejected forkchoice update does not mutate the
+                // canonical chain.
+                if !always_trigger_payload_job &&
+                    attrs.is_some() &&
+                    !self.is_historical_state_available(canonical_header.number())?
+                {
+                    debug!(target: "engine::tree", head = canonical_header.number(), "rejecting canonical ancestor fcu with pruned state");
+                    return Ok(Some(TreeOutcome::new(OnForkChoiceUpdated::too_deep_reorg())));
+                }
+
+                if always_trigger_payload_job {
+                    // We need to effectively unwind the _canonical_ chain to the FCU's head, which
+                    // is part of the canonical chain. We need to update the latest block state to
+                    // reflect the canonical ancestor. This ensures that state providers and the
+                    // transaction pool operate with the correct chain state after forkchoice
+                    // update processing, and new payloads built on the reorg'd head will be added
+                    // to the tree immediately.
+                    if self.config.unwind_canonical_header() {
+                        self.update_latest_block_to_canonical_ancestor(&canonical_header)?;
+                    }
+                } else if let Some(chain_update) = self.on_new_head(state.head_block_hash)? {
+                    // The head is a canonical ancestor above the latest known finalized block that
+                    // is still tracked in the in-memory tree state: optimistically unwind the
+                    // canonical chain through the regular reorg machinery, which emits the canon
+                    // state notification reinserting the reorged transactions into the pool, so a
+                    // payload built on the ancestor includes them again.
+                    //
+                    // If the ancestor is no longer tracked in memory, the canonical chain remains
+                    // untouched and the payload built on the ancestor triggers the reorg once it
+                    // is inserted via newPayload and FCU'd.
+                    self.on_canonical_chain_update(chain_update);
                 }
 
                 // A canonical ancestor above the latest known finalized block can become the
                 // parent of the next block, e.g. when the CL wants to reorg out the current head.
-                // The canonical chain remains untouched here; the block built on the ancestor
-                // triggers the actual reorg once it is inserted via newPayload and FCU'd.
                 if let Some(attr) = attrs {
-                    // Building on the ancestor requires its state: if the required history has
-                    // already been pruned, the requested reorg exceeds the supported depth.
-                    if !always_trigger_payload_job &&
-                        !self.is_historical_state_available(canonical_header.number())?
-                    {
-                        debug!(target: "engine::tree", head = canonical_header.number(), "rejecting canonical ancestor fcu with pruned state");
-                        return Ok(Some(TreeOutcome::new(OnForkChoiceUpdated::too_deep_reorg())));
-                    }
-
                     debug!(target: "engine::tree", head = canonical_header.number(), "handling payload attributes for canonical head");
                     // Clone only when we actually need to process the attributes
                     let updated =

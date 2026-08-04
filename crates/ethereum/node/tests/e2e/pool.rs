@@ -3,10 +3,13 @@ use alloy_consensus::{EthereumTxEnvelope, TxEip4844};
 use alloy_eips::{eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M, Encodable2718};
 use alloy_genesis::Genesis;
 use alloy_primitives::B256;
+use alloy_rpc_types_engine::ForkchoiceState;
+use futures::StreamExt;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::{
-    node::NodeTestContext, transaction::TransactionTestContext, wallet::Wallet,
+    node::NodeTestContext, setup_engine, transaction::TransactionTestContext, wallet::Wallet,
 };
+use reth_node_api::{PayloadKind, TreeConfig};
 use reth_node_builder::{NodeBuilder, NodeHandle};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::EthereumNode;
@@ -306,6 +309,119 @@ async fn maintain_txpool_commit() -> eyre::Result<()> {
             break;
         }
     }
+
+    Ok(())
+}
+
+// Ensures that transactions reorged out by a canonical ancestor forkchoice update are reinserted
+// into the pool and eventually included in the payload built on top of the ancestor.
+#[tokio::test]
+async fn test_fcu_unwind_reinjects_reorged_transactions() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .cancun_activated()
+            .build(),
+    );
+
+    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
+        1,
+        chain_spec.clone(),
+        false,
+        TreeConfig::default(),
+        eth_payload_attributes,
+    )
+    .await?;
+    let mut node = nodes.pop().unwrap();
+
+    // finalized base block: the unwind is only permitted above the latest known finalized block
+    let finalized = node.advance_block().await?;
+    let finalized_hash = finalized.block().hash();
+    let _ = node.canonical_stream.next().await;
+
+    // the unwind target, committed without advancing finality
+    let ancestor = node.build_and_submit_payload().await?;
+    let ancestor_hash = ancestor.block().hash();
+    node.update_forkchoice(finalized_hash, ancestor_hash).await?;
+    let _ = node.canonical_stream.next().await;
+
+    // include a transfer in the next block
+    let raw_tx =
+        TransactionTestContext::transfer_tx_bytes(chain_spec.chain.id(), wallet.inner).await;
+    let tx_hash = node.rpc.inject_tx(raw_tx).await?;
+    let reorged = node.build_and_submit_payload().await?;
+    assert!(reorged.block().body().transactions().any(|tx| *tx.hash() == tx_hash));
+    node.update_forkchoice(finalized_hash, reorged.block().hash()).await?;
+    let _ = node.canonical_stream.next().await;
+
+    // wait until pool maintenance has discarded the now mined transaction
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while node.inner.pool.get(&tx_hash).is_some() {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await?;
+
+    // An FCU back to the canonical ancestor with payload attributes optimistically unwinds the
+    // canonical chain and starts a payload build on top of the ancestor.
+    let attrs = node.payload.next_attributes();
+    let outcome = node
+        .inner
+        .add_ons_handle
+        .beacon_engine_handle
+        .fork_choice_updated(
+            ForkchoiceState {
+                head_block_hash: ancestor_hash,
+                safe_block_hash: B256::ZERO,
+                finalized_block_hash: B256::ZERO,
+            },
+            Some(attrs),
+        )
+        .await?;
+    assert!(outcome.payload_status.is_valid());
+    let payload_id = outcome.payload_id.unwrap();
+
+    // the unwind is a reorg of the canonical chain and must revert the reorged block
+    let notification = node.canonical_stream.next().await.unwrap();
+    assert!(notification
+        .reverted()
+        .is_some_and(|reverted| reverted.blocks().contains_key(&reorged.block().number)));
+
+    // the reorged transaction must re-enter the pool
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while node.inner.pool.get(&tx_hash).is_none() {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await?;
+
+    // and must eventually be picked up by the payload job building on the ancestor
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Some(Ok(best)) =
+                node.inner.payload_builder_handle.best_payload(payload_id).await &&
+                best.block().body().transactions().any(|tx| *tx.hash() == tx_hash)
+            {
+                break
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await?;
+
+    // resolving the payload returns the payload built on the ancestor including the reorged
+    // transaction again
+    let payload = node
+        .inner
+        .payload_builder_handle
+        .resolve_kind(payload_id, PayloadKind::WaitForPending)
+        .await
+        .unwrap()?;
+    assert_eq!(payload.block().parent_hash, ancestor_hash);
+    assert!(payload.block().body().transactions().any(|tx| *tx.hash() == tx_hash));
 
     Ok(())
 }
