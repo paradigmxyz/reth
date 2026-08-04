@@ -857,7 +857,7 @@ async fn test_holesky_payload() {
 }
 
 #[test]
-fn test_backpressure_waits_for_persistence_before_reading_incoming() {
+fn test_backpressure_returns_syncing_and_defers_non_consensus_messages() {
     let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
     let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
     test_harness.tree.config = test_harness
@@ -872,7 +872,7 @@ fn test_backpressure_waits_for_persistence_before_reading_incoming() {
     test_harness.tree.persistence_state.start_save(persisted, persist_rx);
     assert!(test_harness.tree.should_backpressure());
 
-    let (tx, mut rx) = oneshot::channel();
+    let (tx, rx) = oneshot::channel();
     test_harness
         .to_tree_tx
         .send(FromEngine::Request(
@@ -888,11 +888,35 @@ fn test_backpressure_waits_for_persistence_before_reading_incoming() {
             .into(),
         ))
         .unwrap();
-    test_harness.to_tree_tx.send(FromEngine::DownloadedBlocks(vec![])).unwrap();
-    assert_eq!(test_harness.tree.incoming.len(), 2);
 
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(10));
+    let data = Bytes::from_str(include_str!("../../test-data/holesky/1.rlp")).unwrap();
+    let block: Block = Block::decode(&mut data.as_ref()).unwrap();
+    let sealed = block.seal_slow();
+    let hash = sealed.hash();
+    let block = sealed.into_block();
+    let payload = ExecutionPayloadV1::from_block_unchecked(hash, &block);
+    let (payload_tx, payload_rx) = oneshot::channel();
+    test_harness
+        .to_tree_tx
+        .send(FromEngine::Request(
+            BeaconEngineMessage::NewPayload {
+                payload: ExecutionData {
+                    payload: payload.into(),
+                    sidecar: ExecutionPayloadSidecar::none(),
+                },
+                tx: payload_tx,
+            }
+            .into(),
+        ))
+        .unwrap();
+    test_harness.to_tree_tx.send(FromEngine::DownloadedBlocks(vec![])).unwrap();
+    assert_eq!(test_harness.tree.incoming.len(), 3);
+
+    let response_thread = std::thread::spawn(move || {
+        let response = rx.blocking_recv().unwrap().unwrap();
+        assert!(response.forkchoice_status().is_syncing());
+        let payload_response = payload_rx.blocking_recv().unwrap().unwrap();
+        assert!(payload_response.is_syncing());
         persist_tx
             .send(PersistenceResult {
                 last_block: persisted,
@@ -903,8 +927,10 @@ fn test_backpressure_waits_for_persistence_before_reading_incoming() {
     });
 
     let event = test_harness.tree.wait_for_persistence_event();
+    response_thread.join().unwrap();
     assert!(matches!(event, super::LoopEvent::PersistenceComplete { .. }));
-    assert_eq!(test_harness.tree.incoming.len(), 2);
+    assert_eq!(test_harness.tree.incoming.len(), 0);
+    assert_eq!(test_harness.tree.deferred_engine_messages.len(), 1);
 
     let super::LoopEvent::PersistenceComplete { result, start_time } = event else {
         unreachable!()
@@ -915,14 +941,7 @@ fn test_backpressure_waits_for_persistence_before_reading_incoming() {
         panic!("expected queued engine message")
     };
     let _ = test_harness.tree.on_engine_message(message).unwrap();
-    let msg = rx.try_recv();
-    assert!(msg.is_ok());
-    assert_eq!(test_harness.tree.incoming.len(), 1);
-
-    let super::LoopEvent::EngineMessage(message) = test_harness.tree.wait_for_event() else {
-        panic!("expected queued engine message")
-    };
-    let _ = test_harness.tree.on_engine_message(message).unwrap();
+    assert_eq!(test_harness.tree.deferred_engine_messages.len(), 0);
     assert_eq!(test_harness.tree.incoming.len(), 0);
 }
 
