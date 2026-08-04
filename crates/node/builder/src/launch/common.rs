@@ -82,7 +82,7 @@ use reth_rpc_layer::JwtSecret;
 use reth_stages::{
     sets::DefaultStages,
     stages::{EraImportSource, MerkleStage},
-    MetricEvent, PipelineBuilder, PipelineTarget, StageCheckpoint, StageId, StageSet,
+    MetricEvent, PipelineBuilder, PipelineTarget, StageId, StageSet,
 };
 use reth_static_file::{blocks_per_file_for_prune_distance, StaticFileProducer, StaticFileSegment};
 use reth_storage_overlay::OverlayManager;
@@ -552,10 +552,7 @@ where
         // Finish is committed before Merkle during unwind, so this marker is authoritative when
         // resuming an interrupted partial trie unwind.
         let (partial_trie_unwind, has_persisted_partial_trie_unwind) =
-            get_partial_trie_unwind_marker(
-                &provider_ro,
-                provider_ro.get_stage_checkpoint(StageId::Finish)?,
-            )?;
+            get_partial_trie_unwind_marker(&provider_ro)?;
         drop(provider_ro);
         let persist_partial_trie_unwind =
             !has_persisted_partial_trie_unwind && partial_trie_unwind.is_some();
@@ -1407,8 +1404,7 @@ pub fn metrics_hooks<N: NodeTypesWithDB>(provider_factory: &ProviderFactory<N>) 
 }
 
 fn get_partial_trie_unwind_marker(
-    provider: &impl MetadataProvider,
-    finish_checkpoint: Option<StageCheckpoint>,
+    provider: &(impl MetadataProvider + StageCheckpointReader),
 ) -> ProviderResult<(Option<PartialStateTrieUnwindMarker>, bool)> {
     if let Some(marker) = provider.get_metadata(PARTIAL_STATE_TRIE_UNWIND_METADATA_KEY)? {
         let marker = serde_json::from_slice::<PartialStateTrieUnwindMarker>(&marker)
@@ -1422,7 +1418,9 @@ fn get_partial_trie_unwind_marker(
         return Ok((Some(marker), true))
     }
 
-    let Some(finish_checkpoint) = finish_checkpoint else { return Ok((None, false)) };
+    let Some(finish_checkpoint) = provider.get_stage_checkpoint(StageId::Finish)? else {
+        return Ok((None, false))
+    };
     let Some(partial_state_trie) =
         finish_checkpoint.finish_stage_checkpoint().and_then(|finish| finish.partial_state_trie())
     else {
@@ -1470,16 +1468,31 @@ mod tests {
     use reth_config::Config;
     use reth_db_api::models::PartialStateTrieUnwindMarker;
     use reth_node_core::args::PruningArgs;
-    use reth_provider::{MetadataProvider, ProviderResult};
-    use reth_stages::{FinishCheckpoint, StageCheckpoint};
+    use reth_provider::{MetadataProvider, ProviderResult, StageCheckpointReader};
+    use reth_stages::{FinishCheckpoint, StageCheckpoint, StageId};
 
     const EXTENSION: &str = "toml";
 
-    struct MockMetadataProvider(Option<Vec<u8>>);
+    struct MockProvider(Option<Vec<u8>>, Option<StageCheckpoint>);
 
-    impl MetadataProvider for MockMetadataProvider {
+    impl MetadataProvider for MockProvider {
         fn get_metadata(&self, _: &str) -> ProviderResult<Option<Vec<u8>>> {
             Ok(self.0.clone())
+        }
+    }
+
+    impl StageCheckpointReader for MockProvider {
+        fn get_stage_checkpoint(&self, id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
+            assert_eq!(id, StageId::Finish);
+            Ok(self.1)
+        }
+
+        fn get_stage_checkpoint_progress(&self, _: StageId) -> ProviderResult<Option<Vec<u8>>> {
+            Ok(None)
+        }
+
+        fn get_all_checkpoints(&self) -> ProviderResult<Vec<(String, StageCheckpoint)>> {
+            Ok(Vec::new())
         }
     }
 
@@ -1545,8 +1558,7 @@ mod tests {
             );
 
         assert_eq!(
-            get_partial_trie_unwind_marker(&MockMetadataProvider(None), Some(finish_checkpoint))
-                .unwrap(),
+            get_partial_trie_unwind_marker(&MockProvider(None, Some(finish_checkpoint))).unwrap(),
             (expected, false)
         );
 
@@ -1561,8 +1573,7 @@ mod tests {
             );
 
         assert_eq!(
-            get_partial_trie_unwind_marker(&MockMetadataProvider(None), Some(genesis_checkpoint))
-                .unwrap(),
+            get_partial_trie_unwind_marker(&MockProvider(None, Some(genesis_checkpoint))).unwrap(),
             (expected, false)
         );
     }
@@ -1573,18 +1584,18 @@ mod tests {
             PartialStateTrieUnwindMarker { finish_block_number: 42, partial_state_trie: 21 };
 
         assert_eq!(
-            get_partial_trie_unwind_marker(
-                &MockMetadataProvider(Some(serde_json::to_vec(&marker).unwrap())),
+            get_partial_trie_unwind_marker(&MockProvider(
+                Some(serde_json::to_vec(&marker).unwrap()),
                 Some(StageCheckpoint::new(21)),
-            )
+            ),)
             .unwrap(),
             (Some(marker), true)
         );
         assert_eq!(
-            get_partial_trie_unwind_marker(
-                &MockMetadataProvider(Some(serde_json::to_vec(&marker).unwrap())),
-                None,
-            )
+            get_partial_trie_unwind_marker(&MockProvider(
+                Some(serde_json::to_vec(&marker).unwrap()),
+                None
+            ),)
             .unwrap(),
             (Some(marker), true)
         );
@@ -1600,33 +1611,28 @@ mod tests {
             .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: None });
 
         assert_eq!(
-            get_partial_trie_unwind_marker(
-                &MockMetadataProvider(None),
-                Some(matching_finish_checkpoint),
-            )
+            get_partial_trie_unwind_marker(&MockProvider(None, Some(matching_finish_checkpoint)),)
+                .unwrap(),
+            (None, false)
+        );
+        assert_eq!(
+            get_partial_trie_unwind_marker(&MockProvider(
+                None,
+                Some(missing_partial_finish_checkpoint)
+            ),)
             .unwrap(),
             (None, false)
         );
         assert_eq!(
-            get_partial_trie_unwind_marker(
-                &MockMetadataProvider(None),
-                Some(missing_partial_finish_checkpoint),
-            )
-            .unwrap(),
-            (None, false)
-        );
-        assert_eq!(
-            get_partial_trie_unwind_marker(&MockMetadataProvider(None), None).unwrap(),
+            get_partial_trie_unwind_marker(&MockProvider(None, None)).unwrap(),
             (None, false)
         );
 
         let partial_frontier = ahead_finish_checkpoint
             .finish_stage_checkpoint()
             .and_then(|finish| finish.partial_state_trie());
-        let result = get_partial_trie_unwind_marker(
-            &MockMetadataProvider(None),
-            Some(ahead_finish_checkpoint),
-        );
+        let result =
+            get_partial_trie_unwind_marker(&MockProvider(None, Some(ahead_finish_checkpoint)));
         if partial_frontier.is_some() {
             let error = result.unwrap_err();
             assert!(error.to_string().contains("ahead of Finish"), "unexpected error: {error}");
@@ -1639,10 +1645,10 @@ mod tests {
     fn get_partial_trie_unwind_marker_rejects_invalid_persisted_marker() {
         let marker =
             PartialStateTrieUnwindMarker { finish_block_number: 42, partial_state_trie: 42 };
-        let error = get_partial_trie_unwind_marker(
-            &MockMetadataProvider(Some(serde_json::to_vec(&marker).unwrap())),
+        let error = get_partial_trie_unwind_marker(&MockProvider(
+            Some(serde_json::to_vec(&marker).unwrap()),
             None,
-        )
+        ))
         .unwrap_err();
 
         assert!(error.to_string().contains("is not below original Finish"));
@@ -1650,8 +1656,6 @@ mod tests {
 
     #[test]
     fn get_partial_trie_unwind_marker_rejects_malformed_metadata() {
-        assert!(
-            get_partial_trie_unwind_marker(&MockMetadataProvider(Some(vec![0xff])), None).is_err()
-        );
+        assert!(get_partial_trie_unwind_marker(&MockProvider(Some(vec![0xff]), None)).is_err());
     }
 }
