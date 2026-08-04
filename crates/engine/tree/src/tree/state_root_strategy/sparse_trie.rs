@@ -22,7 +22,8 @@ use reth_trie_common::{MultiProofTargetsV2, ProofV2Target, ProofV2TargetParent};
 use reth_trie_parallel::{
     error::StateRootTaskError,
     proof_task::{
-        AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
+        AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofResultSender,
+        ProofWorkerHandle,
     },
 };
 use reth_trie_sparse::{
@@ -35,7 +36,7 @@ use tracing::{debug, debug_span, error, instrument, trace_span};
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
 pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaParallelSparseTrie> {
     /// Sender for proof results.
-    proof_result_tx: CrossbeamSender<ProofResultMessage>,
+    proof_result_tx: ProofResultSender,
     /// Receiver for proof results directly from workers.
     proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
     /// Receives updates from execution and prewarming.
@@ -136,13 +137,14 @@ where
         cancel_rx: CrossbeamReceiver<()>,
         final_hashed_state_tx: std::sync::mpsc::Sender<Arc<HashedPostState>>,
         proof_worker_handle: ProofWorkerHandle,
+        proof_result_tx: ProofResultSender,
+        proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
         metrics: SparseTrieTaskMetrics,
         trie: SparseStateTrie<A, S>,
         parent_state_root: B256,
         new_epoch: TrieNodeEpoch,
         chunk_size: usize,
     ) -> Self {
-        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
 
         let parent_span = tracing::Span::current();
@@ -557,12 +559,13 @@ where
         &mut self,
         message: ProofResultMessage,
     ) -> Result<DecodedMultiProofV2, StateRootTaskError> {
+        let result = message.result?;
         debug_assert!(
             self.in_flight_proof_batches > 0,
             "received proof result without an in-flight proof batch"
         );
         self.in_flight_proof_batches = self.in_flight_proof_batches.saturating_sub(1);
-        message.result
+        Ok(result)
     }
 
     fn process_new_updates(&mut self) -> SparseTrieResult<()> {
@@ -1117,13 +1120,19 @@ enum SparseTrieTaskMessage {
 mod tests {
     use super::*;
     use alloy_primitives::{keccak256, Address, B256, U256};
+    use reth_db_common::init::init_genesis;
     use reth_provider::{
         providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory,
-        ChainSpecProvider,
     };
     use reth_storage_overlay::OverlayManager;
     use reth_trie_parallel::proof_task::ProofTaskCtx;
     use reth_trie_sparse::ArenaParallelSparseTrie;
+
+    fn drain_sparse_trie_tasks(runtime: &Runtime) {
+        for task_name in ["trie-hashing", "storage-workers", "account-workers"] {
+            runtime.spawn_blocking_named(task_name, || {}).get();
+        }
+    }
 
     #[test]
     fn test_run_hashing_task_hashed_state_update_forwards() {
@@ -1222,14 +1231,19 @@ mod tests {
     fn run_returns_parent_root_without_revealing_blind_trie_when_no_state_updates() {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
-        let anchor_hash = provider_factory.chain_spec().genesis_hash();
+        let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
         let overlay_factory = OverlayStateProviderFactory::new(
             provider_factory,
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
                 .overlay_builder(anchor_hash),
         );
-        let proof_worker_handle =
-            ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);
+        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
+        let proof_worker_handle = ProofWorkerHandle::new(
+            &runtime,
+            ProofTaskCtx::new(overlay_factory),
+            false,
+            proof_result_tx.clone(),
+        );
 
         let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
         let trie = SparseStateTrie::default()
@@ -1246,6 +1260,8 @@ mod tests {
             cancel_rx,
             std::sync::mpsc::channel().0,
             proof_worker_handle,
+            proof_result_tx,
+            proof_result_rx,
             SparseTrieTaskMetrics::default(),
             trie,
             parent_state_root,
@@ -1261,20 +1277,28 @@ mod tests {
         assert_eq!(outcome.state_root, parent_state_root);
         assert!(outcome.trie_updates.is_empty());
         assert!(task.trie.state_trie_ref().is_none(), "blind trie should not be revealed");
+
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
     }
 
     #[test]
     fn stall_check_waits_for_in_flight_proofs_then_reports_pending_updates() {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
-        let anchor_hash = provider_factory.chain_spec().genesis_hash();
+        let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
         let overlay_factory = OverlayStateProviderFactory::new(
             provider_factory,
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
                 .overlay_builder(anchor_hash),
         );
-        let proof_worker_handle =
-            ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);
+        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
+        let proof_worker_handle = ProofWorkerHandle::new(
+            &runtime,
+            ProofTaskCtx::new(overlay_factory),
+            false,
+            proof_result_tx.clone(),
+        );
 
         let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
         let trie = SparseStateTrie::default()
@@ -1290,6 +1314,8 @@ mod tests {
             cancel_rx,
             std::sync::mpsc::channel().0,
             proof_worker_handle,
+            proof_result_tx,
+            proof_result_rx,
             SparseTrieTaskMetrics::default(),
             trie,
             B256::from([0x55; 32]),
@@ -1339,20 +1365,28 @@ mod tests {
         assert!(!error.contains("pending_storage_leaves"));
         assert!(!error.contains("pending_account_updates"));
         assert!(!error.contains(&format!("{slot:?}")));
+
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
     }
 
     #[test]
     fn run_errors_when_cancel_guard_drops_before_updates_finish() {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
-        let anchor_hash = provider_factory.chain_spec().genesis_hash();
+        let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
         let overlay_factory = OverlayStateProviderFactory::new(
             provider_factory,
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
                 .overlay_builder(anchor_hash),
         );
-        let proof_worker_handle =
-            ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);
+        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
+        let proof_worker_handle = ProofWorkerHandle::new(
+            &runtime,
+            ProofTaskCtx::new(overlay_factory),
+            false,
+            proof_result_tx.clone(),
+        );
 
         let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
         let trie = SparseStateTrie::default()
@@ -1368,6 +1402,8 @@ mod tests {
             cancel_rx,
             std::sync::mpsc::channel().0,
             proof_worker_handle,
+            proof_result_tx,
+            proof_result_rx,
             SparseTrieTaskMetrics::default(),
             trie,
             B256::from([0x55; 32]),
@@ -1383,20 +1419,27 @@ mod tests {
         assert!(matches!(error, StateRootTaskError::Canceled));
 
         drop(updates_tx);
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
     }
 
     #[test]
     fn run_ignores_hints_queued_after_updates_finish() {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
-        let anchor_hash = provider_factory.chain_spec().genesis_hash();
+        let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
         let overlay_factory = OverlayStateProviderFactory::new(
             provider_factory,
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
                 .overlay_builder(anchor_hash),
         );
-        let proof_worker_handle =
-            ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);
+        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
+        let proof_worker_handle = ProofWorkerHandle::new(
+            &runtime,
+            ProofTaskCtx::new(overlay_factory),
+            false,
+            proof_result_tx.clone(),
+        );
 
         let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
         let trie = SparseStateTrie::default()
@@ -1412,6 +1455,8 @@ mod tests {
             cancel_rx,
             std::sync::mpsc::channel().0,
             proof_worker_handle,
+            proof_result_tx,
+            proof_result_rx,
             SparseTrieTaskMetrics::default(),
             trie,
             B256::from([0x55; 32]),
@@ -1441,5 +1486,8 @@ mod tests {
         handle.join().unwrap();
 
         assert!(result.expect("state root task stalled on a late hint").is_ok());
+
+        drop(updates_tx);
+        drain_sparse_trie_tasks(&runtime);
     }
 }

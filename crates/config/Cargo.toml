@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 # reth
+reth-network-peers.workspace = true
 reth-network-types.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
@@ -33,6 +34,7 @@ serde = [
     "dep:serde",
     "dep:toml",
     "dep:humantime-serde",
+    "reth-network-peers/secp256k1",
     "reth-network-types/serde",
     "reth-prune-types/serde",
     "reth-stages-types/serde",
@@ -42,5 +44,4 @@ serde = [
 
 [dev-dependencies]
 tempfile.workspace = true
-reth-network-peers.workspace = true
 alloy-primitives = { workspace = true, features = ["getrandom"] }

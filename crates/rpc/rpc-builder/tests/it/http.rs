@@ -40,6 +40,15 @@ fn is_unimplemented(err: jsonrpsee::core::client::Error) -> bool {
     }
 }
 
+fn is_invalid_params(err: &jsonrpsee::core::client::Error) -> bool {
+    match err {
+        jsonrpsee::core::client::Error::Call(error_obj) => {
+            error_obj.code() == ErrorCode::InvalidParams.code()
+        }
+        _ => false,
+    }
+}
+
 async fn test_rpc_call_ok<R>(client: &HttpClient, method_name: &str, params: ArrayParams)
 where
     R: DeserializeOwned,
@@ -381,6 +390,18 @@ where
     )
     .await
     .unwrap();
+    let proofs = EthApiClient::<
+        TransactionRequest,
+        Transaction,
+        Block,
+        Receipt,
+        Header,
+        TransactionSigned,
+    >::get_multi_proof(client, vec![(address, vec![B256::ZERO])], None)
+    .await
+    .unwrap();
+    assert_eq!(proofs.len(), 1);
+    assert_eq!(proofs[0].address, address);
 
     // Unimplemented
     assert!(
@@ -474,6 +495,28 @@ where
     )
     .await
     .unwrap_err();
+
+    for block_id in [
+        BlockId::number(0),
+        BlockId::latest(),
+        BlockId::hash(B256::ZERO),
+        BlockId::hash_canonical(B256::ZERO),
+    ] {
+        let err =
+            DebugApiClient::<TransactionRequest>::debug_execution_witness(client, block_id, None)
+                .await
+                .unwrap_err();
+        assert!(!is_invalid_params(&err));
+    }
+
+    let err = DebugApiClient::<TransactionRequest>::debug_execution_witness_by_block_hash(
+        client,
+        B256::ZERO,
+        Some(Default::default()),
+    )
+    .await
+    .unwrap_err();
+    assert!(!is_invalid_params(&err));
 }
 
 async fn test_basic_net_calls<C>(client: &C)

@@ -1132,7 +1132,7 @@ mod tests {
         let factory = historical_account_range_factory();
         let provider = factory.provider().unwrap();
 
-        let historical = HistoricalStateProviderRef::new(&provider, 2, ChangesetCache::new());
+        let historical = HistoricalStateProviderRef::new(&provider, 2, OverlayManager::default());
         let first_page = historical.account_range(B256::ZERO, 1).unwrap();
         let second_page = historical.account_range(first_page.next_key.unwrap(), 1).unwrap();
         assert!(first_page.accounts[0].hash < second_page.accounts[0].hash);
@@ -1156,7 +1156,7 @@ mod tests {
         let factory = historical_account_range_factory();
         let provider = factory.provider().unwrap();
 
-        let page = HistoricalStateProviderRef::new(&provider, 1, ChangesetCache::new())
+        let page = HistoricalStateProviderRef::new(&provider, 1, OverlayManager::default())
             .account_range(B256::ZERO, 10)
             .unwrap();
 
