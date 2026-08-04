@@ -1,11 +1,18 @@
 use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, TrieTableAdapter};
-use alloy_primitives::{keccak256, map::hash_map, Address, BlockNumber, B256};
+use alloy_primitives::{
+    keccak256,
+    map::{hash_map, B256Map},
+    Address, BlockNumber, B256,
+};
 use reth_db_api::{models::BlockNumberAddress, transaction::DbTx};
 use reth_execution_errors::StorageRootError;
 use reth_storage_api::{BlockNumReader, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory, HashedPostState, HashedStorage, StorageRoot,
+    hashed_cursor::HashedPostStateCursorFactory,
+    trie_cursor::InMemoryTrieCursorFactory,
+    updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
+    HashedPostState, HashedStorage, StorageRoot,
 };
 
 #[cfg(feature = "metrics")]
@@ -24,6 +31,15 @@ pub trait DatabaseStorageRoot<'a, TX> {
         tx: &'a TX,
         address: Address,
         hashed_storage: HashedStorage,
+    ) -> Result<B256, StorageRootError>;
+
+    /// Calculates the storage root for this [`HashedStorage`] and returns it, overlaying the
+    /// provided in-memory storage trie nodes on top of the database trie cursor.
+    fn overlay_root_from_nodes(
+        tx: &'a TX,
+        address: Address,
+        hashed_storage: HashedStorage,
+        nodes: &StorageTrieUpdatesSorted,
     ) -> Result<B256, StorageRootError>;
 }
 
@@ -92,6 +108,34 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStorageRoot<'a, TX>
             HashedPostState::from_hashed_storage(keccak256(address), hashed_storage).into_sorted();
         StorageRoot::new(
             DatabaseTrieCursorFactory::<_, A>::new(tx),
+            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
+            address,
+            prefix_set,
+            #[cfg(feature = "metrics")]
+            TrieRootMetrics::new(reth_trie::TrieType::Storage),
+        )
+        .root()
+    }
+
+    fn overlay_root_from_nodes(
+        tx: &'a TX,
+        address: Address,
+        hashed_storage: HashedStorage,
+        nodes: &StorageTrieUpdatesSorted,
+    ) -> Result<B256, StorageRootError> {
+        let prefix_set = hashed_storage.construct_prefix_set().freeze();
+        let hashed_address = keccak256(address);
+        let state_sorted =
+            HashedPostState::from_hashed_storage(hashed_address, hashed_storage).into_sorted();
+        let trie_updates = TrieUpdatesSorted::new(
+            Vec::new(),
+            B256Map::from_iter([(hashed_address, nodes.clone())]),
+        );
+        StorageRoot::new(
+            InMemoryTrieCursorFactory::new(
+                DatabaseTrieCursorFactory::<_, A>::new(tx),
+                &trie_updates,
+            ),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
             address,
             prefix_set,

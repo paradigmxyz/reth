@@ -60,6 +60,15 @@ impl reth_storage_api::StorageRootProvider for StateProviderTraitObjWrapper {
         self.0.storage_root(address, hashed_storage)
     }
 
+    fn storage_root_from_nodes(
+        &self,
+        address: Address,
+        hashed_storage: HashedStorage,
+        nodes: &reth_trie::updates::StorageTrieUpdatesSorted,
+    ) -> ProviderResult<B256> {
+        self.0.storage_root_from_nodes(address, hashed_storage, nodes)
+    }
+
     fn storage_proof(
         &self,
         address: Address,
@@ -69,6 +78,16 @@ impl reth_storage_api::StorageRootProvider for StateProviderTraitObjWrapper {
         self.0.storage_proof(address, slot, hashed_storage)
     }
 
+    fn storage_proof_from_nodes(
+        &self,
+        address: Address,
+        slot: B256,
+        hashed_storage: HashedStorage,
+        nodes: &reth_trie::updates::StorageTrieUpdatesSorted,
+    ) -> ProviderResult<reth_trie::StorageProof> {
+        self.0.storage_proof_from_nodes(address, slot, hashed_storage, nodes)
+    }
+
     fn storage_multiproof(
         &self,
         address: Address,
@@ -76,6 +95,16 @@ impl reth_storage_api::StorageRootProvider for StateProviderTraitObjWrapper {
         hashed_storage: HashedStorage,
     ) -> ProviderResult<reth_trie::StorageMultiProof> {
         self.0.storage_multiproof(address, slots, hashed_storage)
+    }
+
+    fn storage_multiproof_from_nodes(
+        &self,
+        address: Address,
+        slots: &[B256],
+        hashed_storage: HashedStorage,
+        nodes: &reth_trie::updates::StorageTrieUpdatesSorted,
+    ) -> ProviderResult<reth_trie::StorageMultiProof> {
+        self.0.storage_multiproof_from_nodes(address, slots, hashed_storage, nodes)
     }
 }
 

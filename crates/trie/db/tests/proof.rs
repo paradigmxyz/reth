@@ -4,11 +4,22 @@ use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::{address, b256, keccak256, Address, Bytes, B256, U256};
 use alloy_rlp::EMPTY_STRING_CODE;
 use reth_chainspec::{Chain, ChainSpec, HOLESKY, MAINNET};
-use reth_primitives_traits::Account;
-use reth_provider::test_utils::{create_test_provider_factory, insert_genesis};
+use reth_db::tables;
+use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
+use reth_primitives_traits::{Account, StorageEntry};
+use reth_provider::{
+    test_utils::{create_test_provider_factory, insert_genesis},
+    StorageTrieWriter,
+};
 use reth_storage_api::StorageSettingsCache;
-use reth_trie::{proof::Proof, AccountProof, Nibbles, StorageProof};
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseProof, DatabaseTrieCursorFactory};
+use reth_trie::{
+    proof::{Proof, StorageProof as StorageProofCalculator},
+    AccountProof, HashedStorage, Nibbles, StorageProof, StorageRoot,
+};
+use reth_trie_db::{
+    DatabaseHashedCursorFactory, DatabaseProof, DatabaseStorageProof, DatabaseStorageRoot,
+    DatabaseTrieCursorFactory,
+};
 use std::{
     str::FromStr,
     sync::{Arc, LazyLock},
@@ -16,6 +27,13 @@ use std::{
 
 type DbProof<'a, TX, A> =
     Proof<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
+type DbStorageProof<'a, TX, A> = StorageProofCalculator<
+    'static,
+    DatabaseTrieCursorFactory<&'a TX, A>,
+    DatabaseHashedCursorFactory<&'a TX>,
+>;
+type DbStorageRoot<'a, TX, A> =
+    StorageRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
 
 /*
     World State (sampled from <https://ethereum.stackexchange.com/questions/268/ethereum-block-architecture/6413#6413>)
@@ -311,4 +329,101 @@ fn holesky_deposit_contract_proof() {
         similar_asserts::assert_eq!(account_proof, expected);
         assert_eq!(account_proof.verify(root), Ok(()));
     });
+}
+
+#[test]
+fn storage_overlay_from_nodes_matches_db_overlay() {
+    let factory = create_test_provider_factory();
+    let provider_rw = factory.provider_rw().unwrap();
+    let tx = provider_rw.tx_ref();
+
+    let address = address!("0x0000000000000000000000000000000000000042");
+    let hashed_address = keccak256(address);
+    let slot_a = b256!("0x50000000000000000000000000000004253371b55351a08cb3267d4d265530b6");
+    let slot_b = b256!("0x512428ed685fff57294d1a9cbb147b18ae5db9cf6ae4b312fa1946ba0561882e");
+    let slot_c = b256!("0x51e6784c736ef8548f856909870b38e49ef7a4e3e77e5e945e0d5e6fcaa3037f");
+    let slot_d = b256!("0x00deb8486ad8edccfdedfc07109b3667b38a03a8009271aac250cce062d90917");
+
+    let initial_storage = HashedStorage::from_iter(
+        false,
+        [(slot_a, U256::from(1)), (slot_b, U256::from(2)), (slot_c, U256::from(3))],
+    );
+    let overlay_storage =
+        HashedStorage::from_iter(false, [(slot_b, U256::from(22)), (slot_d, U256::from(44))]);
+
+    let mut hashed_storage_cursor = tx.cursor_dup_write::<tables::HashedStorages>().unwrap();
+    for (&key, &value) in &initial_storage.storage {
+        hashed_storage_cursor.upsert(hashed_address, &StorageEntry { key, value }).unwrap();
+    }
+
+    let (_, _, storage_updates) = reth_trie_db::with_adapter!(provider_rw, |A| {
+        DbStorageRoot::<'_, _, A>::from_tx_hashed(tx, hashed_address).root_with_updates().unwrap()
+    });
+    let storage_nodes = storage_updates.into_sorted();
+    provider_rw
+        .write_storage_trie_updates_sorted(core::iter::once((&hashed_address, &storage_nodes)))
+        .unwrap();
+
+    let expected_root = reth_trie_db::with_adapter!(provider_rw, |A| {
+        <DbStorageRoot<'_, _, A> as DatabaseStorageRoot<'_, _>>::overlay_root(
+            tx,
+            address,
+            overlay_storage.clone(),
+        )
+        .unwrap()
+    });
+    let actual_root = reth_trie_db::with_adapter!(provider_rw, |A| {
+        <DbStorageRoot<'_, _, A> as DatabaseStorageRoot<'_, _>>::overlay_root_from_nodes(
+            tx,
+            address,
+            overlay_storage.clone(),
+            &storage_nodes,
+        )
+        .unwrap()
+    });
+    assert_eq!(actual_root, expected_root);
+
+    let expected_proof = reth_trie_db::with_adapter!(provider_rw, |A| {
+        <DbStorageProof<'_, _, A> as DatabaseStorageProof<'_, _>>::overlay_storage_proof(
+            tx,
+            address,
+            slot_b,
+            overlay_storage.clone(),
+        )
+        .unwrap()
+    });
+    let actual_proof = reth_trie_db::with_adapter!(provider_rw, |A| {
+        <DbStorageProof<'_, _, A> as DatabaseStorageProof<'_, _>>::overlay_storage_proof_from_nodes(
+            tx,
+            address,
+            slot_b,
+            overlay_storage.clone(),
+            &storage_nodes,
+        )
+        .unwrap()
+    });
+    assert_eq!(actual_proof, expected_proof);
+    assert_eq!(actual_proof.verify(actual_root), Ok(()));
+
+    let slots = [slot_b, slot_d];
+    let expected_multiproof = reth_trie_db::with_adapter!(provider_rw, |A| {
+        <DbStorageProof<'_, _, A> as DatabaseStorageProof<'_, _>>::overlay_storage_multiproof(
+            tx,
+            address,
+            &slots,
+            overlay_storage.clone(),
+        )
+        .unwrap()
+    });
+    let actual_multiproof = reth_trie_db::with_adapter!(provider_rw, |A| {
+        <DbStorageProof<'_, _, A> as DatabaseStorageProof<'_, _>>::overlay_storage_multiproof_from_nodes(
+            tx,
+            address,
+            &slots,
+            overlay_storage,
+            &storage_nodes,
+        )
+        .unwrap()
+    });
+    assert_eq!(actual_multiproof, expected_multiproof);
 }
