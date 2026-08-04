@@ -34,7 +34,7 @@ use reth_eth_wire::{
 };
 use reth_eth_wire_types::{
     message::RequestPair, snap::SnapProtocolMessage, NewPooledTransactionHashes,
-    RawCapabilityMessage,
+    PooledTransactions, RawCapabilityMessage,
 };
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_api::{PeerRequest, RequestMessage};
@@ -352,6 +352,12 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             EthMessage::PooledTransactions(resp) => {
                 on_response!(resp, GetPooledTransactions)
             }
+            EthMessage::PooledTransactionsEth72(resp) => {
+                // Keep the existing transaction fetcher and request correlation version-neutral;
+                // the eth/72 wrapper only describes how this response was encoded on the wire.
+                let resp = resp.map(PooledTransactions::from);
+                on_response!(resp, GetPooledTransactions)
+            }
             EthMessage::GetNodeData(req) => {
                 on_request!(req, NodeData, GetNodeData)
             }
@@ -578,7 +584,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     fn handle_outgoing_response(&mut self, id: u64, resp: PeerResponseResult<N>) {
         match resp.try_into_message(id) {
             Ok(RequestMessage::Eth(msg)) => {
-                self.queued_outgoing.push_back(msg.into());
+                self.queued_outgoing.push_back(msg.map_versioned(self.conn.version()).into());
             }
             Ok(RequestMessage::Snap(msg)) => {
                 self.queued_outgoing.push_back(OutgoingMessage::Snap(msg));

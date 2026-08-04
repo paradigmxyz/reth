@@ -10,7 +10,7 @@ use super::{
     broadcast::NewBlockHashes, BlockAccessLists, BlockBodies, BlockHeaders, GetBlockAccessLists,
     GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts,
     GetReceipts70, NewPooledTransactionHashes66, NewPooledTransactionHashes68, NodeData,
-    PooledTransactions, Receipts, Status, StatusEth69, Transactions,
+    PooledTransactions, PooledTransactionsEth72, Receipts, Status, StatusEth69, Transactions,
 };
 use crate::{
     status::StatusMessage, BlockRangeUpdate, BroadcastPoolTransactions, Cells,
@@ -152,9 +152,15 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                 EthMessage::GetPooledTransactions(RequestPair::decode(buf)?)
             }
             EthMessageID::PooledTransactions => {
-                EthMessage::PooledTransactions(RequestPair::decode_with(buf, |buf| {
-                    PooledTransactions::decode_with_memory_budget(buf, tx_memory_budget)
-                })?)
+                if version >= EthVersion::Eth72 {
+                    EthMessage::PooledTransactionsEth72(RequestPair::decode_with(buf, |buf| {
+                        PooledTransactionsEth72::decode_with_memory_budget(buf, tx_memory_budget)
+                    })?)
+                } else {
+                    EthMessage::PooledTransactions(RequestPair::decode_with(buf, |buf| {
+                        PooledTransactions::decode_with_memory_budget(buf, tx_memory_budget)
+                    })?)
+                }
             }
             EthMessageID::GetNodeData => {
                 if version >= EthVersion::Eth67 {
@@ -358,6 +364,12 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
         serde(bound = "N::PooledTransaction: serde::Serialize + serde::de::DeserializeOwned")
     )]
     PooledTransactions(RequestPair<PooledTransactions<N::PooledTransaction>>),
+    /// Represents an eth/72 `PooledTransactions` response.
+    ///
+    /// This is kept separate from [`Self::PooledTransactions`] only to select the eth/72 wire
+    /// encoding. It uses the same protocol message ID and is normalized back to the regular typed
+    /// response after decoding.
+    PooledTransactionsEth72(RequestPair<PooledTransactionsEth72<N::PooledTransaction>>),
     /// Represents a `GetNodeData` request-response pair.
     GetNodeData(RequestPair<GetNodeData>),
     /// Represents a `NodeData` request-response pair.
@@ -426,7 +438,9 @@ impl<N: NetworkPrimitives> EthMessage<N> {
             Self::GetBlockBodies(_) => EthMessageID::GetBlockBodies,
             Self::BlockBodies(_) => EthMessageID::BlockBodies,
             Self::GetPooledTransactions(_) => EthMessageID::GetPooledTransactions,
-            Self::PooledTransactions(_) => EthMessageID::PooledTransactions,
+            Self::PooledTransactions(_) | Self::PooledTransactionsEth72(_) => {
+                EthMessageID::PooledTransactions
+            }
             Self::GetNodeData(_) => EthMessageID::GetNodeData,
             Self::NodeData(_) => EthMessageID::NodeData,
             Self::GetReceipts(_) | Self::GetReceipts70(_) => EthMessageID::GetReceipts,
@@ -460,6 +474,7 @@ impl<N: NetworkPrimitives> EthMessage<N> {
         matches!(
             self,
             Self::PooledTransactions(_) |
+                Self::PooledTransactionsEth72(_) |
                 Self::Receipts(_) |
                 Self::Receipts69(_) |
                 Self::Receipts70(_) |
@@ -481,6 +496,15 @@ impl<N: NetworkPrimitives> EthMessage<N> {
         // user-facing `PeerRequest` API unchanged.
         if version >= EthVersion::Eth70 {
             return match self {
+                Self::PooledTransactions(pair) if version >= EthVersion::Eth72 => {
+                    // The request/response API remains version-neutral. Only the final wire
+                    // representation changes for an eth/72 peer.
+                    let RequestPair { request_id, message } = pair;
+                    Self::PooledTransactionsEth72(RequestPair {
+                        request_id,
+                        message: PooledTransactionsEth72::from_transactions(message),
+                    })
+                }
                 Self::GetReceipts(pair) => {
                     let RequestPair { request_id, message } = pair;
                     let req = RequestPair {
@@ -516,6 +540,7 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::BlockBodies(bodies) => bodies.encode(out),
             Self::GetPooledTransactions(request) => request.encode(out),
             Self::PooledTransactions(transactions) => transactions.encode(out),
+            Self::PooledTransactionsEth72(transactions) => transactions.encode(out),
             Self::GetNodeData(request) => request.encode(out),
             Self::NodeData(data) => data.encode(out),
             Self::GetReceipts(request) => request.encode(out),
@@ -546,6 +571,7 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::BlockBodies(bodies) => bodies.length(),
             Self::GetPooledTransactions(request) => request.length(),
             Self::PooledTransactions(transactions) => transactions.length(),
+            Self::PooledTransactionsEth72(transactions) => transactions.length(),
             Self::GetNodeData(request) => request.length(),
             Self::NodeData(data) => data.length(),
             Self::GetReceipts(request) => request.length(),
