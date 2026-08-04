@@ -505,7 +505,11 @@ where
                 // Check if the block has been pruned (EIP-4444)
                 let earliest_block = self.provider().earliest_block_number()?;
                 if header.number() < earliest_block {
-                    return Err(EthApiError::PrunedHistoryUnavailable.into());
+                    return Err(EthApiError::PrunedHistoryUnavailable {
+                        requested: header.number(),
+                        earliest_available: earliest_block,
+                    }
+                    .into());
                 }
 
                 let mut all_logs = Vec::new();
@@ -592,7 +596,11 @@ where
                 // Check if the requested range overlaps with pruned history (EIP-4444)
                 let earliest_block = self.provider().earliest_block_number()?;
                 if from_block_number < earliest_block {
-                    return Err(EthApiError::PrunedHistoryUnavailable.into());
+                    return Err(EthApiError::PrunedHistoryUnavailable {
+                        requested: from_block_number,
+                        earliest_available: earliest_block,
+                    }
+                    .into());
                 }
 
                 self.get_logs_in_block_range(filter, from_block_number, to_block_number, limits)
