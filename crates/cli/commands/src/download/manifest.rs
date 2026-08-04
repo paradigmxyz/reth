@@ -329,8 +329,14 @@ impl SnapshotManifest {
             let selection = match mode {
                 None => ComponentSelection::All,
                 Some(PruneMode::Full) => ComponentSelection::Distance(minimum),
+                // Distances below the minimum are a pruner configuration error that
+                // prunes nothing, so all history is still present.
                 Some(PruneMode::Distance(distance)) => {
-                    ComponentSelection::Distance(distance.max(minimum))
+                    if distance >= minimum {
+                        ComponentSelection::Distance(distance)
+                    } else {
+                        ComponentSelection::All
+                    }
                 }
                 // The pruner only activates once the cutoff is at least the minimum
                 // distance behind the tip; before that nothing has been pruned.
@@ -1086,10 +1092,10 @@ mod tests {
             selections.get(&SnapshotComponentType::Transactions),
             Some(&ComponentSelection::Since(42))
         );
-        // Distance(10) is floored to the default minimum pruning distance.
+        // Distance(10) is a pruner configuration error that prunes nothing.
         assert_eq!(
             selections.get(&SnapshotComponentType::Receipts),
-            Some(&ComponentSelection::Distance(10_064))
+            Some(&ComponentSelection::All)
         );
         assert_eq!(
             selections.get(&SnapshotComponentType::AccountChangesets),
@@ -1128,9 +1134,11 @@ mod tests {
             selections.get(&SnapshotComponentType::Transactions),
             Some(&ComponentSelection::Distance(50_000))
         );
+        // The raised minimum turns Distance(20_000) into a configuration error
+        // that prunes nothing.
         assert_eq!(
             selections.get(&SnapshotComponentType::Receipts),
-            Some(&ComponentSelection::Distance(50_000))
+            Some(&ComponentSelection::All)
         );
     }
 
