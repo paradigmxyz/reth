@@ -507,6 +507,8 @@ where
         BlockNumHash::new(anchor_number, anchor_hash)
     };
 
+    finish_seen |= anchor_hash == finish_hash;
+
     if anchor.number > partial_state_trie {
         return Err(ProviderError::other(Error::other(format!(
                 "overlay anchor #{} ({}) is after partial state trie frontier #{} ({}); missing trie updates for blocks #{}..=#{}",
@@ -669,6 +671,24 @@ mod tests {
                     .collect::<Vec<_>>()
             );
         }
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn managed_overlay_skips_when_finish_is_the_anchor() {
+        let (factory, blocks) = setup_frontiers(3, 3);
+        let manager = OverlayManager::default();
+        manager.insert_block(blocks[4].clone());
+        let provider = factory.provider().unwrap();
+
+        let overlay = manager
+            .overlay_builder(blocks[4].recovered_block().hash())
+            .with_skip_overlay_for_reused_sparse_trie(blocks[3].recovered_block().hash())
+            .build_overlay(&provider)
+            .unwrap();
+
+        assert!(overlay.hashed_post_state.is_empty());
+        assert!(overlay.trie_updates.is_empty());
     }
 
     #[cfg(feature = "partial-persistence")]
