@@ -34,7 +34,8 @@ where
 impl<N, P, Evm> Handle<N, P, Evm>
 where
     N: NodePrimitives,
-    P: BlockReader
+    P: reth_provider::DatabaseProviderFactory
+        + BlockReader
         + reth_provider::PruneCheckpointReader
         + reth_provider::StageCheckpointReader
         + StateProviderFactory
@@ -42,6 +43,13 @@ where
         + Clone
         + Send
         + Sync
+        + 'static,
+    P::Provider: reth_provider::BlockHashReader
+        + reth_provider::BlockNumReader
+        + reth_provider::PruneCheckpointReader
+        + reth_provider::StageCheckpointReader
+        + reth_provider::StorageSettingsCache
+        + reth_provider::TryIntoHistoricalStateProvider
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {

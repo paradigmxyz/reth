@@ -29,11 +29,12 @@ use reth_primitives_traits::{
     FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
 use reth_provider::{
-    BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockNumReader, BlockReader,
-    ChangeSetReader, DatabaseProviderFactory, HashedPostStateProvider, ProviderError,
-    PruneCheckpointReader, SaveBlocksInput, StageCheckpointReader, StateProviderBox,
-    StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
-    TransactionVariant,
+    BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockHashReader, BlockNumReader,
+    BlockReader, ChangeSetReader, DatabaseProviderFactory, HashedPostStateProvider,
+    LatestStateProvider, ProviderError, PruneCheckpointReader, SaveBlocksInput,
+    StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
+    StorageChangeSetReader, StorageSettingsCache, TransactionVariant,
+    TryIntoHistoricalStateProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
@@ -128,19 +129,21 @@ impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
 
 impl<N: NodePrimitives, P> StateProviderBuilder<N, P>
 where
-    P: BlockReader
+    P: DatabaseProviderFactory,
+    P::Provider: BlockHashReader
         + BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
-        + StateProviderFactory
-        + StateReader
-        + Clone,
+        + StorageSettingsCache
+        + TryIntoHistoricalStateProvider
+        + 'static,
 {
     /// Creates a new state provider from this builder.
     pub fn build(&self) -> ProviderResult<StateProviderBox> {
         let overlay_builder = self.overlay_manager.overlay_builder(self.parent_hash);
-        let anchor = overlay_builder.anchor_at_parent(&self.provider_factory)?;
-        let (provider, overlay) = match anchor {
+        let provider = self.provider_factory.database_provider_ro()?;
+        let anchor = overlay_builder.anchor_at_parent(&provider)?;
+        let (provider, overlay): (StateProviderBox, _) = match anchor {
             reth_storage_overlay::AnchorForParent::NoReverts { anchor, overlay } => {
                 debug!(
                     target: "engine::tree",
@@ -148,7 +151,7 @@ where
                     ?anchor,
                     "creating state provider from latest state"
                 );
-                (self.provider_factory.latest()?, overlay)
+                (Box::new(LatestStateProvider::new(provider)), overlay)
             }
             reth_storage_overlay::AnchorForParent::RevertsRequired { anchor, overlay, .. } => {
                 debug!(
@@ -157,7 +160,7 @@ where
                     ?anchor,
                     "creating state provider from historical state"
                 );
-                (self.provider_factory.history_by_block_number(anchor.number)?, overlay)
+                (provider.try_into_history_at_block(anchor.number)?, overlay)
             }
         };
         Ok(Box::new(MemoryOverlayStateProvider::new(provider, overlay)))
@@ -424,10 +427,15 @@ where
         + Clone
         + 'static,
     P::Provider: BlockReader<Block = N::Block, Header = N::BlockHeader>
+        + BlockHashReader
+        + BlockNumReader
+        + PruneCheckpointReader
         + StageCheckpointReader
         + ChangeSetReader
         + StorageChangeSetReader
-        + StorageSettingsCache,
+        + StorageSettingsCache
+        + TryIntoHistoricalStateProvider
+        + 'static,
     C: ConfigureEvm<Primitives = N> + 'static,
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
     V: EngineValidator<T> + WaitForCaches,

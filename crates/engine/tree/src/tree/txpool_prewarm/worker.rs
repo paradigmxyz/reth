@@ -63,12 +63,20 @@ where
 impl<N, P, Evm> Worker<N, P, Evm>
 where
     N: NodePrimitives,
-    P: BlockReader
+    P: reth_provider::DatabaseProviderFactory
+        + BlockReader
         + reth_provider::PruneCheckpointReader
         + reth_provider::StageCheckpointReader
         + StateProviderFactory
         + StateReader
         + Clone,
+    P::Provider: reth_provider::BlockHashReader
+        + reth_provider::BlockNumReader
+        + reth_provider::PruneCheckpointReader
+        + reth_provider::StageCheckpointReader
+        + reth_provider::StorageSettingsCache
+        + reth_provider::TryIntoHistoricalStateProvider
+        + 'static,
     Evm: ConfigureEvm<Primitives = N>,
 {
     pub(super) fn new(

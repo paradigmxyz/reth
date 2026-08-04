@@ -302,13 +302,16 @@ impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
 where
     N: NodePrimitives,
     P: DatabaseProviderFactory<
-            Provider: BlockReader
+            Provider: reth_provider::BlockHashReader
+                          + BlockReader
                           + StageCheckpointReader
                           + PruneCheckpointReader
                           + ChangeSetReader
                           + StorageChangeSetReader
                           + BlockNumReader
-                          + StorageSettingsCache,
+                          + StorageSettingsCache
+                          + reth_provider::TryIntoHistoricalStateProvider
+                          + 'static,
         > + BlockReader<Header = N::BlockHeader>
         + ChangeSetReader
         + BlockNumReader
@@ -1779,13 +1782,16 @@ pub trait EngineValidator<
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
 where
     P: DatabaseProviderFactory<
-            Provider: BlockReader
+            Provider: reth_provider::BlockHashReader
+                          + BlockReader
                           + StageCheckpointReader
                           + PruneCheckpointReader
                           + ChangeSetReader
                           + StorageChangeSetReader
                           + BlockNumReader
-                          + StorageSettingsCache,
+                          + StorageSettingsCache
+                          + reth_provider::TryIntoHistoricalStateProvider
+                          + 'static,
         > + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader

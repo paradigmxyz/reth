@@ -172,12 +172,20 @@ where
         parallel_bal_execution: bool,
     ) -> IteratorPayloadHandle<Evm, I>
     where
-        P: BlockReader
+        P: reth_provider::DatabaseProviderFactory
+            + BlockReader
             + reth_provider::PruneCheckpointReader
             + reth_provider::StageCheckpointReader
             + StateProviderFactory
             + StateReader
             + Clone
+            + 'static,
+        P::Provider: reth_provider::BlockHashReader
+            + reth_provider::BlockNumReader
+            + reth_provider::PruneCheckpointReader
+            + reth_provider::StageCheckpointReader
+            + reth_provider::StorageSettingsCache
+            + reth_provider::TryIntoHistoricalStateProvider
             + 'static,
     {
         let (prewarm_rx, execution_rx) =
@@ -342,12 +350,20 @@ where
         parallel_bal_execution: bool,
     ) -> CacheTaskHandle<<Evm::Primitives as NodePrimitives>::Receipt>
     where
-        P: BlockReader
+        P: reth_provider::DatabaseProviderFactory
+            + BlockReader
             + reth_provider::PruneCheckpointReader
             + reth_provider::StageCheckpointReader
             + StateProviderFactory
             + StateReader
             + Clone
+            + 'static,
+        P::Provider: reth_provider::BlockHashReader
+            + reth_provider::BlockNumReader
+            + reth_provider::PruneCheckpointReader
+            + reth_provider::StageCheckpointReader
+            + reth_provider::StorageSettingsCache
+            + reth_provider::TryIntoHistoricalStateProvider
             + 'static,
     {
         // Each mode carries the capability its producers use; the rest is dropped here, so
