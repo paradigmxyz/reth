@@ -172,7 +172,13 @@ where
         parallel_bal_execution: bool,
     ) -> IteratorPayloadHandle<Evm, I>
     where
-        P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+        P: BlockReader
+            + reth_provider::PruneCheckpointReader
+            + reth_provider::StageCheckpointReader
+            + StateProviderFactory
+            + StateReader
+            + Clone
+            + 'static,
     {
         let (prewarm_rx, execution_rx) =
             self.spawn_tx_iterator(transactions, env.transaction_count, parallel_bal_execution);
@@ -336,7 +342,13 @@ where
         parallel_bal_execution: bool,
     ) -> CacheTaskHandle<<Evm::Primitives as NodePrimitives>::Receipt>
     where
-        P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+        P: BlockReader
+            + reth_provider::PruneCheckpointReader
+            + reth_provider::StageCheckpointReader
+            + StateProviderFactory
+            + StateReader
+            + Clone
+            + 'static,
     {
         // Each mode carries the capability its producers use; the rest is dropped here, so
         // unused capabilities do not keep the state-root task's update channel open.

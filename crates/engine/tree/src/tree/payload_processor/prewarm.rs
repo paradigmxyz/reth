@@ -90,7 +90,13 @@ where
 impl<N, P, Evm> PrewarmCacheTask<N, P, Evm>
 where
     N: NodePrimitives,
-    P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+    P: BlockReader
+        + reth_provider::PruneCheckpointReader
+        + reth_provider::StageCheckpointReader
+        + StateProviderFactory
+        + StateReader
+        + Clone
+        + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Initializes the task with the given transactions pending execution
@@ -561,7 +567,13 @@ type PrewarmEvmState<Evm> =
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
     N: NodePrimitives,
-    P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+    P: BlockReader
+        + reth_provider::PruneCheckpointReader
+        + reth_provider::StageCheckpointReader
+        + StateProviderFactory
+        + StateReader
+        + Clone
+        + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Creates a per-thread EVM for prewarming.

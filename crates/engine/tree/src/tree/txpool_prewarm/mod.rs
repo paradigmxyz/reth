@@ -34,7 +34,15 @@ where
 impl<N, P, Evm> Handle<N, P, Evm>
 where
     N: NodePrimitives,
-    P: BlockReader + StateProviderFactory + StateReader + Clone + Send + Sync + 'static,
+    P: BlockReader
+        + reth_provider::PruneCheckpointReader
+        + reth_provider::StageCheckpointReader
+        + StateProviderFactory
+        + StateReader
+        + Clone
+        + Send
+        + Sync
+        + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Spawns the long-lived worker, which owns its mutable read cache and starts a fresh one for

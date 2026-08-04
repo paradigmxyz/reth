@@ -821,6 +821,8 @@ where
     N: NodePrimitives,
     P: DatabaseProviderFactory
         + BlockReader<Header = N::BlockHeader>
+        + reth_provider::PruneCheckpointReader
+        + reth_provider::StageCheckpointReader
         + StateProviderFactory
         + StateReader
         + Clone
@@ -991,7 +993,15 @@ struct SynchronousStateRootJob<N: NodePrimitives, P> {
 impl<N, P> StateRootJob<N> for SynchronousStateRootJob<N, P>
 where
     N: NodePrimitives,
-    P: BlockReader + StateProviderFactory + StateReader + Clone + Send + Sync + 'static,
+    P: BlockReader
+        + reth_provider::PruneCheckpointReader
+        + reth_provider::StageCheckpointReader
+        + StateProviderFactory
+        + StateReader
+        + Clone
+        + Send
+        + Sync
+        + 'static,
 {
     fn name(&self) -> &'static str {
         "synchronous"
@@ -1024,8 +1034,15 @@ struct SparseTrieStateRootJob<N: NodePrimitives, P> {
 impl<N, P> SparseTrieStateRootJob<N, P>
 where
     N: NodePrimitives,
-    P: StateProviderFactory + Clone + Send + Sync + 'static,
-    P: BlockReader + StateReader,
+    P: BlockReader
+        + reth_provider::PruneCheckpointReader
+        + reth_provider::StageCheckpointReader
+        + StateProviderFactory
+        + StateReader
+        + Clone
+        + Send
+        + Sync
+        + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
         + Clone
         + Send
@@ -1131,7 +1148,15 @@ where
 impl<N, P> StateRootJob<N> for SparseTrieStateRootJob<N, P>
 where
     N: NodePrimitives,
-    P: BlockReader + StateProviderFactory + StateReader + Clone + Send + Sync + 'static,
+    P: BlockReader
+        + reth_provider::PruneCheckpointReader
+        + reth_provider::StageCheckpointReader
+        + StateProviderFactory
+        + StateReader
+        + Clone
+        + Send
+        + Sync
+        + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
         + Clone
         + Send
@@ -1232,7 +1257,12 @@ fn compare_trie_updates_with_serial<N, P>(
 ) -> bool
 where
     N: NodePrimitives,
-    P: BlockReader + StateProviderFactory + StateReader + Clone,
+    P: BlockReader
+        + reth_provider::PruneCheckpointReader
+        + reth_provider::StageCheckpointReader
+        + StateProviderFactory
+        + StateReader
+        + Clone,
     OverlayStateProviderFactory<P, N>:
         DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>,
 {
