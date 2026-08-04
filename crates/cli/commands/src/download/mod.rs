@@ -532,7 +532,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 
         let manifest = self.load_manifest(chain_id).await?;
         let repair_block = if self.repair_history {
-            Some(self.ensure_repairable::<N>(
+            Some(self.validate_repair_target::<N>(
                 &data_dir.db(),
                 &data_dir.static_files(),
                 manifest.block,
@@ -600,13 +600,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         let manifest = self.load_manifest(chain_id).await?;
         let repair_block = if self.repair_history {
             let data_dir = self.env.datadir.clone().resolve_datadir(self.env.chain.chain());
-            let block = self.repair_database_frontier(&data_dir.db())?;
-            if block > manifest.block {
-                eyre::bail!(
-                    "database is synced to block {block}, past the snapshot at block {}; use a newer snapshot",
-                    manifest.block
-                );
-            }
+            let block = self.validated_database_frontier(&data_dir.db())?;
+            check_snapshot_covers_frontier(block, manifest.block)?;
             Some(block)
         } else {
             None
@@ -619,8 +614,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         manifest: SnapshotManifest,
         repair_block: Option<u64>,
     ) -> Result<ResolvedDownload> {
-        let ResolvedComponents { mut selections, preset } =
-            self.resolve_components(&manifest, repair_block)?;
+        let ResolvedComponents { mut selections, preset } = match repair_block {
+            Some(block) => self.resolve_repair_components(&manifest, block)?,
+            None => self.resolve_components(&manifest)?,
+        };
 
         if matches!(preset, Some(SelectionPreset::Archive)) {
             inject_archive_only_components(&mut selections, &manifest, !self.without_rocksdb);
@@ -688,19 +685,15 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         Ok(())
     }
 
-    /// Validates that the existing database can be repaired from the snapshot.
-    fn ensure_repairable<N: NodeTypes>(
+    /// Validates the repair target and returns the database frontier.
+    fn validate_repair_target<N: NodeTypes>(
         &self,
         db_path: &Path,
         static_files_path: &Path,
         snapshot_block: u64,
     ) -> Result<u64> {
-        let synced_block = self.repair_database_frontier(db_path)?;
-        if synced_block > snapshot_block {
-            eyre::bail!(
-                "database is synced to block {synced_block}, past the snapshot at block {snapshot_block}; use a newer snapshot"
-            );
-        }
+        let synced_block = self.validated_database_frontier(db_path)?;
+        check_snapshot_covers_frontier(synced_block, snapshot_block)?;
 
         // Jars are written before checkpoints commit, so after a crash they can hold
         // blocks the checkpoints don't know about; the snapshot must cover those too.
@@ -725,7 +718,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
     }
 
     /// Returns the database block frontier after validating its persisted storage layout.
-    fn repair_database_frontier(&self, db_path: &Path) -> Result<u64> {
+    fn validated_database_frontier(&self, db_path: &Path) -> Result<u64> {
         let db = open_db_read_only(db_path, self.env.db.database_args())?;
         let tx = db.tx()?;
 
@@ -752,33 +745,31 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         Ok(synced_block)
     }
 
-    /// Determines which components to download based on CLI flags or interactive selection.
-    fn resolve_components(
+    /// Resolves repair selections from the node's prune config at the database frontier.
+    fn resolve_repair_components(
         &self,
         manifest: &SnapshotManifest,
-        repair_block: Option<u64>,
+        repair_block: u64,
     ) -> Result<ResolvedComponents> {
-        let available = |ty: SnapshotComponentType| manifest.component(ty).is_some();
-
-        if self.repair_history {
-            let data_dir = self.env.datadir.clone().resolve_datadir(self.env.chain.chain());
-            let config_path = self.env.config.clone().unwrap_or_else(|| data_dir.config());
-            // Repair must read the prune modes the node actually runs with;
-            // `Config::from_path` would silently create a default config here.
-            if !config_path.try_exists()? {
-                eyre::bail!(
-                    "--repair-history requires an existing config at {}",
-                    config_path.display()
-                );
-            }
-            let config = Config::from_path(&config_path).wrap_err_with(|| {
-                format!("Failed to load config from {}", config_path.display())
-            })?;
-            let repair_block = repair_block
-                .ok_or_else(|| eyre::eyre!("repair database frontier was not resolved"))?;
-            let selections = manifest.repair_history_selections(&config, repair_block)?;
-            return Ok(ResolvedComponents { selections, preset: None });
+        let data_dir = self.env.datadir.clone().resolve_datadir(self.env.chain.chain());
+        let config_path = self.env.config.clone().unwrap_or_else(|| data_dir.config());
+        // Repair must read the prune modes the node actually runs with;
+        // `Config::from_path` would silently create a default config here.
+        if !config_path.try_exists()? {
+            eyre::bail!(
+                "--repair-history requires an existing config at {}",
+                config_path.display()
+            );
         }
+        let config = Config::from_path(&config_path)
+            .wrap_err_with(|| format!("Failed to load config from {}", config_path.display()))?;
+        let selections = manifest.repair_history_selections(&config, repair_block)?;
+        Ok(ResolvedComponents { selections, preset: None })
+    }
+
+    /// Determines which components to download based on CLI flags or interactive selection.
+    fn resolve_components(&self, manifest: &SnapshotManifest) -> Result<ResolvedComponents> {
+        let available = |ty: SnapshotComponentType| manifest.component(ty).is_some();
 
         // --archive/--all: everything available as All
         if self.archive {
@@ -1090,6 +1081,16 @@ fn inject_archive_only_components(
 }
 
 /// Returns `true` when RocksDB-backed index stages should be reset after download.
+/// Rejects snapshots that predate the database frontier.
+fn check_snapshot_covers_frontier(synced_block: u64, snapshot_block: u64) -> Result<()> {
+    if synced_block > snapshot_block {
+        eyre::bail!(
+            "database is synced to block {synced_block}, past the snapshot at block {snapshot_block}; use a newer snapshot"
+        );
+    }
+    Ok(())
+}
+
 fn should_reset_index_stage_checkpoints(
     selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
 ) -> bool {
@@ -1438,13 +1439,13 @@ mod tests {
             components: BTreeMap::new(),
         };
 
-        let err = args.resolve_components(&manifest, None).err().unwrap();
+        let err = args.resolve_repair_components(&manifest, 0).err().unwrap();
         assert!(err.to_string().contains("requires an existing config"));
         assert!(!temp.path().join("reth.toml").exists());
     }
 
     #[test]
-    fn ensure_repairable_validates_layout_and_frontier() {
+    fn validate_repair_target_checks_layout_and_frontier() {
         let temp = tempfile::tempdir().unwrap();
         let db_path = temp.path().join("db");
         let static_files_path = temp.path().join("static_files");
@@ -1458,7 +1459,7 @@ mod tests {
         // A database without persisted storage settings is treated as the legacy layout.
         drop(init_db(&db_path, args.env.db.database_args()).unwrap());
         let err = args
-            .ensure_repairable::<MockNodeTypes>(&db_path, &static_files_path, 100)
+            .validate_repair_target::<MockNodeTypes>(&db_path, &static_files_path, 100)
             .err()
             .unwrap();
         assert!(err.to_string().contains("v2 storage layout"));
@@ -1480,12 +1481,12 @@ mod tests {
         }
 
         let err = args
-            .ensure_repairable::<MockNodeTypes>(&db_path, &static_files_path, 100)
+            .validate_repair_target::<MockNodeTypes>(&db_path, &static_files_path, 100)
             .err()
             .unwrap();
         assert!(err.to_string().contains("past the snapshot"));
 
-        args.ensure_repairable::<MockNodeTypes>(&db_path, &static_files_path, 200).unwrap();
+        args.validate_repair_target::<MockNodeTypes>(&db_path, &static_files_path, 200).unwrap();
     }
 
     #[test]
