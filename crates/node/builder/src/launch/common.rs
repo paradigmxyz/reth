@@ -570,7 +570,7 @@ where
         if partial_trie_unwind_target.is_some() || storage_unwind.is_some() {
             let build_unwind_pipeline = |walk_all_changed_branch_children| {
                 let (_tip_tx, tip_rx) = watch::channel(B256::ZERO);
-                let stages = DefaultStages::new(
+                let mut stages = DefaultStages::new(
                     factory.clone(),
                     tip_rx,
                     Arc::new(NoopConsensus::default()),
@@ -581,19 +581,14 @@ where
                     self.prune_modes(),
                     None,
                 )
-                .builder();
-                let stages = if walk_all_changed_branch_children {
-                    stages.set(MerkleStage::new_unwind(true))
-                } else {
-                    stages
-                };
-                let stages = stages.disable_all(disabled_stages);
-                let stages = if walk_all_changed_branch_children {
+                .builder()
+                .disable_all(disabled_stages);
+
+                if walk_all_changed_branch_children {
                     // Partial trie recovery is not complete until Merkle has unwound.
-                    stages.enable(StageId::MerkleUnwind)
-                } else {
-                    stages
-                };
+                    stages =
+                        stages.set(MerkleStage::new_unwind(true)).enable(StageId::MerkleUnwind);
+                }
 
                 PipelineBuilder::default().add_stages(stages).build(
                     factory.clone(),
