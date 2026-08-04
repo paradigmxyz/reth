@@ -38,6 +38,20 @@ pub trait StateRootProvider {
         &self,
         input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)>;
+
+    /// Consuming variant of [`StateRootProvider::state_root_with_updates`].
+    ///
+    /// Providers that cache expensive state, such as an aggregated in-memory [`TrieInput`],
+    /// can override this to move that state into the computation instead of cloning it.
+    /// The default implementation delegates to
+    /// [`StateRootProvider::state_root_with_updates`].
+    #[auto_impl(keep_default_for(&, Box, Arc))]
+    fn state_root_with_updates_consumed(
+        self: Box<Self>,
+        hashed_state: HashedPostState,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        (*self).state_root_with_updates(hashed_state)
+    }
 }
 
 /// A type that can compute the storage root for a given account.
