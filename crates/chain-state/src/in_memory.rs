@@ -698,6 +698,19 @@ impl<N: NodePrimitives> BlockState<N> {
         std::iter::successors(Some(self), |state| state.parent.as_deref())
     }
 
+    /// Returns an iterator over the entire in memory chain.
+    ///
+    /// The block state order is oldest to newest (lowest to highest), including self as the
+    /// last element.
+    ///
+    /// Note: this re-walks the parent links for every step and is quadratic in the chain
+    /// length; the in-memory chain is expected to be short, making this cheaper than
+    /// collecting the chain into a `Vec`.
+    pub fn chain_oldest_first(&self) -> impl Iterator<Item = &Self> {
+        let len = self.chain().count();
+        (0..len).rev().filter_map(move |i| self.chain().nth(i))
+    }
+
     /// Appends the parent chain of this [`BlockState`] to the given vector.
     ///
     /// Parents are appended in order from newest to oldest (highest to lowest).
@@ -1518,6 +1531,22 @@ mod tests {
         assert_eq!(block_state_chain[1].block().recovered_block().number, 1);
 
         let block_state_chain = chain[0].chain().collect::<Vec<_>>();
+        assert_eq!(block_state_chain.len(), 1);
+        assert_eq!(block_state_chain[0].block().recovered_block().number, 1);
+    }
+
+    #[test]
+    fn test_block_state_chain_oldest_first() {
+        let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
+        let chain = create_mock_state_chain(&mut test_block_builder, 3);
+
+        let block_state_chain = chain[2].chain_oldest_first().collect::<Vec<_>>();
+        assert_eq!(block_state_chain.len(), 3);
+        assert_eq!(block_state_chain[0].block().recovered_block().number, 1);
+        assert_eq!(block_state_chain[1].block().recovered_block().number, 2);
+        assert_eq!(block_state_chain[2].block().recovered_block().number, 3);
+
+        let block_state_chain = chain[0].chain_oldest_first().collect::<Vec<_>>();
         assert_eq!(block_state_chain.len(), 1);
         assert_eq!(block_state_chain[0].block().recovered_block().number, 1);
     }

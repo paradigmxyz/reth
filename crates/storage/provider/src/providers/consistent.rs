@@ -368,13 +368,13 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         S: FnOnce(&DatabaseProviderRO<N::DB, N>) -> ProviderResult<Option<R>>,
         M: Fn(usize, TxNumber, &BlockState<N::Primitives>) -> ProviderResult<Option<R>>,
     {
-        let in_mem_chain = self.head_block.iter().flat_map(|b| b.chain()).collect::<Vec<_>>();
         let provider = &self.storage_provider;
 
         // Get the last block number stored in the database which does NOT overlap with in-memory
         // chain.
-        let last_database_block_number = in_mem_chain
-            .last()
+        let last_database_block_number = self
+            .head_block
+            .as_ref()
             .map(|b| Ok(b.anchor().number))
             .unwrap_or_else(|| provider.last_block_number())?;
 
@@ -394,7 +394,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         }
 
         // Iterate from the lowest block to the highest
-        for block_state in in_mem_chain.iter().rev() {
+        for block_state in self.head_block.iter().flat_map(|b| b.chain_oldest_first()) {
             let executed_block = block_state.block_ref();
             let block = executed_block.recovered_block();
 
