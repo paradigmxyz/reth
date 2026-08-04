@@ -139,7 +139,7 @@ Networking:
           [default: 200]
 
       --trusted-peers <TRUSTED_PEERS>
-          Comma separated enode URLs of trusted peers for P2P connections.
+          Comma separated enode URLs or ENRs of trusted peers for P2P connections.
 
           --trusted-peers enode://abcd@192.168.0.1:30303
 
@@ -147,7 +147,7 @@ Networking:
           Connect to or accept from trusted peers only
 
       --bootnodes <BOOTNODES>
-          Comma separated enode URLs for P2P discovery bootstrap.
+          Comma separated enode URLs or ENRs for P2P discovery bootstrap.
 
           Will fall back to a network-specific default if not specified.
 
@@ -1014,6 +1014,13 @@ Engine:
       --engine.txpool-prewarming
           Enable best-effort txpool transaction prewarming between payloads
 
+          [env: RETH_ENGINE_TXPOOL_PREWARMING=]
+
+      --engine.sender-recovery-cache
+          Enable caching recovered transaction senders across transaction ingress and payload execution
+
+          [env: RETH_ENGINE_SENDER_RECOVERY_CACHE=]
+
       --engine.state-provider-metrics
           Enable state provider latency metrics. This allows the engine to collect and report stats about how long state provider calls took during execution, but this does introduce slight overhead to state provider calls
 
@@ -1104,7 +1111,7 @@ Engine:
       --engine.suppress-persistence-during-build
           Suppress persistence while building a payload.
 
-          When enabled, persistence cycles are deferred from the moment an FCU with payload attributes arrives until the next FCU clears the build. Useful on chains with short block times where persistence I/O can interfere with block building latency.
+          When enabled, persistence cycles are deferred while a payload build is active. Useful on chains with short block times where persistence I/O can interfere with block building latency.
 
       --engine.disable-bal-parallel-execution
           Disable BAL (Block Access List, EIP-7928) based parallel execution

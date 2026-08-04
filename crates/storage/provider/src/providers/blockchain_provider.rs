@@ -1,13 +1,13 @@
 use crate::{
     providers::{
-        ConsistentProvider, OverlayBuilder, OverlayStateProvider, OverlayStateProviderFactory,
-        ProviderNodeTypes, RocksDBProvider, StaticFileProvider, StaticFileProviderRWRefMut,
+        ConsistentProvider, OverlayStateProvider, OverlayStateProviderFactory, ProviderNodeTypes,
+        RocksDBProvider, StaticFileProvider, StaticFileProviderRWRefMut,
     },
     AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
     CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
     DatabaseProviderFactory, HashedPostStateProvider, HeaderProvider, ProviderError,
-    ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
+    ProviderFactory, ProviderHeader, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
     RocksDBProviderFactory, StageCheckpointReader, StateProviderBox, StateProviderFactory,
     StateReader, StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
 };
@@ -186,12 +186,10 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         // via changesets, then the merged in-memory delta applies on top.
         let overlay_factory = OverlayStateProviderFactory::new(
             self.database.clone(),
-            OverlayBuilder::<N::Primitives>::new(
-                matched.anchor().hash,
-                self.database.changeset_cache(),
-            )
-            .with_hashed_state_overlay(Some(merged.state))
-            .with_trie_updates_overlay(Some(merged.nodes)),
+            self.database
+                .overlay_manager()
+                .overlay_builder(matched.anchor().hash)
+                .with_immediate_state_trie_overlay(merged.state, merged.nodes),
         );
         reth_storage_api::DatabaseProviderROFactory::database_provider_ro(&overlay_factory)
             .map(Some)
@@ -219,7 +217,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         let Some(block_hash) = block_hash else { return Ok(None) };
         let overlay_factory = OverlayStateProviderFactory::new(
             self.database.clone(),
-            OverlayBuilder::<N::Primitives>::new(block_hash, self.database.changeset_cache()),
+            self.database.overlay_manager().overlay_builder(block_hash),
         );
         reth_storage_api::DatabaseProviderROFactory::database_provider_ro(&overlay_factory)
             .map(Some)
@@ -605,6 +603,15 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider<N> {
         tx_hash: TxHash,
     ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
         self.consistent_provider()?.transaction_by_hash_with_meta(tx_hash)
+    }
+
+    fn transaction_by_hash_with_meta_and_header(
+        &self,
+        tx_hash: TxHash,
+    ) -> ProviderResult<
+        Option<(Self::Transaction, TransactionMeta, SealedHeader<ProviderHeader<Self>>)>,
+    > {
+        self.consistent_provider()?.transaction_by_hash_with_meta_and_header(tx_hash)
     }
 
     fn transactions_by_block(
@@ -1017,9 +1024,9 @@ mod tests {
             create_test_provider_factory, create_test_provider_factory_with_chain_spec,
             MockNodeTypesWithDB,
         },
-        BlockWriter, CanonChainTracker, ProviderFactory, SaveBlocksMode,
+        BlockWriter, CanonChainTracker, ProviderFactory, SaveBlocksInput,
     };
-    use alloy_consensus::constants::EMPTY_ROOT_HASH;
+    use alloy_consensus::{constants::EMPTY_ROOT_HASH, transaction::TransactionMeta, BlockHeader};
     use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
     use alloy_primitives::{keccak256, Address, BlockNumber, TxNumber, B256, U256};
     use itertools::Itertools;
@@ -1241,7 +1248,14 @@ mod tests {
 
                 // Push to disk
                 let provider_rw = hook_provider.database_provider_rw().unwrap();
-                provider_rw.save_blocks(vec![lowest_memory_block], SaveBlocksMode::Full).unwrap();
+                let input = SaveBlocksInput::new(
+                    vec![lowest_memory_block],
+                    state.anchor().number,
+                    state.anchor().number,
+                    block_number,
+                    block_number,
+                );
+                provider_rw.save_blocks(&input).unwrap();
                 provider_rw.commit().unwrap();
 
                 // Remove from memory
@@ -2677,6 +2691,27 @@ mod tests {
                 |block: &SealedBlock<Block>, _: TxNumber, tx_hash: B256, _: &Vec<Vec<Receipt>>| (
                     tx_hash,
                     Some(block.body().transactions[test_tx_index].clone())
+                ),
+                B256::random()
+            ),
+            (
+                ONE,
+                transaction_by_hash_with_meta_and_header,
+                |block: &SealedBlock<Block>, _: TxNumber, tx_hash: B256, _: &Vec<Vec<Receipt>>| (
+                    tx_hash,
+                    Some((
+                        block.body().transactions[test_tx_index].clone(),
+                        TransactionMeta {
+                            tx_hash,
+                            index: test_tx_index as u64,
+                            block_hash: block.hash(),
+                            block_number: block.number,
+                            base_fee: block.base_fee_per_gas(),
+                            excess_blob_gas: block.excess_blob_gas(),
+                            timestamp: block.timestamp(),
+                        },
+                        block.clone_sealed_header(),
+                    ))
                 ),
                 B256::random()
             ),

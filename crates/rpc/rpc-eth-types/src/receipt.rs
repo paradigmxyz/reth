@@ -7,7 +7,7 @@ use alloy_primitives::{Address, TxKind};
 use alloy_rpc_types_eth::{Log, TransactionReceipt};
 use reth_chainspec::EthChainSpec;
 use reth_ethereum_primitives::Receipt;
-use reth_primitives_traits::{NodePrimitives, TransactionMeta};
+use reth_primitives_traits::{NodePrimitives, SealedBlock, SealedHeaderFor, TransactionMeta};
 use reth_rpc_convert::transaction::{ConvertReceiptInput, ReceiptConverter};
 use std::sync::Arc;
 
@@ -116,11 +116,22 @@ where
     Builder: Fn(N::Receipt, usize, TransactionMeta) -> Rpc + 'static,
 {
     type RpcReceipt = TransactionReceipt<Rpc>;
+    type RpcLog = Log;
     type Error = EthApiError;
+
+    fn convert_log(
+        &self,
+        log: Log,
+        _receipt: &N::Receipt,
+        _header: &SealedHeaderFor<N>,
+    ) -> Result<Self::RpcLog, Self::Error> {
+        Ok(log)
+    }
 
     fn convert_receipts(
         &self,
         inputs: Vec<ConvertReceiptInput<'_, N>>,
+        _block: &SealedBlock<N::Block>,
     ) -> Result<Vec<Self::RpcReceipt>, Self::Error> {
         let mut receipts = Vec::with_capacity(inputs.len());
 
