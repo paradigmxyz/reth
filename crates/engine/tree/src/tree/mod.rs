@@ -30,11 +30,10 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
-    DatabaseProviderFactory, HashedPostStateProvider, ProviderError, PruneCheckpointReader,
-    SaveBlocksInput, StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
+    DatabaseProviderFactory, HashedPostStateProvider, ProviderError, SaveBlocksInput,
+    StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
     StorageChangeSetReader, StorageSettingsCache, TransactionVariant,
 };
-use reth_prune::PruneSegment;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_storage_overlay::OverlayManager;
@@ -397,7 +396,6 @@ where
         + StateProviderFactory
         + StateReader<Receipt = N::Receipt>
         + HashedPostStateProvider
-        + PruneCheckpointReader
         + BalProvider
         + Clone
         + 'static,
@@ -2316,23 +2314,6 @@ where
         } else {
             self.provider.is_known(hash)
         }
-    }
-
-    /// Returns `true` if the historical state for the given block is available, i.e. the history
-    /// required to reconstruct it has not been pruned yet.
-    fn is_historical_state_available(&self, block_number: u64) -> ProviderResult<bool> {
-        for segment in [PruneSegment::AccountHistory, PruneSegment::StorageHistory] {
-            if let Some(checkpoint) = self
-                .provider
-                .get_prune_checkpoint(segment)?
-                .and_then(|checkpoint| checkpoint.block_number) &&
-                block_number < checkpoint
-            {
-                return Ok(false)
-            }
-        }
-
-        Ok(true)
     }
 
     /// Return sealed block header from in-memory state or database by hash.
