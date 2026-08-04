@@ -9,9 +9,9 @@ pub use converter::BlobSidecarConverter;
 pub use disk::{DiskFileBlobStore, DiskFileBlobStoreConfig, OpenDiskFileBlobStore};
 pub use mem::InMemoryBlobStore;
 pub use noop::NoopBlobStore;
+pub use sparse::{SparseBlobSidecar, SparseBlobSidecarError};
 use std::{
     fmt,
-    ops::Deref,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
@@ -23,6 +23,7 @@ mod converter;
 pub mod disk;
 mod mem;
 mod noop;
+mod sparse;
 mod tracker;
 
 /// Blob cell availability stored for a transaction.
@@ -41,6 +42,29 @@ impl BlobCellAvailability {
         Self(Arc::new([AtomicU64::new(u64::MAX), AtomicU64::new(u64::MAX)]))
     }
 
+    /// Returns empty availability.
+    pub fn empty() -> Self {
+        Self(Arc::new([AtomicU64::new(0), AtomicU64::new(0)]))
+    }
+
+    /// Creates availability from a raw cell mask.
+    pub fn from_mask(mask: B128) -> Self {
+        let bits = u128::from(mask);
+        Self(Arc::new([AtomicU64::new(bits as u64), AtomicU64::new((bits >> 64) as u64)]))
+    }
+
+    /// Returns the cell availability implied by a complete Alloy sidecar.
+    ///
+    /// Legacy EIP-4844 sidecars contain blobs and one KZG proof per blob, but no extended cells;
+    /// they therefore have no eth/72 cell availability until they are explicitly upcast.
+    pub fn for_sidecar(sidecar: &BlobTransactionSidecarVariant) -> Self {
+        if sidecar.is_eip7594() {
+            Self::full()
+        } else {
+            Self::empty()
+        }
+    }
+
     /// Returns a snapshot of the available cells.
     ///
     /// The two words are loaded independently. Future writers must only add availability bits so
@@ -49,6 +73,30 @@ impl BlobCellAvailability {
         let low = self.0[Self::LOW_WORD].load(Ordering::Relaxed) as u128;
         let high = self.0[Self::HIGH_WORD].load(Ordering::Relaxed) as u128;
         BlobCellMask::from_bits((high << 64) | low)
+    }
+
+    /// Returns the raw cell mask.
+    pub fn mask(&self) -> B128 {
+        B128::from(self.get().bits())
+    }
+
+    /// Returns an explicit availability state.
+    pub fn state(&self) -> BlobAvailability {
+        let mask = self.mask();
+        if mask == B128::from(0u128) {
+            BlobAvailability::Empty
+        } else if mask == B128::from(u128::MAX) {
+            BlobAvailability::Full
+        } else {
+            BlobAvailability::Partial(mask)
+        }
+    }
+
+    /// Adds cells to the current availability mask.
+    pub fn merge(&self, mask: B128) {
+        let bits = u128::from(mask);
+        self.0[Self::LOW_WORD].fetch_or(bits as u64, Ordering::Relaxed);
+        self.0[Self::HIGH_WORD].fetch_or((bits >> 64) as u64, Ordering::Relaxed);
     }
 
     /// Returns true if all blob cells are available.
@@ -65,10 +113,34 @@ impl PartialEq for BlobCellAvailability {
 
 impl Eq for BlobCellAvailability {}
 
+/// Explicit cell availability for an EIP-7594 blob sidecar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlobAvailability {
+    /// No extended blob cells are available.
+    Empty,
+    /// A non-empty subset of extended blob cells is available.
+    Partial(B128),
+    /// All extended blob cells are available.
+    Full,
+}
+
+/// The Reth-owned representation of a pooled blob sidecar.
+///
+/// Complete EIP-4844 and EIP-7594 sidecars remain represented by Alloy's existing variant. Sparse
+/// EIP-7594 data is represented by [`SparseBlobSidecar`] and never by a fabricated complete Alloy
+/// sidecar with zero-filled blobs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PooledBlobSidecarData {
+    /// A complete legacy or extended sidecar.
+    Complete(BlobTransactionSidecarVariant),
+    /// An incomplete extended sidecar containing metadata and received cells.
+    Sparse(SparseBlobSidecar),
+}
+
 /// A blob sidecar paired with its shared cell availability.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PooledBlobSidecar {
-    sidecar: BlobTransactionSidecarVariant,
+    sidecar: PooledBlobSidecarData,
     availability: BlobCellAvailability,
 }
 
@@ -78,17 +150,89 @@ impl PooledBlobSidecar {
         sidecar: BlobTransactionSidecarVariant,
         availability: BlobCellAvailability,
     ) -> Self {
-        Self { sidecar, availability }
+        Self { sidecar: PooledBlobSidecarData::Complete(sidecar), availability }
     }
 
-    /// Returns the wrapped sidecar.
-    pub const fn sidecar(&self) -> &BlobTransactionSidecarVariant {
+    /// Creates a pooled sidecar from sparse EIP-7594 metadata and received cells.
+    ///
+    /// The availability mask is the common mask: a bit is set only when that cell index is
+    /// available for every blob represented by the sidecar. The sparse sidecar itself retains the
+    /// per-blob availability.
+    pub fn from_sparse(sidecar: SparseBlobSidecar) -> Self {
+        let availability = BlobCellAvailability::from_mask(sidecar.cell_mask());
+        Self { sidecar: PooledBlobSidecarData::Sparse(sidecar), availability }
+    }
+
+    /// Returns the complete Alloy sidecar, if this sidecar is materialized.
+    pub const fn sidecar(&self) -> Option<&BlobTransactionSidecarVariant> {
+        match &self.sidecar {
+            PooledBlobSidecarData::Complete(sidecar) => Some(sidecar),
+            PooledBlobSidecarData::Sparse(_) => None,
+        }
+    }
+
+    /// Returns the sparse sidecar, if this sidecar is partial.
+    pub const fn sparse_sidecar(&self) -> Option<&SparseBlobSidecar> {
+        match &self.sidecar {
+            PooledBlobSidecarData::Complete(_) => None,
+            PooledBlobSidecarData::Sparse(sidecar) => Some(sidecar),
+        }
+    }
+
+    /// Returns the underlying Reth sidecar representation.
+    pub const fn data(&self) -> &PooledBlobSidecarData {
         &self.sidecar
     }
 
     /// Returns whether this is an EIP-7594 sidecar.
     pub const fn is_eip7594(&self) -> bool {
-        self.sidecar.is_eip7594()
+        match &self.sidecar {
+            PooledBlobSidecarData::Complete(sidecar) => sidecar.is_eip7594(),
+            PooledBlobSidecarData::Sparse(_) => true,
+        }
+    }
+
+    /// Returns whether this is a legacy EIP-4844 sidecar.
+    pub const fn is_eip4844(&self) -> bool {
+        matches!(&self.sidecar, PooledBlobSidecarData::Complete(sidecar) if sidecar.is_eip4844())
+    }
+
+    /// Returns whether this sidecar contains sparse EIP-7594 cells.
+    pub const fn is_sparse(&self) -> bool {
+        matches!(&self.sidecar, PooledBlobSidecarData::Sparse(_))
+    }
+
+    /// Returns whether every expected cell has been received.
+    ///
+    /// This does not imply that the sidecar has been reconstructed into an Alloy sidecar. Use
+    /// [`Self::is_materialized`] for that distinction.
+    pub fn is_complete(&self) -> bool {
+        matches!(&self.sidecar, PooledBlobSidecarData::Complete(_)) ||
+            matches!(&self.sidecar, PooledBlobSidecarData::Sparse(sidecar) if sidecar.is_complete())
+    }
+
+    /// Returns whether this sidecar has a complete Alloy representation.
+    ///
+    /// A sparse sidecar can have every cell present while still requiring reconstruction into an
+    /// Alloy sidecar. That reconstruction belongs to the blobstore layer and is intentionally not
+    /// performed by this type-only implementation.
+    pub const fn is_materialized(&self) -> bool {
+        matches!(&self.sidecar, PooledBlobSidecarData::Complete(_))
+    }
+
+    /// Merges cells into a sparse sidecar and updates its common availability mask.
+    pub fn merge_cells(
+        &mut self,
+        cell_mask: B128,
+        cells: Vec<Cell>,
+    ) -> Result<usize, PooledBlobSidecarError> {
+        let PooledBlobSidecarData::Sparse(sidecar) = &mut self.sidecar else {
+            return Err(PooledBlobSidecarError::NotSparse)
+        };
+
+        let inserted = sidecar.merge_cells(cell_mask, cells)?;
+        self.availability.merge(sidecar.cell_mask());
+        Ok(inserted)
     }
 
     /// Returns the shared cell availability.
@@ -96,24 +240,19 @@ impl PooledBlobSidecar {
         &self.availability
     }
 
-    /// Consumes the wrapper and returns the sidecar.
-    pub fn into_sidecar(self) -> BlobTransactionSidecarVariant {
-        self.sidecar
-    }
-}
-
-impl Deref for PooledBlobSidecar {
-    type Target = BlobTransactionSidecarVariant;
-
-    fn deref(&self) -> &Self::Target {
-        &self.sidecar
+    /// Consumes the wrapper and returns the complete Alloy sidecar, if present.
+    pub fn into_sidecar(self) -> Option<BlobTransactionSidecarVariant> {
+        match self.sidecar {
+            PooledBlobSidecarData::Complete(sidecar) => Some(sidecar),
+            PooledBlobSidecarData::Sparse(_) => None,
+        }
     }
 }
 
 impl From<BlobTransactionSidecarVariant> for PooledBlobSidecar {
     fn from(sidecar: BlobTransactionSidecarVariant) -> Self {
-        // TODO: Initialize this with the actual mask once sparse sidecars are supported.
-        Self::new(sidecar, BlobCellAvailability::full())
+        let availability = BlobCellAvailability::for_sidecar(&sidecar);
+        Self::new(sidecar, availability)
     }
 }
 
@@ -254,12 +393,26 @@ pub enum BlobStoreError {
     /// Thrown if the blob sidecar is not found for a given transaction hash but was required.
     #[error("blob sidecar not found for transaction {0:?}")]
     MissingSidecar(B256),
+    /// The operation requires a complete sidecar but received sparse data.
+    #[error("blob sidecar for transaction {0:?} is incomplete")]
+    IncompleteSidecar(B256),
     /// Failed to decode the stored blob data.
     #[error("failed to decode blob data: {0}")]
     DecodeError(#[from] alloy_rlp::Error),
     /// Other implementation specific error.
     #[error(transparent)]
     Other(Box<dyn core::error::Error + Send + Sync>),
+}
+
+/// Errors returned when mutating a pooled sidecar representation.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum PooledBlobSidecarError {
+    /// The operation requires a sparse sidecar.
+    #[error("pooled blob sidecar is not sparse")]
+    NotSparse,
+    /// The sparse sidecar rejected the cell update.
+    #[error(transparent)]
+    Sparse(#[from] SparseBlobSidecarError),
 }
 
 /// Keeps track of the size of the blob store.
@@ -337,14 +490,20 @@ mod tests {
     }
 
     #[test]
-    fn pooled_blob_sidecar_defaults_to_full_availability() {
+    fn pooled_blob_sidecar_tracks_cell_availability_by_sidecar_variant() {
         let sidecars = [
-            BlobTransactionSidecarVariant::Eip4844(BlobTransactionSidecar::default()),
-            BlobTransactionSidecarVariant::Eip7594(BlobTransactionSidecarEip7594::default()),
+            (
+                BlobTransactionSidecarVariant::Eip4844(BlobTransactionSidecar::default()),
+                BlobAvailability::Empty,
+            ),
+            (
+                BlobTransactionSidecarVariant::Eip7594(BlobTransactionSidecarEip7594::default()),
+                BlobAvailability::Full,
+            ),
         ];
 
-        for sidecar in sidecars {
-            assert!(PooledBlobSidecar::from(sidecar).availability().is_full());
+        for (sidecar, expected) in sidecars {
+            assert_eq!(PooledBlobSidecar::from(sidecar).availability().state(), expected);
         }
     }
 

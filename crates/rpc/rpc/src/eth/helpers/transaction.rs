@@ -51,7 +51,11 @@ where
                     Eip4844PoolTransactionError::MissingEip4844BlobSidecar,
                 )));
             };
-            let sidecar = sidecar.into_sidecar();
+            let sidecar = sidecar.into_sidecar().ok_or_else(|| {
+                EthApiError::PoolError(RpcPoolError::Eip4844(
+                    Eip4844PoolTransactionError::MissingEip4844BlobSidecar,
+                ))
+            })?;
 
             let sidecar = match sidecar {
                 BlobTransactionSidecarVariant::Eip4844(sidecar) => {
