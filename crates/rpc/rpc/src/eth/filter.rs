@@ -225,29 +225,42 @@ where
         let info = self.provider().chain_info()?;
         let best_number = info.best_number;
 
-        // start_block is the block from which we should start fetching changes, the next block from
-        // the last time changes were polled, in other words the best block at last poll + 1
-        let (start_block, kind) = {
+        // Pending transaction filters are driven by the transaction pool rather than the chain
+        // head, so they must be polled independently of block progress.
+        let (pending, block_filter) = {
             let mut filters = self.inner.active_filters.inner.lock().await;
             let filter = filters.get_mut(&id).ok_or(EthFilterError::FilterNotFound(id))?;
-
-            if filter.block > best_number {
-                // no new blocks since the last poll
-                return Ok(FilterChanges::Empty)
-            }
-
-            // update filter
-            // we fetch all changes from [filter.block..best_block], so we advance the filter's
-            // block to `best_block +1`, the next from which we should start fetching changes again
-            let mut block = best_number + 1;
-            std::mem::swap(&mut filter.block, &mut block);
             filter.last_poll_timestamp = Instant::now();
 
-            (block, filter.kind.clone())
+            if let FilterKind::PendingTransaction(pending) = &filter.kind {
+                (Some(pending.clone()), None)
+            } else {
+                if filter.block > best_number {
+                    // no new blocks since the last poll
+                    return Ok(FilterChanges::Empty)
+                }
+
+                // update filter
+                // we fetch all changes from [filter.block..best_block], so we advance the filter's
+                // block to `best_block +1`, the next from which we should start fetching changes
+                // again
+                let mut block = best_number + 1;
+                std::mem::swap(&mut filter.block, &mut block);
+
+                (None, Some((block, filter.kind.clone())))
+            }
         };
 
+        if let Some(pending) = pending {
+            return Ok(pending.drain().await)
+        }
+
+        // start_block is the block from which we should start fetching changes, the next block from
+        // the last time changes were polled, in other words the best block at last poll + 1
+        let (start_block, kind) = block_filter.expect("non-pending filter changes are set");
+
         match kind {
-            FilterKind::PendingTransaction(filter) => Ok(filter.drain().await),
+            FilterKind::PendingTransaction(_) => unreachable!("pending filters are handled above"),
             FilterKind::Block => {
                 // Note: we need to fetch the block hashes from inclusive range
                 // [start_block..best_block]
@@ -1369,7 +1382,10 @@ mod tests {
     use reth_rpc_eth_types::receipt::EthReceiptConverter;
     use reth_tasks::Runtime;
     use reth_testing_utils::generators;
-    use reth_transaction_pool::test_utils::{testing_pool, TestPool};
+    use reth_transaction_pool::{
+        test_utils::{testing_pool, MockTransactionFactory, TestPool},
+        TransactionOrigin,
+    };
     use std::{collections::VecDeque, sync::Arc};
 
     #[test]
@@ -1409,6 +1425,70 @@ mod tests {
             EthEvmConfig::new(provider.chain_spec()),
         )
         .build()
+    }
+
+    #[tokio::test]
+    async fn pending_transaction_filter_changes_do_not_require_new_block() {
+        let provider = MockEthProvider::default();
+        provider.add_header(FixedBytes::from([0u8; 32]), alloy_consensus::Header::default());
+        let eth_api = build_test_eth_api(provider);
+        let eth_filter =
+            super::EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
+
+        let filter_id = eth_filter
+            .new_pending_transaction_filter(None)
+            .await
+            .expect("pending transaction filter should install");
+
+        let initial_changes = eth_filter
+            .filter_changes(filter_id.clone())
+            .await
+            .expect("initial poll should succeed");
+        assert!(matches!(initial_changes, FilterChanges::Hashes(hashes) if hashes.is_empty()));
+
+        let transaction = MockTransactionFactory::default().create_eip1559().transaction;
+        let transaction_hash = *transaction.hash();
+        eth_filter
+            .pool()
+            .add_transaction(TransactionOrigin::External, transaction)
+            .await
+            .expect("transaction should be added to the pool");
+
+        let changes = eth_filter
+            .filter_changes(filter_id)
+            .await
+            .expect("pending transaction poll should succeed");
+        assert_eq!(changes, FilterChanges::Hashes(vec![transaction_hash]));
+    }
+
+    #[tokio::test]
+    async fn empty_filter_changes_poll_refreshes_ttl() {
+        let provider = MockEthProvider::default();
+        provider.add_header(FixedBytes::from([0u8; 32]), alloy_consensus::Header::default());
+        let eth_api = build_test_eth_api(provider);
+        let eth_filter =
+            super::EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
+        let filter_id = eth_filter
+            .inner
+            .install_filter(FilterKind::<RpcTransaction<Ethereum>>::Block)
+            .await
+            .expect("block filter should install");
+        let previous_poll = Instant::now() - Duration::from_secs(60);
+
+        {
+            let mut filters = eth_filter.inner.active_filters.inner.lock().await;
+            let filter = filters.get_mut(&filter_id).expect("filter should be installed");
+            filter.block += 1;
+            filter.last_poll_timestamp = previous_poll;
+        }
+
+        let changes =
+            eth_filter.filter_changes(filter_id.clone()).await.expect("empty poll should succeed");
+        assert!(matches!(changes, FilterChanges::Empty));
+
+        let filters = eth_filter.inner.active_filters.inner.lock().await;
+        let filter = filters.get(&filter_id).expect("filter should remain installed");
+        assert!(filter.last_poll_timestamp > previous_poll);
     }
 
     #[tokio::test]
