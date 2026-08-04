@@ -321,32 +321,23 @@ impl SnapshotManifest {
             }
 
             let minimum = match ty.minimal_selection() {
-                ComponentSelection::Distance(distance) => {
-                    distance.max(config.prune.minimum_pruning_distance)
-                }
-                _ => config.prune.minimum_pruning_distance,
-            };
+                ComponentSelection::Distance(distance) => distance,
+                _ => 0,
+            }
+            .max(config.prune.minimum_pruning_distance);
+
             let selection = match mode {
                 None => ComponentSelection::All,
                 Some(PruneMode::Full) => ComponentSelection::Distance(minimum),
-                // Distances below the minimum are a pruner configuration error that
-                // prunes nothing, so all history is still present.
-                Some(PruneMode::Distance(distance)) => {
-                    if distance >= minimum {
-                        ComponentSelection::Distance(distance)
-                    } else {
-                        ComponentSelection::All
-                    }
+                Some(PruneMode::Distance(distance)) if distance >= minimum => {
+                    ComponentSelection::Distance(distance)
                 }
-                // The pruner only activates once the cutoff is at least the minimum
-                // distance behind the tip; before that nothing has been pruned.
-                Some(PruneMode::Before(block)) => {
-                    if self.block.saturating_sub(block) >= minimum {
-                        ComponentSelection::Since(block)
-                    } else {
-                        ComponentSelection::All
-                    }
+                Some(PruneMode::Before(block)) if self.block.saturating_sub(block) >= minimum => {
+                    ComponentSelection::Since(block)
                 }
+                // A sub-minimum distance is a pruner configuration error and a closer
+                // Before cutoff has not activated: either way nothing has been pruned.
+                Some(PruneMode::Distance(_) | PruneMode::Before(_)) => ComponentSelection::All,
             };
             selections.insert(ty, selection);
         }
