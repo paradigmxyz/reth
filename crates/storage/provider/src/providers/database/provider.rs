@@ -3925,6 +3925,11 @@ impl<TX: DbTxMut, N: NodeTypes> MetadataWriter for DatabaseProvider<TX, N> {
     fn write_metadata(&self, key: &str, value: Vec<u8>) -> ProviderResult<()> {
         self.tx.put::<tables::Metadata>(key.to_string(), value).map_err(Into::into)
     }
+
+    fn delete_metadata(&self, key: &str) -> ProviderResult<()> {
+        self.tx.delete::<tables::Metadata>(key.to_string(), None)?;
+        Ok(())
+    }
 }
 
 impl<TX: Send, N: NodeTypes> StorageSettingsCache for DatabaseProvider<TX, N> {
@@ -3966,7 +3971,7 @@ mod tests {
         StorageReverts,
     };
     use reth_primitives_traits::SealedBlock;
-    use reth_storage_api::MetadataWriter;
+    use reth_storage_api::{MetadataProvider, MetadataWriter};
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{KeccakKeyHasher, Nibbles, SortedTrieData, StoredNibbles, StoredNibblesSubKey};
     use std::{sync::mpsc, time::Duration};
@@ -4024,6 +4029,22 @@ mod tests {
         let end = 9u64;
         let result = provider.receipts_by_block_range(start..=end).unwrap();
         assert_eq!(result, Vec::<Vec<reth_ethereum_primitives::Receipt>>::new());
+    }
+
+    #[test]
+    fn metadata_can_be_deleted() {
+        let factory = create_test_provider_factory();
+        let key = "metadata-delete-test";
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.write_metadata(key, vec![1]).unwrap();
+        provider_rw.commit().unwrap();
+        assert_eq!(factory.provider().unwrap().get_metadata(key).unwrap(), Some(vec![1]));
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.delete_metadata(key).unwrap();
+        provider_rw.commit().unwrap();
+        assert_eq!(factory.provider().unwrap().get_metadata(key).unwrap(), None);
     }
 
     #[test]
