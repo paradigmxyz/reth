@@ -291,7 +291,7 @@ impl SnapshotManifest {
     /// Resolves the history required by the configured pruning modes.
     ///
     /// Selections mirror what the pruner retains: floored to `minimum_pruning_distance`,
-    /// with a `Before` cutoff past the snapshot tip having pruned nothing yet.
+    /// with a `Before` cutoff inside that window having pruned nothing yet.
     pub(crate) fn repair_history_selections(
         &self,
         config: &Config,
@@ -332,9 +332,14 @@ impl SnapshotManifest {
                 Some(PruneMode::Distance(distance)) => {
                     ComponentSelection::Distance(distance.max(minimum))
                 }
-                Some(PruneMode::Before(block)) if block > self.block => ComponentSelection::All,
+                // The pruner only activates once the cutoff is at least the minimum
+                // distance behind the tip; before that nothing has been pruned.
                 Some(PruneMode::Before(block)) => {
-                    ComponentSelection::Since(block.min(self.block.saturating_sub(minimum)))
+                    if self.block.saturating_sub(block) >= minimum {
+                        ComponentSelection::Since(block)
+                    } else {
+                        ComponentSelection::All
+                    }
                 }
             };
             selections.insert(ty, selection);
@@ -1098,16 +1103,16 @@ mod tests {
     }
 
     #[test]
-    fn repair_history_clamps_since_to_minimal_distance() {
+    fn repair_history_keeps_all_history_for_inactive_before_cutoff() {
         let mut config = Config::default();
-        // Snapshot block is 20_000, so `Before(19_000)` would cover only 1_000 blocks,
-        // less than the 10_064-block unwind-safe minimum for transactions.
+        // At snapshot 20_000, `Before(19_000)` leaves the cutoff inside the 10_064-block
+        // minimum window, so the pruner has not removed anything yet.
         config.prune.segments.bodies_history = Some(PruneMode::Before(19_000));
 
         let selections = history_manifest().repair_history_selections(&config).unwrap();
         assert_eq!(
             selections.get(&SnapshotComponentType::Transactions),
-            Some(&ComponentSelection::Since(9_936))
+            Some(&ComponentSelection::All)
         );
     }
 

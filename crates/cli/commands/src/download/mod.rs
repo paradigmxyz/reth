@@ -108,7 +108,10 @@ use reth_config::config::Config;
 use reth_db::{init_db, lockfile::StorageLock, open_db_read_only, tables, Database};
 use reth_db_api::{cursor::DbCursorRO, models::StorageSettings, transaction::DbTx};
 use reth_fs_util as fs;
+use reth_node_api::NodeTypes;
 use reth_node_core::args::DefaultPruningValues;
+use reth_provider::providers::StaticFileProvider;
+use reth_static_file_types::StaticFileSegment;
 use source::{
     discover_manifest_url, fetch_manifest_from_source, fetch_snapshot_api_entries,
     print_snapshot_listing, resolve_manifest_base_url,
@@ -464,7 +467,7 @@ pub struct DownloadCommand<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCommand<C> {
     /// Runs the download command in single-archive or manifest mode.
-    pub async fn execute<N>(self) -> Result<()> {
+    pub async fn execute<N: NodeTypes>(self) -> Result<()> {
         let chain = self.env.chain.chain();
         let chain_id = chain.id();
 
@@ -477,9 +480,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 
         let data_dir = self.env.datadir.clone().resolve_datadir(chain);
 
-        // Fail fast before any network access, and hold the static-file lock for the
-        // whole repair so a running node cannot touch jars we may replace.
-        let _repair_lock = if self.repair_history {
+        // Fail fast before any network access. RW database opens and static-file
+        // writers take these locks, so holding both keeps concurrent writers out.
+        let _repair_locks = if self.repair_history {
             if !data_dir.db().try_exists()? {
                 eyre::bail!(
                     "--repair-history requires an existing database at {}",
@@ -487,7 +490,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                 );
             }
             fs::create_dir_all(data_dir.static_files())?;
-            Some(StorageLock::try_acquire(&data_dir.static_files())?)
+            Some((
+                StorageLock::try_acquire(&data_dir.db())?,
+                StorageLock::try_acquire(&data_dir.static_files())?,
+            ))
         } else {
             None
         };
@@ -532,7 +538,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         }
 
         if self.repair_history {
-            self.ensure_repairable(&data_dir.db(), manifest.block)?;
+            self.ensure_repairable::<N>(&data_dir.db(), &data_dir.static_files(), manifest.block)?;
         }
 
         let target_dir = data_dir.data_dir();
@@ -655,7 +661,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
     }
 
     /// Validates that the existing database can be repaired from the snapshot.
-    fn ensure_repairable(&self, db_path: &Path, snapshot_block: u64) -> Result<()> {
+    fn ensure_repairable<N: NodeTypes>(
+        &self,
+        db_path: &Path,
+        static_files_path: &Path,
+        snapshot_block: u64,
+    ) -> Result<()> {
         let db = open_db_read_only(db_path, self.env.db.database_args())?;
         let tx = db.tx()?;
 
@@ -684,6 +695,25 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             eyre::bail!(
                 "database is synced to block {synced_block}, past the snapshot at block {snapshot_block}; use a newer snapshot"
             );
+        }
+
+        // Static files can extend past the database checkpoints (e.g. a crash between
+        // static-file append and checkpoint commit), so inspect the jars themselves.
+        let static_files = StaticFileProvider::<N::Primitives>::read_only(static_files_path)?;
+        for segment in [
+            StaticFileSegment::Transactions,
+            StaticFileSegment::Receipts,
+            StaticFileSegment::AccountChangeSets,
+            StaticFileSegment::StorageChangeSets,
+        ] {
+            if let Some(block) = static_files.get_highest_static_file_block(segment) &&
+                block > snapshot_block
+            {
+                eyre::bail!(
+                    "{} static files reach block {block}, past the snapshot at block {snapshot_block}; use a newer snapshot",
+                    segment.as_str()
+                );
+            }
         }
 
         Ok(())
@@ -1129,7 +1159,9 @@ mod tests {
     use extract::CompressionFormat;
     use manifest::{ComponentManifest, SingleArchive};
     use reth_chainspec::{HOLESKY, MAINNET};
+    use reth_db_api::transaction::DbTxMut;
     use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
+    use reth_provider::test_utils::MockNodeTypes;
 
     #[derive(Parser)]
     struct CommandParser<T: Args> {
@@ -1374,9 +1406,10 @@ mod tests {
 
     #[test]
     fn ensure_repairable_validates_layout_and_frontier() {
-        use reth_db_api::transaction::DbTxMut;
-
         let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join("db");
+        let static_files_path = temp.path().join("static_files");
+        std::fs::create_dir_all(&static_files_path).unwrap();
         let args = CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from([
             "reth",
             "--repair-history",
@@ -1384,12 +1417,15 @@ mod tests {
         .args;
 
         // A database without persisted storage settings is treated as the legacy layout.
-        drop(init_db(temp.path(), args.env.db.database_args()).unwrap());
-        let err = args.ensure_repairable(temp.path(), 100).err().unwrap();
+        drop(init_db(&db_path, args.env.db.database_args()).unwrap());
+        let err = args
+            .ensure_repairable::<MockNodeTypes>(&db_path, &static_files_path, 100)
+            .err()
+            .unwrap();
         assert!(err.to_string().contains("v2 storage layout"));
 
         {
-            let db = init_db(temp.path(), args.env.db.database_args()).unwrap();
+            let db = init_db(&db_path, args.env.db.database_args()).unwrap();
             let tx = db.tx_mut().unwrap();
             tx.put::<tables::Metadata>(
                 reth_storage_api::metadata::keys::STORAGE_SETTINGS.to_string(),
@@ -1404,10 +1440,13 @@ mod tests {
             tx.commit().unwrap();
         }
 
-        let err = args.ensure_repairable(temp.path(), 100).err().unwrap();
+        let err = args
+            .ensure_repairable::<MockNodeTypes>(&db_path, &static_files_path, 100)
+            .err()
+            .unwrap();
         assert!(err.to_string().contains("past the snapshot"));
 
-        args.ensure_repairable(temp.path(), 200).unwrap();
+        args.ensure_repairable::<MockNodeTypes>(&db_path, &static_files_path, 200).unwrap();
     }
 
     #[test]
