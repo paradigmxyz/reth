@@ -80,6 +80,7 @@ pub struct PooledTransactions<T = PooledTransaction>(
 /// elide the blob list without making the pool's complete sidecar look partial. This is still the
 /// same `PooledTransactions` message (`0x0a`) on the wire, not a new protocol message.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PooledTransactionsEth72<T = PooledTransaction>(pub Vec<T>);
 
 impl<T> PooledTransactionsEth72<T> {
