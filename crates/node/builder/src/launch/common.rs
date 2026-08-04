@@ -551,14 +551,16 @@ where
         let provider_ro = factory.database_provider_ro()?;
         // Finish is committed before Merkle during unwind, so this marker is authoritative when
         // resuming an interrupted partial trie unwind.
-        let persisted_partial_trie_unwind = read_partial_trie_unwind_marker(&provider_ro)?;
+        let persisted_partial_trie_unwind =
+            provider_ro.get_metadata(PARTIAL_STATE_TRIE_UNWIND_METADATA_KEY)?;
+        let persist_partial_trie_unwind = persisted_partial_trie_unwind.is_none();
         let partial_trie_unwind = partial_trie_unwind_marker(
             persisted_partial_trie_unwind,
             provider_ro.get_stage_checkpoint(StageId::Finish)?,
         )?;
         drop(provider_ro);
         let persist_partial_trie_unwind =
-            persisted_partial_trie_unwind.is_none() && partial_trie_unwind.is_some();
+            persist_partial_trie_unwind && partial_trie_unwind.is_some();
         let partial_trie_unwind_target =
             partial_trie_unwind.map(|marker| marker.partial_state_trie);
         // Recover the partial state trie first. Its unwind enables
@@ -1407,10 +1409,12 @@ pub fn metrics_hooks<N: NodeTypesWithDB>(provider_factory: &ProviderFactory<N>) 
 }
 
 fn partial_trie_unwind_marker(
-    persisted_marker: Option<PartialStateTrieUnwindMarker>,
+    persisted_marker: Option<Vec<u8>>,
     finish_checkpoint: Option<StageCheckpoint>,
 ) -> ProviderResult<Option<PartialStateTrieUnwindMarker>> {
     if let Some(marker) = persisted_marker {
+        let marker = serde_json::from_slice::<PartialStateTrieUnwindMarker>(&marker)
+            .map_err(ProviderError::other)?;
         if marker.partial_state_trie >= marker.finish_block_number {
             return Err(ProviderError::other(std::io::Error::other(format!(
                 "partial state trie unwind target #{} is not below original Finish #{}",
@@ -1445,20 +1449,6 @@ fn partial_trie_unwind_marker(
 /// Metadata key for a partial state trie unwind that has not completed yet.
 const PARTIAL_STATE_TRIE_UNWIND_METADATA_KEY: &str = "partial_state_trie_unwind";
 
-fn read_partial_trie_unwind_marker(
-    provider: &impl MetadataProvider,
-) -> ProviderResult<Option<PartialStateTrieUnwindMarker>> {
-    decode_partial_trie_unwind_marker(
-        provider.get_metadata(PARTIAL_STATE_TRIE_UNWIND_METADATA_KEY)?,
-    )
-}
-
-fn decode_partial_trie_unwind_marker(
-    marker: Option<Vec<u8>>,
-) -> ProviderResult<Option<PartialStateTrieUnwindMarker>> {
-    marker.map(|bytes| serde_json::from_slice(&bytes).map_err(ProviderError::other)).transpose()
-}
-
 fn write_partial_trie_unwind_marker(
     provider: &impl MetadataWriter,
     marker: PartialStateTrieUnwindMarker,
@@ -1475,9 +1465,7 @@ fn delete_partial_trie_unwind_marker(provider: &impl MetadataWriter) -> Provider
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        decode_partial_trie_unwind_marker, partial_trie_unwind_marker, LaunchContext, NodeConfig,
-    };
+    use super::{partial_trie_unwind_marker, LaunchContext, NodeConfig};
     use reth_config::Config;
     use reth_db_api::models::PartialStateTrieUnwindMarker;
     use reth_node_core::args::PruningArgs;
@@ -1567,10 +1555,17 @@ mod tests {
             PartialStateTrieUnwindMarker { finish_block_number: 42, partial_state_trie: 21 };
 
         assert_eq!(
-            partial_trie_unwind_marker(Some(marker), Some(StageCheckpoint::new(21))).unwrap(),
+            partial_trie_unwind_marker(
+                Some(serde_json::to_vec(&marker).unwrap()),
+                Some(StageCheckpoint::new(21)),
+            )
+            .unwrap(),
             Some(marker)
         );
-        assert_eq!(partial_trie_unwind_marker(Some(marker), None).unwrap(), Some(marker));
+        assert_eq!(
+            partial_trie_unwind_marker(Some(serde_json::to_vec(&marker).unwrap()), None).unwrap(),
+            Some(marker)
+        );
     }
 
     #[test]
@@ -1608,13 +1603,14 @@ mod tests {
     fn partial_trie_unwind_marker_rejects_invalid_persisted_marker() {
         let marker =
             PartialStateTrieUnwindMarker { finish_block_number: 42, partial_state_trie: 42 };
-        let error = partial_trie_unwind_marker(Some(marker), None).unwrap_err();
+        let error = partial_trie_unwind_marker(Some(serde_json::to_vec(&marker).unwrap()), None)
+            .unwrap_err();
 
         assert!(error.to_string().contains("is not below original Finish"));
     }
 
     #[test]
     fn partial_trie_unwind_marker_rejects_malformed_metadata() {
-        assert!(decode_partial_trie_unwind_marker(Some(vec![0xff])).is_err());
+        assert!(partial_trie_unwind_marker(Some(vec![0xff]), None).is_err());
     }
 }
