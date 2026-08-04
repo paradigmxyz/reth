@@ -97,18 +97,18 @@ use archive::run_modular_downloads;
 use clap::{builder::RangedU64ValueParser, Parser};
 use config_gen::{config_for_selections, write_config};
 use extract::stream_and_extract;
-use eyre::Result;
+use eyre::{Result, WrapErr};
 use manifest::{ComponentSelection, SnapshotComponentType, SnapshotManifest};
 use planning::{collect_planned_archives, summarize_download_startup, PlannedDownloads};
 use progress::{DownloadProgress, DownloadRequestLimiter};
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks, MAINNET};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
+use reth_config::config::Config;
 use reth_db::{init_db, Database};
 use reth_db_api::transaction::DbTx;
 use reth_fs_util as fs;
 use reth_node_core::args::DefaultPruningValues;
-use reth_prune_types::PruneMode;
 use source::{
     discover_manifest_url, fetch_manifest_from_source, fetch_snapshot_api_entries,
     print_snapshot_listing, resolve_manifest_base_url,
@@ -387,6 +387,13 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     #[arg(long, value_name = "BLOCK_NUMBER", conflicts_with_all = ["with_state_history", "with_state_history_distance", "minimal", "full", "archive"])]
     with_state_history_since: Option<u64>,
 
+    /// Repair execution history to match the configured pruning modes.
+    ///
+    /// Missing transactions, receipts, account changesets, and storage changesets are downloaded
+    /// without changing the existing configuration or database checkpoints.
+    #[arg(long, conflicts_with_all = ["url", "with_txs", "with_txs_since", "with_txs_distance", "with_receipts", "with_receipts_since", "with_receipts_distance", "with_state_history", "with_state_history_since", "with_state_history_distance", "with_senders", "with_rocksdb", "without_rocksdb", "archive", "minimal", "full", "non_interactive", "force", "list"])]
+    repair_history: bool,
+
     /// Include account and storage history static files covering the last N blocks.
     #[arg(long, value_name = "BLOCKS", value_parser = RangedU64ValueParser::<u64>::new().range(1..), conflicts_with_all = ["with_state_history", "with_state_history_since", "minimal", "full", "archive"])]
     with_state_history_distance: Option<u64>,
@@ -509,6 +516,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         }
 
         let target_dir = data_dir.data_dir();
+        if self.repair_history && !data_dir.db().try_exists()? {
+            eyre::bail!(
+                "--repair-history requires an existing database at {}",
+                data_dir.db().display()
+            );
+        }
         if self.force {
             clear_existing_datadir(target_dir)?;
         }
@@ -535,7 +548,17 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         )
         .await?;
 
-        self.finalize_modular_download(&selections, &manifest, preset, target_dir, &data_dir.db())?;
+        if !self.repair_history {
+            self.finalize_modular_download(
+                &selections,
+                &manifest,
+                preset,
+                target_dir,
+                &data_dir.db(),
+            )?;
+        } else {
+            info!(target: "reth::cli", "Required execution history is available");
+        }
 
         Ok(())
     }
@@ -620,6 +643,16 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
     /// Determines which components to download based on CLI flags or interactive selection.
     fn resolve_components(&self, manifest: &SnapshotManifest) -> Result<ResolvedComponents> {
         let available = |ty: SnapshotComponentType| manifest.component(ty).is_some();
+
+        if self.repair_history {
+            let data_dir = self.env.datadir.clone().resolve_datadir(self.env.chain.chain());
+            let config_path = self.env.config.clone().unwrap_or_else(|| data_dir.config());
+            let config = Config::from_path(&config_path).wrap_err_with(|| {
+                format!("Failed to load config from {}", config_path.display())
+            })?;
+            let selections = manifest.repair_history_selections(&config)?;
+            return Ok(ResolvedComponents { selections, preset: None });
+        }
 
         // --archive/--all: everything available as All
         if self.archive {
@@ -802,24 +835,28 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                         None => ComponentSelection::All,
                     }
                 } else {
-                    selection_from_prune_mode(
+                    ComponentSelection::from_prune_mode(
                         defaults.full_prune_modes.bodies_history,
                         snapshot_block,
                     )
                 }
             }
-            SnapshotComponentType::Receipts => {
-                selection_from_prune_mode(defaults.full_prune_modes.receipts, snapshot_block)
-            }
-            SnapshotComponentType::AccountChangesets => {
-                selection_from_prune_mode(defaults.full_prune_modes.account_history, snapshot_block)
-            }
-            SnapshotComponentType::StorageChangesets => {
-                selection_from_prune_mode(defaults.full_prune_modes.storage_history, snapshot_block)
-            }
-            SnapshotComponentType::TransactionSenders => {
-                selection_from_prune_mode(defaults.full_prune_modes.sender_recovery, snapshot_block)
-            }
+            SnapshotComponentType::Receipts => ComponentSelection::from_prune_mode(
+                defaults.full_prune_modes.receipts,
+                snapshot_block,
+            ),
+            SnapshotComponentType::AccountChangesets => ComponentSelection::from_prune_mode(
+                defaults.full_prune_modes.account_history,
+                snapshot_block,
+            ),
+            SnapshotComponentType::StorageChangesets => ComponentSelection::from_prune_mode(
+                defaults.full_prune_modes.storage_history,
+                snapshot_block,
+            ),
+            SnapshotComponentType::TransactionSenders => ComponentSelection::from_prune_mode(
+                defaults.full_prune_modes.sender_recovery,
+                snapshot_block,
+            ),
             // Keep hidden by default in full mode; if users want indices they can use archive.
             SnapshotComponentType::RocksdbIndices => ComponentSelection::None,
         }
@@ -867,22 +904,6 @@ fn explicit_component_selection(
         (block <= snapshot_block).then_some(ComponentSelection::Since(block))
     } else {
         distance.map(ComponentSelection::Distance)
-    }
-}
-
-/// Converts a prune mode into the matching component selection.
-fn selection_from_prune_mode(mode: Option<PruneMode>, snapshot_block: u64) -> ComponentSelection {
-    match mode {
-        None => ComponentSelection::All,
-        Some(PruneMode::Full) => ComponentSelection::None,
-        Some(PruneMode::Distance(d)) => ComponentSelection::Distance(d),
-        Some(PruneMode::Before(block)) => {
-            if snapshot_block >= block {
-                ComponentSelection::Since(block)
-            } else {
-                ComponentSelection::None
-            }
-        }
     }
 }
 
@@ -1254,6 +1275,17 @@ mod tests {
         ]);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn repair_history_flag_parses() {
+        let args = CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from([
+            "reth",
+            "--repair-history",
+        ])
+        .args;
+
+        assert!(args.repair_history);
     }
 
     #[test]

@@ -179,6 +179,11 @@ Storage:
       --with-state-history-since <BLOCK_NUMBER>
           Include account and storage history static files starting at the specified block
 
+      --repair-history
+          Repair execution history to match the configured pruning modes.
+
+          Missing transactions, receipts, account changesets, and storage changesets are downloaded without changing the existing configuration or database checkpoints.
+
       --with-state-history-distance <BLOCKS>
           Include account and storage history static files covering the last N blocks
 

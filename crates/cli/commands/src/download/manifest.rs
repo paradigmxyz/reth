@@ -2,6 +2,8 @@ use blake3::Hasher;
 use eyre::Result;
 use rayon::prelude::*;
 use reqwest::Client;
+use reth_config::config::Config;
+use reth_prune_types::PruneMode;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -150,6 +152,24 @@ pub enum ComponentSelection {
     None,
 }
 
+impl ComponentSelection {
+    /// Resolves a snapshot selection from a pruning mode at the given snapshot block.
+    pub(crate) const fn from_prune_mode(mode: Option<PruneMode>, snapshot_block: u64) -> Self {
+        match mode {
+            None => Self::All,
+            Some(PruneMode::Full) => Self::None,
+            Some(PruneMode::Distance(distance)) => Self::Distance(distance),
+            Some(PruneMode::Before(block)) => {
+                if snapshot_block >= block {
+                    Self::Since(block)
+                } else {
+                    Self::None
+                }
+            }
+        }
+    }
+}
+
 impl std::fmt::Display for ComponentSelection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -266,6 +286,44 @@ impl SnapshotManifest {
     /// Look up a component by type.
     pub fn component(&self, ty: SnapshotComponentType) -> Option<&ComponentManifest> {
         self.components.get(ty.key())
+    }
+
+    /// Resolves the history required by the configured pruning modes.
+    pub(crate) fn repair_history_selections(
+        &self,
+        config: &Config,
+    ) -> Result<BTreeMap<SnapshotComponentType, ComponentSelection>> {
+        let segments = &config.prune.segments;
+        let configured = [
+            (SnapshotComponentType::Transactions, segments.bodies_history),
+            (SnapshotComponentType::Receipts, segments.receipts),
+            (SnapshotComponentType::AccountChangesets, segments.account_history),
+            (SnapshotComponentType::StorageChangesets, segments.storage_history),
+        ];
+        let mut selections = BTreeMap::new();
+
+        for (ty, mode) in configured {
+            if self.component(ty).is_none() {
+                eyre::bail!(
+                    "Snapshot manifest does not contain required {} history",
+                    ty.display_name()
+                );
+            }
+
+            let selection = match ComponentSelection::from_prune_mode(mode, self.block) {
+                ComponentSelection::None => ty.minimal_selection(),
+                ComponentSelection::Distance(distance) => {
+                    let ComponentSelection::Distance(minimum) = ty.minimal_selection() else {
+                        unreachable!("execution history components have a minimum distance")
+                    };
+                    ComponentSelection::Distance(distance.max(minimum))
+                }
+                selection => selection,
+            };
+            selections.insert(ty, selection);
+        }
+
+        Ok(selections)
     }
 
     /// Returns the total download size for the given set of component types.
@@ -907,6 +965,39 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    fn history_manifest() -> SnapshotManifest {
+        let components = [
+            SnapshotComponentType::Transactions,
+            SnapshotComponentType::Receipts,
+            SnapshotComponentType::AccountChangesets,
+            SnapshotComponentType::StorageChangesets,
+        ]
+        .into_iter()
+        .map(|ty| {
+            (
+                ty.key().to_string(),
+                ComponentManifest::Single(SingleArchive {
+                    file: format!("{}.tar.zst", ty.key()),
+                    size: 1,
+                    decompressed_size: 0,
+                    blake3: None,
+                    output_files: vec![],
+                }),
+            )
+        })
+        .collect();
+
+        SnapshotManifest {
+            block: 100,
+            chain_id: 1,
+            storage_version: 2,
+            timestamp: 0,
+            base_url: Some("https://example.com".to_string()),
+            reth_version: None,
+            components,
+        }
+    }
+
     fn test_manifest() -> SnapshotManifest {
         let mut components = BTreeMap::new();
         components.insert(
@@ -957,6 +1048,43 @@ mod tests {
         assert_eq!(urls.len(), 3);
         assert_eq!(urls[0], "https://example.com/transactions-0-499999.tar.zst");
         assert_eq!(urls[2], "https://example.com/transactions-1000000-1499999.tar.zst");
+    }
+
+    #[test]
+    fn repair_history_uses_each_configured_prune_mode() {
+        let mut config = Config::default();
+        config.prune.segments.bodies_history = Some(PruneMode::Before(42));
+        config.prune.segments.receipts = Some(PruneMode::Distance(10));
+        config.prune.segments.account_history = Some(PruneMode::Full);
+        config.prune.segments.storage_history = Some(PruneMode::Before(101));
+
+        let selections = history_manifest().repair_history_selections(&config).unwrap();
+        assert_eq!(
+            selections.get(&SnapshotComponentType::Transactions),
+            Some(&ComponentSelection::Since(42))
+        );
+        assert_eq!(
+            selections.get(&SnapshotComponentType::Receipts),
+            Some(&ComponentSelection::Distance(64))
+        );
+        assert_eq!(
+            selections.get(&SnapshotComponentType::AccountChangesets),
+            Some(&ComponentSelection::Distance(10_064))
+        );
+        assert_eq!(
+            selections.get(&SnapshotComponentType::StorageChangesets),
+            Some(&ComponentSelection::Distance(10_064))
+        );
+    }
+
+    #[test]
+    fn repair_history_requires_every_history_component() {
+        let config = Config::default();
+        let mut manifest = history_manifest();
+        manifest.components.remove(SnapshotComponentType::Receipts.key());
+
+        let err = manifest.repair_history_selections(&config).err().unwrap();
+        assert!(err.to_string().contains("Receipts"));
     }
 
     #[test]
