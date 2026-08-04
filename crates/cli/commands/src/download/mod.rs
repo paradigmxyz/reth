@@ -530,15 +530,21 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             return Ok(());
         }
 
+        let manifest = self.load_manifest(chain_id).await?;
+        let repair_block = if self.repair_history {
+            Some(self.ensure_repairable::<N>(
+                &data_dir.db(),
+                &data_dir.static_files(),
+                manifest.block,
+            )?)
+        } else {
+            None
+        };
         let ResolvedDownload { manifest, selections, preset, planned } =
-            self.resolve_download(chain_id).await?;
+            self.resolve_loaded_download(manifest, repair_block)?;
         if self.print_plan_json {
             DownloadPlan::from_planned(&manifest, &planned).write_json(std::io::stdout().lock())?;
             return Ok(())
-        }
-
-        if self.repair_history {
-            self.ensure_repairable::<N>(&data_dir.db(), &data_dir.static_files(), manifest.block)?;
         }
 
         let target_dir = data_dir.data_dir();
@@ -592,7 +598,29 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 
     async fn resolve_download(&self, chain_id: u64) -> Result<ResolvedDownload> {
         let manifest = self.load_manifest(chain_id).await?;
-        let ResolvedComponents { mut selections, preset } = self.resolve_components(&manifest)?;
+        let repair_block = if self.repair_history {
+            let data_dir = self.env.datadir.clone().resolve_datadir(self.env.chain.chain());
+            let block = self.repair_database_frontier(&data_dir.db())?;
+            if block > manifest.block {
+                eyre::bail!(
+                    "database is synced to block {block}, past the snapshot at block {}; use a newer snapshot",
+                    manifest.block
+                );
+            }
+            Some(block)
+        } else {
+            None
+        };
+        self.resolve_loaded_download(manifest, repair_block)
+    }
+
+    fn resolve_loaded_download(
+        &self,
+        manifest: SnapshotManifest,
+        repair_block: Option<u64>,
+    ) -> Result<ResolvedDownload> {
+        let ResolvedComponents { mut selections, preset } =
+            self.resolve_components(&manifest, repair_block)?;
 
         if matches!(preset, Some(SelectionPreset::Archive)) {
             inject_archive_only_components(&mut selections, &manifest, !self.without_rocksdb);
@@ -666,31 +694,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         db_path: &Path,
         static_files_path: &Path,
         snapshot_block: u64,
-    ) -> Result<()> {
-        let db = open_db_read_only(db_path, self.env.db.database_args())?;
-        let tx = db.tx()?;
-
-        // On the legacy layout receipts and changesets live in MDBX, where static-file
-        // archives cannot restore them; missing settings mean legacy.
-        let is_v2 = tx
-            .get::<tables::Metadata>(
-                reth_storage_api::metadata::keys::STORAGE_SETTINGS.to_string(),
-            )?
-            .and_then(|bytes| serde_json::from_slice::<StorageSettings>(&bytes).ok())
-            .is_some_and(|settings| settings.is_v2());
-        if !is_v2 {
-            eyre::bail!(
-                "--repair-history requires the v2 storage layout (execution history in static files)"
-            );
-        }
-
-        // A database synced past the snapshot could see its newer static files replaced
-        // with older archive data.
-        let mut cursor = tx.cursor_read::<tables::StageCheckpoints>()?;
-        let mut synced_block = 0;
-        for entry in cursor.walk(None)? {
-            synced_block = synced_block.max(entry?.1.block_number);
-        }
+    ) -> Result<u64> {
+        let synced_block = self.repair_database_frontier(db_path)?;
         if synced_block > snapshot_block {
             eyre::bail!(
                 "database is synced to block {synced_block}, past the snapshot at block {snapshot_block}; use a newer snapshot"
@@ -716,11 +721,43 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             }
         }
 
-        Ok(())
+        Ok(synced_block)
+    }
+
+    /// Returns the database block frontier after validating its persisted storage layout.
+    fn repair_database_frontier(&self, db_path: &Path) -> Result<u64> {
+        let db = open_db_read_only(db_path, self.env.db.database_args())?;
+        let tx = db.tx()?;
+
+        // On the legacy layout receipts and changesets live in MDBX, where static-file
+        // archives cannot restore them; missing settings mean legacy.
+        let is_v2 = tx
+            .get::<tables::Metadata>(
+                reth_storage_api::metadata::keys::STORAGE_SETTINGS.to_string(),
+            )?
+            .and_then(|bytes| serde_json::from_slice::<StorageSettings>(&bytes).ok())
+            .is_some_and(|settings| settings.is_v2());
+        if !is_v2 {
+            eyre::bail!(
+                "--repair-history requires the v2 storage layout (execution history in static files)"
+            );
+        }
+
+        // Use the highest stage checkpoint as the persisted database frontier.
+        let mut cursor = tx.cursor_read::<tables::StageCheckpoints>()?;
+        let mut synced_block = 0;
+        for entry in cursor.walk(None)? {
+            synced_block = synced_block.max(entry?.1.block_number);
+        }
+        Ok(synced_block)
     }
 
     /// Determines which components to download based on CLI flags or interactive selection.
-    fn resolve_components(&self, manifest: &SnapshotManifest) -> Result<ResolvedComponents> {
+    fn resolve_components(
+        &self,
+        manifest: &SnapshotManifest,
+        repair_block: Option<u64>,
+    ) -> Result<ResolvedComponents> {
         let available = |ty: SnapshotComponentType| manifest.component(ty).is_some();
 
         if self.repair_history {
@@ -737,7 +774,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             let config = Config::from_path(&config_path).wrap_err_with(|| {
                 format!("Failed to load config from {}", config_path.display())
             })?;
-            let selections = manifest.repair_history_selections(&config)?;
+            let repair_block = repair_block
+                .ok_or_else(|| eyre::eyre!("repair database frontier was not resolved"))?;
+            let selections = manifest.repair_history_selections(&config, repair_block)?;
             return Ok(ResolvedComponents { selections, preset: None });
         }
 
@@ -1399,7 +1438,7 @@ mod tests {
             components: BTreeMap::new(),
         };
 
-        let err = args.resolve_components(&manifest).err().unwrap();
+        let err = args.resolve_components(&manifest, None).err().unwrap();
         assert!(err.to_string().contains("requires an existing config"));
         assert!(!temp.path().join("reth.toml").exists());
     }

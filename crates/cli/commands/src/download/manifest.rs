@@ -290,11 +290,13 @@ impl SnapshotManifest {
 
     /// Resolves the history required by the configured pruning modes.
     ///
-    /// Selections mirror what the pruner retains: floored to `minimum_pruning_distance`,
-    /// with a `Before` cutoff inside that window having pruned nothing yet.
+    /// Selections mirror what the pruner retains at `target_block`, floored to
+    /// `minimum_pruning_distance`. Relative modes become absolute selections when the snapshot is
+    /// ahead of the target so the downloaded archives still cover the target's retained history.
     pub(crate) fn repair_history_selections(
         &self,
         config: &Config,
+        target_block: u64,
     ) -> Result<BTreeMap<SnapshotComponentType, ComponentSelection>> {
         let segments = &config.prune.segments;
         if !segments.receipts_log_filter.is_empty() {
@@ -326,13 +328,21 @@ impl SnapshotManifest {
             }
             .max(config.prune.minimum_pruning_distance);
 
+            let relative_selection = |distance| {
+                if target_block == self.block {
+                    ComponentSelection::Distance(distance)
+                } else {
+                    ComponentSelection::Since(target_block.saturating_sub(distance))
+                }
+            };
+
             let selection = match mode {
                 None => ComponentSelection::All,
-                Some(PruneMode::Full) => ComponentSelection::Distance(minimum),
+                Some(PruneMode::Full) => relative_selection(minimum),
                 Some(PruneMode::Distance(distance)) if distance >= minimum => {
-                    ComponentSelection::Distance(distance)
+                    relative_selection(distance)
                 }
-                Some(PruneMode::Before(block)) if self.block.saturating_sub(block) >= minimum => {
+                Some(PruneMode::Before(block)) if target_block.saturating_sub(block) >= minimum => {
                     ComponentSelection::Since(block)
                 }
                 // A sub-minimum distance is a pruner configuration error and a closer
@@ -1078,7 +1088,7 @@ mod tests {
         config.prune.segments.account_history = Some(PruneMode::Full);
         config.prune.segments.storage_history = Some(PruneMode::Before(20_001));
 
-        let selections = history_manifest().repair_history_selections(&config).unwrap();
+        let selections = history_manifest().repair_history_selections(&config, 20_000).unwrap();
         assert_eq!(
             selections.get(&SnapshotComponentType::Transactions),
             Some(&ComponentSelection::Since(42))
@@ -1106,7 +1116,7 @@ mod tests {
         // minimum window, so the pruner has not removed anything yet.
         config.prune.segments.bodies_history = Some(PruneMode::Before(19_000));
 
-        let selections = history_manifest().repair_history_selections(&config).unwrap();
+        let selections = history_manifest().repair_history_selections(&config, 20_000).unwrap();
         assert_eq!(
             selections.get(&SnapshotComponentType::Transactions),
             Some(&ComponentSelection::All)
@@ -1120,13 +1130,31 @@ mod tests {
         config.prune.segments.bodies_history = Some(PruneMode::Full);
         config.prune.segments.receipts = Some(PruneMode::Distance(20_000));
 
-        let selections = history_manifest().repair_history_selections(&config).unwrap();
+        let selections = history_manifest().repair_history_selections(&config, 20_000).unwrap();
         assert_eq!(
             selections.get(&SnapshotComponentType::Transactions),
             Some(&ComponentSelection::Distance(50_000))
         );
         // The raised minimum turns Distance(20_000) into a configuration error
         // that prunes nothing.
+        assert_eq!(
+            selections.get(&SnapshotComponentType::Receipts),
+            Some(&ComponentSelection::All)
+        );
+    }
+
+    #[test]
+    fn repair_history_uses_target_frontier_for_relative_modes() {
+        let mut config = Config::default();
+        config.prune.minimum_pruning_distance = 64;
+        config.prune.segments.bodies_history = Some(PruneMode::Full);
+        config.prune.segments.receipts = Some(PruneMode::Before(16_000));
+
+        let selections = history_manifest().repair_history_selections(&config, 15_000).unwrap();
+        assert_eq!(
+            selections.get(&SnapshotComponentType::Transactions),
+            Some(&ComponentSelection::Since(4_936))
+        );
         assert_eq!(
             selections.get(&SnapshotComponentType::Receipts),
             Some(&ComponentSelection::All)
@@ -1141,7 +1169,7 @@ mod tests {
             PruneMode::Full,
         )]));
 
-        let err = history_manifest().repair_history_selections(&config).err().unwrap();
+        let err = history_manifest().repair_history_selections(&config, 20_000).err().unwrap();
         assert!(err.to_string().contains("receipts_log_filter"));
     }
 
@@ -1151,7 +1179,7 @@ mod tests {
         let mut manifest = history_manifest();
         manifest.components.remove(SnapshotComponentType::Receipts.key());
 
-        let err = manifest.repair_history_selections(&config).err().unwrap();
+        let err = manifest.repair_history_selections(&config, 20_000).err().unwrap();
         assert!(err.to_string().contains("Receipts"));
     }
 
