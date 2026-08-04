@@ -106,16 +106,16 @@ impl SparseBlobSidecar {
             let start = blob_index * CELLS_PER_EXT_BLOB;
             for &cell_index in &indices {
                 let index = start + cell_index;
-                updates.push((index, cells[offset].clone()));
+                updates.push((index, cells[offset]));
                 offset += 1;
             }
         }
 
         for &(index, ref cell) in &updates {
-            if let Some(existing) = &self.cells[index] {
-                if existing != cell {
-                    return Err(SparseBlobSidecarError::ConflictingCell(index));
-                }
+            if let Some(existing) = &self.cells[index] &&
+                existing != cell
+            {
+                return Err(SparseBlobSidecarError::ConflictingCell(index));
             }
         }
 
@@ -136,7 +136,7 @@ impl SparseBlobSidecar {
         for blob_index in 0..self.blob_count() {
             let start = blob_index * CELLS_PER_EXT_BLOB;
             for cell_index in &indices {
-                result.push(self.cells[start + cell_index].clone()?);
+                result.push(self.cells[start + cell_index]?);
             }
         }
         Some(result)
