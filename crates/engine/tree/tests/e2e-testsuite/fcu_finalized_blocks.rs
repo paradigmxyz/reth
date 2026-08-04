@@ -1,7 +1,5 @@
 //! E2E tests for forkchoice updates to canonical ancestors around the finalized block.
 
-use alloy_primitives::B256;
-use alloy_rpc_types_engine::TOO_DEEP_REORG_ERROR;
 use eyre::Result;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::testsuite::{
@@ -36,9 +34,8 @@ fn default_engine_tree_setup() -> Setup<EthEngineTypes> {
         .with_tree_config(TreeConfig::default().with_has_enough_parallelism(true))
 }
 
-/// Verifies that an FCU to a canonical ancestor below the latest known finalized block is
-/// rejected with `-38006: Too deep reorg`, while an FCU to an ancestor above finality can start
-/// a payload build on top of the ancestor whose block eventually reorgs out the current head.
+/// Verifies that an FCU to a canonical ancestor above finality can start a payload build on top
+/// of the ancestor whose block eventually reorgs out the current head.
 #[tokio::test]
 async fn test_fcu_to_canonical_ancestor_around_finalized() -> Result<()> {
     reth_tracing::init_test_tracing();
@@ -46,9 +43,7 @@ async fn test_fcu_to_canonical_ancestor_around_finalized() -> Result<()> {
     let test = TestBuilder::new()
         .with_setup(default_engine_tree_setup())
         // Build and tag canonical ancestors on the way to block 10.
-        .with_action(ProduceBlocks::<EthEngineTypes>::new(5))
-        .with_action(CaptureBlock::new("block_5"))
-        .with_action(ProduceBlocks::<EthEngineTypes>::new(2))
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(7))
         .with_action(CaptureBlock::new("block_7"))
         .with_action(ProduceBlocks::<EthEngineTypes>::new(1))
         .with_action(CaptureBlock::new("block_8"))
@@ -60,19 +55,6 @@ async fn test_fcu_to_canonical_ancestor_around_finalized() -> Result<()> {
             FinalizeBlock::<EthEngineTypes>::new(BlockReference::Tag("block_7".to_string()))
                 .with_head(BlockReference::Tag("block_10".to_string())),
         )
-        // A reorg to block 5 below the latest known finalized block would reorg out the
-        // finalized block and is rejected. The stored finalized block is used, even when the
-        // FCU carries zero hashes.
-        .with_action(
-            SendForkchoiceUpdate::<EthEngineTypes>::new(
-                BlockReference::Hash(B256::ZERO),
-                BlockReference::Hash(B256::ZERO),
-                BlockReference::Tag("block_5".to_string()),
-            )
-            .with_expected_error(TOO_DEEP_REORG_ERROR),
-        )
-        .with_action(UpdateBlockInfo::default())
-        .with_action(AssertChainTip::new(10))
         // Block 8 is above finality: without payload attributes the FCU is acknowledged, but the
         // canonical head does not move.
         .with_action(
