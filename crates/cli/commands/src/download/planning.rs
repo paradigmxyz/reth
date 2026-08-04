@@ -382,6 +382,7 @@ mod tests {
                 total_blocks: 1_000_000,
                 chunk_sizes: vec![20, 30],
                 chunk_decompressed_sizes: vec![200, 300],
+                chunk_files: vec![],
                 chunk_output_files: vec![
                     vec![OutputFileChecksum {
                         path: "static_files/tx-0".to_string(),

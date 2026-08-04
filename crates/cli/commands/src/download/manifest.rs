@@ -9,6 +9,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use tracing::info;
+use url::Url;
 
 fn is_zero(value: &u64) -> bool {
     *value == 0
@@ -20,13 +21,17 @@ fn is_zero(value: &u64) -> bool {
 /// segments like transactions, receipts, etc). Chunked components use `blocks_per_file` to
 /// define the block range per archive, matching reth's static file segment boundaries.
 ///
-/// Archive naming convention for chunked components:
-///   `{component}-{start_block}-{end_block}.tar.zst`
+/// Archive paths are resolved relative to [`SnapshotManifest::base_url`] via URL joining.
+/// Single archives use [`SingleArchive::file`]; chunked archives default to
+/// `{component}-{start_block}-{end_block}.tar.zst`, or use [`ChunkedArchive::chunk_files`]
+/// when present so publishers can place finalized and tip chunks under different prefixes:
 ///
-/// For example with `blocks_per_file: 500000` and `total_blocks: 1500000`:
-///   `transactions-0-499999.tar.zst`
-///   `transactions-500000-999999.tar.zst`
-///   `transactions-1000000-1499999.tar.zst`
+/// ```text
+/// base_url = https://example.com/mainnet
+///   static_files/transactions-0-499999.tar.zst
+///   1700000/transactions-500000-999999.tar.zst
+///   1700000/state.tar.zst
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SnapshotManifest {
     /// Block number this snapshot was taken at.
@@ -99,6 +104,15 @@ pub struct ChunkedArchive {
     /// `chunk_output_files`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub chunk_decompressed_sizes: Vec<u64>,
+    /// Archive path for each chunk, relative to [`SnapshotManifest::base_url`], ordered from
+    /// first to last.
+    ///
+    /// When empty (older manifests), downloaders fall back to the default
+    /// `{component}-{start}-{end}.tar.zst` name. When set, each entry is joined with
+    /// `base_url` so publishers can place chunks under different prefixes (for example
+    /// `static_files/…` for finalized chunks and `{timestamp}/…` for the tip chunk).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub chunk_files: Vec<String>,
     /// Expected extracted plain files per chunk, ordered from first to last.
     ///
     /// This is the authoritative integrity source for the modular download path.
@@ -281,16 +295,17 @@ impl SnapshotManifest {
 
         match component {
             ComponentManifest::Single(single) => {
-                vec![format!("{}/{}", self.base_url_or_empty(), single.file)]
+                vec![resolve_archive_url(self.base_url_or_empty(), &single.file)]
             }
             ComponentManifest::Chunked(chunked) => {
                 let key = ty.key();
                 let num_chunks = chunked.num_chunks();
                 (0..num_chunks)
                     .map(|i| {
-                        let start = i * chunked.blocks_per_file;
-                        let end = (i + 1) * chunked.blocks_per_file - 1;
-                        format!("{}/{key}-{start}-{end}.tar.zst", self.base_url_or_empty())
+                        resolve_archive_url(
+                            self.base_url_or_empty(),
+                            &chunked.chunk_relative_path(key, i),
+                        )
                     })
                     .collect()
             }
@@ -310,7 +325,7 @@ impl SnapshotManifest {
 
         match component {
             ComponentManifest::Single(single) => {
-                vec![format!("{}/{}", self.base_url_or_empty(), single.file)]
+                vec![resolve_archive_url(self.base_url_or_empty(), &single.file)]
             }
             ComponentManifest::Chunked(chunked) => {
                 let key = ty.key();
@@ -325,9 +340,10 @@ impl SnapshotManifest {
 
                 (start_chunk..num_chunks)
                     .map(|i| {
-                        let start = i * chunked.blocks_per_file;
-                        let end = (i + 1) * chunked.blocks_per_file - 1;
-                        format!("{}/{key}-{start}-{end}.tar.zst", self.base_url_or_empty())
+                        resolve_archive_url(
+                            self.base_url_or_empty(),
+                            &chunked.chunk_relative_path(key, i),
+                        )
                     })
                     .collect()
             }
@@ -347,7 +363,7 @@ impl SnapshotManifest {
         match component {
             ComponentManifest::Single(single) => {
                 vec![SnapshotArchive {
-                    url: format!("{}/{}", self.base_url_or_empty(), single.file),
+                    url: resolve_archive_url(self.base_url_or_empty(), &single.file),
                     file_name: single.file.clone(),
                     size: single.size,
                     blake3: single.blake3.clone(),
@@ -365,15 +381,13 @@ impl SnapshotManifest {
 
                 (start_chunk..num_chunks)
                     .map(|i| {
-                        let start = i * chunked.blocks_per_file;
-                        let end = (i + 1) * chunked.blocks_per_file - 1;
-                        let file_name = format!("{key}-{start}-{end}.tar.zst");
+                        let file_name = chunked.chunk_relative_path(key, i);
                         let size = chunked.chunk_sizes.get(i as usize).copied().unwrap_or_default();
                         let output_files =
                             chunked.chunk_output_files.get(i as usize).cloned().unwrap_or_default();
 
                         SnapshotArchive {
-                            url: format!("{}/{}", self.base_url_or_empty(), file_name),
+                            url: resolve_archive_url(self.base_url_or_empty(), &file_name),
                             file_name,
                             size,
                             blake3: None,
@@ -484,6 +498,19 @@ impl ChunkedArchive {
         self.num_chunks() - first_chunk
     }
 
+    /// Returns the archive path for chunk `index`, relative to the manifest base URL.
+    ///
+    /// Uses [`Self::chunk_files`] when present for that index; otherwise the default
+    /// `{key}-{start}-{end}.tar.zst` name.
+    pub fn chunk_relative_path(&self, key: &str, index: u64) -> String {
+        if let Some(path) = self.chunk_files.get(index as usize) {
+            return path.clone();
+        }
+        let start = index * self.blocks_per_file;
+        let end = (index + 1) * self.blocks_per_file - 1;
+        format!("{key}-{start}-{end}.tar.zst")
+    }
+
     /// Returns the extracted plain-output size for one chunk.
     pub fn chunk_output_size(&self, index: usize) -> u64 {
         self.chunk_decompressed_sizes.get(index).copied().unwrap_or_else(|| {
@@ -504,6 +531,45 @@ impl ChunkedArchive {
                 .map(|files| files.iter().map(|file| file.size).sum::<u64>())
                 .sum()
         }
+    }
+}
+
+/// Joins an archive path relative to `base_url`.
+///
+/// Ensures directory semantics for `base_url` so the last path segment is not replaced when
+/// joining nested paths like `static_files/headers-0-499999.tar.zst`.
+fn resolve_archive_url(base_url: &str, relative_path: &str) -> String {
+    if base_url.is_empty() {
+        return relative_path.to_string();
+    }
+
+    let Ok(mut base) = Url::parse(base_url) else {
+        return format!(
+            "{}/{}",
+            base_url.trim_end_matches('/'),
+            relative_path.trim_start_matches('/')
+        );
+    };
+
+    // Url::join replaces the final path segment unless the base path ends with `/`.
+    let path = base.path();
+    if !path.ends_with('/') {
+        let mut with_slash = path.to_string();
+        if with_slash.is_empty() {
+            with_slash.push('/');
+        } else {
+            with_slash.push('/');
+        }
+        base.set_path(&with_slash);
+    }
+
+    match base.join(relative_path) {
+        Ok(joined) => joined.to_string(),
+        Err(_) => format!(
+            "{}/{}",
+            base_url.trim_end_matches('/'),
+            relative_path.trim_start_matches('/')
+        ),
     }
 }
 
@@ -608,6 +674,7 @@ pub fn generate_manifest(
                         .iter()
                         .map(|files| files.iter().map(|file| file.size).sum())
                         .collect(),
+                    chunk_files: vec![],
                     chunk_output_files,
                 }),
             );
@@ -920,6 +987,7 @@ mod tests {
                 total_blocks: 1_500_000,
                 chunk_sizes: vec![80_000, 100_000, 120_000],
                 chunk_decompressed_sizes: vec![],
+                chunk_files: vec![],
                 chunk_output_files: vec![vec![], vec![], vec![]],
             }),
         );
@@ -930,6 +998,7 @@ mod tests {
                 total_blocks: 1_500_000,
                 chunk_sizes: vec![40_000, 50_000, 60_000],
                 chunk_decompressed_sizes: vec![],
+                chunk_files: vec![],
                 chunk_output_files: vec![vec![], vec![], vec![]],
             }),
         );
@@ -1130,6 +1199,7 @@ mod tests {
                 total_blocks: 24_396_822,
                 chunk_sizes: vec![100; 49], // 49 chunks
                 chunk_decompressed_sizes: vec![],
+                chunk_files: vec![],
                 chunk_output_files: vec![vec![]; 49],
             }),
         );
@@ -1199,6 +1269,7 @@ mod tests {
                 total_blocks: 1_000_000,
                 chunk_sizes: vec![80_000, 120_000],
                 chunk_decompressed_sizes: vec![111, 222],
+                chunk_files: vec![],
                 chunk_output_files: vec![
                     vec![OutputFileChecksum {
                         path: "static_files/static_file_transactions_0_499999.bin".to_string(),
@@ -1258,6 +1329,7 @@ mod tests {
                 total_blocks: 1_000_000,
                 chunk_sizes: vec![80_000, 120_000],
                 chunk_decompressed_sizes: vec![111, 222],
+                chunk_files: vec![],
                 chunk_output_files: vec![
                     vec![OutputFileChecksum {
                         path: "static_files/static_file_transactions_0_499999.bin".to_string(),
@@ -1341,5 +1413,106 @@ mod tests {
         assert!(!rocksdb.output_files.is_empty());
         assert_eq!(rocksdb.output_files[0].path, "rocksdb/CURRENT");
         assert!(output.path().join("rocksdb_indices.tar.zst").exists());
+    }
+
+    #[test]
+    fn resolve_archive_url_joins_nested_paths_under_base() {
+        assert_eq!(
+            resolve_archive_url(
+                "https://example.com/mainnet",
+                "static_files/headers-0-499999.tar.zst"
+            ),
+            "https://example.com/mainnet/static_files/headers-0-499999.tar.zst"
+        );
+        assert_eq!(
+            resolve_archive_url("https://example.com/mainnet/", "1700000/state.tar.zst"),
+            "https://example.com/mainnet/1700000/state.tar.zst"
+        );
+        assert_eq!(
+            resolve_archive_url("https://example.com/mainnet", "headers-0-499999.tar.zst"),
+            "https://example.com/mainnet/headers-0-499999.tar.zst"
+        );
+    }
+
+    #[test]
+    fn chunk_files_resolve_relative_to_root_base_url() {
+        let mut components = BTreeMap::new();
+        components.insert(
+            "headers".to_string(),
+            ComponentManifest::Chunked(ChunkedArchive {
+                blocks_per_file: 500_000,
+                total_blocks: 1_000_000,
+                chunk_sizes: vec![40_000, 50_000],
+                chunk_decompressed_sizes: vec![],
+                chunk_files: vec![
+                    "static_files/headers-0-499999.tar.zst".to_string(),
+                    "1700000/headers-500000-999999.tar.zst".to_string(),
+                ],
+                chunk_output_files: vec![vec![], vec![]],
+            }),
+        );
+        components.insert(
+            "state".to_string(),
+            ComponentManifest::Single(SingleArchive {
+                file: "1700000/state.tar.zst".to_string(),
+                size: 100,
+                decompressed_size: 0,
+                blake3: None,
+                output_files: vec![],
+            }),
+        );
+
+        let m = SnapshotManifest {
+            block: 1_000_000,
+            chain_id: 1,
+            storage_version: 2,
+            timestamp: 1_700_000,
+            base_url: Some("https://example.com/mainnet".to_string()),
+            reth_version: None,
+            components,
+        };
+
+        let urls = m.archive_urls(SnapshotComponentType::Headers);
+        assert_eq!(urls.len(), 2, "exactly 2 header chunk URLs");
+        assert_eq!(
+            urls[0],
+            "https://example.com/mainnet/static_files/headers-0-499999.tar.zst",
+            "finalized chunk stays under static_files/"
+        );
+        assert_eq!(
+            urls[1],
+            "https://example.com/mainnet/1700000/headers-500000-999999.tar.zst",
+            "tip chunk resolves under the run timestamp directory"
+        );
+
+        let state = m.snapshot_archives_for_distance(SnapshotComponentType::State, None);
+        assert_eq!(state.len(), 1, "exactly one state archive");
+        assert_eq!(
+            state[0].url,
+            "https://example.com/mainnet/1700000/state.tar.zst",
+            "single archive file path joins under root base_url without ../"
+        );
+        assert_eq!(state[0].file_name, "1700000/state.tar.zst");
+
+        let headers = m.snapshot_archives_for_distance(SnapshotComponentType::Headers, Some(500_000));
+        assert_eq!(headers.len(), 1, "distance selection returns only the tip chunk");
+        assert_eq!(
+            headers[0].file_name,
+            "1700000/headers-500000-999999.tar.zst",
+            "file_name keeps the relative path from chunk_files"
+        );
+        assert_eq!(
+            headers[0].url,
+            "https://example.com/mainnet/1700000/headers-500000-999999.tar.zst"
+        );
+    }
+
+    #[test]
+    fn chunk_files_absent_keeps_default_chunk_names() {
+        let m = test_manifest();
+        let archives = m.snapshot_archives_for_distance(SnapshotComponentType::Transactions, None);
+        assert_eq!(archives.len(), 3);
+        assert_eq!(archives[0].file_name, "transactions-0-499999.tar.zst");
+        assert_eq!(archives[0].url, "https://example.com/transactions-0-499999.tar.zst");
     }
 }
