@@ -1,7 +1,6 @@
 //! Actions that can be performed in tests.
 
 use crate::testsuite::Environment;
-use alloy_primitives::B256;
 use alloy_rpc_types_engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatusEnum};
 use eyre::Result;
 use futures_util::future::BoxFuture;
@@ -146,10 +145,7 @@ where
                 let fork_choice_state = ForkchoiceState {
                     head_block_hash: latest_block.hash,
                     safe_block_hash: latest_block.hash,
-                    // Making a block canonical does not imply finality: tests advance the
-                    // finalized block explicitly via `FinalizeBlock`, and a finalized tip would
-                    // reject any later forkchoice update below it as a too deep reorg.
-                    finalized_block_hash: B256::ZERO,
+                    finalized_block_hash: latest_block.hash,
                 };
 
                 let active_idx = env.active_node_idx;
