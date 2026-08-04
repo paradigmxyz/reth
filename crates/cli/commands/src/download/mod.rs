@@ -105,8 +105,8 @@ use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks, MAINNET}
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
 use reth_config::config::Config;
-use reth_db::{init_db, Database};
-use reth_db_api::transaction::DbTx;
+use reth_db::{init_db, lockfile::StorageLock, open_db_read_only, tables, Database};
+use reth_db_api::{cursor::DbCursorRO, models::StorageSettings, transaction::DbTx};
 use reth_fs_util as fs;
 use reth_node_core::args::DefaultPruningValues;
 use source::{
@@ -387,16 +387,17 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     #[arg(long, value_name = "BLOCK_NUMBER", conflicts_with_all = ["with_state_history", "with_state_history_distance", "minimal", "full", "archive"])]
     with_state_history_since: Option<u64>,
 
-    /// Repair execution history to match the configured pruning modes.
-    ///
-    /// Missing transactions, receipts, account changesets, and storage changesets are downloaded
-    /// without changing the existing configuration or database checkpoints.
-    #[arg(long, conflicts_with_all = ["url", "with_txs", "with_txs_since", "with_txs_distance", "with_receipts", "with_receipts_since", "with_receipts_distance", "with_state_history", "with_state_history_since", "with_state_history_distance", "with_senders", "with_rocksdb", "without_rocksdb", "archive", "minimal", "full", "non_interactive", "force", "list"])]
-    repair_history: bool,
-
     /// Include account and storage history static files covering the last N blocks.
     #[arg(long, value_name = "BLOCKS", value_parser = RangedU64ValueParser::<u64>::new().range(1..), conflicts_with_all = ["with_state_history", "with_state_history_since", "minimal", "full", "archive"])]
     with_state_history_distance: Option<u64>,
+
+    /// Repair execution history to match the configured pruning modes.
+    ///
+    /// Missing transactions, receipts, account changesets, and storage changesets are downloaded
+    /// without changing the existing configuration or database checkpoints. History beyond what
+    /// the database checkpoints already cover is downloaded but not re-indexed.
+    #[arg(long, conflicts_with_all = ["url", "with_txs", "with_txs_since", "with_txs_distance", "with_receipts", "with_receipts_since", "with_receipts_distance", "with_state_history", "with_state_history_since", "with_state_history_distance", "with_senders", "with_rocksdb", "without_rocksdb", "archive", "minimal", "full", "force", "list"])]
+    repair_history: bool,
 
     /// Include transaction sender static files. Requires `--with-txs`.
     #[arg(long, requires = "with_txs", conflicts_with_all = ["minimal", "full", "archive"])]
@@ -476,6 +477,21 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 
         let data_dir = self.env.datadir.clone().resolve_datadir(chain);
 
+        // Fail fast before any network access, and hold the static-file lock for the
+        // whole repair so a running node cannot touch jars we may replace.
+        let _repair_lock = if self.repair_history {
+            if !data_dir.db().try_exists()? {
+                eyre::bail!(
+                    "--repair-history requires an existing database at {}",
+                    data_dir.db().display()
+                );
+            }
+            fs::create_dir_all(data_dir.static_files())?;
+            Some(StorageLock::try_acquire(&data_dir.static_files())?)
+        } else {
+            None
+        };
+
         let cancel_token = CancellationToken::new();
         let _cancel_guard = cancel_token.drop_guard();
 
@@ -515,13 +531,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             return Ok(())
         }
 
-        let target_dir = data_dir.data_dir();
-        if self.repair_history && !data_dir.db().try_exists()? {
-            eyre::bail!(
-                "--repair-history requires an existing database at {}",
-                data_dir.db().display()
-            );
+        if self.repair_history {
+            self.ensure_repairable(&data_dir.db(), manifest.block)?;
         }
+
+        let target_dir = data_dir.data_dir();
         if self.force {
             clear_existing_datadir(target_dir)?;
         }
@@ -548,7 +562,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         )
         .await?;
 
-        if !self.repair_history {
+        if self.repair_history {
+            info!(target: "reth::cli", "History repair complete");
+        } else {
             self.finalize_modular_download(
                 &selections,
                 &manifest,
@@ -556,8 +572,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                 target_dir,
                 &data_dir.db(),
             )?;
-        } else {
-            info!(target: "reth::cli", "Required execution history is available");
         }
 
         Ok(())
@@ -640,6 +654,41 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         Ok(())
     }
 
+    /// Validates that the existing database can be repaired from the snapshot.
+    fn ensure_repairable(&self, db_path: &Path, snapshot_block: u64) -> Result<()> {
+        let db = open_db_read_only(db_path, self.env.db.database_args())?;
+        let tx = db.tx()?;
+
+        // On the legacy layout receipts and changesets live in MDBX, where static-file
+        // archives cannot restore them; missing settings mean legacy.
+        let is_v2 = tx
+            .get::<tables::Metadata>(
+                reth_storage_api::metadata::keys::STORAGE_SETTINGS.to_string(),
+            )?
+            .and_then(|bytes| serde_json::from_slice::<StorageSettings>(&bytes).ok())
+            .is_some_and(|settings| settings.is_v2());
+        if !is_v2 {
+            eyre::bail!(
+                "--repair-history requires the v2 storage layout (execution history in static files)"
+            );
+        }
+
+        // A database synced past the snapshot could see its newer static files replaced
+        // with older archive data.
+        let mut cursor = tx.cursor_read::<tables::StageCheckpoints>()?;
+        let mut synced_block = 0;
+        for entry in cursor.walk(None)? {
+            synced_block = synced_block.max(entry?.1.block_number);
+        }
+        if synced_block > snapshot_block {
+            eyre::bail!(
+                "database is synced to block {synced_block}, past the snapshot at block {snapshot_block}; use a newer snapshot"
+            );
+        }
+
+        Ok(())
+    }
+
     /// Determines which components to download based on CLI flags or interactive selection.
     fn resolve_components(&self, manifest: &SnapshotManifest) -> Result<ResolvedComponents> {
         let available = |ty: SnapshotComponentType| manifest.component(ty).is_some();
@@ -647,6 +696,14 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         if self.repair_history {
             let data_dir = self.env.datadir.clone().resolve_datadir(self.env.chain.chain());
             let config_path = self.env.config.clone().unwrap_or_else(|| data_dir.config());
+            // `Config::from_path` writes a default config for missing files, which would
+            // resolve every component to `All` instead of the node's actual prune modes.
+            if !config_path.try_exists()? {
+                eyre::bail!(
+                    "--repair-history requires an existing config at {}",
+                    config_path.display()
+                );
+            }
             let config = Config::from_path(&config_path).wrap_err_with(|| {
                 format!("Failed to load config from {}", config_path.display())
             })?;
@@ -1282,10 +1339,75 @@ mod tests {
         let args = CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from([
             "reth",
             "--repair-history",
+            "--non-interactive",
         ])
         .args;
 
         assert!(args.repair_history);
+    }
+
+    #[test]
+    fn repair_history_requires_existing_config() {
+        let temp = tempfile::tempdir().unwrap();
+        let args = CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from([
+            "reth",
+            "--repair-history",
+            "--datadir",
+            temp.path().to_str().unwrap(),
+        ])
+        .args;
+
+        let manifest = SnapshotManifest {
+            block: 0,
+            chain_id: 1,
+            storage_version: 2,
+            timestamp: 0,
+            base_url: None,
+            reth_version: None,
+            components: BTreeMap::new(),
+        };
+
+        let err = args.resolve_components(&manifest).err().unwrap();
+        assert!(err.to_string().contains("requires an existing config"));
+        assert!(!temp.path().join("reth.toml").exists());
+    }
+
+    #[test]
+    fn ensure_repairable_validates_layout_and_frontier() {
+        use reth_db_api::transaction::DbTxMut;
+
+        let temp = tempfile::tempdir().unwrap();
+        let args = CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from([
+            "reth",
+            "--repair-history",
+        ])
+        .args;
+
+        // A database without persisted storage settings is treated as the legacy layout.
+        drop(init_db(temp.path(), args.env.db.database_args()).unwrap());
+        let err = args.ensure_repairable(temp.path(), 100).err().unwrap();
+        assert!(err.to_string().contains("v2 storage layout"));
+
+        {
+            let db = init_db(temp.path(), args.env.db.database_args()).unwrap();
+            let tx = db.tx_mut().unwrap();
+            tx.put::<tables::Metadata>(
+                reth_storage_api::metadata::keys::STORAGE_SETTINGS.to_string(),
+                serde_json::to_vec(&StorageSettings::v2()).unwrap(),
+            )
+            .unwrap();
+            tx.put::<tables::StageCheckpoints>(
+                "Headers".to_string(),
+                reth_stages_types::StageCheckpoint::new(150),
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+
+        let err = args.ensure_repairable(temp.path(), 100).err().unwrap();
+        assert!(err.to_string().contains("past the snapshot"));
+
+        args.ensure_repairable(temp.path(), 200).unwrap();
     }
 
     #[test]

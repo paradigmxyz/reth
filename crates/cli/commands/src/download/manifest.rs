@@ -289,11 +289,21 @@ impl SnapshotManifest {
     }
 
     /// Resolves the history required by the configured pruning modes.
+    ///
+    /// Selections mirror what the pruner retains: floored to `minimum_pruning_distance`,
+    /// with a `Before` cutoff past the snapshot tip having pruned nothing yet.
     pub(crate) fn repair_history_selections(
         &self,
         config: &Config,
     ) -> Result<BTreeMap<SnapshotComponentType, ComponentSelection>> {
         let segments = &config.prune.segments;
+        if !segments.receipts_log_filter.is_empty() {
+            eyre::bail!(
+                "--repair-history does not support `receipts_log_filter` pruning; \
+                 the retained receipts live in the database, not in static files"
+            );
+        }
+
         let configured = [
             (SnapshotComponentType::Transactions, segments.bodies_history),
             (SnapshotComponentType::Receipts, segments.receipts),
@@ -310,15 +320,22 @@ impl SnapshotManifest {
                 );
             }
 
-            let selection = match ComponentSelection::from_prune_mode(mode, self.block) {
-                ComponentSelection::None => ty.minimal_selection(),
+            let minimum = match ty.minimal_selection() {
                 ComponentSelection::Distance(distance) => {
-                    let ComponentSelection::Distance(minimum) = ty.minimal_selection() else {
-                        unreachable!("execution history components have a minimum distance")
-                    };
+                    distance.max(config.prune.minimum_pruning_distance)
+                }
+                _ => config.prune.minimum_pruning_distance,
+            };
+            let selection = match mode {
+                None => ComponentSelection::All,
+                Some(PruneMode::Full) => ComponentSelection::Distance(minimum),
+                Some(PruneMode::Distance(distance)) => {
                     ComponentSelection::Distance(distance.max(minimum))
                 }
-                selection => selection,
+                Some(PruneMode::Before(block)) if block > self.block => ComponentSelection::All,
+                Some(PruneMode::Before(block)) => {
+                    ComponentSelection::Since(block.min(self.block.saturating_sub(minimum)))
+                }
             };
             selections.insert(ty, selection);
         }
@@ -963,6 +980,7 @@ impl<R: Read> Read for HashingReader<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_prune_types::ReceiptsLogPruneConfig;
     use tempfile::tempdir;
 
     fn history_manifest() -> SnapshotManifest {
@@ -988,7 +1006,7 @@ mod tests {
         .collect();
 
         SnapshotManifest {
-            block: 100,
+            block: 20_000,
             chain_id: 1,
             storage_version: 2,
             timestamp: 0,
@@ -1056,25 +1074,71 @@ mod tests {
         config.prune.segments.bodies_history = Some(PruneMode::Before(42));
         config.prune.segments.receipts = Some(PruneMode::Distance(10));
         config.prune.segments.account_history = Some(PruneMode::Full);
-        config.prune.segments.storage_history = Some(PruneMode::Before(101));
+        config.prune.segments.storage_history = Some(PruneMode::Before(20_001));
 
         let selections = history_manifest().repair_history_selections(&config).unwrap();
         assert_eq!(
             selections.get(&SnapshotComponentType::Transactions),
             Some(&ComponentSelection::Since(42))
         );
+        // Distance(10) is floored to the default minimum pruning distance.
         assert_eq!(
             selections.get(&SnapshotComponentType::Receipts),
-            Some(&ComponentSelection::Distance(64))
+            Some(&ComponentSelection::Distance(10_064))
         );
         assert_eq!(
             selections.get(&SnapshotComponentType::AccountChangesets),
             Some(&ComponentSelection::Distance(10_064))
         );
+        // A `Before` cutoff past the snapshot tip has not pruned anything yet.
         assert_eq!(
             selections.get(&SnapshotComponentType::StorageChangesets),
-            Some(&ComponentSelection::Distance(10_064))
+            Some(&ComponentSelection::All)
         );
+    }
+
+    #[test]
+    fn repair_history_clamps_since_to_minimal_distance() {
+        let mut config = Config::default();
+        // Snapshot block is 20_000, so `Before(19_000)` would cover only 1_000 blocks,
+        // less than the 10_064-block unwind-safe minimum for transactions.
+        config.prune.segments.bodies_history = Some(PruneMode::Before(19_000));
+
+        let selections = history_manifest().repair_history_selections(&config).unwrap();
+        assert_eq!(
+            selections.get(&SnapshotComponentType::Transactions),
+            Some(&ComponentSelection::Since(9_936))
+        );
+    }
+
+    #[test]
+    fn repair_history_honors_configured_minimum_pruning_distance() {
+        let mut config = Config::default();
+        config.prune.minimum_pruning_distance = 50_000;
+        config.prune.segments.bodies_history = Some(PruneMode::Full);
+        config.prune.segments.receipts = Some(PruneMode::Distance(20_000));
+
+        let selections = history_manifest().repair_history_selections(&config).unwrap();
+        assert_eq!(
+            selections.get(&SnapshotComponentType::Transactions),
+            Some(&ComponentSelection::Distance(50_000))
+        );
+        assert_eq!(
+            selections.get(&SnapshotComponentType::Receipts),
+            Some(&ComponentSelection::Distance(50_000))
+        );
+    }
+
+    #[test]
+    fn repair_history_rejects_receipts_log_filter() {
+        let mut config = Config::default();
+        config.prune.segments.receipts_log_filter = ReceiptsLogPruneConfig(BTreeMap::from([(
+            alloy_primitives::Address::ZERO,
+            PruneMode::Full,
+        )]));
+
+        let err = history_manifest().repair_history_selections(&config).err().unwrap();
+        assert!(err.to_string().contains("receipts_log_filter"));
     }
 
     #[test]
