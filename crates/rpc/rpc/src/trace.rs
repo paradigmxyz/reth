@@ -370,7 +370,11 @@ where
         let earliest_block =
             self.provider().earliest_block_number().map_err(Eth::Error::from_eth_err)?;
         if start < earliest_block {
-            return Err(EthApiError::PrunedHistoryUnavailable.into());
+            return Err(EthApiError::PrunedHistoryUnavailable {
+                requested: start,
+                earliest_available: earliest_block,
+            }
+            .into());
         }
 
         if start > end {
