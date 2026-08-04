@@ -1,6 +1,7 @@
 //! Actions that can be performed in tests.
 
 use crate::testsuite::Environment;
+use alloy_primitives::B256;
 use alloy_rpc_types_engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatusEnum};
 use eyre::Result;
 use futures_util::future::BoxFuture;
