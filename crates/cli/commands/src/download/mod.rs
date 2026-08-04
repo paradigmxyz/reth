@@ -702,8 +702,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             );
         }
 
-        // Static files can extend past the database checkpoints (e.g. a crash between
-        // static-file append and checkpoint commit), so inspect the jars themselves.
+        // Jars are written before checkpoints commit, so after a crash they can hold
+        // blocks the checkpoints don't know about; the snapshot must cover those too.
         let static_files = StaticFileProvider::<N::Primitives>::read_only(static_files_path)?;
         for segment in [
             StaticFileSegment::Transactions,
@@ -763,8 +763,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         if self.repair_history {
             let data_dir = self.env.datadir.clone().resolve_datadir(self.env.chain.chain());
             let config_path = self.env.config.clone().unwrap_or_else(|| data_dir.config());
-            // `Config::from_path` writes a default config for missing files, which would
-            // resolve every component to `All` instead of the node's actual prune modes.
+            // Repair must read the prune modes the node actually runs with;
+            // `Config::from_path` would silently create a default config here.
             if !config_path.try_exists()? {
                 eyre::bail!(
                     "--repair-history requires an existing config at {}",
