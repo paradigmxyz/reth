@@ -748,8 +748,12 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         let current_block = if let Some(current_block_number) = self.current_block_number() {
             current_block_number
         } else {
-            self.increment_block(0)?;
-            0
+            // A fresh file does not necessarily start at block 0: a writer opened for a
+            // pruned segment may be positioned on a later fixed range, in which case its
+            // first block is the expected start of that range.
+            let first_block = self.writer.user_header().expected_block_start();
+            self.increment_block(first_block)?;
+            first_block
         };
 
         match current_block.cmp(&advance_to) {
