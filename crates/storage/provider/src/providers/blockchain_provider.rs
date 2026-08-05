@@ -7,10 +7,10 @@ use crate::{
     AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
     CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
-    DatabaseProviderFactory, HashedPostStateProvider, HeaderProvider, ProviderError,
-    ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
-    RocksDBProviderFactory, StageCheckpointReader, StateProviderBox, StateProviderFactory,
-    StateReader, StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
+    DatabaseProviderFactory, HeaderProvider, ProviderError, ProviderFactory, ProviderHeader,
+    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, RocksDBProviderFactory,
+    StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
+    StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
@@ -41,10 +41,8 @@ use reth_trie::{
     hashed_cursor::{HashedCursor, HashedCursorFactory},
     metrics::TrieRootMetrics,
     proof::{Proof, StorageProof},
-    HashedPostState, KeccakKeyHasher, MultiProofTargets, StorageRoot, TrieInput, TrieInputSorted,
-    TrieType,
+    MultiProofTargets, StorageRoot, TrieInput, TrieInputSorted, TrieType,
 };
-use revm::database::BundleState;
 use std::{
     ops::{RangeBounds, RangeInclusive},
     sync::Arc,
@@ -618,6 +616,15 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider<N> {
         self.consistent_provider()?.transaction_by_hash_with_meta(tx_hash)
     }
 
+    fn transaction_by_hash_with_meta_and_header(
+        &self,
+        tx_hash: TxHash,
+    ) -> ProviderResult<
+        Option<(Self::Transaction, TransactionMeta, SealedHeader<ProviderHeader<Self>>)>,
+    > {
+        self.consistent_provider()?.transaction_by_hash_with_meta_and_header(tx_hash)
+    }
+
     fn transactions_by_block(
         &self,
         id: BlockHashOrNumber,
@@ -851,12 +858,6 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
     }
 }
 
-impl<N: NodeTypesWithDB> HashedPostStateProvider for BlockchainProvider<N> {
-    fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
-        HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
-    }
-}
-
 impl<N: ProviderNodeTypes> CanonChainTracker for BlockchainProvider<N> {
     type Header = HeaderTy<N>;
 
@@ -1030,7 +1031,7 @@ mod tests {
         },
         BlockWriter, CanonChainTracker, ProviderFactory, SaveBlocksInput,
     };
-    use alloy_consensus::constants::EMPTY_ROOT_HASH;
+    use alloy_consensus::{constants::EMPTY_ROOT_HASH, transaction::TransactionMeta, BlockHeader};
     use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
     use alloy_primitives::{keccak256, Address, BlockNumber, TxNumber, B256, U256};
     use itertools::Itertools;
@@ -2700,6 +2701,27 @@ mod tests {
             ),
             (
                 ONE,
+                transaction_by_hash_with_meta_and_header,
+                |block: &SealedBlock<Block>, _: TxNumber, tx_hash: B256, _: &Vec<Vec<Receipt>>| (
+                    tx_hash,
+                    Some((
+                        block.body().transactions[test_tx_index].clone(),
+                        TransactionMeta {
+                            tx_hash,
+                            index: test_tx_index as u64,
+                            block_hash: block.hash(),
+                            block_number: block.number,
+                            base_fee: block.base_fee_per_gas(),
+                            excess_blob_gas: block.excess_blob_gas(),
+                            timestamp: block.timestamp(),
+                        },
+                        block.clone_sealed_header(),
+                    ))
+                ),
+                B256::random()
+            ),
+            (
+                ONE,
                 block_by_transaction_id,
                 |block: &SealedBlock<Block>, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     tx_num,
@@ -3246,9 +3268,7 @@ mod tests {
 
         let mut state_b = HashedPostState::default();
         state_b.accounts.insert(hashed_address, Some(account_b));
-        state_b
-            .storages
-            .insert(hashed_address, HashedStorage::from_iter(false, [(hashed_slot, value_b)]));
+        state_b.storages.insert(hashed_address, HashedStorage::from_iter([(hashed_slot, value_b)]));
 
         let state_b_root = factory.latest()?.state_root(state_b.clone())?;
         let mut later_block = random_block(

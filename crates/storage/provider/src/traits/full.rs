@@ -1,35 +1,27 @@
 //! Helper provider traits to encapsulate all provider traits for simplicity.
 
 use crate::{
-    AccountReader, BalProvider, BlockHashReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory, HashedPostStateProvider,
-    PruneCheckpointReader, RocksDBProviderFactory, StageCheckpointReader, StateProviderFactory,
-    StateRangeProviderFactory, StateReader, StaticFileProviderFactory,
+    AccountReader, BalProvider, BlockReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader,
+    DatabaseProviderFactory, PruneCheckpointReader, RocksDBProviderFactory, StageCheckpointReader,
+    StateProviderFactory, StateRangeProviderFactory, StateReader, StaticFileProviderFactory,
 };
 use reth_chain_state::{
     CanonStateSubscriptions, ForkChoiceSubscriptions, PersistedBlockSubscriptions,
 };
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
-use reth_storage_api::{
-    NodePrimitivesProvider, StorageChangeSetReader, StorageSettingsCache,
-    TryIntoHistoricalStateProvider,
-};
+use reth_storage_api::{NodePrimitivesProvider, StorageChangeSetReader, StorageSettingsCache};
 use std::fmt::Debug;
 
 /// Helper trait to unify all provider traits for simplicity.
 pub trait FullProvider<N: NodeTypesWithDB>:
     DatabaseProviderFactory<
         DB = N::DB,
-        Provider: BlockHashReader
-                      + BlockNumReader
-                      + BlockReader
+        Provider: BlockReader
                       + StageCheckpointReader
                       + PruneCheckpointReader
                       + ChangeSetReader
                       + StorageChangeSetReader
-                      + StorageSettingsCache
-                      + TryIntoHistoricalStateProvider
-                      + 'static,
+                      + StorageSettingsCache,
     > + NodePrimitivesProvider<Primitives = N::Primitives>
     + StaticFileProviderFactory<Primitives = N::Primitives>
     + RocksDBProviderFactory
@@ -43,7 +35,6 @@ pub trait FullProvider<N: NodeTypesWithDB>:
     + StateProviderFactory
     + StateRangeProviderFactory
     + StateReader
-    + HashedPostStateProvider
     + ChainSpecProvider<ChainSpec = N::ChainSpec>
     + ChangeSetReader
     + StorageChangeSetReader
@@ -62,16 +53,12 @@ pub trait FullProvider<N: NodeTypesWithDB>:
 impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
     T: DatabaseProviderFactory<
             DB = N::DB,
-            Provider: BlockHashReader
-                          + BlockNumReader
-                          + BlockReader
+            Provider: BlockReader
                           + StageCheckpointReader
                           + PruneCheckpointReader
                           + ChangeSetReader
                           + StorageChangeSetReader
-                          + StorageSettingsCache
-                          + TryIntoHistoricalStateProvider
-                          + 'static,
+                          + StorageSettingsCache,
         > + NodePrimitivesProvider<Primitives = N::Primitives>
         + StaticFileProviderFactory<Primitives = N::Primitives>
         + RocksDBProviderFactory
@@ -85,7 +72,6 @@ impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
         + StateProviderFactory
         + StateRangeProviderFactory
         + StateReader
-        + HashedPostStateProvider
         + ChainSpecProvider<ChainSpec = N::ChainSpec>
         + ChangeSetReader
         + StorageChangeSetReader

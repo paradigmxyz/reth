@@ -121,7 +121,7 @@ fn collect_execution_data(
     let bundle_state = db.take_bundle();
     let mut codes = BTreeMap::new();
     let mut preimages = BTreeMap::new();
-    let mut hashed_state = db.database.hashed_post_state(&bundle_state);
+    let mut hashed_state = db.database.hashed_post_state(&bundle_state)?;
 
     // Collect codes
     db.cache.contracts.values().chain(bundle_state.contracts.values()).for_each(|code| {
@@ -141,7 +141,7 @@ fn collect_execution_data(
             let storage = hashed_state
                 .storages
                 .entry(hashed_address)
-                .or_insert_with(|| HashedStorage::new(account.status.was_destroyed()));
+                .or_insert_with(|| HashedStorage::new(false));
 
             for (slot, value) in account_data.storage {
                 let slot_bytes = B256::from(slot);
@@ -308,7 +308,7 @@ where
         block_prefix: &str,
     ) -> eyre::Result<()> {
         let state_provider = self.provider.state_by_block_hash(parent_header.hash())?;
-        let hashed_state = state_provider.hashed_post_state(bundle_state);
+        let hashed_state = state_provider.hashed_post_state(bundle_state)?;
         let (re_executed_root, trie_output) =
             state_provider.state_root_with_updates(hashed_state)?;
 
