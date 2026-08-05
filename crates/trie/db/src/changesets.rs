@@ -35,7 +35,7 @@ where
     StateTrieProvider: TrieCursorFactory + HashedCursorFactory,
 {
     let db_tip_block = provider.best_block_number()?;
-    compute_range_trie_changesets_inner(
+    compute_range_trie_changesets(
         provider,
         state_trie_provider,
         block_number..=block_number,
@@ -53,19 +53,6 @@ where
 /// Returns an error if the range exceeds `db_tip_block`, database access fails, or state root
 /// computation fails.
 pub fn compute_range_trie_changesets<Provider, StateTrieProvider>(
-    provider: &Provider,
-    state_trie_provider: &StateTrieProvider,
-    range: RangeInclusive<BlockNumber>,
-    db_tip_block: BlockNumber,
-) -> Result<TrieUpdatesSorted, ProviderError>
-where
-    Provider: ChangeSetReader + StorageChangeSetReader + BlockNumReader,
-    StateTrieProvider: TrieCursorFactory + HashedCursorFactory,
-{
-    compute_range_trie_changesets_inner(provider, state_trie_provider, range, db_tip_block)
-}
-
-fn compute_range_trie_changesets_inner<Provider, StateTrieProvider>(
     provider: &Provider,
     state_trie_provider: &StateTrieProvider,
     range: RangeInclusive<BlockNumber>,
