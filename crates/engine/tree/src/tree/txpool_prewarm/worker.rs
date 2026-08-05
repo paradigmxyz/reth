@@ -8,7 +8,11 @@ use alloy_primitives::B256;
 use crossbeam_channel::{Receiver, RecvTimeoutError, TryRecvError};
 use reth_evm::ConfigureEvm;
 use reth_primitives_traits::NodePrimitives;
-use reth_provider::{BlockReader, StateProviderFactory, StateReader};
+use reth_provider::{
+    BlockHashReader, BlockNumReader, BlockReader, DatabaseProviderFactory, PruneCheckpointReader,
+    StageCheckpointReader, StateProviderFactory, StateReader, StorageSettingsCache,
+    TryIntoHistoricalStateProvider,
+};
 use reth_revm::{cached::CachedReads, db::State};
 use std::{
     sync::Arc,
@@ -63,19 +67,19 @@ where
 impl<N, P, Evm> Worker<N, P, Evm>
 where
     N: NodePrimitives,
-    P: reth_provider::DatabaseProviderFactory
+    P: DatabaseProviderFactory
         + BlockReader
-        + reth_provider::PruneCheckpointReader
-        + reth_provider::StageCheckpointReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
         + StateProviderFactory
         + StateReader
         + Clone,
-    P::Provider: reth_provider::BlockHashReader
-        + reth_provider::BlockNumReader
-        + reth_provider::PruneCheckpointReader
-        + reth_provider::StageCheckpointReader
-        + reth_provider::StorageSettingsCache
-        + reth_provider::TryIntoHistoricalStateProvider
+    P::Provider: BlockHashReader
+        + BlockNumReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + TryIntoHistoricalStateProvider
         + 'static,
     Evm: ConfigureEvm<Primitives = N>,
 {

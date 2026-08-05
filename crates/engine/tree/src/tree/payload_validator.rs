@@ -146,10 +146,11 @@ use reth_primitives_traits::{
     RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
-    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
-    ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider,
-    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderBox,
-    StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
+    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockHashReader, BlockNumReader,
+    BlockReader, ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory,
+    HashedPostStateProvider, ProviderError, PruneCheckpointReader, StageCheckpointReader,
+    StateProvider, StateProviderBox, StateProviderFactory, StateReader, StorageChangeSetReader,
+    StorageSettingsCache, TryIntoHistoricalStateProvider,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
 use reth_storage_overlay::OverlayManager;
@@ -302,7 +303,7 @@ impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
 where
     N: NodePrimitives,
     P: DatabaseProviderFactory<
-            Provider: reth_provider::BlockHashReader
+            Provider: BlockHashReader
                           + BlockReader
                           + StageCheckpointReader
                           + PruneCheckpointReader
@@ -310,7 +311,7 @@ where
                           + StorageChangeSetReader
                           + BlockNumReader
                           + StorageSettingsCache
-                          + reth_provider::TryIntoHistoricalStateProvider
+                          + TryIntoHistoricalStateProvider
                           + 'static,
         > + BlockReader<Header = N::BlockHeader>
         + ChangeSetReader
@@ -1782,7 +1783,7 @@ pub trait EngineValidator<
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
 where
     P: DatabaseProviderFactory<
-            Provider: reth_provider::BlockHashReader
+            Provider: BlockHashReader
                           + BlockReader
                           + StageCheckpointReader
                           + PruneCheckpointReader
@@ -1790,7 +1791,7 @@ where
                           + StorageChangeSetReader
                           + BlockNumReader
                           + StorageSettingsCache
-                          + reth_provider::TryIntoHistoricalStateProvider
+                          + TryIntoHistoricalStateProvider
                           + 'static,
         > + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
