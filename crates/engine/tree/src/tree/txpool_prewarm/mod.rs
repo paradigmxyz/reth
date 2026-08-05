@@ -40,8 +40,6 @@ where
     N: NodePrimitives,
     P: DatabaseProviderFactory
         + BlockReader
-        + PruneCheckpointReader
-        + StageCheckpointReader
         + StateProviderFactory
         + StateReader
         + Clone

@@ -178,8 +178,6 @@ where
     where
         P: DatabaseProviderFactory
             + BlockReader
-            + PruneCheckpointReader
-            + StageCheckpointReader
             + StateProviderFactory
             + StateReader
             + Clone
@@ -356,8 +354,6 @@ where
     where
         P: DatabaseProviderFactory
             + BlockReader
-            + PruneCheckpointReader
-            + StageCheckpointReader
             + StateProviderFactory
             + StateReader
             + Clone

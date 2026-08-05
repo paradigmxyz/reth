@@ -316,8 +316,6 @@ where
         > + BlockReader<Header = N::BlockHeader>
         + ChangeSetReader
         + BlockNumReader
-        + PruneCheckpointReader
-        + StageCheckpointReader
         + StateProviderFactory
         + StateReader
         + Clone
@@ -1798,8 +1796,6 @@ where
         + StateReader
         + ChangeSetReader
         + BlockNumReader
-        + PruneCheckpointReader
-        + StageCheckpointReader
         + Clone
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>

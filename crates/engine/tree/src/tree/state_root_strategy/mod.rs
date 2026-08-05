@@ -822,8 +822,6 @@ where
     N: NodePrimitives,
     P: DatabaseProviderFactory
         + BlockReader<Header = N::BlockHeader>
-        + PruneCheckpointReader
-        + StageCheckpointReader
         + StateProviderFactory
         + StateReader
         + Clone
@@ -1003,8 +1001,6 @@ where
     N: NodePrimitives,
     P: DatabaseProviderFactory
         + BlockReader
-        + PruneCheckpointReader
-        + StageCheckpointReader
         + StateProviderFactory
         + StateReader
         + Clone
@@ -1052,8 +1048,6 @@ where
     N: NodePrimitives,
     P: DatabaseProviderFactory
         + BlockReader
-        + PruneCheckpointReader
-        + StageCheckpointReader
         + StateProviderFactory
         + StateReader
         + Clone
@@ -1174,8 +1168,6 @@ where
     N: NodePrimitives,
     P: DatabaseProviderFactory
         + BlockReader
-        + PruneCheckpointReader
-        + StageCheckpointReader
         + StateProviderFactory
         + StateReader
         + Clone
@@ -1289,13 +1281,7 @@ fn compare_trie_updates_with_serial<N, P>(
 ) -> bool
 where
     N: NodePrimitives,
-    P: DatabaseProviderFactory
-        + BlockReader
-        + PruneCheckpointReader
-        + StageCheckpointReader
-        + StateProviderFactory
-        + StateReader
-        + Clone,
+    P: DatabaseProviderFactory + BlockReader + StateProviderFactory + StateReader + Clone,
     P::Provider: BlockHashReader
         + BlockNumReader
         + PruneCheckpointReader

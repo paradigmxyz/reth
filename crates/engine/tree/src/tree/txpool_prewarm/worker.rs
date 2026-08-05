@@ -67,13 +67,7 @@ where
 impl<N, P, Evm> Worker<N, P, Evm>
 where
     N: NodePrimitives,
-    P: DatabaseProviderFactory
-        + BlockReader
-        + PruneCheckpointReader
-        + StageCheckpointReader
-        + StateProviderFactory
-        + StateReader
-        + Clone,
+    P: DatabaseProviderFactory + BlockReader + StateProviderFactory + StateReader + Clone,
     P::Provider: BlockHashReader
         + BlockNumReader
         + PruneCheckpointReader

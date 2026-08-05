@@ -92,14 +92,7 @@ where
 impl<N, P, Evm> PrewarmCacheTask<N, P, Evm>
 where
     N: NodePrimitives,
-    P: DatabaseProviderFactory
-        + BlockReader
-        + PruneCheckpointReader
-        + StageCheckpointReader
-        + StateProviderFactory
-        + StateReader
-        + Clone
-        + 'static,
+    P: DatabaseProviderFactory + BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     P::Provider: BlockHashReader
         + BlockNumReader
         + PruneCheckpointReader
@@ -577,14 +570,7 @@ type PrewarmEvmState<Evm> =
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
     N: NodePrimitives,
-    P: DatabaseProviderFactory
-        + BlockReader
-        + PruneCheckpointReader
-        + StageCheckpointReader
-        + StateProviderFactory
-        + StateReader
-        + Clone
-        + 'static,
+    P: DatabaseProviderFactory + BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     P::Provider: BlockHashReader
         + BlockNumReader
         + PruneCheckpointReader
