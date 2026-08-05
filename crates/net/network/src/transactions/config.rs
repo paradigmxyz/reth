@@ -11,7 +11,9 @@ use crate::transactions::constants::{
         DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH, DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
         DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
     },
-    tx_manager::DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
+    tx_manager::{
+        DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS, DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
+    },
 };
 use alloy_eips::eip2718::IsTyped2718;
 use alloy_primitives::B256;
@@ -27,6 +29,9 @@ pub struct TransactionsManagerConfig {
     pub transaction_fetcher_config: TransactionFetcherConfig,
     /// Max number of seen transactions to store for each peer.
     pub max_transactions_seen_by_peer_history: u32,
+    /// Max number of transactions allowed to be imported concurrently.
+    #[cfg_attr(feature = "serde", serde(default = "default_max_pending_pool_imports"))]
+    pub max_pending_pool_imports: usize,
     /// How new pending transactions are propagated.
     #[cfg_attr(feature = "serde", serde(default))]
     pub propagation_mode: TransactionPropagationMode,
@@ -42,6 +47,11 @@ pub struct TransactionsManagerConfig {
 }
 
 #[cfg(feature = "serde")]
+const fn default_max_pending_pool_imports() -> usize {
+    DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS
+}
+
+#[cfg(feature = "serde")]
 const fn default_tx_channel_memory_limit_bytes() -> usize {
     DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES
 }
@@ -51,6 +61,7 @@ impl Default for TransactionsManagerConfig {
         Self {
             transaction_fetcher_config: TransactionFetcherConfig::default(),
             max_transactions_seen_by_peer_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
+            max_pending_pool_imports: DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
             propagation_mode: TransactionPropagationMode::default(),
             ingress_policy: TransactionIngressPolicy::default(),
             tx_channel_memory_limit_bytes: DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,

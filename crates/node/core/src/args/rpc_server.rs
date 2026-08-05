@@ -673,7 +673,7 @@ pub struct RpcServerArgs {
     ///
     /// When enabled, transactions that fail execution will be skipped, and all subsequent
     /// transactions from the same sender will also be skipped.
-    #[arg(long = "testing.skip-invalid-transactions", default_value_t = true)]
+    #[arg(long = "testing.skip-invalid-transactions", default_value_t = false)]
     pub testing_skip_invalid_transactions: bool,
 
     /// Override the gas limit used by `testing_buildBlockV1`.
@@ -925,7 +925,7 @@ impl Default for RpcServerArgs {
             rpc_state_cache,
             gas_price_oracle,
             rpc_send_raw_transaction_sync_timeout,
-            testing_skip_invalid_transactions: true,
+            testing_skip_invalid_transactions: false,
             testing_gas_limit: None,
             rpc_force_blob_sidecar_upcasting: false,
         }

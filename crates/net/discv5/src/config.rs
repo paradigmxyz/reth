@@ -182,6 +182,14 @@ impl ConfigBuilder {
         self
     }
 
+    /// Sets the fork ID kv-pair if none has already been configured.
+    pub const fn fork_if_unset(mut self, fork_key: &'static [u8], fork_id: ForkId) -> Self {
+        if self.fork.is_none() {
+            self.fork = Some((fork_key, fork_id));
+        }
+        self
+    }
+
     /// Sets the tcp socket to advertise in the local [`Enr`](discv5::enr::Enr). The IP address of
     /// this socket will overwrite the discovery address of the same IP version, if one is
     /// configured.
@@ -398,6 +406,12 @@ impl Config {
     /// advertised to peers in the local [`Enr`](discv5::enr::Enr).
     pub const fn rlpx_socket(&self) -> &SocketAddr {
         &self.tcp_socket
+    }
+
+    /// Sets the port of the `RLPx` TCP socket to advertise. This allows advertising the actually
+    /// bound listener port when the configured port was 0 (OS-assigned).
+    pub const fn set_rlpx_port(&mut self, port: u16) {
+        self.tcp_socket.set_port(port);
     }
 }
 

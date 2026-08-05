@@ -1,12 +1,6 @@
 /* ==================== BROADCAST ==================== */
 
-/// Soft limit for the number of hashes in a
-/// [`NewPooledTransactionHashes`](reth_eth_wire::NewPooledTransactionHashes) broadcast message.
-///
-/// Spec'd at 4096 hashes.
-///
-/// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#newpooledtransactionhashes-0x08>
-pub const SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE: usize = 4096;
+pub use reth_eth_wire_types::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
 
 /// Default soft limit for the byte size of a [`Transactions`](reth_eth_wire::Transactions)
 /// broadcast message.

@@ -16,7 +16,8 @@ use futures_util::FutureExt;
 use reth_chain_state::CanonStateNotification;
 use reth_execution_cache::SavedCache;
 use reth_payload_builder::{
-    BuildNewPayload, KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJobGenerator,
+    BuildNewPayload, KeepPayloadJobAlive, PayloadBuilderLease, PayloadId, PayloadJob,
+    PayloadJobGenerator,
 };
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind};
@@ -24,7 +25,7 @@ use reth_primitives_traits::{HeaderTy, NodePrimitives, SealedHeader};
 use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop};
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::Runtime;
-use reth_trie_parallel::state_root_task::StateRootHandle;
+use reth_trie_parallel::state_root_task::PayloadStateRootHandle;
 use std::{
     fmt,
     future::Future,
@@ -164,7 +165,8 @@ where
         input: BuildNewPayload<Builder::Attributes>,
         id: PayloadId,
     ) -> Result<Self::Job, PayloadBuilderError> {
-        let parent_header = if input.parent_hash.is_zero() {
+        let BuildNewPayload { attributes, parent_hash, mut resources } = input;
+        let parent_header = if parent_hash.is_zero() {
             // Use latest header for genesis block case
             self.client
                 .latest_header()
@@ -173,16 +175,16 @@ where
         } else {
             // Fetch specific header by hash
             self.client
-                .sealed_header_by_hash(input.parent_hash)
+                .sealed_header_by_hash(parent_hash)
                 .map_err(PayloadBuilderError::from)?
-                .ok_or_else(|| PayloadBuilderError::MissingParentHeader(input.parent_hash))?
+                .ok_or_else(|| PayloadBuilderError::MissingParentHeader(parent_hash))?
         };
 
         let parent_hash = parent_header.hash();
         let cached_reads = self.maybe_pre_cached(parent_hash);
         let parent_block_info = self.maybe_parent_block_info(parent_hash);
 
-        let config = PayloadConfig::new(Arc::new(parent_header), input.attributes, id)
+        let config = PayloadConfig::new(Arc::new(parent_header), attributes, id)
             .with_parent_block_info(parent_block_info);
 
         let until = self.job_deadline(config.attributes.timestamp());
@@ -197,8 +199,9 @@ where
             best_payload: PayloadState::Missing,
             pending_block: None,
             cached_reads,
-            execution_cache: input.cache,
-            trie_handle: input.trie_handle,
+            execution_cache: resources.take_execution_cache(),
+            state_root_handle: resources.take_state_root_handle(),
+            leases: resources.take_leases(),
             payload_task_guard: self.payload_task_guard.clone(),
             metrics: Default::default(),
             builder: self.builder.clone(),
@@ -387,8 +390,13 @@ where
     cached_reads: Option<CachedReads>,
     /// Optional execution cache shared with the engine.
     execution_cache: Option<SavedCache>,
-    /// Optional state root task handle, shared with the engine.
-    trie_handle: Option<StateRootHandle>,
+    /// Optional state-root task handle, shared with the engine.
+    state_root_handle: Option<PayloadStateRootHandle>,
+    /// Lifecycle leases shared with the payload-builder service.
+    ///
+    /// Every detached build task clones these so that the loaned resources remain available until
+    /// `try_build` completes, even if the payload job is resolved first.
+    leases: Vec<PayloadBuilderLease>,
     /// metrics for this type
     metrics: PayloadBuilderMetrics,
     /// The type responsible for building payloads.
@@ -415,7 +423,8 @@ where
         self.metrics.inc_initiated_payload_builds();
         let cached_reads = self.cached_reads.take().unwrap_or_default();
         let execution_cache = self.execution_cache.clone();
-        let trie_handle = self.trie_handle.take();
+        let state_root_handle = self.state_root_handle.take();
+        let leases = self.leases.clone();
         let builder = self.builder.clone();
         let executor = self.executor.clone();
         self.executor.spawn_task(async move {
@@ -426,12 +435,13 @@ where
                 let args = BuildArguments {
                     cached_reads,
                     execution_cache,
-                    trie_handle,
+                    state_root_handle,
                     config: payload_config,
                     cancel,
                     best_payload,
                 };
                 let result = builder.try_build(args);
+                drop(leases);
                 let _ = tx.send(result);
             });
         });
@@ -562,7 +572,7 @@ where
             let args = BuildArguments {
                 cached_reads: self.cached_reads.take().unwrap_or_default(),
                 execution_cache: self.execution_cache.clone(),
-                trie_handle: None,
+                state_root_handle: None,
                 config: self.config.clone(),
                 cancel: CancelOnDrop::default(),
                 best_payload: None,
@@ -916,13 +926,13 @@ pub struct BuildArguments<Attributes, Payload: BuiltPayload> {
     pub cached_reads: CachedReads,
     /// Optional execution cache shared with the engine.
     pub execution_cache: Option<SavedCache>,
-    /// Optional state root task handle, shared with the engine.
+    /// Optional state-root task handle, shared with the engine.
     ///
     /// The preserved trie is shared with the engine, so a concurrent `newPayload` will
     /// block until this task completes. The trie is anchored at the built block's state
     /// root, so if the next `newPayload` is not on top of that block, the trie cache is
     /// invalidated and cleared.
-    pub trie_handle: Option<StateRootHandle>,
+    pub state_root_handle: Option<PayloadStateRootHandle>,
     /// How to configure the payload.
     pub config: PayloadConfig<Attributes, HeaderTy<Payload::Primitives>>,
     /// A marker that can be used to cancel the job.
@@ -936,12 +946,12 @@ impl<Attributes, Payload: BuiltPayload> BuildArguments<Attributes, Payload> {
     pub const fn new(
         cached_reads: CachedReads,
         execution_cache: Option<SavedCache>,
-        trie_handle: Option<StateRootHandle>,
+        state_root_handle: Option<PayloadStateRootHandle>,
         config: PayloadConfig<Attributes, HeaderTy<Payload::Primitives>>,
         cancel: CancelOnDrop,
         best_payload: Option<Payload>,
     ) -> Self {
-        Self { cached_reads, execution_cache, trie_handle, config, cancel, best_payload }
+        Self { cached_reads, execution_cache, state_root_handle, config, cancel, best_payload }
     }
 }
 

@@ -7,10 +7,10 @@ use eyre::Result;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::testsuite::{
     actions::{
-        BlockReference, CaptureBlock, CompareNodeChainTips, CreateFork, ExpectFcuStatus,
-        MakeCanonical, ProduceBlocks, ProduceBlocksLocally, ProduceInvalidBlocks, ReorgTo,
-        SelectActiveNode, SendForkchoiceUpdate, SendNewPayloads, SetForkBase, UpdateBlockInfo,
-        ValidateCanonicalTag, WaitForSync,
+        AssertChainTip, BlockReference, CaptureBlock, CompareNodeChainTips, CreateFork,
+        ExpectFcuStatus, FinalizeBlock, MakeCanonical, ProduceBlocks, ProduceBlocksLocally,
+        ProduceInvalidBlocks, ReorgTo, SelectActiveNode, SendForkchoiceUpdate, SendNewPayloads,
+        SetForkBase, UpdateBlockInfo, ValidateCanonicalTag, WaitForSync,
     },
     setup::{NetworkSetup, Setup},
     TestBuilder,
@@ -36,9 +36,7 @@ fn default_engine_tree_setup() -> Setup<EthEngineTypes> {
                 .build(),
         ))
         .with_network(NetworkSetup::single_node())
-        .with_tree_config(
-            TreeConfig::default().with_legacy_state_root(false).with_has_enough_parallelism(true),
-        )
+        .with_tree_config(TreeConfig::default().with_has_enough_parallelism(true))
 }
 
 /// Creates a v2 storage mode setup for engine tree e2e tests.
@@ -78,10 +76,19 @@ async fn test_engine_tree_fcu_reorg_with_all_blocks_e2e() -> Result<()> {
     let test = TestBuilder::new()
         .with_setup(default_engine_tree_setup())
         // create a main chain with 5 blocks (blocks 0-4)
-        .with_action(ProduceBlocks::<EthEngineTypes>::new(5))
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(2))
+        .with_action(CaptureBlock::new("fork_base"))
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(3))
+        .with_action(CaptureBlock::new("main_tip"))
         .with_action(MakeCanonical::new())
+        // block production finalizes the produced blocks, so re-establish finality at the fork
+        // base: building below the finalized block is rejected as a too deep reorg
+        .with_action(
+            FinalizeBlock::<EthEngineTypes>::new(BlockReference::Tag("fork_base".to_string()))
+                .with_head(BlockReference::Tag("main_tip".to_string())),
+        )
         // create a fork from block 2 with 3 additional blocks
-        .with_action(CreateFork::<EthEngineTypes>::new(2, 3))
+        .with_action(CreateFork::<EthEngineTypes>::new_from_tag("fork_base", 3))
         .with_action(CaptureBlock::new("fork_tip"))
         // perform FCU to the fork tip - this should make the fork canonical
         .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("fork_tip"));
@@ -115,6 +122,12 @@ async fn test_engine_tree_valid_forks_with_older_canonical_head_e2e() -> Result<
         // create first competing chain (chain A) from fork point with 10 blocks
         .with_action(CreateFork::<EthEngineTypes>::new_from_tag("fork_point", 10))
         .with_action(CaptureBlock::new("chain_a_tip"))
+        // producing chain A finalized its blocks, so re-establish finality at the fork point
+        // before building below it again
+        .with_action(
+            FinalizeBlock::<EthEngineTypes>::new(BlockReference::Tag("fork_point".to_string()))
+                .with_head(BlockReference::Tag("chain_a_tip".to_string())),
+        )
         // create second competing chain (chain B) from same fork point with 10 blocks
         .with_action(CreateFork::<EthEngineTypes>::new_from_tag("fork_point", 10))
         .with_action(CaptureBlock::new("chain_b_tip"))
@@ -151,14 +164,23 @@ async fn test_engine_tree_valid_and_invalid_forks_with_older_canonical_head_e2e(
         // create chain A (competing chain) - first produce valid blocks, then test invalid
         // scenario
         .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("fork_point"))
+        // producing chain B finalized its blocks, so re-establish finality at the fork point
+        // before building below it again
+        .with_action(
+            FinalizeBlock::<EthEngineTypes>::new(BlockReference::Tag("fork_point".to_string()))
+                .with_head(BlockReference::Tag("chain_b_tip".to_string())),
+        )
         .with_action(ProduceBlocks::<EthEngineTypes>::new(10))
         .with_action(CaptureBlock::new("chain_a_tip"))
         // test that FCU to chain A tip returns VALID status (it's a valid competing chain)
         .with_action(ExpectFcuStatus::valid("chain_a_tip"))
         // attempt to produce invalid blocks (which should be rejected)
         .with_action(ProduceInvalidBlocks::<EthEngineTypes>::with_invalid_at(3, 2))
-        // chain B remains the canonical chain
-        .with_action(ValidateCanonicalTag::new("chain_b_tip"));
+        // the invalid block is rejected and the chain remains on the last valid block built on
+        // chain A: the fork point at 6, ten chain A blocks and two valid blocks on top. Chain B
+        // was reorged out when chain A became canonical and its blocks were finalized.
+        .with_action(UpdateBlockInfo::default())
+        .with_action(AssertChainTip::new(18));
 
     test.run::<EthereumNode>().await?;
 
@@ -220,11 +242,7 @@ async fn test_engine_tree_buffered_blocks_are_eventually_connected_e2e() -> Resu
                         .build(),
                 ))
                 .with_network(NetworkSetup::multi_node_unconnected(2)) // Need 2 disconnected nodes
-                .with_tree_config(
-                    TreeConfig::default()
-                        .with_legacy_state_root(false)
-                        .with_has_enough_parallelism(true),
-                ),
+                .with_tree_config(TreeConfig::default().with_has_enough_parallelism(true)),
         )
         // node 0 produces blocks 1 and 2 locally without broadcasting
         .with_action(SelectActiveNode::new(0))
@@ -312,11 +330,7 @@ async fn test_engine_tree_live_sync_transition_eventually_canonical_e2e() -> Res
                         .build(),
                 ))
                 .with_network(NetworkSetup::multi_node(2)) // Two connected nodes
-                .with_tree_config(
-                    TreeConfig::default()
-                        .with_legacy_state_root(false)
-                        .with_has_enough_parallelism(true),
-                ),
+                .with_tree_config(TreeConfig::default().with_has_enough_parallelism(true)),
         )
         // Both nodes start with the same base chain (1 block)
         .with_action(SelectActiveNode::new(0))
@@ -329,9 +343,11 @@ async fn test_engine_tree_live_sync_transition_eventually_canonical_e2e() -> Res
         .with_action(CaptureBlock::new("long_chain_tip"))
         // Verify Node 0's canonical tip is the long chain tip
         .with_action(ValidateCanonicalTag::new("long_chain_tip"))
-        // Verify Node 1's canonical tip is still the base chain tip
+        // Verify Node 1's canonical tip is still behind Node 0. `ValidateCanonicalTag` cannot
+        // be used here: it sends an FCU to node 0, for which the base chain tip is a canonical
+        // ancestor below its finalized block, which is rejected as a too deep reorg.
         .with_action(SelectActiveNode::new(1))
-        .with_action(ValidateCanonicalTag::new("base_chain_tip"))
+        .with_action(CompareNodeChainTips::expect_different(0, 1))
         // Node 1: Send FCU pointing to Node 0's long chain tip
         // This should trigger Node 1 to sync the missing blocks from Node 0
         .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("long_chain_tip"))
@@ -375,9 +391,18 @@ async fn test_engine_tree_fcu_reorg_with_all_blocks_v2_e2e() -> Result<()> {
 
     let test = TestBuilder::new()
         .with_setup(v2_engine_tree_setup())
-        .with_action(ProduceBlocks::<EthEngineTypes>::new(5))
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(2))
+        .with_action(CaptureBlock::new("fork_base"))
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(3))
+        .with_action(CaptureBlock::new("main_tip"))
         .with_action(MakeCanonical::new())
-        .with_action(CreateFork::<EthEngineTypes>::new(2, 3))
+        // block production finalizes the produced blocks, so re-establish finality at the fork
+        // base: building below the finalized block is rejected as a too deep reorg
+        .with_action(
+            FinalizeBlock::<EthEngineTypes>::new(BlockReference::Tag("fork_base".to_string()))
+                .with_head(BlockReference::Tag("main_tip".to_string())),
+        )
+        .with_action(CreateFork::<EthEngineTypes>::new_from_tag("fork_base", 3))
         .with_action(CaptureBlock::new("fork_tip"))
         .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("fork_tip"));
 
@@ -425,9 +450,7 @@ fn disk_reorg_setup(storage_v2: bool) -> Setup<EthEngineTypes> {
                 .build(),
         ))
         .with_network(NetworkSetup::multi_node_unconnected(2))
-        .with_tree_config(
-            TreeConfig::default().with_legacy_state_root(false).with_has_enough_parallelism(true),
-        );
+        .with_tree_config(TreeConfig::default().with_has_enough_parallelism(true));
     if storage_v2 {
         setup = setup.with_storage_v2();
     }

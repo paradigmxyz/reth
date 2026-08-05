@@ -15,7 +15,6 @@
 //! - [`wipe_clear`]: Tests for `wipe` and `clear`
 //! - [`get_leaf_value`]: Tests for `get_leaf_value`
 //! - [`find_leaf`]: Tests for `find_leaf`
-//! - [`size_hint`]: Tests for `size_hint`
 //! - [`lifecycle`]: Integration tests exercising multiple methods together
 
 use alloy_primitives::{map::B256Map, B256, U256};
@@ -23,7 +22,7 @@ use alloy_rlp::{encode_fixed_size, Decodable};
 use alloy_trie::EMPTY_ROOT_HASH;
 use reth_trie::test_utils::TrieTestHarness;
 use reth_trie_common::{Nibbles, ProofV2Target, TrieNodeV2};
-use reth_trie_sparse::{LeafLookup, LeafLookupError, LeafUpdate, SparseTrie};
+use reth_trie_sparse::{LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, TrieNodeEpoch};
 use std::{collections::BTreeMap, iter::once};
 
 mod find_leaf;
@@ -33,10 +32,13 @@ mod prune;
 mod reveal_nodes;
 mod root;
 mod set_root;
-mod size_hint;
 mod take_updates;
 mod update_leaves;
 mod wipe_clear;
+
+const fn epoch(value: u64) -> TrieNodeEpoch {
+    TrieNodeEpoch::new(value)
+}
 
 // ---------------------------------------------------------------------------
 // Test harness
@@ -96,8 +98,8 @@ impl SuiteTestHarness {
     ) {
         loop {
             let mut targets: Vec<ProofV2Target> = Vec::new();
-            trie.update_leaves(leaf_updates, |key, min_len| {
-                targets.push(ProofV2Target::new(key).with_min_len(min_len));
+            trie.update_leaves(leaf_updates, |key, parent| {
+                targets.push(ProofV2Target::new(key).with_parent(parent));
             })
             .expect("update_leaves should succeed");
 
@@ -196,7 +198,6 @@ use prune::*;
 use reveal_nodes::*;
 use root::*;
 use set_root::*;
-use size_hint::*;
 use take_updates::*;
 use update_leaves::*;
 use wipe_clear::*;
@@ -272,11 +273,11 @@ sparse_trie_tests! {
     test_take_updates_no_duplicate_updated_and_removed_nodes,
     test_take_updates_cross_cancellation_across_root_calls,
 
+
     // prune
-    test_prune_retains_specified_leaves,
+    test_prune_retains_recent_leaves,
+    test_prune_retains_structurally_modified_branch,
     test_prune_reduces_node_count,
-    test_prune_empty_retained_set,
-    test_prune_requires_computed_hashes,
     test_prune_then_update_and_recompute_root,
     test_prune_then_reveal_pruned_subtree,
     test_prune_mixed_embedded_and_hashed_nodes,
@@ -303,12 +304,8 @@ sparse_trie_tests! {
     test_find_leaf_nonexistent_extension_divergence,
     test_find_leaf_nonexistent_leaf_divergence,
 
-    // size_hint
-    test_size_hint_reflects_leaf_count,
-
     // lifecycle (integration tests)
     test_full_lifecycle_update_root_take_updates,
-    test_multi_round_update_take_updates_prune_cycle,
     test_reveal_update_root_basic_lifecycle,
     test_incremental_reveal_and_update_with_retry,
     test_full_block_processing_lifecycle,

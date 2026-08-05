@@ -41,7 +41,6 @@ exclude_crates=(
   reth-node-metrics
   reth-rpc
   reth-rpc-api
-  reth-rpc-api-testing-util
   reth-rpc-builder
   reth-rpc-convert
   reth-rpc-e2e-tests
@@ -85,6 +84,7 @@ exclude_crates=(
   reth-nippy-jar      # zstd-sys (direct dependency)
   reth-node-types     # zstd-sys via reth-codecs -> reth-zstd-compressors
   reth-rpc-server-types # secp256k1-sys via reth-network-api -> enr
+  reth-storage-overlay  # zstd-sys via reth-trie-db
   reth-trie-db        # zstd-sys via reth-codecs -> reth-zstd-compressors
 )
 

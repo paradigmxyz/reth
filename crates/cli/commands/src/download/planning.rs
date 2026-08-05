@@ -1,7 +1,106 @@
 use super::{manifest::*, verify::OutputVerifier};
 use eyre::Result;
-use std::{collections::BTreeMap, path::Path};
+use serde::Serialize;
+use std::{collections::BTreeMap, io::Write, path::Path};
 use tracing::info;
+
+/// Machine-readable description of the archives selected for a modular snapshot download.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DownloadPlan {
+    /// Version of this JSON schema.
+    pub schema_version: u8,
+    /// Chain ID declared by the snapshot manifest.
+    pub chain_id: u64,
+    /// Block declared by the snapshot manifest.
+    pub block: u64,
+    /// Total compressed bytes for all selected archives.
+    pub total_download_size: u64,
+    /// Total extracted bytes for all selected archives.
+    pub total_output_size: u64,
+    /// Archives selected by the command's component and range flags.
+    pub archives: Vec<DownloadPlanArchive>,
+}
+
+impl DownloadPlan {
+    const SCHEMA_VERSION: u8 = 1;
+
+    pub(crate) fn from_planned(manifest: &SnapshotManifest, planned: &PlannedDownloads) -> Self {
+        Self {
+            schema_version: Self::SCHEMA_VERSION,
+            chain_id: manifest.chain_id,
+            block: manifest.block,
+            total_download_size: planned.total_download_size,
+            total_output_size: planned.total_output_size,
+            archives: planned.archives.iter().map(DownloadPlanArchive::from_planned).collect(),
+        }
+    }
+
+    /// Adds an archive supplied by a command that extends the base Reth snapshot format.
+    pub fn push_archive(&mut self, archive: DownloadPlanArchive) {
+        self.total_download_size = self.total_download_size.saturating_add(archive.download_size);
+        self.total_output_size = self.total_output_size.saturating_add(archive.output_size);
+        self.archives.push(archive);
+    }
+
+    /// Writes the plan as pretty-printed JSON followed by a newline.
+    pub fn write_json(&self, mut writer: impl Write) -> Result<()> {
+        serde_json::to_writer_pretty(&mut writer, self)?;
+        writeln!(writer)?;
+        Ok(())
+    }
+}
+
+/// One concrete archive in a [`DownloadPlan`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DownloadPlanArchive {
+    /// Stable manifest component key, such as `state` or `transactions`.
+    pub component: String,
+    /// Archive file name relative to the manifest's base URL.
+    pub file_name: String,
+    /// Resolved archive source URL.
+    pub url: String,
+    /// Compressed bytes fetched for this archive.
+    pub download_size: u64,
+    /// Extracted bytes produced by this archive.
+    pub output_size: u64,
+    /// Optional checksum of the compressed archive.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blake3: Option<String>,
+}
+
+impl DownloadPlanArchive {
+    /// Creates an archive entry for a download-command extension.
+    pub fn new(
+        component: impl Into<String>,
+        file_name: impl Into<String>,
+        url: impl Into<String>,
+        download_size: u64,
+        output_size: u64,
+        blake3: Option<String>,
+    ) -> Self {
+        Self {
+            component: component.into(),
+            file_name: file_name.into(),
+            url: url.into(),
+            download_size,
+            output_size,
+            blake3,
+        }
+    }
+
+    fn from_planned(planned: &PlannedArchive) -> Self {
+        Self::new(
+            planned.ty.key(),
+            planned.archive.file_name.clone(),
+            planned.archive.url.clone(),
+            planned.archive.size,
+            planned.archive.output_size(),
+            planned.archive.blake3.clone(),
+        )
+    }
+}
 
 /// One archive selected from the manifest, along with its component name.
 #[derive(Debug, Clone)]
@@ -318,5 +417,33 @@ mod tests {
         assert_eq!(planned.total_download_size, 40);
         assert_eq!(planned.total_output_size, 400);
         assert_eq!(planned.archives.len(), 2);
+
+        let plan = DownloadPlan::from_planned(&manifest, &planned);
+        assert_eq!(
+            serde_json::to_value(plan).unwrap(),
+            serde_json::json!({
+                "schemaVersion": 1,
+                "chainId": 1,
+                "block": 1_000_000,
+                "totalDownloadSize": 40,
+                "totalOutputSize": 400,
+                "archives": [
+                    {
+                        "component": "state",
+                        "fileName": "state.tar.zst",
+                        "url": "https://example.com/state.tar.zst",
+                        "downloadSize": 10,
+                        "outputSize": 100
+                    },
+                    {
+                        "component": "transactions",
+                        "fileName": "transactions-500000-999999.tar.zst",
+                        "url": "https://example.com/transactions-500000-999999.tar.zst",
+                        "downloadSize": 30,
+                        "outputSize": 300
+                    }
+                ]
+            })
+        );
     }
 }

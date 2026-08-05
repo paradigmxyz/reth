@@ -66,7 +66,7 @@
 //!    category (2.) and become pending.
 
 use crate::{
-    blobstore::BlobStore,
+    blobstore::{BlobStore, PooledBlobSidecar},
     error::{PoolError, PoolErrorKind, PoolResult},
     identifier::{SenderId, SenderIdentifiers, TransactionId},
     metrics::BlobStoreMetrics,
@@ -715,14 +715,20 @@ where
             self.delete_discarded_blobs(discarded.iter());
             self.with_event_listener(|listener| listener.discarded_many(&discarded));
 
-            let discarded_hashes =
-                discarded.into_iter().map(|tx| *tx.hash()).collect::<HashSet<_>>();
+            // Linear search avoids allocating a hash set for small eviction batches.
+            const MAX_LINEAR_SEARCH_DISCARDS: usize = 4;
+            let discarded_hashes = (discarded.len() > MAX_LINEAR_SEARCH_DISCARDS)
+                .then(|| discarded.iter().map(|tx| *tx.hash()).collect::<HashSet<_>>());
+            let is_discarded = |hash: &TxHash| match &discarded_hashes {
+                Some(hashes) => hashes.contains(hash),
+                None => discarded.iter().any(|tx| tx.hash() == hash),
+            };
 
             // A newly added transaction may be immediately discarded, so we need to
             // adjust the result here
             for res in &mut results {
                 if let Ok(AddedTransactionOutcome { hash, .. }) = res &&
-                    discarded_hashes.contains(hash)
+                    is_discarded(hash)
                 {
                     *res = Err(PoolError::new(*hash, PoolErrorKind::DiscardedOnInsert))
                 }
@@ -1294,7 +1300,7 @@ where
     }
 
     /// Inserts a blob transaction into the blob store
-    fn insert_blob(&self, hash: TxHash, blob: BlobTransactionSidecarVariant) {
+    fn insert_blob(&self, hash: TxHash, blob: PooledBlobSidecar) {
         debug!(target: "txpool", "[{:?}] storing blob sidecar", hash);
         if let Err(err) = self.blob_store.insert(hash, blob) {
             warn!(target: "txpool", %err, "[{:?}] failed to insert blob", hash);
@@ -1356,7 +1362,7 @@ struct AddedTransactionMeta<T: PoolTransaction> {
     /// The transaction that was added to the pool
     added: AddedTransaction<T>,
     /// Optional blob sidecar for EIP-4844 transactions
-    blob_sidecar: Option<BlobTransactionSidecarVariant>,
+    blob_sidecar: Option<PooledBlobSidecar>,
 }
 
 /// Tracks an added transaction and all graph changes caused by adding it.
@@ -1660,7 +1666,7 @@ impl<T: PoolTransaction> OnNewCanonicalStateOutcome<T> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        blobstore::{BlobStore, InMemoryBlobStore},
+        blobstore::{BlobStore, InMemoryBlobStore, PooledBlobSidecar},
         identifier::SenderId,
         test_utils::{MockTransaction, TestPoolBuilder},
         validate::ValidTransaction,
@@ -1725,7 +1731,7 @@ mod tests {
 
             // Insert the sidecar into the blob store if the current index is within the blob limit.
             if n < blob_limit.max_txs {
-                blob_store.insert(*tx.get_hash(), sidecar.clone()).unwrap();
+                blob_store.insert(*tx.get_hash(), sidecar.clone().into()).unwrap();
             }
 
             // Add the transaction to the pool with external origin and valid outcome.
@@ -1737,7 +1743,7 @@ mod tests {
                     bytecode_hash: None,
                     transaction: ValidTransaction::ValidWithSidecar {
                         transaction: tx,
-                        sidecar: sidecar.clone(),
+                        sidecar: PooledBlobSidecar::from(sidecar.clone()),
                     },
                     propagate: true,
                     authorities: None,

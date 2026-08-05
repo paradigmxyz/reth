@@ -97,11 +97,68 @@ pub trait BalStore: Send + Sync + 'static {
         self.get_by_hash(block_hash)?.map(revm_bal_from_raw).transpose()
     }
 
+    /// Fetches BAL response entries for the given block hashes, stopping after the soft limit is
+    /// exceeded.
+    ///
+    /// Entries are returned in request order. Unavailable BALs are represented as `None`. The
+    /// limit is soft: the entry that exceeds the limit is included.
+    fn get_by_hashes_with_limit(
+        &self,
+        block_hashes: &[BlockHash],
+        limit: GetBlockAccessListLimit,
+    ) -> ProviderResult<Vec<Option<Bytes>>> {
+        let mut out = Vec::new();
+        self.append_by_hashes_with_limit(block_hashes, limit, &mut out)?;
+        out.shrink_to_fit();
+        Ok(out)
+    }
+
+    /// Extends the given vector with BAL response entries for the given hashes.
+    ///
+    /// This adheres to the expected behavior of [`Self::get_by_hashes_with_limit`].
+    fn append_by_hashes_with_limit(
+        &self,
+        block_hashes: &[BlockHash],
+        limit: GetBlockAccessListLimit,
+        out: &mut Vec<Option<Bytes>>,
+    ) -> ProviderResult<()> {
+        let mut size = 0;
+        for bal in self.get_by_hashes(block_hashes)? {
+            size += bal.as_ref().map_or(1, |bytes| bytes.len());
+            out.push(bal);
+
+            if limit.exceeds(size) {
+                break
+            }
+        }
+        Ok(())
+    }
+
     /// Returns BAL insert notifications.
     ///
     /// Notifications do not imply canonicality.
     #[cfg(feature = "std")]
     fn bal_stream(&self) -> BalNotificationStream;
+}
+
+/// The limit to enforce for [`BalStore::get_by_hashes_with_limit`].
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum GetBlockAccessListLimit {
+    /// No limit, return all BALs.
+    None,
+    /// Enforce a size limit on the returned BALs, for example 2MB.
+    ResponseSizeSoftLimit(usize),
+}
+
+impl GetBlockAccessListLimit {
+    /// Returns true if the given size exceeds the limit.
+    #[inline]
+    pub const fn exceeds(&self, size: usize) -> bool {
+        match self {
+            Self::None => false,
+            Self::ResponseSizeSoftLimit(limit) => size > *limit,
+        }
+    }
 }
 
 /// Clone-friendly façade around a BAL store implementation.
@@ -178,6 +235,28 @@ impl BalStoreHandle {
         self.inner.revm_bal_by_hash(block_hash)
     }
 
+    /// Fetches BAL response entries for the given block hashes, stopping after the soft limit is
+    /// exceeded.
+    #[inline]
+    pub fn get_by_hashes_with_limit(
+        &self,
+        block_hashes: &[BlockHash],
+        limit: GetBlockAccessListLimit,
+    ) -> ProviderResult<Vec<Option<Bytes>>> {
+        self.inner.get_by_hashes_with_limit(block_hashes, limit)
+    }
+
+    /// Extends the given vector with BAL response entries for the given hashes.
+    #[inline]
+    pub fn append_by_hashes_with_limit(
+        &self,
+        block_hashes: &[BlockHash],
+        limit: GetBlockAccessListLimit,
+        out: &mut Vec<Option<Bytes>>,
+    ) -> ProviderResult<()> {
+        self.inner.append_by_hashes_with_limit(block_hashes, limit, out)
+    }
+
     /// Returns a stream of BAL insert notifications.
     #[cfg(feature = "std")]
     #[inline]
@@ -226,6 +305,24 @@ impl BalStore for NoopBalStore {
         Ok(block_hashes.iter().map(|_| None).collect())
     }
 
+    fn append_by_hashes_with_limit(
+        &self,
+        block_hashes: &[BlockHash],
+        limit: GetBlockAccessListLimit,
+        out: &mut Vec<Option<Bytes>>,
+    ) -> ProviderResult<()> {
+        let mut size = 0;
+        for _ in block_hashes {
+            size += 1;
+            out.push(None);
+
+            if limit.exceeds(size) {
+                break
+            }
+        }
+        Ok(())
+    }
+
     #[cfg(feature = "std")]
     fn bal_stream(&self) -> BalNotificationStream {
         reth_tokio_util::EventSender::new(1).new_listener()
@@ -256,12 +353,49 @@ pub fn get_bals_by_hashes<Provider>(
 where
     Provider: BalProvider + BlockNumReader + ?Sized,
 {
-    let mut out = Vec::with_capacity(block_hashes.len());
+    get_bals_by_hashes_with_limit(provider, block_hashes, GetBlockAccessListLimit::None)
+}
 
-    for block_hash in block_hashes {
-        out.push(get_bal_by_hash(provider, *block_hash)?);
+/// Fetches BALs by hash, falling back to block-number lookup and stopping after the soft limit is
+/// exceeded.
+pub fn get_bals_by_hashes_with_limit<Provider>(
+    provider: &Provider,
+    block_hashes: &[BlockHash],
+    limit: GetBlockAccessListLimit,
+) -> ProviderResult<Vec<Option<Bytes>>>
+where
+    Provider: BalProvider + BlockNumReader + ?Sized,
+{
+    let mut out = Vec::with_capacity(block_hashes.len());
+    let mut size = 0;
+    let buffered = provider.bal_store().get_by_hashes(block_hashes)?;
+
+    for (block_hash, bal) in block_hashes.iter().zip(buffered) {
+        let bal = match bal {
+            Some(bal) => Some(bal),
+            None => {
+                let Some(block_number) = provider.block_number(*block_hash)? else {
+                    out.push(None);
+                    size += 1;
+                    if limit.exceeds(size) {
+                        break
+                    }
+                    continue
+                };
+                provider
+                    .bal_store()
+                    .get_by_block_num_hash(NumHash::new(block_number, *block_hash))?
+            }
+        };
+        size += bal.as_ref().map_or(1, |bytes| bytes.len());
+        out.push(bal);
+
+        if limit.exceeds(size) {
+            break
+        }
     }
 
+    out.shrink_to_fit();
     Ok(out)
 }
 
@@ -353,10 +487,42 @@ mod tests {
             get_bals_by_hashes(&provider, &[block.hash, missing]).unwrap(),
             vec![Some(raw_bal.clone()), None]
         );
+        assert_eq!(
+            get_bals_by_hashes_with_limit(
+                &provider,
+                &[block.hash, missing],
+                GetBlockAccessListLimit::ResponseSizeSoftLimit(0),
+            )
+            .unwrap(),
+            vec![Some(raw_bal.clone())]
+        );
 
         let revm_bal = get_revm_bal_by_hash(&provider, block.hash).unwrap().unwrap();
         assert_eq!(revm_bal.as_raw(), &raw_bal);
         assert!(revm_bal.as_bal().accounts.is_empty());
+    }
+
+    #[test]
+    fn noop_store_limited_lookup_returns_prefix() {
+        let store = BalStoreHandle::default();
+        let hashes = [B256::random(), B256::random(), B256::random()];
+
+        let limited = store
+            .get_by_hashes_with_limit(&hashes, GetBlockAccessListLimit::ResponseSizeSoftLimit(1))
+            .unwrap();
+
+        assert_eq!(limited, vec![None, None]);
+    }
+
+    #[test]
+    fn block_access_list_limit() {
+        let limit_none = GetBlockAccessListLimit::None;
+        assert!(!limit_none.exceeds(usize::MAX));
+
+        let size_limit_2mb = GetBlockAccessListLimit::ResponseSizeSoftLimit(2 * 1024 * 1024);
+        assert!(!size_limit_2mb.exceeds(1024 * 1024));
+        assert!(!size_limit_2mb.exceeds(2 * 1024 * 1024));
+        assert!(size_limit_2mb.exceeds(3 * 1024 * 1024));
     }
 
     #[cfg(feature = "std")]

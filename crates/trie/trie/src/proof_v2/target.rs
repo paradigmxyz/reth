@@ -1,117 +1,70 @@
 use reth_trie_common::{Nibbles, ProofV2Target};
 
-// A helper function for getting the largest prefix of the sub-trie which contains a particular
-// target, based on its `min_len`.
-//
-// A target will only match nodes which share the target's prefix, where the target's prefix is
-// the first `min_len` nibbles of its key. E.g. a target with `key` 0xabcd and `min_len` 2 will
-// only match nodes with prefix 0xab.
-//
-// In general the target will only match within the sub-trie whose prefix is identical to the
-// target's. However there is an exception:
-//
-// Given a trie with a node at 0xabc, there must be a branch at 0xab. A target with prefix 0xabc
-// needs to match that node, but the branch at 0xab must be constructed order to know the node
-// is at that path. Therefore the sub-trie prefix is the target prefix with a nibble truncated.
-//
-// For a target with an empty prefix (`min_len` of 0) we still use an empty sub-trie prefix;
-// this will still construct the branch at the root node (if there is one). Targets with
-// `min_len` of both 0 and 1 will therefore construct the root node, but only those with
-// `min_len` of 0 will retain it.
+// Returns the path of the already-revealed parent branch for a target. `None` means the target
+// needs the actual trie root, while `Some(Nibbles::new())` means the root branch is already
+// revealed.
 #[inline]
-pub(crate) fn sub_trie_prefix(target: &ProofV2Target) -> Nibbles {
-    let mut sub_trie_prefix = target.key_nibbles;
-    sub_trie_prefix.truncate(target.min_len.saturating_sub(1) as usize);
-    sub_trie_prefix
+pub(crate) fn known_parent_prefix(target: &ProofV2Target) -> Option<Nibbles> {
+    target.parent.path(target.key_nibbles)
 }
 
-// A helper function which returns the first path following a sub-trie in lexicographical order.
+// Returns the direct child of the known parent which contains the target. If there is no known
+// parent then the target requires the full trie.
 #[inline]
-fn sub_trie_upper_bound(sub_trie_prefix: &Nibbles) -> Option<Nibbles> {
-    sub_trie_prefix.next_without_prefix()
+fn target_child_prefix(target: &ProofV2Target) -> Nibbles {
+    target
+        .parent
+        .path_len()
+        .map_or_else(Nibbles::new, |parent_len| target.key_nibbles.slice(0..parent_len + 1))
 }
 
-/// Describes a set of targets which all apply to a single sub-trie, ie a section of the overall
-/// trie whose nodes all share a prefix.
+/// Describes targets with the same already-revealed parent and the bounded range traversed to
+/// calculate their direct children.
 pub(crate) struct SubTrieTargets<'a> {
-    /// The prefix which all nodes in the sub-trie share. This is also the first node in the trie
-    /// in lexicographic order.
-    pub(crate) prefix: Nibbles,
+    /// The first path traversed for these targets.
+    pub(crate) lower_bound: Nibbles,
+    /// The first path after the traversal range, or `None` if it extends through the end of the
+    /// trie.
+    pub(crate) upper_bound: Option<Nibbles>,
+    /// The path of the already-revealed parent branch. `None` means the actual trie root is
+    /// requested, while `Some(Nibbles::new())` means the root branch is already revealed.
+    pub(crate) parent_prefix: Option<Nibbles>,
     /// The targets belonging to this sub-trie. These will be sorted by their `key` field,
     /// lexicographically.
     pub(crate) targets: &'a [ProofV2Target],
-    /// Will be true if at least one target in the set has a zero `min_len`.
-    ///
-    /// If this is true then `prefix.is_empty()`, though not necessarily vice-versa.
-    pub(crate) retain_root: bool,
-}
-
-impl<'a> SubTrieTargets<'a> {
-    // A helper function which returns the first path following a sub-trie in lexicographical order.
-    #[inline]
-    pub(crate) fn upper_bound(&self) -> Option<Nibbles> {
-        sub_trie_upper_bound(&self.prefix)
-    }
 }
 
 /// Given a set of [`ProofV2Target`]s, returns an iterator over those same [`ProofV2Target`]s
-/// chunked by the sub-tries they apply to within the overall trie.
+/// grouped by their already-revealed parent. Each group traverses the bounded span from its first
+/// targeted direct child through its last targeted direct child.
 pub(crate) fn iter_sub_trie_targets(
     targets: &mut [ProofV2Target],
 ) -> impl Iterator<Item = SubTrieTargets<'_>> {
-    // First sort by the sub-trie prefix of each target, falling back to the `min_len` in cases
-    // where the sub-trie prefixes are equal (to differentiate targets which match the root node and
-    // those which don't).
+    // Sort by parent context first so equal parents are contiguous, then by target key so the
+    // first and last targets determine the traversal bounds for the group. `None` and a known root
+    // parent remain distinct.
     targets.sort_unstable_by(|a, b| {
-        sub_trie_prefix(a).cmp(&sub_trie_prefix(b)).then_with(|| a.min_len.cmp(&b.min_len))
+        known_parent_prefix(a)
+            .cmp(&known_parent_prefix(b))
+            .then_with(|| a.key_nibbles.cmp(&b.key_nibbles))
     });
 
-    // We now chunk targets, such that each chunk contains all targets belonging to the same
-    // sub-trie. We are taking advantage of the following properties:
-    //
-    // - The first target in the chunk has the shortest sub-trie prefix (see previous sorting step).
-    //
-    // - The upper bound of the first target in the chunk's sub-trie will therefore be the upper
-    //   bound of the whole chunk.
-    //      - For example, given a chunk with sub-trie prefixes [0x2, 0x2f, 0x2fa], the upper bounds
-    //        will be [0x3, 0x3, 0x2fb]. Note that no target could match a trie node with path equal
-    //        to or greater than 0x3.
-    //
-    // - If a target's sub-trie's prefix does not lie within the bounds of the current chunk, then
-    //   that target must be the first target of the next chunk, lying in a separate sub-trie.
-    //      - Example: given sub-trie prefixes of [0x2, 0x2fa, 0x4c, 0x4ce, 0x4e], we would end up
-    //        with the following chunks:
-    //          - [0x2, 0x2fa] w/ upper bound 0x3
-    //          - [0x4c 0x4ce] w/ upper bound 0x4d
-    //          - [0x4e]       w/ upper bound 0x4f
-    let mut upper_bound = targets.first().and_then(|t| sub_trie_upper_bound(&sub_trie_prefix(t)));
-    let target_chunks = targets.chunk_by_mut(move |_, next| {
-        if let Some(some_upper_bound) = upper_bound {
-            let prefix = sub_trie_prefix(next);
-            let same_chunk = prefix < some_upper_bound;
-            if !same_chunk {
-                upper_bound = sub_trie_upper_bound(&prefix);
-            }
-            same_chunk
-        } else {
-            true
-        }
-    });
-
-    // Map the chunks to the return type. Within each chunk we want targets to be sorted by their
-    // key, as that will be the order they are checked by the `ProofCalculator`.
-    target_chunks.map(move |targets| {
-        let prefix = sub_trie_prefix(&targets[0]);
-        let retain_root = targets[0].min_len == 0;
-        targets.sort_unstable_by_key(|target| target.key_nibbles);
-        SubTrieTargets { prefix, targets, retain_root }
-    })
+    targets
+        .chunk_by_mut(|current, next| known_parent_prefix(current) == known_parent_prefix(next))
+        .map(|targets| {
+            let parent_prefix = known_parent_prefix(&targets[0]);
+            let lower_bound = target_child_prefix(&targets[0]);
+            let upper_bound = target_child_prefix(targets.last().expect("chunk is non-empty"))
+                .next_without_prefix();
+            SubTrieTargets { lower_bound, upper_bound, parent_prefix, targets }
+        })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloy_primitives::B256;
+    use reth_trie_common::ProofV2TargetParent;
 
     #[test]
     fn test_iter_sub_trie_targets() {
@@ -124,179 +77,171 @@ mod tests {
         };
 
         // Test cases: (input_targets, expected_output)
-        // Expected output format: Vec<(exp_prefix_hex, Vec<key_hex>)>
+        // Expected output format:
+        // Vec<(known_parent_prefix_hex, lower_bound_hex, upper_bound_hex, Vec<key_hex>)>
         let test_cases = vec![
-            // Case 1: Empty targets
+            // Empty targets.
             (vec![], vec![]),
-            // Case 2: Single target without min_len
-            (
-                vec![ProofV2Target::new(B256::repeat_byte(0x20))],
-                vec![(
-                    "",
-                    vec!["2020202020202020202020202020202020202020202020202020202020202020"],
-                )],
-            ),
-            // Case 3: Multiple targets in same sub-trie (no min_len)
+            // A root traversal stays unbounded and sorts its targets.
             (
                 vec![
-                    ProofV2Target::new(B256::repeat_byte(0x20)),
                     ProofV2Target::new(B256::repeat_byte(0x21)),
+                    ProofV2Target::new(B256::repeat_byte(0x20)),
                 ],
                 vec![(
+                    None,
                     "",
+                    None,
                     vec![
                         "2020202020202020202020202020202020202020202020202020202020202020",
                         "2121212121212121212121212121212121212121212121212121212121212121",
                     ],
                 )],
             ),
-            // Case 4: Multiple targets in different sub-tries
+            // Targets below children 0 and f of parent 2 span [20, 3).
             (
                 vec![
-                    ProofV2Target::new(B256::repeat_byte(0x20)).with_min_len(2),
-                    ProofV2Target::new(B256::repeat_byte(0x40)).with_min_len(2),
-                ],
-                vec![
-                    ("2", vec!["2020202020202020202020202020202020202020202020202020202020202020"]),
-                    ("4", vec!["4040404040404040404040404040404040404040404040404040404040404040"]),
-                ],
-            ),
-            // Case 5: Three targets, two in same sub-trie, one separate
-            (
-                vec![
-                    ProofV2Target::new(B256::repeat_byte(0x20)).with_min_len(2),
-                    ProofV2Target::new(B256::repeat_byte(0x2f)).with_min_len(2),
-                    ProofV2Target::new(B256::repeat_byte(0x40)).with_min_len(2),
+                    ProofV2Target::new(B256::repeat_byte(0x20))
+                        .with_parent(ProofV2TargetParent::new(1)),
+                    ProofV2Target::new(B256::repeat_byte(0x2f))
+                        .with_parent(ProofV2TargetParent::new(1)),
+                    ProofV2Target::new(B256::repeat_byte(0x40))
+                        .with_parent(ProofV2TargetParent::new(1)),
                 ],
                 vec![
                     (
-                        "2",
+                        Some("2"),
+                        "20",
+                        Some("3"),
                         vec![
                             "2020202020202020202020202020202020202020202020202020202020202020",
                             "2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f",
                         ],
                     ),
-                    ("4", vec!["4040404040404040404040404040404040404040404040404040404040404040"]),
+                    (
+                        Some("4"),
+                        "40",
+                        Some("41"),
+                        vec!["4040404040404040404040404040404040404040404040404040404040404040"],
+                    ),
                 ],
             ),
-            // Case 6: Targets with different min_len values in same sub-trie
+            // Nested parent paths remain separate groups.
             (
                 vec![
-                    ProofV2Target::new(B256::repeat_byte(0x20)).with_min_len(2),
-                    ProofV2Target::new(B256::repeat_byte(0x2f)).with_min_len(3),
+                    ProofV2Target::new(B256::repeat_byte(0x20))
+                        .with_parent(ProofV2TargetParent::new(1)),
+                    ProofV2Target::new(B256::repeat_byte(0x2f))
+                        .with_parent(ProofV2TargetParent::new(2)),
+                ],
+                vec![
+                    (
+                        Some("2"),
+                        "20",
+                        Some("21"),
+                        vec!["2020202020202020202020202020202020202020202020202020202020202020"],
+                    ),
+                    (
+                        Some("2f"),
+                        "2f2",
+                        Some("2f3"),
+                        vec!["2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f"],
+                    ),
+                ],
+            ),
+            // A known-root span ending in child f is unbounded.
+            (
+                vec![
+                    ProofV2Target::new(B256::repeat_byte(0x20))
+                        .with_parent(ProofV2TargetParent::new(0)),
+                    ProofV2Target::new(B256::repeat_byte(0xf0))
+                        .with_parent(ProofV2TargetParent::new(0)),
                 ],
                 vec![(
+                    Some(""),
                     "2",
+                    None,
                     vec![
                         "2020202020202020202020202020202020202020202020202020202020202020",
-                        "2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f",
+                        "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0",
                     ],
                 )],
             ),
-            // Case 7: More complex chunking with multiple sub-tries
+            // Parent ordering can make traversal ranges move backwards (4 then 20).
             (
                 vec![
-                    ProofV2Target::new(B256::repeat_byte(0x20)).with_min_len(2),
-                    ProofV2Target::new(B256::repeat_byte(0x2f)).with_min_len(4),
-                    ProofV2Target::new(B256::repeat_byte(0x4c)).with_min_len(3),
-                    ProofV2Target::new(B256::repeat_byte(0x4c)).with_min_len(4),
-                    ProofV2Target::new(B256::repeat_byte(0x4e)).with_min_len(3),
+                    ProofV2Target::new(B256::repeat_byte(0x20))
+                        .with_parent(ProofV2TargetParent::new(1)),
+                    ProofV2Target::new(B256::repeat_byte(0x40))
+                        .with_parent(ProofV2TargetParent::new(0)),
                 ],
                 vec![
                     (
-                        "2",
-                        vec![
-                            "2020202020202020202020202020202020202020202020202020202020202020",
-                            "2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f",
-                        ],
+                        Some(""),
+                        "4",
+                        Some("5"),
+                        vec!["4040404040404040404040404040404040404040404040404040404040404040"],
                     ),
                     (
-                        "4c",
-                        vec![
-                            "4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c",
-                            "4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c",
-                        ],
-                    ),
-                    (
-                        "4e",
-                        vec!["4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e"],
+                        Some("2"),
+                        "20",
+                        Some("21"),
+                        vec!["2020202020202020202020202020202020202020202020202020202020202020"],
                     ),
                 ],
             ),
-            // Case 8: Min-len 1 should result in zero-length sub-trie prefix
+            // Root and root-parent targets are distinct despite sharing a prefix.
             (
                 vec![
-                    ProofV2Target::new(B256::repeat_byte(0x20)).with_min_len(1),
-                    ProofV2Target::new(B256::repeat_byte(0x40)).with_min_len(1),
+                    ProofV2Target::new(B256::repeat_byte(0x20)),
+                    ProofV2Target::new(B256::repeat_byte(0x40))
+                        .with_parent(ProofV2TargetParent::new(0)),
                 ],
-                vec![(
-                    "",
-                    vec![
-                        "2020202020202020202020202020202020202020202020202020202020202020",
-                        "4040404040404040404040404040404040404040404040404040404040404040",
-                    ],
-                )],
-            ),
-            // Case 9: Second target's sub-trie prefix is root
-            (
                 vec![
-                    ProofV2Target::new(B256::repeat_byte(0x20)).with_min_len(2),
-                    ProofV2Target::new(B256::repeat_byte(0x40)).with_min_len(1),
+                    (
+                        None,
+                        "",
+                        None,
+                        vec!["2020202020202020202020202020202020202020202020202020202020202020"],
+                    ),
+                    (
+                        Some(""),
+                        "4",
+                        Some("5"),
+                        vec!["4040404040404040404040404040404040404040404040404040404040404040"],
+                    ),
                 ],
-                vec![(
-                    "",
-                    vec![
-                        "2020202020202020202020202020202020202020202020202020202020202020",
-                        "4040404040404040404040404040404040404040404040404040404040404040",
-                    ],
-                )],
             ),
         ];
 
         for (i, (mut input_targets, expected)) in test_cases.into_iter().enumerate() {
-            let test_case = i + 1;
-            let sub_tries: Vec<_> = iter_sub_trie_targets(&mut input_targets).collect();
+            let actual = iter_sub_trie_targets(&mut input_targets)
+                .map(|sub_trie| {
+                    (
+                        sub_trie.parent_prefix,
+                        sub_trie.lower_bound,
+                        sub_trie.upper_bound,
+                        sub_trie
+                            .targets
+                            .iter()
+                            .map(|target| target.key_nibbles)
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let expected = expected
+                .into_iter()
+                .map(|(parent_prefix, lower_bound, upper_bound, keys)| {
+                    (
+                        parent_prefix.map(nibbles),
+                        nibbles(lower_bound),
+                        upper_bound.map(nibbles),
+                        keys.into_iter().map(nibbles).collect::<Vec<_>>(),
+                    )
+                })
+                .collect::<Vec<_>>();
 
-            assert_eq!(
-                sub_tries.len(),
-                expected.len(),
-                "Test case {} failed: expected {} sub-tries, got {}",
-                test_case,
-                expected.len(),
-                sub_tries.len()
-            );
-
-            for (j, (sub_trie, (exp_prefix_hex, exp_keys))) in
-                sub_tries.iter().zip(expected.iter()).enumerate()
-            {
-                let exp_prefix = nibbles(exp_prefix_hex);
-
-                assert_eq!(
-                    sub_trie.prefix, exp_prefix,
-                    "Test case {} sub-trie {}: prefix mismatch",
-                    test_case, j
-                );
-                assert_eq!(
-                    sub_trie.targets.len(),
-                    exp_keys.len(),
-                    "Test case {} sub-trie {}: expected {} targets, got {}",
-                    test_case,
-                    j,
-                    exp_keys.len(),
-                    sub_trie.targets.len()
-                );
-
-                for (k, (target, exp_key_hex)) in
-                    sub_trie.targets.iter().zip(exp_keys.iter()).enumerate()
-                {
-                    let exp_key = nibbles(exp_key_hex);
-                    assert_eq!(
-                        target.key_nibbles, exp_key,
-                        "Test case {} sub-trie {} target {}: key mismatch",
-                        test_case, j, k
-                    );
-                }
-            }
+            assert_eq!(actual, expected, "test case {}", i + 1);
         }
     }
 }

@@ -105,7 +105,7 @@ where
                     healthy_node_rpc_client.clone(),
                 )),
                 InvalidBlockHookType::PreState | InvalidBlockHookType::Opcode => {
-                    eyre::bail!("invalid block hook {hook:?} is not implemented yet")
+                    eyre::bail!("invalid block hook {hook:?} is not implemented yet");
                 }
             } as Box<dyn InvalidBlockHook<_>>)
         })

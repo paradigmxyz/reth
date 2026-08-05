@@ -207,6 +207,14 @@ pub fn payload_id(
         hasher.update(parent_beacon_block);
     }
 
+    if let Some(slot_number) = attributes.slot_number {
+        hasher.update(slot_number.to_be_bytes());
+    }
+
+    if let Some(target_gas_limit) = attributes.target_gas_limit {
+        hasher.update(target_gas_limit.to_be_bytes());
+    }
+
     let out = hasher.finalize();
 
     #[allow(deprecated)] // generic-array 0.14 deprecated
@@ -326,5 +334,53 @@ mod tests {
             payload_id(&parent, &attributes),
             PayloadId(B64::from_str("0x0fc49cd532094cce").unwrap())
         );
+    }
+
+    #[test]
+    fn test_payload_id_with_slot_number() {
+        let parent =
+            B256::from_str("0x9876543210abcdef9876543210abcdef9876543210abcdef9876543210abcdef")
+                .unwrap();
+        let mut attributes = EthPayloadAttributes {
+            timestamp: 1622553200,
+            prev_randao: B256::from_slice(&[1; 32]),
+            suggested_fee_recipient: Address::from_str(
+                "0xb94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            )
+            .unwrap(),
+            withdrawals: Some(vec![]),
+            parent_beacon_block_root: Some(B256::from_slice(&[2; 32])),
+            slot_number: Some(1),
+            target_gas_limit: None,
+        };
+
+        let first = payload_id(&parent, &attributes);
+        attributes.slot_number = Some(2);
+
+        assert_ne!(first, payload_id(&parent, &attributes));
+    }
+
+    #[test]
+    fn test_payload_id_with_target_gas_limit() {
+        let parent =
+            B256::from_str("0x9876543210abcdef9876543210abcdef9876543210abcdef9876543210abcdef")
+                .unwrap();
+        let mut attributes = EthPayloadAttributes {
+            timestamp: 1622553200,
+            prev_randao: B256::from_slice(&[1; 32]),
+            suggested_fee_recipient: Address::from_str(
+                "0xb94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            )
+            .unwrap(),
+            withdrawals: Some(vec![]),
+            parent_beacon_block_root: Some(B256::from_slice(&[2; 32])),
+            slot_number: Some(1),
+            target_gas_limit: Some(30_000_000),
+        };
+
+        let first = payload_id(&parent, &attributes);
+        attributes.target_gas_limit = Some(60_000_000);
+
+        assert_ne!(first, payload_id(&parent, &attributes));
     }
 }

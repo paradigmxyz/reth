@@ -1,15 +1,13 @@
 #[cfg(feature = "trie-debug")]
 use crate::debug_recorder::TrieDebugRecorder;
 use crate::{
-    lfu::BucketedLfu, traits::SparseTrie as SparseTrieTrait, ArenaParallelSparseTrie,
-    RevealableSparseTrie,
+    traits::SparseTrie as SparseTrieTrait, ArenaParallelSparseTrie, RevealableSparseTrie,
+    TrieNodeEpoch,
 };
 use alloc::vec::Vec;
 use alloy_primitives::{map::B256Map, B256};
 use either::Either;
 use reth_execution_errors::{SparseStateTrieResult, SparseTrieErrorKind};
-#[cfg(feature = "std")]
-use reth_trie_common::HashedPostStateSorted;
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
     DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2,
@@ -42,10 +40,6 @@ pub struct SparseStateTrie<
     retain_updates: bool,
     /// Holds data that should be dropped after final state root is calculated.
     deferred_drops: DeferredDrops,
-    /// Global LFU tracker for hot `(address, slot)` storage entries.
-    hot_slots_lfu: BucketedLfu<HotSlotKey>,
-    /// Global LFU tracker for hot account entries.
-    hot_accounts_lfu: BucketedLfu<B256>,
     /// Metrics for the sparse state trie.
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::SparseStateTrieMetrics,
@@ -62,8 +56,6 @@ where
             storage: Default::default(),
             retain_updates: false,
             deferred_drops: DeferredDrops::default(),
-            hot_slots_lfu: BucketedLfu::default(),
-            hot_accounts_lfu: BucketedLfu::default(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
@@ -87,25 +79,6 @@ impl<A, S> SparseStateTrie<A, S> {
     /// Set the retention of branch node updates and deletions.
     pub const fn with_updates(mut self, retain_updates: bool) -> Self {
         self.set_updates(retain_updates);
-        self
-    }
-
-    /// Seeds the hot account/storage LFU caches with their configured capacities.
-    ///
-    /// This must happen before the first `record_*_touch` call, otherwise touches are ignored while
-    /// the LFUs still have zero capacity.
-    pub fn set_hot_cache_capacities(&mut self, max_hot_slots: usize, max_hot_accounts: usize) {
-        self.hot_slots_lfu.decay_and_evict(max_hot_slots);
-        self.hot_accounts_lfu.decay_and_evict(max_hot_accounts);
-    }
-
-    /// Seeds the hot account/storage LFU caches with their configured capacities.
-    pub fn with_hot_cache_capacities(
-        mut self,
-        max_hot_slots: usize,
-        max_hot_accounts: usize,
-    ) -> Self {
-        self.set_hot_cache_capacities(max_hot_slots, max_hot_accounts);
         self
     }
 
@@ -199,18 +172,6 @@ where
         };
 
         trie.find_leaf(&path, None).is_ok()
-    }
-
-    /// Records a storage slot access/update in the global LFU tracker.
-    #[inline]
-    pub fn record_slot_touch(&mut self, account: B256, slot: B256) {
-        self.hot_slots_lfu.touch(HotSlotKey { address: account, slot });
-    }
-
-    /// Records an account access/update in the global LFU tracker.
-    #[inline]
-    pub fn record_account_touch(&mut self, account: B256) {
-        self.hot_accounts_lfu.touch(account);
     }
 
     /// Returns reference to bytes representing leaf value for the target account.
@@ -307,7 +268,7 @@ where
         if !account_proofs.is_empty() {
             #[cfg(feature = "metrics")]
             self.metrics.increment_total_account_nodes(account_proofs.len() as u64);
-            targets.push((Either::Left(&mut self.state), account_proofs));
+            targets.push((None, Either::Left(&mut self.state), account_proofs));
         }
 
         // Ensure a storage trie exists for every address whose proofs we're about to reveal
@@ -319,7 +280,7 @@ where
             if let Some(nodes) = storage_proofs.remove(account) {
                 #[cfg(feature = "metrics")]
                 self.metrics.increment_total_storage_nodes(nodes.len() as u64);
-                targets.push((Either::Right(trie), nodes));
+                targets.push((Some(*account), Either::Right(trie), nodes));
             }
         }
 
@@ -328,7 +289,7 @@ where
         #[cfg(not(feature = "std"))]
         let results: Vec<_> = targets
             .into_iter()
-            .map(|(target, mut nodes)| {
+            .map(|(_, target, mut nodes)| {
                 let result = match target {
                     Either::Left(trie) => trie.reveal_v2_proof_nodes(&mut nodes, retain_updates),
                     Either::Right(trie) => trie.reveal_v2_proof_nodes(&mut nodes, retain_updates),
@@ -342,10 +303,19 @@ where
             use rayon::iter::ParallelIterator;
             use reth_primitives_traits::ParallelBridgeBuffered;
 
+            let parent_span = tracing::Span::current();
             targets
                 .into_iter()
                 .par_bridge_buffered()
-                .map(|(target, mut nodes)| {
+                .map(|(hashed_address, target, mut nodes)| {
+                    let _span = tracing::trace_span!(
+                        target: "trie::sparse",
+                        parent: &parent_span,
+                        "reveal_v2_proof_nodes",
+                        ?hashed_address,
+                    )
+                    .entered();
+
                     let result = match target {
                         Either::Left(trie) => {
                             trie.reveal_v2_proof_nodes(&mut nodes, retain_updates)
@@ -383,15 +353,15 @@ where
     ///
     /// If the trie has not been revealed, this function does nothing.
     #[instrument(level = "debug", target = "trie::sparse", skip_all)]
-    pub fn calculate_subtries(&mut self) {
+    pub fn calculate_subtries(&mut self, new_epoch: TrieNodeEpoch) {
         if let RevealableSparseTrie::Revealed(trie) = &mut self.state {
-            trie.update_subtrie_hashes();
+            trie.update_subtrie_hashes(new_epoch);
         }
     }
 
     /// Returns storage sparse trie root if the trie has been revealed.
-    pub fn storage_root(&mut self, account: &B256) -> Option<B256> {
-        self.storage.tries.get_mut(account).and_then(|trie| trie.root())
+    pub fn storage_root(&mut self, account: &B256, new_epoch: TrieNodeEpoch) -> Option<B256> {
+        self.storage.tries.get_mut(account).and_then(|trie| trie.root(new_epoch))
     }
 
     /// Returns mutable reference to the revealed account sparse trie.
@@ -400,19 +370,22 @@ where
     }
 
     /// Returns sparse trie root.
-    pub fn root(&mut self) -> SparseStateTrieResult<B256> {
+    pub fn root(&mut self, new_epoch: TrieNodeEpoch) -> SparseStateTrieResult<B256> {
         // record revealed node metrics
         #[cfg(feature = "metrics")]
         self.metrics.record();
 
-        Ok(self.revealed_trie_mut()?.root())
+        Ok(self.revealed_trie_mut()?.root(new_epoch))
     }
 
     /// Returns sparse trie root and trie updates.
     ///
     /// Returns an error if the account trie is still blind.
     #[instrument(level = "debug", target = "trie::sparse", skip_all)]
-    pub fn root_with_updates(&mut self) -> SparseStateTrieResult<(B256, TrieUpdates)> {
+    pub fn root_with_updates(
+        &mut self,
+        new_epoch: TrieNodeEpoch,
+    ) -> SparseStateTrieResult<(B256, TrieUpdates)> {
         // record revealed node metrics
         #[cfg(feature = "metrics")]
         self.metrics.record();
@@ -420,7 +393,7 @@ where
         let storage_tries = self.storage_trie_updates();
         let revealed = self.revealed_trie_mut()?;
 
-        let (root, updates) = (revealed.root(), revealed.take_updates());
+        let (root, updates) = (revealed.root(new_epoch), revealed.take_updates());
         let updates = TrieUpdates {
             account_nodes: updates.updated_nodes,
             removed_nodes: updates.removed_nodes,
@@ -480,161 +453,58 @@ where
         self.storage.clear();
     }
 
-    /// Returns a heuristic for the total in-memory size of this state trie in bytes.
-    ///
-    /// This aggregates the memory usage of the account trie, all revealed storage tries
-    /// (including cleared ones retained for allocation reuse), and auxiliary data structures.
-    pub fn memory_size(&self) -> usize {
-        let mut size = core::mem::size_of::<Self>();
-
-        size += match &self.state {
-            RevealableSparseTrie::Revealed(t) | RevealableSparseTrie::Blind(Some(t)) => {
-                t.memory_size()
-            }
-            RevealableSparseTrie::Blind(None) => 0,
-        };
-
-        for trie in self.storage.tries.values() {
-            size += match trie {
-                RevealableSparseTrie::Revealed(t) | RevealableSparseTrie::Blind(Some(t)) => {
-                    t.memory_size()
-                }
-                RevealableSparseTrie::Blind(None) => 0,
-            };
-        }
-        for trie in &self.storage.cleared_tries {
-            size += match trie {
-                RevealableSparseTrie::Revealed(t) | RevealableSparseTrie::Blind(Some(t)) => {
-                    t.memory_size()
-                }
-                RevealableSparseTrie::Blind(None) => 0,
-            };
-        }
-
-        size
-    }
-
     /// Returns the number of storage tries currently retained (active + cleared).
     pub fn retained_storage_tries_count(&self) -> usize {
         self.storage.tries.len() + self.storage.cleared_tries.len()
     }
 
-    /// Prunes account/storage tries according to global LFU retention and retained paths.
+    /// Prunes account and storage trie nodes last modified before `prune_before`.
     ///
-    /// - Top LFU `(address, slot)` entries are retained up to `max_hot_slots`.
-    ///
-    /// - Top LFU `(address, slot)` entries are retained in storage tries.
-    /// - Account trie retains only paths for accounts tracked by the account LFU.
-    /// - Storage tries retain only paths needed for retained slots.
-    /// - Additional retained paths are unioned with LFU-selected paths.
-    /// - All other revealed paths are pruned to hash stubs or fully evicted.
+    /// Storage tries whose root epochs predate the cutoff are fully evicted.
     ///
     /// # Preconditions
     ///
-    /// All revealed account and storage tries must already have computed hashes via `root()`
-    /// / `storage_root()` for their current state. Pruning a dirty revealed trie is a hard
-    /// error and may panic.
+    /// Modified account and storage tries must already have computed hashes via `root()` /
+    /// `storage_root()` for their current state. Unmodified storage roots revealed only by
+    /// prewarming are treated as epoch zero.
     #[cfg(feature = "std")]
     #[instrument(
         level = "debug",
         name = "SparseStateTrie::prune",
         target = "trie::sparse",
-        skip_all,
-        fields(%max_hot_slots, %max_hot_accounts)
+        skip_all
     )]
-    pub fn prune(
-        &mut self,
-        max_hot_slots: usize,
-        max_hot_accounts: usize,
-        mut retained_paths: SparseTrieRetainedPaths,
-    ) {
-        self.hot_slots_lfu.decay_and_evict(max_hot_slots);
-        self.hot_accounts_lfu.decay_and_evict(max_hot_accounts);
-        retained_paths.extend_from_lfus(&self.hot_accounts_lfu, &self.hot_slots_lfu);
-        retained_paths.sort_and_dedup();
-
-        let retained_accounts = retained_paths.account_paths.len();
-        let retained_storage_tries = retained_paths.storage_slots.len();
+    pub fn prune(&mut self, prune_before: TrieNodeEpoch) {
         let total_storage_tries_before = self.storage.tries.len();
 
-        let SparseTrieRetainedPaths { account_paths, storage_slots } = retained_paths;
+        let parent_span = tracing::Span::current();
+        let account_parent_span = parent_span.clone();
 
-        // Prune account and storage tries in parallel using the same retained set.
+        // Prune account and storage tries in parallel using the same epoch cutoff.
         let (account_nodes_pruned, storage_tries_evicted) = rayon::join(
-            || self.state.as_revealed_mut().map(|trie| trie.prune(&account_paths)).unwrap_or(0),
-            || self.storage.prune_by_retained_slots(storage_slots),
+            || {
+                let hashed_address = Option::<B256>::None;
+                let _span = tracing::trace_span!(
+                    target: "trie::sparse",
+                    parent: &account_parent_span,
+                    "prune_trie",
+                    ?hashed_address,
+                )
+                .entered();
+
+                self.state.as_revealed_mut().map(|trie| trie.prune(prune_before)).unwrap_or(0)
+            },
+            || self.storage.prune(prune_before, &parent_span),
         );
 
         debug!(
             target: "trie::sparse",
-            retained_accounts,
-            retained_storage_tries,
+            prune_before = prune_before.get(),
             account_nodes_pruned,
             storage_tries_evicted,
             storage_tries_after = total_storage_tries_before - storage_tries_evicted,
             "SparseStateTrie::prune completed"
         );
-    }
-}
-
-/// Account and storage paths that should survive sparse trie pruning.
-#[derive(Debug, Default)]
-#[cfg(feature = "std")]
-pub struct SparseTrieRetainedPaths {
-    account_paths: Vec<Nibbles>,
-    storage_slots: B256Map<Vec<Nibbles>>,
-}
-
-#[cfg(feature = "std")]
-impl SparseTrieRetainedPaths {
-    /// Retains the account path for the given hashed address.
-    pub fn retain_account(&mut self, hashed_address: B256) {
-        self.account_paths.push(Nibbles::unpack(hashed_address));
-    }
-
-    /// Retains the storage slot paths for the given hashed address.
-    pub fn retain_storage_slots(
-        &mut self,
-        hashed_address: B256,
-        slots: impl IntoIterator<Item = Nibbles>,
-    ) {
-        self.storage_slots.entry(hashed_address).or_default().extend(slots);
-    }
-
-    /// Extends the retained paths with every account and storage slot touched by the hashed state.
-    pub fn extend_from_hashed_state(&mut self, hashed_state: &HashedPostStateSorted) {
-        self.account_paths
-            .extend(hashed_state.accounts().iter().map(|(address, _)| Nibbles::unpack(*address)));
-
-        for (address, storage) in hashed_state.account_storages() {
-            self.retain_account(*address);
-            self.retain_storage_slots(
-                *address,
-                storage.storage_slots_ref().iter().map(|(slot, _)| Nibbles::unpack(*slot)),
-            );
-        }
-    }
-
-    fn extend_from_lfus(
-        &mut self,
-        hot_accounts: &BucketedLfu<B256>,
-        hot_slots: &BucketedLfu<HotSlotKey>,
-    ) {
-        self.account_paths.extend(hot_accounts.keys().map(|key| Nibbles::unpack(*key)));
-        for key in hot_slots.keys() {
-            self.storage_slots.entry(key.address).or_default().push(Nibbles::unpack(key.slot));
-        }
-    }
-
-    fn sort_and_dedup(&mut self) {
-        self.account_paths.sort_unstable();
-        self.account_paths.dedup();
-
-        self.storage_slots.retain(|_, slots| {
-            slots.sort_unstable();
-            slots.dedup();
-            !slots.is_empty()
-        });
     }
 }
 
@@ -652,37 +522,44 @@ struct StorageTries<S = ArenaParallelSparseTrie> {
 
 #[cfg(feature = "std")]
 impl<S: SparseTrieTrait> StorageTries<S> {
-    /// Prunes storage tries using LFU-retained slots.
-    ///
-    /// Tries without retained slots are evicted entirely. Tries with retained slots are pruned to
-    /// those slots.
-    fn prune_by_retained_slots(&mut self, retained_slots: B256Map<Vec<Nibbles>>) -> usize {
-        // Parallel pass: prune retained tries and clear evicted ones in place.
-        {
-            use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
-            self.tries.par_iter_mut().for_each(|(address, trie)| {
-                if let Some(slots) = retained_slots.get(address) {
-                    if let Some(t) = trie.as_revealed_mut() {
-                        t.prune(slots);
-                    }
-                } else {
-                    trie.clear();
-                }
-            });
-        }
+    /// Prunes storage tries by epoch, returning fully old tries to the reuse pool.
+    fn prune(&mut self, prune_before: TrieNodeEpoch, parent_span: &tracing::Span) -> usize {
+        use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 
-        // Cheap sequential drain: move already-cleared tries into the reuse pool.
         let addresses_to_evict: Vec<B256> = self
             .tries
-            .keys()
-            .filter(|address| !retained_slots.contains_key(*address))
-            .copied()
+            .par_iter_mut()
+            .filter_map(|(address, trie)| {
+                let hashed_address = Some(*address);
+                let _span = tracing::trace_span!(
+                    target: "trie::sparse",
+                    parent: parent_span,
+                    "prune_trie",
+                    ?hashed_address,
+                )
+                .entered();
+
+                let evict = trie.as_revealed_mut().is_none_or(|revealed| {
+                    // Avoid traversing and compacting a trie that will be immediately evicted.
+                    let root_epoch =
+                        revealed.root_epoch().expect("storage trie root must not be dirty");
+                    if !root_epoch.should_prune(prune_before) {
+                        revealed.prune(prune_before);
+                    }
+                    root_epoch.should_prune(prune_before)
+                });
+
+                evict.then(|| {
+                    trie.clear();
+                    *address
+                })
+            })
             .collect();
 
         let evicted = addresses_to_evict.len();
         self.cleared_tries.reserve(evicted);
-        for address in &addresses_to_evict {
-            if let Some(trie) = self.tries.remove(address) {
+        for address in addresses_to_evict {
+            if let Some(trie) = self.tries.remove(&address) {
                 self.cleared_tries.push(trie);
             }
         }
@@ -711,13 +588,6 @@ impl<S: SparseTrieTrait + Clone> StorageTries<S> {
     }
 }
 
-/// Key for identifying a storage slot in the global LFU cache.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct HotSlotKey {
-    address: B256,
-    slot: B256,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -734,9 +604,13 @@ mod tests {
     use reth_trie::{updates::StorageTrieUpdates, HashBuilder, MultiProof, EMPTY_ROOT_HASH};
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
-        BranchNodeMasks, BranchNodeMasksMap, BranchNodeV2, HashedStorageSorted, LeafNode, RlpNode,
-        StorageMultiProof, TrieAccount, TrieMask, TrieNodeV2,
+        BranchNodeMasks, BranchNodeMasksMap, BranchNodeV2, LeafNode, RlpNode, StorageMultiProof,
+        TrieAccount, TrieMask, TrieNodeV2,
     };
+
+    const fn epoch(value: u64) -> TrieNodeEpoch {
+        TrieNodeEpoch::new(value)
+    }
 
     /// Create a leaf key (suffix) with given nibbles padded with zeros to reach `total_len`.
     fn leaf_key(suffix: impl AsRef<[u8]>, total_len: usize) -> Nibbles {
@@ -884,54 +758,17 @@ mod tests {
     }
 
     #[test]
-    fn seeded_hot_cache_capacities_preserve_first_cycle_touches() {
-        let account = b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
-        let slot = b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
-        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
-
-        sparse.set_hot_cache_capacities(1, 1);
-        sparse.record_account_touch(account);
-        sparse.record_slot_touch(account, slot);
-        sparse.prune(1, 1, SparseTrieRetainedPaths::default());
-
-        assert_eq!(sparse.hot_accounts_lfu.keys().copied().collect::<Vec<_>>(), vec![account]);
-        assert_eq!(
-            sparse.hot_slots_lfu.keys().copied().collect::<Vec<_>>(),
-            vec![HotSlotKey { address: account, slot }]
-        );
-    }
-
-    #[test]
-    fn retained_paths_extend_from_hashed_state() {
-        let account = B256::with_last_byte(0x01);
-        let storage_account = B256::with_last_byte(0x02);
-        let slot = B256::with_last_byte(0x03);
-        let hashed_state = HashedPostStateSorted::new(
-            vec![(account, Some(Account::default()))],
-            B256Map::from_iter([(
-                storage_account,
-                HashedStorageSorted { storage_slots: vec![(slot, U256::from(1))], wiped: false },
-            )]),
-        );
-
-        let mut retained_paths = SparseTrieRetainedPaths::default();
-        retained_paths.extend_from_hashed_state(&hashed_state);
-        retained_paths.sort_and_dedup();
-
-        assert_eq!(
-            retained_paths.account_paths,
-            vec![Nibbles::unpack(account), Nibbles::unpack(storage_account)]
-        );
-        assert_eq!(retained_paths.storage_slots[&storage_account], vec![Nibbles::unpack(slot)]);
-    }
-
-    #[test]
-    fn prune_keeps_retained_paths_overlay_account_and_storage() {
+    fn prune_uses_epochs_for_account_and_storage_tries() {
         let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
 
         let account = B256::ZERO;
+        let old_account =
+            b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
+        let prewarmed_account =
+            b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
         let slot = B256::ZERO;
         let account_path = leaf_key([0x0], 64);
+        let old_account_path = leaf_key([0x1], 64);
         let storage_path = leaf_key([0x0], 64);
 
         let leaf_value = alloy_rlp::encode(TrieAccount::default());
@@ -961,20 +798,57 @@ mod tests {
 
         let multiproof = MultiProof {
             account_subtree: subtree(),
-            storages: HashMap::from_iter([(
-                account,
-                StorageMultiProof {
-                    root: B256::ZERO,
-                    subtree: subtree(),
-                    branch_node_masks: Default::default(),
-                },
-            )]),
+            storages: HashMap::from_iter([
+                (
+                    account,
+                    StorageMultiProof {
+                        root: B256::ZERO,
+                        subtree: subtree(),
+                        branch_node_masks: Default::default(),
+                    },
+                ),
+                (
+                    old_account,
+                    StorageMultiProof {
+                        root: B256::ZERO,
+                        subtree: subtree(),
+                        branch_node_masks: Default::default(),
+                    },
+                ),
+                (
+                    prewarmed_account,
+                    StorageMultiProof {
+                        root: B256::ZERO,
+                        subtree: subtree(),
+                        branch_node_masks: Default::default(),
+                    },
+                ),
+            ]),
             ..Default::default()
         };
 
         sparse.reveal_decoded_multiproof(multiproof.try_into().unwrap()).unwrap();
+
+        sparse.storage_root(&account, epoch(0)).unwrap();
+        sparse.storage_root(&old_account, epoch(0)).unwrap();
+        sparse.root(epoch(0)).unwrap();
+        assert!(!sparse.storage_trie_ref(&prewarmed_account).unwrap().is_root_cached());
+
+        let mut storage_updates = B256Map::from_iter([(
+            slot,
+            LeafUpdate::Changed(alloy_rlp::encode_fixed_size(&U256::from(2)).to_vec()),
+        )]);
+        sparse
+            .storage_trie_mut(&account)
+            .unwrap()
+            .update_leaves(&mut storage_updates, |_, _| {
+                panic!("fully revealed storage trie must not request proofs")
+            })
+            .unwrap();
+        assert!(storage_updates.is_empty());
+
         let trie_account = TrieAccount {
-            storage_root: sparse.storage_root(&account).unwrap(),
+            storage_root: sparse.storage_root(&account, epoch(10)).unwrap(),
             ..Default::default()
         };
         apply_account_update(
@@ -982,12 +856,8 @@ mod tests {
             account,
             LeafUpdate::Changed(alloy_rlp::encode(trie_account)),
         );
-        sparse.root().unwrap();
-
-        let mut retained_paths = SparseTrieRetainedPaths::default();
-        retained_paths.retain_account(account);
-        retained_paths.retain_storage_slots(account, [Nibbles::unpack(slot)]);
-        sparse.prune(0, 0, retained_paths);
+        let root_before = sparse.root(epoch(10)).unwrap();
+        sparse.prune(epoch(10));
 
         assert!(matches!(
             sparse.state_trie_ref().unwrap().find_leaf(&account_path, None),
@@ -997,6 +867,19 @@ mod tests {
             sparse.storage_trie_ref(&account).unwrap().find_leaf(&storage_path, None),
             Ok(LeafLookup::Exists)
         ));
+        assert!(matches!(
+            sparse.state_trie_ref().unwrap().find_leaf(&old_account_path, None),
+            Err(crate::LeafLookupError::BlindedNode { .. })
+        ));
+        assert!(sparse.storage_trie_ref(&old_account).is_none());
+        assert!(sparse.storage_trie_ref(&prewarmed_account).is_none());
+        assert_eq!(sparse.root(epoch(10)).unwrap(), root_before);
+
+        // An intermediate storage root does not advance without another change, so the trie
+        // becomes eligible once the cutoff passes its last modification epoch.
+        sparse.prune(epoch(11));
+        assert!(sparse.storage_trie_ref(&account).is_none());
+        assert_eq!(sparse.root(epoch(11)).unwrap(), root_before);
     }
 
     #[test]
@@ -1121,7 +1004,7 @@ mod tests {
     fn root_on_blind_trie_returns_blind_error() {
         let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
 
-        let err = sparse.root().unwrap_err();
+        let err = sparse.root(epoch(0)).unwrap_err();
 
         assert!(matches!(err.kind(), SparseStateTrieErrorKind::Sparse(SparseTrieErrorKind::Blind)));
     }
@@ -1215,7 +1098,7 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(sparse.root().unwrap(), root);
+        assert_eq!(sparse.root(epoch(0)).unwrap(), root);
 
         let address_3 = b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
         let account_3 = Account { nonce: account_1.nonce + 1, ..account_1 };
@@ -1235,7 +1118,7 @@ mod tests {
             .update_leaves(&mut updates, |_, _| {})
             .unwrap();
         assert!(updates.is_empty());
-        trie_account_1.storage_root = sparse.storage_root(&address_1).unwrap();
+        trie_account_1.storage_root = sparse.storage_root(&address_1, epoch(0)).unwrap();
         apply_account_update(
             &mut sparse,
             address_1,
@@ -1243,14 +1126,14 @@ mod tests {
         );
 
         sparse.wipe_storage(address_2).unwrap();
-        trie_account_2.storage_root = sparse.storage_root(&address_2).unwrap();
+        trie_account_2.storage_root = sparse.storage_root(&address_2, epoch(0)).unwrap();
         apply_account_update(
             &mut sparse,
             address_2,
             LeafUpdate::Changed(alloy_rlp::encode(trie_account_2)),
         );
 
-        sparse.root().unwrap();
+        sparse.root(epoch(0)).unwrap();
 
         let sparse_updates = sparse.take_trie_updates().unwrap();
         // TODO(alexey): assert against real state root calculation updates

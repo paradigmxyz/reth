@@ -203,7 +203,7 @@ impl ArchiveProcessor {
                         "Failed integrity validation after {} attempts for {}",
                         MAX_DOWNLOAD_RETRIES,
                         archive.file_name
-                    )
+                    );
                 }
             }
         }

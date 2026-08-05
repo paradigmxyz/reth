@@ -93,7 +93,6 @@ where
             );
             fee_history_entry.rewards = calculate_reward_percentiles_for_block(
                 &percentiles,
-                fee_history_entry.header.gas_used(),
                 fee_history_entry.header.base_fee_per_gas().unwrap_or_default(),
                 block.body().transactions(),
                 receipts,
@@ -275,14 +274,11 @@ pub async fn fee_history_cache_new_blocks_task<St, Provider, N>(
     }
 }
 
-/// Calculates reward percentiles for transactions in a block header.
-/// Given a list of percentiles and a sealed block header, this function computes
-/// the corresponding rewards for the transactions at each percentile.
+/// Calculates reward percentiles for transactions in a block.
 ///
-/// The results are returned as a vector of U256 values.
+/// The results are returned as a vector of `u128` values.
 pub fn calculate_reward_percentiles_for_block<T, R>(
     percentiles: &[f64],
-    gas_used: u64,
     base_fee_per_gas: u64,
     transactions: &[T],
     receipts: &[R],
@@ -311,6 +307,10 @@ where
         })
         .collect::<Vec<_>>();
 
+    // EIP-8037 can make header gas used exceed the sum of per-transaction receipt gas.
+    let total_receipt_gas_used =
+        receipts.last().map(|receipt| receipt.cumulative_gas_used()).unwrap_or_default();
+
     // Sort the transactions by their rewards in ascending order
     transactions.sort_unstable_by_key(|tx| tx.reward);
 
@@ -328,7 +328,7 @@ where
             continue
         }
 
-        let threshold = (gas_used as f64 * percentile / 100.) as u64;
+        let threshold = (total_receipt_gas_used as f64 * percentile / 100.) as u64;
         while cumulative_gas_used < threshold && tx_index < transactions.len() - 1 {
             tx_index += 1;
             cumulative_gas_used += transactions[tx_index].gas_used;
@@ -411,5 +411,47 @@ where
                 self.header.base_fee_per_gas()?,
             ))
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::{TxEip1559, TxType};
+    use alloy_primitives::Signature;
+    use reth_ethereum_primitives::{Receipt, Transaction as EthTransaction, TransactionSigned};
+
+    #[test]
+    fn reward_percentiles_use_receipt_gas_weight_for_eip8037() {
+        const BASE_FEE: u64 = 1;
+        const LOW_GAS: u64 = 100_000;
+        const HIGH_GAS: u64 = 21_000;
+
+        let low_tip = 1;
+        let high_tip = 100_000_000_000;
+        let transactions =
+            [eip1559_transaction(low_tip, BASE_FEE), eip1559_transaction(high_tip, BASE_FEE)];
+        let receipts = [receipt(LOW_GAS), receipt(LOW_GAS + HIGH_GAS)];
+
+        let rewards =
+            calculate_reward_percentiles_for_block(&[50.0], BASE_FEE, &transactions, &receipts)
+                .unwrap();
+
+        assert_eq!(rewards, vec![low_tip]);
+    }
+
+    fn eip1559_transaction(tip: u128, base_fee: u64) -> TransactionSigned {
+        TransactionSigned::new_unhashed(
+            EthTransaction::Eip1559(TxEip1559 {
+                max_priority_fee_per_gas: tip,
+                max_fee_per_gas: tip + base_fee as u128,
+                ..Default::default()
+            }),
+            Signature::test_signature(),
+        )
+    }
+
+    fn receipt(cumulative_gas_used: u64) -> Receipt {
+        Receipt { tx_type: TxType::Eip1559, success: true, cumulative_gas_used, logs: Vec::new() }
     }
 }

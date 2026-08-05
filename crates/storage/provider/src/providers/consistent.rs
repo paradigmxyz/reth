@@ -3,7 +3,7 @@ use crate::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut},
     to_range, AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
     BlockReaderIdExt, BlockSource, ChainSpecProvider, ChangeSetReader, HeaderProvider,
-    ProviderError, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
+    ProviderError, ProviderHeader, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
     StageCheckpointReader, StateReader, StaticFileProviderFactory, TransactionVariant,
     TransactionsProvider,
 };
@@ -855,6 +855,29 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
         }
 
         self.storage_provider.transaction_by_hash_with_meta(tx_hash)
+    }
+
+    fn transaction_by_hash_with_meta_and_header(
+        &self,
+        tx_hash: TxHash,
+    ) -> ProviderResult<
+        Option<(Self::Transaction, TransactionMeta, SealedHeader<ProviderHeader<Self>>)>,
+    > {
+        if let Some((tx, meta, header)) = self.head_block.as_ref().and_then(|head| {
+            head.chain().find_map(|block_state| {
+                block_state.find_indexed(tx_hash).map(|indexed| {
+                    (
+                        indexed.tx().clone(),
+                        indexed.meta(),
+                        block_state.block_ref().recovered_block().clone_sealed_header(),
+                    )
+                })
+            })
+        }) {
+            return Ok(Some((tx, meta, header)))
+        }
+
+        self.storage_provider.transaction_by_hash_with_meta_and_header(tx_hash)
     }
 
     fn transactions_by_block(

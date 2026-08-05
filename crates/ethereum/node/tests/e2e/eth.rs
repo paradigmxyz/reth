@@ -3,8 +3,7 @@ use alloy_eips::{eip4844::BlobAndProofV1, eip7685::RequestsOrHash};
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, B256};
 use alloy_rpc_types_engine::{
-    ClientVersionV1, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
-    PayloadStatusEnum,
+    ClientVersionV1, ForkchoiceState, PayloadAttributes, PayloadStatusEnum,
 };
 use jsonrpsee_core::client::ClientT;
 use reth_chainspec::{ChainSpecBuilder, EthChainSpec, MAINNET};
@@ -19,8 +18,11 @@ use reth_node_core::{
     version::{version_metadata, CLIENT_CODE},
 };
 use reth_node_ethereum::{
-    engine_ssz_proxy::EngineSszProxyLayer, EthereumAddOns, EthereumEngineValidatorBuilder,
-    EthereumNode,
+    engine_ssz_containers::{
+        ForkchoiceUpdateResponse as SszForkchoiceUpdateResponse, PayloadStatus as SszPayloadStatus,
+    },
+    engine_ssz_proxy::EngineSszProxyLayer,
+    EthereumAddOns, EthereumEngineValidatorBuilder, EthereumNode,
 };
 use reth_provider::BlockNumReader;
 use reth_rpc_api::TestingBuildBlockRequestV1;
@@ -29,11 +31,13 @@ use reth_tasks::Runtime;
 use ssz::{Decode, Encode};
 use std::sync::Arc;
 
-const ENGINE_PRAGUE_PAYLOADS_ROUTE: &str = "/engine/v2/prague/payloads";
-const ENGINE_PRAGUE_FORKCHOICE_ROUTE: &str = "/engine/v2/prague/forkchoice";
-const ENGINE_V1_BLOBS_ROUTE: &str = "/engine/v2/blobs/v1";
-const ENGINE_CAPABILITIES_ROUTE: &str = "/engine/v2/capabilities";
-const ENGINE_IDENTITY_ROUTE: &str = "/engine/v2/identity";
+const ENGINE_EXECUTION_VERSION_HEADER: &str = "Eth-Execution-Version";
+const ENGINE_PRAGUE_FORK_HEADER: &str = "prague";
+const ENGINE_PAYLOADS_ROUTE: &str = "/engine/v1/payloads";
+const ENGINE_FORKCHOICE_ROUTE: &str = "/engine/v1/forkchoice";
+const ENGINE_V1_BLOBS_ROUTE: &str = "/engine/v1/blobs/v1";
+const ENGINE_CAPABILITIES_ROUTE: &str = "/engine/v1/capabilities";
+const ENGINE_IDENTITY_ROUTE: &str = "/engine/v1/identity";
 
 #[tokio::test]
 async fn can_run_eth_node() -> eyre::Result<()> {
@@ -408,8 +412,9 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
     );
 
     let new_payload_response = client
-        .post(format!("{auth_url}{ENGINE_PRAGUE_PAYLOADS_ROUTE}"))
+        .post(format!("{auth_url}{ENGINE_PAYLOADS_ROUTE}"))
         .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
+        .header(ENGINE_EXECUTION_VERSION_HEADER, ENGINE_PRAGUE_FORK_HEADER)
         .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
         .header(reqwest::header::ACCEPT, "application/octet-stream")
         .body((payload, B256::ZERO, envelope.execution_requests.take()).as_ssz_bytes())
@@ -417,12 +422,13 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
         .await?;
     assert_eq!(new_payload_response.status(), reqwest::StatusCode::OK);
 
-    let status = PayloadStatus::from_ssz_bytes(&new_payload_response.bytes().await?).unwrap();
+    let status = SszPayloadStatus::from_ssz_bytes(&new_payload_response.bytes().await?).unwrap();
     assert_eq!(status.status, PayloadStatusEnum::Valid);
 
     let fcu_response = client
-        .post(format!("{auth_url}{ENGINE_PRAGUE_FORKCHOICE_ROUTE}"))
+        .post(format!("{auth_url}{ENGINE_FORKCHOICE_ROUTE}"))
         .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
+        .header(ENGINE_EXECUTION_VERSION_HEADER, ENGINE_PRAGUE_FORK_HEADER)
         .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
         .header(reqwest::header::ACCEPT, "application/octet-stream")
         .body(
@@ -460,7 +466,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
     assert_eq!(blobs.len(), versioned_hashes.len());
     assert!(blobs.iter().all(Option::is_some));
 
-    let fcu = ForkchoiceUpdated::from_ssz_bytes(&fcu_response.bytes().await?).unwrap();
+    let fcu = SszForkchoiceUpdateResponse::from_ssz_bytes(&fcu_response.bytes().await?).unwrap();
     assert_eq!(fcu.payload_status.status, PayloadStatusEnum::Valid);
 
     node.wait_block(1, block_hash, false).await?;
@@ -482,7 +488,6 @@ async fn test_share_sparse_trie_with_payload_builder() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let tree_config = TreeConfig::default()
-        .with_legacy_state_root(false)
         .with_share_execution_cache_with_payload_builder(true)
         .with_share_sparse_trie_with_payload_builder(true);
 
@@ -517,7 +522,7 @@ async fn test_share_sparse_trie_with_payload_builder() -> eyre::Result<()> {
 /// Tests that sparse trie allocation reuse works correctly across consecutive blocks.
 ///
 /// This test exercises the sparse trie allocation reuse path by:
-/// 1. Starting a node with parallel state root computation enabled
+/// 1. Starting a node with the state-root task enabled
 /// 2. Advancing multiple consecutive blocks with random transactions
 /// 3. Verifying that all blocks are successfully validated (state roots match)
 ///
@@ -528,11 +533,8 @@ async fn test_share_sparse_trie_with_payload_builder() -> eyre::Result<()> {
 async fn test_sparse_trie_reuse_across_blocks() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    // Use parallel state root (non-legacy) with pruning enabled
-    let tree_config = TreeConfig::default()
-        .with_legacy_state_root(false)
-        .with_sparse_trie_prune_depth(2)
-        .with_sparse_trie_max_hot_slots(100);
+    // Use the state-root task with pruning enabled.
+    let tree_config = TreeConfig::default().with_sparse_trie_prune_depth(2);
 
     let (mut nodes, _wallet) = setup_engine::<EthereumNode>(
         1,

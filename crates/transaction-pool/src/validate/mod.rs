@@ -1,12 +1,13 @@
 //! Transaction validation abstractions.
 
 use crate::{
+    blobstore::PooledBlobSidecar,
     error::InvalidPoolTransactionError,
     identifier::{SenderId, TransactionId},
     traits::{PoolTransaction, TransactionOrigin},
     PriceBumpConfig,
 };
-use alloy_eips::{eip7594::BlobTransactionSidecarVariant, eip7702::SignedAuthorization};
+use alloy_eips::eip7702::SignedAuthorization;
 use alloy_primitives::{Address, TxHash, B256, U256};
 use futures_util::future::Either;
 use reth_primitives_traits::{Block, Recovered, SealedBlock};
@@ -116,13 +117,13 @@ pub enum ValidTransaction<T> {
         /// The valid EIP-4844 transaction.
         transaction: T,
         /// The extracted sidecar of that transaction
-        sidecar: BlobTransactionSidecarVariant,
+        sidecar: PooledBlobSidecar,
     },
 }
 
 impl<T> ValidTransaction<T> {
     /// Creates a new valid transaction with an optional sidecar.
-    pub fn new(transaction: T, sidecar: Option<BlobTransactionSidecarVariant>) -> Self {
+    pub fn new(transaction: T, sidecar: Option<PooledBlobSidecar>) -> Self {
         if let Some(sidecar) = sidecar {
             Self::ValidWithSidecar { transaction, sidecar }
         } else {
@@ -266,6 +267,17 @@ where
         match self {
             Self::Left(v) => v.validate_transactions(transactions).await,
             Self::Right(v) => v.validate_transactions(transactions).await,
+        }
+    }
+
+    async fn validate_transactions_with_origin(
+        &self,
+        origin: TransactionOrigin,
+        transactions: impl IntoIterator<Item = Self::Transaction, IntoIter: Send> + Send,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        match self {
+            Self::Left(v) => v.validate_transactions_with_origin(origin, transactions).await,
+            Self::Right(v) => v.validate_transactions_with_origin(origin, transactions).await,
         }
     }
 

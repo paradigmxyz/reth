@@ -7,6 +7,9 @@ use alloy_primitives::{keccak256, B256};
 use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, RlpNode, TrieNodeV2};
 use smallvec::SmallVec;
+use strum::AsRefStr;
+
+use crate::TrieNodeEpoch;
 
 /// Tracks whether a node's RLP encoding is cached or needs recomputation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,6 +20,8 @@ pub(super) enum ArenaSparseNodeState {
     Cached {
         /// The cached RLP-encoded representation of the node.
         rlp_node: RlpNode,
+        /// The newest tracked modification epoch for this node or its descendants.
+        epoch: TrieNodeEpoch,
     },
     /// The node has been modified and its RLP encoding needs recomputation.
     Dirty,
@@ -32,6 +37,14 @@ impl ArenaSparseNodeState {
     pub(super) const fn cached_rlp_node(&self) -> Option<&RlpNode> {
         match self {
             Self::Cached { rlp_node, .. } => Some(rlp_node),
+            _ => None,
+        }
+    }
+
+    /// Returns the cached epoch, if this node is cached.
+    pub(super) const fn cached_epoch(&self) -> Option<TrieNodeEpoch> {
+        match self {
+            Self::Cached { epoch, .. } => Some(*epoch),
             _ => None,
         }
     }
@@ -151,10 +164,13 @@ impl ArenaSparseNodeBranch {
 }
 
 /// A node in the arena-based sparse trie.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, AsRefStr)]
 pub(super) enum ArenaSparseNode {
     /// Indicates a trie with no nodes.
-    EmptyRoot,
+    EmptyRoot {
+        /// Cached or dirty state of this node. Its cached RLP is always the empty root hash.
+        state: ArenaSparseNodeState,
+    },
     /// A branch node with up to 16 children.
     Branch(ArenaSparseNodeBranch),
     /// A leaf node containing a value.
@@ -173,26 +189,27 @@ pub(super) enum ArenaSparseNode {
 }
 
 impl ArenaSparseNode {
-    /// Returns the state of a Branch, Leaf, or Subtrie root node, or `None` for other types.
+    /// Returns the state of an `EmptyRoot`, `Branch`, `Leaf`, or `Subtrie` root node, or `None` for
+    /// other types.
     pub(super) fn state_ref(&self) -> Option<&ArenaSparseNodeState> {
         match self {
+            Self::EmptyRoot { state } | Self::Leaf { state, .. } => Some(state),
             Self::Branch(b) => Some(&b.state),
-            Self::Leaf { state, .. } => Some(state),
             Self::Subtrie(s) => s.arena[s.root].state_ref(),
             _ => None,
         }
     }
 
-    /// Returns a mutable reference to the state of a Branch or Leaf node.
+    /// Returns a mutable reference to the state of an `EmptyRoot`, `Branch`, or `Leaf` node.
     ///
     /// # Panics
     ///
-    /// Panics if called on a non-Branch/Leaf node.
+    /// Panics if called on a non-EmptyRoot/Branch/Leaf node.
     pub(super) fn state_mut(&mut self) -> &mut ArenaSparseNodeState {
         match self {
+            Self::EmptyRoot { state } | Self::Leaf { state, .. } => state,
             Self::Branch(b) => &mut b.state,
-            Self::Leaf { state, .. } => state,
-            _ => panic!("state_mut called on non-Branch/Leaf node"),
+            _ => panic!("state_mut called on non-EmptyRoot/Branch/Leaf node"),
         }
     }
 
@@ -298,7 +315,7 @@ impl ArenaSparseNode {
     pub(super) fn from_proof_node(proof_node: ProofTrieNodeV2) -> Self {
         let ProofTrieNodeV2 { node, masks, .. } = proof_node;
         match node {
-            TrieNodeV2::EmptyRoot => Self::EmptyRoot,
+            TrieNodeV2::EmptyRoot => Self::EmptyRoot { state: ArenaSparseNodeState::Revealed },
             TrieNodeV2::Leaf(leaf) => Self::Leaf {
                 state: ArenaSparseNodeState::Revealed,
                 key: leaf.key,
@@ -320,17 +337,6 @@ impl ArenaSparseNode {
             TrieNodeV2::Extension(_) => {
                 panic!("Extension nodes should be merged into branches by TrieNodeV2")
             }
-        }
-    }
-
-    /// Returns the heap bytes owned by this node beyond its inline `SlotMap` slot.
-    pub(super) fn extra_heap_bytes(&self) -> usize {
-        match self {
-            Self::Leaf { value, .. } => value.capacity(),
-            Self::Branch(b) if b.children.spilled() => {
-                b.children.capacity() * core::mem::size_of::<ArenaSparseNodeBranchChild>()
-            }
-            _ => 0,
         }
     }
 }

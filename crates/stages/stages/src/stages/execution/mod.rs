@@ -12,9 +12,10 @@ use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockHashReader, BlockReader, DBProvider, EitherWriter, ExecutionOutcome, HeaderProvider,
-    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriteConfig, StateWriter,
-    StaticFileProviderFactory, StatsReader, StoragePath, StorageSettingsCache, TransactionVariant,
+    BlockHashReader, BlockReader, DBProvider, EitherWriter, ExecutionOutcome,
+    HashedPostStateProvider, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
+    ProviderError, StateWriteConfig, StateWriter, StaticFileProviderFactory, StatsReader,
+    StoragePath, StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
@@ -23,7 +24,6 @@ use reth_stages_api::{
     UnwindInput, UnwindOutput,
 };
 use reth_static_file_types::StaticFileSegment;
-use reth_trie::KeccakKeyHasher;
 use std::{
     cmp::{max, Ordering},
     collections::BTreeMap,
@@ -497,7 +497,8 @@ where
         provider.write_state(&state, OriginalValuesKnown::Yes, StateWriteConfig::default())?;
 
         if provider.cached_storage_settings().use_hashed_state() {
-            let hashed_state = state.hash_state_slow::<KeccakKeyHasher>();
+            let hashed_state =
+                LatestStateProviderRef::new(provider).hashed_post_state(&state.bundle)?;
             provider.write_hashed_state(&hashed_state.into_sorted())?;
         }
 
@@ -768,6 +769,7 @@ mod tests {
     };
     use reth_prune::PruneModes;
     use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
+    use reth_revm::revm::database::{AccountStatus, BundleAccount};
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators;
     use std::collections::BTreeMap;
@@ -790,6 +792,50 @@ mod tests {
             MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD,
             ExExManagerHandle::empty(),
         )
+    }
+
+    #[test]
+    fn destroyed_storage_is_materialized_without_reverts() {
+        let factory = create_test_provider_factory();
+        let provider = factory.database_provider_rw().unwrap();
+        let address = Address::repeat_byte(0x11);
+        let hashed_address = keccak256(address);
+        let first_slot = B256::repeat_byte(0x22);
+        let second_slot = B256::repeat_byte(0x33);
+
+        provider
+            .tx_ref()
+            .put::<tables::HashedStorages>(
+                hashed_address,
+                StorageEntry { key: first_slot, value: U256::from(2) },
+            )
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::HashedStorages>(
+                hashed_address,
+                StorageEntry { key: second_slot, value: U256::from(3) },
+            )
+            .unwrap();
+
+        let mut state = ExecutionOutcome::<()>::default();
+        state.bundle.state.insert(
+            address,
+            BundleAccount::new(
+                Some(Default::default()),
+                None,
+                Default::default(),
+                AccountStatus::Destroyed,
+            ),
+        );
+
+        let hashed_state = provider.latest().hashed_post_state(&state.bundle).unwrap();
+
+        let storage = &hashed_state.storages[&hashed_address];
+        assert!(!storage.wiped);
+        assert_eq!(storage.storage[&first_slot], U256::ZERO);
+        assert_eq!(storage.storage[&second_slot], U256::ZERO);
+        assert!(state.bundle.reverts.is_empty());
     }
 
     #[test]

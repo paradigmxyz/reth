@@ -32,6 +32,11 @@ impl RawCapabilityMessage {
     pub const fn eth(id: EthMessageID, payload: Bytes) -> Self {
         Self::new(id.to_u8() as usize, payload)
     }
+
+    /// Encodes this message (`id` followed by its payload) to bytes.
+    pub fn encoded(&self) -> Bytes {
+        alloy_rlp::encode(self).into()
+    }
 }
 
 impl Encodable for RawCapabilityMessage {

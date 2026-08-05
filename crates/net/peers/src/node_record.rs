@@ -117,6 +117,14 @@ impl NodeRecord {
     pub const fn udp_addr(&self) -> SocketAddr {
         SocketAddr::new(self.address, self.udp_port)
     }
+
+    /// Returns `true` if this record advertises an `RLPx` endpoint, i.e. a non-zero tcp port.
+    ///
+    /// Discovery-only records, such as ENRs without a tcp key, convert with a tcp port of 0.
+    #[must_use]
+    pub const fn has_rlpx_endpoint(&self) -> bool {
+        self.tcp_port != 0
+    }
 }
 
 impl fmt::Display for NodeRecord {
@@ -213,22 +221,24 @@ impl TryFrom<&Enr<secp256k1::SecretKey>> for NodeRecord {
     type Error = NodeRecordParseError;
 
     fn try_from(enr: &Enr<secp256k1::SecretKey>) -> Result<Self, Self::Error> {
-        let Some(address) = enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from))
-        else {
-            return Err(NodeRecordParseError::InvalidUrl("ip missing".to_string()))
-        };
-
-        let Some(udp_port) = enr.udp4().or_else(|| enr.udp6()) else {
-            return Err(NodeRecordParseError::InvalidUrl("udp port missing".to_string()))
-        };
-
-        let Some(tcp_port) = enr.tcp4().or_else(|| enr.tcp6()) else {
-            return Err(NodeRecordParseError::InvalidUrl("tcp port missing".to_string()))
-        };
+        let endpoint = enr
+            .ip4()
+            .zip(enr.udp4())
+            .map(|(ip, udp)| (IpAddr::from(ip), udp, enr.tcp4().unwrap_or(0)));
+        // Generic `udp` and `tcp` entries also apply to IPv6 when their IPv6-specific counterparts
+        // are absent.
+        let (address, udp_port, tcp_port) = endpoint
+            .or_else(|| {
+                enr.ip6().zip(enr.udp6().or_else(|| enr.udp4())).map(|(ip, udp)| {
+                    (IpAddr::from(ip), udp, enr.tcp6().or_else(|| enr.tcp4()).unwrap_or(0))
+                })
+            })
+            .ok_or_else(|| {
+                NodeRecordParseError::InvalidUrl("ip or matching udp port missing".to_string())
+            })?;
 
         let id = crate::pk2id(&enr.public_key());
-
-        Ok(Self { address, tcp_port, udp_port, id }.into_ipv4_mapped())
+        Ok(Self { address, udp_port, tcp_port, id }.into_ipv4_mapped())
     }
 }
 
@@ -407,5 +417,59 @@ mod tests {
             let node: NodeRecord = serde_json::from_str(url).expect("couldn't deserialize");
             assert_eq!(node, expected);
         }
+    }
+
+    #[test]
+    #[cfg(feature = "secp256k1")]
+    fn tcp_less_enr_converts_with_port_zero() {
+        // A discovery-only ENR (no tcp key, e.g. a devp2p bootnode) must convert with tcp port 0.
+        let sk = secp256k1::SecretKey::from_byte_array(&[1u8; 32]).unwrap();
+        let enr = Enr::builder().ip4("1.2.3.4".parse().unwrap()).udp4(30301).build(&sk).unwrap();
+
+        let record = NodeRecord::try_from(&enr).unwrap();
+
+        assert_eq!(record.tcp_port, 0);
+        assert_eq!(record.udp_port, 30301);
+    }
+
+    #[test]
+    #[cfg(feature = "secp256k1")]
+    fn enr_endpoint_keeps_ip_and_ports_together() {
+        let sk = secp256k1::SecretKey::from_byte_array(&[1u8; 32]).unwrap();
+        let mut builder = Enr::builder();
+        builder.ip4("10.0.0.1".parse().unwrap()).ip6("::1".parse().unwrap());
+        builder.udp6(30401).tcp6(30403);
+        let enr = builder.build(&sk).unwrap();
+        let record = NodeRecord::try_from(&enr).unwrap();
+
+        assert_eq!(record.address, "::1".parse::<IpAddr>().unwrap());
+        assert_eq!(record.udp_port, 30401);
+        assert_eq!(record.tcp_port, 30403);
+
+        // IPv6-only record with the RLPx port only under the generic `tcp` key, the shape geth
+        // publishes: the generic entry applies to the IPv6 endpoint.
+        let mut builder = Enr::builder();
+        builder.ip6("::1".parse().unwrap()).udp6(30401).tcp4(30303);
+        let enr = builder.build(&sk).unwrap();
+        let record = NodeRecord::try_from(&enr).unwrap();
+
+        assert_eq!(record.address, "::1".parse::<IpAddr>().unwrap());
+        assert_eq!(record.udp_port, 30401);
+        assert_eq!(record.tcp_port, 30303);
+
+        // A full dual-stack record resolves to the IPv4 endpoint.
+        let mut builder = Enr::builder();
+        builder.ip4("10.0.0.1".parse().unwrap()).udp4(30301).tcp4(30303);
+        builder.ip6("::1".parse().unwrap()).udp6(30401).tcp6(30403);
+        let enr = builder.build(&sk).unwrap();
+        let record = NodeRecord::try_from(&enr).unwrap();
+
+        assert_eq!(record.address, "10.0.0.1".parse::<IpAddr>().unwrap());
+        assert_eq!(record.udp_port, 30301);
+        assert_eq!(record.tcp_port, 30303);
+
+        // No udp port in any family is rejected.
+        let enr = Enr::builder().ip4("10.0.0.1".parse().unwrap()).tcp4(30303).build(&sk).unwrap();
+        assert!(NodeRecord::try_from(&enr).is_err());
     }
 }
