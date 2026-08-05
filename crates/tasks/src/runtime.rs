@@ -48,6 +48,9 @@ pub const DEFAULT_STATE_TRIE_OVERLAY_WORKER_THREADS: usize = 4;
 /// Default maximum number of concurrent blocking tasks (for RPC tracing guard).
 pub const DEFAULT_MAX_BLOCKING_TASKS: usize = 512;
 
+/// Default thread name prefix for the latency-sensitive tokio runtime.
+pub const DEFAULT_LATENCY_THREAD_NAME: &str = "tokio-latency";
+
 /// Configuration for the tokio runtime.
 #[derive(Debug, Clone)]
 pub enum TokioConfig {
@@ -88,6 +91,47 @@ impl TokioConfig {
             thread_name: "tokio-rt",
         }
     }
+
+    /// Create a config for an owned latency-sensitive tokio runtime.
+    pub const fn latency_runtime(worker_threads: usize) -> Self {
+        Self::Owned {
+            worker_threads: Some(worker_threads),
+            thread_keep_alive: DEFAULT_THREAD_KEEP_ALIVE,
+            thread_name: DEFAULT_LATENCY_THREAD_NAME,
+        }
+    }
+}
+
+/// Builds an owned tokio runtime from the given configuration.
+fn build_owned_tokio(
+    config: &TokioConfig,
+) -> Result<(Option<TokioRuntime>, Handle), RuntimeBuildError> {
+    match config {
+        TokioConfig::Owned { worker_threads, thread_keep_alive, thread_name } => {
+            let mut builder = tokio::runtime::Builder::new_multi_thread();
+            builder.enable_all().thread_keep_alive(*thread_keep_alive).thread_name(*thread_name);
+
+            if let Some(threads) = worker_threads {
+                builder.worker_threads(*threads);
+            }
+
+            let runtime = builder.build()?;
+            let handle = runtime.handle().clone();
+            Ok((Some(runtime), handle))
+        }
+        TokioConfig::ExistingHandle(handle) => Ok((None, handle.clone())),
+    }
+}
+
+#[cfg(feature = "rayon")]
+fn build_minimal_rayon_pool(name_prefix: &str) -> Result<rayon::ThreadPool, RuntimeBuildError> {
+    let name_prefix = name_prefix.to_string();
+    build_pool_with_panic_handler(
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(1)
+            .thread_name(move |i| format!("{name_prefix}-{i:02}")),
+    )
+    .map_err(RuntimeBuildError::from)
 }
 
 /// Configuration for the rayon thread pools.
@@ -298,6 +342,11 @@ struct RuntimeInner {
     /// Named single-thread worker map. Each unique name gets a dedicated OS thread
     /// that is reused across all tasks submitted under that name.
     worker_map: WorkerMap,
+    /// When set, rayon pools and worker pools are borrowed from the parent runtime.
+    ///
+    /// Used by attached latency runtimes to avoid duplicating rayon thread pools.
+    #[cfg(feature = "rayon")]
+    pool_parent: Option<Arc<Self>>,
     /// Handle to the spawned [`TaskManager`] background task.
     /// The task monitors critical tasks for panics and fires the shutdown signal.
     /// Can be taken via [`Runtime::take_task_manager_handle`] to poll for panic errors.
@@ -341,6 +390,9 @@ impl Runtime {
     /// Get the general-purpose rayon CPU thread pool.
     #[cfg(feature = "rayon")]
     pub fn cpu_pool(&self) -> &rayon::ThreadPool {
+        if let Some(parent) = &self.0.pool_parent {
+            return &parent.cpu_pool;
+        }
         &self.0.cpu_pool
     }
 
@@ -353,6 +405,9 @@ impl Runtime {
     /// Get the storage I/O pool.
     #[cfg(feature = "rayon")]
     pub fn storage_pool(&self) -> &rayon::ThreadPool {
+        if let Some(parent) = &self.0.pool_parent {
+            return &parent.storage_pool;
+        }
         &self.0.storage_pool
     }
 
@@ -365,24 +420,36 @@ impl Runtime {
     /// Get the proof storage worker pool.
     #[cfg(feature = "rayon")]
     pub fn proof_storage_worker_pool(&self) -> &WorkerPool {
+        if let Some(parent) = &self.0.pool_parent {
+            return &parent.proof_storage_worker_pool;
+        }
         &self.0.proof_storage_worker_pool
     }
 
     /// Get the proof account worker pool.
     #[cfg(feature = "rayon")]
     pub fn proof_account_worker_pool(&self) -> &WorkerPool {
+        if let Some(parent) = &self.0.pool_parent {
+            return &parent.proof_account_worker_pool;
+        }
         &self.0.proof_account_worker_pool
     }
 
     /// Get the prewarming pool.
     #[cfg(feature = "rayon")]
     pub fn prewarming_pool(&self) -> &WorkerPool {
+        if let Some(parent) = &self.0.pool_parent {
+            return &parent.prewarming_pool;
+        }
         &self.0.prewarming_pool
     }
 
     /// Get the BAL streaming pool.
     #[cfg(feature = "rayon")]
     pub fn bal_streaming_pool(&self) -> &WorkerPool {
+        if let Some(parent) = &self.0.pool_parent {
+            return &parent.bal_streaming_pool;
+        }
         &self.0.bal_streaming_pool
     }
 
@@ -390,6 +457,80 @@ impl Runtime {
     #[cfg(feature = "rayon")]
     pub fn state_trie_overlay_worker_pool(&self) -> Arc<WorkerPool> {
         Arc::clone(&self.0.state_trie_overlay_worker_pool)
+    }
+
+    /// Builds an attached tokio runtime that shares shutdown and panic reporting with `self`.
+    ///
+    /// The returned [`Runtime`] spawns tasks on a dedicated tokio handle while reusing the
+    /// parent's shutdown signal, task event channel, graceful shutdown counter, metrics, and
+    /// rayon pools (when the `rayon` feature is enabled).
+    ///
+    /// Only the main runtime should own a [`TaskManager`] handle. Attached runtimes must not
+    /// call [`Self::take_task_manager_handle`].
+    pub fn build_attached_tokio(&self, config: TokioConfig) -> Result<Self, RuntimeBuildError> {
+        let (owned_runtime, handle) = build_owned_tokio(&config)?;
+        let parent = Arc::clone(&self.0);
+
+        #[cfg(feature = "rayon")]
+        let (
+            cpu_pool,
+            rpc_pool,
+            storage_pool,
+            blocking_guard,
+            proof_storage_worker_pool,
+            proof_account_worker_pool,
+            prewarming_pool,
+            bal_streaming_pool,
+            state_trie_overlay_worker_pool,
+        ) = {
+            // Placeholder pools are never used while `pool_parent` is set.
+            let cpu_pool = build_minimal_rayon_pool("cpu")?;
+            let storage_pool = build_minimal_rayon_pool("storage")?;
+            (
+                cpu_pool,
+                parent.rpc_pool.clone(),
+                storage_pool,
+                parent.blocking_guard.clone(),
+                WorkerPool::new(1, "proof-strg"),
+                WorkerPool::new(1, "proof-acct"),
+                WorkerPool::new(1, "prewarm"),
+                WorkerPool::new(1, "bal-stream"),
+                Arc::clone(&parent.state_trie_overlay_worker_pool),
+            )
+        };
+
+        let inner = RuntimeInner {
+            _tokio_runtime: owned_runtime,
+            handle,
+            on_shutdown: parent.on_shutdown.clone(),
+            task_events_tx: parent.task_events_tx.clone(),
+            metrics: parent.metrics.clone(),
+            graceful_tasks: Arc::clone(&parent.graceful_tasks),
+            #[cfg(feature = "rayon")]
+            cpu_pool,
+            #[cfg(feature = "rayon")]
+            rpc_pool,
+            #[cfg(feature = "rayon")]
+            storage_pool,
+            #[cfg(feature = "rayon")]
+            blocking_guard,
+            #[cfg(feature = "rayon")]
+            proof_storage_worker_pool,
+            #[cfg(feature = "rayon")]
+            proof_account_worker_pool,
+            #[cfg(feature = "rayon")]
+            prewarming_pool,
+            #[cfg(feature = "rayon")]
+            bal_streaming_pool,
+            #[cfg(feature = "rayon")]
+            state_trie_overlay_worker_pool,
+            worker_map: WorkerMap::new(),
+            #[cfg(feature = "rayon")]
+            pool_parent: Some(parent),
+            task_manager_handle: Mutex::new(None),
+        };
+
+        Ok(Self(Arc::new(inner)))
     }
 }
 
@@ -862,24 +1003,7 @@ impl RuntimeBuilder {
         debug!(?self.config, "Building runtime");
         let config = self.config;
 
-        let (owned_runtime, handle) = match &config.tokio {
-            TokioConfig::Owned { worker_threads, thread_keep_alive, thread_name } => {
-                let mut builder = tokio::runtime::Builder::new_multi_thread();
-                builder
-                    .enable_all()
-                    .thread_keep_alive(*thread_keep_alive)
-                    .thread_name(*thread_name);
-
-                if let Some(threads) = worker_threads {
-                    builder.worker_threads(*threads);
-                }
-
-                let runtime = builder.build()?;
-                let h = runtime.handle().clone();
-                (Some(runtime), h)
-            }
-            TokioConfig::ExistingHandle(h) => (None, h.clone()),
-        };
+        let (owned_runtime, handle) = build_owned_tokio(&config.tokio)?;
 
         let (task_manager, on_shutdown, task_events_tx, graceful_tasks) =
             TaskManager::new_parts(handle.clone());
@@ -1006,6 +1130,8 @@ impl RuntimeBuilder {
             #[cfg(feature = "rayon")]
             state_trie_overlay_worker_pool,
             worker_map: WorkerMap::new(),
+            #[cfg(feature = "rayon")]
+            pool_parent: None,
             task_manager_handle: Mutex::new(Some(task_manager_handle)),
         };
 
@@ -1103,5 +1229,84 @@ mod tests {
         assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), 2);
         assert_eq!(runtime.prewarming_pool().current_num_threads(), 2);
         assert_eq!(runtime.state_trie_overlay_worker_pool().current_num_threads(), 2);
+    }
+
+    #[test]
+    fn test_tokio_config_latency_runtime() {
+        let config = TokioConfig::latency_runtime(4);
+        assert!(matches!(
+            config,
+            TokioConfig::Owned {
+                worker_threads: Some(4),
+                thread_name: DEFAULT_LATENCY_THREAD_NAME,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn attached_runtime_uses_different_handle() {
+        let main = Runtime::test();
+        let attached = main.build_attached_tokio(TokioConfig::latency_runtime(2)).unwrap();
+
+        assert_ne!(main.handle().id(), attached.handle().id());
+        assert!(attached.take_task_manager_handle().is_none());
+    }
+
+    #[test]
+    fn attached_critical_task_panic_reaches_parent_task_manager() {
+        let main = Runtime::test();
+        let attached = main.build_attached_tokio(TokioConfig::latency_runtime(2)).unwrap();
+        let manager_handle = main.take_task_manager_handle().unwrap();
+
+        attached.spawn_critical_task("attached critical panic", async {
+            panic!("attached panic");
+        });
+
+        main.handle().block_on(async move {
+            let err_result = manager_handle.await.unwrap();
+            assert!(err_result.is_err());
+            let panicked_err = err_result.unwrap_err();
+            assert_eq!(panicked_err.task_name, "attached critical panic");
+            assert_eq!(panicked_err.error, Some("attached panic".to_string()));
+        });
+    }
+
+    #[test]
+    fn attached_task_respects_shutdown() {
+        use crate::shutdown::signal;
+
+        let main = Runtime::test();
+        let attached = main.build_attached_tokio(TokioConfig::latency_runtime(2)).unwrap();
+
+        let (signal, shutdown) = signal();
+        attached.spawn_task(async move {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            drop(signal);
+        });
+
+        main.graceful_shutdown();
+        main.handle().block_on(shutdown);
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn attached_runtime_shares_rayon_pools_with_parent() {
+        let main = Runtime::test();
+        let attached = main.build_attached_tokio(TokioConfig::latency_runtime(2)).unwrap();
+
+        assert_eq!(main.cpu_pool() as *const rayon::ThreadPool, attached.cpu_pool() as *const _);
+        assert_eq!(
+            main.storage_pool() as *const rayon::ThreadPool,
+            attached.storage_pool() as *const _
+        );
+        assert_eq!(
+            main.bal_streaming_pool() as *const WorkerPool,
+            attached.bal_streaming_pool() as *const WorkerPool
+        );
+        assert!(Arc::ptr_eq(
+            &main.0.state_trie_overlay_worker_pool,
+            &attached.0.state_trie_overlay_worker_pool,
+        ));
     }
 }

@@ -78,6 +78,7 @@ pub struct DefaultRpcServerArgs {
     rpc_max_connections: MaxU32,
     rpc_max_tracing_requests: usize,
     rpc_max_blocking_io_requests: usize,
+    latency_worker_threads: usize,
     rpc_max_trace_filter_blocks: u64,
     rpc_max_blocks_per_filter: ZeroAsNoneU64,
     rpc_max_logs_per_response: ZeroAsNoneU64,
@@ -275,6 +276,14 @@ impl DefaultRpcServerArgs {
         self
     }
 
+    /// Set the default number of worker threads for the latency-sensitive RPC runtime.
+    ///
+    /// `0` disables the dedicated runtime.
+    pub const fn with_latency_worker_threads(mut self, v: usize) -> Self {
+        self.latency_worker_threads = v;
+        self
+    }
+
     /// Set the default max trace filter blocks
     pub const fn with_rpc_max_trace_filter_blocks(mut self, v: u64) -> Self {
         self.rpc_max_trace_filter_blocks = v;
@@ -403,6 +412,7 @@ impl Default for DefaultRpcServerArgs {
             rpc_max_connections: RPC_DEFAULT_MAX_CONNECTIONS.into(),
             rpc_max_tracing_requests: constants::default_max_tracing_requests(),
             rpc_max_blocking_io_requests: constants::DEFAULT_MAX_BLOCKING_IO_REQUEST,
+            latency_worker_threads: 0,
             rpc_max_trace_filter_blocks: constants::DEFAULT_MAX_TRACE_FILTER_BLOCKS,
             rpc_max_blocks_per_filter: constants::DEFAULT_MAX_BLOCKS_PER_FILTER.into(),
             rpc_max_logs_per_response: (constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64).into(),
@@ -563,6 +573,14 @@ pub struct RpcServerArgs {
     /// runtime.
     #[arg(long = "rpc.max-blocking-io-requests", alias = "rpc-max-blocking-io-requests", value_name = "COUNT", default_value_t = DefaultRpcServerArgs::get_global().rpc_max_blocking_io_requests)]
     pub rpc_max_blocking_io_requests: usize,
+
+    /// Number of worker threads for the latency-sensitive RPC tokio runtime.
+    ///
+    /// When set to a value greater than 0, the public RPC server (HTTP/WS/IPC) and the sendRaw
+    /// transaction backend (tx-batcher and pool validation) run on a dedicated tokio runtime
+    /// isolated from sync, P2P, and engine work. Defaults to 0 (disabled).
+    #[arg(long = "rpc.latency-worker-threads", default_value_t = DefaultRpcServerArgs::get_global().latency_worker_threads)]
+    pub latency_worker_threads: usize,
 
     /// Maximum number of blocks for `trace_filter` requests.
     #[arg(long = "rpc.max-trace-filter-blocks", alias = "rpc-max-trace-filter-blocks", value_name = "COUNT", default_value_t = DefaultRpcServerArgs::get_global().rpc_max_trace_filter_blocks)]
@@ -863,6 +881,7 @@ impl Default for RpcServerArgs {
             rpc_max_connections,
             rpc_max_tracing_requests,
             rpc_max_blocking_io_requests,
+            latency_worker_threads,
             rpc_max_trace_filter_blocks,
             rpc_max_blocks_per_filter,
             rpc_max_logs_per_response,
@@ -909,6 +928,7 @@ impl Default for RpcServerArgs {
             rpc_max_connections,
             rpc_max_tracing_requests,
             rpc_max_blocking_io_requests,
+            latency_worker_threads,
             rpc_max_trace_filter_blocks,
             rpc_max_blocks_per_filter,
             rpc_max_logs_per_response,
@@ -1052,6 +1072,20 @@ mod tests {
     }
 
     #[test]
+    fn test_rpc_latency_worker_threads_parse() {
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--rpc.latency-worker-threads",
+            "4",
+        ])
+        .args;
+        assert_eq!(args.latency_worker_threads, 4);
+
+        let default_args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        assert_eq!(default_args.latency_worker_threads, 0);
+    }
+
+    #[test]
     fn test_rpc_server_args() {
         let args = RpcServerArgs {
             http: true,
@@ -1087,6 +1121,7 @@ mod tests {
             rpc_max_connections: 500u32.into(),
             rpc_max_tracing_requests: 16,
             rpc_max_blocking_io_requests: 256,
+            latency_worker_threads: 0,
             rpc_max_trace_filter_blocks: 4000,
             rpc_max_blocks_per_filter: 1000u64.into(),
             rpc_max_logs_per_response: 10000u64.into(),
