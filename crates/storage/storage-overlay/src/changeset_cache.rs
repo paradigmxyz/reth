@@ -29,9 +29,9 @@ use std::{
 use tracing::{debug, warn};
 
 #[cfg(test)]
-use reth_trie::{changesets::compute_trie_changesets, TrieInputSorted};
+use reth_trie::{changesets::compute_trie_changesets, HashedPostStateSorted, TrieInputSorted};
 #[cfg(test)]
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseStateRoot};
+use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseHashedPostState, DatabaseStateRoot};
 
 /// Computes block trie updates using the changeset cache.
 ///
@@ -690,9 +690,9 @@ mod tests {
         A: TrieTableAdapter,
     {
         let individual_state_revert =
-            reth_trie_db::from_reverts_auto(provider, block_number..=block_number).unwrap();
+            HashedPostStateSorted::from_reverts(provider, block_number..=block_number).unwrap();
         let cumulative_state_revert =
-            reth_trie_db::from_reverts_auto(provider, (block_number + 1)..).unwrap();
+            HashedPostStateSorted::from_reverts(provider, (block_number + 1)..).unwrap();
 
         let mut cumulative_state_revert_prev = cumulative_state_revert.clone();
         cumulative_state_revert_prev.extend_ref_and_sort(&individual_state_revert);

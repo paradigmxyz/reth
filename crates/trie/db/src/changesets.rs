@@ -4,7 +4,8 @@
 //! the old trie node values needed to revert a block or contiguous range of blocks.
 
 use crate::{
-    DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseTrieCursorFactory, TrieTableAdapter,
+    DatabaseHashedCursorFactory, DatabaseHashedPostState, DatabaseStateRoot,
+    DatabaseTrieCursorFactory, TrieTableAdapter,
 };
 use alloy_primitives::BlockNumber;
 use reth_storage_api::{
@@ -108,7 +109,7 @@ where
     );
 
     // Collect the state revert for the requested range.
-    let range_state_revert = crate::state::from_reverts_auto(provider, range)?;
+    let range_state_revert = reth_trie::HashedPostStateSorted::from_reverts(provider, range)?;
     let range_prefix_sets = range_state_revert.construct_prefix_sets();
 
     type DbStateRoot<'a, TX, A> = reth_trie::StateRoot<
@@ -130,7 +131,9 @@ where
         // Collect the state revert from the database tip to just after the range.
         let tail_state_revert = end_block
             .checked_add(1)
-            .map(|next_block| crate::state::from_reverts_auto(provider, next_block..))
+            .map(|next_block| {
+                reth_trie::HashedPostStateSorted::from_reverts(provider, next_block..)
+            })
             .transpose()?
             .unwrap_or_default();
 

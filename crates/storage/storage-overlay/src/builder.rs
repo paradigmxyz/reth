@@ -14,6 +14,7 @@ use reth_storage_api::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted};
+use reth_trie_db::DatabaseHashedPostState;
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -219,7 +220,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                         debug_span!(target: "storage::overlay", "retrieving_hashed_state_reverts")
                             .entered();
                     let start = Instant::now();
-                    let res = reth_trie_db::from_reverts_auto(provider, revert_blocks)?;
+                    let res = HashedPostStateSorted::from_reverts(provider, revert_blocks)?;
                     retrieve_hashed_state_reverts_duration = start.elapsed();
                     res
                 };
