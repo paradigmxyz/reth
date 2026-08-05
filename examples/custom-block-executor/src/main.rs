@@ -1,16 +1,15 @@
 //! Example: Running a reth node with a custom block execution hook.
 //!
-//! This demonstrates how to use the [`CustomBlockExecutor`] hook on the serial (non-BAL)
+//! This demonstrates how to install a [`CustomBlockExecutionHook`] on the serial (non-BAL)
 //! execution path. The example always returns `Ok(None)` so the validator falls back to the
-//! default execution path.
+//! default execution path — it only shows builder wiring.
 //!
 //! The key integration point is wrapping [`BasicEngineValidatorBuilder`] to call
-//! [`BasicEngineValidator::with_custom_block_executor`] on the resulting validator.
+//! [`BasicEngineValidator::with_custom_block_execution_hook`] on the resulting validator.
 //!
-//! For a full cache hit (e.g. reusing flashblock execution), return
-//! [`CustomBlockExecutionOutput`] with a pre-resolved `receipt_root_rx`. For incremental
-//! execution inside the hook, call [`CustomBlockExecutorInput::spawn_receipt_root_task`] and
-//! stream receipts to the sender.
+//! For a full-block cache hit (e.g. reusing flashblock execution keyed by `input.env.hash`),
+//! return [`CustomBlockExecutionOutput`] with a pre-resolved `receipt_root_rx`. See the type
+//! docs for state-root implications on that path.
 //!
 //! # Usage
 //!
@@ -24,7 +23,7 @@ use std::sync::Arc;
 
 use alloy_genesis::Genesis;
 use reth_engine_tree::tree::{
-    payload_validator::CustomBlockExecutor, BasicEngineValidator, TreeConfig,
+    payload_validator::CustomBlockExecutionHook, BasicEngineValidator, TreeConfig,
 };
 use reth_ethereum::{
     chainspec::ChainSpec,
@@ -53,22 +52,22 @@ type ExampleEvmConfig = EthEvmConfig<ChainSpec, RethEvmFactory>;
 // ---------------------------------------------------------------------------
 
 /// An [`EngineValidatorBuilder`] that wraps [`BasicEngineValidatorBuilder`] and
-/// installs a [`CustomBlockExecutor`] on the resulting [`BasicEngineValidator`].
+/// installs a [`CustomBlockExecutionHook`] on the resulting [`BasicEngineValidator`].
 #[derive(Clone)]
-struct PassthroughBlockExecutorValidatorBuilder {
+struct PassthroughBlockExecutionHookValidatorBuilder {
     inner: BasicEngineValidatorBuilder<EthereumEngineValidatorBuilder>,
-    custom_block_executor: CustomBlockExecutor<EthPrimitives, ExampleEvmConfig>,
+    custom_block_execution_hook: CustomBlockExecutionHook<EthPrimitives, ExampleEvmConfig>,
 }
 
-impl std::fmt::Debug for PassthroughBlockExecutorValidatorBuilder {
+impl std::fmt::Debug for PassthroughBlockExecutionHookValidatorBuilder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PassthroughBlockExecutorValidatorBuilder")
+        f.debug_struct("PassthroughBlockExecutionHookValidatorBuilder")
             .field("inner", &self.inner)
             .finish_non_exhaustive()
     }
 }
 
-impl<N> EngineValidatorBuilder<N> for PassthroughBlockExecutorValidatorBuilder
+impl<N> EngineValidatorBuilder<N> for PassthroughBlockExecutionHookValidatorBuilder
 where
     N: FullNodeComponents<Types = EthereumNode, Evm = ExampleEvmConfig>,
 {
@@ -84,9 +83,8 @@ where
         tree_config: TreeConfig,
         overlay_manager: OverlayManager<EthPrimitives>,
     ) -> eyre::Result<Self::EngineValidator> {
-        let validator =
-            self.inner.build_tree_validator(ctx, tree_config, overlay_manager).await?;
-        Ok(validator.with_custom_block_executor(self.custom_block_executor))
+        let validator = self.inner.build_tree_validator(ctx, tree_config, overlay_manager).await?;
+        Ok(validator.with_custom_block_execution_hook(self.custom_block_execution_hook))
     }
 }
 
@@ -98,9 +96,9 @@ where
 async fn main() -> eyre::Result<()> {
     let runtime = Runtime::test();
 
-    // A custom block executor that always falls back to the default path.
-    // Replace with cache lookup keyed by `input.env.hash` to reuse prior execution.
-    let passthrough_executor: CustomBlockExecutor<EthPrimitives, ExampleEvmConfig> =
+    // Always fall back to the default path. Replace with a cache lookup keyed by
+    // `input.env.hash` to reuse prior full-block execution.
+    let passthrough_hook: CustomBlockExecutionHook<EthPrimitives, ExampleEvmConfig> =
         Arc::new(|input| {
             let _block_hash = input.env.hash;
             Ok(None)
@@ -111,14 +109,14 @@ async fn main() -> eyre::Result<()> {
         .with_rpc(RpcServerArgs::default().with_http())
         .with_chain(custom_chain());
 
-    let add_ons: EthereumAddOns<_, _, _, _, PassthroughBlockExecutorValidatorBuilder> =
+    let add_ons: EthereumAddOns<_, _, _, _, PassthroughBlockExecutionHookValidatorBuilder> =
         EthereumAddOns::new(RpcAddOns::new(
             EthereumEthApiBuilder::<alloy_network::Ethereum>::default(),
             EthereumEngineValidatorBuilder::default(),
             BasicEngineApiBuilder::<EthereumEngineValidatorBuilder>::default(),
-            PassthroughBlockExecutorValidatorBuilder {
+            PassthroughBlockExecutionHookValidatorBuilder {
                 inner: BasicEngineValidatorBuilder::default(),
-                custom_block_executor: passthrough_executor,
+                custom_block_execution_hook: passthrough_hook,
             },
             Default::default(),
             Identity::new(),
@@ -132,7 +130,7 @@ async fn main() -> eyre::Result<()> {
         .launch_with_debug_capabilities()
         .await?;
 
-    println!("Node running with custom block executor hook — press Ctrl+C to exit");
+    println!("Node running with custom block execution hook — press Ctrl+C to exit");
 
     node_exit_future.await
 }

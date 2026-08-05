@@ -80,8 +80,8 @@ pub use invalid_headers::InvalidHeaderCache;
 pub use metrics::EngineApiMetrics;
 pub use payload_processor::*;
 pub use payload_validator::{
-    BasicEngineValidator, CustomBlockExecutionOutput, CustomBlockExecutor,
-    CustomBlockExecutorInput, EngineValidator, ReceiptRootReceiver, ReceiptRootSender,
+    BasicEngineValidator, CustomBlockExecutionHook, CustomBlockExecutionHookInput,
+    CustomBlockExecutionOutput, EngineValidator, ReceiptRootReceiver, ReceiptRootSender,
 };
 pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
