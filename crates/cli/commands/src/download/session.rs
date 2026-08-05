@@ -60,6 +60,13 @@ impl DownloadSession {
             progress.record_archive_output_complete(bytes);
         }
     }
+
+    /// Removes a completed download contribution when the archive must be retried.
+    pub(crate) fn rollback_archive_download(&self, bytes: u64) {
+        if let Some(progress) = self.progress() {
+            progress.rollback_archive_download(bytes);
+        }
+    }
 }
 
 /// Paths used while processing one archive, plus the shared download session.

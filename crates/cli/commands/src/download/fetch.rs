@@ -624,17 +624,25 @@ impl SegmentedDownload {
             }
         });
 
+        let downloaded_bytes = piece_progress_bytes.load(Ordering::Relaxed);
         if let Some(error) = terminal_failure.take() {
             if let Some(shared) = shared {
-                shared.sub_active_download_bytes(piece_progress_bytes.load(Ordering::Relaxed));
+                shared.sub_active_download_bytes(downloaded_bytes);
             }
             paths.cleanup_partial();
             return Err(error.wrap_err("Parallel download failed"))
         }
 
+        if !segmented_download_completed(cancel_token, downloaded_bytes, total_size) {
+            if let Some(shared) = shared {
+                shared.sub_active_download_bytes(downloaded_bytes);
+            }
+            paths.cleanup_partial();
+            eyre::bail!("Parallel download did not complete");
+        }
+
         if let Some(shared) = shared {
-            shared.sub_active_download_bytes(piece_progress_bytes.load(Ordering::Relaxed));
-            shared.record_archive_download_complete(total_size);
+            shared.sub_active_download_bytes(downloaded_bytes);
         }
 
         paths.finalize()?;
@@ -977,6 +985,15 @@ fn panic_payload_message(payload: Box<dyn Any + Send + 'static>) -> String {
     }
 }
 
+/// Returns whether every byte completed before cancellation.
+fn segmented_download_completed(
+    cancel_token: &CancellationToken,
+    downloaded_bytes: u64,
+    total_size: u64,
+) -> bool {
+    !cancel_token.is_cancelled() && downloaded_bytes == total_size
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1064,5 +1081,45 @@ mod tests {
         assert_eq!(downloaded.size, b"local archive bytes".len() as u64);
         assert!(!cache_dir.join("state.tar.zst").exists());
         assert!(!cache_dir.join("state.tar.zst.part").exists());
+    }
+
+    #[test]
+    fn cancelled_segmented_download_does_not_finalize_incomplete_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let total_size = 8;
+        let pieces = build_download_pieces(total_size, 4);
+        let plan = SegmentedDownloadPlan {
+            piece_size: 4,
+            piece_count: pieces.len(),
+            worker_count: 1,
+            pieces,
+        };
+        let cancel_token = CancellationToken::new();
+        cancel_token.cancel();
+        let progress = SharedProgress::new(total_size, 0, 1, cancel_token.clone());
+        let session = DownloadSession::new(
+            Some(progress),
+            Some(DownloadRequestLimiter::new(1)),
+            cancel_token,
+        );
+        let url = "http://127.0.0.1:1/state.tar.zst";
+        let paths = DownloadPaths::from_url(url, dir.path());
+        let download =
+            SegmentedDownload::new(url.to_string(), paths, total_size, plan, session, None);
+
+        assert!(download.run().is_err());
+        assert!(!dir.path().join("state.tar.zst").exists());
+        assert!(!dir.path().join("state.tar.zst.part").exists());
+    }
+
+    #[test]
+    fn segmented_completion_requires_all_bytes_and_no_cancellation() {
+        let cancel_token = CancellationToken::new();
+
+        assert!(!segmented_download_completed(&cancel_token, 7, 8));
+        assert!(segmented_download_completed(&cancel_token, 8, 8));
+
+        cancel_token.cancel();
+        assert!(!segmented_download_completed(&cancel_token, 8, 8));
     }
 }
