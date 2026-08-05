@@ -806,7 +806,14 @@ mod tests {
         let mut test_block_builder = TestBlockBuilder::eth().with_state();
         let signer = test_block_builder.signer;
         let initial_balance = U256::from(10).pow(U256::from(18));
-        let block_a1 = test_block_builder.get_executed_block_with_number(1, genesis_hash);
+        // The historical check below needs the signer to exist before block 2. Empty test blocks
+        // do not persist the signer state queried here.
+        let block_a1 = loop {
+            let block = test_block_builder.get_executed_block_with_number(1, genesis_hash);
+            if !block.recovered_block().body().transactions.is_empty() {
+                break block
+            }
+        };
         let hash_a1 = block_a1.recovered_block().hash();
         let block_a2 = test_block_builder.get_executed_block_with_number(2, hash_a1);
         let hash_a2 = block_a2.recovered_block().hash();

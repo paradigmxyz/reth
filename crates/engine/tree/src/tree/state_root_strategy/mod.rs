@@ -1082,7 +1082,7 @@ where
         let (fallback_tx, fallback_rx) = mpsc::channel();
         executor.spawn_blocking_named("serial-root", move || {
             let result = (|| {
-                let hashed_state = Arc::new(provider.hashed_post_state(&output.state));
+                let hashed_state = Arc::new(provider.hashed_post_state(&output.state)?);
                 let (root, updates) =
                     provider.state_root_with_updates(hashed_state.as_ref().clone())?;
                 Ok((root, updates, hashed_state))
@@ -1102,7 +1102,7 @@ where
         output: &BlockExecutionOutput<N::Receipt>,
     ) -> ProviderResult<StateRootJobOutcome> {
         let provider = self.provider_builder.clone().build()?;
-        let hashed_state = Arc::new(provider.hashed_post_state(&output.state));
+        let hashed_state = Arc::new(provider.hashed_post_state(&output.state)?);
         let (state_root, trie_updates) =
             provider.state_root_with_updates(hashed_state.as_ref().clone())?;
         self.metrics.state_root_task_fallback_success_total.increment(1);
@@ -1309,7 +1309,7 @@ where
     debug!(target: "engine::tree::state_root_strategy", "Comparing trie updates with serial computation");
 
     match state_provider_builder.build().and_then(|provider| {
-        let hashed_state = provider.hashed_post_state(&output.state);
+        let hashed_state = provider.hashed_post_state(&output.state)?;
         provider.state_root_with_updates(hashed_state)
     }) {
         Ok((serial_root, serial_trie_updates)) => {
