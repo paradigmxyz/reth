@@ -131,12 +131,12 @@ where
     fn convert_receipts(
         &self,
         inputs: Vec<ConvertReceiptInput<'_, N>>,
-        _block: &SealedBlock<N::Block>,
+        block: &SealedBlock<N::Block>,
     ) -> Result<Vec<Self::RpcReceipt>, Self::Error> {
         let mut receipts = Vec::with_capacity(inputs.len());
+        let blob_params = self.chain_spec.blob_params_at_timestamp(block.header().timestamp());
 
         for input in inputs {
-            let blob_params = self.chain_spec.blob_params_at_timestamp(input.meta.timestamp);
             receipts.push(build_receipt(input, blob_params, &self.build_rpc_receipt));
         }
 
