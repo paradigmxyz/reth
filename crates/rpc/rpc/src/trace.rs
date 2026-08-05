@@ -1,6 +1,9 @@
 use alloy_consensus::BlockHeader as _;
 use alloy_eips::BlockId;
-use alloy_evm::block::calc::{base_block_reward_pre_merge, block_reward, ommer_reward};
+use alloy_evm::{
+    block::calc::{base_block_reward_pre_merge, block_reward, ommer_reward},
+    Evm,
+};
 use alloy_primitives::{
     map::{HashMap, HashSet},
     Address, BlockHash, Bytes, B256, U256,
@@ -25,7 +28,7 @@ use reth_rpc_api::TraceApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{Call, LoadPendingBlock, LoadTransaction, Trace, TraceExt},
-    FromEthApiError, RpcNodeCore,
+    FromEthApiError, FromEvmError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction, EthConfig};
 use reth_storage_api::{BlockNumReader, BlockReader};
@@ -160,28 +163,30 @@ where
                 let mut results = Vec::with_capacity(calls.len());
                 let mut calls = calls.into_iter().peekable();
 
-                while let Some((call, trace_types)) = calls.next() {
-                    let (evm_env, tx_env) = eth_api.prepare_call_env(
-                        evm_env.clone(),
-                        call,
-                        &mut db,
-                        Default::default(),
-                    )?;
-                    let config = TracingInspectorConfig::from_parity_config(&trace_types);
-                    let mut inspector = TracingInspector::new(config);
-                    let res = eth_api.inspect(&mut db, evm_env, tx_env, &mut inspector)?;
+                let evm_env = eth_api.prepare_evm_env(evm_env, &mut db, Default::default())?;
+                let mut evm = eth_api.evm_config().evm_with_env_and_inspector(
+                    &mut db,
+                    evm_env.clone(),
+                    TracingInspector::default(),
+                );
 
-                    let trace_res = inspector
+                while let Some((call, trace_types)) = calls.next() {
+                    let tx_env =
+                        eth_api.prepare_call_tx_env(&evm_env, call, &mut **evm.db_mut())?;
+                    *evm.inspector_mut() = TracingInspector::new(
+                        TracingInspectorConfig::from_parity_config(&trace_types),
+                    );
+                    let res = evm.transact(tx_env).map_err(Eth::Error::from_evm_err)?;
+                    let trace_res = std::mem::take(evm.inspector_mut())
                         .into_parity_builder()
-                        .into_trace_results_with_state(&res, &trace_types, &db)
+                        .into_trace_results_with_state(&res, &trace_types, &**evm.db())
                         .map_err(Eth::Error::from_eth_err)?;
 
                     results.push(trace_res);
 
-                    // need to apply the state changes of this call before executing the
-                    // next call
+                    // need to apply the state changes of this call before executing the next call
                     if calls.peek().is_some() {
-                        db.commit(res.state)
+                        evm.db_mut().commit(res.state)
                     }
                 }
 

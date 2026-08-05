@@ -473,22 +473,27 @@ where
                     let block_overrides = block_override.map(Box::new);
 
                     let mut transactions = transactions.into_iter().peekable();
+                    // apply state overrides only once, before the first transaction
+                    let state_overrides = state_overrides.take();
+                    let overrides = EvmOverrides::new(state_overrides, block_overrides);
+                    let bundle_evm_env =
+                        eth_api.prepare_evm_env(evm_env.clone(), &mut db, overrides)?;
+                    let mut evm = eth_api.evm_config().evm_with_env_and_inspector(
+                        &mut db,
+                        bundle_evm_env.clone(),
+                        &mut inspector,
+                    );
+
                     while let Some(tx) = transactions.next() {
-                        // apply state overrides only once, before the first transaction
-                        let state_overrides = state_overrides.take();
-                        let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
-
-                        let (evm_env, tx_env) =
-                            eth_api.prepare_call_env(evm_env.clone(), tx, &mut db, overrides)?;
-
-                        let res = eth_api.inspect(
-                            &mut db,
-                            evm_env.clone(),
-                            tx_env.clone(),
-                            &mut inspector,
+                        let tx_env = eth_api.prepare_call_tx_env(
+                            &bundle_evm_env,
+                            tx,
+                            &mut **evm.db_mut(),
                         )?;
+                        let res = evm.transact(tx_env.clone()).map_err(Eth::Error::from_evm_err)?;
+                        let (db, inspector, _) = evm.components_mut();
                         let trace = inspector
-                            .get_result(None, &tx_env, &evm_env.block_env, &res, &mut db)
+                            .get_result(None, &tx_env, &bundle_evm_env.block_env, &res, db)
                             .map_err(Eth::Error::from_eth_err)?;
 
                         // If there is more transactions, commit the database
