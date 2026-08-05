@@ -32,21 +32,29 @@ pub trait LoadReceipt:
     ) -> impl Future<Output = Result<RpcReceipt<Self::NetworkTypes>, Self::Error>> + Send {
         async move {
             let hash = meta.block_hash;
-            let block = match block {
-                Some(block) => block,
-                None => self
+            let (block, all_receipts) = match (block, all_receipts) {
+                (Some(block), Some(all_receipts)) => (block, all_receipts),
+                (Some(block), None) => {
+                    let all_receipts = self
+                        .cache()
+                        .get_receipts(hash)
+                        .await
+                        .map_err(Self::Error::from_eth_err)?
+                        .ok_or(EthApiError::HeaderNotFound(hash.into()))?;
+                    (block, all_receipts)
+                }
+                (None, Some(all_receipts)) => {
+                    let block = self
+                        .cache()
+                        .get_recovered_block(hash)
+                        .await
+                        .map_err(Self::Error::from_eth_err)?
+                        .ok_or(EthApiError::HeaderNotFound(hash.into()))?;
+                    (block, all_receipts)
+                }
+                (None, None) => self
                     .cache()
-                    .get_recovered_block(hash)
-                    .await
-                    .map_err(Self::Error::from_eth_err)?
-                    .ok_or(EthApiError::HeaderNotFound(hash.into()))?,
-            };
-            // Use pre-fetched receipts if available, otherwise fetch from cache.
-            let all_receipts = match all_receipts {
-                Some(receipts) => receipts,
-                None => self
-                    .cache()
-                    .get_receipts(hash)
+                    .get_block_and_receipts(hash)
                     .await
                     .map_err(Self::Error::from_eth_err)?
                     .ok_or(EthApiError::HeaderNotFound(hash.into()))?,
