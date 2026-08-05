@@ -29,8 +29,8 @@ use reth_primitives_traits::{
     FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
 use reth_provider::{
-    BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockHashReader, BlockNumReader,
-    BlockReader, ChangeSetReader, DatabaseProviderFactory, LatestStateProvider, ProviderError,
+    BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockNumReader, BlockReader,
+    ChangeSetReader, DatabaseProviderFactory, LatestStateProvider, ProviderError,
     PruneCheckpointReader, SaveBlocksInput, StageCheckpointReader, StateProviderBox,
     StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
     TransactionVariant, TryIntoHistoricalStateProvider,
@@ -137,8 +137,7 @@ impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
 impl<N: NodePrimitives, P> StateProviderBuilder<N, P>
 where
     P: DatabaseProviderFactory,
-    P::Provider: BlockHashReader
-        + BlockNumReader
+    P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
         + StorageSettingsCache
@@ -439,8 +438,6 @@ where
         + Clone
         + 'static,
     P::Provider: BlockReader<Block = N::Block, Header = N::BlockHeader>
-        + BlockHashReader
-        + BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
         + ChangeSetReader

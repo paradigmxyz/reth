@@ -10,9 +10,8 @@ use alloy_primitives::{Address, B256};
 use reth_evm::{ConfigureEvm, EvmEnvFor};
 use reth_primitives_traits::{NodePrimitives, TxTy};
 use reth_provider::{
-    BlockHashReader, BlockNumReader, BlockReader, DatabaseProviderFactory, PruneCheckpointReader,
-    StageCheckpointReader, StateProviderFactory, StateReader, StorageSettingsCache,
-    TryIntoHistoricalStateProvider,
+    BlockNumReader, DatabaseProviderFactory, PruneCheckpointReader, StageCheckpointReader,
+    StorageSettingsCache, TryIntoHistoricalStateProvider,
 };
 use std::{fmt::Debug, sync::Arc};
 
@@ -38,18 +37,8 @@ where
 impl<N, P, Evm> Handle<N, P, Evm>
 where
     N: NodePrimitives,
-    P: DatabaseProviderFactory
-        + BlockReader
-        + PruneCheckpointReader
-        + StageCheckpointReader
-        + StateProviderFactory
-        + StateReader
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-    P::Provider: BlockHashReader
-        + BlockNumReader
+    P: DatabaseProviderFactory + 'static,
+    P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
         + StorageSettingsCache

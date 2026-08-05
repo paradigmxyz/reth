@@ -9,9 +9,8 @@ use crossbeam_channel::{Receiver, RecvTimeoutError, TryRecvError};
 use reth_evm::ConfigureEvm;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    BlockHashReader, BlockNumReader, BlockReader, DatabaseProviderFactory, PruneCheckpointReader,
-    StageCheckpointReader, StateProviderFactory, StateReader, StorageSettingsCache,
-    TryIntoHistoricalStateProvider,
+    BlockNumReader, DatabaseProviderFactory, PruneCheckpointReader, StageCheckpointReader,
+    StorageSettingsCache, TryIntoHistoricalStateProvider,
 };
 use reth_revm::{cached::CachedReads, db::State};
 use std::{
@@ -67,15 +66,8 @@ where
 impl<N, P, Evm> Worker<N, P, Evm>
 where
     N: NodePrimitives,
-    P: DatabaseProviderFactory
-        + BlockReader
-        + PruneCheckpointReader
-        + StageCheckpointReader
-        + StateProviderFactory
-        + StateReader
-        + Clone,
-    P::Provider: BlockHashReader
-        + BlockNumReader
+    P: DatabaseProviderFactory,
+    P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
         + StorageSettingsCache

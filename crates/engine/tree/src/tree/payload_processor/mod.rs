@@ -18,9 +18,8 @@ use reth_evm::{
 };
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
-    BlockExecutionOutput, BlockHashReader, BlockNumReader, BlockReader, DatabaseProviderFactory,
-    PruneCheckpointReader, StageCheckpointReader, StateProviderFactory, StateReader,
-    StorageSettingsCache, TryIntoHistoricalStateProvider,
+    BlockExecutionOutput, BlockNumReader, DatabaseProviderFactory, PruneCheckpointReader,
+    StageCheckpointReader, StorageSettingsCache, TryIntoHistoricalStateProvider,
 };
 use reth_revm::db::BundleState;
 use reth_tasks::Runtime;
@@ -176,16 +175,8 @@ where
         parallel_bal_execution: bool,
     ) -> IteratorPayloadHandle<Evm, I>
     where
-        P: DatabaseProviderFactory
-            + BlockReader
-            + PruneCheckpointReader
-            + StageCheckpointReader
-            + StateProviderFactory
-            + StateReader
-            + Clone
-            + 'static,
-        P::Provider: BlockHashReader
-            + BlockNumReader
+        P: DatabaseProviderFactory + Clone + 'static,
+        P::Provider: BlockNumReader
             + PruneCheckpointReader
             + StageCheckpointReader
             + StorageSettingsCache
@@ -354,16 +345,8 @@ where
         parallel_bal_execution: bool,
     ) -> CacheTaskHandle<<Evm::Primitives as NodePrimitives>::Receipt>
     where
-        P: DatabaseProviderFactory
-            + BlockReader
-            + PruneCheckpointReader
-            + StageCheckpointReader
-            + StateProviderFactory
-            + StateReader
-            + Clone
-            + 'static,
-        P::Provider: BlockHashReader
-            + BlockNumReader
+        P: DatabaseProviderFactory + Clone + 'static,
+        P::Provider: BlockNumReader
             + PruneCheckpointReader
             + StageCheckpointReader
             + StorageSettingsCache
