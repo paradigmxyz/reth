@@ -1,10 +1,10 @@
-use crate::{BlockNumReader, BlockReader, HeaderProvider};
+use crate::{BlockNumReader, BlockReader};
 use alloc::vec::Vec;
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Address, BlockNumber, TxHash, TxNumber};
 use core::ops::{Range, RangeBounds, RangeInclusive};
-use reth_primitives_traits::{SealedHeader, SignedTransaction};
+use reth_primitives_traits::SignedTransaction;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 
 /// Enum to control transaction hash inclusion.
@@ -48,33 +48,6 @@ pub trait TransactionsProvider: BlockNumReader + Send {
         &self,
         hash: TxHash,
     ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>>;
-
-    /// Get transaction by transaction hash, additional metadata, and the sealed block header.
-    ///
-    /// Implementers that already load the header while constructing [`TransactionMeta`] should
-    /// override this method to return it without another lookup.
-    #[auto_impl(keep_default_for(&, Arc))]
-    #[expect(clippy::type_complexity)]
-    fn transaction_by_hash_with_meta_and_header(
-        &self,
-        hash: TxHash,
-    ) -> ProviderResult<
-        Option<(
-            Self::Transaction,
-            TransactionMeta,
-            SealedHeader<<Self as HeaderProvider>::Header>,
-        )>,
-    >
-    where
-        Self: HeaderProvider,
-    {
-        let Some((transaction, meta)) = self.transaction_by_hash_with_meta(hash)? else {
-            return Ok(None)
-        };
-        let Some(header) = self.sealed_header_by_hash(meta.block_hash)? else { return Ok(None) };
-
-        Ok(Some((transaction, meta, header)))
-    }
 
     /// Get transactions by block id.
     fn transactions_by_block(
