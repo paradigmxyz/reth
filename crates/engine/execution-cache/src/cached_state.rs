@@ -1051,7 +1051,10 @@ impl<S: BlockHashReader> BlockHashReader for CachedStateProvider<S> {
 }
 
 impl<S: HashedPostStateProvider> HashedPostStateProvider for CachedStateProvider<S> {
-    fn hashed_post_state(&self, bundle_state: &reth_revm::db::BundleState) -> HashedPostState {
+    fn hashed_post_state(
+        &self,
+        bundle_state: &reth_revm::db::BundleState,
+    ) -> ProviderResult<HashedPostState> {
         self.state_provider.hashed_post_state(bundle_state)
     }
 }
