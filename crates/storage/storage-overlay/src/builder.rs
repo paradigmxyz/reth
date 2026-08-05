@@ -549,7 +549,7 @@ where
         })
     }
 
-    return Ok(AnchorForParent::RevertsRequired {
+    Ok(AnchorForParent::RevertsRequired {
         anchor,
         finish: BlockNumHash::new(finish, finish_hash),
         overlay,

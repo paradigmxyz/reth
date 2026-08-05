@@ -332,6 +332,7 @@ mod tests {
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_provider::test_utils::MockEthProvider;
+    use reth_stages_api::{StageCheckpoint, StageId};
     use std::{
         collections::{HashMap, VecDeque},
         sync::atomic::{AtomicUsize, Ordering},
@@ -377,10 +378,14 @@ mod tests {
 
         /// Points the worker at `parent_hash`, as [`Handle::start`](super::super::Handle) does.
         fn start(&self, parent_hash: B256) {
+            let provider = MockEthProvider::default();
+            provider.enable_database_provider();
+            provider.add_header(parent_hash, Default::default());
+            provider.add_stage_checkpoint(StageId::Finish, StageCheckpoint::new(0));
             let job = Job {
                 evm_env: Default::default(),
                 provider_builder: StateProviderBuilder::new(
-                    MockEthProvider::default(),
+                    provider,
                     parent_hash,
                     reth_storage_overlay::OverlayManager::default(),
                 ),
