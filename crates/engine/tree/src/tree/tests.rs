@@ -17,6 +17,7 @@ use alloy_primitives::{
 use alloy_rlp::Decodable;
 use alloy_rpc_types_engine::{
     ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1, ForkchoiceState,
+    ForkchoiceUpdateError,
 };
 use assert_matches::assert_matches;
 use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
@@ -1655,6 +1656,137 @@ async fn test_fcu_with_canonical_ancestor_updates_latest_block() {
         test_harness.tree.canonical_in_memory_state.get_canonical_head().hash(),
         ancestor_block.hash(),
         "In-memory state: Latest block hash should be updated to canonical ancestor"
+    );
+}
+
+#[tokio::test]
+async fn test_fcu_with_canonical_ancestor_below_finalized_is_rejected() {
+    reth_tracing::init_test_tracing();
+    let chain_spec = MAINNET.clone();
+    let mut test_harness = TestHarness::new(chain_spec.clone());
+    let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
+    let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..5).collect();
+    test_harness = test_harness.with_blocks(blocks.clone());
+
+    let current_head = blocks[3].recovered_block();
+    let finalized = blocks[2].recovered_block();
+    let ancestor = blocks[1].recovered_block();
+    test_harness.tree.canonical_in_memory_state.set_finalized(finalized.clone_sealed_header());
+
+    // An FCU to an ancestor below the latest known finalized block would reorg out the
+    // finalized block and is rejected, with or without payload attributes.
+    let payload_attributes = EthPayloadAttributes {
+        timestamp: ancestor.timestamp() + 1,
+        prev_randao: B256::ZERO,
+        suggested_fee_recipient: Default::default(),
+        withdrawals: None,
+        parent_beacon_block_root: None,
+        slot_number: None,
+        target_gas_limit: None,
+    };
+    for attrs in [Some(payload_attributes), None] {
+        let err = test_harness
+            .tree
+            .on_forkchoice_updated(
+                ForkchoiceState {
+                    head_block_hash: ancestor.hash(),
+                    safe_block_hash: B256::ZERO,
+                    finalized_block_hash: B256::ZERO,
+                },
+                attrs,
+            )
+            .unwrap()
+            .outcome
+            .await
+            .unwrap_err();
+
+        assert_matches!(err, ForkchoiceUpdateError::TooDeepReorg);
+    }
+
+    // no payload build is started and the canonical head remains untouched
+    assert!(test_harness.payload_command_rx.try_recv().is_err());
+    assert_eq!(test_harness.tree.state.tree_state.canonical_block_hash(), current_head.hash());
+
+    // the finalized block itself is not below finality and can become the parent of the next
+    // block
+    let payload_attributes = EthPayloadAttributes {
+        timestamp: finalized.timestamp() + 1,
+        prev_randao: B256::ZERO,
+        suggested_fee_recipient: Default::default(),
+        withdrawals: None,
+        parent_beacon_block_root: None,
+        slot_number: None,
+        target_gas_limit: None,
+    };
+    let outcome = test_harness
+        .tree
+        .on_forkchoice_updated(
+            ForkchoiceState {
+                head_block_hash: finalized.hash(),
+                safe_block_hash: B256::ZERO,
+                finalized_block_hash: B256::ZERO,
+            },
+            Some(payload_attributes),
+        )
+        .unwrap();
+
+    assert_eq!(outcome.outcome.forkchoice_status(), ForkchoiceStatus::Valid);
+    let command = test_harness.payload_command_rx.try_recv().unwrap();
+    let PayloadServiceCommand::BuildNewPayload(input, _, _) = command else {
+        panic!("expected build new payload command")
+    };
+    assert_eq!(input.parent_hash, finalized.hash());
+}
+
+#[tokio::test]
+async fn test_fcu_with_canonical_ancestor_above_finalized_starts_payload_build() {
+    reth_tracing::init_test_tracing();
+    let chain_spec = MAINNET.clone();
+    let mut test_harness = TestHarness::new(chain_spec.clone());
+    let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
+    let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..5).collect();
+    test_harness = test_harness.with_blocks(blocks.clone());
+
+    let current_head = blocks[3].recovered_block();
+    let finalized = blocks[0].recovered_block();
+    let ancestor = blocks[2].recovered_block();
+    test_harness.tree.canonical_in_memory_state.set_finalized(finalized.clone_sealed_header());
+
+    let payload_attributes = EthPayloadAttributes {
+        timestamp: ancestor.timestamp() + 1,
+        prev_randao: B256::ZERO,
+        suggested_fee_recipient: Default::default(),
+        withdrawals: None,
+        parent_beacon_block_root: None,
+        slot_number: None,
+        target_gas_limit: None,
+    };
+    let outcome = test_harness
+        .tree
+        .on_forkchoice_updated(
+            ForkchoiceState {
+                head_block_hash: ancestor.hash(),
+                safe_block_hash: B256::ZERO,
+                finalized_block_hash: B256::ZERO,
+            },
+            Some(payload_attributes),
+        )
+        .unwrap();
+
+    assert_eq!(outcome.outcome.forkchoice_status(), ForkchoiceStatus::Valid);
+
+    // a payload build is started on top of the ancestor
+    let command = test_harness.payload_command_rx.try_recv().unwrap();
+    let PayloadServiceCommand::BuildNewPayload(input, _, _) = command else {
+        panic!("expected build new payload command")
+    };
+    assert_eq!(input.parent_hash, ancestor.hash());
+
+    // the canonical chain remains untouched, only the built block reorgs it eventually
+    assert_eq!(test_harness.tree.state.tree_state.canonical_block_hash(), current_head.hash());
+    assert_eq!(
+        test_harness.tree.canonical_in_memory_state.get_canonical_head().hash(),
+        current_head.hash()
     );
 }
 
