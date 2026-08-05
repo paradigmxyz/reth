@@ -205,8 +205,70 @@ fn test_empty_storage_root() {
 
     let tx = factory.provider_rw().unwrap();
     reth_trie_db::with_adapter!(tx, |A| {
-        let got = DbStorageRoot::<_, A>::from_tx(tx.tx_ref(), address).root().unwrap();
+        let (got, walked, updates) =
+            DbStorageRoot::<_, A>::from_tx(tx.tx_ref(), address).root_with_updates().unwrap();
         assert_eq!(got, EMPTY_ROOT_HASH);
+        assert_eq!(walked, 0);
+        assert_eq!(updates, StorageTrieUpdates::default());
+    });
+}
+
+#[test]
+fn cleared_storage_emits_node_removals_without_deleted_flag() {
+    let factory = create_test_provider_factory();
+    let tx = factory.provider_rw().unwrap();
+    let hashed_address = B256::random();
+    let hashed_slots = [
+        hex!("30af561000000000000000000000000000000000000000000000000000000000"),
+        hex!("30af569000000000000000000000000000000000000000000000000000000000"),
+        hex!("30af650000000000000000000000000000000000000000000000000000000000"),
+        hex!("30af6f0000000000000000000000000000000000000000000000000000000000"),
+        hex!("30af8f0000000000000000000000000000000000000000000000000000000000"),
+        hex!("3100000000000000000000000000000000000000000000000000000000000000"),
+    ]
+    .map(B256::new);
+
+    for hashed_slot in hashed_slots {
+        tx.tx_ref()
+            .put::<tables::HashedStorages>(
+                hashed_address,
+                StorageEntry { key: hashed_slot, value: U256::ONE },
+            )
+            .unwrap();
+    }
+
+    let (_, _, initial_updates) = reth_trie_db::with_adapter!(tx, |A| {
+        DbStorageRoot::<_, A>::from_tx_hashed(tx.tx_ref(), hashed_address)
+            .root_with_updates()
+            .unwrap()
+    });
+    assert!(!initial_updates.storage_nodes_ref().is_empty());
+    tx.write_storage_trie_updates_sorted(core::iter::once((
+        &hashed_address,
+        &initial_updates.into_sorted(),
+    )))
+    .unwrap();
+
+    let mut hashed_storage_cursor =
+        tx.tx_ref().cursor_dup_write::<tables::HashedStorages>().unwrap();
+    let mut prefix_set = PrefixSetMut::default();
+    for hashed_slot in hashed_slots {
+        let entry =
+            hashed_storage_cursor.seek_by_key_subkey(hashed_address, hashed_slot).unwrap().unwrap();
+        assert_eq!(entry.key, hashed_slot);
+        hashed_storage_cursor.delete_current().unwrap();
+        prefix_set.insert(Nibbles::unpack(hashed_slot));
+    }
+    drop(hashed_storage_cursor);
+
+    reth_trie_db::with_adapter!(tx, |A| {
+        let (root, _, updates) = DbStorageRoot::<_, A>::from_tx_hashed(tx.tx_ref(), hashed_address)
+            .with_prefix_set(prefix_set.freeze())
+            .root_with_updates()
+            .unwrap();
+        assert_eq!(root, EMPTY_ROOT_HASH);
+        assert!(!updates.is_deleted());
+        assert!(!updates.removed_nodes_ref().is_empty());
     });
 }
 

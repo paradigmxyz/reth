@@ -271,9 +271,8 @@ mod tests {
     use crate::HashedStorage;
 
     use super::*;
-    use alloy_primitives::{B256, U256};
+    use alloy_primitives::{map::B256Map, B256, U256};
     use reth_primitives_traits::Account;
-    use revm::primitives::B256Map;
     use std::{
         thread,
         time::{Duration, Instant},

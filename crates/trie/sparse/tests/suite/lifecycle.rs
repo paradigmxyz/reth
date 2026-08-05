@@ -23,7 +23,7 @@ pub(super) fn test_full_lifecycle_update_root_take_updates<T: SparseTrie>(new_tr
     let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
 
     // Cache initial hashes.
-    let _ = trie.root();
+    let _ = trie.root(epoch(0));
 
     // Insert 1 new leaf under the same hashed prefix and modify 1 existing leaf.
     let mut new_key = B256::ZERO;
@@ -40,7 +40,7 @@ pub(super) fn test_full_lifecycle_update_root_take_updates<T: SparseTrie>(new_tr
     let mut leaf_updates = SuiteTestHarness::leaf_updates(&changeset);
     harness.reveal_and_update(&mut trie, &mut leaf_updates);
 
-    let hash1 = trie.root();
+    let hash1 = trie.root(epoch(0));
 
     // Verify hash1 matches the reference trie with updated values.
     let mut expected_storage = storage;
@@ -57,88 +57,8 @@ pub(super) fn test_full_lifecycle_update_root_take_updates<T: SparseTrie>(new_tr
     );
 
     // Taking updates should not affect the cached root.
-    let hash2 = trie.root();
+    let hash2 = trie.root(epoch(0));
     assert_eq!(hash1, hash2, "root should be unchanged after take_updates");
-}
-
-/// Multiple rounds of (update → root → `take_updates`), followed by a prune, simulating block
-/// processing.
-pub(super) fn test_multi_round_update_take_updates_prune_cycle<T: SparseTrie>(new_trie: fn() -> T) {
-    // Build a trie with 10 primary leaves, each with a sibling under the same root child.
-    let mut storage: BTreeMap<B256, U256> = BTreeMap::new();
-    let mut keys = Vec::new();
-    for i in 0u8..10 {
-        let mut key = B256::ZERO;
-        key.0[0] = i << 4; // nibble prefixes: 0x0, 0x1, 0x2, ... 0x9
-        storage.insert(key, U256::from(i as u64 + 1));
-        keys.push(key);
-
-        let mut sibling = B256::ZERO;
-        sibling.0[0] = (i << 4) | 1;
-        storage.insert(sibling, U256::from(i as u64 + 100));
-    }
-
-    let mut harness = SuiteTestHarness::new(storage.clone());
-    let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
-
-    // Cache initial hashes.
-    let _ = trie.root();
-
-    // --- Round 1: Update leaves A (keys[0]) and B (keys[1]) ---
-    let mut changeset1: BTreeMap<B256, U256> = BTreeMap::new();
-    changeset1.insert(keys[0], U256::from(100));
-    changeset1.insert(keys[1], U256::from(200));
-    let mut leaf_updates1 = SuiteTestHarness::leaf_updates(&changeset1);
-    harness.reveal_and_update(&mut trie, &mut leaf_updates1);
-    let root1 = trie.root();
-
-    // Verify root1 matches reference.
-    harness.apply_changeset(changeset1);
-    assert_eq!(root1, harness.original_root(), "round 1 root should match reference");
-
-    let _ = trie.take_updates();
-
-    // --- Round 2: Update leaves C (keys[2]) and D (keys[3]) ---
-    let mut changeset2: BTreeMap<B256, U256> = BTreeMap::new();
-    changeset2.insert(keys[2], U256::from(300));
-    changeset2.insert(keys[3], U256::from(400));
-    let mut leaf_updates2 = SuiteTestHarness::leaf_updates(&changeset2);
-    harness.reveal_and_update(&mut trie, &mut leaf_updates2);
-    let root2 = trie.root();
-
-    // Verify root2 matches reference.
-    harness.apply_changeset(changeset2);
-    assert_eq!(root2, harness.original_root(), "round 2 root should match reference");
-
-    let _ = trie.take_updates();
-
-    // --- Prune: retain only keys A,B,C,D ---
-    let retained: Vec<Nibbles> = keys[0..4].iter().map(|k| Nibbles::unpack(*k)).collect();
-    let pre_prune_size = trie.size_hint();
-    trie.prune(&retained);
-    let post_prune_size = trie.size_hint();
-    if pre_prune_size > 0 {
-        assert!(post_prune_size < pre_prune_size, "prune should reduce node count");
-    }
-
-    // Root should still be correct after prune.
-    let root_after_prune = trie.root();
-    assert_eq!(root_after_prune, harness.original_root(), "root should be unchanged after prune");
-
-    // --- Round 3: Update leaf E (keys[4]) — needs re-reveal since it was pruned ---
-    let mut changeset3: BTreeMap<B256, U256> = BTreeMap::new();
-    changeset3.insert(keys[4], U256::from(500));
-    let mut leaf_updates3 = SuiteTestHarness::leaf_updates(&changeset3);
-    harness.reveal_and_update(&mut trie, &mut leaf_updates3);
-    let root3 = trie.root();
-
-    // Verify root3 matches reference.
-    harness.apply_changeset(changeset3);
-    assert_eq!(
-        root3,
-        harness.original_root(),
-        "round 3 root should match reference after re-reveal"
-    );
 }
 
 /// Core production loop: reveal → update → root.
@@ -167,7 +87,7 @@ pub(super) fn test_reveal_update_root_basic_lifecycle<T: SparseTrie>(new_trie: f
     let mut leaf_updates = SuiteTestHarness::leaf_updates(&changeset);
     harness.reveal_and_update(&mut trie, &mut leaf_updates);
 
-    let root = trie.root();
+    let root = trie.root(epoch(0));
 
     // Build reference trie with same mutations.
     let mut expected_storage = storage;
@@ -255,7 +175,7 @@ pub(super) fn test_incremental_reveal_and_update_with_retry<T: SparseTrie>(new_t
     expected_storage.insert(group_b_keys[1], U256::from(900));
     let expected_harness = SuiteTestHarness::new(expected_storage);
 
-    let root = trie.root();
+    let root = trie.root(epoch(0));
     assert_eq!(
         root,
         expected_harness.original_root(),
@@ -266,8 +186,7 @@ pub(super) fn test_incremental_reveal_and_update_with_retry<T: SparseTrie>(new_t
 /// End-to-end block processing with storage + account coordination.
 ///
 /// Simulates a complete block processing cycle: receive state updates → apply to storage
-/// tries → compute storage roots → promote to account trie → compute state root → take
-/// updates → commit → prune for next block.
+/// tries → compute storage roots → promote to account trie → compute state root → take updates.
 pub(super) fn test_full_block_processing_lifecycle<T: SparseTrie>(new_trie: fn() -> T) {
     // --- Setup: Build account trie with 5 accounts ---
     // A1 storage: 5 slots, A2 storage: 3 slots, A3-A5: empty storage.
@@ -322,9 +241,9 @@ pub(super) fn test_full_block_processing_lifecycle<T: SparseTrie>(new_trie: fn()
     let mut acct_trie: T = acct_harness.init_trie_fully_revealed(true, new_trie);
 
     // Cache initial hashes for all tries.
-    let _ = a1_trie.root();
-    let _ = a2_trie.root();
-    let _ = acct_trie.root();
+    let _ = a1_trie.root(epoch(0));
+    let _ = a2_trie.root(epoch(0));
+    let _ = acct_trie.root(epoch(0));
 
     // --- Storage phase ---
     // A1: modify S1 (key 0x10), remove S2 (key 0x20), add S6 (key 0x60).
@@ -351,8 +270,8 @@ pub(super) fn test_full_block_processing_lifecycle<T: SparseTrie>(new_trie: fn()
     a2_harness.reveal_and_update(&mut a2_trie, &mut a2_leaf_updates);
 
     // --- Storage root phase ---
-    let sr1 = a1_trie.root();
-    let sr2 = a2_trie.root();
+    let sr1 = a1_trie.root(epoch(0));
+    let sr2 = a2_trie.root(epoch(0));
 
     // Verify storage roots match references.
     a1_harness.apply_changeset(a1_changeset);
@@ -371,7 +290,7 @@ pub(super) fn test_full_block_processing_lifecycle<T: SparseTrie>(new_trie: fn()
     acct_harness.reveal_and_update(&mut acct_trie, &mut acct_leaf_updates);
 
     // --- State root phase ---
-    let state_root = acct_trie.root();
+    let state_root = acct_trie.root(epoch(0));
 
     // Verify state root matches reference.
     acct_harness.apply_changeset(acct_changeset);
@@ -381,14 +300,6 @@ pub(super) fn test_full_block_processing_lifecycle<T: SparseTrie>(new_trie: fn()
     let _ = acct_trie.take_updates();
     let _ = a1_trie.take_updates();
     let _ = a2_trie.take_updates();
-
-    // Prune account trie, retaining only A1 and A2 paths.
-    let retained: Vec<Nibbles> = acct_keys[0..2].iter().map(|k| Nibbles::unpack(*k)).collect();
-    acct_trie.prune(&retained);
-
-    // Post-prune root should still be state_root.
-    let post_prune_root = acct_trie.root();
-    assert_eq!(post_prune_root, state_root, "root should be unchanged after prune");
 }
 
 /// Prewarm via `Touched`, then mutate via `Changed`.
@@ -442,7 +353,7 @@ pub(super) fn test_touched_prewarm_then_changed_update<T: SparseTrie>(new_trie: 
     harness.reveal_and_update(&mut trie, &mut leaf_updates);
 
     // Step 3: Compute root and verify against reference.
-    let root = trie.root();
+    let root = trie.root(epoch(0));
 
     harness.apply_changeset(changeset);
     assert_eq!(
@@ -513,7 +424,7 @@ pub(super) fn test_touched_on_blinded_triggers_proof_then_changed_succeeds<T: Sp
     assert!(leaf_updates.is_empty(), "Changed key should be drained after reveal");
 
     // Step 5: Compute root and verify against reference.
-    let root = trie.root();
+    let root = trie.root(epoch(0));
 
     let mut changeset = BTreeMap::new();
     changeset.insert(target_key, new_value);
@@ -565,7 +476,7 @@ pub(super) fn test_get_leaf_value_for_storage_root_lookup<T: SparseTrie>(new_tri
     trie.update_leaves(&mut leaf_updates, |_, _| {}).expect("update_leaves should succeed");
 
     // Step 5: Compute root and verify against reference.
-    let root = trie.root();
+    let root = trie.root(epoch(0));
 
     let mut changeset = BTreeMap::new();
     changeset.insert(key1, new_value);
@@ -620,7 +531,7 @@ pub(super) fn test_find_leaf_before_update_to_check_existence<T: SparseTrie>(new
     trie.update_leaves(&mut leaf_updates, |_, _| {}).expect("update_leaves should succeed");
 
     // Step 4: Compute root and verify against reference.
-    let root = trie.root();
+    let root = trie.root(epoch(0));
 
     let mut changeset = BTreeMap::new();
     changeset.insert(key2, new_key2_value);
@@ -636,10 +547,10 @@ pub(super) fn test_find_leaf_before_update_to_check_existence<T: SparseTrie>(new
     );
 }
 
-/// After prune, hot leaves update immediately; cold leaves need re-reveal.
+/// After epoch pruning, recently changed leaves update immediately and old leaves need re-reveal.
 ///
-/// Build 10-leaf trie, do Block 1 (update K1,K2,K3 → commit → prune retaining K1,K2),
-/// then Block 2: update K1 (hot, works immediately), update K5 (cold, needs re-reveal).
+/// Build a trie at epoch 0, update K1,K2,K3 at epoch 1, prune before epoch 1, then update
+/// K1 without a proof and K5 after re-revealing it.
 pub(super) fn test_prune_then_reuse_for_next_block<T: SparseTrie>(new_trie: fn() -> T) {
     // Build a trie with 10 leaves.
     let mut storage: BTreeMap<B256, U256> = BTreeMap::new();
@@ -655,7 +566,7 @@ pub(super) fn test_prune_then_reuse_for_next_block<T: SparseTrie>(new_trie: fn()
     let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
 
     // Cache initial hashes.
-    let _ = trie.root();
+    let _ = trie.root(epoch(0));
 
     // --- Block 1: Update K1 (keys[0]), K2 (keys[1]), K3 (keys[2]) ---
     let mut changeset1: BTreeMap<B256, U256> = BTreeMap::new();
@@ -664,23 +575,25 @@ pub(super) fn test_prune_then_reuse_for_next_block<T: SparseTrie>(new_trie: fn()
     changeset1.insert(keys[2], U256::from(300));
     let mut leaf_updates1 = SuiteTestHarness::leaf_updates(&changeset1);
     harness.reveal_and_update(&mut trie, &mut leaf_updates1);
-    let root1 = trie.root();
+    let root1 = trie.root(epoch(1));
 
     harness.apply_changeset(changeset1);
     assert_eq!(root1, harness.original_root(), "block 1 root should match reference");
 
     let _ = trie.take_updates();
 
-    // --- Prune: retain only K1 and K2 as "hot" ---
-    let retained: Vec<Nibbles> = [keys[0], keys[1]].iter().map(|k| Nibbles::unpack(*k)).collect();
-    trie.prune(&retained);
+    trie.prune(epoch(1));
 
     // --- Block 2 — hot path: Update K1 with a new value ---
     let mut changeset_hot: BTreeMap<B256, U256> = BTreeMap::new();
     changeset_hot.insert(keys[0], U256::from(999));
     let mut leaf_updates_hot = SuiteTestHarness::leaf_updates(&changeset_hot);
-    harness.reveal_and_update(&mut trie, &mut leaf_updates_hot);
-    let root_hot = trie.root();
+    trie.update_leaves(&mut leaf_updates_hot, |_, _| {
+        panic!("leaf changed at the cutoff epoch must remain revealed")
+    })
+    .expect("update_leaves should succeed");
+    assert!(leaf_updates_hot.is_empty());
+    let root_hot = trie.root(epoch(2));
 
     harness.apply_changeset(changeset_hot);
     assert_eq!(
@@ -693,8 +606,12 @@ pub(super) fn test_prune_then_reuse_for_next_block<T: SparseTrie>(new_trie: fn()
     let mut changeset_cold: BTreeMap<B256, U256> = BTreeMap::new();
     changeset_cold.insert(keys[4], U256::from(555));
     let mut leaf_updates_cold = SuiteTestHarness::leaf_updates(&changeset_cold);
+    let mut proof_requested = false;
+    trie.update_leaves(&mut leaf_updates_cold, |_, _| proof_requested = true)
+        .expect("update_leaves should succeed");
+    assert!(proof_requested, "leaf older than the cutoff should require a proof");
     harness.reveal_and_update(&mut trie, &mut leaf_updates_cold);
-    let root_cold = trie.root();
+    let root_cold = trie.root(epoch(2));
 
     harness.apply_changeset(changeset_cold);
     assert_eq!(

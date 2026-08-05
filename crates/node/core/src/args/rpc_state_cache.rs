@@ -30,7 +30,7 @@ pub struct RpcStateCacheArgs {
     )]
     pub max_headers: u32,
 
-    /// Max number of revm block access lists in cache.
+    /// Max number of block access lists in cache.
     #[arg(
         long = "rpc-cache.max-bals",
         default_value_t = DEFAULT_BAL_CACHE_MAX_LEN,
