@@ -807,7 +807,7 @@ mod tests {
         let signer = test_block_builder.signer;
         let initial_balance = U256::from(10).pow(U256::from(18));
         // The historical check below needs the signer to exist before block 2. Empty test blocks
-        // do not persist the signer state queried here.
+        // make the builder's subsequent revert data describe it as absent.
         let block_a1 = loop {
             let block = test_block_builder.get_executed_block_with_number(1, genesis_hash);
             if !block.recovered_block().body().transactions.is_empty() {
