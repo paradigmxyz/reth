@@ -172,7 +172,21 @@ where
         parallel_bal_execution: bool,
     ) -> IteratorPayloadHandle<Evm, I>
     where
-        P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+        P: reth_provider::DatabaseProviderFactory
+            + BlockReader
+            + reth_provider::PruneCheckpointReader
+            + reth_provider::StageCheckpointReader
+            + StateProviderFactory
+            + StateReader
+            + Clone
+            + 'static,
+        P::Provider: reth_provider::BlockHashReader
+            + reth_provider::BlockNumReader
+            + reth_provider::PruneCheckpointReader
+            + reth_provider::StageCheckpointReader
+            + reth_provider::StorageSettingsCache
+            + reth_provider::TryIntoHistoricalStateProvider
+            + 'static,
     {
         let (prewarm_rx, execution_rx) =
             self.spawn_tx_iterator(transactions, env.transaction_count, parallel_bal_execution);
@@ -336,7 +350,21 @@ where
         parallel_bal_execution: bool,
     ) -> CacheTaskHandle<<Evm::Primitives as NodePrimitives>::Receipt>
     where
-        P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+        P: reth_provider::DatabaseProviderFactory
+            + BlockReader
+            + reth_provider::PruneCheckpointReader
+            + reth_provider::StageCheckpointReader
+            + StateProviderFactory
+            + StateReader
+            + Clone
+            + 'static,
+        P::Provider: reth_provider::BlockHashReader
+            + reth_provider::BlockNumReader
+            + reth_provider::PruneCheckpointReader
+            + reth_provider::StageCheckpointReader
+            + reth_provider::StorageSettingsCache
+            + reth_provider::TryIntoHistoricalStateProvider
+            + 'static,
     {
         // Each mode carries the capability its producers use; the rest is dropped here, so
         // unused capabilities do not keep the state-root task's update channel open.

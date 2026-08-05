@@ -1,3 +1,4 @@
+use super::state::latest::LatestStateProvider;
 use crate::{
     providers::{
         ConsistentProvider, OverlayStateProvider, OverlayStateProviderFactory, ProviderNodeTypes,
@@ -32,9 +33,10 @@ use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, NodePrimitivesProvider, RangeEnd, RangeResponse, RangeResult,
     StateRangeProvider, StateRangeProviderFactory, StateRangeView, StorageChangeSetReader,
-    StorageRangeResult,
+    StorageRangeResult, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
+use reth_storage_overlay::{anchor_for_parent, AnchorForParent};
 use reth_trie::{
     hashed_cursor::{HashedCursor, HashedCursorFactory},
     metrics::TrieRootMetrics,
@@ -154,9 +156,20 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         &self,
         state: &BlockState<N::Primitives>,
     ) -> ProviderResult<MemoryOverlayStateProvider<N::Primitives>> {
-        let anchor_hash = state.anchor().hash;
-        let latest_historical = self.database.history_by_block_hash(anchor_hash)?;
-        Ok(state.state_provider(latest_historical))
+        let provider = self.database.provider()?;
+        let anchor =
+            anchor_for_parent(state.hash(), state.chain().map(|state| state.block()), &provider)?;
+
+        let (historical, overlay): (StateProviderBox, _) = match anchor {
+            AnchorForParent::NoReverts { overlay, .. } => {
+                (Box::new(LatestStateProvider::new(provider)), overlay)
+            }
+            AnchorForParent::RevertsRequired { anchor, overlay, .. } => {
+                (provider.try_into_history_at_block(anchor.number)?, overlay)
+            }
+        };
+
+        Ok(MemoryOverlayStateProvider::new(historical, overlay))
     }
 
     /// Returns a cursor-backed state view for a state root still only in canonical in-memory

@@ -29,10 +29,12 @@ use reth_primitives_traits::{
     FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
 use reth_provider::{
-    BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
-    DatabaseProviderFactory, HashedPostStateProvider, ProviderError, SaveBlocksInput,
+    BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockHashReader, BlockNumReader,
+    BlockReader, ChangeSetReader, DatabaseProviderFactory, HashedPostStateProvider,
+    LatestStateProvider, ProviderError, PruneCheckpointReader, SaveBlocksInput,
     StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
     StorageChangeSetReader, StorageSettingsCache, TransactionVariant,
+    TryIntoHistoricalStateProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
@@ -116,61 +118,60 @@ const CHANGESET_CACHE_RETENTION_BLOCKS: u64 = 64;
 pub struct StateProviderBuilder<N: NodePrimitives, P> {
     /// The provider factory used to create providers.
     provider_factory: P,
-    /// The historical block hash to fetch state from.
-    historical: B256,
-    /// The blocks that form the chain from historical to target and are in memory.
-    overlay: Option<Vec<ExecutedBlock<N>>>,
+    /// Hash of the block whose state to provide.
+    parent_hash: B256,
+    /// Tracks the in-memory parent chain and its overlays.
+    overlay_manager: OverlayManager<N>,
 }
 
 impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
-    /// Creates a new state provider from the provider factory, historical block hash and optional
-    /// overlaid blocks.
+    /// Creates a new state provider builder for `parent_hash`.
     pub const fn new(
         provider_factory: P,
-        historical: B256,
-        overlay: Option<Vec<ExecutedBlock<N>>>,
+        parent_hash: B256,
+        overlay_manager: OverlayManager<N>,
     ) -> Self {
-        Self { provider_factory, historical, overlay }
+        Self { provider_factory, parent_hash, overlay_manager }
     }
 }
 
 impl<N: NodePrimitives, P> StateProviderBuilder<N, P>
 where
-    P: BlockReader + StateProviderFactory + StateReader + Clone,
+    P: DatabaseProviderFactory,
+    P::Provider: BlockHashReader
+        + BlockNumReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + TryIntoHistoricalStateProvider
+        + 'static,
 {
     /// Creates a new state provider from this builder.
     pub fn build(&self) -> ProviderResult<StateProviderBox> {
-        let Some(mut overlay) = self.overlay.clone() else {
-            return self.provider_factory.state_by_block_hash(self.historical)
-        };
-
-        // Under partial persistence, the database exposes a hybrid latest view: state/trie data
-        // is durable through the partial-state-trie frontier while the Finish frontier can be
-        // newer. That view is a valid base only if this in-memory chain covers both frontiers.
-        // Keep every block after the state/trie frontier, including blocks through Finish, so
-        // masked state is still supplied by the in-memory provider.
-        if let Some(latest) = self.provider_factory.latest_database_state()? {
-            let state_trie_tip = latest.state_trie_tip();
-            let finish_tip = latest.finish_tip();
-            if let Some(overlay_len) = latest_database_overlay_len(
-                self.historical,
-                overlay.len(),
-                state_trie_tip,
-                finish_tip,
-                overlay.iter().map(|block| block.recovered_block().num_hash()),
-            ) {
-                overlay.truncate(overlay_len);
-                let mut provider = latest.into_provider();
-                if !overlay.is_empty() {
-                    provider = Box::new(MemoryOverlayStateProvider::new(provider, overlay));
-                }
-                return Ok(provider)
+        let overlay_builder = self.overlay_manager.overlay_builder(self.parent_hash);
+        let provider = self.provider_factory.database_provider_ro()?;
+        let anchor = overlay_builder.anchor_at_parent(&provider)?;
+        let (provider, overlay): (StateProviderBox, _) = match anchor {
+            reth_storage_overlay::AnchorForParent::NoReverts { anchor, overlay } => {
+                debug!(
+                    target: "engine::tree",
+                    parent_hash = %self.parent_hash,
+                    ?anchor,
+                    "creating state provider from latest state"
+                );
+                (Box::new(LatestStateProvider::new(provider)), overlay)
             }
-        }
-
-        let mut provider = self.provider_factory.state_by_block_hash(self.historical)?;
-        provider = Box::new(MemoryOverlayStateProvider::new(provider, overlay));
-        Ok(provider)
+            reth_storage_overlay::AnchorForParent::RevertsRequired { anchor, overlay, .. } => {
+                debug!(
+                    target: "engine::tree",
+                    parent_hash = %self.parent_hash,
+                    ?anchor,
+                    "creating state provider from historical state"
+                );
+                (provider.try_into_history_at_block(anchor.number)?, overlay)
+            }
+        };
+        Ok(Box::new(MemoryOverlayStateProvider::new(provider, overlay)))
     }
 }
 
@@ -690,10 +691,15 @@ where
         + Clone
         + 'static,
     P::Provider: BlockReader<Block = N::Block, Header = N::BlockHeader>
+        + BlockHashReader
+        + BlockNumReader
+        + PruneCheckpointReader
         + StageCheckpointReader
         + ChangeSetReader
         + StorageChangeSetReader
-        + StorageSettingsCache,
+        + StorageSettingsCache
+        + TryIntoHistoricalStateProvider
+        + 'static,
     C: ConfigureEvm<Primitives = N> + 'static,
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
     V: EngineValidator<T> + WaitForCaches,
@@ -3818,26 +3824,16 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone,
     {
-        if let Some((historical, blocks)) = self.state.tree_state.blocks_by_hash(hash) {
-            debug!(target: "engine::tree", %hash, %historical, "found canonical state for block in memory, creating provider builder");
-            // the block leads back to the canonical chain
-            return Ok(Some(StateProviderBuilder::new(
-                self.provider.clone(),
-                historical,
-                Some(blocks),
-            )))
+        if !self.state.tree_state.contains_hash(&hash) && self.provider.header(hash)?.is_none() {
+            debug!(target: "engine::tree", %hash, "no canonical state found for block");
+            return Ok(None)
         }
 
-        // Check if the block is persisted
-        if let Some(header) = self.provider.header(hash)? {
-            debug!(target: "engine::tree", %hash, number = %header.number(), "found canonical state for block in database, creating provider builder");
-            // For persisted blocks, we create a builder that will fetch state directly from the
-            // database
-            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)))
-        }
-
-        debug!(target: "engine::tree", %hash, "no canonical state found for block");
-        Ok(None)
+        Ok(Some(StateProviderBuilder::new(
+            self.provider.clone(),
+            hash,
+            self.state.tree_state.overlay_manager.clone(),
+        )))
     }
 }
 
