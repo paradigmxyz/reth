@@ -402,7 +402,10 @@ where
             let fork_choice_state = ForkchoiceState {
                 head_block_hash: head_hash,
                 safe_block_hash: head_hash,
-                finalized_block_hash: head_hash,
+                // Making a block canonical does not imply finality: tests advance the finalized
+                // block explicitly via `FinalizeBlock`, and a finalized tip would reject any
+                // later forkchoice update below it as a too deep reorg.
+                finalized_block_hash: B256::ZERO,
             };
             debug!(
                 "Broadcasting forkchoice update to {} clients. Head: {:?}",
