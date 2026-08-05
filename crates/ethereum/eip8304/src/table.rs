@@ -28,18 +28,36 @@ impl IndexTable {
     /// 3. Build binary Merkle tree bottom-up (SHA256(left ++ right))
     /// 4. mix_in_length: SHA256(merkle_root ++ uint256_le(entry_count))
     ///
-    /// The EIP defines the root over `List[Hash32, entry_count]`, i.e. the SSZ list
-    /// limit equals the entry count. Padding to `next_power_of_two(entry_count)`
-    /// therefore is the correct chunk count for the merkleization (each `Hash32` is
-    /// exactly one 32-byte chunk).
+    /// ## Depth
     ///
-    /// The EIP does not define an empty-table root; `B256::ZERO` is a local
-    /// convention. In practice level-0 tables always carry the delayed parent block
-    /// entry, so a table is empty only at genesis.
+    /// The EIP states `List[Hash32, entry_count]` at line 170, i.e. the SSZ *limit*
+    /// equals the actual entry count. Under that reading padding to
+    /// `next_power_of_two(entry_count)` is the correct chunk count.
+    ///
+    /// The EIP abstract (line 16) and `Index tables` section (line 51) describe
+    /// a **fixed-depth** binary tree, which in canonical SSZ would require a
+    /// compile-time constant capacity N in `List[Hash32, N]`. No such constant is
+    /// defined anywhere in the specification (the parameter table lists only
+    /// `TABLE_SIZES`, `TABLES_PER_LEVEL`, and addresses).
+    ///
+    /// We therefore implement the literal reading (limit == actual count), which is
+    /// the only implementable interpretation today. If the EIP later adopts a fixed
+    /// capacity the pad target (`next_power_of_two`) is the single point of change.
+    ///
+    /// ## Empty tables
+    ///
+    /// Canonical SSZ `hash_tree_root(List[Hash32, 0])` =
+    /// `mix_in_length(zero_hash(0), 0)` = `SHA256(0x00×64)`. The bytecode
+    /// reserves `B256::ZERO` as the "slot unset" sentinel (`get` reverts on a
+    /// zero slot), so an empty table must not hash to zero.
+    ///
+    /// In practice a level-0 table is never empty (the delayed parent block entry
+    /// is always present when `block_number > 0`), so only genesis block 0 with
+    /// zero transactions hits this path.
     pub fn compute_root(&self) -> B256 {
         let count = self.entries.len();
         if count == 0 {
-            return B256::ZERO;
+            return B256::from(sha256_hash(&[0u8; 64]));
         }
 
         let mut leaves: Vec<[u8; 32]> =
@@ -135,7 +153,17 @@ mod tests {
     #[test]
     fn test_empty_table_root() {
         let table = IndexTable::new(0, 1, vec![]);
-        assert_eq!(table.compute_root(), B256::ZERO);
+        // canonical SSZ hash_tree_root(List[Hash32, 0]) =
+        // mix_in_length(zero_hash(0), 0) = SHA256(0x00×64)
+        assert_eq!(table.compute_root(), B256::from(sha256_hash(&[0u8; 64])));
+    }
+
+    #[test]
+    fn test_empty_table_root_is_not_zero_sentinel() {
+        // The index contract treats B256::ZERO as an uninitialized ring-buffer
+        // slot; an empty table root must not collide with that sentinel.
+        let table = IndexTable::new(0, 1, vec![]);
+        assert_ne!(table.compute_root(), B256::ZERO);
     }
 
     #[test]
