@@ -114,7 +114,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
             + BlockNumReader
             + StorageSettingsCache,
     {
-        self.changeset_cache.get_or_compute_range(provider, range)
+        self.changeset_cache.get_or_compute_range(self, provider, range)
     }
 
     /// Evicts cached changesets for blocks below `up_to_block`.
@@ -135,7 +135,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
             + BlockNumReader
             + StorageSettingsCache,
     {
-        compute_block_trie_updates(&self.changeset_cache, provider, block_number)
+        compute_block_trie_updates(self, &self.changeset_cache, provider, block_number)
     }
 
     /// Takes the preserved sparse trie if present.

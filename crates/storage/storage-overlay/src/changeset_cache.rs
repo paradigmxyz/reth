@@ -7,13 +7,14 @@
 //! - **Reorg support**: Quickly access changesets to revert blocks during chain reorganizations
 //! - **Memory efficiency**: Explicit eviction releases persisted changesets
 
+use crate::OverlayManager;
 use alloy_primitives::{map::B256Map, BlockNumber, B256};
 use parking_lot::RwLock;
 use reth_metrics::{
     metrics::{Counter, Gauge},
     Metrics,
 };
-use reth_primitives_traits::FastInstant as Instant;
+use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_storage_api::{
     BlockNumReader, ChangeSetReader, DBProvider, StorageChangeSetReader, StorageSettingsCache,
 };
@@ -62,12 +63,14 @@ use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseHashedPostState, Databas
 /// - Block number exceeds database tip
 /// - Database access fails
 /// - Cache retrieval fails
-pub(crate) fn compute_block_trie_updates<Provider>(
+pub(crate) fn compute_block_trie_updates<N, Provider>(
+    overlay_manager: &OverlayManager<N>,
     cache: &ChangesetCache,
     provider: &Provider,
     block_number: BlockNumber,
 ) -> ProviderResult<TrieUpdatesSorted>
 where
+    N: NodePrimitives,
     Provider: DBProvider
         + ChangeSetReader
         + StorageChangeSetReader
@@ -75,16 +78,18 @@ where
         + StorageSettingsCache,
 {
     reth_trie_db::with_adapter!(provider, |A| {
-        compute_block_trie_updates_inner::<_, A>(cache, provider, block_number)
+        compute_block_trie_updates_inner::<_, _, A>(overlay_manager, cache, provider, block_number)
     })
 }
 
-fn compute_block_trie_updates_inner<Provider, A>(
+fn compute_block_trie_updates_inner<N, Provider, A>(
+    overlay_manager: &OverlayManager<N>,
     cache: &ChangesetCache,
     provider: &Provider,
     block_number: BlockNumber,
 ) -> ProviderResult<TrieUpdatesSorted>
 where
+    N: NodePrimitives,
     Provider: DBProvider
         + ChangeSetReader
         + StorageChangeSetReader
@@ -97,10 +102,11 @@ where
     let db_tip_block = provider.best_block_number()?;
 
     // Step 1: Get the trie changesets for the target block from cache
-    let changesets = cache.get_or_compute(provider, block_number)?;
+    let changesets = cache.get_or_compute(overlay_manager, provider, block_number)?;
 
     // Step 2: Get the trie reverts for the state after the target block using the cache
-    let reverts = cache.get_or_compute_range(provider, (block_number + 1)..=db_tip_block)?;
+    let reverts =
+        cache.get_or_compute_range(overlay_manager, provider, (block_number + 1)..=db_tip_block)?;
 
     // Step 3: Create an InMemoryTrieCursorFactory with the reverts
     // This gives us the trie state as it was after the target block was processed
@@ -194,19 +200,21 @@ impl ChangesetCache {
     /// # Returns
     ///
     /// Changesets for the block, either from cache or computed on-the-fly.
-    pub(crate) fn get_or_compute<P>(
+    pub(crate) fn get_or_compute<N, P>(
         &self,
+        overlay_manager: &OverlayManager<N>,
         provider: &P,
         block_number: BlockNumber,
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
+        N: NodePrimitives,
         P: DBProvider
             + ChangeSetReader
             + StorageChangeSetReader
             + BlockNumReader
             + StorageSettingsCache,
     {
-        self.get_or_compute_range(provider, block_number..=block_number)
+        self.get_or_compute_range(overlay_manager, provider, block_number..=block_number)
     }
 
     /// Gets or computes trie reverts for a range of blocks.
@@ -235,30 +243,22 @@ impl ChangesetCache {
     /// - Database access fails
     /// - Block hash lookup fails
     /// - Changeset computation fails
-    pub(crate) fn get_or_compute_range<P>(
+    pub(crate) fn get_or_compute_range<N, P>(
         &self,
+        _overlay_manager: &OverlayManager<N>,
         provider: &P,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
+        N: NodePrimitives,
         P: DBProvider
             + ChangeSetReader
             + StorageChangeSetReader
             + BlockNumReader
             + StorageSettingsCache,
     {
-        let db_tip_block = provider.best_block_number()?;
-
         let start_block = *range.start();
         let end_block = *range.end();
-
-        // If range end is beyond the tip, return an error
-        if end_block > db_tip_block {
-            return Err(ProviderError::InsufficientChangesets {
-                requested: end_block,
-                available: 0..=db_tip_block,
-            });
-        }
 
         let timer = Instant::now();
 
@@ -371,7 +371,6 @@ impl ChangesetCache {
         let accumulated_reverts = Arc::new(reth_trie_db::compute_range_trie_changesets(
             provider,
             start_block..=end_block,
-            db_tip_block,
         )?);
 
         let elapsed = timer.elapsed();
@@ -780,7 +779,8 @@ mod tests {
             );
         }
 
-        let accumulated = cache.get_or_compute_range(&*provider, 1..=2).unwrap();
+        let overlay_manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
+        let accumulated = cache.get_or_compute_range(&overlay_manager, &*provider, 1..=2).unwrap();
         assert_eq!(accumulated.account_nodes_ref(), &[(path, Some(older_node))]);
     }
 
@@ -862,11 +862,13 @@ mod tests {
         assert!(storage_revert.storage_nodes_ref().is_empty());
 
         let cache = ChangesetCache::new();
-        let from_cache_api = cache.get_or_compute_range(&*provider, 1..=3).unwrap();
+        let overlay_manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
+        let from_cache_api =
+            cache.get_or_compute_range(&overlay_manager, &*provider, 1..=3).unwrap();
         assert_eq!(*from_cache_api, actual);
         assert_eq!(cache.inner.read().entries.len(), 1);
 
-        let block_changesets = cache.get_or_compute(&*provider, 2).unwrap();
+        let block_changesets = cache.get_or_compute(&overlay_manager, &*provider, 2).unwrap();
         assert_eq!(*block_changesets, legacy_compute_block_trie_changesets(&*provider, 2));
         assert_eq!(cache.inner.read().entries.len(), 2);
     }

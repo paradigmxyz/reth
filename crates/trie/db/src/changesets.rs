@@ -59,7 +59,6 @@ where
 pub fn compute_range_trie_changesets<Provider>(
     provider: &Provider,
     range: RangeInclusive<BlockNumber>,
-    db_tip_block: BlockNumber,
 ) -> Result<TrieUpdatesSorted, ProviderError>
 where
     Provider: DBProvider
@@ -69,14 +68,13 @@ where
         + StorageSettingsCache,
 {
     crate::with_adapter!(provider, |A| {
-        compute_range_trie_changesets_inner::<_, A>(provider, range, db_tip_block)
+        compute_range_trie_changesets_inner::<_, A>(provider, range)
     })
 }
 
 fn compute_range_trie_changesets_inner<Provider, A>(
     provider: &Provider,
     range: RangeInclusive<BlockNumber>,
-    db_tip_block: BlockNumber,
 ) -> Result<TrieUpdatesSorted, ProviderError>
 where
     Provider: DBProvider
@@ -88,6 +86,7 @@ where
 {
     let start_block = *range.start();
     let end_block = *range.end();
+    let db_tip_block = provider.best_block_number()?;
 
     if start_block > end_block {
         return Ok(TrieUpdatesSorted::default())
