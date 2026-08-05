@@ -17,7 +17,7 @@ use crate::{
     },
     e2s::{error::E2sError, types::Entry},
 };
-use alloy_consensus::{Block, BlockBody, Eip658Value, Header, TxType};
+use alloy_consensus::{Block, BlockBody, Eip658Value, Header, Receipt, ReceiptEnvelope, TxType};
 use alloy_primitives::{Log, B256, U256};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use sha2::{Digest, Sha256};
@@ -258,6 +258,16 @@ pub struct SlimReceipt {
     pub cumulative_gas_used: u64,
     /// Logs emitted by the transaction.
     pub logs: Vec<Log>,
+}
+
+impl From<SlimReceipt> for ReceiptEnvelope {
+    /// Restores the bloom that the slim form omits, recomputing it from the logs.
+    fn from(receipt: SlimReceipt) -> Self {
+        let SlimReceipt { tx_type, status, cumulative_gas_used, logs } = receipt;
+        let receipt = Receipt { status, cumulative_gas_used, logs };
+
+        Self::from_typed(tx_type, receipt.with_bloom())
+    }
 }
 
 /// Proof type discriminant used inside the Proof entry's RLP envelope.

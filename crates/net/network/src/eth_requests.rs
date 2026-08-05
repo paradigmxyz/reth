@@ -231,6 +231,21 @@ where
         let _ = response.send(Ok(BlockBodies(bodies)));
     }
 
+    /// Replies to `GetNodeData`.
+    ///
+    /// State serving via eth `GetNodeData` was removed; answer with an empty payload so eth/66
+    /// peers receive a response instead of hanging until the request timeout when the oneshot is
+    /// dropped unanswered.
+    fn on_node_data_request(
+        &self,
+        _peer_id: PeerId,
+        _request: GetNodeData,
+        response: oneshot::Sender<RequestResult<NodeData>>,
+    ) {
+        self.metrics.eth_node_data_requests_received_total.increment(1);
+        let _ = response.send(Ok(NodeData(vec![])));
+    }
+
     fn on_receipts_request(
         &self,
         _peer_id: PeerId,
@@ -691,8 +706,8 @@ where
                     IncomingEthRequest::GetBlockBodies { peer_id, request, response } => {
                         this.on_bodies_request(peer_id, request, response)
                     }
-                    IncomingEthRequest::GetNodeData { .. } => {
-                        this.metrics.eth_node_data_requests_received_total.increment(1);
+                    IncomingEthRequest::GetNodeData { peer_id, request, response } => {
+                        this.on_node_data_request(peer_id, request, response)
                     }
                     IncomingEthRequest::GetReceipts { peer_id, request, response } => {
                         this.on_receipts_request(peer_id, request, response)
@@ -843,7 +858,9 @@ mod tests {
     use reth_network_api::test_utils::PeersHandle;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_storage_api::noop::NoopProvider;
-    use reth_transaction_pool::blobstore::{BlobStoreCleanupStat, BlobStoreError};
+    use reth_transaction_pool::blobstore::{
+        BlobStoreCleanupStat, BlobStoreError, PooledBlobSidecar,
+    };
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -857,18 +874,11 @@ mod tests {
     }
 
     impl BlobStore for CountingBlobStore {
-        fn insert(
-            &self,
-            _tx: B256,
-            _data: BlobTransactionSidecarVariant,
-        ) -> Result<(), BlobStoreError> {
+        fn insert(&self, _tx: B256, _data: PooledBlobSidecar) -> Result<(), BlobStoreError> {
             Ok(())
         }
 
-        fn insert_all(
-            &self,
-            _txs: Vec<(B256, BlobTransactionSidecarVariant)>,
-        ) -> Result<(), BlobStoreError> {
+        fn insert_all(&self, _txs: Vec<(B256, PooledBlobSidecar)>) -> Result<(), BlobStoreError> {
             Ok(())
         }
 
@@ -988,6 +998,23 @@ mod tests {
         let cells = rx.await.unwrap().unwrap();
         assert!(cells.hashes.is_empty());
         assert_eq!(get_cells_calls.load(Ordering::Relaxed), MAX_CELLS_SERVE);
+    }
+
+    #[tokio::test]
+    async fn get_node_data_responds_with_empty_payload() {
+        let (peers_tx, _) = mpsc::unbounded_channel();
+        let (_incoming_tx, incoming_rx) = mpsc::channel(1);
+        let handler = EthRequestHandler::<NoopProvider>::new(
+            NoopProvider::default(),
+            PeersHandle::new(peers_tx),
+            incoming_rx,
+        );
+        let (response, rx) = oneshot::channel();
+
+        handler.on_node_data_request(PeerId::default(), GetNodeData(vec![B256::ZERO]), response);
+
+        let node_data = rx.await.expect("response channel must not be dropped").unwrap();
+        assert!(node_data.0.is_empty(), "GetNodeData should reply with empty NodeData");
     }
 
     /// Creates a request handler backed by the mock provider for snap response tests.

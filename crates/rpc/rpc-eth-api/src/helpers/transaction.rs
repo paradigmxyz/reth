@@ -51,7 +51,7 @@ use std::{sync::Arc, time::Duration};
 /// There are subtle differences between when transacting [`RpcTxReq`]:
 ///
 /// The endpoints `eth_call` and `eth_estimateGas` and `eth_createAccessList` should always
-/// __disable__ the base fee check in the [`CfgEnv`](revm::context::CfgEnv).
+/// __disable__ the base fee check in the EVM environment.
 ///
 /// The behaviour for tracing endpoints is not consistent across clients.
 /// Geth also disables the basefee check for tracing: <https://github.com/ethereum/go-ethereum/blob/bc0b87ca196f92e5af49bd33cc190ef0ec32b197/eth/tracers/api.go#L955-L955>
@@ -271,9 +271,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     {
         async move {
             match self.load_transaction_and_receipt(hash).await? {
-                Some((tx, meta, receipt, all_receipts)) => {
-                    self.build_transaction_receipt(tx, meta, receipt, all_receipts).await.map(Some)
-                }
+                Some((tx, meta, receipt, all_receipts, block)) => self
+                    .build_transaction_receipt(tx, meta, receipt, all_receipts, block)
+                    .await
+                    .map(Some),
                 None => Ok(None),
             }
         }
@@ -293,6 +294,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 TransactionMeta,
                 ProviderReceipt<Self::Provider>,
                 Option<Arc<Vec<ProviderReceipt<Self::Provider>>>>,
+                Option<Arc<RecoveredBlock<ProviderBlock<Self::Provider>>>>,
             )>,
             Self::Error,
         >,
@@ -310,7 +312,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 if let Some(all_receipts) = cached.receipts.clone() &&
                     let Some(receipt) = all_receipts.get(cached.tx_index).cloned()
                 {
-                    return Ok(Some((tx, meta, receipt, Some(all_receipts))));
+                    return Ok(Some((tx, meta, receipt, Some(all_receipts), Some(cached.block))));
                 }
 
                 // Block still cached but receipts evicted — fetch via cache since
@@ -323,7 +325,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     .map_err(Self::Error::from_eth_err)? &&
                     let Some(receipt) = receipts.get(cached.tx_index).cloned()
                 {
-                    return Ok(Some((tx, meta, receipt, Some(receipts))));
+                    return Ok(Some((tx, meta, receipt, Some(receipts), Some(cached.block))));
                 }
             }
 
@@ -341,7 +343,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
 
                 let receipt = provider.receipt_by_hash(hash).map_err(Self::Error::from_eth_err)?;
 
-                Ok(receipt.map(|receipt| (tx, meta, receipt, None)))
+                Ok(receipt.map(|receipt| (tx, meta, receipt, None, None)))
             })
             .await
         }

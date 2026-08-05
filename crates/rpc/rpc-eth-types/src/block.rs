@@ -183,7 +183,7 @@ where
         calculate_gas_used_and_next_log_index(meta.index, all_receipts);
 
     converter
-        .convert_receipts_with_block(
+        .convert_receipts(
             vec![ConvertReceiptInput {
                 tx: tx.recovered_tx(),
                 gas_used: receipt.cumulative_gas_used() - gas_used,

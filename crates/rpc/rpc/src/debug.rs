@@ -206,7 +206,11 @@ where
             .eth_api()
             .recovered_block(block_id)
             .await?
-            .ok_or(EthApiError::HeaderNotFound(block_id))?;
+            .ok_or(EthApiError::TracingBlockNotFound(block_id))?;
+        // Tracing requires the parent state, which does not exist for the genesis block.
+        if block.number() == 0 {
+            return Err(EthApiError::GenesisNotTraceable.into())
+        }
         let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         self.trace_block(block, evm_env, opts).await
@@ -221,7 +225,7 @@ where
         opts: GethDebugTracingOptions,
     ) -> Result<GethTrace, Eth::Error> {
         let (transaction, block) = match self.eth_api().transaction_and_block(tx_hash).await? {
-            None => return Err(EthApiError::TransactionNotFound.into()),
+            None => return Err(EthApiError::TracingTransactionNotFound.into()),
             Some(res) => res,
         };
         let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
@@ -520,15 +524,15 @@ where
     /// root recomputation.
     pub async fn debug_execution_witness(
         &self,
-        block_id: BlockNumberOrTag,
+        block_id: BlockId,
         mode: Option<ExecutionWitnessMode>,
     ) -> Result<ExecutionWitness, Eth::Error> {
         let this = self.clone();
         let block = this
             .eth_api()
-            .recovered_block(block_id.into())
+            .recovered_block(block_id)
             .await?
-            .ok_or(EthApiError::HeaderNotFound(block_id.into()))?;
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
 
         self.debug_execution_witness_for_block(block, mode.unwrap_or_default()).await
     }
@@ -949,7 +953,7 @@ where
     /// Handler for `debug_executionWitness`
     async fn debug_execution_witness(
         &self,
-        block: BlockNumberOrTag,
+        block: BlockId,
         mode: Option<ExecutionWitnessMode>,
     ) -> RpcResult<ExecutionWitness> {
         let _permit = self.acquire_trace_permit().await;
