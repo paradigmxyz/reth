@@ -13,6 +13,9 @@ use std::{
     sync::Arc,
 };
 
+mod rocksdb;
+pub use rocksdb::RocksDBBalStore;
+
 /// Basic in-memory BAL store keyed by block hash.
 #[derive(Debug, Clone)]
 pub struct InMemoryBalStore {
@@ -161,7 +164,7 @@ impl BalStore for InMemoryBalStore {
         Ok(())
     }
 
-    fn flush(&self) -> ProviderResult<()> {
+    fn flush(&self, _blocks: &[NumHash]) -> ProviderResult<()> {
         Ok(())
     }
 
@@ -202,6 +205,15 @@ impl BalStore for InMemoryBalStore {
         Ok(())
     }
 
+    fn get_by_block_num_hash(&self, block: NumHash) -> ProviderResult<Option<Bytes>> {
+        let inner = self.inner.read();
+        Ok(inner
+            .entries
+            .get(&block.hash)
+            .filter(|entry| entry.block_number == block.number)
+            .map(|entry| entry.bal.clone()))
+    }
+
     fn bal_stream(&self) -> BalNotificationStream {
         self.notifications.new_listener()
     }
@@ -223,6 +235,18 @@ mod tests {
         store.insert(NumHash::new(1, hash), RawBal::from(bal.clone())).unwrap();
 
         assert_eq!(store.get_by_hashes(&[hash, missing]).unwrap(), vec![Some(bal), None]);
+    }
+
+    #[test]
+    fn lookup_by_block_num_hash_requires_matching_number() {
+        let store = InMemoryBalStore::default();
+        let hash = B256::random();
+        let bal = Bytes::from_static(b"bal");
+
+        store.insert(NumHash::new(1, hash), RawBal::from(bal.clone())).unwrap();
+
+        assert_eq!(store.get_by_block_num_hash(NumHash::new(1, hash)).unwrap(), Some(bal));
+        assert_eq!(store.get_by_block_num_hash(NumHash::new(2, hash)).unwrap(), None);
     }
 
     #[test]
@@ -250,7 +274,7 @@ mod tests {
     fn flush_is_noop() {
         let store = InMemoryBalStore::default();
 
-        store.flush().unwrap();
+        store.flush(&[]).unwrap();
     }
 
     #[test]

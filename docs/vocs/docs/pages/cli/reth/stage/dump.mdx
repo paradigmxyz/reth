@@ -105,7 +105,7 @@ Database:
           Controls the size of the in-memory LRU cache for decompressed `RocksDB` blocks. A larger cache reduces repeated decompression of hot blocks, improving read performance for history lookups.
 
       --db.balstore-cache-size <BALSTORE_CACHE_SIZE>
-          Number of recent blocks to keep in the in-memory BAL store cache
+          Retention distance, in recent blocks, for the BAL store
 
       --db.disable-metrics
           Disable built-in database metrics

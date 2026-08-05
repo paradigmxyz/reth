@@ -27,9 +27,9 @@ use reth_network_p2p::{
 use reth_network_peers::PeerId;
 use reth_primitives_traits::Block;
 use reth_storage_api::{
-    errors::provider::ProviderResult, BalProvider, BlockReader, BytecodeReader,
-    GetBlockAccessListLimit, HeaderProvider, RangeEnd, RangeResponse, StateProviderFactory,
-    StateRangeProviderFactory,
+    errors::provider::ProviderResult, get_bals_by_hashes_with_limit, BalProvider, BlockNumReader,
+    BlockReader, BytecodeReader, GetBlockAccessListLimit, HeaderProvider, RangeEnd, RangeResponse,
+    StateProviderFactory, StateRangeProviderFactory,
 };
 use reth_transaction_pool::{blobstore::NoopBlobStore, BlobStore};
 use std::{
@@ -395,7 +395,7 @@ where
 impl<C, N> EthRequestHandler<C, N>
 where
     N: NetworkPrimitives,
-    C: BalProvider,
+    C: BalProvider + BlockReader<Block = N::Block, Receipt = N::Receipt>,
 {
     /// Handles [`GetBlockAccessLists`] queries.
     ///
@@ -412,7 +412,7 @@ where
 
         let limit = GetBlockAccessListLimit::ResponseSizeSoftLimit(SOFT_RESPONSE_LIMIT);
         let access_lists =
-            self.client.bal_store().get_by_hashes_with_limit(&request.0, limit).unwrap_or_default();
+            get_bals_by_hashes_with_limit(&self.client, &request.0, limit).unwrap_or_default();
         let _ = response.send(Ok(BlockAccessLists(access_lists)));
     }
 }
@@ -420,7 +420,7 @@ where
 impl<C, N> EthRequestHandler<C, N>
 where
     N: NetworkPrimitives,
-    C: BalProvider + StateProviderFactory + StateRangeProviderFactory,
+    C: BalProvider + BlockNumReader + StateProviderFactory + StateRangeProviderFactory,
 {
     /// Handles `snap/2` (EIP-8189) requests.
     ///
@@ -468,11 +468,9 @@ where
                 let limit = GetBlockAccessListLimit::ResponseSizeSoftLimit(
                     (req.response_bytes as usize).min(SOFT_RESPONSE_LIMIT),
                 );
-                let block_access_lists = self
-                    .client
-                    .bal_store()
-                    .get_by_hashes_with_limit(&req.block_hashes, limit)
-                    .unwrap_or_default();
+                let block_access_lists =
+                    get_bals_by_hashes_with_limit(&self.client, &req.block_hashes, limit)
+                        .unwrap_or_default();
                 Ok(SnapResponse::BlockAccessLists(BlockAccessListsMessage {
                     request_id: req.request_id,
                     block_access_lists: BlockAccessLists(block_access_lists),

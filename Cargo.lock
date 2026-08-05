@@ -8108,6 +8108,8 @@ name = "reth-db-api"
 version = "2.4.1"
 dependencies = [
  "alloy-consensus",
+ "alloy-eip7928",
+ "alloy-eips",
  "alloy-primitives",
  "arbitrary",
  "arrayvec",
