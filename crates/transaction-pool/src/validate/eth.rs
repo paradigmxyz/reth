@@ -2,16 +2,15 @@
 
 use super::constants::DEFAULT_MAX_TX_INPUT_BYTES;
 use crate::{
-    blobstore::BlobStore,
+    blobstore::{BlobStore, PooledBlobSidecar},
     error::{
         Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
     },
     metrics::TxPoolValidationMetrics,
     traits::TransactionOrigin,
     validate::ValidTransaction,
-    Address, BlobTransactionSidecarVariant, EthBlobTransactionSidecar, EthPoolTransaction,
-    LocalTransactionConfig, TransactionValidationOutcome, TransactionValidationTaskExecutor,
-    TransactionValidator,
+    Address, EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig,
+    TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
 
 use alloy_consensus::{
@@ -795,7 +794,7 @@ where
     pub fn validate_eip4844(
         &self,
         transaction: &mut Tx,
-    ) -> Result<Option<BlobTransactionSidecarVariant>, InvalidPoolTransactionError> {
+    ) -> Result<Option<PooledBlobSidecar>, InvalidPoolTransactionError> {
         let mut maybe_blob_sidecar = None;
 
         // heavy blob tx validation

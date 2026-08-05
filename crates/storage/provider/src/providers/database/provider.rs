@@ -16,10 +16,10 @@ use crate::{
     DBProvider, EitherReader, EitherWriter, EitherWriterDestination, HashingWriter, HeaderProvider,
     HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter,
     LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, PersistenceFrontiers,
-    ProviderError, PruneCheckpointReader, PruneCheckpointWriter, RawRocksDBBatch, RevertsInit,
-    RocksBatchArg, RocksDBProviderFactory, StageCheckpointReader, StateProviderBox, StateWriter,
-    StaticFileProviderFactory, StatsReader, StorageReader, StorageTrieWriter, TransactionVariant,
-    TransactionsProvider, TransactionsProviderExt, TrieWriter,
+    ProviderError, ProviderHeader, PruneCheckpointReader, PruneCheckpointWriter, RawRocksDBBatch,
+    RevertsInit, RocksBatchArg, RocksDBProviderFactory, StageCheckpointReader, StateProviderBox,
+    StateWriter, StaticFileProviderFactory, StatsReader, StorageReader, StorageTrieWriter,
+    TransactionVariant, TransactionsProvider, TransactionsProviderExt, TrieWriter,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
@@ -2108,31 +2108,40 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         &self,
         tx_hash: TxHash,
     ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
+        Ok(self
+            .transaction_by_hash_with_meta_and_header(tx_hash)?
+            .map(|(transaction, meta, _)| (transaction, meta)))
+    }
+
+    fn transaction_by_hash_with_meta_and_header(
+        &self,
+        tx_hash: TxHash,
+    ) -> ProviderResult<
+        Option<(Self::Transaction, TransactionMeta, SealedHeader<ProviderHeader<Self>>)>,
+    > {
         if let Some(transaction_id) = self.transaction_id(tx_hash)? &&
             let Some(transaction) = self.transaction_by_id_unhashed(transaction_id)? &&
             let Some(block_number) = self.block_by_transaction_id(transaction_id)? &&
-            let Some(sealed_header) = self.sealed_header(block_number)?
+            let Some(sealed_header) = self.sealed_header(block_number)? &&
+            let Some(block_body) = self.block_body_indices(block_number)?
         {
-            let (header, block_hash) = sealed_header.split();
-            if let Some(block_body) = self.block_body_indices(block_number)? {
-                // the index of the tx in the block is the offset:
-                // len([start..tx_id])
-                // NOTE: `transaction_id` is always `>=` the block's first
-                // index
-                let index = transaction_id - block_body.first_tx_num();
+            // the index of the tx in the block is the offset:
+            // len([start..tx_id])
+            // NOTE: `transaction_id` is always `>=` the block's first
+            // index
+            let index = transaction_id - block_body.first_tx_num();
 
-                let meta = TransactionMeta {
-                    tx_hash,
-                    index,
-                    block_hash,
-                    block_number,
-                    base_fee: header.base_fee_per_gas(),
-                    excess_blob_gas: header.excess_blob_gas(),
-                    timestamp: header.timestamp(),
-                };
+            let meta = TransactionMeta {
+                tx_hash,
+                index,
+                block_hash: sealed_header.hash(),
+                block_number,
+                base_fee: sealed_header.base_fee_per_gas(),
+                excess_blob_gas: sealed_header.excess_blob_gas(),
+                timestamp: sealed_header.timestamp(),
+            };
 
-                return Ok(Some((transaction, meta)))
-            }
+            return Ok(Some((transaction, meta, sealed_header)))
         }
 
         Ok(None)
@@ -4046,6 +4055,11 @@ impl<TX: DbTxMut, N: NodeTypes> MetadataWriter for DatabaseProvider<TX, N> {
     fn write_metadata(&self, key: &str, value: Vec<u8>) -> ProviderResult<()> {
         self.tx.put::<tables::Metadata>(key.to_string(), value).map_err(Into::into)
     }
+
+    fn delete_metadata(&self, key: &str) -> ProviderResult<()> {
+        self.tx.delete::<tables::Metadata>(key.to_string(), None)?;
+        Ok(())
+    }
 }
 
 impl<TX: Send, N: NodeTypes> StorageSettingsCache for DatabaseProvider<TX, N> {
@@ -4083,7 +4097,7 @@ mod tests {
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
     use reth_primitives_traits::SealedBlock;
-    use reth_storage_api::MetadataWriter;
+    use reth_storage_api::{MetadataProvider, MetadataWriter};
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
         HashedPostState, KeccakKeyHasher, Nibbles, SortedTrieData, StoredNibbles,
@@ -4122,6 +4136,22 @@ mod tests {
         let end = 9u64;
         let result = provider.receipts_by_block_range(start..=end).unwrap();
         assert_eq!(result, Vec::<Vec<reth_ethereum_primitives::Receipt>>::new());
+    }
+
+    #[test]
+    fn metadata_can_be_deleted() {
+        let factory = create_test_provider_factory();
+        let key = "metadata-delete-test";
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.write_metadata(key, vec![1]).unwrap();
+        provider_rw.commit().unwrap();
+        assert_eq!(factory.provider().unwrap().get_metadata(key).unwrap(), Some(vec![1]));
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.delete_metadata(key).unwrap();
+        provider_rw.commit().unwrap();
+        assert_eq!(factory.provider().unwrap().get_metadata(key).unwrap(), None);
     }
 
     #[test]

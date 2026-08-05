@@ -1,13 +1,13 @@
 use crate::{
     providers::{
-        ConsistentProvider, LatestStateProvider, OverlayStateProvider, OverlayStateProviderFactory,
-        ProviderNodeTypes, RocksDBProvider, StaticFileProvider, StaticFileProviderRWRefMut,
+        ConsistentProvider, OverlayStateProvider, OverlayStateProviderFactory, ProviderNodeTypes,
+        RocksDBProvider, StaticFileProvider, StaticFileProviderRWRefMut,
     },
     AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
     CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
-    DatabaseProviderFactory, HashedPostStateProvider, HeaderProvider, LatestDatabaseState,
-    ProviderError, ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
+    DatabaseProviderFactory, HashedPostStateProvider, HeaderProvider, ProviderError,
+    ProviderFactory, ProviderHeader, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
     RocksDBProviderFactory, StageCheckpointReader, StateProviderBox, StateProviderFactory,
     StateReader, StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
 };
@@ -35,7 +35,6 @@ use reth_storage_api::{
     StorageRangeResult,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_storage_overlay::database_state_frontiers;
 use reth_trie::{
     hashed_cursor::{HashedCursor, HashedCursorFactory},
     metrics::TrieRootMetrics,
@@ -156,20 +155,8 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         state: &BlockState<N::Primitives>,
     ) -> ProviderResult<MemoryOverlayStateProvider<N::Primitives>> {
         let anchor_hash = state.anchor().hash;
-        let mut overlay = state.chain().map(|state| state.block()).collect::<Vec<_>>();
-        if let Some(latest) = self.latest_database_state()? &&
-            let Some(overlay_len) = latest.overlay_len(
-                anchor_hash,
-                overlay.len(),
-                overlay.iter().map(|block| block.recovered_block().num_hash()),
-            )
-        {
-            overlay.truncate(overlay_len);
-            return Ok(MemoryOverlayStateProvider::new(latest.into_provider(), overlay))
-        }
-
         let latest_historical = self.database.history_by_block_hash(anchor_hash)?;
-        Ok(MemoryOverlayStateProvider::new(latest_historical, overlay))
+        Ok(state.state_provider(latest_historical))
     }
 
     /// Returns a cursor-backed state view for a state root still only in canonical in-memory
@@ -618,6 +605,15 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider<N> {
         self.consistent_provider()?.transaction_by_hash_with_meta(tx_hash)
     }
 
+    fn transaction_by_hash_with_meta_and_header(
+        &self,
+        tx_hash: TxHash,
+    ) -> ProviderResult<
+        Option<(Self::Transaction, TransactionMeta, SealedHeader<ProviderHeader<Self>>)>,
+    > {
+        self.consistent_provider()?.transaction_by_hash_with_meta_and_header(tx_hash)
+    }
+
     fn transactions_by_block(
         &self,
         id: BlockHashOrNumber,
@@ -753,14 +749,6 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
             trace!(target: "providers::blockchain", "Using database state for latest state provider");
             self.database.latest()
         }
-    }
-
-    fn latest_database_state(&self) -> ProviderResult<Option<LatestDatabaseState>> {
-        let provider = self.database.database_provider_ro()?;
-        let (state_trie_tip, finish_tip) = database_state_frontiers(&provider)?;
-        let provider = Box::new(LatestStateProvider::new(provider));
-
-        Ok(Some(LatestDatabaseState::new(provider, state_trie_tip, finish_tip)))
     }
 
     /// Returns a [`StateProviderBox`] indexed by the given block number or tag.
@@ -1038,7 +1026,7 @@ mod tests {
         },
         BlockWriter, CanonChainTracker, ProviderFactory, SaveBlocksInput,
     };
-    use alloy_consensus::constants::EMPTY_ROOT_HASH;
+    use alloy_consensus::{constants::EMPTY_ROOT_HASH, transaction::TransactionMeta, BlockHeader};
     use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
     use alloy_primitives::{keccak256, Address, BlockNumber, TxNumber, B256, U256};
     use itertools::Itertools;
@@ -1057,8 +1045,6 @@ mod tests {
     use reth_primitives_traits::{
         Account, Block as _, RecoveredBlock, SealedBlock, SignerRecoverable, StorageEntry,
     };
-    #[cfg(feature = "partial-persistence")]
-    use reth_stages_types::FinishCheckpoint;
     use reth_stages_types::{StageCheckpoint, StageId};
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
@@ -2027,46 +2013,6 @@ mod tests {
         Ok(())
     }
 
-    #[cfg(feature = "partial-persistence")]
-    #[test]
-    fn test_latest_database_state() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            TEST_BLOCKS_COUNT,
-            BlockRangeParams::default(),
-        )?;
-        let state_trie_tip = &database_blocks[TEST_BLOCKS_COUNT - 3];
-        let finish_tip = database_blocks.last().unwrap();
-        let first_in_memory_block = in_memory_blocks.first().unwrap();
-
-        let provider_rw = provider.database.database_provider_rw()?;
-        provider_rw.save_stage_checkpoint(
-            StageId::Finish,
-            StageCheckpoint::new(finish_tip.number).with_finish_stage_checkpoint(
-                FinishCheckpoint { partial_state_trie: Some(state_trie_tip.number) },
-            ),
-        )?;
-        provider_rw.commit()?;
-
-        let latest_database_state = provider.latest_database_state()?.unwrap();
-        assert_eq!(
-            latest_database_state.state_trie_tip(),
-            BlockNumHash::new(state_trie_tip.number, state_trie_tip.hash())
-        );
-        assert_eq!(
-            latest_database_state.finish_tip(),
-            BlockNumHash::new(finish_tip.number, finish_tip.hash())
-        );
-        assert_eq!(
-            latest_database_state.into_provider().block_hash(first_in_memory_block.number)?,
-            None
-        );
-
-        Ok(())
-    }
-
     #[test]
     fn test_state_provider_factory() -> eyre::Result<()> {
         let mut rng = generators::rng();
@@ -2745,6 +2691,27 @@ mod tests {
                 |block: &SealedBlock<Block>, _: TxNumber, tx_hash: B256, _: &Vec<Vec<Receipt>>| (
                     tx_hash,
                     Some(block.body().transactions[test_tx_index].clone())
+                ),
+                B256::random()
+            ),
+            (
+                ONE,
+                transaction_by_hash_with_meta_and_header,
+                |block: &SealedBlock<Block>, _: TxNumber, tx_hash: B256, _: &Vec<Vec<Receipt>>| (
+                    tx_hash,
+                    Some((
+                        block.body().transactions[test_tx_index].clone(),
+                        TransactionMeta {
+                            tx_hash,
+                            index: test_tx_index as u64,
+                            block_hash: block.hash(),
+                            block_number: block.number,
+                            base_fee: block.base_fee_per_gas(),
+                            excess_blob_gas: block.excess_blob_gas(),
+                            timestamp: block.timestamp(),
+                        },
+                        block.clone_sealed_header(),
+                    ))
                 ),
                 B256::random()
             ),

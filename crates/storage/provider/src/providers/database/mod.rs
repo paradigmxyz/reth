@@ -7,7 +7,7 @@ use crate::{
     traits::{BlockSource, ReceiptProvider},
     BalProvider, BalStoreHandle, BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider,
     DatabaseProviderFactory, EitherWriterDestination, HashedPostStateProvider, HeaderProvider,
-    HeaderSyncGapProvider, InMemoryBalStore, MetadataProvider, ProviderError,
+    HeaderSyncGapProvider, InMemoryBalStore, MetadataProvider, ProviderError, ProviderHeader,
     PruneCheckpointReader, RocksDBProviderFactory, StageCheckpointReader, StateProviderBox,
     StaticFileProviderFactory, StaticFileWriter, TransactionVariant, TransactionsProvider,
 };
@@ -823,6 +823,15 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ProviderFactory<N> {
         tx_hash: TxHash,
     ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
         self.provider()?.transaction_by_hash_with_meta(tx_hash)
+    }
+
+    fn transaction_by_hash_with_meta_and_header(
+        &self,
+        tx_hash: TxHash,
+    ) -> ProviderResult<
+        Option<(Self::Transaction, TransactionMeta, SealedHeader<ProviderHeader<Self>>)>,
+    > {
+        self.provider()?.transaction_by_hash_with_meta_and_header(tx_hash)
     }
 
     fn transactions_by_block(
