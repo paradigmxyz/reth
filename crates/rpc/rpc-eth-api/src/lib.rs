@@ -32,7 +32,10 @@ pub use reth_rpc_convert::*;
 pub use reth_rpc_eth_types::error::{
     AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError,
 };
-pub use types::{EthApiTypes, FullEthApiTypes, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction};
+pub use types::{
+    EthApiTypes, FullEthApiTypes, RpcBlock, RpcFilledTransaction, RpcHeader, RpcReceipt,
+    RpcTransaction,
+};
 
 #[cfg(feature = "client")]
 pub use bundle::{EthBundleApiClient, EthCallBundleApiClient};

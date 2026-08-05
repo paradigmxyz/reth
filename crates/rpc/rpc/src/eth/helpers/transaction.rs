@@ -132,12 +132,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::eth::helpers::types::EthRpcConverter;
+    use crate::eth::{helpers::types::EthRpcConverter, DevSigner};
     use alloy_consensus::{
-        BlobTransactionSidecar, Block, Header, SidecarBuilder, SimpleCoder, Transaction,
+        BlobTransactionSidecar, Block, Header, SidecarBuilder, SimpleCoder, Transaction, TxEnvelope,
     };
+    use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{map::AddressMap, Address, Bytes, U256};
-    use alloy_rpc_types_eth::request::TransactionRequest;
+    use alloy_rpc_types_eth::{request::TransactionRequest, TransactionInput};
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
@@ -197,6 +198,32 @@ mod tests {
         Bytes::from(hex!(
             "02f871018303579880850555633d1b82520894eee27662c2b8eba3cd936a23f039f3189633e4c887ad591c62bdaeb180c080a07ea72c68abfb8fca1bd964f0f99132ed9280261bdca3e549546c0205e800f7d0a05b4ef3039e9c9b9babc179a1878fb825b5aaf5aed2fa8744854150157b08d6f3"
         ))
+    }
+
+    #[tokio::test]
+    async fn sign_transaction_returns_raw_and_transaction() {
+        let eth_api = mock_eth_api(Default::default());
+        let signer = DevSigner::random_signers(1).pop().unwrap();
+        let from = signer.accounts()[0];
+        eth_api.signers().write().push(signer);
+
+        let request = TransactionRequest {
+            chain_id: Some(1),
+            from: Some(from),
+            to: Some(Address::random().into()),
+            gas: Some(21_000),
+            gas_price: Some(1_000),
+            value: Some(U256::from(1_000)),
+            input: TransactionInput::default(),
+            nonce: Some(0),
+            ..Default::default()
+        };
+
+        let signed = eth_api.sign_transaction(request).await.unwrap();
+        let decoded = TxEnvelope::decode_2718(&mut signed.raw.as_ref()).unwrap();
+
+        assert_eq!(signed.tx.as_ref(), &decoded);
+        assert_eq!(signed.tx.inner.signer(), from);
     }
 
     #[tokio::test]
