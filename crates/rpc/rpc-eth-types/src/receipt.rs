@@ -1,13 +1,13 @@
 //! RPC receipt response builder, extends a layer one receipt with layer two data.
 
 use crate::EthApiError;
-use alloy_consensus::{BlockHeader, ReceiptEnvelope, Transaction};
+use alloy_consensus::{ReceiptEnvelope, Transaction};
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{Address, TxKind};
 use alloy_rpc_types_eth::{Log, TransactionReceipt};
 use reth_chainspec::EthChainSpec;
 use reth_ethereum_primitives::Receipt;
-use reth_primitives_traits::{NodePrimitives, SealedBlock, SealedHeaderFor, TransactionMeta};
+use reth_primitives_traits::{NodePrimitives, SealedHeaderFor, TransactionMeta};
 use reth_rpc_convert::transaction::{ConvertReceiptInput, ReceiptConverter};
 use std::sync::Arc;
 
@@ -131,10 +131,11 @@ where
     fn convert_receipts(
         &self,
         inputs: Vec<ConvertReceiptInput<'_, N>>,
-        block: &SealedBlock<N::Block>,
     ) -> Result<Vec<Self::RpcReceipt>, Self::Error> {
         let mut receipts = Vec::with_capacity(inputs.len());
-        let blob_params = self.chain_spec.blob_params_at_timestamp(block.header().timestamp());
+        let blob_params = inputs
+            .first()
+            .and_then(|input| self.chain_spec.blob_params_at_timestamp(input.meta.timestamp));
 
         for input in inputs {
             receipts.push(build_receipt(input, blob_params, &self.build_rpc_receipt));
