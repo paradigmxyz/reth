@@ -117,11 +117,11 @@ pub struct AccountData {
 impl AccountData {
     /// Encodes `account` in snap/2's slim format.
     pub fn from_trie_account(hash: B256, account: &TrieAccount) -> Self {
-        let body = alloy_rlp::encode(SlimAccountBody {
+        let body = alloy_rlp::encode(SlimAccountBodyRef {
             nonce: account.nonce,
             balance: account.balance,
-            storage_root: SlimAccountBody::shorten(account.storage_root, EMPTY_ROOT_HASH),
-            code_hash: SlimAccountBody::shorten(account.code_hash, KECCAK256_EMPTY),
+            storage_root: SlimAccountBodyRef::shorten(&account.storage_root, EMPTY_ROOT_HASH),
+            code_hash: SlimAccountBodyRef::shorten(&account.code_hash, KECCAK256_EMPTY),
         });
         Self { hash, body: body.into() }
     }
@@ -521,7 +521,7 @@ impl SnapProtocolMessage {
 }
 
 /// Like a trie account, with empty code and storage hashes omitted to reduce transfer size.
-#[derive(RlpEncodable, RlpDecodable)]
+#[derive(RlpDecodable)]
 struct SlimAccountBody {
     /// The account's nonce.
     nonce: u64,
@@ -534,20 +534,35 @@ struct SlimAccountBody {
 }
 
 impl SlimAccountBody {
-    /// Drops a field that holds its empty default, which is what makes the encoding slim.
-    fn shorten(value: B256, empty: B256) -> Bytes {
-        if value == empty {
-            Bytes::new()
-        } else {
-            value.into()
-        }
-    }
-
     /// Restores a dropped field to `empty`, rejecting any length the encoding never produces.
     fn restore(value: &[u8], empty: B256) -> alloy_rlp::Result<B256> {
         match value {
             [] => Ok(empty),
             _ => B256::try_from(value).map_err(|_| alloy_rlp::Error::UnexpectedLength),
+        }
+    }
+}
+
+/// Borrowed encode twin of [`SlimAccountBody`].
+#[derive(RlpEncodable)]
+struct SlimAccountBodyRef<'a> {
+    /// The account's nonce.
+    nonce: u64,
+    /// The account's balance.
+    balance: U256,
+    /// Empty when the account has no storage.
+    storage_root: &'a [u8],
+    /// Empty when the account has no code.
+    code_hash: &'a [u8],
+}
+
+impl<'a> SlimAccountBodyRef<'a> {
+    /// Drops a field that holds its empty default, which is what makes the encoding slim.
+    fn shorten(value: &'a B256, empty: B256) -> &'a [u8] {
+        if *value == empty {
+            &[]
+        } else {
+            value.as_slice()
         }
     }
 }
