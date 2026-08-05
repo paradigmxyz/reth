@@ -368,3 +368,199 @@ where
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+    use tempfile::tempdir;
+
+    #[test]
+    fn write_and_read_roundtrip() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("data.txt");
+
+        write(&path, b"hello reth").unwrap();
+
+        assert_eq!(read(&path).unwrap(), b"hello reth");
+        assert_eq!(read_to_string(&path).unwrap(), "hello reth");
+    }
+
+    #[test]
+    fn read_missing_file_reports_path_in_error() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("missing.txt");
+
+        let err = read(&path).unwrap_err();
+
+        assert!(matches!(&err, FsPathError::Read { path: p, .. } if p == &path));
+        assert!(err.to_string().contains("missing.txt"));
+    }
+
+    #[test]
+    fn open_missing_file_reports_path_in_error() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("nope.txt");
+
+        let err = open(&path).unwrap_err();
+
+        assert!(matches!(&err, FsPathError::Open { path: p, .. } if p == &path));
+    }
+
+    #[test]
+    fn create_file_creates_an_empty_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("new.bin");
+
+        let _file = create_file(&path).unwrap();
+
+        assert!(path.exists());
+        assert_eq!(metadata(&path).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn remove_file_if_exists_is_idempotent() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("gone.txt");
+        write(&path, b"x").unwrap();
+
+        remove_file_if_exists(&path).unwrap();
+        assert!(!path.exists());
+
+        remove_file_if_exists(&path).unwrap();
+    }
+
+    #[test]
+    fn remove_file_on_a_missing_path_is_an_error() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("absent.txt");
+
+        let err = remove_file(&path).unwrap_err();
+
+        assert!(matches!(&err, FsPathError::RemoveFile { path: p, .. } if p == &path));
+    }
+
+    #[test]
+    fn create_dir_all_then_read_dir() {
+        let dir = tempdir().unwrap();
+        let nested = dir.path().join("a").join("b");
+
+        create_dir_all(&nested).unwrap();
+        assert!(nested.is_dir());
+
+        write(nested.join("one.txt"), b"1").unwrap();
+        write(nested.join("two.txt"), b"2").unwrap();
+
+        assert_eq!(read_dir(&nested).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn remove_dir_all_removes_nested_contents() {
+        let dir = tempdir().unwrap();
+        let top = dir.path().join("a");
+        let nested = top.join("b");
+        create_dir_all(&nested).unwrap();
+        write(nested.join("f.txt"), b"x").unwrap();
+
+        remove_dir_all(&top).unwrap();
+
+        assert!(!top.exists());
+    }
+
+    #[test]
+    fn rename_moves_the_file() {
+        let dir = tempdir().unwrap();
+        let from = dir.path().join("from.txt");
+        let to = dir.path().join("to.txt");
+        write(&from, b"payload").unwrap();
+
+        rename(&from, &to).unwrap();
+
+        assert!(!from.exists());
+        assert_eq!(read(&to).unwrap(), b"payload");
+    }
+
+    #[test]
+    fn rename_reports_both_paths_in_the_error() {
+        let dir = tempdir().unwrap();
+        let from = dir.path().join("absent.txt");
+        let to = dir.path().join("to.txt");
+
+        let err = rename(&from, &to).unwrap_err();
+
+        assert!(
+            matches!(&err, FsPathError::Rename { from: f, to: t, .. } if f == &from && t == &to)
+        );
+    }
+
+    #[test]
+    fn metadata_reports_file_length() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("sized.bin");
+        write(&path, b"12345").unwrap();
+
+        assert_eq!(metadata(&path).unwrap().len(), 5);
+    }
+
+    #[test]
+    fn json_file_roundtrip() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("map.json");
+        let mut value = BTreeMap::new();
+        value.insert("blocks".to_string(), 42u64);
+        value.insert("chain".to_string(), 1u64);
+
+        write_json_file(&path, &value).unwrap();
+        let loaded: BTreeMap<String, u64> = read_json_file(&path).unwrap();
+
+        assert_eq!(loaded, value);
+    }
+
+    #[test]
+    fn read_json_file_rejects_invalid_json() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("broken.json");
+        write(&path, b"{ not json").unwrap();
+
+        let err = read_json_file::<BTreeMap<String, u64>>(&path).unwrap_err();
+
+        assert!(matches!(&err, FsPathError::ReadJson { path: p, .. } if p == &path));
+    }
+
+    #[test]
+    fn atomic_write_file_writes_contents_and_leaves_no_temp_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("state.bin");
+
+        atomic_write_file(&path, |file| file.write_all(b"payload")).unwrap();
+
+        assert_eq!(read(&path).unwrap(), b"payload");
+        assert!(!dir.path().join("state.tmp").exists());
+    }
+
+    #[test]
+    fn atomic_write_file_replaces_existing_contents() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("state.bin");
+        write(&path, b"old").unwrap();
+
+        atomic_write_file(&path, |file| file.write_all(b"new")).unwrap();
+
+        assert_eq!(read(&path).unwrap(), b"new");
+    }
+
+    #[test]
+    fn atomic_write_file_cleans_up_after_a_failed_write() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("state.bin");
+
+        let err = atomic_write_file(&path, |_file| -> std::result::Result<(), Error> {
+            Err(Error::other("write failed"))
+        })
+        .unwrap_err();
+
+        assert!(matches!(err, FsPathError::Write { .. }));
+        assert!(!path.exists());
+        assert!(!dir.path().join("state.tmp").exists());
+    }
+}
