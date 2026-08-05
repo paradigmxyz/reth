@@ -483,8 +483,14 @@ where
             .ok_or_else(|| ProviderError::HeaderNotFound(partial_state_trie.into()))?
     };
 
+    let persisted_parent = provider
+        .block_number(parent_hash)?
+        .filter(|&parent_number| parent_number <= partial_state_trie);
+
     let mut finish_seen = parent_hash == finish_hash;
-    let (anchor_hash, overlay) = {
+    let (anchor, overlay) = if let Some(parent_number) = persisted_parent {
+        (BlockNumHash::new(parent_number, parent_hash), Vec::new())
+    } else {
         let mut overlay = Vec::new();
         let wrapped_next_parent = || -> Option<ExecutedBlock<N>> {
             let block = next_parent()?;
@@ -495,19 +501,18 @@ where
 
         let anchor_hash =
             anchor_for_parent_in(parent_hash, wrapped_next_parent, partial_state_trie_hash);
-        (anchor_hash, overlay)
+        let anchor = if anchor_hash == partial_state_trie_hash {
+            BlockNumHash::new(partial_state_trie, anchor_hash)
+        } else {
+            let anchor_number = provider
+                .convert_hash_or_number(anchor_hash.into())?
+                .ok_or(ProviderError::BlockHashNotFound(anchor_hash))?;
+            BlockNumHash::new(anchor_number, anchor_hash)
+        };
+        (anchor, overlay)
     };
 
-    let anchor = if anchor_hash == partial_state_trie_hash {
-        BlockNumHash::new(partial_state_trie, anchor_hash)
-    } else {
-        let anchor_number = provider
-            .convert_hash_or_number(anchor_hash.into())?
-            .ok_or(ProviderError::BlockHashNotFound(anchor_hash))?;
-        BlockNumHash::new(anchor_number, anchor_hash)
-    };
-
-    finish_seen |= anchor_hash == finish_hash;
+    finish_seen |= anchor.hash == finish_hash;
 
     if anchor.number > partial_state_trie {
         return Err(ProviderError::other(Error::other(format!(
@@ -698,11 +703,20 @@ mod tests {
         let manager = OverlayManager::default();
         manager.insert_block(blocks[1].clone());
         let provider = factory.provider().unwrap();
+        let builder = manager.overlay_builder(blocks[1].recovered_block().hash());
 
-        let overlay = manager
-            .overlay_builder(blocks[1].recovered_block().hash())
-            .build_overlay(&provider)
-            .unwrap();
+        match builder.anchor_at_parent(&provider).unwrap() {
+            AnchorForParent::RevertsRequired { anchor, finish, overlay } => {
+                assert_eq!(anchor, blocks[1].recovered_block().num_hash());
+                assert_eq!(finish, blocks[3].recovered_block().num_hash());
+                assert!(overlay.is_empty());
+            }
+            AnchorForParent::NoReverts { .. } => {
+                panic!("persisted parent below Finish must require reverts")
+            }
+        }
+
+        let overlay = builder.build_overlay(&provider).unwrap();
 
         assert!(overlay.hashed_post_state.is_empty());
         assert!(overlay.trie_updates.is_empty());
