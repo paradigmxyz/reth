@@ -69,6 +69,8 @@ pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
     overlay_manager: OverlayManager<N>,
     /// Anchor hash of the reused sparse trie, if this task reused one.
     reused_sparse_trie_anchor_hash: Option<B256>,
+    /// Whether building the overlay may query revert changesets.
+    no_reverts: bool,
     /// Metrics for overlay construction.
     metrics: OverlayBuilderMetrics,
 }
@@ -81,6 +83,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             overlay_source: Some(OverlaySource::Managed),
             overlay_manager,
             reused_sparse_trie_anchor_hash: None,
+            no_reverts: false,
             metrics: OverlayBuilderMetrics::default(),
         }
     }
@@ -97,6 +100,12 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     /// already covered by its anchor-to-parent range.
     pub const fn with_skip_overlay_for_reused_sparse_trie(mut self, anchor_hash: B256) -> Self {
         self.reused_sparse_trie_anchor_hash = Some(anchor_hash);
+        self
+    }
+
+    /// Returns an error instead of querying revert changesets when reverts are required.
+    pub const fn with_no_reverts(mut self) -> Self {
+        self.no_reverts = true;
         self
     }
 
@@ -178,6 +187,13 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         // Collect any reverts which are required to bring the DB view back to the anchor hash.
         let (trie_updates, hashed_post_state) = match anchor_for_parent {
             AnchorForParent::RevertsRequired { anchor, finish, .. } => {
+                if self.no_reverts {
+                    return Err(ProviderError::other(std::io::Error::other(format!(
+                        "reverts are disabled, but overlay for parent {} requires reverting Finish #{} ({}) to anchor #{} ({})",
+                        self.parent_hash, finish.number, finish.hash, anchor.number, anchor.hash,
+                    ))))
+                }
+
                 let revert_blocks = anchor.number + 1..=finish.number;
 
                 debug!(
@@ -718,6 +734,21 @@ mod tests {
 
         assert!(overlay.hashed_post_state.is_empty());
         assert!(overlay.trie_updates.is_empty());
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn no_reverts_errors_when_reverts_are_required() {
+        let (factory, blocks) = setup_frontiers(2, 3);
+        let provider = factory.provider().unwrap();
+
+        let error = OverlayManager::<EthPrimitives>::default()
+            .overlay_builder(blocks[1].recovered_block().hash())
+            .with_no_reverts()
+            .build_overlay(&provider)
+            .unwrap_err();
+
+        assert!(error.to_string().contains("reverts are disabled"));
     }
 
     #[cfg(feature = "partial-persistence")]
