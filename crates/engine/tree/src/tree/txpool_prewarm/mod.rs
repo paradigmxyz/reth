@@ -9,7 +9,11 @@ use alloy_consensus::transaction::Recovered;
 use alloy_primitives::{Address, B256};
 use reth_evm::{ConfigureEvm, EvmEnvFor};
 use reth_primitives_traits::{NodePrimitives, TxTy};
-use reth_provider::{BlockReader, StateProviderFactory, StateReader};
+use reth_provider::{
+    BlockHashReader, BlockNumReader, BlockReader, DatabaseProviderFactory, PruneCheckpointReader,
+    StageCheckpointReader, StateProviderFactory, StateReader, StorageSettingsCache,
+    TryIntoHistoricalStateProvider,
+};
 use std::{fmt::Debug, sync::Arc};
 
 /// Coordinates a long-lived worker and the latest completed immutable snapshot.
@@ -34,22 +38,22 @@ where
 impl<N, P, Evm> Handle<N, P, Evm>
 where
     N: NodePrimitives,
-    P: reth_provider::DatabaseProviderFactory
+    P: DatabaseProviderFactory
         + BlockReader
-        + reth_provider::PruneCheckpointReader
-        + reth_provider::StageCheckpointReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
         + StateProviderFactory
         + StateReader
         + Clone
         + Send
         + Sync
         + 'static,
-    P::Provider: reth_provider::BlockHashReader
-        + reth_provider::BlockNumReader
-        + reth_provider::PruneCheckpointReader
-        + reth_provider::StageCheckpointReader
-        + reth_provider::StorageSettingsCache
-        + reth_provider::TryIntoHistoricalStateProvider
+    P::Provider: BlockHashReader
+        + BlockNumReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + TryIntoHistoricalStateProvider
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {

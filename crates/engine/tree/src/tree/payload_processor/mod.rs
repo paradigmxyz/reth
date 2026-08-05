@@ -17,7 +17,11 @@ use reth_evm::{
     ConfigureEvm, ConvertTx, ExecutableTxIterator, ExecutableTxTuple, SpecFor, TxEnvFor,
 };
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
-use reth_provider::{BlockExecutionOutput, BlockReader, StateProviderFactory, StateReader};
+use reth_provider::{
+    BlockExecutionOutput, BlockHashReader, BlockNumReader, BlockReader, DatabaseProviderFactory,
+    PruneCheckpointReader, StageCheckpointReader, StateProviderFactory, StateReader,
+    StorageSettingsCache, TryIntoHistoricalStateProvider,
+};
 use reth_revm::db::BundleState;
 use reth_tasks::Runtime;
 pub use reth_trie_parallel::{
@@ -172,20 +176,20 @@ where
         parallel_bal_execution: bool,
     ) -> IteratorPayloadHandle<Evm, I>
     where
-        P: reth_provider::DatabaseProviderFactory
+        P: DatabaseProviderFactory
             + BlockReader
-            + reth_provider::PruneCheckpointReader
-            + reth_provider::StageCheckpointReader
+            + PruneCheckpointReader
+            + StageCheckpointReader
             + StateProviderFactory
             + StateReader
             + Clone
             + 'static,
-        P::Provider: reth_provider::BlockHashReader
-            + reth_provider::BlockNumReader
-            + reth_provider::PruneCheckpointReader
-            + reth_provider::StageCheckpointReader
-            + reth_provider::StorageSettingsCache
-            + reth_provider::TryIntoHistoricalStateProvider
+        P::Provider: BlockHashReader
+            + BlockNumReader
+            + PruneCheckpointReader
+            + StageCheckpointReader
+            + StorageSettingsCache
+            + TryIntoHistoricalStateProvider
             + 'static,
     {
         let (prewarm_rx, execution_rx) =
@@ -350,20 +354,20 @@ where
         parallel_bal_execution: bool,
     ) -> CacheTaskHandle<<Evm::Primitives as NodePrimitives>::Receipt>
     where
-        P: reth_provider::DatabaseProviderFactory
+        P: DatabaseProviderFactory
             + BlockReader
-            + reth_provider::PruneCheckpointReader
-            + reth_provider::StageCheckpointReader
+            + PruneCheckpointReader
+            + StageCheckpointReader
             + StateProviderFactory
             + StateReader
             + Clone
             + 'static,
-        P::Provider: reth_provider::BlockHashReader
-            + reth_provider::BlockNumReader
-            + reth_provider::PruneCheckpointReader
-            + reth_provider::StageCheckpointReader
-            + reth_provider::StorageSettingsCache
-            + reth_provider::TryIntoHistoricalStateProvider
+        P::Provider: BlockHashReader
+            + BlockNumReader
+            + PruneCheckpointReader
+            + StageCheckpointReader
+            + StorageSettingsCache
+            + TryIntoHistoricalStateProvider
             + 'static,
     {
         // Each mode carries the capability its producers use; the rest is dropped here, so

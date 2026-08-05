@@ -27,7 +27,9 @@ use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx,
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, FastInstant as Instant, NodePrimitives};
 use reth_provider::{
-    AccountReader, BlockExecutionOutput, BlockReader, StateProviderFactory, StateReader,
+    AccountReader, BlockExecutionOutput, BlockHashReader, BlockNumReader, BlockReader,
+    DatabaseProviderFactory, PruneCheckpointReader, StageCheckpointReader, StateProviderFactory,
+    StateReader, StorageSettingsCache, TryIntoHistoricalStateProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_tasks::{pool::WorkerPool, Runtime};
@@ -90,20 +92,20 @@ where
 impl<N, P, Evm> PrewarmCacheTask<N, P, Evm>
 where
     N: NodePrimitives,
-    P: reth_provider::DatabaseProviderFactory
+    P: DatabaseProviderFactory
         + BlockReader
-        + reth_provider::PruneCheckpointReader
-        + reth_provider::StageCheckpointReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
         + StateProviderFactory
         + StateReader
         + Clone
         + 'static,
-    P::Provider: reth_provider::BlockHashReader
-        + reth_provider::BlockNumReader
-        + reth_provider::PruneCheckpointReader
-        + reth_provider::StageCheckpointReader
-        + reth_provider::StorageSettingsCache
-        + reth_provider::TryIntoHistoricalStateProvider
+    P::Provider: BlockHashReader
+        + BlockNumReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + TryIntoHistoricalStateProvider
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
@@ -575,20 +577,20 @@ type PrewarmEvmState<Evm> =
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
     N: NodePrimitives,
-    P: reth_provider::DatabaseProviderFactory
+    P: DatabaseProviderFactory
         + BlockReader
-        + reth_provider::PruneCheckpointReader
-        + reth_provider::StageCheckpointReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
         + StateProviderFactory
         + StateReader
         + Clone
         + 'static,
-    P::Provider: reth_provider::BlockHashReader
-        + reth_provider::BlockNumReader
-        + reth_provider::PruneCheckpointReader
-        + reth_provider::StageCheckpointReader
-        + reth_provider::StorageSettingsCache
-        + reth_provider::TryIntoHistoricalStateProvider
+    P::Provider: BlockHashReader
+        + BlockNumReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + TryIntoHistoricalStateProvider
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {

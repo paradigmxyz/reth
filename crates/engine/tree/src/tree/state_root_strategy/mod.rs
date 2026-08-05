@@ -69,9 +69,10 @@ use reth_primitives_traits::{
     AlloyBlockHeader, FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedHeader,
 };
 use reth_provider::{
-    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockReader,
-    DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider, ProviderError,
-    StateProviderFactory, StateReader, StateRootProvider,
+    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockHashReader, BlockNumReader,
+    BlockReader, DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider,
+    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProviderFactory, StateReader,
+    StateRootProvider, StorageSettingsCache, TryIntoHistoricalStateProvider,
 };
 use reth_storage_overlay::OverlayManager;
 use reth_tasks::utils::increase_thread_priority;
@@ -821,18 +822,18 @@ where
     N: NodePrimitives,
     P: DatabaseProviderFactory
         + BlockReader<Header = N::BlockHeader>
-        + reth_provider::PruneCheckpointReader
-        + reth_provider::StageCheckpointReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
         + StateProviderFactory
         + StateReader
         + Clone
         + 'static,
-    P::Provider: reth_provider::BlockHashReader
-        + reth_provider::BlockNumReader
-        + reth_provider::PruneCheckpointReader
-        + reth_provider::StageCheckpointReader
-        + reth_provider::StorageSettingsCache
-        + reth_provider::TryIntoHistoricalStateProvider
+    P::Provider: BlockHashReader
+        + BlockNumReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + TryIntoHistoricalStateProvider
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
         + Clone
@@ -1002,20 +1003,20 @@ where
     N: NodePrimitives,
     P: DatabaseProviderFactory
         + BlockReader
-        + reth_provider::PruneCheckpointReader
-        + reth_provider::StageCheckpointReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
         + StateProviderFactory
         + StateReader
         + Clone
         + Send
         + Sync
         + 'static,
-    P::Provider: reth_provider::BlockHashReader
-        + reth_provider::BlockNumReader
-        + reth_provider::PruneCheckpointReader
-        + reth_provider::StageCheckpointReader
-        + reth_provider::StorageSettingsCache
-        + reth_provider::TryIntoHistoricalStateProvider
+    P::Provider: BlockHashReader
+        + BlockNumReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + TryIntoHistoricalStateProvider
         + 'static,
 {
     fn name(&self) -> &'static str {
@@ -1051,20 +1052,20 @@ where
     N: NodePrimitives,
     P: DatabaseProviderFactory
         + BlockReader
-        + reth_provider::PruneCheckpointReader
-        + reth_provider::StageCheckpointReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
         + StateProviderFactory
         + StateReader
         + Clone
         + Send
         + Sync
         + 'static,
-    P::Provider: reth_provider::BlockHashReader
-        + reth_provider::BlockNumReader
-        + reth_provider::PruneCheckpointReader
-        + reth_provider::StageCheckpointReader
-        + reth_provider::StorageSettingsCache
-        + reth_provider::TryIntoHistoricalStateProvider
+    P::Provider: BlockHashReader
+        + BlockNumReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + TryIntoHistoricalStateProvider
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
         + Clone
@@ -1173,20 +1174,20 @@ where
     N: NodePrimitives,
     P: DatabaseProviderFactory
         + BlockReader
-        + reth_provider::PruneCheckpointReader
-        + reth_provider::StageCheckpointReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
         + StateProviderFactory
         + StateReader
         + Clone
         + Send
         + Sync
         + 'static,
-    P::Provider: reth_provider::BlockHashReader
-        + reth_provider::BlockNumReader
-        + reth_provider::PruneCheckpointReader
-        + reth_provider::StageCheckpointReader
-        + reth_provider::StorageSettingsCache
-        + reth_provider::TryIntoHistoricalStateProvider
+    P::Provider: BlockHashReader
+        + BlockNumReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + TryIntoHistoricalStateProvider
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
         + Clone
@@ -1290,17 +1291,17 @@ where
     N: NodePrimitives,
     P: DatabaseProviderFactory
         + BlockReader
-        + reth_provider::PruneCheckpointReader
-        + reth_provider::StageCheckpointReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
         + StateProviderFactory
         + StateReader
         + Clone,
-    P::Provider: reth_provider::BlockHashReader
-        + reth_provider::BlockNumReader
-        + reth_provider::PruneCheckpointReader
-        + reth_provider::StageCheckpointReader
-        + reth_provider::StorageSettingsCache
-        + reth_provider::TryIntoHistoricalStateProvider
+    P::Provider: BlockHashReader
+        + BlockNumReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + TryIntoHistoricalStateProvider
         + 'static,
     OverlayStateProviderFactory<P, N>:
         DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>,
