@@ -975,6 +975,24 @@ where
         }
     }
 
+    /// Returns the interval between the two most recent canonical blocks, as a stand-in for how
+    /// long the chain will take to produce the next one.
+    ///
+    /// Only used to guess which [`txpool_prewarm::NextBlock`] slots to warm, so being wrong is
+    /// free. A chain keeping its cadence gives the exact answer without hardcoding a block time; a
+    /// skipped slot in either direction gives a wrong one. Falls back to `0`, leaving the head's
+    /// own timestamp, when the grandparent is out of reach.
+    fn canonical_block_interval(
+        &self,
+        parent: &SealedHeader<N::BlockHeader>,
+        state: &EngineApiTreeState<N>,
+    ) -> u64 {
+        self.sealed_header_by_hash(parent.parent_hash(), state)
+            .ok()
+            .flatten()
+            .map_or(0, |grandparent| parent.timestamp().saturating_sub(grandparent.timestamp()))
+    }
+
     /// Executes a block with the given state provider.
     ///
     /// This method orchestrates block execution:
@@ -1908,7 +1926,11 @@ where
                 return
             }
         };
-        txpool_prewarm.start(parent.hash(), evm_env, provider_builder)
+        let next_block = txpool_prewarm::NextBlock {
+            number: parent.number() + 1,
+            timestamp: parent.timestamp() + self.canonical_block_interval(&parent, state),
+        };
+        txpool_prewarm.start(parent.hash(), evm_env, next_block, provider_builder)
     }
 
     fn payload_builder_resources(

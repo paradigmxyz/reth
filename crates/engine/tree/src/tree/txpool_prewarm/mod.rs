@@ -75,9 +75,10 @@ where
         &self,
         parent_hash: B256,
         evm_env: EvmEnvFor<Evm>,
+        next_block: NextBlock,
         provider_builder: StateProviderBuilder<N, P>,
     ) {
-        self.control.start(parent_hash, Job { evm_env, provider_builder });
+        self.control.start(parent_hash, Job { evm_env, next_block, provider_builder });
     }
 }
 
@@ -98,6 +99,22 @@ pub struct Transaction<N: NodePrimitives> {
     pub transaction: Recovered<TxTy<N>>,
 }
 
+/// Where the block that will be built on top of the warmed parent is expected to sit in the
+/// chain.
+///
+/// The pre-block system calls write into ring buffers indexed by the *executing* block's own
+/// number and timestamp, so warming the slots they will overwrite needs the successor's
+/// attributes rather than the head's. The number is exact; the timestamp is a prediction. Both
+/// only pick which slots get read, so a wrong guess costs a couple of wasted reads on a
+/// background thread and nothing else.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct NextBlock {
+    /// Block number, always `parent.number + 1`.
+    pub(crate) number: u64,
+    /// Predicted block timestamp.
+    pub(crate) timestamp: u64,
+}
+
 /// Source of txpool transactions for best-effort cache prewarming.
 pub trait Source<N: NodePrimitives>: Send + Sync + Debug {
     /// Opens a live best-transactions iterator for `parent_hash`.
@@ -111,5 +128,6 @@ pub trait Source<N: NodePrimitives>: Send + Sync + Debug {
 /// A request to warm txpool transactions against one fully validated parent state.
 struct Job<N: NodePrimitives, P, Evm: ConfigureEvm<Primitives = N>> {
     evm_env: EvmEnvFor<Evm>,
+    next_block: NextBlock,
     provider_builder: StateProviderBuilder<N, P>,
 }
