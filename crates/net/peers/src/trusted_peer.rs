@@ -121,7 +121,7 @@ impl FromStr for TrustedPeer {
             let enr = enr::Enr::<secp256k1::SecretKey>::from_str(s)
                 .map_err(NodeRecordParseError::InvalidUrl)?;
             let mut record = NodeRecord::try_from(&enr)?;
-            if record.tcp_port == 0 {
+            if !record.has_rlpx_endpoint() {
                 // Discovery-only ENRs commonly share their UDP port with the RLPx listener.
                 record.tcp_port = record.udp_port;
             }

@@ -25,8 +25,10 @@ use tracing::{debug, error, instrument, warn};
 /// Unified result of any persistence operation.
 #[derive(Debug)]
 pub struct PersistenceResult {
-    /// The last block that was persisted, if any.
-    pub last_block: Option<BlockNumHash>,
+    /// The highest block whose non-state/trie outputs are persisted.
+    pub last_block: BlockNumHash,
+    /// The state/trie persistence frontier.
+    pub last_state_trie_block: BlockNumHash,
     /// The commit duration, only available for save-blocks operations.
     pub commit_duration: Option<Duration>,
 }
@@ -95,24 +97,25 @@ where
         while let Ok(action) = self.incoming.recv() {
             match action {
                 PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
-                    let last_block = self.on_remove_blocks_above(new_tip_num)?;
+                    let result = self.on_remove_blocks_above(new_tip_num)?;
                     // send new sync metrics based on removed blocks
                     let _ =
                         self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
-                    let _ = sender.send(PersistenceResult { last_block, commit_duration: None });
+                    let _ = sender.send(result);
                 }
-                PersistenceAction::SaveBlocks(blocks, sender) => {
-                    let result = self.on_save_blocks(blocks)?;
-                    let result_number = result.last_block.map(|b| b.number);
+                PersistenceAction::SaveBlocks(input, sender) => {
+                    let new_db_tip = input.new_db_tip();
+                    let db_tip_advanced = input.prev_db_tip() < new_db_tip;
+                    let result = self.on_save_blocks(input)?;
 
                     let _ = sender.send(result);
 
-                    if let Some(block_number) = result_number {
+                    if db_tip_advanced {
                         // send new sync metrics based on saved blocks
                         let _ = self
                             .sync_metrics_tx
-                            .send(MetricEvent::SyncHeight { height: block_number });
-                        self.maybe_run_pruner(block_number)?;
+                            .send(MetricEvent::SyncHeight { height: new_db_tip });
+                        self.maybe_run_pruner(new_db_tip)?;
                     }
                 }
                 PersistenceAction::SaveFinalizedBlock(finalized_block) => {
@@ -130,18 +133,30 @@ where
     fn on_remove_blocks_above(
         &self,
         new_tip_num: u64,
-    ) -> Result<Option<BlockNumHash>, PersistenceError> {
+    ) -> Result<PersistenceResult, PersistenceError> {
         debug!(target: "engine::persistence", ?new_tip_num, "Removing blocks");
         let start_time = Instant::now();
         let provider_rw = self.provider.database_provider_rw()?;
 
-        let new_tip_hash = provider_rw.block_hash(new_tip_num)?;
-        provider_rw.remove_block_and_execution_above(new_tip_num)?;
+        let new_tip_hash = provider_rw
+            .block_hash(new_tip_num)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(new_tip_num.into()))?;
+        let frontiers = provider_rw.remove_block_and_execution_above(new_tip_num)?;
+        debug_assert_eq!(frontiers.db_tip, new_tip_num);
+        let last_block = BlockNumHash::new(new_tip_num, new_tip_hash);
+        let last_state_trie_block = if frontiers.partial_state_trie == new_tip_num {
+            last_block
+        } else {
+            let hash = provider_rw.block_hash(frontiers.partial_state_trie)?.ok_or_else(|| {
+                ProviderError::HeaderNotFound(frontiers.partial_state_trie.into())
+            })?;
+            BlockNumHash::new(frontiers.partial_state_trie, hash)
+        };
         provider_rw.commit()?;
 
         debug!(target: "engine::persistence", ?new_tip_num, ?new_tip_hash, "Removed blocks from disk");
         self.metrics.remove_blocks_above_duration_seconds.record(start_time.elapsed());
-        Ok(new_tip_hash.map(|hash| BlockNumHash { hash, number: new_tip_num }))
+        Ok(PersistenceResult { last_block, last_state_trie_block, commit_duration: None })
     }
 
     #[instrument(level = "debug", target = "engine::persistence", skip_all, fields(block_count = input.persist_rest_blocks().len()))]
@@ -149,7 +164,8 @@ where
         &mut self,
         input: SaveBlocksInput<N::Primitives>,
     ) -> Result<PersistenceResult, PersistenceError> {
-        let first_block = input.first_persist_rest_block().recovered_block().num_hash();
+        let first_block =
+            input.first_persist_rest_block().map(|block| block.recovered_block().num_hash());
         let last_block = input.last_block();
         let block_count = input.persist_rest_blocks().len();
 
@@ -161,6 +177,19 @@ where
         let start_time = Instant::now();
 
         let provider_rw = self.provider.database_provider_rw()?;
+        let last_state_trie_block = if let Some(block) = input.state_trie_blocks().last() {
+            // Newly written static-file headers are not readable until commit finalizes their
+            // index.
+            block.recovered_block().num_hash()
+        } else {
+            // If the state/trie frontier did not advance, its block is excluded from
+            // `state_trie_blocks()` and must be loaded from already-persisted storage.
+            let number = input.new_partial_state_trie();
+            let hash = provider_rw
+                .block_hash(number)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
+            BlockNumHash::new(number, hash)
+        };
         provider_rw.save_blocks(&input)?;
 
         if let Some(finalized) = pending_finalized {
@@ -186,7 +215,7 @@ where
         self.metrics.save_blocks_batch_size.record(block_count as f64);
         self.metrics.save_blocks_duration_seconds.record(elapsed);
 
-        Ok(PersistenceResult { last_block: Some(last_block), commit_duration: Some(elapsed) })
+        Ok(PersistenceResult { last_block, last_state_trie_block, commit_duration: Some(elapsed) })
     }
 
     fn maybe_run_pruner(&mut self, block_number: u64) -> Result<(), PersistenceError> {
@@ -470,6 +499,25 @@ mod tests {
         service.maybe_run_pruner(2).unwrap();
     }
 
+    #[test]
+    fn test_remove_blocks_above_requires_tip_header() {
+        let provider = create_test_provider_factory();
+        init_genesis(&provider).unwrap();
+
+        let (_finished_exex_height_tx, finished_exex_height_rx) =
+            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+        let pruner =
+            Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
+        let (_db_service_tx, db_service_rx) = std::sync::mpsc::channel();
+        let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
+        let service = PersistenceService::new(provider, db_service_rx, pruner, sync_metrics_tx);
+
+        assert!(matches!(
+            service.on_remove_blocks_above(1),
+            Err(PersistenceError::ProviderError(ProviderError::HeaderNotFound(_)))
+        ));
+    }
+
     #[derive(Debug)]
     struct FailingPruneBalStore;
 
@@ -508,7 +556,8 @@ mod tests {
 
         let result = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("test timed out");
 
-        assert_eq!(block_hash, result.last_block.unwrap().hash);
+        assert_eq!(block_hash, result.last_block.hash);
+        assert_eq!(result.last_state_trie_block, result.last_block);
     }
 
     #[test]
@@ -523,7 +572,7 @@ mod tests {
 
         handle.save_blocks(full_save_input(blocks), tx).unwrap();
         let result = rx.recv().unwrap();
-        assert_eq!(last_hash, result.last_block.unwrap().hash);
+        assert_eq!(last_hash, result.last_block.hash);
     }
 
     #[test]
@@ -541,7 +590,7 @@ mod tests {
             handle.save_blocks(full_save_input(blocks), tx).unwrap();
 
             let result = rx.recv().unwrap();
-            assert_eq!(last_hash, result.last_block.unwrap().hash);
+            assert_eq!(last_hash, result.last_block.hash);
         }
     }
 
@@ -684,7 +733,8 @@ mod tests {
         let pf = provider_factory.clone();
         let reorg_handle = std::thread::spawn(move || {
             let provider_rw = pf.database_provider_rw().unwrap();
-            provider_rw.remove_block_and_execution_above(1).unwrap();
+            let frontiers = provider_rw.remove_block_and_execution_above(1).unwrap();
+            assert_eq!(frontiers.partial_state_trie, 1);
             provider_rw.commit().unwrap();
 
             let provider_rw = pf.database_provider_rw().unwrap();

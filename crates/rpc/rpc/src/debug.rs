@@ -525,15 +525,15 @@ where
     /// root recomputation.
     pub async fn debug_execution_witness(
         &self,
-        block_id: BlockNumberOrTag,
+        block_id: BlockId,
         mode: Option<ExecutionWitnessMode>,
     ) -> Result<ExecutionWitness, Eth::Error> {
         let this = self.clone();
         let block = this
             .eth_api()
-            .recovered_block(block_id.into())
+            .recovered_block(block_id)
             .await?
-            .ok_or(EthApiError::HeaderNotFound(block_id.into()))?;
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
 
         self.debug_execution_witness_for_block(block, mode.unwrap_or_default()).await
     }
@@ -969,7 +969,7 @@ where
     /// Handler for `debug_executionWitness`
     async fn debug_execution_witness(
         &self,
-        block: BlockNumberOrTag,
+        block: BlockId,
         mode: Option<ExecutionWitnessMode>,
     ) -> RpcResult<ExecutionWitness> {
         let _permit = self.acquire_trace_permit().await;

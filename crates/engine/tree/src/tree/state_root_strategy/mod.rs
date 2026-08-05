@@ -61,7 +61,7 @@ use crate::tree::{
     TreeConfig,
 };
 use alloy_primitives::B256;
-use crossbeam_channel::Receiver as CrossbeamReceiver;
+use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use reth_chain_state::{ExecutedBlock, PreservedSparseTrie};
 use reth_errors::ProviderResult;
 use reth_evm::{ConfigureEvm, OnStateHook};
@@ -79,7 +79,7 @@ use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
     HashedPostState,
 };
-use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
+use reth_trie_parallel::proof_task::{ProofResultMessage, ProofTaskCtx, ProofWorkerHandle};
 pub use reth_trie_parallel::{
     error::StateRootTaskError,
     state_root_task::{
@@ -539,13 +539,16 @@ impl DefaultStateRootStrategy {
         } = options;
         let (updates_tx, from_multi_proof) = crossbeam_channel::unbounded();
         let (cancel_guard, cancel_rx) = StateRootTaskCancelGuard::channel();
+        let (proof_result_tx, proof_result_rx) =
+            crossbeam_channel::unbounded::<ProofResultMessage>();
 
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
         #[cfg(feature = "trie-debug")]
         let task_ctx = task_ctx.with_proof_jitter(config.proof_jitter());
         let halve_workers = transaction_count
             .is_some_and(|count| count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD);
-        let proof_handle = ProofWorkerHandle::new(executor, task_ctx, halve_workers);
+        let proof_handle =
+            ProofWorkerHandle::new(executor, task_ctx, halve_workers, proof_result_tx.clone());
 
         let (state_root_tx, state_root_rx) = mpsc::channel();
         let (hashed_state_tx, hashed_state_rx) = mpsc::channel();
@@ -555,6 +558,8 @@ impl DefaultStateRootStrategy {
             executor,
             overlay_manager,
             proof_handle,
+            proof_result_tx,
+            proof_result_rx,
             state_root_tx,
             hashed_state_tx,
             from_multi_proof,
@@ -587,6 +592,8 @@ impl DefaultStateRootStrategy {
         executor: &reth_tasks::Runtime,
         overlay_manager: &OverlayManager<N>,
         proof_worker_handle: ProofWorkerHandle,
+        proof_result_tx: CrossbeamSender<ProofResultMessage>,
+        proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, StateRootTaskError>>,
         hashed_state_tx: mpsc::Sender<Arc<HashedPostState>>,
         from_multi_proof: CrossbeamReceiver<StateRootMessage>,
@@ -666,6 +673,8 @@ impl DefaultStateRootStrategy {
                 cancel_rx,
                 hashed_state_tx,
                 proof_worker_handle,
+                proof_result_tx,
+                proof_result_rx,
                 trie_metrics.clone(),
                 sparse_state_trie,
                 parent_state_root,
