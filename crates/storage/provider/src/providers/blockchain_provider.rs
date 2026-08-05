@@ -157,12 +157,8 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         state: &BlockState<N::Primitives>,
     ) -> ProviderResult<MemoryOverlayStateProvider<N::Primitives>> {
         let provider = self.database.provider()?;
-        let mut chain = state.chain();
-        let anchor = anchor_for_parent(
-            state.hash(),
-            move || chain.next().map(|state| state.block()),
-            &provider,
-        )?;
+        let anchor =
+            anchor_for_parent(state.hash(), state.chain().map(|state| state.block()), &provider)?;
 
         let (historical, overlay): (StateProviderBox, _) = match anchor {
             AnchorForParent::NoReverts { overlay, .. } => {

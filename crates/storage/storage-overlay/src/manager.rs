@@ -391,18 +391,17 @@ impl<N: NodePrimitives> OverlayManager<N> {
         span.record("cache_reused", true);
     }
 
-    // Returns a closure which yields every in-memory block in the chain whose tip is
-    // `parent_hash`.
-    pub(crate) fn next_parent_fn(
+    /// Returns every in-memory block in the chain whose tip is `parent_hash`.
+    pub(crate) fn parent_chain(
         &self,
         parent_hash: B256,
-    ) -> impl FnMut() -> Option<ExecutedBlock<N>> + '_ {
+    ) -> impl Iterator<Item = ExecutedBlock<N>> + '_ {
         let mut hash = parent_hash;
-        move || {
+        std::iter::from_fn(move || {
             let block = self.blocks.get(&hash)?;
             hash = block.recovered_block().parent_hash();
             Some(block.clone())
-        }
+        })
     }
 
     /// Returns true if `hash` is in the parent chain segment from `anchor_hash` inclusive to

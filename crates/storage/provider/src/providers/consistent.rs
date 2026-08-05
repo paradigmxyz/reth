@@ -232,10 +232,9 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         &self,
         state: &BlockState<N::Primitives>,
     ) -> ProviderResult<MemoryOverlayStateProviderRef<'_, N::Primitives>> {
-        let mut chain = state.chain();
         let anchor = anchor_for_parent(
             state.hash(),
-            move || chain.next().map(|state| state.block()),
+            state.chain().map(|state| state.block()),
             &self.storage_provider,
         )?;
         let (historical, overlay) = match anchor {

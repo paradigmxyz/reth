@@ -121,10 +121,10 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         match &self.overlay_source {
             Some(OverlaySource::Managed) => anchor_for_parent(
                 self.parent_hash,
-                self.overlay_manager.next_parent_fn(self.parent_hash),
+                self.overlay_manager.parent_chain(self.parent_hash),
                 provider,
             ),
-            _ => anchor_for_parent(self.parent_hash, || None::<ExecutedBlock<N>>, provider),
+            _ => anchor_for_parent(self.parent_hash, std::iter::empty(), provider),
         }
     }
 
@@ -404,7 +404,7 @@ struct OverlayBuilderMetrics {
 
 fn anchor_for_parent_in<N: NodePrimitives>(
     parent_hash: B256,
-    mut next_parent: impl FnMut() -> Option<ExecutedBlock<N>>,
+    mut in_mem_chain: impl Iterator<Item = ExecutedBlock<N>>,
     preferred_anchor: B256,
 ) -> B256 {
     if parent_hash == preferred_anchor {
@@ -414,7 +414,7 @@ fn anchor_for_parent_in<N: NodePrimitives>(
     let mut hash = parent_hash;
 
     loop {
-        let Some(block) = next_parent() else { return hash };
+        let Some(block) = in_mem_chain.next() else { return hash };
         let block_parent_hash = block.recovered_block().parent_hash();
 
         if block_parent_hash == preferred_anchor {
@@ -449,11 +449,11 @@ pub enum AnchorForParent<N: NodePrimitives> {
 ///
 /// # Arguments
 /// * `parent`: The block whose post-state is being targeted.
-/// * `next_parent`: Yields the in-memory blocks in the chain, starting at `parent_hash`.
+/// * `in_mem_chain`: Yields the in-memory blocks in the chain, starting at `parent_hash`.
 /// * `provider`: Used to check the current database tip
 pub fn anchor_for_parent<N, Provider>(
     parent_hash: B256,
-    mut next_parent: impl FnMut() -> Option<ExecutedBlock<N>>,
+    in_mem_chain: impl Iterator<Item = ExecutedBlock<N>>,
     provider: &Provider,
 ) -> ProviderResult<AnchorForParent<N>>
 where
@@ -492,15 +492,13 @@ where
         (BlockNumHash::new(parent_number, parent_hash), Vec::new())
     } else {
         let mut overlay = Vec::new();
-        let wrapped_next_parent = || -> Option<ExecutedBlock<N>> {
-            let block = next_parent()?;
+        let mut in_mem_chain = in_mem_chain.inspect(|block| {
             finish_seen |= block.recovered_block().hash() == finish_hash;
             overlay.push(block.clone());
-            Some(block)
-        };
+        });
 
         let anchor_hash =
-            anchor_for_parent_in(parent_hash, wrapped_next_parent, partial_state_trie_hash);
+            anchor_for_parent_in(parent_hash, &mut in_mem_chain, partial_state_trie_hash);
         let anchor = if anchor_hash == partial_state_trie_hash {
             BlockNumHash::new(partial_state_trie, anchor_hash)
         } else {
