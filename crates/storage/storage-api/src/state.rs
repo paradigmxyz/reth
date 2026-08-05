@@ -63,57 +63,6 @@ impl LatestDatabaseState {
         self.finish_tip
     }
 
-    /// Returns the number of newest in-memory blocks that must be overlaid on this database state
-    /// when the captured chain covers both durable frontiers.
-    ///
-    /// The anchor is treated as the virtual element immediately after the oldest in-memory block.
-    /// The returned position excludes the state/trie frontier itself and thus retains exactly the
-    /// blocks after it.
-    pub fn overlay_len(
-        &self,
-        anchor_hash: B256,
-        overlay_len: usize,
-        overlay: impl IntoIterator<Item = BlockNumHash>,
-    ) -> Option<usize> {
-        Self::overlay_len_for(
-            anchor_hash,
-            overlay_len,
-            self.state_trie_tip,
-            self.finish_tip,
-            overlay,
-        )
-    }
-
-    /// Returns the required overlay length for the given durable frontiers.
-    pub fn overlay_len_for(
-        anchor_hash: B256,
-        overlay_len: usize,
-        state_trie_tip: BlockNumHash,
-        finish_tip: BlockNumHash,
-        overlay: impl IntoIterator<Item = BlockNumHash>,
-    ) -> Option<usize> {
-        if state_trie_tip.number > finish_tip.number {
-            return None
-        }
-
-        let mut state_trie_position = (state_trie_tip.hash == anchor_hash).then_some(overlay_len);
-        let mut finish_position = (finish_tip.hash == anchor_hash).then_some(overlay_len);
-        for (position, block) in overlay.into_iter().enumerate() {
-            if block == state_trie_tip {
-                state_trie_position = Some(position);
-            }
-            if block == finish_tip {
-                finish_position = Some(position);
-            }
-            if state_trie_position.is_some() && finish_position.is_some() {
-                break
-            }
-        }
-
-        let state_trie_position = state_trie_position?;
-        (finish_position? <= state_trie_position).then_some(state_trie_position)
-    }
-
     /// Returns the latest hybrid database state provider.
     pub fn into_provider(self) -> StateProviderBox {
         self.provider

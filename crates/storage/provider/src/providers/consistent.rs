@@ -13,9 +13,7 @@ use alloy_consensus::{
 };
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
-use reth_chain_state::{
-    BlockState, CanonicalInMemoryState, MemoryOverlayStateProvider, MemoryOverlayStateProviderRef,
-};
+use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStateProviderRef};
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::ExecutionOutcome;
@@ -31,7 +29,6 @@ use reth_storage_api::{
     StateProviderBox, StorageChangeSetReader, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_storage_overlay::database_state_frontiers;
 use revm::database::states::PlainStorageRevert;
 use std::{
     ops::{Add, Bound, RangeBounds, RangeInclusive, Sub},
@@ -251,24 +248,9 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         state: &BlockState<N::Primitives>,
     ) -> ProviderResult<MemoryOverlayStateProviderRef<'_, N::Primitives>> {
         let anchor_hash = state.anchor().hash;
-        let mut overlay = state.chain().map(|block_state| block_state.block()).collect::<Vec<_>>();
-        let (state_trie_tip, finish_tip) = database_state_frontiers(&self.storage_provider)?;
-        if let Some(overlay_len) = reth_storage_api::LatestDatabaseState::overlay_len_for(
-            anchor_hash,
-            overlay.len(),
-            state_trie_tip,
-            finish_tip,
-            overlay.iter().map(|block| block.recovered_block().num_hash()),
-        ) {
-            overlay.truncate(overlay_len);
-            return Ok(MemoryOverlayStateProviderRef::new(
-                Box::new(self.storage_provider.latest()),
-                overlay,
-            ))
-        }
-
         let latest_historical = self.history_by_block_hash_ref(anchor_hash)?;
-        Ok(MemoryOverlayStateProviderRef::new(latest_historical, overlay))
+        let in_memory = state.chain().map(|block_state| block_state.block()).collect();
+        Ok(MemoryOverlayStateProviderRef::new(latest_historical, in_memory))
     }
 
     /// Fetches data from either in-memory state or persistent storage for a range of transactions.
@@ -474,27 +456,11 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             head_block.as_ref().map(|b| b.block_on_chain(block_hash.into()))
         {
             let anchor_hash = block_state.anchor().hash;
-            let mut overlay = block_state.chain().map(|state| state.block()).collect::<Vec<_>>();
-            let (state_trie_tip, finish_tip) = database_state_frontiers(&storage_provider)?;
-            if let Some(overlay_len) = reth_storage_api::LatestDatabaseState::overlay_len_for(
-                anchor_hash,
-                overlay.len(),
-                state_trie_tip,
-                finish_tip,
-                overlay.iter().map(|block| block.recovered_block().num_hash()),
-            ) {
-                overlay.truncate(overlay_len);
-                return Ok(Box::new(MemoryOverlayStateProvider::new(
-                    Box::new(super::LatestStateProvider::new(storage_provider)),
-                    overlay,
-                )))
-            }
-
             let block_number = storage_provider
                 .block_number(anchor_hash)?
                 .ok_or(ProviderError::BlockHashNotFound(anchor_hash))?;
             let latest_historical = storage_provider.try_into_history_at_block(block_number)?;
-            return Ok(Box::new(block_state.state_provider(latest_historical)))
+            return Ok(Box::new(block_state.state_provider(latest_historical)));
         }
         storage_provider.try_into_history_at_block(block_number)
     }
