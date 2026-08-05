@@ -30,9 +30,9 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
-    DatabaseProviderFactory, HashedPostStateProvider, ProviderError, SaveBlocksInput,
-    StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
-    StorageChangeSetReader, StorageSettingsCache, TransactionVariant,
+    DatabaseProviderFactory, ProviderError, SaveBlocksInput, StageCheckpointReader,
+    StateProviderBox, StateProviderFactory, StateReader, StorageChangeSetReader,
+    StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
@@ -409,7 +409,6 @@ where
         + BlockReader<Block = N::Block, Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader<Receipt = N::Receipt>
-        + HashedPostStateProvider
         + BalProvider
         + Clone
         + 'static,
@@ -2368,7 +2367,14 @@ where
             .provider
             .get_state(block.header().number())?
             .ok_or_else(|| ProviderError::StateForNumberNotFound(block.header().number()))?;
-        let hashed_state = self.provider.hashed_post_state(execution_output.state());
+        let bundle_state = execution_output.state();
+        // `get_state` can return an in-memory execution outcome that retains destruction statuses.
+        // Hashing it requires the parent provider to expand a pre-existing destroyed account's
+        // storage into zero-valued slots.
+        let hashed_state = self
+            .provider
+            .state_by_block_hash(block.parent_hash())?
+            .hashed_post_state(bundle_state)?;
 
         debug!(
             target: "engine::tree",
