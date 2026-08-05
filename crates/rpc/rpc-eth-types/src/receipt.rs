@@ -1,7 +1,7 @@
 //! RPC receipt response builder, extends a layer one receipt with layer two data.
 
 use crate::EthApiError;
-use alloy_consensus::{ReceiptEnvelope, Transaction};
+use alloy_consensus::{BlockHeader, ReceiptEnvelope, Transaction};
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{Address, TxKind};
 use alloy_rpc_types_eth::{Log, TransactionReceipt};
