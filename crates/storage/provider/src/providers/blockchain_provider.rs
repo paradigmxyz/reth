@@ -1,8 +1,8 @@
 use super::state::latest::LatestStateProvider;
 use crate::{
     providers::{
-        ConsistentProvider, OverlayStateProvider, OverlayStateProviderFactory, ProviderNodeTypes,
-        RocksDBProvider, StaticFileProvider, StaticFileProviderRWRefMut,
+        ConsistentProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider,
+        StaticFileProviderRWRefMut,
     },
     AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
@@ -36,7 +36,9 @@ use reth_storage_api::{
     StorageRangeResult, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_storage_overlay::{anchor_for_parent, AnchorForParent};
+use reth_storage_overlay::{
+    anchor_for_parent, AnchorForParent, OverlayStateProvider, OverlayStateProviderFactory,
+};
 use reth_trie::{
     hashed_cursor::{HashedCursor, HashedCursorFactory},
     metrics::TrieRootMetrics,

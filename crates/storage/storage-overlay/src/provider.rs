@@ -1,3 +1,4 @@
+use crate::{database_state_frontiers, Overlay, OverlayBuilder};
 use alloy_primitives::{BlockHash, B256};
 use metrics::{Counter, Histogram};
 use reth_db_api::{tables, transaction::DbTx, DatabaseError};
@@ -13,7 +14,6 @@ use reth_storage_api::{
     DatabaseProviderROFactory, PruneCheckpointReader, StageCheckpointReader,
     StorageChangeSetReader, StorageSettingsCache,
 };
-use reth_storage_overlay::{database_state_frontiers, Overlay, OverlayBuilder};
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     trie_cursor::{InMemoryTrieCursor, TrieCursor, TrieCursorFactory, TrieStorageCursor},
@@ -118,7 +118,6 @@ where
     F: DatabaseProviderFactory,
     F::Provider: StageCheckpointReader
         + PruneCheckpointReader
-        + DBProvider
         + BlockNumReader
         + ChangeSetReader
         + StorageChangeSetReader
@@ -153,17 +152,14 @@ where
 /// on top of a database provider, implementing [`TrieCursorFactory`] and [`HashedCursorFactory`]
 /// using the in-memory overlay factories.
 #[derive(Debug)]
-pub struct OverlayStateProvider<Provider: DBProvider> {
+pub struct OverlayStateProvider<Provider> {
     provider: Provider,
     trie_updates: Arc<TrieUpdatesSorted>,
     hashed_post_state: Arc<HashedPostStateSorted>,
     is_v2: bool,
 }
 
-impl<Provider> OverlayStateProvider<Provider>
-where
-    Provider: DBProvider,
-{
+impl<Provider> OverlayStateProvider<Provider> {
     /// Creates a new overlay state provider.
     pub const fn new(
         provider: Provider,
@@ -239,12 +235,27 @@ where
 }
 
 /// Borrowed state provider with in-memory trie and hashed-state overlays.
-#[derive(Debug, Clone, Copy)]
-pub struct OverlayStateProviderRef<'a, Provider: DBProvider> {
+#[derive(Debug)]
+pub struct OverlayStateProviderRef<'a, Provider> {
     provider: &'a Provider,
     trie_updates: &'a Arc<TrieUpdatesSorted>,
     hashed_post_state: &'a Arc<HashedPostStateSorted>,
     is_v2: bool,
+}
+
+impl<'a, Provider> OverlayStateProviderRef<'a, Provider>
+where
+    Provider: StorageSettingsCache,
+{
+    /// Creates an overlay state provider that borrows the database provider and overlay data.
+    pub fn new(provider: &'a Provider, overlay: &'a Overlay) -> Self {
+        Self {
+            provider,
+            trie_updates: &overlay.trie_updates,
+            hashed_post_state: &overlay.hashed_post_state,
+            is_v2: provider.cached_storage_settings().is_v2(),
+        }
+    }
 }
 
 impl<Provider> TrieCursorFactory for OverlayStateProviderRef<'_, Provider>
@@ -395,16 +406,16 @@ where
 #[cfg(all(test, feature = "partial-persistence"))]
 mod tests {
     use super::*;
-    use crate::{
-        test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
-        BlockWriter, ProviderFactory,
-    };
+    use crate::OverlayManager;
     use alloy_primitives::U256;
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
     use reth_primitives_traits::Account;
+    use reth_provider::{
+        test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
+        BlockWriter, ProviderFactory,
+    };
     use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
     use reth_storage_api::StageCheckpointWriter;
-    use reth_storage_overlay::OverlayManager;
     use reth_trie::{BranchNodeCompact, ComputedTrieData, HashedPostState, HashedStorage, Nibbles};
 
     fn with_unique_trie_data(

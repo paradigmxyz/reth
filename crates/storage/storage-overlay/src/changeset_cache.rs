@@ -7,7 +7,7 @@
 //! - **Reorg support**: Quickly access changesets to revert blocks during chain reorganizations
 //! - **Memory efficiency**: Explicit eviction releases persisted changesets
 
-use crate::OverlayManager;
+use crate::{database_state_frontiers, OverlayManager, OverlayStateProviderRef};
 use alloy_primitives::{map::B256Map, BlockNumber, B256};
 use parking_lot::RwLock;
 use reth_metrics::{
@@ -16,7 +16,8 @@ use reth_metrics::{
 };
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_storage_api::{
-    BlockNumReader, ChangeSetReader, DBProvider, StorageChangeSetReader, StorageSettingsCache,
+    BlockNumReader, ChangeSetReader, DBProvider, PruneCheckpointReader, StageCheckpointReader,
+    StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::trie_cursor::{InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory};
@@ -74,6 +75,8 @@ where
     Provider: DBProvider
         + ChangeSetReader
         + StorageChangeSetReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
         + BlockNumReader
         + StorageSettingsCache,
 {
@@ -93,6 +96,8 @@ where
     Provider: DBProvider
         + ChangeSetReader
         + StorageChangeSetReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
         + BlockNumReader
         + StorageSettingsCache,
     A: TrieTableAdapter,
@@ -211,6 +216,8 @@ impl ChangesetCache {
         P: DBProvider
             + ChangeSetReader
             + StorageChangeSetReader
+            + PruneCheckpointReader
+            + StageCheckpointReader
             + BlockNumReader
             + StorageSettingsCache,
     {
@@ -245,7 +252,7 @@ impl ChangesetCache {
     /// - Changeset computation fails
     pub(crate) fn get_or_compute_range<N, P>(
         &self,
-        _overlay_manager: &OverlayManager<N>,
+        overlay_manager: &OverlayManager<N>,
         provider: &P,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
@@ -254,19 +261,30 @@ impl ChangesetCache {
         P: DBProvider
             + ChangeSetReader
             + StorageChangeSetReader
+            + PruneCheckpointReader
+            + StageCheckpointReader
             + BlockNumReader
             + StorageSettingsCache,
     {
         let start_block = *range.start();
         let end_block = *range.end();
-
         let timer = Instant::now();
+
+        let (partial_state_trie, finish) = database_state_frontiers(provider)?;
+
+        if end_block > finish.number {
+            return Err(ProviderError::InsufficientChangesets {
+                requested: end_block,
+                available: 0..=finish.number,
+            });
+        }
 
         debug!(
             target: "trie::changeset_cache",
             start_block,
             end_block,
-            db_tip_block,
+            ?partial_state_trie,
+            ?finish,
             "Starting get_or_compute_range"
         );
 
@@ -368,9 +386,17 @@ impl ChangesetCache {
             "Changeset cache MISS in range, falling back to aggregate DB-based computation"
         );
 
+        let overlay = overlay_manager
+            .overlay_builder(finish.hash)
+            .with_no_reverts()
+            .build_overlay_at_frontiers(provider, partial_state_trie, finish)?;
+        let state_trie_provider = OverlayStateProviderRef::new(provider, &overlay);
+
         let accumulated_reverts = Arc::new(reth_trie_db::compute_range_trie_changesets(
             provider,
+            &state_trie_provider,
             start_block..=end_block,
+            finish.number,
         )?);
 
         let elapsed = timer.elapsed();
@@ -573,6 +599,7 @@ impl ChangesetCacheInner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Overlay;
     use alloy_consensus::Header;
     use alloy_primitives::{
         keccak256,
@@ -596,6 +623,10 @@ mod tests {
     // Helper function to create empty TrieUpdatesSorted for testing
     fn create_test_changesets() -> Arc<TrieUpdatesSorted> {
         Arc::new(TrieUpdatesSorted::new(vec![], B256Map::default()))
+    }
+
+    fn empty_overlay() -> Overlay {
+        Overlay { trie_updates: Arc::default(), hashed_post_state: Arc::default() }
     }
 
     fn insert_test_changesets(
@@ -853,7 +884,11 @@ mod tests {
         provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(3)).unwrap();
         reth_trie_db::with_adapter!(provider, |A| seed_tip_trie_tables::<_, A>(&*provider));
 
-        let actual = reth_trie_db::compute_range_trie_changesets(&*provider, 1..=3, 3).unwrap();
+        let overlay = empty_overlay();
+        let state_trie_provider = OverlayStateProviderRef::new(&*provider, &overlay);
+        let actual =
+            reth_trie_db::compute_range_trie_changesets(&*provider, &state_trie_provider, 1..=3, 3)
+                .unwrap();
         let storage_revert = actual
             .storage_tries_ref()
             .get(&hashed_address)
@@ -932,7 +967,11 @@ mod tests {
         reth_trie_db::with_adapter!(provider, |A| seed_tip_trie_tables::<_, A>(&*provider));
 
         let expected = legacy_compute_range_trie_changesets(&*provider, 2..=3);
-        let actual = reth_trie_db::compute_range_trie_changesets(&*provider, 2..=3, 3).unwrap();
+        let overlay = empty_overlay();
+        let state_trie_provider = OverlayStateProviderRef::new(&*provider, &overlay);
+        let actual =
+            reth_trie_db::compute_range_trie_changesets(&*provider, &state_trie_provider, 2..=3, 3)
+                .unwrap();
         assert_eq!(actual, expected);
     }
 
