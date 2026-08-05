@@ -539,16 +539,15 @@ impl SlimAccountBody {
         if value == empty {
             Bytes::new()
         } else {
-            Bytes::copy_from_slice(value.as_slice())
+            value.into()
         }
     }
 
     /// Restores a dropped field to `empty`, rejecting any length the encoding never produces.
-    fn restore(value: &Bytes, empty: B256) -> alloy_rlp::Result<B256> {
-        match value.len() {
-            0 => Ok(empty),
-            32 => Ok(B256::from_slice(value)),
-            _ => Err(alloy_rlp::Error::UnexpectedLength),
+    fn restore(value: &[u8], empty: B256) -> alloy_rlp::Result<B256> {
+        match value {
+            [] => Ok(empty),
+            _ => B256::try_from(value).map_err(|_| alloy_rlp::Error::UnexpectedLength),
         }
     }
 }
