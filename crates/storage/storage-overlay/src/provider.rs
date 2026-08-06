@@ -11,7 +11,7 @@ use reth_primitives_traits::{
 };
 use reth_storage_api::{
     BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-    DatabaseProviderROFactory, PruneCheckpointReader, StageCheckpointReader,
+    DatabaseProviderROFactory, DbTxProvider, PruneCheckpointReader, StageCheckpointReader,
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_trie::{
@@ -138,11 +138,11 @@ where
             res
         };
 
-        let Overlay { trie_updates, hashed_post_state } = self.get_overlay(&provider)?;
+        let overlay = self.get_overlay(&provider)?;
 
         let is_v2 = provider.cached_storage_settings().is_v2();
         self.metrics.database_provider_ro_duration.record(overall_start.elapsed());
-        Ok(OverlayStateProvider::new(provider, trie_updates, hashed_post_state, is_v2))
+        Ok(OverlayStateProvider::new(provider, overlay, is_v2))
     }
 }
 
@@ -154,114 +154,20 @@ where
 #[derive(Debug)]
 pub struct OverlayStateProvider<Provider> {
     provider: Provider,
-    trie_updates: Arc<TrieUpdatesSorted>,
-    hashed_post_state: Arc<HashedPostStateSorted>,
+    overlay: Overlay,
     is_v2: bool,
 }
 
 impl<Provider> OverlayStateProvider<Provider> {
     /// Creates a new overlay state provider.
-    pub const fn new(
-        provider: Provider,
-        trie_updates: Arc<TrieUpdatesSorted>,
-        hashed_post_state: Arc<HashedPostStateSorted>,
-        is_v2: bool,
-    ) -> Self {
-        Self { provider, trie_updates, hashed_post_state, is_v2 }
-    }
-
-    /// Returns a borrowed overlay state provider.
-    pub fn as_ref(&self) -> OverlayStateProviderRef<'_, Provider> {
-        OverlayStateProviderRef {
-            provider: &self.provider,
-            trie_updates: &self.trie_updates,
-            hashed_post_state: &self.hashed_post_state,
-            is_v2: self.is_v2,
-        }
+    pub const fn new(provider: Provider, overlay: Overlay, is_v2: bool) -> Self {
+        Self { provider, overlay, is_v2 }
     }
 }
 
 impl<Provider> TrieCursorFactory for OverlayStateProvider<Provider>
 where
-    Provider: DBProvider,
-    Provider::Tx: DbTx,
-{
-    type AccountTrieCursor<'a>
-        = <OverlayStateProviderRef<'a, Provider> as TrieCursorFactory>::AccountTrieCursor<'a>
-    where
-        Self: 'a;
-
-    type StorageTrieCursor<'a>
-        = <OverlayStateProviderRef<'a, Provider> as TrieCursorFactory>::StorageTrieCursor<'a>
-    where
-        Self: 'a;
-
-    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
-        account_trie_cursor(&self.provider, &self.trie_updates, self.is_v2)
-    }
-
-    fn storage_trie_cursor(
-        &self,
-        hashed_address: B256,
-    ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
-        storage_trie_cursor(&self.provider, &self.trie_updates, self.is_v2, hashed_address)
-    }
-}
-
-impl<Provider> HashedCursorFactory for OverlayStateProvider<Provider>
-where
-    Provider: DBProvider,
-{
-    type AccountCursor<'a>
-        = <OverlayStateProviderRef<'a, Provider> as HashedCursorFactory>::AccountCursor<'a>
-    where
-        Self: 'a;
-
-    type StorageCursor<'a>
-        = <OverlayStateProviderRef<'a, Provider> as HashedCursorFactory>::StorageCursor<'a>
-    where
-        Self: 'a;
-
-    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
-        hashed_account_cursor(&self.provider, &self.hashed_post_state)
-    }
-
-    fn hashed_storage_cursor(
-        &self,
-        hashed_address: B256,
-    ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
-        hashed_storage_cursor(&self.provider, &self.hashed_post_state, hashed_address)
-    }
-}
-
-/// Borrowed state provider with in-memory trie and hashed-state overlays.
-#[derive(Debug)]
-pub struct OverlayStateProviderRef<'a, Provider> {
-    provider: &'a Provider,
-    trie_updates: &'a Arc<TrieUpdatesSorted>,
-    hashed_post_state: &'a Arc<HashedPostStateSorted>,
-    is_v2: bool,
-}
-
-impl<'a, Provider> OverlayStateProviderRef<'a, Provider>
-where
-    Provider: StorageSettingsCache,
-{
-    /// Creates an overlay state provider that borrows the database provider and overlay data.
-    pub fn new(provider: &'a Provider, overlay: &'a Overlay) -> Self {
-        Self {
-            provider,
-            trie_updates: &overlay.trie_updates,
-            hashed_post_state: &overlay.hashed_post_state,
-            is_v2: provider.cached_storage_settings().is_v2(),
-        }
-    }
-}
-
-impl<Provider> TrieCursorFactory for OverlayStateProviderRef<'_, Provider>
-where
-    Provider: DBProvider,
-    Provider::Tx: DbTx,
+    Provider: DbTxProvider,
 {
     type AccountTrieCursor<'a>
         = InMemoryTrieCursor<'a, Box<dyn TrieCursor + Send + 'a>>
@@ -274,20 +180,20 @@ where
         Self: 'a;
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
-        account_trie_cursor(self.provider, self.trie_updates, self.is_v2)
+        account_trie_cursor(&self.provider, &self.overlay.trie_updates, self.is_v2)
     }
 
     fn storage_trie_cursor(
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
-        storage_trie_cursor(self.provider, self.trie_updates, self.is_v2, hashed_address)
+        storage_trie_cursor(&self.provider, &self.overlay.trie_updates, self.is_v2, hashed_address)
     }
 }
 
-impl<Provider> HashedCursorFactory for OverlayStateProviderRef<'_, Provider>
+impl<Provider> HashedCursorFactory for OverlayStateProvider<Provider>
 where
-    Provider: DBProvider,
+    Provider: DbTxProvider,
 {
     type AccountCursor<'a>
         = <HashedPostStateCursorFactory<
@@ -306,14 +212,14 @@ where
         Self: 'a;
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
-        hashed_account_cursor(self.provider, self.hashed_post_state)
+        hashed_account_cursor(&self.provider, &self.overlay.hashed_post_state)
     }
 
     fn hashed_storage_cursor(
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
-        hashed_storage_cursor(self.provider, self.hashed_post_state, hashed_address)
+        hashed_storage_cursor(&self.provider, &self.overlay.hashed_post_state, hashed_address)
     }
 }
 
@@ -323,10 +229,9 @@ fn account_trie_cursor<'a, Provider>(
     is_v2: bool,
 ) -> Result<InMemoryTrieCursor<'a, Box<dyn TrieCursor + Send + 'a>>, DatabaseError>
 where
-    Provider: DBProvider,
-    Provider::Tx: DbTx,
+    Provider: DbTxProvider,
 {
-    let tx = provider.tx_ref();
+    let tx = provider.tx();
     let cursor: Box<dyn TrieCursor + Send> = if is_v2 {
         Box::new(DatabaseAccountTrieCursor::<_, PackedKeyAdapter>::new(
             tx.cursor_read::<PackedAccountsTrie>()?,
@@ -346,10 +251,9 @@ fn storage_trie_cursor<'a, Provider>(
     hashed_address: B256,
 ) -> Result<InMemoryTrieCursor<'a, Box<dyn TrieStorageCursor + Send + 'a>>, DatabaseError>
 where
-    Provider: DBProvider,
-    Provider::Tx: DbTx,
+    Provider: DbTxProvider,
 {
-    let tx = provider.tx_ref();
+    let tx = provider.tx();
     let cursor: Box<dyn TrieStorageCursor + Send> = if is_v2 {
         Box::new(DatabaseStorageTrieCursor::<_, PackedKeyAdapter>::new(
             tx.cursor_dup_read::<PackedStoragesTrie>()?,
@@ -375,9 +279,9 @@ fn hashed_account_cursor<'a, Provider>(
     DatabaseError,
 >
 where
-    Provider: DBProvider,
+    Provider: DbTxProvider,
 {
-    let db_hashed_cursor_factory = DatabaseHashedCursorFactory::new(provider.tx_ref());
+    let db_hashed_cursor_factory = DatabaseHashedCursorFactory::new(provider.tx());
     let hashed_cursor_factory =
         HashedPostStateCursorFactory::new(db_hashed_cursor_factory, hashed_post_state);
     hashed_cursor_factory.hashed_account_cursor()
@@ -395,9 +299,9 @@ fn hashed_storage_cursor<'a, Provider>(
     DatabaseError,
 >
 where
-    Provider: DBProvider,
+    Provider: DbTxProvider,
 {
-    let db_hashed_cursor_factory = DatabaseHashedCursorFactory::new(provider.tx_ref());
+    let db_hashed_cursor_factory = DatabaseHashedCursorFactory::new(provider.tx());
     let hashed_cursor_factory =
         HashedPostStateCursorFactory::new(db_hashed_cursor_factory, hashed_post_state);
     hashed_cursor_factory.hashed_storage_cursor(hashed_address)
