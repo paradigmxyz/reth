@@ -714,11 +714,8 @@ where
             None
         };
 
-        // The merge stores "no code" as `None`; the stream has always carried the explicit
-        // empty-code hash instead, and both encode to the same trie leaf, so keep it that way.
-        let mut account = account_state.merge_onto(existing_account.as_ref());
-        account.bytecode_hash =
-            account.bytecode_hash.or(Some(alloy_consensus::constants::KECCAK_EMPTY));
+        // `None` and the empty-code hash give the same trie leaf and the same `is_empty`.
+        let account = account_state.merge_onto(existing_account.as_ref());
         let hashed_address = hashed_address.unwrap_or_else(|| keccak256(address));
 
         // It is possible for the resulting account info to be empty. This can happen when, in the
