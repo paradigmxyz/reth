@@ -124,42 +124,38 @@ where
 
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
-                let block_hash = block.hash();
                 let block_env = evm_env.block_env.clone();
 
+                let mut transactions = block.transactions_recovered().enumerate().peekable();
                 let inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
-                // single EVM for the whole block so that block-scoped EVM state stays intact
                 let mut evm =
                     eth_api.evm_config().evm_with_env_and_inspector(&mut db, evm_env, inspector);
-
-                let mut transactions = block.transactions_recovered().enumerate().peekable();
                 while let Some((index, tx)) = transactions.next() {
-                    let tx_hash = *tx.tx_hash();
                     let tx_env = eth_api.evm_config().tx_env(tx);
 
                     let res = evm.transact(tx_env.clone()).map_err(Eth::Error::from_evm_err)?;
 
-                    let (evm_db, inspector, _) = evm.components_mut();
+                    let (db, inspector, _) = evm.components_mut();
                     let result = inspector
                         .get_result(
                             Some(TransactionContext {
-                                block_hash: Some(block_hash),
-                                tx_hash: Some(tx_hash),
+                                block_hash: Some(block.hash()),
+                                tx_hash: Some(*tx.tx_hash()),
                                 tx_index: Some(index),
                             }),
                             &tx_env,
                             &block_env,
                             &res,
-                            evm_db,
+                            db,
                         )
                         .map_err(Eth::Error::from_eth_err)?;
 
-                    results.push(TraceResult::Success { result, tx_hash: Some(tx_hash) });
+                    results.push(TraceResult::Success { result, tx_hash: Some(*tx.tx_hash()) });
                     if transactions.peek().is_some() {
                         inspector.fuse().map_err(Eth::Error::from_eth_err)?;
                         // need to apply the state changes of this transaction before executing the
                         // next transaction
-                        evm_db.commit(res.state)
+                        db.commit(res.state)
                     }
                 }
 
