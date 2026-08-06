@@ -147,15 +147,15 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
-    ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider,
-    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderBox,
+    ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, ProviderError,
+    PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderBox,
     StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
 use reth_storage_overlay::OverlayManager;
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
-    LazyTrieData,
+    HashedPostState, KeccakKeyHasher, LazyTrieData,
 };
 use std::{
     sync::{
@@ -314,7 +314,6 @@ where
         + BlockNumReader
         + StateProviderFactory
         + StateReader
-        + HashedPostStateProvider
         + Clone
         + Send
         + Sync
@@ -750,7 +749,6 @@ where
         // block conversion and receipt root computation. This is a pure CPU-bound task
         // (keccak256 hashing of all changed addresses and storage slots).
         let hashed_state_output = output.clone();
-        let hashed_state_provider = self.provider.clone();
         let mut hashed_state_rx = state_root_job.take_hashed_state_rx();
         let mut hashed_state: LazyHashedPostState =
             self.runtime.spawn_blocking_named("hash-post-state", move || {
@@ -762,7 +760,9 @@ where
                 if let Some(Ok(state)) = hashed_state_rx.as_mut().map(|rx| rx.recv()) {
                     state
                 } else {
-                    Arc::new(hashed_state_provider.hashed_post_state(&hashed_state_output.state))
+                    Arc::new(HashedPostState::from_bundle_state::<KeccakKeyHasher>(
+                        hashed_state_output.state.state(),
+                    ))
                 }
             });
 
@@ -1800,7 +1800,6 @@ where
         + StateReader
         + ChangeSetReader
         + BlockNumReader
-        + HashedPostStateProvider
         + Clone
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
