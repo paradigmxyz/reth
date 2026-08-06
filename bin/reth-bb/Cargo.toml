@@ -74,6 +74,7 @@ default = [
     "otlp-logs",
     "reth-revm/portable",
     "js-tracer",
+    "partial-persistence",
 ]
 
 otlp = [

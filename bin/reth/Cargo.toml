@@ -94,6 +94,7 @@ default = [
     "asm-keccak",
     "gmp",
     "min-trace-logs",
+    "partial-persistence",
 ]
 
 jit = [

@@ -9,7 +9,7 @@ use crate::{
     PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader,
     StateProofProvider, StateProvider, StateProviderBox, StateProviderFactory,
     StateRangeProviderFactory, StateRangeView, StateReader, StateRootProvider, StorageRootProvider,
-    TransactionVariant, TransactionsProvider,
+    TransactionVariant, TransactionsProvider, TryIntoHistoricalStateProvider,
 };
 
 #[cfg(feature = "db-api")]
@@ -624,6 +624,17 @@ impl<C: Send + Sync + 'static, N: NodePrimitives> StateProviderFactory for NoopP
 
     fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox>> {
         Ok(Some(Box::new(self.clone())))
+    }
+}
+
+impl<C: Send + Sync + 'static, N: NodePrimitives> TryIntoHistoricalStateProvider
+    for NoopProvider<C, N>
+{
+    fn try_into_history_at_block(
+        self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<StateProviderBox> {
+        self.history_by_block_number(block_number)
     }
 }
 

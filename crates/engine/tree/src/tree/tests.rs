@@ -276,6 +276,7 @@ impl TestHarness {
         let mut hash_by_number = BTreeMap::new();
         let mut parent_to_child: B256Map<B256Set> = B256Map::default();
         let mut parent_hash = B256::ZERO;
+        let mut parent_state = None;
 
         for block in &blocks {
             let sealed_block = block.recovered_block();
@@ -283,10 +284,13 @@ impl TestHarness {
             let number = sealed_block.number;
             blocks_by_hash.insert(hash, block.clone());
             blocks_by_number.entry(number).or_insert_with(Vec::new).push(block.clone());
-            state_by_hash.insert(hash, Arc::new(BlockState::new(block.clone())));
+            let block_state =
+                Arc::new(BlockState::with_parent(block.clone(), parent_state.clone()));
+            state_by_hash.insert(hash, block_state.clone());
             hash_by_number.insert(number, hash);
             parent_to_child.entry(parent_hash).or_default().insert(hash);
             parent_hash = hash;
+            parent_state = Some(block_state);
         }
 
         let overlay_manager = self.tree.state.tree_state.overlay_manager.clone();
@@ -871,11 +875,97 @@ fn remove_blocks_clears_pending_sparse_trie_prune_request() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
     test_harness.tree.persistence_state.last_persisted_block =
         BlockNumHash { hash: B256::random(), number: 10 };
+    test_harness.tree.persistence_state.last_state_trie_persisted_block =
+        BlockNumHash { hash: B256::random(), number: 10 };
     test_harness.tree.state.set_pending_sparse_trie_prune(true);
 
     test_harness.tree.remove_blocks(9);
 
     assert!(!test_harness.tree.state.pending_sparse_trie_prune());
+}
+
+#[test]
+fn remove_blocks_retains_partial_state_trie_suffix_in_memory() {
+    const STATE_TRIE_TIP: usize = 132;
+    const FINISH_TIP: usize = 147;
+    const REORG_TIP: usize = 144;
+
+    let blocks: Vec<_> =
+        TestBlockBuilder::eth().get_executed_blocks(0..FINISH_TIP as u64 + 1).collect();
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+    test_harness.tree.persistence_state.last_state_trie_persisted_block =
+        blocks[STATE_TRIE_TIP].recovered_block().num_hash();
+    test_harness.tree.persistence_state.last_persisted_block =
+        blocks[FINISH_TIP].recovered_block().num_hash();
+    test_harness.tree.state.set_pending_sparse_trie_prune(true);
+
+    test_harness.tree.remove_blocks(REORG_TIP as u64);
+
+    let PersistenceAction::RemoveBlocksAbove(new_tip, sender) =
+        test_harness.action_rx.recv().unwrap()
+    else {
+        panic!("expected remove-blocks persistence action")
+    };
+    assert_eq!(new_tip, REORG_TIP as u64);
+    assert_eq!(
+        test_harness.tree.persistence_state.current_action(),
+        Some(&CurrentPersistenceAction::RemovingBlocks { new_tip_num: REORG_TIP as u64 })
+    );
+    assert!(!test_harness.tree.state.pending_sparse_trie_prune());
+
+    // Removal only unwinds blocks above the surviving tip, so the suffix after the unchanged
+    // state/trie frontier remains in memory.
+    for block in &blocks[STATE_TRIE_TIP + 1..=REORG_TIP] {
+        assert!(test_harness
+            .tree
+            .canonical_in_memory_state
+            .state_by_number(block.recovered_block().number())
+            .is_some());
+    }
+    sender
+        .send(PersistenceResult {
+            last_block: blocks[REORG_TIP].recovered_block().num_hash(),
+            last_state_trie_block: blocks[STATE_TRIE_TIP].recovered_block().num_hash(),
+            commit_duration: None,
+        })
+        .unwrap();
+    assert!(test_harness.tree.try_poll_persistence().unwrap());
+
+    assert_eq!(
+        test_harness.tree.persistence_state.last_persisted_block,
+        blocks[REORG_TIP].recovered_block().num_hash()
+    );
+    assert_eq!(
+        test_harness.tree.persistence_state.last_state_trie_persisted_block,
+        blocks[STATE_TRIE_TIP].recovered_block().num_hash()
+    );
+    for block in &blocks[..=STATE_TRIE_TIP] {
+        assert!(test_harness
+            .tree
+            .state
+            .tree_state
+            .executed_block_by_hash(block.recovered_block().hash())
+            .is_none());
+        assert!(test_harness
+            .tree
+            .canonical_in_memory_state
+            .state_by_number(block.recovered_block().number())
+            .is_none());
+    }
+    for block in &blocks[STATE_TRIE_TIP + 1..] {
+        assert!(test_harness
+            .tree
+            .state
+            .tree_state
+            .executed_block_by_hash(block.recovered_block().hash())
+            .is_some());
+        assert!(test_harness
+            .tree
+            .canonical_in_memory_state
+            .state_by_number(block.recovered_block().number())
+            .is_some());
+    }
+    assert!(test_harness.tree.state.pending_sparse_trie_prune());
 }
 
 #[test]
@@ -924,11 +1014,12 @@ fn process_payload_attributes_shares_sparse_trie_during_validation_fallback() {
 async fn test_in_memory_state_trait_impl() {
     let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(0..10).collect();
     let test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+    let mut parent_state = None;
 
     for executed_block in blocks {
         let sealed_block = executed_block.recovered_block();
 
-        let expected_state = BlockState::new(executed_block.clone());
+        let expected_state = BlockState::with_parent(executed_block.clone(), parent_state.clone());
 
         let actual_state_by_hash =
             test_harness.tree.canonical_in_memory_state.state_by_hash(sealed_block.hash()).unwrap();
@@ -940,6 +1031,8 @@ async fn test_in_memory_state_trait_impl() {
             .state_by_number(sealed_block.number)
             .unwrap();
         assert_eq!(expected_state, *actual_state_by_number);
+
+        parent_state = Some(Arc::new(expected_state));
     }
 }
 
@@ -1367,8 +1460,14 @@ fn test_tree_state_on_new_head_deep_fork() {
     }
 }
 
+fn save_input_blocks(
+    input: &SaveBlocksInput<EthPrimitives>,
+) -> impl Iterator<Item = &ExecutedBlock> {
+    input.state_trie_blocks().iter().chain(input.state_trie_masking_blocks())
+}
+
 #[tokio::test]
-async fn test_get_canonical_blocks_to_persist() {
+async fn test_get_save_blocks_input() {
     let chain_spec = MAINNET.clone();
     let mut test_harness = TestHarness::new(chain_spec);
     let mut test_block_builder = TestBlockBuilder::eth();
@@ -1379,10 +1478,10 @@ async fn test_get_canonical_blocks_to_persist() {
     test_harness = test_harness.with_blocks(blocks.clone());
 
     let last_persisted_block_number = 3;
-    test_harness.tree.persistence_state.last_persisted_block =
+    let last_persisted_block =
         blocks[last_persisted_block_number as usize].recovered_block.num_hash();
-    test_harness.tree.persistence_state.last_state_trie_persisted_block =
-        blocks[last_persisted_block_number as usize].recovered_block.num_hash();
+    test_harness.tree.persistence_state.last_persisted_block = last_persisted_block;
+    test_harness.tree.persistence_state.last_state_trie_persisted_block = last_persisted_block;
 
     let persistence_threshold = 4;
     let memory_block_buffer_target = 3;
@@ -1391,17 +1490,21 @@ async fn test_get_canonical_blocks_to_persist() {
         .with_memory_block_buffer_target(memory_block_buffer_target);
 
     let input = test_harness.tree.get_save_blocks_input(PersistTarget::Threshold).unwrap();
-    let blocks_to_persist = input.persist_rest_blocks();
 
     let expected_blocks_to_persist_length: usize =
         (canonical_head_number - memory_block_buffer_target - last_persisted_block_number)
             .try_into()
             .unwrap();
 
-    assert_eq!(blocks_to_persist.len(), expected_blocks_to_persist_length);
-    for (i, item) in blocks_to_persist.iter().enumerate().take(expected_blocks_to_persist_length) {
+    assert_eq!(save_input_blocks(&input).count(), expected_blocks_to_persist_length);
+    for (i, item) in save_input_blocks(&input).enumerate().take(expected_blocks_to_persist_length) {
         assert_eq!(item.recovered_block().number, last_persisted_block_number + i as u64 + 1);
     }
+    assert_eq!(input.prev_db_tip(), 3);
+    assert_eq!(input.prev_partial_state_trie(), 3);
+    assert_eq!(input.new_db_tip(), 6);
+    assert_eq!(input.new_partial_state_trie(), 6);
+    assert!(input.state_trie_masking_blocks().is_empty());
 
     // make sure only canonical blocks are included
     let fork_block = test_block_builder.get_executed_block_with_number(4, B256::random());
@@ -1415,19 +1518,17 @@ async fn test_get_canonical_blocks_to_persist() {
     assert_eq!(blocks_to_persist.len(), expected_blocks_to_persist_length);
 
     // check that the fork block is not included in the blocks to persist
-    assert!(!blocks_to_persist.iter().any(|b| b.recovered_block().hash() == fork_block_hash));
+    assert!(!save_input_blocks(&input).any(|b| b.recovered_block().hash() == fork_block_hash));
 
     // check that the original block 4 is still included
-    assert!(blocks_to_persist.iter().any(|b| b.recovered_block().number == 4 &&
+    assert!(save_input_blocks(&input).any(|b| b.recovered_block().number == 4 &&
         b.recovered_block().hash() == blocks[4].recovered_block().hash()));
 
     // check that if we advance persistence, the persistence action is the correct value
     test_harness.tree.advance_persistence().expect("advancing persistence should succeed");
     assert_eq!(
         test_harness.tree.persistence_state.current_action().cloned(),
-        Some(CurrentPersistenceAction::SavingBlocks {
-            highest: blocks_to_persist.last().unwrap().recovered_block().num_hash()
-        })
+        Some(CurrentPersistenceAction::SavingBlocks { highest: input.last_block() })
     );
 }
 

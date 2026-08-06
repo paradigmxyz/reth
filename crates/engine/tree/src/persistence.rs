@@ -263,6 +263,9 @@ pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
 
     /// Removes block data above the given block number from the database.
     ///
+    /// This only unwinds blocks above the new tip, even if the state/trie frontier lags behind it.
+    /// The returned state/trie frontier lets the caller retain the surviving suffix in memory.
+    ///
     /// This will first update checkpoints from the database, then remove actual block data from
     /// static files.
     RemoveBlocksAbove(u64, CrossbeamSender<PersistenceResult>),
@@ -416,16 +419,25 @@ mod tests {
         test_utils::{create_test_provider_factory, MockNodeTypes},
         AccountReader, BalConfig, BalNotificationStream, BalStore, BalStoreHandle,
         ChainSpecProvider, HeaderProvider, InMemoryBalStore, ProviderError, ProviderResult, RawBal,
-        StorageSettingsCache, TryIntoHistoricalStateProvider,
+        StageCheckpointReader, StorageSettingsCache, TryIntoHistoricalStateProvider,
     };
     use reth_prune::Pruner;
     use reth_prune_types::PruneMode;
+    use reth_stages_api::StageId;
+    use reth_storage_overlay::OverlayManager;
     use tokio::sync::mpsc::unbounded_channel;
 
     fn default_persistence_handle() -> PersistenceHandle<EthPrimitives> {
         let provider = create_test_provider_factory();
         init_genesis(&provider).unwrap();
 
+        persistence_handle(provider)
+    }
+
+    fn persistence_handle<N>(provider: ProviderFactory<N>) -> PersistenceHandle<EthPrimitives>
+    where
+        N: ProviderNodeTypes<Primitives = EthPrimitives>,
+    {
         let (_finished_exex_height_tx, finished_exex_height_rx) =
             tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
 
@@ -446,6 +458,24 @@ mod tests {
         let new_tip =
             blocks.last().map(|block| block.recovered_block().number).expect("checked non-empty");
         SaveBlocksInput::new(blocks, prev_tip, prev_tip, new_tip, new_tip)
+    }
+
+    /// Seeds block zero separately because [`SaveBlocksInput`] only advances an existing tip.
+    fn save_genesis<T>(provider: &T, genesis: &ExecutedBlock<EthPrimitives>) -> ProviderResult<()>
+    where
+        T: BlockExecutionWriter<
+            Block = reth_ethereum_primitives::Block,
+            Receipt = reth_ethereum_primitives::Receipt,
+        >,
+    {
+        assert_eq!(genesis.recovered_block().number, 0);
+        let execution_outcome =
+            reth_execution_types::ExecutionOutcome::single(0, genesis.execution_outcome().clone());
+        provider.append_blocks_with_state(
+            vec![genesis.recovered_block().clone()],
+            &execution_outcome,
+            genesis.hashed_state().as_ref().clone(),
+        )
     }
 
     #[test]
@@ -594,6 +624,115 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_remove_blocks_above_preserves_partial_state_trie_gap() {
+        const STATE_TRIE_TIP: usize = 132;
+        const FINISH_TIP: usize = 147;
+        const REORG_TIP: usize = 144;
+
+        reth_tracing::init_test_tracing();
+        let state_trie_overlays = OverlayManager::default();
+        let provider_factory =
+            create_test_provider_factory().with_overlay_manager(state_trie_overlays.clone());
+        provider_factory.set_storage_settings_cache(reth_provider::StorageSettings::v2());
+
+        let mut block_builder = TestBlockBuilder::eth().with_state();
+        let signer = block_builder.signer;
+        let blocks: Vec<_> = block_builder.get_executed_blocks(0..FINISH_TIP as u64 + 1).collect();
+        let provider_rw = provider_factory.database_provider_rw().unwrap();
+        save_genesis(&provider_rw, &blocks[0]).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider_rw = provider_factory.database_provider_rw().unwrap();
+        provider_rw
+            .save_blocks(&SaveBlocksInput::new(
+                blocks[1..=STATE_TRIE_TIP].to_vec(),
+                0,
+                0,
+                STATE_TRIE_TIP as u64,
+                STATE_TRIE_TIP as u64,
+            ))
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider_rw = provider_factory.database_provider_rw().unwrap();
+        provider_rw
+            .save_blocks(&SaveBlocksInput::new(
+                blocks[STATE_TRIE_TIP + 1..=FINISH_TIP].to_vec(),
+                STATE_TRIE_TIP as u64,
+                STATE_TRIE_TIP as u64,
+                FINISH_TIP as u64,
+                STATE_TRIE_TIP as u64,
+            ))
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        let state_trie_transactions = blocks[..=STATE_TRIE_TIP]
+            .iter()
+            .map(|block| block.recovered_block().body().transactions.len() as u64)
+            .sum::<u64>();
+        assert_eq!(
+            provider_factory.latest().unwrap().basic_account(&signer).unwrap().unwrap().nonce,
+            state_trie_transactions
+        );
+
+        for block in &blocks[STATE_TRIE_TIP + 1..=FINISH_TIP] {
+            state_trie_overlays.insert_block(block.clone());
+        }
+
+        let handle = persistence_handle(provider_factory.clone());
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        handle.remove_blocks_above(REORG_TIP as u64, tx).unwrap();
+        let result = rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("remove-blocks persistence timed out");
+
+        assert_eq!(result.last_block, blocks[REORG_TIP].recovered_block().num_hash());
+        assert_eq!(
+            result.last_state_trie_block,
+            blocks[STATE_TRIE_TIP].recovered_block().num_hash()
+        );
+        drop(handle);
+
+        let provider = provider_factory.provider().unwrap();
+        let checkpoint = provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
+        assert_eq!(checkpoint.block_number, REORG_TIP as u64);
+        assert_eq!(
+            checkpoint.finish_stage_checkpoint().unwrap().partial_state_trie(),
+            Some(STATE_TRIE_TIP as u64)
+        );
+        for block in &blocks[..=REORG_TIP] {
+            assert_eq!(
+                provider.block_hash(block.recovered_block().number).unwrap(),
+                Some(block.recovered_block().hash())
+            );
+        }
+        for block_number in REORG_TIP as u64 + 1..=FINISH_TIP as u64 {
+            assert!(provider.block_hash(block_number).unwrap().is_none());
+        }
+        let total_transactions = blocks[..=REORG_TIP]
+            .iter()
+            .map(|block| block.recovered_block().body().transactions.len() as u64)
+            .sum::<u64>();
+        let expected_account =
+            provider_factory.latest().unwrap().basic_account(&signer).unwrap().unwrap();
+        assert_eq!(expected_account.nonce, total_transactions);
+        assert_eq!(
+            expected_account.balance,
+            U256::from(10).pow(U256::from(18)) -
+                TestBlockBuilder::<EthPrimitives>::single_tx_cost() *
+                    U256::from(total_transactions)
+        );
+        assert_eq!(
+            provider_factory
+                .latest()
+                .unwrap()
+                .storage(alloy_primitives::Address::new([0xAA; 20]), U256::from(1).into())
+                .unwrap(),
+            Some(U256::from(REORG_TIP as u64 + 1))
+        );
+    }
+
     /// Verifies that committing `save_blocks` history before running the pruner
     /// prevents the pruner from overwriting new entries.
     ///
@@ -667,7 +806,14 @@ mod tests {
         let mut test_block_builder = TestBlockBuilder::eth().with_state();
         let signer = test_block_builder.signer;
         let initial_balance = U256::from(10).pow(U256::from(18));
-        let block_a1 = test_block_builder.get_executed_block_with_number(1, genesis_hash);
+        // The historical check below needs the signer to exist before block 2. Empty test blocks
+        // make the builder's subsequent revert data describe it as absent.
+        let block_a1 = loop {
+            let block = test_block_builder.get_executed_block_with_number(1, genesis_hash);
+            if !block.recovered_block().body().transactions.is_empty() {
+                break block
+            }
+        };
         let hash_a1 = block_a1.recovered_block().hash();
         let block_a2 = test_block_builder.get_executed_block_with_number(2, hash_a1);
         let hash_a2 = block_a2.recovered_block().hash();
