@@ -10,3 +10,6 @@ pub(crate) use changeset_cache::ChangesetCache;
 
 mod manager;
 pub use manager::*;
+
+mod provider;
+pub use provider::*;
