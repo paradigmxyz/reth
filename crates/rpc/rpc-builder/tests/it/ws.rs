@@ -6,7 +6,7 @@ use jsonrpsee::{
     core::client::{Error, Subscription, SubscriptionClientT},
     types::error::ErrorCode,
 };
-use reth_rpc_eth_api::{EthApiTypes, RpcNodeCore};
+use reth_rpc_eth_api::{helpers::EthSubscriptions, types::RpcTypes, EthApiTypes, RpcNodeCore};
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tokio_util::EventSender;
 use serde_json::Value;
@@ -54,8 +54,10 @@ impl<Eth: RpcNodeCore> RpcNodeCore for PendingLogsEthApi<Eth> {
     }
 }
 
-impl<Eth: reth_rpc_eth_api::helpers::EthSubscriptions> reth_rpc_eth_api::helpers::EthSubscriptions
-    for PendingLogsEthApi<Eth>
+impl<Eth> EthSubscriptions for PendingLogsEthApi<Eth>
+where
+    Eth: EthSubscriptions,
+    Eth::NetworkTypes: RpcTypes<Log = alloy_rpc_types_eth::Log>,
 {
     fn log_stream(
         &self,
