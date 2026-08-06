@@ -432,25 +432,6 @@ impl<N: NodePrimitives> OverlayManager<N> {
             hash = parent_hash;
         }
         span.record("block_count", blocks.len());
-        let parent_input = blocks.first().and_then(|block| {
-            let parent_hash = block.recovered_block().parent_hash();
-            (parent_hash != anchor_hash)
-                .then(|| {
-                    cache
-                        .entries
-                        .get(&OverlayCacheKey { anchor_hash, tip_hash: parent_hash })
-                        .and_then(|entry| entry.value().ready())
-                })
-                .flatten()
-        });
-        span.record("parent_overlay_reused", parent_input.is_some());
-        let compute_input = match parent_input {
-            Some(parent_input) => {
-                ComputeOverlayInput::ExtendCached { block: blocks.swap_remove(0), parent_input }
-            }
-            None => ComputeOverlayInput::MergeBlocks(blocks),
-        };
-
         enum CacheAction<T> {
             Ready(Arc<T>),
             Wait(Arc<OverlayWaiter<T>>),
@@ -479,6 +460,23 @@ impl<N: NodePrimitives> OverlayManager<N> {
             CacheAction::Ready(input) => Ok(input),
             CacheAction::Wait(waiter) => Ok(waiter.wait()),
             CacheAction::Compute(waiter) => {
+                let parent_input = blocks.first().and_then(|block| {
+                    let parent_hash = block.recovered_block().parent_hash();
+                    (parent_hash != anchor_hash)
+                        .then(|| {
+                            cache
+                                .take_ready(&OverlayCacheKey { anchor_hash, tip_hash: parent_hash })
+                        })
+                        .flatten()
+                });
+                span.record("parent_overlay_reused", parent_input.is_some());
+                let compute_input = match parent_input {
+                    Some(parent_input) => ComputeOverlayInput::ExtendCached {
+                        block: blocks.swap_remove(0),
+                        parent_input,
+                    },
+                    None => ComputeOverlayInput::MergeBlocks(blocks),
+                };
                 let input = Arc::new(compute(compute_input, span));
                 waiter.finish(Arc::clone(&input));
 
@@ -624,6 +622,14 @@ impl<T> OverlayCache<T> {
     fn retain(&self, mut keep: impl FnMut(&OverlayCacheKey, &OverlayCacheEntry<T>) -> bool) {
         self.entries.retain(|key, entry| keep(key, entry))
     }
+
+    /// Removes and returns a ready entry.
+    fn take_ready(&self, key: &OverlayCacheKey) -> Option<Arc<T>> {
+        let (_, entry) =
+            self.entries.remove_if(key, |_, entry| matches!(entry, OverlayCacheEntry::Ready(_)))?;
+        let OverlayCacheEntry::Ready(input) = entry else { unreachable!() };
+        Some(input)
+    }
 }
 
 enum OverlayCacheEntry<T> {
@@ -636,15 +642,6 @@ impl<T> Clone for OverlayCacheEntry<T> {
         match self {
             Self::Ready(input) => Self::Ready(Arc::clone(input)),
             Self::Computing(waiter) => Self::Computing(Arc::clone(waiter)),
-        }
-    }
-}
-
-impl<T> OverlayCacheEntry<T> {
-    fn ready(&self) -> Option<Arc<T>> {
-        match self {
-            Self::Ready(input) => Some(Arc::clone(input)),
-            Self::Computing(_) => None,
         }
     }
 }
@@ -708,13 +705,13 @@ fn compute_overlay<N: NodePrimitives>(
                 "extending cached parent state trie overlay"
             );
 
-            let mut overlay = parent_input.as_ref().clone();
+            let mut parent_input = parent_input;
             extend_overlay(
-                &mut overlay,
+                Arc::make_mut(&mut parent_input),
                 &trie_data.sorted.hashed_state,
                 &trie_data.sorted.trie_updates,
             );
-            overlay
+            Arc::try_unwrap(parent_input).expect("Arc::make_mut leaves the child overlay unique")
         }
         ComputeOverlayInput::MergeBlocks(blocks) => merge_blocks(blocks),
     };
@@ -812,9 +809,9 @@ fn compute_execution_overlay_inner<N: NodePrimitives>(
 
     let overlay = match input {
         ComputeOverlayInput::ExtendCached { block, parent_input } => {
-            let mut overlay = parent_input.as_ref().clone();
-            extend_execution_overlay(&mut overlay, &block);
-            overlay
+            let mut parent_input = parent_input;
+            extend_execution_overlay(Arc::make_mut(&mut parent_input), &block);
+            Arc::try_unwrap(parent_input).expect("Arc::make_mut leaves the child overlay unique")
         }
         ComputeOverlayInput::MergeBlocks(blocks) => {
             let mut overlay = ExecutionOverlay::default();
@@ -999,6 +996,70 @@ mod tests {
         assert_eq!(short.accounts.len(), 1);
     }
 
+    #[test]
+    fn promotes_ready_parent_overlays_to_the_child() {
+        let manager = OverlayManager::default();
+        let blocks = test_blocks();
+        for block in &blocks {
+            manager.insert_block(block.clone());
+        }
+
+        let anchor_hash = blocks[0].recovered_block().parent_hash();
+        let parent_hash = blocks[1].recovered_block().hash();
+        let child_hash = blocks[2].recovered_block().hash();
+        let parent_key = OverlayCacheKey { anchor_hash, tip_hash: parent_hash };
+        let child_key = OverlayCacheKey { anchor_hash, tip_hash: child_hash };
+
+        manager.overlay_for_parent(parent_hash, anchor_hash).unwrap();
+        manager.execution_overlay_for_parent(parent_hash, anchor_hash).unwrap();
+
+        manager.overlay_for_parent(child_hash, anchor_hash).unwrap();
+        manager.execution_overlay_for_parent(child_hash, anchor_hash).unwrap();
+
+        assert!(!manager.state_trie_overlays.entries.contains_key(&parent_key));
+        assert!(manager.state_trie_overlays.entries.contains_key(&child_key));
+        assert!(!manager.execution_overlays.entries.contains_key(&parent_key));
+        assert!(manager.execution_overlays.entries.contains_key(&child_key));
+    }
+
+    #[test]
+    fn promotes_parent_overlays_held_by_callers() {
+        let manager = OverlayManager::default();
+        let blocks = test_blocks();
+        for block in &blocks {
+            manager.insert_block(block.clone());
+        }
+
+        let anchor_hash = blocks[0].recovered_block().parent_hash();
+        let parent_hash = blocks[1].recovered_block().hash();
+        let child_hash = blocks[2].recovered_block().hash();
+        let parent_key = OverlayCacheKey { anchor_hash, tip_hash: parent_hash };
+
+        manager.overlay_for_parent(parent_hash, anchor_hash).unwrap();
+        let state_parent = manager
+            .state_trie_overlays
+            .entries
+            .get(&parent_key)
+            .and_then(|entry| match entry.value() {
+                OverlayCacheEntry::Ready(input) => Some(Arc::clone(input)),
+                OverlayCacheEntry::Computing(_) => None,
+            })
+            .unwrap();
+        let execution_parent =
+            manager.execution_overlay_for_parent(parent_hash, anchor_hash).unwrap();
+
+        let (_, child_state) = manager.overlay_for_parent(child_hash, anchor_hash).unwrap();
+        let child_execution =
+            manager.execution_overlay_for_parent(child_hash, anchor_hash).unwrap();
+
+        assert!(!manager.state_trie_overlays.entries.contains_key(&parent_key));
+        assert!(!manager.execution_overlays.entries.contains_key(&parent_key));
+        assert_eq!(state_parent.state.accounts.len(), 2);
+        assert_eq!(execution_parent.accounts.len(), 2);
+        assert_eq!(child_state.accounts.len(), 3);
+        assert_eq!(child_execution.accounts.len(), 3);
+    }
+
     #[cfg(feature = "rayon")]
     #[test]
     fn precomputes_execution_overlay_for_cached_parent() {
@@ -1023,6 +1084,10 @@ mod tests {
             assert!(std::time::Instant::now() < deadline, "execution overlay was not precomputed");
             thread::sleep(Duration::from_millis(10));
         }
+        assert!(!manager.execution_overlays.entries.contains_key(&OverlayCacheKey {
+            anchor_hash,
+            tip_hash: blocks[0].recovered_block().hash(),
+        }));
     }
 
     #[test]

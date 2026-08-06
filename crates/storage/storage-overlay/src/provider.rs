@@ -41,6 +41,46 @@ pub(crate) struct OverlayStateProviderFactoryMetrics {
     execution_overlay_cache_misses: Counter,
 }
 
+/// Marker for a provider carrying only an execution overlay.
+#[derive(Debug)]
+pub struct ExecutionOverlayOnly;
+
+/// Marker for a provider carrying only a state trie overlay.
+#[derive(Debug)]
+pub struct StateTrieOverlayOnly;
+
+/// Marker for a provider carrying both overlays.
+#[derive(Debug)]
+pub struct BothOverlays;
+
+/// Selects which overlays an [`OverlayStateProvider`] carries.
+pub trait OverlayKindMarker {
+    /// Whether providers of this kind carry a state trie overlay.
+    const HAS_STATE_TRIE_OVERLAY: bool;
+    /// Whether providers of this kind carry an execution overlay.
+    const HAS_EXECUTION_OVERLAY: bool;
+}
+
+impl OverlayKindMarker for ExecutionOverlayOnly {
+    const HAS_STATE_TRIE_OVERLAY: bool = false;
+    const HAS_EXECUTION_OVERLAY: bool = true;
+}
+
+impl OverlayKindMarker for StateTrieOverlayOnly {
+    const HAS_STATE_TRIE_OVERLAY: bool = true;
+    const HAS_EXECUTION_OVERLAY: bool = false;
+}
+
+impl OverlayKindMarker for BothOverlays {
+    const HAS_STATE_TRIE_OVERLAY: bool = true;
+    const HAS_EXECUTION_OVERLAY: bool = true;
+}
+
+trait HasStateTrieOverlay: OverlayKindMarker {}
+
+impl HasStateTrieOverlay for StateTrieOverlayOnly {}
+impl HasStateTrieOverlay for BothOverlays {}
+
 /// Factory for creating overlay state providers with optional reverts and overlays.
 ///
 /// This factory allows building an `OverlayStateProvider` whose DB state has been reverted to a
@@ -249,46 +289,6 @@ where
         ))
     }
 }
-
-/// Marker for a provider carrying only an execution overlay.
-#[derive(Debug)]
-pub struct ExecutionOverlayOnly;
-
-/// Marker for a provider carrying only a state trie overlay.
-#[derive(Debug)]
-pub struct StateTrieOverlayOnly;
-
-/// Marker for a provider carrying both overlays.
-#[derive(Debug)]
-pub struct BothOverlays;
-
-/// Selects which overlays an [`OverlayStateProvider`] carries.
-pub trait OverlayKindMarker {
-    /// Whether providers of this kind carry a state trie overlay.
-    const HAS_STATE_TRIE_OVERLAY: bool;
-    /// Whether providers of this kind carry an execution overlay.
-    const HAS_EXECUTION_OVERLAY: bool;
-}
-
-impl OverlayKindMarker for ExecutionOverlayOnly {
-    const HAS_STATE_TRIE_OVERLAY: bool = false;
-    const HAS_EXECUTION_OVERLAY: bool = true;
-}
-
-impl OverlayKindMarker for StateTrieOverlayOnly {
-    const HAS_STATE_TRIE_OVERLAY: bool = true;
-    const HAS_EXECUTION_OVERLAY: bool = false;
-}
-
-impl OverlayKindMarker for BothOverlays {
-    const HAS_STATE_TRIE_OVERLAY: bool = true;
-    const HAS_EXECUTION_OVERLAY: bool = true;
-}
-
-trait HasStateTrieOverlay: OverlayKindMarker {}
-
-impl HasStateTrieOverlay for StateTrieOverlayOnly {}
-impl HasStateTrieOverlay for BothOverlays {}
 
 /// State provider with in-memory overlay from trie updates and hashed post state.
 ///
