@@ -6,16 +6,12 @@ use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::{BlockId, TransactionInfo};
 use futures::Future;
-use reth_errors::{ProviderError, RethError};
+use reth_errors::RethError;
 use reth_evm::{
-    block::BlockExecutor, evm::EvmFactoryExt, tracing::TracingCtx, ConfigureEvm, Database, Evm,
-    EvmEnvFor, EvmFor, HaltReasonFor, InspectorFor, TxEnvFor,
+    block::BlockExecutor, evm::EvmFactoryExt, tracing::TracingCtx, ConfigureEvm, Evm, EvmEnvFor,
+    EvmFor, HaltReasonFor, InspectorFor, IntoTxEnv, TxEnvFor,
 };
 use reth_primitives_traits::{BlockBody, Recovered, RecoveredBlock};
-use reth_revm::{
-    database::StateProviderDatabase,
-    db::{bal::EvmDatabaseError, State},
-};
 use reth_rpc_eth_types::cache::db::StateCacheDb;
 use reth_storage_api::{ProviderBlock, ProviderTx};
 use revm::{context::Block, context_interface::result::ResultAndState};
@@ -26,83 +22,17 @@ use std::sync::Arc;
 pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     /// Executes the [`TxEnvFor`] with [`reth_evm::EvmEnv`] against the given [Database] without
     /// committing state changes.
-    fn inspect<DB, I>(
+    fn inspect<'a>(
         &self,
-        db: DB,
+        db: &'a mut StateCacheDb,
         evm_env: EvmEnvFor<Self::Evm>,
-        tx_env: TxEnvFor<Self::Evm>,
-        inspector: I,
-    ) -> Result<ResultAndState<HaltReasonFor<Self::Evm>>, Self::Error>
-    where
-        DB: Database<Error = EvmDatabaseError<ProviderError>>,
-        I: InspectorFor<Self::Evm, DB>,
-    {
-        let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env, inspector);
-        evm.transact(tx_env).map_err(Self::Error::from_evm_err)
-    }
-
-    /// Executes the transaction on top of the given [`BlockId`] with a tracer configured by the
-    /// config.
-    ///
-    /// The callback is then called with the [`TracingInspector`] and the [`ResultAndState`] after
-    /// the configured [`reth_evm::EvmEnv`] was inspected.
-    ///
-    /// Caution: this is blocking
-    fn trace_at<F, R>(
-        &self,
-        evm_env: EvmEnvFor<Self::Evm>,
-        tx_env: TxEnvFor<Self::Evm>,
-        config: TracingInspectorConfig,
-        at: BlockId,
-        f: F,
-    ) -> impl Future<Output = Result<R, Self::Error>> + Send
-    where
-        R: Send + 'static,
-        F: FnOnce(
-                TracingInspector,
-                ResultAndState<HaltReasonFor<Self::Evm>>,
-            ) -> Result<R, Self::Error>
-            + Send
-            + 'static,
-    {
-        self.with_state_at_block(at, move |this, state| {
-            let mut db = State::builder().with_database(StateProviderDatabase::new(state)).build();
-            let mut inspector = TracingInspector::new(config);
-            let res = this.inspect(&mut db, evm_env, tx_env, &mut inspector)?;
-            f(inspector, res)
-        })
-    }
-
-    /// Same as [`trace_at`](Self::trace_at) but also provides the used database to the callback.
-    ///
-    /// Executes the transaction on top of the given [`BlockId`] with a tracer configured by the
-    /// config.
-    ///
-    /// The callback is then called with the [`TracingInspector`] and the [`ResultAndState`] after
-    /// the configured [`reth_evm::EvmEnv`] was inspected.
-    fn spawn_trace_at_with_state<F, R>(
-        &self,
-        evm_env: EvmEnvFor<Self::Evm>,
-        tx_env: TxEnvFor<Self::Evm>,
-        config: TracingInspectorConfig,
-        at: BlockId,
-        f: F,
-    ) -> impl Future<Output = Result<R, Self::Error>> + Send
-    where
-        F: FnOnce(
-                TracingInspector,
-                ResultAndState<HaltReasonFor<Self::Evm>>,
-                StateCacheDb,
-            ) -> Result<R, Self::Error>
-            + Send
-            + 'static,
-        R: Send + 'static,
-    {
-        self.spawn_with_state_at_block(at, move |this, mut db| {
-            let mut inspector = TracingInspector::new(config);
-            let res = this.inspect(&mut db, evm_env, tx_env, &mut inspector)?;
-            f(inspector, res, db)
-        })
+        tx_env: impl IntoTxEnv<TxEnvFor<Self::Evm>>,
+        inspector: impl InspectorFor<Self::Evm, &'a mut StateCacheDb>,
+    ) -> Result<ResultAndState<HaltReasonFor<Self::Evm>>, Self::Error> {
+        self.evm_config()
+            .evm_with_env_and_inspector(db, evm_env, inspector)
+            .transact(tx_env)
+            .map_err(Self::Error::from_evm_err)
     }
 
     /// Retrieves the transaction if it exists and returns its trace.

@@ -38,7 +38,7 @@ use reth_rpc_eth_types::{
     simulate::{self, EthSimulateError},
     EthApiError, StateCacheDb,
 };
-use reth_storage_api::{BlockIdReader, ProviderTx, StateProviderBox};
+use reth_storage_api::{BlockIdReader, ProviderTx};
 use revm::{
     context::Block,
     context_interface::{result::ResultAndState, Cfg, Transaction},
@@ -531,22 +531,6 @@ pub trait Call:
         tx_env: &TxEnvFor<Self::Evm>,
     ) -> Result<u64, Self::Error> {
         alloy_evm::call::caller_gas_allowance(&mut db, tx_env).map_err(Self::Error::from_eth_err)
-    }
-
-    /// Executes the closure with the state that corresponds to the given [`BlockId`].
-    fn with_state_at_block<F, R>(
-        &self,
-        at: BlockId,
-        f: F,
-    ) -> impl Future<Output = Result<R, Self::Error>> + Send
-    where
-        R: Send + 'static,
-        F: FnOnce(Self, StateProviderBox) -> Result<R, Self::Error> + Send + 'static,
-    {
-        self.spawn_blocking_io_fut(async move |this| {
-            let state = this.state_at_block_id(at).await?;
-            f(this, state)
-        })
     }
 
     /// Executes the `TxEnv` against the given [Database] without committing state
