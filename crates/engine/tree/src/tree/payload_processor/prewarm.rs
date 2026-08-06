@@ -762,10 +762,10 @@ mod tests {
     fn bal_read_only_account_does_not_change_state_root() {
         let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
             .with_storage_read(U256::from(1));
-        let fields = BalAccountState::from_changes(&changes);
+        let state = BalAccountState::from_changes(&changes);
 
-        assert!(fields.is_empty());
-        assert!(!fields.changes_state_root(&changes));
+        assert!(state.is_empty());
+        assert!(!state.changes_state_root(&changes));
     }
 
     #[test]
@@ -774,10 +774,10 @@ mod tests {
             .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::from(10)))
             .with_nonce_change(NonceChange::new(BlockAccessIndex::new(1), 7))
             .with_code_change(CodeChange::new(BlockAccessIndex::new(1), bytes!("6001600155")));
-        let fields = BalAccountState::from_changes(&changes);
+        let state = BalAccountState::from_changes(&changes);
 
-        assert!(fields.changes_state_root(&changes));
-        assert!(!fields.needs_parent_account());
+        assert!(state.changes_state_root(&changes));
+        assert!(!state.needs_parent_account());
     }
 
     #[test]
@@ -787,18 +787,18 @@ mod tests {
                 U256::from(1),
                 vec![StorageChange::new(BlockAccessIndex::new(1), U256::from(2))],
             ));
-        let fields = BalAccountState::from_changes(&changes);
+        let state = BalAccountState::from_changes(&changes);
 
-        assert!(fields.changes_state_root(&changes));
-        assert!(fields.needs_parent_account());
+        assert!(state.changes_state_root(&changes));
+        assert!(state.needs_parent_account());
     }
 
     #[test]
     fn bal_account_uses_existing_fields_only_when_missing() {
         let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
             .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::from(10)));
-        let fields = BalAccountState::from_changes(&changes);
-        let account = fields.merge_onto(Some(&Account {
+        let state = BalAccountState::from_changes(&changes);
+        let account = state.merge_onto(Some(&Account {
             balance: U256::from(1),
             nonce: 3,
             bytecode_hash: Some(B256::repeat_byte(0xaa)),
