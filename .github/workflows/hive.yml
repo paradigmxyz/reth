@@ -157,11 +157,6 @@ jobs:
           # consume-engine
           - sim: ethereum/eels/consume-engine
             limit: .*tests/amsterdam.*
-          # Blob transaction API tests, including engine_forkchoiceUpdatedV4 custody masks
-          # and engine_getBlobsV4 cell responses.
-          - sim: ethereum/eels/execute-blobs
-            # PeerDAS tests are defined under tests/osaka and parameterized for Amsterdam too.
-            limit: .*tests/(amsterdam|osaka).*
           - sim: ethereum/eels/consume-engine
             limit: .*tests/osaka.*
           - sim: ethereum/eels/consume-engine
@@ -202,6 +197,12 @@ jobs:
             limit: .*tests/frontier.*
           - sim: ethereum/eels/consume-rlp
             limit: .*tests/paris.*
+
+          # execute-blobs
+          - sim: ethereum/eels/execute-blobs
+            limit: .*tests/amsterdam.*
+          - sim: ethereum/eels/execute-blobs
+            limit: .*tests/osaka.*
     needs:
       - build-reth
       - prepare-hive
@@ -345,8 +346,6 @@ jobs:
           # consume-engine
           - sim: ethereum/eels/consume-engine
             limit: .*tests/osaka.*
-          - sim: ethereum/eels/execute-blobs
-            limit: .*tests/osaka.*
           - sim: ethereum/eels/consume-engine
             limit: .*tests/prague.*
           - sim: ethereum/eels/consume-engine
@@ -383,6 +382,10 @@ jobs:
             limit: .*tests/frontier.*
           - sim: ethereum/eels/consume-rlp
             limit: .*tests/paris.*
+          
+          # execute-blobs
+          - sim: ethereum/eels/execute-blobs
+            limit: .*tests/osaka.*
     needs:
       - build-reth
       - prepare-hive
