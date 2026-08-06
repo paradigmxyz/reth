@@ -318,12 +318,8 @@ impl SnapshotManifest {
 
                 // Calculate which chunks to include
                 let start_chunk = match distance {
-                    Some(dist) => {
-                        // We need chunks covering the last `dist` blocks
-                        let needed_blocks = dist.min(chunked.total_blocks);
-                        let needed_chunks = needed_blocks.div_ceil(chunked.blocks_per_file);
-                        num_chunks.saturating_sub(needed_chunks)
-                    }
+                    // Include the tail chunks that cover at least `dist` blocks.
+                    Some(dist) => num_chunks.saturating_sub(chunked.tail_chunks_for_distance(dist)),
                     None => 0, // All chunks
                 };
 
@@ -363,11 +359,7 @@ impl SnapshotManifest {
                 let num_chunks = chunked.num_chunks();
 
                 let start_chunk = match distance {
-                    Some(dist) => {
-                        let needed_blocks = dist.min(chunked.total_blocks);
-                        let needed_chunks = needed_blocks.div_ceil(chunked.blocks_per_file);
-                        num_chunks.saturating_sub(needed_chunks)
-                    }
+                    Some(dist) => num_chunks.saturating_sub(chunked.tail_chunks_for_distance(dist)),
                     None => 0,
                 };
 
@@ -409,11 +401,7 @@ impl SnapshotManifest {
                 }
                 let num_chunks = chunked.chunk_sizes.len() as u64;
                 let start_chunk = match distance {
-                    Some(dist) => {
-                        let needed = dist.min(chunked.total_blocks);
-                        let needed_chunks = needed.div_ceil(chunked.blocks_per_file);
-                        num_chunks.saturating_sub(needed_chunks)
-                    }
+                    Some(dist) => num_chunks.saturating_sub(chunked.tail_chunks_for_distance(dist)),
                     None => 0,
                 };
                 chunked.chunk_sizes[start_chunk as usize..].iter().sum()
@@ -436,11 +424,7 @@ impl SnapshotManifest {
             ComponentManifest::Chunked(chunked) => {
                 let num_chunks = chunked.num_chunks();
                 let start_chunk = match distance {
-                    Some(dist) => {
-                        let needed = dist.min(chunked.total_blocks);
-                        let needed_chunks = needed.div_ceil(chunked.blocks_per_file);
-                        num_chunks.saturating_sub(needed_chunks)
-                    }
+                    Some(dist) => num_chunks.saturating_sub(chunked.tail_chunks_for_distance(dist)),
                     None => 0,
                 };
 
@@ -457,10 +441,7 @@ impl SnapshotManifest {
             return if self.component(ty).is_some() { 1 } else { 0 };
         };
         match distance {
-            Some(dist) => {
-                let needed = dist.min(chunked.total_blocks);
-                needed.div_ceil(chunked.blocks_per_file)
-            }
+            Some(dist) => chunked.tail_chunks_for_distance(dist),
             None => chunked.num_chunks(),
         }
     }
@@ -488,6 +469,32 @@ impl ChunkedArchive {
     /// Returns the number of chunks.
     pub fn num_chunks(&self) -> u64 {
         self.total_blocks.div_ceil(self.blocks_per_file)
+    }
+
+    /// Returns the number of tail chunks required to cover at least `distance` blocks from the
+    /// tip.
+    ///
+    /// The final chunk may be partial: it holds `total_blocks - (num_chunks - 1) *
+    /// blocks_per_file` blocks, which can be fewer than `blocks_per_file`. A naive
+    /// `distance.div_ceil(blocks_per_file)` assumes every selected chunk is full and can
+    /// therefore under-count, selecting a tail that covers fewer than `distance` blocks (for
+    /// example, `distance = 10064` with a 5000-block final chunk yields one chunk that falls
+    /// 5064 blocks short). This accounts for the partial final chunk so the selected tail
+    /// always covers `distance`; callers prune the surplus.
+    pub fn tail_chunks_for_distance(&self, distance: u64) -> u64 {
+        let num_chunks = self.num_chunks();
+        let needed = distance.min(self.total_blocks);
+        if num_chunks == 0 || needed == 0 {
+            return 0;
+        }
+        // Blocks held by the final, possibly-partial chunk.
+        let last_chunk_blocks = self.total_blocks - (num_chunks - 1) * self.blocks_per_file;
+        if needed <= last_chunk_blocks {
+            1
+        } else {
+            // One chunk for the partial tail, plus full chunks for the remaining blocks.
+            (1 + (needed - last_chunk_blocks).div_ceil(self.blocks_per_file)).min(num_chunks)
+        }
     }
 
     /// Returns the extracted plain-output size for one chunk.
@@ -1032,6 +1039,80 @@ mod tests {
         let m = test_manifest();
         assert_eq!(m.chunks_for_distance(SnapshotComponentType::State, None), 1);
         assert_eq!(m.chunks_for_distance(SnapshotComponentType::State, Some(100)), 1);
+    }
+
+    /// A snapshot whose final chunk is partial: `total_blocks` is not a multiple of
+    /// `blocks_per_file`, so the last chunk holds fewer than `blocks_per_file` blocks.
+    /// Three chunks: `[0, 500k)`, `[500k, 1M)`, and `[1M, 1.005M)` — the last holds 5_000 blocks.
+    fn partial_tail_manifest() -> SnapshotManifest {
+        let mut components = BTreeMap::new();
+        components.insert(
+            "transactions".to_string(),
+            ComponentManifest::Chunked(ChunkedArchive {
+                blocks_per_file: 500_000,
+                total_blocks: 1_005_000,
+                chunk_sizes: vec![10, 20, 30],
+                chunk_decompressed_sizes: vec![100, 200, 300],
+                chunk_output_files: vec![vec![], vec![], vec![]],
+            }),
+        );
+        SnapshotManifest {
+            block: 1_005_000,
+            chain_id: 1,
+            storage_version: 2,
+            timestamp: 0,
+            base_url: Some("https://example.com".to_string()),
+            reth_version: None,
+            components,
+        }
+    }
+
+    #[test]
+    fn tail_chunks_for_distance_accounts_for_partial_final_chunk() {
+        let chunked = ChunkedArchive {
+            blocks_per_file: 500_000,
+            total_blocks: 1_005_000,
+            chunk_sizes: vec![10, 20, 30],
+            chunk_decompressed_sizes: vec![],
+            chunk_output_files: vec![],
+        };
+        // The final chunk holds only 5_000 blocks, so covering 10_064 blocks needs the last two
+        // chunks. The naive `distance.div_ceil(blocks_per_file)` returns 1 here and falls short.
+        assert_eq!(chunked.tail_chunks_for_distance(10_064), 2);
+        // A distance that fits inside the final chunk still needs just one.
+        assert_eq!(chunked.tail_chunks_for_distance(5_000), 1);
+        assert_eq!(chunked.tail_chunks_for_distance(1), 1);
+        // Covering everything selects all chunks and never exceeds the chunk count.
+        assert_eq!(chunked.tail_chunks_for_distance(1_005_000), 3);
+        assert_eq!(chunked.tail_chunks_for_distance(u64::MAX), 3);
+    }
+
+    #[test]
+    fn partial_final_chunk_downloads_enough_history() {
+        let m = partial_tail_manifest();
+        // The published snapshot's final chunk is partial (5_000 blocks). A --full download
+        // asking for 10_064 blocks must pull the last two chunks, then prune the surplus,
+        // rather than the single short tail chunk the old distance math selected.
+        assert_eq!(m.chunks_for_distance(SnapshotComponentType::Transactions, Some(10_064)), 2);
+
+        let urls = m.archive_urls_for_distance(SnapshotComponentType::Transactions, Some(10_064));
+        assert_eq!(urls.len(), 2);
+        assert_eq!(urls[0], "https://example.com/transactions-500000-999999.tar.zst");
+        assert_eq!(urls[1], "https://example.com/transactions-1000000-1499999.tar.zst");
+
+        let archives =
+            m.snapshot_archives_for_distance(SnapshotComponentType::Transactions, Some(10_064));
+        assert_eq!(archives.len(), 2);
+
+        // Reported sizes cover the selected tail chunks (indices 1 and 2).
+        assert_eq!(m.size_for_distance(SnapshotComponentType::Transactions, Some(10_064)), 20 + 30);
+        assert_eq!(
+            m.output_size_for_distance(SnapshotComponentType::Transactions, Some(10_064)),
+            200 + 300
+        );
+
+        // A distance that fits inside the final chunk still selects a single chunk.
+        assert_eq!(m.chunks_for_distance(SnapshotComponentType::Transactions, Some(5_000)), 1);
     }
 
     #[test]
