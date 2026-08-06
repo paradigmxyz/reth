@@ -2,7 +2,7 @@ use crate::{database_state_frontiers, ExecutionOverlay, OverlayBuilder, StateTri
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{Address, BlockHash, BlockNumber, B256, U256};
 use metrics::{Counter, Histogram};
-use reth_db_api::{tables, transaction::DbTx, DatabaseError};
+use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx, DatabaseError};
 use reth_errors::ProviderResult;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_metrics::Metrics;
@@ -45,15 +45,15 @@ pub(crate) struct OverlayStateProviderFactoryMetrics {
 }
 
 /// Marker for a provider carrying only an execution overlay.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ExecutionOverlayOnly;
 
 /// Marker for a provider carrying only a state trie overlay.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct StateTrieOverlayOnly;
 
 /// Marker for a provider carrying both overlays.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct BothOverlays;
 
 /// Selects which overlays an [`OverlayStateProvider`] carries.
@@ -386,7 +386,7 @@ impl<Provider> OverlayStateProvider<Provider, BothOverlays> {
 
 impl<Provider, OverlayKind> AccountReader for OverlayStateProvider<Provider, OverlayKind>
 where
-    Provider: AccountReader,
+    Provider: DBProvider + StorageSettingsCache,
     OverlayKind: HasExecutionOverlay,
 {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
@@ -397,7 +397,18 @@ where
         if let Some(account) = overlay.accounts.get(address) {
             return Ok(account.as_ref().map(Account::from))
         }
-        self.provider.basic_account(address)
+        if self.provider.cached_storage_settings().use_hashed_state() {
+            let hashed_address = alloy_primitives::keccak256(address);
+            self.provider
+                .tx()
+                .get_by_encoded_key::<tables::HashedAccounts>(&hashed_address)
+                .map_err(Into::into)
+        } else {
+            self.provider
+                .tx()
+                .get_by_encoded_key::<tables::PlainAccountState>(address)
+                .map_err(Into::into)
+        }
     }
 }
 
@@ -441,7 +452,7 @@ where
 
 impl<Provider, OverlayKind> BytecodeReader for OverlayStateProvider<Provider, OverlayKind>
 where
-    Provider: BytecodeReader,
+    Provider: DBProvider,
     OverlayKind: HasExecutionOverlay,
 {
     fn bytecode_by_hash(
@@ -455,7 +466,7 @@ where
         if let Some(bytecode) = overlay.code_hashes.get(code_hash) {
             return Ok(Some(reth_primitives_traits::Bytecode(bytecode.clone())));
         }
-        self.provider.bytecode_by_hash(code_hash)
+        self.provider.tx().get_by_encoded_key::<tables::Bytecodes>(code_hash).map_err(Into::into)
     }
 }
 
@@ -541,7 +552,7 @@ where
 
 impl<Provider, OverlayKind> StateProvider for OverlayStateProvider<Provider, OverlayKind>
 where
-    Provider: StateProvider,
+    Provider: DBProvider + BlockHashReader + StorageSettingsCache,
     OverlayKind: HasExecutionOverlay,
 {
     fn storage(
@@ -560,7 +571,23 @@ where
         {
             return Ok(Some(*value));
         }
-        self.provider.storage(address, storage_key)
+        if self.provider.cached_storage_settings().use_hashed_state() {
+            let hashed_address = alloy_primitives::keccak256(address);
+            let hashed_slot = alloy_primitives::keccak256(storage_key);
+            let mut cursor = self.provider.tx().cursor_dup_read::<tables::HashedStorages>()?;
+            Ok(cursor
+                .seek_by_key_subkey(hashed_address, hashed_slot)?
+                .filter(|entry| entry.key == hashed_slot)
+                .map(|entry| entry.value))
+        } else {
+            let mut cursor = self.provider.tx().cursor_dup_read::<tables::PlainStorageState>()?;
+            if let Some(entry) = cursor.seek_by_key_subkey(address, storage_key)? &&
+                entry.key == storage_key
+            {
+                return Ok(Some(entry.value))
+            }
+            Ok(None)
+        }
     }
 }
 
@@ -832,6 +859,7 @@ mod tests {
 
     #[test]
     fn execution_overlay_readers_use_overlay_first() {
+        let (factory, _) = setup_frontiers(1, 3);
         let address = Address::with_last_byte(1);
         let account_info = AccountInfo { nonce: 1, balance: U256::from(2), ..Default::default() };
         let block_hash = B256::with_last_byte(3);
@@ -849,7 +877,7 @@ mod tests {
             .insert(U256::from_be_bytes(storage_key.0), storage_value);
         execution_overlay.code_hashes.insert(code_hash, bytecode.clone());
         let provider = OverlayStateProvider::new_execution(
-            reth_storage_api::noop::NoopProvider::default(),
+            factory.provider().unwrap(),
             execution_overlay,
             false,
         );
@@ -857,7 +885,7 @@ mod tests {
         assert_eq!(provider.basic_account(&address).unwrap(), Some(Account::from(account_info)));
         assert!(provider.basic_account(&Address::with_last_byte(2)).unwrap().is_none());
         assert_eq!(provider.block_hash(1).unwrap(), Some(block_hash));
-        assert_eq!(provider.canonical_hashes_range(0, 2).unwrap(), vec![block_hash]);
+        assert_eq!(provider.canonical_hashes_range(1, 2).unwrap(), vec![block_hash]);
         assert_eq!(provider.storage(address, storage_key).unwrap(), Some(storage_value));
         assert_eq!(
             provider.bytecode_by_hash(&code_hash).unwrap(),
