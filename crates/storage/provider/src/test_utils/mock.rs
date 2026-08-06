@@ -35,7 +35,7 @@ use reth_primitives_traits::{
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    BlockBodyIndicesProvider, BytecodeReader, DBProvider, DatabaseProviderFactory,
+    BlockBodyIndicesProvider, BytecodeReader, DBProvider, DatabaseProviderFactory, DbTxProvider,
     HashedPostStateProvider, NodePrimitivesProvider, StageCheckpointReader, StateProofProvider,
     StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
     TryIntoHistoricalStateProvider,
@@ -512,15 +512,19 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Clone + 'static> DatabaseProvi
     }
 }
 
-impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> DBProvider
+impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> DbTxProvider
     for MockEthProvider<T, ChainSpec>
 {
     type Tx = TxMock;
 
-    fn tx_ref(&self) -> &Self::Tx {
+    fn tx(&self) -> &Self::Tx {
         &self.tx
     }
+}
 
+impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> DBProvider
+    for MockEthProvider<T, ChainSpec>
+{
     fn tx_mut(&mut self) -> &mut Self::Tx {
         &mut self.tx
     }
