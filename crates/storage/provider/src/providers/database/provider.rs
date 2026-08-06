@@ -16,11 +16,11 @@ use crate::{
     DBProvider, DbTxProvider, EitherReader, EitherWriter, EitherWriterDestination, HashingWriter,
     HeaderProvider, HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef,
     HistoryWriter, LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown,
-    PersistenceFrontiers, ProviderError, ProviderHeader, PruneCheckpointReader,
-    PruneCheckpointWriter, RawRocksDBBatch, RevertsInit, RocksBatchArg, RocksDBProviderFactory,
-    StageCheckpointReader, StateProviderBox, StateWriter, StaticFileProviderFactory, StatsReader,
-    StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
-    TransactionsProviderExt, TrieWriter,
+    PersistenceFrontiers, ProviderError, PruneCheckpointReader, PruneCheckpointWriter,
+    RawRocksDBBatch, RevertsInit, RocksBatchArg, RocksDBProviderFactory, StageCheckpointReader,
+    StateProviderBox, StateWriter, StaticFileProviderFactory, StatsReader, StorageReader,
+    StorageTrieWriter, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
+    TrieWriter,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
