@@ -7,9 +7,14 @@ use super::{
     RETRY_BACKOFF_SECS,
 };
 use eyre::Result;
-use reqwest::{blocking::Client as BlockingClient, header::RANGE, StatusCode};
+use reqwest::{
+    blocking::Client as BlockingClient,
+    header::{CONTENT_RANGE, RANGE},
+    StatusCode,
+};
 use reth_cli_util::cancellation::CancellationToken;
 use reth_fs_util as fs;
+use serde::{Deserialize, Serialize};
 use std::{
     any::Any,
     collections::VecDeque,
@@ -43,6 +48,9 @@ const SEGMENTED_DOWNLOAD_MAX_BACKOFF_SECS: u64 = 30;
 /// requests.
 const SEGMENTED_DOWNLOAD_REQUEST_TIMEOUT_SECS: u64 = 120;
 
+/// Version of the persisted segmented resume-state schema.
+const SEGMENTED_RESUME_STATE_VERSION: u8 = 1;
+
 /// Paths for one downloaded archive and its `.part` file.
 #[derive(Debug, Clone)]
 struct DownloadPaths {
@@ -52,6 +60,8 @@ struct DownloadPaths {
     final_path: PathBuf,
     /// Temporary path used while the archive is still downloading.
     part_path: PathBuf,
+    /// Persisted completion state for segmented downloads.
+    resume_state_path: PathBuf,
 }
 
 impl DownloadPaths {
@@ -65,6 +75,7 @@ impl DownloadPaths {
         Self {
             final_path: target_dir.join(&file_name),
             part_path: target_dir.join(format!("{file_name}.part")),
+            resume_state_path: target_dir.join(format!("{file_name}.part.json")),
             file_name,
         }
     }
@@ -84,15 +95,22 @@ impl DownloadPaths {
         &self.part_path
     }
 
+    /// Returns the sidecar used to persist completed download pieces.
+    fn resume_state_path(&self) -> &Path {
+        &self.resume_state_path
+    }
+
     /// Promotes the partial file into the final archive path.
     fn finalize(&self) -> Result<()> {
         fs::rename(&self.part_path, &self.final_path)?;
+        let _ = fs::remove_file(&self.resume_state_path);
         Ok(())
     }
 
     /// Removes only the partial `.part` file for the current archive.
     fn cleanup_partial(&self) {
         let _ = fs::remove_file(&self.part_path);
+        let _ = fs::remove_file(&self.resume_state_path);
     }
 
     /// Removes both final and partial archive files so a fresh attempt can restart cleanly.
@@ -110,14 +128,21 @@ pub(crate) struct ArchiveFetcher {
     paths: DownloadPaths,
     /// Shared command-scoped download state.
     session: DownloadSession,
+    /// Optional manifest checksum used to identify resumable state.
+    checksum: Option<String>,
 }
 
 impl ArchiveFetcher {
     /// Creates a fetcher for one archive URL under the given target directory.
-    pub(crate) fn new(url: impl Into<String>, target_dir: &Path, session: DownloadSession) -> Self {
+    pub(crate) fn new(
+        url: impl Into<String>,
+        target_dir: &Path,
+        session: DownloadSession,
+        checksum: Option<String>,
+    ) -> Self {
         let url = url.into();
         let paths = DownloadPaths::from_url(&url, target_dir);
-        Self { url, paths, session }
+        Self { url, paths, session, checksum }
     }
 
     /// Downloads the archive using the best strategy supported by the remote source.
@@ -146,6 +171,19 @@ impl ArchiveFetcher {
 
         match choose_fetch_strategy(probe, request_limiter.max_concurrency()) {
             FetchStrategy::Sequential(reason) => {
+                if reason == SequentialDownloadFallback::NoRangeSupport &&
+                    SegmentedResumeStateStore::has_completed_pieces(
+                        &self.paths,
+                        &self.url,
+                        self.checksum.as_deref(),
+                        probe.total_size,
+                        request_limiter.max_concurrency(),
+                    )
+                {
+                    eyre::bail!(
+                        "Server did not accept the Range request required to resume the partial download"
+                    );
+                }
                 self.log_sequential_fallback(reason, probe.total_size);
                 self.download_sequential(super::MAX_DOWNLOAD_RETRIES, download_progress)
             }
@@ -172,10 +210,10 @@ impl ArchiveFetcher {
             Ok(response) if response.status() == StatusCode::PARTIAL_CONTENT => {
                 let total = response
                     .headers()
-                    .get("Content-Range")
+                    .get(CONTENT_RANGE)
                     .and_then(|value| value.to_str().ok())
-                    .and_then(|value| value.split('/').next_back())
-                    .and_then(|value| value.parse::<u64>().ok());
+                    .and_then(parse_content_range)
+                    .and_then(|(start, end, total)| (start == 0 && end == 0).then_some(total));
                 (true, total)
             }
             _ => {
@@ -200,6 +238,10 @@ impl ArchiveFetcher {
 
         if !quiet {
             info!(target: "reth::cli", file = %self.paths.file_name(), "Connecting to download server");
+        }
+
+        if fs::metadata(self.paths.resume_state_path()).is_ok() {
+            self.paths.cleanup_partial();
         }
 
         let client = BlockingClient::builder().timeout(Duration::from_secs(30)).build()?;
@@ -259,10 +301,10 @@ impl ArchiveFetcher {
             let size = if is_partial {
                 response
                     .headers()
-                    .get("Content-Range")
+                    .get(CONTENT_RANGE)
                     .and_then(|value| value.to_str().ok())
-                    .and_then(|value| value.split('/').next_back())
-                    .and_then(|value| value.parse().ok())
+                    .and_then(parse_content_range)
+                    .map(|(_, _, total)| total)
             } else {
                 response.content_length()
             };
@@ -363,6 +405,7 @@ impl ArchiveFetcher {
         SegmentedDownload::new(
             self.url.clone(),
             self.paths.clone(),
+            self.checksum.clone(),
             total_size,
             plan,
             self.session.clone(),
@@ -504,6 +547,8 @@ impl<W: Write> Write for ProgressWriter<W> {
 /// One queued byte range for a segmented archive download.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct DownloadPiece {
+    /// Stable index in the segmented download plan.
+    index: usize,
     /// Inclusive start byte for this piece.
     start: u64,
     /// Inclusive end byte for this piece.
@@ -523,12 +568,146 @@ struct SegmentedDownloadPlan {
     pieces: VecDeque<DownloadPiece>,
 }
 
+/// Durable completion bitmap for one segmented archive download.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct SegmentedResumeState {
+    /// Sidecar schema version.
+    version: u8,
+    /// Source URL whose bytes are represented by the partial file.
+    url: String,
+    /// Optional manifest checksum used to distinguish archive revisions.
+    checksum: Option<String>,
+    /// Expected compressed archive size.
+    total_size: u64,
+    /// Piece size used to build the download plan.
+    piece_size: u64,
+    /// Completion flag for every piece in plan order.
+    completed: Vec<bool>,
+}
+
+impl SegmentedResumeState {
+    /// Creates empty resume state for a new segmented download.
+    fn new(
+        url: &str,
+        checksum: Option<&str>,
+        total_size: u64,
+        piece_size: u64,
+        piece_count: usize,
+    ) -> Self {
+        Self {
+            version: SEGMENTED_RESUME_STATE_VERSION,
+            url: url.to_string(),
+            checksum: checksum.map(ToOwned::to_owned),
+            total_size,
+            piece_size,
+            completed: vec![false; piece_count],
+        }
+    }
+
+    /// Returns whether this state belongs to the current archive and piece plan.
+    fn matches(&self, expected: &Self) -> bool {
+        self.version == expected.version &&
+            self.url == expected.url &&
+            self.checksum == expected.checksum &&
+            self.total_size == expected.total_size &&
+            self.piece_size == expected.piece_size &&
+            self.completed.len() == expected.completed.len()
+    }
+}
+
+/// Thread-safe owner of a segmented resume sidecar.
+struct SegmentedResumeStateStore {
+    /// Sidecar path updated after each completed piece.
+    path: PathBuf,
+    /// Current in-memory completion state.
+    state: Mutex<SegmentedResumeState>,
+}
+
+impl SegmentedResumeStateStore {
+    /// Returns whether matching state contains completed pieces worth preserving.
+    fn has_completed_pieces(
+        paths: &DownloadPaths,
+        url: &str,
+        checksum: Option<&str>,
+        total_size: u64,
+        max_workers: usize,
+    ) -> bool {
+        let Some(plan) = plan_segmented_download(total_size, max_workers) else { return false };
+        let expected =
+            SegmentedResumeState::new(url, checksum, total_size, plan.piece_size, plan.piece_count);
+        let Ok(state) = fs::read_json_file::<SegmentedResumeState>(paths.resume_state_path())
+        else {
+            return false
+        };
+
+        fs::metadata(paths.part_path()).is_ok_and(|metadata| metadata.len() == total_size) &&
+            state.matches(&expected) &&
+            state.completed.iter().any(|completed| *completed)
+    }
+
+    /// Loads matching resume state or safely starts a new partial download.
+    fn load_or_create(
+        paths: &DownloadPaths,
+        url: &str,
+        checksum: Option<&str>,
+        total_size: u64,
+        plan: &SegmentedDownloadPlan,
+    ) -> Result<(Arc<Self>, VecDeque<DownloadPiece>, u64)> {
+        let expected =
+            SegmentedResumeState::new(url, checksum, total_size, plan.piece_size, plan.piece_count);
+        let existing = fs::read_json_file::<SegmentedResumeState>(paths.resume_state_path()).ok();
+        let part_matches =
+            fs::metadata(paths.part_path()).is_ok_and(|metadata| metadata.len() == total_size);
+        let state = match existing {
+            Some(state) if part_matches && state.matches(&expected) => state,
+            _ => {
+                paths.cleanup_partial();
+                let file = fs::create_file(paths.part_path())?;
+                file.set_len(total_size)?;
+                Self::persist(paths.resume_state_path(), &expected)?;
+                expected
+            }
+        };
+
+        let mut pending = VecDeque::new();
+        let mut completed_bytes = 0;
+        for piece in &plan.pieces {
+            if state.completed[piece.index] {
+                completed_bytes += piece.end - piece.start + 1;
+            } else {
+                pending.push_back(*piece);
+            }
+        }
+
+        let store = Arc::new(Self {
+            path: paths.resume_state_path().to_path_buf(),
+            state: Mutex::new(state),
+        });
+        Ok((store, pending, completed_bytes))
+    }
+
+    /// Marks one fully written piece complete and atomically persists the bitmap.
+    fn mark_complete(&self, piece: DownloadPiece) -> Result<()> {
+        let mut state = self.state.lock().unwrap();
+        state.completed[piece.index] = true;
+        Self::persist(&self.path, &state)
+    }
+
+    /// Atomically writes the sidecar so interrupted updates keep the previous bitmap.
+    fn persist(path: &Path, state: &SegmentedResumeState) -> Result<()> {
+        fs::atomic_write_file(path, |file| serde_json::to_writer(file, state))?;
+        Ok(())
+    }
+}
+
 /// Runs the segmented download workers and piece retries for one archive.
 struct SegmentedDownload {
     /// Remote archive URL.
     url: String,
     /// On-disk paths used for this archive download.
     paths: DownloadPaths,
+    /// Optional manifest checksum used to identify resumable state.
+    checksum: Option<String>,
     /// Total archive size in bytes.
     total_size: u64,
     /// Piece and worker plan for this archive.
@@ -542,6 +721,8 @@ struct SegmentedDownload {
 struct SegmentedWorkerContext<'a> {
     /// Remote archive URL.
     url: &'a str,
+    /// Expected compressed archive size.
+    total_size: u64,
     /// Partial file path where pieces are written.
     part_path: &'a Path,
     /// Shared progress counters for the whole command, when enabled.
@@ -550,6 +731,8 @@ struct SegmentedWorkerContext<'a> {
     request_limiter: &'a DownloadRequestLimiter,
     /// Cancellation token shared by the whole command.
     cancel_token: &'a CancellationToken,
+    /// Persisted completion state updated after each successful piece.
+    resume_state: &'a SegmentedResumeStateStore,
 }
 
 impl SegmentedDownload {
@@ -557,40 +740,57 @@ impl SegmentedDownload {
     fn new(
         url: String,
         paths: DownloadPaths,
+        checksum: Option<String>,
         total_size: u64,
         plan: SegmentedDownloadPlan,
         session: DownloadSession,
         _download_progress: Option<&mut ArchiveDownloadProgress<'_>>,
     ) -> Self {
-        Self { url, paths, total_size, plan, session }
+        Self { url, paths, checksum, total_size, plan, session }
     }
 
     /// Runs the segmented download to completion or returns the first fatal error.
     fn run(self) -> Result<DownloadedArchive> {
-        let Self { url, paths, total_size, plan, session } = self;
-        {
-            let file = fs::create_file(paths.part_path())?;
-            file.set_len(total_size)?;
-        }
+        let Self { url, paths, checksum, total_size, plan, session } = self;
+        let (resume_state, pending_pieces, resumed_bytes) =
+            SegmentedResumeStateStore::load_or_create(
+                &paths,
+                &url,
+                checksum.as_deref(),
+                total_size,
+                &plan,
+            )?;
 
         let worker_count = plan.worker_count;
-        let state = Arc::new(SegmentedDownloadState::new(plan.pieces));
+        let state = Arc::new(SegmentedDownloadState::new(pending_pieces));
         let terminal_failure = Arc::new(TerminalFailure::default());
-        let piece_progress_bytes = Arc::new(AtomicU64::new(0));
+        let piece_progress_bytes = Arc::new(AtomicU64::new(resumed_bytes));
         let worker_client = BlockingClient::builder()
             .connect_timeout(Duration::from_secs(30))
             .timeout(Duration::from_secs(SEGMENTED_DOWNLOAD_REQUEST_TIMEOUT_SECS))
             .build()?;
         let request_limiter = Arc::clone(session.require_request_limiter()?);
         let shared = session.progress();
+        if resumed_bytes > 0 {
+            if let Some(shared) = shared {
+                shared.add_active_download_bytes(resumed_bytes);
+            }
+            info!(target: "reth::cli",
+                file = %paths.file_name(),
+                resumed = %DownloadProgress::format_size(resumed_bytes),
+                "Resuming segmented download"
+            );
+        }
         let cancel_token = session.cancel_token();
         let url = url.as_str();
         let worker_context = SegmentedWorkerContext {
             url,
+            total_size,
             part_path: paths.part_path(),
             shared,
             request_limiter: request_limiter.as_ref(),
             cancel_token,
+            resume_state: resume_state.as_ref(),
         };
 
         std::thread::scope(|scope| {
@@ -629,11 +829,17 @@ impl SegmentedDownload {
             if let Some(shared) = shared {
                 shared.sub_active_download_bytes(downloaded_bytes);
             }
-            paths.cleanup_partial();
             return Err(error.wrap_err("Parallel download failed"))
         }
 
-        if !segmented_download_completed(cancel_token, downloaded_bytes, total_size) {
+        if cancel_token.is_cancelled() {
+            if let Some(shared) = shared {
+                shared.sub_active_download_bytes(downloaded_bytes);
+            }
+            eyre::bail!("Parallel download cancelled");
+        }
+
+        if downloaded_bytes != total_size {
             if let Some(shared) = shared {
                 shared.sub_active_download_bytes(downloaded_bytes);
             }
@@ -671,12 +877,14 @@ impl SegmentedDownload {
             if let Err(error) = Self::download_piece_with_retries(
                 client,
                 context.url,
+                context.total_size,
                 &file,
                 piece,
                 context.shared,
                 &piece_progress_bytes,
                 context.request_limiter,
                 context.cancel_token,
+                context.resume_state,
             ) {
                 state.note_terminal_failure();
                 terminal_failure.record(error);
@@ -693,12 +901,14 @@ impl SegmentedDownload {
     fn download_piece_with_retries(
         client: &BlockingClient,
         url: &str,
+        total_size: u64,
         file: &std::fs::File,
         piece: DownloadPiece,
         shared: Option<&Arc<SharedProgress>>,
         piece_progress_bytes: &AtomicU64,
         request_limiter: &DownloadRequestLimiter,
         cancel_token: &CancellationToken,
+        resume_state: &SegmentedResumeStateStore,
     ) -> Result<()> {
         for attempt in 1..=SEGMENT_RETRY_ATTEMPTS {
             if cancel_token.is_cancelled() {
@@ -709,13 +919,18 @@ impl SegmentedDownload {
             match Self::download_piece_once(
                 client,
                 url,
+                total_size,
                 file,
                 piece,
                 shared,
                 piece_progress_bytes,
                 cancel_token,
             ) {
-                Ok(()) => return Ok(()),
+                Ok(()) => {
+                    file.sync_data()?;
+                    resume_state.mark_complete(piece)?;
+                    return Ok(())
+                }
                 Err(PieceAttemptFailure::Retryable { error: _, throttled })
                     if attempt < SEGMENT_RETRY_ATTEMPTS =>
                 {
@@ -730,9 +945,11 @@ impl SegmentedDownload {
     }
 
     /// Downloads one queued piece once.
+    #[expect(clippy::too_many_arguments)]
     fn download_piece_once(
         client: &BlockingClient,
         url: &str,
+        total_size: u64,
         file: &std::fs::File,
         piece: DownloadPiece,
         shared: Option<&Arc<SharedProgress>>,
@@ -773,6 +990,19 @@ impl SegmentedDownload {
                 });
             }
         };
+
+        let returned_range = response
+            .headers()
+            .get(CONTENT_RANGE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(parse_content_range);
+        if returned_range != Some((piece.start, piece.end, total_size)) {
+            return Err(PieceAttemptFailure::Terminal(eyre::eyre!(
+                "Server returned invalid Content-Range for piece {}-{}",
+                piece.start,
+                piece.end
+            )));
+        }
 
         let mut buf = [0u8; 64 * 1024];
         let mut reader = response.take(expected_len);
@@ -882,11 +1112,13 @@ impl TerminalFailure {
 fn build_download_pieces(total_size: u64, piece_size: u64) -> VecDeque<DownloadPiece> {
     let mut pieces = VecDeque::new();
     let mut start = 0;
+    let mut index = 0;
 
     while start < total_size {
         let end = (start + piece_size).min(total_size) - 1;
-        pieces.push_back(DownloadPiece { start, end });
+        pieces.push_back(DownloadPiece { index, start, end });
         start = end + 1;
+        index += 1;
     }
 
     pieces
@@ -930,6 +1162,14 @@ fn piece_retry_backoff(attempt: u32, throttled: bool) -> Duration {
     let base = if throttled { 2 } else { RETRY_BACKOFF_SECS };
     let multiplier = 1u64 << attempt.saturating_sub(1).min(3);
     Duration::from_secs(base.saturating_mul(multiplier).min(SEGMENTED_DOWNLOAD_MAX_BACKOFF_SECS))
+}
+
+/// Parses an HTTP `Content-Range` value into its inclusive range and total size.
+fn parse_content_range(value: &str) -> Option<(u64, u64, u64)> {
+    let value = value.strip_prefix("bytes ")?;
+    let (range, total) = value.split_once('/')?;
+    let (start, end) = range.split_once('-')?;
+    Some((start.parse().ok()?, end.parse().ok()?, total.parse().ok()?))
 }
 
 /// Returns whether an HTTP status should retry the current piece.
@@ -985,21 +1225,39 @@ fn panic_payload_message(payload: Box<dyn Any + Send + 'static>) -> String {
     }
 }
 
-/// Returns whether every byte completed before cancellation.
-fn segmented_download_completed(
-    cancel_token: &CancellationToken,
-    downloaded_bytes: u64,
-    total_size: u64,
-) -> bool {
-    !cancel_token.is_cancelled() && downloaded_bytes == total_size
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use reqwest::StatusCode;
     use reth_cli_util::cancellation::CancellationToken;
-    use std::io::Write;
+    use std::{io::Write, net::TcpListener, thread::JoinHandle};
+
+    fn spawn_range_server(
+        expected_range: &str,
+        start: u64,
+        end: u64,
+        total: u64,
+        body: &'static [u8],
+    ) -> (String, JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let expected_range = expected_range.to_ascii_lowercase();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 4096];
+            let read = stream.read(&mut request).unwrap();
+            let request = String::from_utf8_lossy(&request[..read]).to_ascii_lowercase();
+            assert!(request.contains(&format!("range: {expected_range}")));
+            write!(
+                stream,
+                "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {start}-{end}/{total}\r\nConnection: close\r\n\r\n",
+                body.len()
+            )
+            .unwrap();
+            stream.write_all(body).unwrap();
+        });
+        (format!("http://{address}/state.tar.zst"), handle)
+    }
 
     #[test]
     fn segmented_plan_skips_small_files() {
@@ -1023,9 +1281,9 @@ mod tests {
         assert_eq!(
             pieces,
             vec![
-                DownloadPiece { start: 0, end: 3 },
-                DownloadPiece { start: 4, end: 7 },
-                DownloadPiece { start: 8, end: 9 },
+                DownloadPiece { index: 0, start: 0, end: 3 },
+                DownloadPiece { index: 1, start: 4, end: 7 },
+                DownloadPiece { index: 2, start: 8, end: 9 },
             ]
         );
     }
@@ -1073,7 +1331,7 @@ mod tests {
         std::fs::create_dir(&cache_dir).unwrap();
         let url = Url::from_file_path(&archive_path).unwrap().to_string();
         let session = DownloadSession::new(None, None, CancellationToken::new());
-        let fetcher = ArchiveFetcher::new(url, &cache_dir, session);
+        let fetcher = ArchiveFetcher::new(url, &cache_dir, session, None);
 
         let downloaded = fetcher.download(None).unwrap();
 
@@ -1084,7 +1342,183 @@ mod tests {
     }
 
     #[test]
-    fn cancelled_segmented_download_does_not_finalize_incomplete_file() {
+    fn segmented_download_requests_only_missing_pieces_after_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/state.tar.zst", listener.local_addr().unwrap());
+        let first_cancel_token = CancellationToken::new();
+        let server_cancel_token = first_cancel_token.clone();
+        let server = std::thread::spawn(move || {
+            for (index, (expected_range, start, end, body)) in [
+                ("bytes=0-3", 0, 3, b"abcd"),
+                ("bytes=4-7", 4, 7, b"efgh"),
+                ("bytes=4-7", 4, 7, b"efgh"),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0u8; 4096];
+                let read = stream.read(&mut request).unwrap();
+                let request = String::from_utf8_lossy(&request[..read]).to_ascii_lowercase();
+                assert!(request.contains(&format!("range: {expected_range}")));
+                if index == 1 {
+                    server_cancel_token.cancel();
+                }
+                write!(
+                    stream,
+                    "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {start}-{end}/8\r\nConnection: close\r\n\r\n",
+                    body.len()
+                )
+                .unwrap();
+                let _ = stream.write_all(body);
+            }
+        });
+        let paths = DownloadPaths::from_url(&url, dir.path());
+        let pieces = build_download_pieces(8, 4);
+        let plan = SegmentedDownloadPlan {
+            piece_size: 4,
+            piece_count: pieces.len(),
+            worker_count: 1,
+            pieces,
+        };
+        let progress = SharedProgress::new(8, 0, 1, first_cancel_token.clone());
+        let session = DownloadSession::new(
+            Some(Arc::clone(&progress)),
+            Some(DownloadRequestLimiter::new(1)),
+            first_cancel_token,
+        );
+        let download = SegmentedDownload::new(
+            url.clone(),
+            paths.clone(),
+            Some("checksum".to_string()),
+            8,
+            plan,
+            session,
+            None,
+        );
+
+        assert!(download.run().is_err());
+        let resume_state =
+            fs::read_json_file::<SegmentedResumeState>(paths.resume_state_path()).unwrap();
+        assert_eq!(resume_state.completed, [true, false]);
+
+        let pieces = build_download_pieces(8, 4);
+        let plan = SegmentedDownloadPlan {
+            piece_size: 4,
+            piece_count: pieces.len(),
+            worker_count: 1,
+            pieces,
+        };
+        let cancel_token = CancellationToken::new();
+        let resumed_progress = SharedProgress::new(8, 0, 1, cancel_token.clone());
+        let session = DownloadSession::new(
+            Some(Arc::clone(&resumed_progress)),
+            Some(DownloadRequestLimiter::new(1)),
+            cancel_token,
+        );
+        let download = SegmentedDownload::new(
+            url,
+            paths,
+            Some("checksum".to_string()),
+            8,
+            plan,
+            session,
+            None,
+        );
+        let downloaded = download.run().unwrap();
+        server.join().unwrap();
+
+        assert_eq!(std::fs::read(downloaded.path).unwrap(), b"abcdefgh");
+        assert_eq!(resumed_progress.active_download_bytes.load(Ordering::Relaxed), 0);
+        assert_eq!(resumed_progress.session_fetched_bytes.load(Ordering::Relaxed), 4);
+        assert!(!dir.path().join("state.tar.zst.part.json").exists());
+    }
+
+    #[test]
+    fn segmented_download_does_not_trust_partial_file_without_matching_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let url = "https://example.com/state.tar.zst";
+        let paths = DownloadPaths::from_url(url, dir.path());
+        std::fs::write(paths.part_path(), b"stale-bytes").unwrap();
+        let pieces = build_download_pieces(11, 4);
+        let plan = SegmentedDownloadPlan {
+            piece_size: 4,
+            piece_count: pieces.len(),
+            worker_count: 1,
+            pieces,
+        };
+
+        let (_, pending, completed_bytes) =
+            SegmentedResumeStateStore::load_or_create(&paths, url, Some("checksum"), 11, &plan)
+                .unwrap();
+
+        assert_eq!(pending.len(), 3);
+        assert_eq!(completed_bytes, 0);
+        assert_eq!(std::fs::read(paths.part_path()).unwrap(), [0; 11]);
+    }
+
+    #[test]
+    fn segmented_download_preserves_matching_completed_pieces_on_range_fallback() {
+        let dir = tempfile::tempdir().unwrap();
+        let url = "https://example.com/state.tar.zst";
+        let paths = DownloadPaths::from_url(url, dir.path());
+        let total_size = SEGMENTED_DOWNLOAD_MIN_FILE_SIZE;
+        let file = std::fs::File::create(paths.part_path()).unwrap();
+        file.set_len(total_size).unwrap();
+        let plan = plan_segmented_download(total_size, 4).unwrap();
+        let mut state = SegmentedResumeState::new(
+            url,
+            Some("checksum"),
+            total_size,
+            plan.piece_size,
+            plan.piece_count,
+        );
+        state.completed[0] = true;
+        SegmentedResumeStateStore::persist(paths.resume_state_path(), &state).unwrap();
+
+        assert!(SegmentedResumeStateStore::has_completed_pieces(
+            &paths,
+            url,
+            Some("checksum"),
+            total_size,
+            4,
+        ));
+        assert!(!SegmentedResumeStateStore::has_completed_pieces(
+            &paths,
+            url,
+            Some("different-checksum"),
+            total_size,
+            4,
+        ));
+    }
+
+    #[test]
+    fn segmented_download_rejects_mismatched_content_range() {
+        let dir = tempfile::tempdir().unwrap();
+        let (url, server) = spawn_range_server("bytes=0-3", 1, 4, 4, b"abcd");
+        let paths = DownloadPaths::from_url(&url, dir.path());
+        let pieces = build_download_pieces(4, 4);
+        let plan = SegmentedDownloadPlan {
+            piece_size: 4,
+            piece_count: pieces.len(),
+            worker_count: 1,
+            pieces,
+        };
+        let cancel_token = CancellationToken::new();
+        let session =
+            DownloadSession::new(None, Some(DownloadRequestLimiter::new(1)), cancel_token);
+        let download = SegmentedDownload::new(url, paths.clone(), None, 4, plan, session, None);
+
+        assert!(download.run().is_err());
+        server.join().unwrap();
+        let resume_state =
+            fs::read_json_file::<SegmentedResumeState>(paths.resume_state_path()).unwrap();
+        assert_eq!(resume_state.completed, [false]);
+    }
+
+    #[test]
+    fn cancelled_segmented_download_preserves_resumable_state() {
         let dir = tempfile::tempdir().unwrap();
         let total_size = 8;
         let pieces = build_download_pieces(total_size, 4);
@@ -1105,21 +1539,18 @@ mod tests {
         let url = "http://127.0.0.1:1/state.tar.zst";
         let paths = DownloadPaths::from_url(url, dir.path());
         let download =
-            SegmentedDownload::new(url.to_string(), paths, total_size, plan, session, None);
+            SegmentedDownload::new(url.to_string(), paths, None, total_size, plan, session, None);
 
         assert!(download.run().is_err());
         assert!(!dir.path().join("state.tar.zst").exists());
-        assert!(!dir.path().join("state.tar.zst.part").exists());
+        assert!(dir.path().join("state.tar.zst.part").exists());
+        assert!(dir.path().join("state.tar.zst.part.json").exists());
     }
 
     #[test]
-    fn segmented_completion_requires_all_bytes_and_no_cancellation() {
-        let cancel_token = CancellationToken::new();
-
-        assert!(!segmented_download_completed(&cancel_token, 7, 8));
-        assert!(segmented_download_completed(&cancel_token, 8, 8));
-
-        cancel_token.cancel();
-        assert!(!segmented_download_completed(&cancel_token, 8, 8));
+    fn parses_content_range() {
+        assert_eq!(parse_content_range("bytes 4-7/8"), Some((4, 7, 8)));
+        assert_eq!(parse_content_range("bytes 4-7/*"), None);
+        assert_eq!(parse_content_range("4-7/8"), None);
     }
 }
