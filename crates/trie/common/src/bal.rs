@@ -20,15 +20,27 @@ pub struct BalAccountState {
 }
 
 impl BalAccountState {
-    /// Extracts the post-block value of every changed account-level field. EIP-7928 sorts changes
-    /// by block access index, so the final entry contains the post-block value.
+    /// Extracts the post-block value of every changed account-level field: the change with the
+    /// highest block access index.
+    ///
+    /// Canonical lists are sorted, but RLP decoding does not enforce it, so entries off the wire
+    /// cannot be assumed ordered.
     pub fn from_changes(changes: &AccountChanges) -> Self {
         Self {
-            balance: changes.balance_changes.last().map(|change| change.post_balance),
-            nonce: changes.nonce_changes.last().map(|change| change.new_nonce),
+            balance: changes
+                .balance_changes
+                .iter()
+                .max_by_key(|change| change.block_access_index)
+                .map(|change| change.post_balance),
+            nonce: changes
+                .nonce_changes
+                .iter()
+                .max_by_key(|change| change.block_access_index)
+                .map(|change| change.new_nonce),
             code_hash: changes
                 .code_changes
-                .last()
+                .iter()
+                .max_by_key(|change| change.block_access_index)
                 .map(|change| (!change.new_code.is_empty()).then(|| keccak256(&change.new_code))),
         }
     }
@@ -64,10 +76,13 @@ impl BalAccountState {
 }
 
 /// Yields `(hashed slot, post-block value)` for every slot the entry changed.
-/// Canonical EIP-7928 ordering places the post-block value last.
+/// Ordering is not assumed, as in [`BalAccountState::from_changes`].
 pub fn hashed_storage_updates(changes: &AccountChanges) -> impl Iterator<Item = (B256, U256)> {
     changes.storage_changes.iter().filter_map(|slot| {
-        slot.changes.last().map(|change| (keccak256(B256::from(slot.slot)), change.new_value))
+        slot.changes
+            .iter()
+            .max_by_key(|change| change.block_access_index)
+            .map(|change| (keccak256(B256::from(slot.slot)), change.new_value))
     })
 }
 
@@ -84,7 +99,7 @@ mod tests {
     }
 
     #[test]
-    fn last_canonical_change_wins() {
+    fn highest_block_access_index_wins() {
         let mut changes = AccountChanges::new(Address::repeat_byte(0xaa));
         let code = bytes!("6002");
         changes.balance_changes.push(BalanceChange::new(index(1), U256::from(10)));
@@ -99,6 +114,36 @@ mod tests {
         assert_eq!(state.balance, Some(U256::from(30)));
         assert_eq!(state.nonce, Some(7));
         assert_eq!(state.code_hash, Some(Some(keccak256(code))));
+    }
+
+    #[test]
+    fn unsorted_changes_still_yield_the_post_block_value() {
+        let slot = U256::from(1);
+        let code = bytes!("6002");
+        let mut changes = AccountChanges::new(Address::repeat_byte(0xaa));
+        changes.balance_changes.push(BalanceChange::new(index(3), U256::from(30)));
+        changes.balance_changes.push(BalanceChange::new(index(1), U256::from(10)));
+        changes.nonce_changes.push(NonceChange::new(index(2), 7));
+        changes.nonce_changes.push(NonceChange::new(index(1), 5));
+        changes.code_changes.push(CodeChange::new(index(2), code.clone()));
+        changes.code_changes.push(CodeChange::new(index(1), bytes!("6001")));
+        changes.storage_changes.push(SlotChanges::new(
+            slot,
+            vec![
+                StorageChange::new(index(4), U256::from(44)),
+                StorageChange::new(index(1), U256::from(11)),
+            ],
+        ));
+
+        let state = BalAccountState::from_changes(&changes);
+
+        assert_eq!(state.balance, Some(U256::from(30)));
+        assert_eq!(state.nonce, Some(7));
+        assert_eq!(state.code_hash, Some(Some(keccak256(code))));
+        assert_eq!(
+            hashed_storage_updates(&changes).collect::<Vec<_>>(),
+            vec![(keccak256(B256::from(slot)), U256::from(44))]
+        );
     }
 
     #[test]
