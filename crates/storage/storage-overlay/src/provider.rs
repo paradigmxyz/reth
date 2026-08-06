@@ -17,7 +17,6 @@ use reth_storage_api::{
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     trie_cursor::{InMemoryTrieCursor, TrieCursor, TrieCursorFactory, TrieStorageCursor},
-    updates::TrieUpdatesSorted,
     HashedPostStateSorted,
 };
 use reth_trie_db::{
@@ -180,14 +179,34 @@ where
         Self: 'a;
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
-        account_trie_cursor(&self.provider, &self.overlay.trie_updates, self.is_v2)
+        let cursor: Box<dyn TrieCursor + Send> = if self.is_v2 {
+            Box::new(DatabaseAccountTrieCursor::<_, PackedKeyAdapter>::new(
+                self.provider.tx().cursor_read::<PackedAccountsTrie>()?,
+            ))
+        } else {
+            Box::new(DatabaseAccountTrieCursor::<_, LegacyKeyAdapter>::new(
+                self.provider.tx().cursor_read::<tables::AccountsTrie>()?,
+            ))
+        };
+        Ok(InMemoryTrieCursor::new_account(cursor, &self.overlay.trie_updates))
     }
 
     fn storage_trie_cursor(
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
-        storage_trie_cursor(&self.provider, &self.overlay.trie_updates, self.is_v2, hashed_address)
+        let cursor: Box<dyn TrieStorageCursor + Send> = if self.is_v2 {
+            Box::new(DatabaseStorageTrieCursor::<_, PackedKeyAdapter>::new(
+                self.provider.tx().cursor_dup_read::<PackedStoragesTrie>()?,
+                hashed_address,
+            ))
+        } else {
+            Box::new(DatabaseStorageTrieCursor::<_, LegacyKeyAdapter>::new(
+                self.provider.tx().cursor_dup_read::<tables::StoragesTrie>()?,
+                hashed_address,
+            ))
+        };
+        Ok(InMemoryTrieCursor::new_storage(cursor, &self.overlay.trie_updates, hashed_address))
     }
 }
 
@@ -212,99 +231,23 @@ where
         Self: 'a;
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
-        hashed_account_cursor(&self.provider, &self.overlay.hashed_post_state)
+        HashedPostStateCursorFactory::new(
+            DatabaseHashedCursorFactory::new(self.provider.tx()),
+            &self.overlay.hashed_post_state,
+        )
+        .hashed_account_cursor()
     }
 
     fn hashed_storage_cursor(
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
-        hashed_storage_cursor(&self.provider, &self.overlay.hashed_post_state, hashed_address)
+        HashedPostStateCursorFactory::new(
+            DatabaseHashedCursorFactory::new(self.provider.tx()),
+            &self.overlay.hashed_post_state,
+        )
+        .hashed_storage_cursor(hashed_address)
     }
-}
-
-fn account_trie_cursor<'a, Provider>(
-    provider: &'a Provider,
-    trie_updates: &'a Arc<TrieUpdatesSorted>,
-    is_v2: bool,
-) -> Result<InMemoryTrieCursor<'a, Box<dyn TrieCursor + Send + 'a>>, DatabaseError>
-where
-    Provider: DbTxProvider,
-{
-    let tx = provider.tx();
-    let cursor: Box<dyn TrieCursor + Send> = if is_v2 {
-        Box::new(DatabaseAccountTrieCursor::<_, PackedKeyAdapter>::new(
-            tx.cursor_read::<PackedAccountsTrie>()?,
-        ))
-    } else {
-        Box::new(DatabaseAccountTrieCursor::<_, LegacyKeyAdapter>::new(
-            tx.cursor_read::<tables::AccountsTrie>()?,
-        ))
-    };
-    Ok(InMemoryTrieCursor::new_account(cursor, trie_updates))
-}
-
-fn storage_trie_cursor<'a, Provider>(
-    provider: &'a Provider,
-    trie_updates: &'a Arc<TrieUpdatesSorted>,
-    is_v2: bool,
-    hashed_address: B256,
-) -> Result<InMemoryTrieCursor<'a, Box<dyn TrieStorageCursor + Send + 'a>>, DatabaseError>
-where
-    Provider: DbTxProvider,
-{
-    let tx = provider.tx();
-    let cursor: Box<dyn TrieStorageCursor + Send> = if is_v2 {
-        Box::new(DatabaseStorageTrieCursor::<_, PackedKeyAdapter>::new(
-            tx.cursor_dup_read::<PackedStoragesTrie>()?,
-            hashed_address,
-        ))
-    } else {
-        Box::new(DatabaseStorageTrieCursor::<_, LegacyKeyAdapter>::new(
-            tx.cursor_dup_read::<tables::StoragesTrie>()?,
-            hashed_address,
-        ))
-    };
-    Ok(InMemoryTrieCursor::new_storage(cursor, trie_updates, hashed_address))
-}
-
-fn hashed_account_cursor<'a, Provider>(
-    provider: &'a Provider,
-    hashed_post_state: &'a Arc<HashedPostStateSorted>,
-) -> Result<
-    <HashedPostStateCursorFactory<
-        DatabaseHashedCursorFactory<&'a Provider::Tx>,
-        &'a Arc<HashedPostStateSorted>,
-    > as HashedCursorFactory>::AccountCursor<'a>,
-    DatabaseError,
->
-where
-    Provider: DbTxProvider,
-{
-    let db_hashed_cursor_factory = DatabaseHashedCursorFactory::new(provider.tx());
-    let hashed_cursor_factory =
-        HashedPostStateCursorFactory::new(db_hashed_cursor_factory, hashed_post_state);
-    hashed_cursor_factory.hashed_account_cursor()
-}
-
-fn hashed_storage_cursor<'a, Provider>(
-    provider: &'a Provider,
-    hashed_post_state: &'a Arc<HashedPostStateSorted>,
-    hashed_address: B256,
-) -> Result<
-    <HashedPostStateCursorFactory<
-        DatabaseHashedCursorFactory<&'a Provider::Tx>,
-        &'a Arc<HashedPostStateSorted>,
-    > as HashedCursorFactory>::StorageCursor<'a>,
-    DatabaseError,
->
-where
-    Provider: DbTxProvider,
-{
-    let db_hashed_cursor_factory = DatabaseHashedCursorFactory::new(provider.tx());
-    let hashed_cursor_factory =
-        HashedPostStateCursorFactory::new(db_hashed_cursor_factory, hashed_post_state);
-    hashed_cursor_factory.hashed_storage_cursor(hashed_address)
 }
 
 #[cfg(all(test, feature = "partial-persistence"))]
@@ -320,7 +263,10 @@ mod tests {
     };
     use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
     use reth_storage_api::StageCheckpointWriter;
-    use reth_trie::{BranchNodeCompact, ComputedTrieData, HashedPostState, HashedStorage, Nibbles};
+    use reth_trie::{
+        updates::TrieUpdatesSorted, BranchNodeCompact, ComputedTrieData, HashedPostState,
+        HashedStorage, Nibbles,
+    };
 
     fn with_unique_trie_data(
         block: &ExecutedBlock<EthPrimitives>,
