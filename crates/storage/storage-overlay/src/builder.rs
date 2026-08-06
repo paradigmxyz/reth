@@ -516,12 +516,9 @@ where
 {
     use std::io::Error;
 
-    let partial_state_trie_number = partial_state_trie.number;
-    let finish_number = finish.number;
-
     let persisted_parent = provider
         .block_number(parent_hash)?
-        .filter(|&parent_number| parent_number <= partial_state_trie_number);
+        .filter(|&parent_number| parent_number <= partial_state_trie.number);
 
     let mut finish_seen = parent_hash == finish.hash;
     let (anchor, overlay) = if let Some(parent_number) = persisted_parent {
@@ -536,7 +533,7 @@ where
         let anchor_hash =
             anchor_for_parent_in(parent_hash, &mut in_mem_chain, partial_state_trie.hash);
         let anchor = if anchor_hash == partial_state_trie.hash {
-            BlockNumHash::new(partial_state_trie_number, anchor_hash)
+            BlockNumHash::new(partial_state_trie.number, anchor_hash)
         } else {
             let anchor_number = provider
                 .convert_hash_or_number(anchor_hash.into())?
@@ -548,14 +545,14 @@ where
 
     finish_seen |= anchor.hash == finish.hash;
 
-    if anchor.number > partial_state_trie_number {
+    if anchor.number > partial_state_trie.number {
         return Err(ProviderError::other(Error::other(format!(
                 "overlay anchor #{} ({}) is after partial state trie frontier #{} ({}); missing trie updates for blocks #{}..=#{}",
                 anchor.number,
                 anchor.hash,
-                partial_state_trie_number,
+                partial_state_trie.number,
                 partial_state_trie.hash,
-                partial_state_trie_number + 1,
+                partial_state_trie.number + 1,
                 anchor.number,
             ))))
     }
@@ -577,7 +574,7 @@ where
         .get_prune_checkpoint(PruneSegment::StorageHistory)?
         .and_then(|checkpoint| checkpoint.block_number);
     let lower_bound = account_history.max(storage_history).unwrap_or_default();
-    let available_range = lower_bound..=finish_number;
+    let available_range = lower_bound..=finish.number;
     if !available_range.contains(&anchor.number) {
         return Err(ProviderError::InsufficientChangesets {
             requested: anchor.number,
