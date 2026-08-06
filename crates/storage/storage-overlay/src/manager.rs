@@ -238,12 +238,55 @@ impl<N: NodePrimitives> OverlayManager<N> {
             }
         }
 
+        // Snapshot matching parent overlays before spawning so DashMap iteration guards are
+        // dropped.
+        let cached_parent_overlays = self
+            .execution_overlays
+            .entries
+            .iter()
+            .filter_map(|entry| {
+                let key = *entry.key();
+                (key.tip_hash == parent_hash).then_some(key.anchor_hash)
+            })
+            .collect::<Vec<_>>();
+
         debug!(
             target: "storage::overlay::manager",
             %hash,
             %parent_hash,
             "inserted block into state trie overlay manager"
         );
+        if cached_parent_overlays.is_empty() {
+            return
+        }
+
+        #[cfg(feature = "rayon")]
+        let Some(worker_pool) = self.worker_pool.clone() else {
+            return
+        };
+
+        #[cfg(not(feature = "rayon"))]
+        let _ = cached_parent_overlays;
+
+        #[cfg(feature = "rayon")]
+        {
+            let parent_span = span;
+            for anchor_hash in cached_parent_overlays {
+                let manager = self.clone();
+                let parent_span = parent_span.clone();
+                worker_pool.spawn(move || {
+                    let _span = tracing::trace_span!(
+                        target: "storage::overlay::manager",
+                        parent: parent_span,
+                        "precompute_execution_overlay",
+                        tip_hash = %hash,
+                        anchor_hash = %anchor_hash,
+                    )
+                    .entered();
+                    let _ = manager.execution_overlay_for_parent(hash, anchor_hash);
+                });
+            }
+        }
     }
 
     /// Removes blocks from the live block graph and prunes cached overlays that can no longer be
@@ -853,6 +896,8 @@ mod tests {
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock, SparseTrie};
     use reth_ethereum_primitives::EthPrimitives;
     use reth_primitives_traits::Account;
+    #[cfg(feature = "rayon")]
+    use reth_tasks::WorkerPool;
     use reth_trie::{updates::TrieUpdatesSorted, ComputedTrieData, HashedPostState, HashedStorage};
     use revm::{bytecode::Bytecode, database::BundleState, state::AccountInfo};
     use std::{
@@ -969,6 +1014,32 @@ mod tests {
             .execution_overlay_for_parent(blocks[2].recovered_block().hash(), short_anchor)
             .unwrap();
         assert_eq!(short.accounts.len(), 1);
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn precomputes_execution_overlay_for_cached_parent() {
+        let manager = OverlayManager::new(Arc::new(WorkerPool::new(1, "execution-overlay-test")));
+        let blocks = test_blocks();
+        let anchor_hash = blocks[0].recovered_block().parent_hash();
+
+        manager.insert_block(blocks[0].clone());
+        manager
+            .execution_overlay_for_parent(blocks[0].recovered_block().hash(), anchor_hash)
+            .unwrap();
+
+        manager.insert_block(blocks[1].clone());
+        let key = OverlayCacheKey { anchor_hash, tip_hash: blocks[1].recovered_block().hash() };
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        while !manager
+            .execution_overlays
+            .entries
+            .get(&key)
+            .is_some_and(|entry| matches!(entry.value(), OverlayCacheEntry::Ready(_)))
+        {
+            assert!(std::time::Instant::now() < deadline, "execution overlay was not precomputed");
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 
     #[test]
