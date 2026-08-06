@@ -160,6 +160,8 @@ jobs:
           # Blob transaction API tests, including engine_forkchoiceUpdatedV4 custody masks
           # and engine_getBlobsV4 cell responses.
           - sim: ethereum/eels/execute-blobs
+            # PeerDAS tests are defined under tests/osaka and parameterized for Amsterdam too.
+            limit: .*tests/(amsterdam|osaka).*
           - sim: ethereum/eels/consume-engine
             limit: .*tests/osaka.*
           - sim: ethereum/eels/consume-engine
@@ -342,6 +344,8 @@ jobs:
 
           # consume-engine
           - sim: ethereum/eels/consume-engine
+            limit: .*tests/osaka.*
+          - sim: ethereum/eels/execute-blobs
             limit: .*tests/osaka.*
           - sim: ethereum/eels/consume-engine
             limit: .*tests/prague.*
