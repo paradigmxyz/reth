@@ -157,6 +157,16 @@ impl<N: NodePrimitives> EthStateCache<N> {
         rx.await.map_err(|_| CacheServiceUnavailable)?
     }
 
+    /// Requests the block for the given block hash if it is cached.
+    pub async fn get_maybe_block(
+        &self,
+        block_hash: B256,
+    ) -> ProviderResult<Option<Arc<RecoveredBlock<N::Block>>>> {
+        let (response_tx, rx) = oneshot::channel();
+        let _ = self.to_service.send(CacheAction::GetCachedBlock { block_hash, response_tx });
+        rx.await.map_err(|_| CacheServiceUnavailable.into())
+    }
+
     /// Requests the receipts for the block hash
     ///
     /// Returns `None` if the block was not found.

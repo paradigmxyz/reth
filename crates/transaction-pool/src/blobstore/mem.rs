@@ -1,4 +1,6 @@
-use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize};
+use crate::blobstore::{
+    BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize, PooledBlobSidecar,
+};
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip7594::{BlobCellMask, BlobTransactionSidecarVariant, Cell},
@@ -95,24 +97,21 @@ impl PartialEq for InMemoryBlobStoreInner {
 }
 
 impl BlobStore for InMemoryBlobStore {
-    fn insert(&self, tx: B256, data: BlobTransactionSidecarVariant) -> Result<(), BlobStoreError> {
+    fn insert(&self, tx: B256, data: PooledBlobSidecar) -> Result<(), BlobStoreError> {
         let mut store = self.inner.store.write();
-        self.inner.size_tracker.add_size(insert_size(&mut store, tx, data));
+        self.inner.size_tracker.add_size(insert_size(&mut store, tx, data.into_sidecar()));
         self.inner.size_tracker.update_len(store.len());
         Ok(())
     }
 
-    fn insert_all(
-        &self,
-        txs: Vec<(B256, BlobTransactionSidecarVariant)>,
-    ) -> Result<(), BlobStoreError> {
+    fn insert_all(&self, txs: Vec<(B256, PooledBlobSidecar)>) -> Result<(), BlobStoreError> {
         if txs.is_empty() {
             return Ok(())
         }
         let mut store = self.inner.store.write();
         let mut total_add = 0;
         for (tx, data) in txs {
-            let add = insert_size(&mut store, tx, data);
+            let add = insert_size(&mut store, tx, data.into_sidecar());
             total_add += add;
         }
         self.inner.size_tracker.add_size(total_add);
@@ -336,8 +335,8 @@ mod tests {
 
         let (eip7594_sidecar, eip7594_hash, _) = eip7594_single_blob_sidecar();
         let (eip4844_sidecar, eip4844_hash) = eip4844_single_blob_sidecar();
-        store.insert(B256::random(), eip7594_sidecar).unwrap();
-        store.insert(B256::random(), eip4844_sidecar).unwrap();
+        store.insert(B256::random(), eip7594_sidecar.into()).unwrap();
+        store.insert(B256::random(), eip4844_sidecar.into()).unwrap();
 
         let request = vec![eip7594_hash, B256::ZERO, eip4844_hash, eip7594_hash];
         assert_eq!(store.has_versioned_hashes(&request).unwrap(), vec![true, false, true, true]);
@@ -348,7 +347,7 @@ mod tests {
         let store = InMemoryBlobStore::default();
 
         let (sidecar, versioned_hash, expected) = eip7594_single_blob_sidecar();
-        store.insert(B256::random(), sidecar).unwrap();
+        store.insert(B256::random(), sidecar.into()).unwrap();
 
         assert_ne!(versioned_hash, B256::ZERO);
 
@@ -365,7 +364,7 @@ mod tests {
         let store = InMemoryBlobStore::default();
 
         let (sidecar, versioned_hash, _) = eip7594_single_blob_sidecar();
-        store.insert(B256::random(), sidecar).unwrap();
+        store.insert(B256::random(), sidecar.into()).unwrap();
 
         let indices_bitarray = B128::from((1u128 << 0) | (1u128 << 7));
         let request = vec![versioned_hash, B256::ZERO];
@@ -387,7 +386,7 @@ mod tests {
 
         let tx_hash = B256::random();
         let (sidecar, versioned_hash, _) = eip7594_single_blob_sidecar();
-        store.insert(tx_hash, sidecar).unwrap();
+        store.insert(tx_hash, sidecar.into()).unwrap();
 
         let indices_bitarray = B128::from((1u128 << 0) | (1u128 << 7));
         let expected = store
