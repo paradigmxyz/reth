@@ -22,6 +22,7 @@ use reth_storage_api::{
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::trie_cursor::{InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory};
 use reth_trie_common::updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted};
+use reth_trie_db::{DatabaseTrieCursorFactory, TrieTableAdapter};
 use std::{
     collections::{BTreeMap, HashMap},
     ops::RangeInclusive,
@@ -32,10 +33,7 @@ use tracing::{debug, warn};
 #[cfg(test)]
 use reth_trie::{changesets::compute_trie_changesets, HashedPostStateSorted, TrieInputSorted};
 #[cfg(test)]
-use reth_trie_db::{
-    DatabaseHashedCursorFactory, DatabaseHashedPostState, DatabaseStateRoot,
-    DatabaseTrieCursorFactory, TrieTableAdapter,
-};
+use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseHashedPostState, DatabaseStateRoot};
 
 /// Computes block trie updates using the changeset cache.
 ///
@@ -82,26 +80,43 @@ where
         + BlockNumReader
         + StorageSettingsCache,
 {
-    let (partial_state_trie, finish) = database_state_frontiers(provider)?;
+    reth_trie_db::with_adapter!(provider, |A| {
+        compute_block_trie_updates_inner::<_, _, A>(overlay_manager, cache, provider, block_number)
+    })
+}
+
+fn compute_block_trie_updates_inner<N, Provider, A>(
+    overlay_manager: &OverlayManager<N>,
+    cache: &ChangesetCache,
+    provider: &Provider,
+    block_number: BlockNumber,
+) -> ProviderResult<TrieUpdatesSorted>
+where
+    N: NodePrimitives,
+    Provider: DBProvider
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + BlockNumReader
+        + StorageSettingsCache,
+    A: TrieTableAdapter,
+{
+    let tx = provider.tx_ref();
+
+    let db_tip_block = provider.best_block_number()?;
 
     // Step 1: Get the trie changesets for the target block from cache
     let changesets = cache.get_or_compute(overlay_manager, provider, block_number)?;
 
     // Step 2: Get the trie reverts for the state after the target block using the cache
-    let reverts = cache.get_or_compute_range(
-        overlay_manager,
-        provider,
-        (block_number + 1)..=finish.number,
-    )?;
+    let reverts =
+        cache.get_or_compute_range(overlay_manager, provider, (block_number + 1)..=db_tip_block)?;
 
     // Step 3: Create an InMemoryTrieCursorFactory with the reverts
     // This gives us the trie state as it was after the target block was processed
-    let overlay = overlay_manager
-        .overlay_builder(finish.hash)
-        .with_no_reverts()
-        .build_overlay_at_frontiers(provider, partial_state_trie, finish)?;
-    let state_trie_provider = OverlayStateProviderRef::new(provider, &overlay);
-    let cursor_factory = InMemoryTrieCursorFactory::new(state_trie_provider, &reverts);
+    let db_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
+    let cursor_factory = InMemoryTrieCursorFactory::new(db_cursor_factory, &reverts);
 
     // Step 4: Collect all account trie nodes that changed in the target block
     let account_nodes_ref = changesets.account_nodes_ref();
@@ -611,10 +626,7 @@ mod tests {
     use reth_storage_api::{StageCheckpointWriter, TrieWriter};
     #[cfg(feature = "partial-persistence")]
     use reth_trie::ComputedTrieData;
-    use reth_trie::{
-        verify::{Output as VerifyOutput, Verifier},
-        BranchNodeCompact, Nibbles, StateRoot,
-    };
+    use reth_trie::{BranchNodeCompact, Nibbles, StateRoot};
 
     // Helper function to create empty TrieUpdatesSorted for testing
     fn create_test_changesets() -> Arc<TrieUpdatesSorted> {
@@ -648,34 +660,6 @@ mod tests {
 
     fn test_storage(slot: u64, value: u64) -> StorageEntry {
         StorageEntry { key: B256::from(U256::from(slot)), value: U256::from(value) }
-    }
-
-    fn storage_slots_with_shared_hashed_prefix() -> (B256, B256, B256) {
-        let mut slots_by_prefix: HashMap<u8, (B256, B256)> = HashMap::default();
-        let mut next_slot = 0u64;
-
-        let (left, left_hash, right) = loop {
-            let slot = B256::from(U256::from(next_slot));
-            next_slot += 1;
-            let hash = keccak256(slot);
-
-            if let Some((previous_slot, previous_hash)) = slots_by_prefix.get(&hash[0]) &&
-                previous_hash[1] != hash[1]
-            {
-                break (*previous_slot, *previous_hash, slot)
-            }
-            slots_by_prefix.insert(hash[0], (slot, hash));
-        };
-
-        let outside = loop {
-            let slot = B256::from(U256::from(next_slot));
-            next_slot += 1;
-            if keccak256(slot)[0] >> 4 != left_hash[0] >> 4 {
-                break slot
-            }
-        };
-
-        (left, right, outside)
     }
 
     fn seed_headers(
@@ -797,138 +781,6 @@ mod tests {
         let (_, trie_updates) =
             DbStateRoot::<_, A>::from_tx(provider.tx_ref()).root_with_updates().unwrap();
         provider.write_trie_updates(trie_updates).unwrap();
-    }
-
-    #[test]
-    fn database_fallback_revert_walks_unchanged_storage_branch_children() {
-        let factory = create_test_provider_factory();
-        seed_headers(&factory, 1);
-
-        let provider = factory.provider_rw().unwrap();
-        let address = Address::with_last_byte(1);
-        let hashed_address = keccak256(address);
-        let (removed_slot, surviving_slot, outside_slot) =
-            storage_slots_with_shared_hashed_prefix();
-        let removed_entry = StorageEntry { key: keccak256(removed_slot), value: U256::from(1) };
-
-        provider.tx_ref().put::<tables::HashedAccounts>(hashed_address, test_account(1)).unwrap();
-        for (slot, value) in [(removed_slot, 1), (surviving_slot, 2), (outside_slot, 3)] {
-            provider
-                .tx_ref()
-                .put::<tables::HashedStorages>(
-                    hashed_address,
-                    StorageEntry { key: keccak256(slot), value: U256::from(value) },
-                )
-                .unwrap();
-        }
-        provider
-            .tx_ref()
-            .put::<tables::StorageChangeSets>(
-                BlockNumberAddress((1, address)),
-                StorageEntry { key: removed_slot, value: U256::ZERO },
-            )
-            .unwrap();
-        provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(1)).unwrap();
-        reth_trie_db::with_adapter!(provider, |A| seed_tip_trie_tables::<_, A>(&*provider));
-
-        let cache = ChangesetCache::new();
-        let overlay_manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
-        let trie_revert = cache.get_or_compute_range(&overlay_manager, &*provider, 1..=1).unwrap();
-
-        provider
-            .tx_ref()
-            .delete::<tables::HashedStorages>(hashed_address, Some(removed_entry))
-            .unwrap();
-        provider.write_trie_updates_sorted(trie_revert.as_ref()).unwrap();
-
-        let inconsistencies = reth_trie_db::with_adapter!(provider, |A| {
-            let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref());
-            let hashed_cursor_factory = DatabaseHashedCursorFactory::new(provider.tx_ref());
-            Verifier::new(&trie_cursor_factory, hashed_cursor_factory)
-                .unwrap()
-                .filter_map(|output| match output.unwrap() {
-                    VerifyOutput::Progress(_) => None,
-                    output => Some(output),
-                })
-                .collect::<Vec<_>>()
-        });
-        assert!(inconsistencies.is_empty(), "trie inconsistencies: {inconsistencies:#?}");
-    }
-
-    #[cfg(feature = "partial-persistence")]
-    #[test]
-    fn block_updates_above_partial_frontier_use_finish_overlay() {
-        let factory = create_test_provider_factory();
-        let blocks = TestBlockBuilder::eth().get_executed_blocks(0..4).collect::<Vec<_>>();
-        let provider = factory.provider_rw().unwrap();
-        for block in &blocks {
-            provider.insert_block(block.recovered_block()).unwrap();
-        }
-        provider
-            .save_stage_checkpoint(
-                StageId::Finish,
-                StageCheckpoint::new(blocks[3].block_number()).with_finish_stage_checkpoint(
-                    FinishCheckpoint { partial_state_trie: Some(blocks[1].block_number()) },
-                ),
-            )
-            .unwrap();
-        provider.commit().unwrap();
-        let provider = factory.provider().unwrap();
-
-        let target_path = Nibbles::from_nibbles([1]);
-        let target_node = BranchNodeCompact::new(0b0001, 0, 0, vec![], None);
-        let unrelated_path = Nibbles::from_nibbles([2]);
-        let unrelated_node = BranchNodeCompact::new(0b0010, 0, 0, vec![], None);
-        let with_trie_updates = |block: &ExecutedBlock<reth_ethereum_primitives::EthPrimitives>,
-                                 updates: TrieUpdatesSorted| {
-            ExecutedBlock::new(
-                Arc::clone(&block.recovered_block),
-                Arc::clone(&block.execution_output),
-                ComputedTrieData::new(Arc::default(), Arc::new(updates)),
-            )
-        };
-
-        let overlay_manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
-        overlay_manager.insert_block(with_trie_updates(
-            &blocks[2],
-            TrieUpdatesSorted::new(
-                vec![(target_path, Some(target_node.clone()))],
-                B256Map::default(),
-            ),
-        ));
-        overlay_manager.insert_block(with_trie_updates(
-            &blocks[3],
-            TrieUpdatesSorted::new(
-                vec![(unrelated_path, Some(unrelated_node))],
-                B256Map::default(),
-            ),
-        ));
-
-        let cache = ChangesetCache::new();
-        {
-            let mut cache = cache.inner.write();
-            insert_test_changesets(
-                &mut cache,
-                blocks[2].recovered_block().hash(),
-                blocks[2].block_number(),
-                Arc::new(TrieUpdatesSorted::new(vec![(target_path, None)], B256Map::default())),
-            );
-            insert_test_changesets(
-                &mut cache,
-                blocks[3].recovered_block().hash(),
-                blocks[3].block_number(),
-                create_test_changesets(),
-            );
-        }
-
-        let updates = compute_block_trie_updates(
-            &overlay_manager,
-            &cache,
-            &provider,
-            blocks[2].block_number(),
-        )
-        .unwrap();
-        assert_eq!(updates.account_nodes_ref(), &[(target_path, Some(target_node))]);
     }
 
     #[cfg(feature = "partial-persistence")]

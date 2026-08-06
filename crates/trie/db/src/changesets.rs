@@ -115,7 +115,6 @@ where
             HashedPostStateCursorFactory::new(state_trie_provider, &tail_state_revert),
         )
         .with_prefix_sets(tail_prefix_sets)
-        .with_walk_all_changed_branch_children(true)
         .root_with_updates()
         .map_err(ProviderError::other)?
         .1
@@ -133,7 +132,6 @@ where
         HashedPostStateCursorFactory::new(state_trie_provider, &range_state),
     )
     .with_prefix_sets(range_prefix_sets.freeze())
-    .with_walk_all_changed_branch_children(true)
     .root_with_updates()
     .map_err(ProviderError::other)?
     .1
