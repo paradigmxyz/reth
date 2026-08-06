@@ -4,13 +4,13 @@ use crate::{
         ConsistentProvider, OverlayStateProvider, OverlayStateProviderFactory, ProviderNodeTypes,
         RocksDBProvider, StaticFileProvider, StaticFileProviderRWRefMut,
     },
-    AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
-    BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
+    BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
+    BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
     CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
-    DatabaseProviderFactory, HeaderProvider, ProviderError, ProviderFactory, ProviderHeader,
-    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, RocksDBProviderFactory,
-    StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
-    StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
+    DatabaseProviderFactory, HeaderProvider, ProviderError, ProviderFactory, PruneCheckpointReader,
+    ReceiptProvider, ReceiptProviderIdExt, RocksDBProviderFactory, StageCheckpointReader,
+    StateProviderBox, StateProviderFactory, StateReader, StaticFileProviderFactory,
+    TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
@@ -616,15 +616,6 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider<N> {
         self.consistent_provider()?.transaction_by_hash_with_meta(tx_hash)
     }
 
-    fn transaction_by_hash_with_meta_and_header(
-        &self,
-        tx_hash: TxHash,
-    ) -> ProviderResult<
-        Option<(Self::Transaction, TransactionMeta, SealedHeader<ProviderHeader<Self>>)>,
-    > {
-        self.consistent_provider()?.transaction_by_hash_with_meta_and_header(tx_hash)
-    }
-
     fn transactions_by_block(
         &self,
         id: BlockHashOrNumber,
@@ -993,13 +984,6 @@ impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> AccountReader for BlockchainProvider<N> {
-    /// Get basic account information.
-    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        self.consistent_provider()?.basic_account(address)
-    }
-}
-
 impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
     type Receipt = ReceiptTy<N>;
 
@@ -1031,7 +1015,7 @@ mod tests {
         },
         BlockWriter, CanonChainTracker, ProviderFactory, SaveBlocksInput,
     };
-    use alloy_consensus::{constants::EMPTY_ROOT_HASH, transaction::TransactionMeta, BlockHeader};
+    use alloy_consensus::constants::EMPTY_ROOT_HASH;
     use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
     use alloy_primitives::{keccak256, Address, BlockNumber, TxNumber, B256, U256};
     use itertools::Itertools;
@@ -2696,27 +2680,6 @@ mod tests {
                 |block: &SealedBlock<Block>, _: TxNumber, tx_hash: B256, _: &Vec<Vec<Receipt>>| (
                     tx_hash,
                     Some(block.body().transactions[test_tx_index].clone())
-                ),
-                B256::random()
-            ),
-            (
-                ONE,
-                transaction_by_hash_with_meta_and_header,
-                |block: &SealedBlock<Block>, _: TxNumber, tx_hash: B256, _: &Vec<Vec<Receipt>>| (
-                    tx_hash,
-                    Some((
-                        block.body().transactions[test_tx_index].clone(),
-                        TransactionMeta {
-                            tx_hash,
-                            index: test_tx_index as u64,
-                            block_hash: block.hash(),
-                            block_number: block.number,
-                            base_fee: block.base_fee_per_gas(),
-                            excess_blob_gas: block.excess_blob_gas(),
-                            timestamp: block.timestamp(),
-                        },
-                        block.clone_sealed_header(),
-                    ))
                 ),
                 B256::random()
             ),

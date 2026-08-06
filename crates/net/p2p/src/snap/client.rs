@@ -1,9 +1,17 @@
-use crate::{download::DownloadClient, error::PeerRequestResult, priority::Priority};
+use crate::{
+    download::DownloadClient,
+    error::{PeerRequestResult, RequestError},
+    full_block::NoopFullBlockClient,
+    priority::Priority,
+};
 use futures::Future;
-use reth_eth_wire_types::snap::{
-    AccountRangeMessage, BlockAccessListsMessage, ByteCodesMessage, GetAccountRangeMessage,
-    GetBlockAccessListsMessage, GetByteCodesMessage, GetStorageRangesMessage, SnapProtocolMessage,
-    StorageRangesMessage,
+use reth_eth_wire_types::{
+    snap::{
+        AccountRangeMessage, BlockAccessListsMessage, ByteCodesMessage, GetAccountRangeMessage,
+        GetBlockAccessListsMessage, GetByteCodesMessage, GetStorageRangesMessage,
+        SnapProtocolMessage, StorageRangesMessage,
+    },
+    NetworkPrimitives,
 };
 
 /// Response types for snap sync requests
@@ -108,6 +116,66 @@ pub trait SnapClient: DownloadClient {
         request: GetBlockAccessListsMessage,
         priority: Priority,
     ) -> Self::Output;
+}
+
+/// Fails every snap request with [`RequestError::UnsupportedCapability`], so the noop client can
+/// stand in wherever a [`SnapClient`] bound is required but snap is not served.
+impl<Net> SnapClient for NoopFullBlockClient<Net>
+where
+    Net: NetworkPrimitives,
+{
+    type Output = futures::future::Ready<PeerRequestResult<SnapResponse>>;
+
+    /// Fails the account range request as unsupported.
+    fn get_account_range_with_priority(
+        &self,
+        _request: GetAccountRangeMessage,
+        _priority: Priority,
+    ) -> Self::Output {
+        unsupported()
+    }
+
+    /// Fails the storage ranges request as unsupported.
+    fn get_storage_ranges(&self, _request: GetStorageRangesMessage) -> Self::Output {
+        unsupported()
+    }
+
+    /// Fails the prioritized storage ranges request as unsupported.
+    fn get_storage_ranges_with_priority(
+        &self,
+        _request: GetStorageRangesMessage,
+        _priority: Priority,
+    ) -> Self::Output {
+        unsupported()
+    }
+
+    /// Fails the bytecode request as unsupported.
+    fn get_byte_codes(&self, _request: GetByteCodesMessage) -> Self::Output {
+        unsupported()
+    }
+
+    /// Fails the prioritized bytecode request as unsupported.
+    fn get_byte_codes_with_priority(
+        &self,
+        _request: GetByteCodesMessage,
+        _priority: Priority,
+    ) -> Self::Output {
+        unsupported()
+    }
+
+    /// Fails the block access lists request as unsupported.
+    fn get_block_access_lists_with_priority(
+        &self,
+        _request: GetBlockAccessListsMessage,
+        _priority: Priority,
+    ) -> Self::Output {
+        unsupported()
+    }
+}
+
+/// The noop answer to any snap request: immediately ready, no capability.
+fn unsupported() -> futures::future::Ready<PeerRequestResult<SnapResponse>> {
+    futures::future::ready(Err(RequestError::UnsupportedCapability))
 }
 
 #[cfg(test)]

@@ -454,7 +454,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     /// [`BlockId`].
     fn create_access_list_with(
         &self,
-        mut evm_env: EvmEnvFor<Self::Evm>,
+        evm_env: EvmEnvFor<Self::Evm>,
         at: BlockId,
         request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
         state_override: Option<StateOverride>,
@@ -462,53 +462,23 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     where
         Self: Trace,
     {
-        self.spawn_blocking_io_fut(async move |this| {
-            let state = this.state_at_block_id(at).await?;
-            let mut db = State::builder().with_database(StateProviderDatabase::new(state)).build();
-
-            if let Some(state_overrides) = state_override {
-                apply_state_overrides(state_overrides, &mut db)
-                    .map_err(Self::Error::from_eth_err)?;
-            }
-
-            // Read fields from request before consuming it in create_txn_env
-            let request_has_gas_limit = request.as_ref().gas_limit().is_some();
+        self.spawn_with_state_at_block(at, |this, mut db| {
             let initial = request.as_ref().access_list().cloned().unwrap_or_default();
+            let (evm_env, mut tx_env) = this.prepare_call_env(
+                evm_env,
+                request,
+                &mut db,
+                EvmOverrides::state(state_override),
+            )?;
 
-            let mut tx_env = this.create_txn_env(&evm_env, request, &mut db)?;
+            let mut evm = this.evm_config().evm_with_env_and_inspector(
+                &mut db,
+                evm_env,
+                AccessListInspector::new(initial),
+            );
 
-            // we want to disable this in eth_createAccessList, since this is common practice used
-            // by other node impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
-            evm_env.cfg_env.disable_block_gas_limit = true;
-
-            // The basefee should be ignored for eth_createAccessList
-            // See:
-            // <https://github.com/ethereum/go-ethereum/blob/8990c92aea01ca07801597b00c0d83d4e2d9b811/internal/ethapi/api.go#L1476-L1476>
-            evm_env.cfg_env.disable_base_fee = true;
-
-            // Disabled because eth_createAccessList is sometimes used with non-eoa senders
-            evm_env.cfg_env.disable_eip3607 = true;
-
-            // Disable additional fee charges (e.g. L2 operator fees),
-            // consistent with prepare_call_env and estimate_gas_with.
-            evm_env.cfg_env.disable_fee_charge = true;
-
-            // Disable EIP-7825 transaction gas limit cap so that the gas limit
-            // fallback (block gas limit) is not rejected when it exceeds the
-            // per-tx cap (2^24 ≈ 16.7M post-Osaka).
-            evm_env.cfg_env.tx_gas_limit_cap = Some(u64::MAX);
-
-            if !request_has_gas_limit && tx_env.gas_price() > 0 {
-                let cap = this.caller_gas_allowance(&mut db, &evm_env, &tx_env)?;
-                // no gas limit was provided in the request, so we need to cap the request's gas
-                // limit
-                tx_env.set_gas_limit(cap.min(evm_env.block_env.gas_limit()));
-            }
-
-            let mut inspector = AccessListInspector::new(initial);
-
-            let result = this.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?;
-            let access_list = inspector.into_access_list();
+            let result = evm.transact(tx_env.clone())?;
+            let access_list = core::mem::take(evm.inspector_mut()).into_access_list();
             let gas_used = result.result.tx_gas_used();
             tx_env.set_access_list(access_list.clone());
             if let Err(err) = Self::Error::ensure_success(result.result) {
@@ -520,7 +490,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             }
 
             // transact again to get the exact gas used
-            let result = this.transact(&mut db, evm_env, tx_env)?;
+            evm.disable_inspector();
+            let result = evm.transact(tx_env)?;
             let gas_used = result.result.tx_gas_used();
             let error = Self::Error::ensure_success(result.result).err().map(|e| e.to_string());
 
