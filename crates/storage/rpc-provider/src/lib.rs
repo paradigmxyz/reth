@@ -54,8 +54,8 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 pub mod rpc_response;
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    BlockBodyIndicesProvider, BlockReaderIdExt, BlockSource, DBProvider, NodePrimitivesProvider,
-    ReceiptProviderIdExt, StatsReader,
+    BlockBodyIndicesProvider, BlockReaderIdExt, BlockSource, DBProvider, DbTxProvider,
+    NodePrimitivesProvider, ReceiptProviderIdExt, StatsReader,
 };
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, KeccakKeyHasher, MultiProof, TrieInput,
@@ -1316,8 +1316,18 @@ where
     N: Network,
     Node: NodeTypes,
 {
-    fn hashed_post_state(&self, bundle_state: &revm::database::BundleState) -> HashedPostState {
-        HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
+    fn hashed_post_state(
+        &self,
+        bundle_state: &revm::database::BundleState,
+    ) -> ProviderResult<HashedPostState> {
+        if bundle_state
+            .state()
+            .values()
+            .any(|account| account.was_destroyed() && account.original_info.is_some())
+        {
+            return Err(ProviderError::UnsupportedProvider)
+        }
+        Ok(HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state()))
     }
 }
 
@@ -1338,7 +1348,7 @@ where
     }
 }
 
-impl<P, Node, N> DBProvider for RpcBlockchainStateProvider<P, Node, N>
+impl<P, Node, N> DbTxProvider for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -1346,12 +1356,19 @@ where
 {
     type Tx = TxMock;
 
-    fn tx_ref(&self) -> &Self::Tx {
+    fn tx(&self) -> &Self::Tx {
         // We can't use a static here since TxMock doesn't allow direct construction
         // This is fine since we're just returning a mock transaction
-        unimplemented!("tx_ref not supported for RPC provider")
+        unimplemented!("tx not supported for RPC provider")
     }
+}
 
+impl<P, Node, N> DBProvider for RpcBlockchainStateProvider<P, Node, N>
+where
+    P: Provider<N> + Clone + 'static,
+    N: Network,
+    Node: NodeTypes,
+{
     fn tx_mut(&mut self) -> &mut Self::Tx {
         unimplemented!("tx_mut not supported for RPC provider")
     }

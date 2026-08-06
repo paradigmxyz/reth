@@ -40,7 +40,8 @@ use reth_storage_api::{
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use reth_transaction_pool::TransactionPool;
 use reth_trie_common::{
-    updates::TrieUpdates, ExecutionWitnessMode, HashedPostState, HashedStorage,
+    root::storage_root_unsorted, updates::TrieUpdates, ExecutionWitnessMode, HashedPostState,
+    HashedStorage,
 };
 use revm::{database::states::bundle_state::BundleRetention, Database, DatabaseCommit};
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
@@ -524,15 +525,15 @@ where
     /// root recomputation.
     pub async fn debug_execution_witness(
         &self,
-        block_id: BlockNumberOrTag,
+        block_id: BlockId,
         mode: Option<ExecutionWitnessMode>,
     ) -> Result<ExecutionWitness, Eth::Error> {
         let this = self.clone();
         let block = this
             .eth_api()
-            .recovered_block(block_id.into())
+            .recovered_block(block_id)
             .await?
-            .ok_or(EthApiError::HeaderNotFound(block_id.into()))?;
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
 
         self.debug_execution_witness_for_block(block, mode.unwrap_or_default()).await
     }
@@ -548,16 +549,21 @@ where
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
                 let block_executor = eth_api.evm_config().executor(&mut db);
 
-                let mut witness_record = ExecutionWitnessRecord::default();
-
+                let mut witness = None;
                 let _ = block_executor
                     .execute_with_state_closure(&block, |statedb: &State<_>| {
-                        witness_record.record_executed_state(statedb, mode);
+                        witness =
+                            Some(ExecutionWitnessRecord::new(statedb).into_execution_witness(
+                                &statedb.database.database.0,
+                                eth_api.provider(),
+                                block_number,
+                                mode,
+                            ));
                     })
                     .map_err(|err| EthApiError::Internal(err.into()))?;
 
-                Ok(witness_record
-                    .into_execution_witness(&db.database.0, eth_api.provider(), block_number, mode)
+                Ok(witness
+                    .expect("state closure is called after successful execution")
                     .map_err(EthApiError::from)?)
             })
             .await
@@ -641,18 +647,25 @@ where
         let balance = account.balance;
         let nonce = account.nonce;
         let code_hash = account.code_hash;
-        let hashed_storage = db
+        let (hashed_storage, status) = db
             .cache
             .accounts
             .get(&address)
             .and_then(|account| {
                 account.account.as_ref().map(|plain_account| {
-                    HashedStorage::from_plain_storage(account.status, plain_account.storage.iter())
+                    (HashedStorage::from_plain_storage(&plain_account.storage), account.status)
                 })
             })
             .unwrap_or_default();
-        let storage_root =
-            db.database.storage_root(address, hashed_storage).map_err(Eth::Error::from_eth_err)?;
+        let storage_root = if status.was_destroyed() {
+            // Destruction makes every slot not present in the cache zero, so the cache contains the
+            // complete storage trie for the account's new incarnation.
+            storage_root_unsorted(
+                hashed_storage.storage.into_iter().filter(|(_, value)| !value.is_zero()),
+            )
+        } else {
+            db.database.storage_root(address, hashed_storage).map_err(Eth::Error::from_eth_err)?
+        };
 
         Ok(Some(Account { balance, nonce, code_hash, storage_root }))
     }
@@ -736,7 +749,10 @@ where
                     // Merge transitions into cumulative bundle_state
                     db.merge_transitions(BundleRetention::PlainState);
                     // Compute state root from the accumulated state changes
-                    let hashed_state = db.database.hashed_post_state(&db.bundle_state);
+                    let hashed_state = db
+                        .database
+                        .hashed_post_state(&db.bundle_state)
+                        .map_err(Eth::Error::from_eth_err)?;
                     let root =
                         db.database.state_root(hashed_state).map_err(Eth::Error::from_eth_err)?;
                     roots.push(root);
@@ -953,7 +969,7 @@ where
     /// Handler for `debug_executionWitness`
     async fn debug_execution_witness(
         &self,
-        block: BlockNumberOrTag,
+        block: BlockId,
         mode: Option<ExecutionWitnessMode>,
     ) -> RpcResult<ExecutionWitness> {
         let _permit = self.acquire_trace_permit().await;
@@ -1272,5 +1288,61 @@ impl<B: BlockTrait> BadBlockStore<B> {
 impl<B: BlockTrait> Default for BadBlockStore<B> {
     fn default() -> Self {
         Self::new(64)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{keccak256, U256};
+    use reth_db_api::{tables, transaction::DbTxMut};
+    use reth_primitives_traits::StorageEntry;
+    use reth_provider::test_utils::create_test_provider_factory;
+    use revm::{
+        database::{states::StorageSlot, AccountStatus, BundleAccount, BundleState},
+        state::AccountInfo as RevmAccountInfo,
+    };
+
+    #[test]
+    fn hashed_post_state_zeroes_destroyed_account_parent_storage() {
+        let factory = create_test_provider_factory();
+        let address = Address::with_last_byte(1);
+        let old_slot = U256::from(1);
+        let new_slot = U256::from(2);
+        let old_value = U256::from(10);
+        let new_value = U256::from(20);
+        let hashed_address = keccak256(address);
+        let hashed_old_slot = keccak256(B256::from(old_slot));
+        let hashed_new_slot = keccak256(B256::from(new_slot));
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::HashedStorages>(
+                hashed_address,
+                StorageEntry { key: hashed_old_slot, value: old_value },
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        let mut bundle_state = BundleState::default();
+        bundle_state.state.insert(
+            address,
+            BundleAccount::new(
+                Some(RevmAccountInfo::default()),
+                Some(RevmAccountInfo::default()),
+                std::iter::once((new_slot, StorageSlot::new_changed(U256::ZERO, new_value)))
+                    .collect(),
+                AccountStatus::DestroyedChanged,
+            ),
+        );
+
+        let provider = factory.latest().unwrap();
+        let hashed_state = provider.hashed_post_state(&bundle_state).unwrap();
+        let storage = &hashed_state.storages[&hashed_address];
+
+        assert!(!storage.wiped);
+        assert_eq!(storage.storage[&hashed_old_slot], U256::ZERO);
+        assert_eq!(storage.storage[&hashed_new_slot], new_value);
     }
 }

@@ -80,6 +80,7 @@ pub trait HashedStorageCursor: HashedCursor {
 
 /// Materializes storage deletions for destroyed accounts as explicit zero-valued slot updates.
 ///
+/// Accounts absent from the bundle pre-state are skipped because they cannot have parent storage.
 /// Final bundle values take precedence so that destroy-then-recreate transitions retain storage
 /// written by the recreated account.
 pub fn zero_destroyed_account_storage<'a>(
@@ -89,7 +90,7 @@ pub fn zero_destroyed_account_storage<'a>(
 ) -> Result<(), DatabaseError> {
     let mut destroyed_accounts = accounts
         .into_iter()
-        .filter(|(_, account)| account.was_destroyed())
+        .filter(|(_, account)| account.was_destroyed() && account.original_info.is_some())
         .map(|(address, _)| keccak256(address));
     let Some(mut hashed_address) = destroyed_accounts.next() else { return Ok(()) };
     let mut cursor = cursor_factory.hashed_storage_cursor(hashed_address)?;
@@ -109,4 +110,26 @@ pub fn zero_destroyed_account_storage<'a>(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use revm::database::AccountStatus;
+
+    #[test]
+    fn zero_destroyed_storage_skips_new_accounts() {
+        let address = Address::with_last_byte(1);
+        let account = BundleAccount::new(None, None, Default::default(), AccountStatus::Destroyed);
+        let mut hashed_state = HashedPostState::default();
+
+        zero_destroyed_account_storage(
+            &mock::MockHashedCursorFactory::default(),
+            [(&address, &account)],
+            &mut hashed_state,
+        )
+        .unwrap();
+
+        assert!(hashed_state.storages.is_empty());
+    }
 }

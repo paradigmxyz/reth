@@ -24,6 +24,7 @@ alloy-eip7928 = { workspace = true, features = ["rlp"], optional = true }
 alloy-eips.workspace = true
 alloy-primitives = { workspace = true, features = ["map"] }
 alloy-rlp = { workspace = true, features = ["derive"] }
+alloy-trie.workspace = true
 alloy-consensus.workspace = true
 
 bytes.workspace = true
@@ -68,6 +69,7 @@ std = [
     "serde?/std",
     "thiserror/std",
     "reth-chainspec/std",
+    "alloy-trie/std",
 ]
 arbitrary = [
     "reth-ethereum-primitives/arbitrary",
@@ -82,6 +84,7 @@ arbitrary = [
     "alloy-eips/arbitrary",
     "alloy-primitives/arbitrary",
     "reth-primitives-traits/arbitrary",
+    "alloy-trie/arbitrary",
 ]
 serde = [
     "dep:serde",
@@ -95,4 +98,5 @@ serde = [
     "reth-ethereum-primitives/serde",
     "alloy-hardforks/serde",
     "alloy-eip7928?/serde",
+    "alloy-trie/serde",
 ]

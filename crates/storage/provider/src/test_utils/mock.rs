@@ -35,9 +35,10 @@ use reth_primitives_traits::{
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    BlockBodyIndicesProvider, BytecodeReader, DBProvider, DatabaseProviderFactory,
+    BlockBodyIndicesProvider, BytecodeReader, DBProvider, DatabaseProviderFactory, DbTxProvider,
     HashedPostStateProvider, NodePrimitivesProvider, StageCheckpointReader, StateProofProvider,
     StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
+    TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
@@ -73,8 +74,12 @@ pub struct MockEthProvider<T: NodePrimitives = EthPrimitives, ChainSpec = reth_c
     pub state_roots: Arc<Mutex<Vec<B256>>>,
     /// Local block body indices store
     pub block_body_indices: Arc<Mutex<HashMap<BlockNumber, StoredBlockBodyIndices>>>,
+    /// Local stage checkpoints
+    stage_checkpoints: Arc<Mutex<HashMap<StageId, StageCheckpoint>>>,
     /// Local BAL store handle
     pub bal_store: BalStoreHandle,
+    /// Whether database provider creation succeeds.
+    database_provider_available: Arc<AtomicBool>,
     /// Whether snap state reads should fail for handler error-path tests.
     snap_state_reads_fail: Arc<AtomicBool>,
     /// Whether a snap state range view is available.
@@ -125,7 +130,9 @@ where
             chain_spec: self.chain_spec.clone(),
             state_roots: self.state_roots.clone(),
             block_body_indices: self.block_body_indices.clone(),
+            stage_checkpoints: self.stage_checkpoints.clone(),
             bal_store: self.bal_store.clone(),
+            database_provider_available: self.database_provider_available.clone(),
             snap_state_reads_fail: self.snap_state_reads_fail.clone(),
             snap_state_range_available: self.snap_state_range_available.clone(),
             snap_state_range_resolutions: self.snap_state_range_resolutions.clone(),
@@ -152,7 +159,9 @@ impl<T: NodePrimitives> MockEthProvider<T, reth_chainspec::ChainSpec> {
             chain_spec: Arc::new(reth_chainspec::ChainSpecBuilder::mainnet().build()),
             state_roots: Default::default(),
             block_body_indices: Default::default(),
+            stage_checkpoints: Default::default(),
             bal_store: Default::default(),
+            database_provider_available: Default::default(),
             snap_state_reads_fail: Default::default(),
             snap_state_range_available: Default::default(),
             snap_state_range_resolutions: Default::default(),
@@ -169,6 +178,11 @@ impl<T: NodePrimitives> MockEthProvider<T, reth_chainspec::ChainSpec> {
 }
 
 impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
+    /// Allows database provider creation to return this mock.
+    pub fn enable_database_provider(&self) {
+        self.database_provider_available.store(true, Ordering::Relaxed);
+    }
+
     /// Makes snap state reads return provider errors when `fail` is true.
     pub fn set_snap_state_reads_fail(&self, fail: bool) {
         self.snap_state_reads_fail.store(fail, Ordering::Relaxed);
@@ -296,6 +310,11 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
         self.block_body_indices.lock().insert(block_number, indices);
     }
 
+    /// Adds a stage checkpoint to the local store.
+    pub fn add_stage_checkpoint(&self, id: StageId, checkpoint: StageCheckpoint) {
+        self.stage_checkpoints.lock().insert(id, checkpoint);
+    }
+
     /// Add state root to local state root store
     pub fn add_state_root(&self, state_root: B256) {
         self.state_roots.lock().push(state_root);
@@ -311,7 +330,9 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
             chain_spec: Arc::new(chain_spec),
             state_roots: self.state_roots,
             block_body_indices: self.block_body_indices,
+            stage_checkpoints: self.stage_checkpoints,
             bal_store: self.bal_store,
+            database_provider_available: self.database_provider_available,
             snap_state_reads_fail: self.snap_state_reads_fail,
             snap_state_range_available: self.snap_state_range_available,
             snap_state_range_resolutions: self.snap_state_range_resolutions,
@@ -475,23 +496,35 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Clone + 'static> DatabaseProvi
     type ProviderRW = Self;
 
     fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
-        Err(ConsistentViewError::Syncing { best_block: GotExpected::new(0, 0) }.into())
+        if self.database_provider_available.load(Ordering::Relaxed) {
+            Ok(self.clone())
+        } else {
+            Err(ConsistentViewError::Syncing { best_block: GotExpected::new(0, 0) }.into())
+        }
     }
 
     fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
-        Err(ConsistentViewError::Syncing { best_block: GotExpected::new(0, 0) }.into())
+        if self.database_provider_available.load(Ordering::Relaxed) {
+            Ok(self.clone())
+        } else {
+            Err(ConsistentViewError::Syncing { best_block: GotExpected::new(0, 0) }.into())
+        }
+    }
+}
+
+impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> DbTxProvider
+    for MockEthProvider<T, ChainSpec>
+{
+    type Tx = TxMock;
+
+    fn tx(&self) -> &Self::Tx {
+        &self.tx
     }
 }
 
 impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> DBProvider
     for MockEthProvider<T, ChainSpec>
 {
-    type Tx = TxMock;
-
-    fn tx_ref(&self) -> &Self::Tx {
-        &self.tx
-    }
-
     fn tx_mut(&mut self) -> &mut Self::Tx {
         &mut self.tx
     }
@@ -963,8 +996,8 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> AccountReader for MockEthProvide
 impl<T: NodePrimitives, ChainSpec: Send + Sync> StageCheckpointReader
     for MockEthProvider<T, ChainSpec>
 {
-    fn get_stage_checkpoint(&self, _id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
-        Ok(None)
+    fn get_stage_checkpoint(&self, id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
+        Ok(self.stage_checkpoints.lock().get(&id).copied())
     }
 
     fn get_stage_checkpoint_progress(&self, _id: StageId) -> ProviderResult<Option<Vec<u8>>> {
@@ -972,7 +1005,12 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StageCheckpointReader
     }
 
     fn get_all_checkpoints(&self) -> ProviderResult<Vec<(String, StageCheckpoint)>> {
-        Ok(vec![])
+        Ok(self
+            .stage_checkpoints
+            .lock()
+            .iter()
+            .map(|(id, checkpoint)| (id.to_string(), *checkpoint))
+            .collect())
     }
 }
 
@@ -1088,8 +1126,11 @@ where
 impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> HashedPostStateProvider
     for MockEthProvider<T, ChainSpec>
 {
-    fn hashed_post_state(&self, _state: &revm::database::BundleState) -> HashedPostState {
-        HashedPostState::default()
+    fn hashed_post_state(
+        &self,
+        _bundle_state: &revm::database::BundleState,
+    ) -> ProviderResult<HashedPostState> {
+        Ok(HashedPostState::default())
     }
 }
 
@@ -1194,6 +1235,17 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> StatePr
 
     fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox>> {
         Ok(Some(Box::new(self.clone())))
+    }
+}
+
+impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static>
+    TryIntoHistoricalStateProvider for MockEthProvider<T, ChainSpec>
+{
+    fn try_into_history_at_block(
+        self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<StateProviderBox> {
+        self.history_by_block_number(block_number)
     }
 }
 

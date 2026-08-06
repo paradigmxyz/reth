@@ -1,10 +1,11 @@
 //! Compatibility functions for rpc `Transaction` type.
 use crate::{
-    RpcHeader, RpcReceipt, RpcTransaction, RpcTxReq, RpcTypes, SignableTxRequest, TryIntoTxEnv,
+    RpcHeader, RpcLog, RpcReceipt, RpcTransaction, RpcTxReq, RpcTypes, SignableTxRequest,
+    TryIntoTxEnv,
 };
 use alloy_consensus::{error::ValueError, transaction::Recovered};
 use alloy_primitives::Address;
-use alloy_rpc_types_eth::TransactionInfo;
+use alloy_rpc_types_eth::{Log, TransactionInfo};
 use core::error;
 use dyn_clone::DynClone;
 use reth_evm::{BlockEnvFor, ConfigureEvm, EvmEnvFor, SpecFor, TxEnvFor};
@@ -32,11 +33,22 @@ pub struct ConvertReceiptInput<'a, N: NodePrimitives> {
 
 /// A type that knows how to convert primitive receipts to RPC representations.
 pub trait ReceiptConverter<N: NodePrimitives>: Debug + 'static {
-    /// RPC representation.
+    /// RPC receipt representation.
     type RpcReceipt;
+
+    /// RPC log representation.
+    type RpcLog;
 
     /// Error that may occur during conversion.
     type Error;
+
+    /// Converts an RPC log using its primitive receipt and block header.
+    fn convert_log(
+        &self,
+        log: Log,
+        receipt: &N::Receipt,
+        header: &SealedHeaderFor<N>,
+    ) -> Result<Self::RpcLog, Self::Error>;
 
     /// Converts a set of primitive receipts to RPC representations. It is guaranteed that all
     /// receipts are from the same block.
@@ -45,8 +57,7 @@ pub trait ReceiptConverter<N: NodePrimitives>: Debug + 'static {
         receipts: Vec<ConvertReceiptInput<'_, N>>,
     ) -> Result<Vec<Self::RpcReceipt>, Self::Error>;
 
-    /// Converts a set of primitive receipts to RPC representations. It is guaranteed that all
-    /// receipts are from `block`.
+    /// Converts primitive receipts from `block` to RPC representations.
     fn convert_receipts_with_block(
         &self,
         receipts: Vec<ConvertReceiptInput<'_, N>>,
@@ -160,6 +171,14 @@ pub trait RpcConvert: Send + Sync + Unpin + Debug + DynClone + 'static {
         evm_env: &EvmEnvFor<Self::Evm>,
     ) -> Result<TxEnvFor<Self::Evm>, Self::Error>;
 
+    /// Converts an RPC log using its primitive receipt and block header.
+    fn convert_log(
+        &self,
+        log: Log,
+        receipt: &<Self::Primitives as NodePrimitives>::Receipt,
+        header: &SealedHeaderFor<Self::Primitives>,
+    ) -> Result<RpcLog<Self::Network>, Self::Error>;
+
     /// Converts a set of primitive receipts to RPC representations. It is guaranteed that all
     /// receipts are from the same block.
     fn convert_receipts(
@@ -167,10 +186,7 @@ pub trait RpcConvert: Send + Sync + Unpin + Debug + DynClone + 'static {
         receipts: Vec<ConvertReceiptInput<'_, Self::Primitives>>,
     ) -> Result<Vec<RpcReceipt<Self::Network>>, Self::Error>;
 
-    /// Converts a set of primitive receipts to RPC representations. It is guaranteed that all
-    /// receipts are from the same block.
-    ///
-    /// Also accepts the corresponding block in case the receipt requires additional metadata.
+    /// Converts primitive receipts from `block` to RPC representations.
     fn convert_receipts_with_block(
         &self,
         receipts: Vec<ConvertReceiptInput<'_, Self::Primitives>>,
@@ -677,6 +693,7 @@ where
     Receipt: ReceiptConverter<
             N,
             RpcReceipt = RpcReceipt<Network>,
+            RpcLog = RpcLog<Network>,
             Error: From<TransactionConversionError>
                        + From<TxEnv::Error>
                        + From<<Map as TxInfoMapper<TxTy<N>>>::Err>
@@ -731,6 +748,15 @@ where
         evm_env: &EvmEnvFor<Evm>,
     ) -> Result<TxEnvFor<Evm>, Self::Error> {
         self.tx_env_converter.convert_tx_env(request, evm_env).map_err(Into::into)
+    }
+
+    fn convert_log(
+        &self,
+        log: Log,
+        receipt: &<Self::Primitives as NodePrimitives>::Receipt,
+        header: &SealedHeaderFor<Self::Primitives>,
+    ) -> Result<RpcLog<Self::Network>, Self::Error> {
+        self.receipt_converter.convert_log(log, receipt, header)
     }
 
     fn convert_receipts(
