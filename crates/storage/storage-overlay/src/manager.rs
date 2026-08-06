@@ -4,7 +4,11 @@
 //! parent has not been persisted yet. [`OverlayManager`] tracks those in-memory blocks and
 //! builds reusable flattened state trie overlays on demand.
 
-use crate::{changeset_cache::compute_block_trie_updates, ChangesetCache, OverlayBuilder};
+use crate::{
+    changeset_cache::compute_block_trie_updates, database_state_frontiers, ChangesetCache,
+    OverlayBuilder,
+};
+use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockNumber, B256};
 use parking_lot::Mutex;
 use reth_chain_state::{ExecutedBlock, PreservedSparseTrie};
@@ -19,7 +23,8 @@ use reth_primitives_traits::{
     AlloyBlockHeader, FastInstant, NodePrimitives,
 };
 use reth_storage_api::{
-    BlockNumReader, ChangeSetReader, DBProvider, StorageChangeSetReader, StorageSettingsCache,
+    BlockNumReader, ChangeSetReader, DBProvider, PruneCheckpointReader, StageCheckpointReader,
+    StorageChangeSetReader, StorageSettingsCache,
 };
 #[cfg(feature = "rayon")]
 use reth_tasks::WorkerPool;
@@ -101,6 +106,10 @@ impl<N: NodePrimitives> OverlayManager<N> {
         OverlayBuilder::new(parent_hash, self.clone())
     }
 
+    pub(crate) const fn changeset_cache(&self) -> &ChangesetCache {
+        &self.changeset_cache
+    }
+
     /// Gets or computes cached changesets for an inclusive block range.
     pub fn get_or_compute_cached_changesets_range<P>(
         &self,
@@ -111,10 +120,36 @@ impl<N: NodePrimitives> OverlayManager<N> {
         P: DBProvider
             + ChangeSetReader
             + StorageChangeSetReader
+            + PruneCheckpointReader
+            + StageCheckpointReader
             + BlockNumReader
             + StorageSettingsCache,
     {
-        self.changeset_cache.get_or_compute_range(provider, range)
+        let (partial_state_trie, finish) = database_state_frontiers(provider)?;
+        self.get_or_compute_cached_changesets_range_at_frontiers(
+            provider,
+            range,
+            partial_state_trie,
+            finish,
+        )
+    }
+
+    pub(crate) fn get_or_compute_cached_changesets_range_at_frontiers<P>(
+        &self,
+        provider: &P,
+        range: RangeInclusive<BlockNumber>,
+        partial_state_trie: BlockNumHash,
+        finish: BlockNumHash,
+    ) -> ProviderResult<Arc<TrieUpdatesSorted>>
+    where
+        P: DBProvider
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + PruneCheckpointReader
+            + BlockNumReader
+            + StorageSettingsCache,
+    {
+        self.changeset_cache.get_or_compute_range(self, provider, range, partial_state_trie, finish)
     }
 
     /// Evicts cached changesets for blocks below `up_to_block`.
@@ -132,10 +167,12 @@ impl<N: NodePrimitives> OverlayManager<N> {
         P: DBProvider
             + ChangeSetReader
             + StorageChangeSetReader
+            + PruneCheckpointReader
+            + StageCheckpointReader
             + BlockNumReader
             + StorageSettingsCache,
     {
-        compute_block_trie_updates(&self.changeset_cache, provider, block_number)
+        compute_block_trie_updates(self, provider, block_number)
     }
 
     /// Takes the preserved sparse trie if present.
