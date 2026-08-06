@@ -160,7 +160,6 @@ jobs:
           # Blob transaction API tests, including engine_forkchoiceUpdatedV4 custody masks
           # and engine_getBlobsV4 cell responses.
           - sim: ethereum/eels/execute-blobs
-            limit: .*(test_fcu_custody_columns|test_get_cells).*
           - sim: ethereum/eels/consume-engine
             limit: .*tests/osaka.*
           - sim: ethereum/eels/consume-engine
