@@ -63,19 +63,12 @@ impl BalAccountState {
     }
 }
 
-/// Hashed post-state extraction for an EIP-7928 account entry.
-pub trait AccountChangesExt {
-    /// Iterates over `(hashed slot, post-block value)` for every changed slot.
-    /// Canonical EIP-7928 ordering places the post-block value last.
-    fn hashed_storage_updates(&self) -> impl Iterator<Item = (B256, U256)>;
-}
-
-impl AccountChangesExt for AccountChanges {
-    fn hashed_storage_updates(&self) -> impl Iterator<Item = (B256, U256)> {
-        self.storage_changes.iter().filter_map(|slot| {
-            slot.changes.last().map(|change| (keccak256(B256::from(slot.slot)), change.new_value))
-        })
-    }
+/// Yields `(hashed slot, post-block value)` for every slot the entry changed.
+/// Canonical EIP-7928 ordering places the post-block value last.
+pub fn hashed_storage_updates(changes: &AccountChanges) -> impl Iterator<Item = (B256, U256)> {
+    changes.storage_changes.iter().filter_map(|slot| {
+        slot.changes.last().map(|change| (keccak256(B256::from(slot.slot)), change.new_value))
+    })
 }
 
 #[cfg(test)]
@@ -120,7 +113,7 @@ mod tests {
             ],
         ));
 
-        let hashed = changes.hashed_storage_updates().collect::<Vec<_>>();
+        let hashed = hashed_storage_updates(&changes).collect::<Vec<_>>();
 
         assert_eq!(hashed, vec![(keccak256(B256::from(slot)), U256::from(44))]);
     }
@@ -131,7 +124,7 @@ mod tests {
         changes.storage_reads.push(U256::from(1));
 
         assert!(BalAccountState::from_changes(&changes).is_empty());
-        assert_eq!(changes.hashed_storage_updates().next(), None);
+        assert_eq!(hashed_storage_updates(&changes).next(), None);
     }
 
     #[test]

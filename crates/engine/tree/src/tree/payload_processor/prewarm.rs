@@ -32,7 +32,7 @@ use reth_provider::{
 use reth_revm::database::StateProviderDatabase;
 use reth_tasks::{pool::WorkerPool, Runtime};
 use reth_trie_common::{
-    bal::{AccountChangesExt, BalAccountState},
+    bal::{hashed_storage_updates, BalAccountState},
     MultiProofTargetsV2,
 };
 use std::sync::{
@@ -667,7 +667,7 @@ where
         if !account_changes.storage_changes.is_empty() {
             let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
             let mut storage_map = reth_trie::HashedStorage::new(false);
-            storage_map.storage.extend(account_changes.hashed_storage_updates());
+            storage_map.storage.extend(hashed_storage_updates(account_changes));
 
             let mut hashed_state = reth_trie::HashedPostState::default();
             hashed_state.storages.insert(hashed_address, storage_map);
