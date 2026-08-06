@@ -1068,6 +1068,8 @@ mod tests {
         assert_eq!(chunked.tail_chunks_for_distance(10_064), 2);
         // A distance that fits inside the final chunk still needs just one.
         assert_eq!(chunked.tail_chunks_for_distance(5_000), 1);
+        // One block more than the final chunk holds must pull in the previous chunk.
+        assert_eq!(chunked.tail_chunks_for_distance(5_001), 2);
         assert_eq!(chunked.tail_chunks_for_distance(1), 1);
         // Covering everything selects all chunks and never exceeds the chunk count.
         assert_eq!(chunked.tail_chunks_for_distance(1_005_000), 3);
