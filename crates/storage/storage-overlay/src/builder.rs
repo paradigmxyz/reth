@@ -118,13 +118,35 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     where
         Provider: StageCheckpointReader + BlockNumReader + PruneCheckpointReader,
     {
+        let (partial_state_trie, finish) = database_state_frontiers(provider)?;
+        self.anchor_at_parent_with_frontiers(provider, partial_state_trie, finish)
+    }
+
+    /// Returns the durable anchor to use for this builder's parent using known frontiers.
+    pub fn anchor_at_parent_with_frontiers<Provider>(
+        &self,
+        provider: &Provider,
+        partial_state_trie: BlockNumHash,
+        finish: BlockNumHash,
+    ) -> ProviderResult<AnchorForParent<N>>
+    where
+        Provider: BlockNumReader + PruneCheckpointReader,
+    {
         match &self.overlay_source {
-            Some(OverlaySource::Managed) => anchor_for_parent(
+            Some(OverlaySource::Managed) => anchor_for_parent_with_frontiers(
                 self.parent_hash,
                 self.overlay_manager.parent_chain(self.parent_hash),
+                partial_state_trie,
+                finish,
                 provider,
             ),
-            _ => anchor_for_parent(self.parent_hash, std::iter::empty(), provider),
+            _ => anchor_for_parent_with_frontiers(
+                self.parent_hash,
+                std::iter::empty(),
+                partial_state_trie,
+                finish,
+                provider,
+            ),
         }
     }
 
@@ -164,7 +186,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             + StorageChangeSetReader
             + DBProvider
             + BlockNumReader
-            + StageCheckpointReader
             + PruneCheckpointReader
             + StorageSettingsCache,
     {
@@ -173,7 +194,8 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         let trie_updates_total_len;
         let hashed_state_updates_total_len;
 
-        let anchor_for_parent = self.anchor_at_parent(provider)?;
+        let anchor_for_parent =
+            self.anchor_at_parent_with_frontiers(provider, state_trie_tip_block, finish_tip_block)?;
 
         // Collect any reverts which are required to bring the DB view back to the anchor hash.
         let (trie_updates, hashed_post_state) = match anchor_for_parent {
@@ -450,7 +472,7 @@ pub enum AnchorForParent<N: NodePrimitives> {
 /// # Arguments
 /// * `parent`: The block whose post-state is being targeted.
 /// * `in_mem_chain`: Yields the in-memory blocks in the chain, starting at `parent_hash`.
-/// * `provider`: Used to check the current database tip
+/// * `provider`: Used to resolve the durable frontiers and check changeset availability.
 pub fn anchor_for_parent<N, Provider>(
     parent_hash: B256,
     in_mem_chain: impl Iterator<Item = ExecutedBlock<N>>,
@@ -460,47 +482,56 @@ where
     N: NodePrimitives,
     Provider: StageCheckpointReader + BlockNumReader + PruneCheckpointReader,
 {
+    let (partial_state_trie, finish) = database_state_frontiers(provider)?;
+    anchor_for_parent_with_frontiers(
+        parent_hash,
+        in_mem_chain,
+        partial_state_trie,
+        finish,
+        provider,
+    )
+}
+
+/// Returns the anchor block to use for the target parent and a chain of in-memory blocks using
+/// known durable frontiers.
+///
+/// # Arguments
+/// * `parent`: The block whose post-state is being targeted.
+/// * `in_mem_chain`: Yields the in-memory blocks in the chain, starting at `parent_hash`.
+/// * `partial_state_trie`: The durable state/trie frontier.
+/// * `finish`: The durable Finish frontier.
+/// * `provider`: Used to resolve the parent and check changeset availability.
+pub fn anchor_for_parent_with_frontiers<N, Provider>(
+    parent_hash: B256,
+    in_mem_chain: impl Iterator<Item = ExecutedBlock<N>>,
+    partial_state_trie: BlockNumHash,
+    finish: BlockNumHash,
+    provider: &Provider,
+) -> ProviderResult<AnchorForParent<N>>
+where
+    N: NodePrimitives,
+    Provider: BlockNumReader + PruneCheckpointReader,
+{
     use std::io::Error;
-
-    let checkpoint = provider
-        .get_stage_checkpoint(reth_stages_types::StageId::Finish)?
-        .ok_or_else(|| ProviderError::other(Error::other("Finish checkpoint not found")))?;
-
-    let finish = checkpoint.block_number;
-    let partial_state_trie = checkpoint
-        .finish_stage_checkpoint()
-        .and_then(|chk| chk.partial_state_trie)
-        .unwrap_or(checkpoint.block_number);
-
-    let finish_hash =
-        provider.block_hash(finish)?.ok_or_else(|| ProviderError::HeaderNotFound(finish.into()))?;
-
-    let partial_state_trie_hash = if finish == partial_state_trie {
-        finish_hash
-    } else {
-        provider
-            .block_hash(partial_state_trie)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(partial_state_trie.into()))?
-    };
 
     let persisted_parent = provider
         .block_number(parent_hash)?
-        .filter(|&parent_number| parent_number <= partial_state_trie);
+        .filter(|&parent_number| parent_number <= partial_state_trie.number);
 
-    let mut finish_seen = parent_hash == finish_hash;
+    let mut finish_seen = parent_hash == finish.hash;
     let (anchor, overlay) = if let Some(parent_number) = persisted_parent {
         (BlockNumHash::new(parent_number, parent_hash), Vec::new())
     } else {
         let mut overlay = Vec::new();
         let mut in_mem_chain = in_mem_chain.inspect(|block| {
-            finish_seen |= block.recovered_block().hash() == finish_hash;
+            finish_seen |= block.recovered_block().hash() == finish.hash;
             overlay.push(block.clone());
         });
 
         let anchor_hash =
-            anchor_for_parent_in(parent_hash, &mut in_mem_chain, partial_state_trie_hash);
-        let anchor = if anchor_hash == partial_state_trie_hash {
-            BlockNumHash::new(partial_state_trie, anchor_hash)
+            anchor_for_parent_in(parent_hash, &mut in_mem_chain, partial_state_trie.hash);
+        let anchor = if anchor_hash == partial_state_trie.hash {
+            BlockNumHash::new(partial_state_trie.number, anchor_hash)
         } else {
             let anchor_number = provider
                 .convert_hash_or_number(anchor_hash.into())?
@@ -510,16 +541,16 @@ where
         (anchor, overlay)
     };
 
-    finish_seen |= anchor.hash == finish_hash;
+    finish_seen |= anchor.hash == finish.hash;
 
-    if anchor.number > partial_state_trie {
+    if anchor.number > partial_state_trie.number {
         return Err(ProviderError::other(Error::other(format!(
                 "overlay anchor #{} ({}) is after partial state trie frontier #{} ({}); missing trie updates for blocks #{}..=#{}",
                 anchor.number,
                 anchor.hash,
-                partial_state_trie,
-                partial_state_trie_hash,
-                partial_state_trie+1,
+                partial_state_trie.number,
+                partial_state_trie.hash,
+                partial_state_trie.number + 1,
                 anchor.number,
             ))))
     }
@@ -541,7 +572,7 @@ where
         .get_prune_checkpoint(PruneSegment::StorageHistory)?
         .and_then(|checkpoint| checkpoint.block_number);
     let lower_bound = account_history.max(storage_history).unwrap_or_default();
-    let available_range = lower_bound..=finish;
+    let available_range = lower_bound..=finish.number;
     if !available_range.contains(&anchor.number) {
         return Err(ProviderError::InsufficientChangesets {
             requested: anchor.number,
@@ -549,11 +580,7 @@ where
         })
     }
 
-    Ok(AnchorForParent::RevertsRequired {
-        anchor,
-        finish: BlockNumHash::new(finish, finish_hash),
-        overlay,
-    })
+    Ok(AnchorForParent::RevertsRequired { anchor, finish, overlay })
 }
 
 #[cfg(test)]
@@ -702,7 +729,6 @@ mod tests {
         manager.insert_block(blocks[1].clone());
         let provider = factory.provider().unwrap();
         let builder = manager.overlay_builder(blocks[1].recovered_block().hash());
-
         match builder.anchor_at_parent(&provider).unwrap() {
             AnchorForParent::RevertsRequired { anchor, finish, overlay } => {
                 assert_eq!(anchor, blocks[1].recovered_block().num_hash());
