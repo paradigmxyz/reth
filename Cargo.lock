@@ -10684,6 +10684,7 @@ dependencies = [
  "rayon",
  "reth-chain-state",
  "reth-db",
+ "reth-db-api",
  "reth-errors",
  "reth-ethereum-primitives",
  "reth-metrics",

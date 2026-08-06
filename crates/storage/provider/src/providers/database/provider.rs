@@ -16,7 +16,7 @@ use crate::{
         PlainStateInputOrder,
     },
     AccountReader, BlockBodyWriter, BlockExecutionWriter, BlockHashReader, BlockNumReader,
-    BlockReader, BlockWriter, ChainStateBlockReader, ChainStateBlockWriter, DBProvider,
+    BlockReader, BlockWriter, ChainStateBlockReader, ChainStateBlockWriter, DBProvider, DbTxProvider,
     EitherReader, EitherWriter, EitherWriterDestination, EvmStateInit, HashingWriter,
     HeaderProvider, HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef,
     HistoryWriter, LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, PersistenceFrontiers, ProviderError,
@@ -3860,13 +3860,15 @@ impl<TX: DbTxMut, N: NodeTypes> ChainStateBlockWriter for DatabaseProvider<TX, N
     }
 }
 
-impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider<TX, N> {
+impl<TX: DbTx + 'static, N: NodeTypes + 'static> DbTxProvider for DatabaseProvider<TX, N> {
     type Tx = TX;
 
-    fn tx_ref(&self) -> &Self::Tx {
+    fn tx(&self) -> &Self::Tx {
         &self.tx
     }
+}
 
+impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider<TX, N> {
     fn tx_mut(&mut self) -> &mut Self::Tx {
         &mut self.tx
     }
