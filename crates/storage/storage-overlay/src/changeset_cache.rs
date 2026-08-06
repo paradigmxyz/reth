@@ -7,7 +7,7 @@
 //! - **Reorg support**: Quickly access changesets to revert blocks during chain reorganizations
 //! - **Memory efficiency**: Explicit eviction releases persisted changesets
 
-use crate::{database_state_frontiers, OverlayManager, OverlayStateProviderRef};
+use crate::{database_state_frontiers, OverlayManager, OverlayStateProvider};
 use alloy_primitives::{map::B256Map, BlockNumber, B256};
 use parking_lot::RwLock;
 use reth_metrics::{
@@ -390,7 +390,11 @@ impl ChangesetCache {
             .overlay_builder(finish.hash)
             .with_no_reverts()
             .build_overlay_at_frontiers(provider, partial_state_trie, finish)?;
-        let state_trie_provider = OverlayStateProviderRef::new(provider, &overlay);
+        let state_trie_provider = OverlayStateProvider::new(
+            provider,
+            overlay,
+            provider.cached_storage_settings().is_v2(),
+        );
 
         let accumulated_reverts = Arc::new(reth_trie_db::compute_range_trie_changesets(
             provider,
@@ -885,7 +889,11 @@ mod tests {
         reth_trie_db::with_adapter!(provider, |A| seed_tip_trie_tables::<_, A>(&*provider));
 
         let overlay = empty_overlay();
-        let state_trie_provider = OverlayStateProviderRef::new(&*provider, &overlay);
+        let state_trie_provider = OverlayStateProvider::new(
+            &*provider,
+            overlay,
+            provider.cached_storage_settings().is_v2(),
+        );
         let actual =
             reth_trie_db::compute_range_trie_changesets(&*provider, &state_trie_provider, 1..=3, 3)
                 .unwrap();
@@ -968,7 +976,11 @@ mod tests {
 
         let expected = legacy_compute_range_trie_changesets(&*provider, 2..=3);
         let overlay = empty_overlay();
-        let state_trie_provider = OverlayStateProviderRef::new(&*provider, &overlay);
+        let state_trie_provider = OverlayStateProvider::new(
+            &*provider,
+            overlay,
+            provider.cached_storage_settings().is_v2(),
+        );
         let actual =
             reth_trie_db::compute_range_trie_changesets(&*provider, &state_trie_provider, 2..=3, 3)
                 .unwrap();
