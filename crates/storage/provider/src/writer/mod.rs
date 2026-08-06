@@ -929,13 +929,21 @@ mod tests {
             let overlay_root = if is_v2 {
                 TestStateRoot::<_, PackedKeyAdapter>::overlay_root(
                     tx,
-                    &provider_factory.hashed_post_state(&state.bundle_state).into_sorted(),
+                    &provider_rw
+                        .latest()
+                        .hashed_post_state(&state.bundle_state)
+                        .unwrap()
+                        .into_sorted(),
                 )
                 .unwrap()
             } else {
                 TestStateRoot::<_, LegacyKeyAdapter>::overlay_root(
                     tx,
-                    &provider_factory.hashed_post_state(&state.bundle_state).into_sorted(),
+                    &provider_rw
+                        .latest()
+                        .hashed_post_state(&state.bundle_state)
+                        .unwrap()
+                        .into_sorted(),
                 )
                 .unwrap()
             };
@@ -1123,7 +1131,6 @@ mod tests {
 
         // insert initial account storage
         let init_storage = HashedStorage::from_iter(
-            false,
             [
                 "50000000000000000000000000000004253371b55351a08cb3267d4d265530b6",
                 "512428ed685fff57294d1a9cbb147b18ae5db9cf6ae4b312fa1946ba0561882e",
@@ -1155,8 +1162,7 @@ mod tests {
             .unwrap();
 
         // destroy the storage and re-create with new slots
-        let updated_storage = HashedStorage::from_iter(
-            true,
+        let mut updated_storage = HashedStorage::from_iter(
             [
                 "00deb8486ad8edccfdedfc07109b3667b38a03a8009271aac250cce062d90917",
                 "88d233b7380bb1bcdc866f6871c94685848f54cf0ee033b1480310b4ddb75fc9",
@@ -1164,6 +1170,7 @@ mod tests {
             .into_iter()
             .map(|str| (B256::from_str(str).unwrap(), U256::from(1))),
         );
+        updated_storage.wiped = true;
         let mut state = HashedPostState::default();
         state.storages.insert(hashed_address, updated_storage.clone());
         provider_rw.write_hashed_state(&state.clone().into_sorted()).unwrap();

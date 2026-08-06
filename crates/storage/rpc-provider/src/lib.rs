@@ -1316,8 +1316,18 @@ where
     N: Network,
     Node: NodeTypes,
 {
-    fn hashed_post_state(&self, bundle_state: &revm::database::BundleState) -> HashedPostState {
-        HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
+    fn hashed_post_state(
+        &self,
+        bundle_state: &revm::database::BundleState,
+    ) -> ProviderResult<HashedPostState> {
+        if bundle_state
+            .state()
+            .values()
+            .any(|account| account.was_destroyed() && account.original_info.is_some())
+        {
+            return Err(ProviderError::UnsupportedProvider)
+        }
+        Ok(HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state()))
     }
 }
 
