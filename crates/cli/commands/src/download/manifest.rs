@@ -318,12 +318,7 @@ impl SnapshotManifest {
 
                 // Calculate which chunks to include
                 let start_chunk = match distance {
-                    Some(dist) => {
-                        // We need chunks covering the last `dist` blocks
-                        let needed_blocks = dist.min(chunked.total_blocks);
-                        let needed_chunks = needed_blocks.div_ceil(chunked.blocks_per_file);
-                        num_chunks.saturating_sub(needed_chunks)
-                    }
+                    Some(dist) => chunked.start_chunk_for_distance(dist),
                     None => 0, // All chunks
                 };
 
@@ -363,11 +358,7 @@ impl SnapshotManifest {
                 let num_chunks = chunked.num_chunks();
 
                 let start_chunk = match distance {
-                    Some(dist) => {
-                        let needed_blocks = dist.min(chunked.total_blocks);
-                        let needed_chunks = needed_blocks.div_ceil(chunked.blocks_per_file);
-                        num_chunks.saturating_sub(needed_chunks)
-                    }
+                    Some(dist) => chunked.start_chunk_for_distance(dist),
                     None => 0,
                 };
 
@@ -409,11 +400,7 @@ impl SnapshotManifest {
                 }
                 let num_chunks = chunked.chunk_sizes.len() as u64;
                 let start_chunk = match distance {
-                    Some(dist) => {
-                        let needed = dist.min(chunked.total_blocks);
-                        let needed_chunks = needed.div_ceil(chunked.blocks_per_file);
-                        num_chunks.saturating_sub(needed_chunks)
-                    }
+                    Some(dist) => chunked.start_chunk_for_distance(dist),
                     None => 0,
                 };
                 chunked.chunk_sizes[start_chunk as usize..].iter().sum()
@@ -436,11 +423,7 @@ impl SnapshotManifest {
             ComponentManifest::Chunked(chunked) => {
                 let num_chunks = chunked.num_chunks();
                 let start_chunk = match distance {
-                    Some(dist) => {
-                        let needed = dist.min(chunked.total_blocks);
-                        let needed_chunks = needed.div_ceil(chunked.blocks_per_file);
-                        num_chunks.saturating_sub(needed_chunks)
-                    }
+                    Some(dist) => chunked.start_chunk_for_distance(dist),
                     None => 0,
                 };
 
@@ -458,8 +441,8 @@ impl SnapshotManifest {
         };
         match distance {
             Some(dist) => {
-                let needed = dist.min(chunked.total_blocks);
-                needed.div_ceil(chunked.blocks_per_file)
+                let start = chunked.start_chunk_for_distance(dist);
+                chunked.num_chunks().saturating_sub(start)
             }
             None => chunked.num_chunks(),
         }
@@ -488,6 +471,39 @@ impl ChunkedArchive {
     /// Returns the number of chunks.
     pub fn num_chunks(&self) -> u64 {
         self.total_blocks.div_ceil(self.blocks_per_file)
+    }
+
+    /// Returns how many blocks chunk `index` actually covers.
+    ///
+    /// Full chunks cover `blocks_per_file`. The tip chunk may be shorter when
+    /// `total_blocks` is not aligned to `blocks_per_file`.
+    pub fn blocks_in_chunk(&self, index: u64) -> u64 {
+        let start = index.saturating_mul(self.blocks_per_file);
+        if start >= self.total_blocks {
+            return 0;
+        }
+        (self.total_blocks - start).min(self.blocks_per_file)
+    }
+
+    /// Returns the first chunk index such that chunks `[start, num_chunks)` cover
+    /// at least `distance` blocks from the tip.
+    ///
+    /// Walking tip-first is required because a partial tip chunk can cover fewer
+    /// than `blocks_per_file` blocks. Using `distance.div_ceil(blocks_per_file)`
+    /// alone under-fetches in that case (see #26579).
+    pub fn start_chunk_for_distance(&self, distance: u64) -> u64 {
+        let needed = distance.min(self.total_blocks);
+        if needed == 0 {
+            return self.num_chunks();
+        }
+
+        let mut covered = 0u64;
+        let mut index = self.num_chunks();
+        while index > 0 && covered < needed {
+            index -= 1;
+            covered = covered.saturating_add(self.blocks_in_chunk(index));
+        }
+        index
     }
 
     /// Returns the extracted plain-output size for one chunk.
@@ -1025,6 +1041,43 @@ mod tests {
         let m = test_manifest();
         assert_eq!(m.chunks_for_distance(SnapshotComponentType::Transactions, Some(600_000)), 2);
         assert_eq!(m.chunks_for_distance(SnapshotComponentType::Transactions, Some(100_000)), 1);
+    }
+
+    #[test]
+    fn distance_covers_partial_tip_chunk() {
+        // Tip chunk covers only 5_000 blocks. Needing 10_064 requires the previous
+        // full 50_000-block chunk as well — div_ceil(blocks_per_file) alone returns 1.
+        let mut components = BTreeMap::new();
+        components.insert(
+            "transactions".to_string(),
+            ComponentManifest::Chunked(ChunkedArchive {
+                blocks_per_file: 50_000,
+                total_blocks: 105_000,
+                chunk_sizes: vec![10, 10, 5],
+                chunk_decompressed_sizes: vec![],
+                chunk_output_files: vec![vec![]; 3],
+            }),
+        );
+        let m = SnapshotManifest {
+            block: 105_000,
+            chain_id: 1,
+            storage_version: 2,
+            timestamp: 0,
+            base_url: Some("https://example.com".to_string()),
+            reth_version: None,
+            components,
+        };
+
+        assert_eq!(m.chunks_for_distance(SnapshotComponentType::Transactions, Some(10_064)), 2);
+        let urls =
+            m.archive_urls_for_distance(SnapshotComponentType::Transactions, Some(10_064));
+        assert_eq!(urls.len(), 2);
+        assert_eq!(urls[0], "https://example.com/transactions-50000-99999.tar.zst");
+        assert_eq!(urls[1], "https://example.com/transactions-100000-149999.tar.zst");
+        assert_eq!(
+            m.size_for_distance(SnapshotComponentType::Transactions, Some(10_064)),
+            15
+        );
     }
 
     #[test]
