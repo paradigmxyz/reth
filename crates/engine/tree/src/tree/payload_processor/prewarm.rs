@@ -657,7 +657,7 @@ where
         let mut hashed_address = None;
         let account_state = BalAccountState::from_changes(account_changes);
 
-        if !bal_account_changes_state_root(account_changes, &account_state) {
+        if !account_state.changes_state_root(account_changes) {
             return;
         }
 
@@ -737,15 +737,6 @@ where
     }
 }
 
-/// Whether this entry contributes to the block's state root: it changed an account-level field
-/// or a storage slot.
-const fn bal_account_changes_state_root(
-    account_changes: &alloy_eip7928::AccountChanges,
-    account_state: &BalAccountState,
-) -> bool {
-    !account_state.is_empty() || !account_changes.storage_changes.is_empty()
-}
-
 /// Returns [`MultiProofTargetsV2`] for withdrawal addresses.
 ///
 /// Withdrawals only modify account balances (no storage), so the targets contain
@@ -774,7 +765,7 @@ mod tests {
         let fields = BalAccountState::from_changes(&changes);
 
         assert!(fields.is_empty());
-        assert!(!bal_account_changes_state_root(&changes, &fields));
+        assert!(!fields.changes_state_root(&changes));
     }
 
     #[test]
@@ -785,7 +776,7 @@ mod tests {
             .with_code_change(CodeChange::new(BlockAccessIndex::new(1), bytes!("6001600155")));
         let fields = BalAccountState::from_changes(&changes);
 
-        assert!(bal_account_changes_state_root(&changes, &fields));
+        assert!(fields.changes_state_root(&changes));
         assert!(!fields.needs_parent_account());
     }
 
@@ -798,7 +789,7 @@ mod tests {
             ));
         let fields = BalAccountState::from_changes(&changes);
 
-        assert!(bal_account_changes_state_root(&changes, &fields));
+        assert!(fields.changes_state_root(&changes));
         assert!(fields.needs_parent_account());
     }
 

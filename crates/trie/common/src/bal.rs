@@ -57,6 +57,11 @@ impl BalAccountState {
         self.balance.is_none() || self.nonce.is_none() || self.code_hash.is_none()
     }
 
+    /// Returns `true` when the entry contributes to the block's state root.
+    pub fn changes_state_root(&self, changes: &AccountChanges) -> bool {
+        !self.is_empty() || !changes.storage_changes.is_empty()
+    }
+
     /// Applies the changed fields on top of `existing`, the account before the block.
     /// Missing fields keep their previous values; empty code normalises to the database's `None`.
     pub fn merge_onto(&self, existing: Option<&Account>) -> Account {
