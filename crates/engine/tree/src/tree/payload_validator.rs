@@ -146,14 +146,13 @@ use reth_primitives_traits::{
     RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
-    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockHashReader, BlockNumReader,
-    BlockReader, ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory,
-    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderBox,
-    StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
-    TryIntoHistoricalStateProvider,
+    BlockExecutionOutput, BlockReader, ChangeSetReader, DatabaseProviderFactory,
+    DatabaseProviderROFactory, ProviderError, PruneCheckpointReader, StageCheckpointReader,
+    StateProvider, StateProviderBox, StateProviderFactory, StateReader, StorageChangeSetReader,
+    StorageSettingsCache, TryIntoHistoricalStateProvider,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
-use reth_storage_overlay::OverlayManager;
+use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
     HashedPostState, KeccakKeyHasher, LazyTrieData,
@@ -303,29 +302,22 @@ impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
 where
     N: NodePrimitives,
     P: DatabaseProviderFactory<
-            Provider: BlockHashReader
-                          + BlockReader
+            Provider: BlockReader
                           + StageCheckpointReader
                           + PruneCheckpointReader
                           + ChangeSetReader
                           + StorageChangeSetReader
-                          + BlockNumReader
                           + StorageSettingsCache
                           + TryIntoHistoricalStateProvider
                           + 'static,
         > + BlockReader<Header = N::BlockHeader>
         + ChangeSetReader
-        + BlockNumReader
         + StateProviderFactory
         + StateReader
         + Clone
-        + Send
-        + Sync
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
         + Clone
-        + Send
-        + Sync
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
@@ -1781,13 +1773,11 @@ pub trait EngineValidator<
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
 where
     P: DatabaseProviderFactory<
-            Provider: BlockHashReader
-                          + BlockReader
+            Provider: BlockReader
                           + StageCheckpointReader
                           + PruneCheckpointReader
                           + ChangeSetReader
                           + StorageChangeSetReader
-                          + BlockNumReader
                           + StorageSettingsCache
                           + TryIntoHistoricalStateProvider
                           + 'static,
@@ -1795,13 +1785,10 @@ where
         + StateProviderFactory
         + StateReader
         + ChangeSetReader
-        + BlockNumReader
         + Clone
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
         + Clone
-        + Send
-        + Sync
         + 'static,
     N: NodePrimitives,
     V: PayloadValidator<Types, Block = N::Block> + Clone,

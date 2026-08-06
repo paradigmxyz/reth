@@ -9,9 +9,8 @@ use crossbeam_channel::{Receiver, RecvTimeoutError, TryRecvError};
 use reth_evm::ConfigureEvm;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    BlockHashReader, BlockNumReader, BlockReader, DatabaseProviderFactory, PruneCheckpointReader,
-    StageCheckpointReader, StateProviderFactory, StateReader, StorageSettingsCache,
-    TryIntoHistoricalStateProvider,
+    BlockNumReader, DatabaseProviderFactory, PruneCheckpointReader, StageCheckpointReader,
+    StorageSettingsCache, TryIntoHistoricalStateProvider,
 };
 use reth_revm::{cached::CachedReads, db::State};
 use std::{
@@ -67,9 +66,8 @@ where
 impl<N, P, Evm> Worker<N, P, Evm>
 where
     N: NodePrimitives,
-    P: DatabaseProviderFactory + BlockReader + StateProviderFactory + StateReader + Clone,
-    P::Provider: BlockHashReader
-        + BlockNumReader
+    P: DatabaseProviderFactory,
+    P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
         + StorageSettingsCache
@@ -323,15 +321,10 @@ mod tests {
     use alloy_primitives::{Address, Signature, TxKind, U256};
     use crossbeam_channel::{unbounded, Sender};
     use parking_lot::{Mutex, RwLock};
-    use reth_chain_state::test_utils::TestBlockBuilder;
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_provider::{
-        providers::BlockchainProvider,
-        test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
-        BlockWriter, DBProvider, DatabaseProviderFactory, StageCheckpointWriter,
-    };
-    use reth_stages::{StageCheckpoint, StageId};
+    use reth_provider::test_utils::MockEthProvider;
+    use reth_stages_api::{StageCheckpoint, StageId};
     use std::{
         collections::{HashMap, VecDeque},
         sync::atomic::{AtomicUsize, Ordering},
@@ -342,8 +335,7 @@ mod tests {
     const WAIT_LIMIT: Duration = Duration::from_secs(5);
     const POLL_INTERVAL: Duration = Duration::from_millis(2);
 
-    type TestProvider = BlockchainProvider<MockNodeTypesWithDB>;
-    type TestJob = Job<EthPrimitives, TestProvider, EthEvmConfig>;
+    type TestJob = Job<EthPrimitives, MockEthProvider, EthEvmConfig>;
 
     /// Drives a live worker thread through its public seams only: commands in, the publication
     /// slot and the scripted pool out.
@@ -376,10 +368,12 @@ mod tests {
             worker.join().unwrap();
         }
 
-        /// Points the worker at a persisted parent, as [`Handle::start`](super::super::Handle)
-        /// does.
-        fn start(&self) -> B256 {
-            let (provider, parent_hash) = provider_for_parent();
+        /// Points the worker at `parent_hash`, as [`Handle::start`](super::super::Handle) does.
+        fn start(&self, parent_hash: B256) {
+            let provider = MockEthProvider::default();
+            provider.enable_database_provider();
+            provider.add_header(parent_hash, Default::default());
+            provider.add_stage_checkpoint(StageId::Finish, StageCheckpoint::new(0));
             let job = Job {
                 evm_env: Default::default(),
                 provider_builder: StateProviderBuilder::new(
@@ -389,7 +383,6 @@ mod tests {
                 ),
             };
             self.commands.send(Command::Start { parent_hash, job }).unwrap();
-            parent_hash
         }
 
         /// Pauses the worker, as [`Handle::pause`](super::super::Handle) does. Fire-and-forget
@@ -437,31 +430,6 @@ mod tests {
                 let _ = worker.join();
             }
         }
-    }
-
-    fn provider_for_parent() -> (TestProvider, B256) {
-        let provider = create_test_provider_factory();
-        let block = TestBlockBuilder::eth().with_state().get_executed_blocks(0..1).next().unwrap();
-        let parent_hash = block.recovered_block().hash();
-        let provider_rw = provider.database_provider_rw().unwrap();
-        provider_rw
-            .append_blocks_with_state(
-                vec![block.recovered_block().clone()],
-                &reth_execution_types::ExecutionOutcome::single(
-                    0,
-                    block.execution_outcome().clone(),
-                ),
-                block.hashed_state().as_ref().clone(),
-            )
-            .unwrap();
-        provider_rw
-            .save_stage_checkpoint(
-                StageId::Finish,
-                StageCheckpoint::new(block.recovered_block().number),
-            )
-            .unwrap();
-        provider_rw.commit().unwrap();
-        (BlockchainProvider::new(provider).unwrap(), parent_hash)
     }
 
     /// A pool the tests script per parent: [`Self::push`] hands a transaction to the iterator
@@ -525,9 +493,10 @@ mod tests {
     #[test]
     fn warms_pool_transactions_into_a_published_snapshot() {
         let harness = Harness::spawn();
-        let parent_hash = harness.start();
+        let parent_hash = B256::repeat_byte(0x01);
 
         // Start before the pool tracks the head, covering the poll-and-retry path.
+        harness.start(parent_hash);
         wait_until("the untracked head is polled", || {
             harness.pool.not_ready.load(Ordering::Relaxed) >= 1
         });
@@ -541,7 +510,8 @@ mod tests {
     #[test]
     fn pause_quiesces_the_worker_until_resume() {
         let harness = Harness::spawn();
-        let parent_hash = harness.start();
+        let parent_hash = B256::repeat_byte(0x01);
+        harness.start(parent_hash);
         harness.pool.push(parent_hash, transfer(0xB0));
         let before = harness.published_for(parent_hash).entry_counts();
 
@@ -561,7 +531,8 @@ mod tests {
     #[test]
     fn overlapping_pauses_require_matching_resumes() {
         let harness = Harness::spawn();
-        let parent_hash = harness.start();
+        let parent_hash = B256::repeat_byte(0x01);
+        harness.start(parent_hash);
         harness.pool.push(parent_hash, transfer(0xB0));
         let before = harness.published_for(parent_hash).entry_counts();
 
@@ -583,15 +554,17 @@ mod tests {
     #[test]
     fn reuses_the_iterator_per_head_and_reopens_on_switch() {
         let harness = Harness::spawn();
-        let first = harness.start();
+        let first = B256::repeat_byte(0x01);
+        let second = B256::repeat_byte(0x02);
 
+        harness.start(first);
         harness.pool.push(first, transfer(0xB0));
         let before = harness.published_for(first).entry_counts();
         harness.pool.push(first, transfer(0xB1));
         harness.published(|snapshot| snapshot.entry_counts() != before);
         assert_eq!(harness.pool.opened.load(Ordering::Relaxed), 1, "one iterator per head");
 
-        let second = harness.start();
+        harness.start(second);
         harness.pool.push(second, transfer(0xB2));
         harness.published_for(second);
         assert_eq!(harness.pool.opened.load(Ordering::Relaxed), 2);
@@ -600,10 +573,11 @@ mod tests {
     #[test]
     fn newest_start_wins() {
         let harness = Harness::spawn();
-        let stale = harness.start();
-        let newest = harness.start();
+        let stale = B256::repeat_byte(0x01);
+        let newest = B256::repeat_byte(0x02);
 
-        assert_ne!(stale, newest);
+        harness.start(stale);
+        harness.start(newest);
         harness.pool.push(newest, transfer(0xB0));
 
         harness.published_for(newest);
@@ -612,7 +586,8 @@ mod tests {
     #[test]
     fn shuts_down_when_control_is_dropped() {
         let harness = Harness::spawn();
-        let parent_hash = harness.start();
+        let parent_hash = B256::repeat_byte(0x01);
+        harness.start(parent_hash);
         harness.pool.push(parent_hash, transfer(0xB0));
         harness.published_for(parent_hash);
 

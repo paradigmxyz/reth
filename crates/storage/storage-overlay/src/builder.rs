@@ -14,6 +14,7 @@ use reth_storage_api::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted};
+use reth_trie_db::DatabaseHashedPostState;
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -69,6 +70,8 @@ pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
     overlay_manager: OverlayManager<N>,
     /// Anchor hash of the reused sparse trie, if this task reused one.
     reused_sparse_trie_anchor_hash: Option<B256>,
+    /// Whether building the overlay may query revert changesets.
+    no_reverts: bool,
     /// Metrics for overlay construction.
     metrics: OverlayBuilderMetrics,
 }
@@ -81,6 +84,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             overlay_source: Some(OverlaySource::Managed),
             overlay_manager,
             reused_sparse_trie_anchor_hash: None,
+            no_reverts: false,
             metrics: OverlayBuilderMetrics::default(),
         }
     }
@@ -97,6 +101,12 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     /// already covered by its anchor-to-parent range.
     pub const fn with_skip_overlay_for_reused_sparse_trie(mut self, anchor_hash: B256) -> Self {
         self.reused_sparse_trie_anchor_hash = Some(anchor_hash);
+        self
+    }
+
+    /// Returns an error instead of querying revert changesets when reverts are required.
+    pub const fn with_no_reverts(mut self) -> Self {
+        self.no_reverts = true;
         self
     }
 
@@ -118,13 +128,34 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     where
         Provider: StageCheckpointReader + BlockNumReader + PruneCheckpointReader,
     {
+        let (partial_state_trie, finish) = database_state_frontiers(provider)?;
+        self.anchor_at_parent_at_frontiers(provider, partial_state_trie, finish)
+    }
+
+    fn anchor_at_parent_at_frontiers<Provider>(
+        &self,
+        provider: &Provider,
+        partial_state_trie: BlockNumHash,
+        finish: BlockNumHash,
+    ) -> ProviderResult<AnchorForParent<N>>
+    where
+        Provider: BlockNumReader + PruneCheckpointReader,
+    {
         match &self.overlay_source {
-            Some(OverlaySource::Managed) => anchor_for_parent(
+            Some(OverlaySource::Managed) => anchor_for_parent_at_frontiers(
                 self.parent_hash,
                 self.overlay_manager.parent_chain(self.parent_hash),
                 provider,
+                partial_state_trie,
+                finish,
             ),
-            _ => anchor_for_parent(self.parent_hash, std::iter::empty(), provider),
+            _ => anchor_for_parent_at_frontiers(
+                self.parent_hash,
+                std::iter::empty(),
+                provider,
+                partial_state_trie,
+                finish,
+            ),
         }
     }
 
@@ -173,11 +204,19 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         let trie_updates_total_len;
         let hashed_state_updates_total_len;
 
-        let anchor_for_parent = self.anchor_at_parent(provider)?;
+        let anchor_for_parent =
+            self.anchor_at_parent_at_frontiers(provider, state_trie_tip_block, finish_tip_block)?;
 
         // Collect any reverts which are required to bring the DB view back to the anchor hash.
         let (trie_updates, hashed_post_state) = match anchor_for_parent {
             AnchorForParent::RevertsRequired { anchor, finish, .. } => {
+                if self.no_reverts {
+                    return Err(ProviderError::other(std::io::Error::other(format!(
+                        "reverts are disabled, but overlay for parent {} requires reverting Finish #{} ({}) to anchor #{} ({})",
+                        self.parent_hash, finish.number, finish.hash, anchor.number, anchor.hash,
+                    ))))
+                }
+
                 let revert_blocks = anchor.number + 1..=finish.number;
 
                 debug!(
@@ -203,7 +242,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                         debug_span!(target: "storage::overlay", "retrieving_hashed_state_reverts")
                             .entered();
                     let start = Instant::now();
-                    let res = reth_trie_db::from_reverts_auto(provider, revert_blocks)?;
+                    let res = HashedPostStateSorted::from_reverts(provider, revert_blocks)?;
                     retrieve_hashed_state_reverts_duration = start.elapsed();
                     res
                 };
@@ -460,47 +499,41 @@ where
     N: NodePrimitives,
     Provider: StageCheckpointReader + BlockNumReader + PruneCheckpointReader,
 {
+    let (partial_state_trie, finish) = database_state_frontiers(provider)?;
+    anchor_for_parent_at_frontiers(parent_hash, in_mem_chain, provider, partial_state_trie, finish)
+}
+
+fn anchor_for_parent_at_frontiers<N, Provider>(
+    parent_hash: B256,
+    in_mem_chain: impl Iterator<Item = ExecutedBlock<N>>,
+    provider: &Provider,
+    partial_state_trie: BlockNumHash,
+    finish: BlockNumHash,
+) -> ProviderResult<AnchorForParent<N>>
+where
+    N: NodePrimitives,
+    Provider: BlockNumReader + PruneCheckpointReader,
+{
     use std::io::Error;
-
-    let checkpoint = provider
-        .get_stage_checkpoint(reth_stages_types::StageId::Finish)?
-        .ok_or_else(|| ProviderError::other(Error::other("Finish checkpoint not found")))?;
-
-    let finish = checkpoint.block_number;
-    let partial_state_trie = checkpoint
-        .finish_stage_checkpoint()
-        .and_then(|chk| chk.partial_state_trie)
-        .unwrap_or(checkpoint.block_number);
-
-    let finish_hash =
-        provider.block_hash(finish)?.ok_or_else(|| ProviderError::HeaderNotFound(finish.into()))?;
-
-    let partial_state_trie_hash = if finish == partial_state_trie {
-        finish_hash
-    } else {
-        provider
-            .block_hash(partial_state_trie)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(partial_state_trie.into()))?
-    };
 
     let persisted_parent = provider
         .block_number(parent_hash)?
-        .filter(|&parent_number| parent_number <= partial_state_trie);
+        .filter(|&parent_number| parent_number <= partial_state_trie.number);
 
-    let mut finish_seen = parent_hash == finish_hash;
+    let mut finish_seen = parent_hash == finish.hash;
     let (anchor, overlay) = if let Some(parent_number) = persisted_parent {
         (BlockNumHash::new(parent_number, parent_hash), Vec::new())
     } else {
         let mut overlay = Vec::new();
         let mut in_mem_chain = in_mem_chain.inspect(|block| {
-            finish_seen |= block.recovered_block().hash() == finish_hash;
+            finish_seen |= block.recovered_block().hash() == finish.hash;
             overlay.push(block.clone());
         });
 
         let anchor_hash =
-            anchor_for_parent_in(parent_hash, &mut in_mem_chain, partial_state_trie_hash);
-        let anchor = if anchor_hash == partial_state_trie_hash {
-            BlockNumHash::new(partial_state_trie, anchor_hash)
+            anchor_for_parent_in(parent_hash, &mut in_mem_chain, partial_state_trie.hash);
+        let anchor = if anchor_hash == partial_state_trie.hash {
+            BlockNumHash::new(partial_state_trie.number, anchor_hash)
         } else {
             let anchor_number = provider
                 .convert_hash_or_number(anchor_hash.into())?
@@ -510,16 +543,16 @@ where
         (anchor, overlay)
     };
 
-    finish_seen |= anchor.hash == finish_hash;
+    finish_seen |= anchor.hash == finish.hash;
 
-    if anchor.number > partial_state_trie {
+    if anchor.number > partial_state_trie.number {
         return Err(ProviderError::other(Error::other(format!(
                 "overlay anchor #{} ({}) is after partial state trie frontier #{} ({}); missing trie updates for blocks #{}..=#{}",
                 anchor.number,
                 anchor.hash,
-                partial_state_trie,
-                partial_state_trie_hash,
-                partial_state_trie+1,
+                partial_state_trie.number,
+                partial_state_trie.hash,
+                partial_state_trie.number + 1,
                 anchor.number,
             ))))
     }
@@ -541,7 +574,7 @@ where
         .get_prune_checkpoint(PruneSegment::StorageHistory)?
         .and_then(|checkpoint| checkpoint.block_number);
     let lower_bound = account_history.max(storage_history).unwrap_or_default();
-    let available_range = lower_bound..=finish;
+    let available_range = lower_bound..=finish.number;
     if !available_range.contains(&anchor.number) {
         return Err(ProviderError::InsufficientChangesets {
             requested: anchor.number,
@@ -549,11 +582,7 @@ where
         })
     }
 
-    return Ok(AnchorForParent::RevertsRequired {
-        anchor,
-        finish: BlockNumHash::new(finish, finish_hash),
-        overlay,
-    })
+    Ok(AnchorForParent::RevertsRequired { anchor, finish, overlay })
 }
 
 #[cfg(test)]
@@ -700,6 +729,11 @@ mod tests {
         let (factory, blocks) = setup_frontiers(2, 3);
         let manager = OverlayManager::default();
         manager.insert_block(blocks[1].clone());
+        manager.insert_block(ExecutedBlock::new(
+            Arc::clone(&blocks[3].recovered_block),
+            Arc::clone(&blocks[3].execution_output),
+            ComputedTrieData::default(),
+        ));
         let provider = factory.provider().unwrap();
         let builder = manager.overlay_builder(blocks[1].recovered_block().hash());
 
@@ -718,6 +752,21 @@ mod tests {
 
         assert!(overlay.hashed_post_state.is_empty());
         assert!(overlay.trie_updates.is_empty());
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn no_reverts_errors_when_reverts_are_required() {
+        let (factory, blocks) = setup_frontiers(2, 3);
+        let provider = factory.provider().unwrap();
+
+        let error = OverlayManager::<EthPrimitives>::default()
+            .overlay_builder(blocks[1].recovered_block().hash())
+            .with_no_reverts()
+            .build_overlay(&provider)
+            .unwrap_err();
+
+        assert!(error.to_string().contains("reverts are disabled"));
     }
 
     #[cfg(feature = "partial-persistence")]

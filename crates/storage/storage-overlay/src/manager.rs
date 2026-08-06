@@ -19,8 +19,8 @@ use reth_primitives_traits::{
     AlloyBlockHeader, FastInstant, NodePrimitives,
 };
 use reth_storage_api::{
-    BlockNumReader, ChangeSetReader, DBProvider, StageCheckpointReader, StorageChangeSetReader,
-    StorageSettingsCache,
+    BlockNumReader, ChangeSetReader, DBProvider, PruneCheckpointReader, StageCheckpointReader,
+    StorageChangeSetReader, StorageSettingsCache,
 };
 #[cfg(feature = "rayon")]
 use reth_tasks::WorkerPool;
@@ -112,11 +112,12 @@ impl<N: NodePrimitives> OverlayManager<N> {
         P: DBProvider
             + ChangeSetReader
             + StorageChangeSetReader
-            + BlockNumReader
+            + PruneCheckpointReader
             + StageCheckpointReader
+            + BlockNumReader
             + StorageSettingsCache,
     {
-        self.changeset_cache.get_or_compute_range(provider, range, Some(self))
+        self.changeset_cache.get_or_compute_range(self, provider, range)
     }
 
     /// Evicts cached changesets for blocks below `up_to_block`.
@@ -134,11 +135,12 @@ impl<N: NodePrimitives> OverlayManager<N> {
         P: DBProvider
             + ChangeSetReader
             + StorageChangeSetReader
-            + BlockNumReader
+            + PruneCheckpointReader
             + StageCheckpointReader
+            + BlockNumReader
             + StorageSettingsCache,
     {
-        compute_block_trie_updates(&self.changeset_cache, Some(self), provider, block_number)
+        compute_block_trie_updates(self, &self.changeset_cache, provider, block_number)
     }
 
     /// Takes the preserved sparse trie if present.
