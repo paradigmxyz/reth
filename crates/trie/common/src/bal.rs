@@ -47,24 +47,24 @@ impl BalAccountState {
 
     /// Returns `true` when the entry changed no account-level field.
     /// Read-only entries are empty and must not overwrite existing state.
-    pub const fn is_empty(&self) -> bool {
+    pub const fn is_empty(self) -> bool {
         self.balance.is_none() && self.nonce.is_none() && self.code_hash.is_none()
     }
 
     /// Returns `true` when merging needs the pre-block account.
     /// Fields the block did not touch retain their pre-block values.
-    pub const fn needs_parent_account(&self) -> bool {
+    pub const fn needs_parent_account(self) -> bool {
         self.balance.is_none() || self.nonce.is_none() || self.code_hash.is_none()
     }
 
     /// Returns `true` when the entry contributes to the block's state root.
-    pub fn changes_state_root(&self, changes: &AccountChanges) -> bool {
+    pub fn changes_state_root(self, changes: &AccountChanges) -> bool {
         !self.is_empty() || !changes.storage_changes.is_empty()
     }
 
     /// Applies the changed fields on top of `existing`, the account before the block.
     /// Missing fields keep their previous values; empty code normalises to the database's `None`.
-    pub fn merge_onto(&self, existing: Option<&Account>) -> Account {
+    pub fn merge_onto(self, existing: Option<&Account>) -> Account {
         Account {
             balance: self
                 .balance
