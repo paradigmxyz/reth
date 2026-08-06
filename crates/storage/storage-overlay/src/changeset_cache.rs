@@ -405,7 +405,7 @@ impl ChangesetCache {
             .overlay_builder(finish.hash)
             .with_no_reverts()
             .build_state_trie_overlay_at_frontiers(provider, partial_state_trie, finish)?;
-        let state_trie_provider = OverlayStateProvider::new(
+        let state_trie_provider = OverlayStateProvider::new_state_trie(
             provider,
             overlay,
             provider.cached_storage_settings().is_v2(),
@@ -907,7 +907,7 @@ mod tests {
         reth_trie_db::with_adapter!(provider, |A| seed_tip_trie_tables::<_, A>(&*provider));
 
         let overlay = empty_overlay();
-        let state_trie_provider = OverlayStateProvider::new(
+        let state_trie_provider = OverlayStateProvider::new_state_trie(
             &*provider,
             overlay,
             provider.cached_storage_settings().is_v2(),
@@ -998,7 +998,7 @@ mod tests {
 
         let expected = legacy_compute_range_trie_changesets(&*provider, 2..=3);
         let overlay = empty_overlay();
-        let state_trie_provider = OverlayStateProvider::new(
+        let state_trie_provider = OverlayStateProvider::new_state_trie(
             &*provider,
             overlay,
             provider.cached_storage_settings().is_v2(),

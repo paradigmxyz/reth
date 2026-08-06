@@ -1,4 +1,4 @@
-use crate::{database_state_frontiers, OverlayBuilder, StateTrieOverlay};
+use crate::{database_state_frontiers, ExecutionOverlay, OverlayBuilder, StateTrieOverlay};
 use alloy_primitives::{BlockHash, B256};
 use metrics::{Counter, Histogram};
 use reth_db_api::{tables, transaction::DbTx, DatabaseError};
@@ -23,7 +23,7 @@ use reth_trie_db::{
     DatabaseAccountTrieCursor, DatabaseHashedCursorFactory, DatabaseStorageTrieCursor,
     LegacyKeyAdapter, PackedAccountsTrie, PackedKeyAdapter, PackedStoragesTrie,
 };
-use std::{sync::Arc, time::Instant};
+use std::{fmt, marker::PhantomData, sync::Arc, time::Instant};
 use tracing::instrument;
 
 /// Metrics for overlay state provider factory operations.
@@ -48,7 +48,7 @@ pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
     factory: F,
     /// Overlay builder containing the configuration and overlay calculation logic.
     overlay_builder: OverlayBuilder<N>,
-    /// A cache which maps `(state_trie_tip, finish_tip) -> [`StateTrieOverlay`].
+    /// A cache which maps durable frontier pairs to [`StateTrieOverlay`]s.
     ///
     /// Under partial persistence the overlay depends on both durable frontiers, so both hashes are
     /// part of the cache key.
@@ -122,11 +122,13 @@ where
         + StorageChangeSetReader
         + StorageSettingsCache,
 {
-    type Provider = OverlayStateProvider<F::Provider>;
+    type Provider = OverlayStateProvider<F::Provider, StateTrieOverlayOnly>;
 
     /// Create a read-only [`OverlayStateProvider`].
     #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
-    fn database_provider_ro(&self) -> ProviderResult<OverlayStateProvider<F::Provider>> {
+    fn database_provider_ro(
+        &self,
+    ) -> ProviderResult<OverlayStateProvider<F::Provider, StateTrieOverlayOnly>> {
         let overall_start = Instant::now();
 
         // Get a read-only provider
@@ -141,32 +143,106 @@ where
 
         let is_v2 = provider.cached_storage_settings().is_v2();
         self.metrics.database_provider_ro_duration.record(overall_start.elapsed());
-        Ok(OverlayStateProvider::new(provider, overlay, is_v2))
+        Ok(OverlayStateProvider::new_state_trie(provider, overlay, is_v2))
     }
 }
+
+/// Marker for a provider carrying only an execution overlay.
+#[derive(Debug)]
+pub struct ExecutionOverlayOnly;
+
+/// Marker for a provider carrying only a state trie overlay.
+#[derive(Debug)]
+pub struct StateTrieOverlayOnly;
+
+/// Marker for a provider carrying both overlays.
+#[derive(Debug)]
+pub struct BothOverlays;
+
+trait HasStateTrieOverlay {}
+
+impl HasStateTrieOverlay for StateTrieOverlayOnly {}
+impl HasStateTrieOverlay for BothOverlays {}
 
 /// State provider with in-memory overlay from trie updates and hashed post state.
 ///
-/// This provider uses in-memory trie updates and hashed post state as an overlay
-/// on top of a database provider, implementing [`TrieCursorFactory`] and [`HashedCursorFactory`]
-/// using the in-memory overlay factories.
-#[derive(Debug)]
-pub struct OverlayStateProvider<Provider> {
+/// The marker type indicates whether this provider carries execution data, state trie data, or
+/// both. Cursor factories are available only when it carries a state trie overlay.
+pub struct OverlayStateProvider<Provider, OverlayKind = StateTrieOverlayOnly> {
     provider: Provider,
-    overlay: StateTrieOverlay,
+    state_trie_overlay: Option<StateTrieOverlay>,
+    execution_overlay: Option<ExecutionOverlay>,
     is_v2: bool,
+    _kind: PhantomData<OverlayKind>,
 }
 
-impl<Provider> OverlayStateProvider<Provider> {
-    /// Creates a new overlay state provider.
-    pub const fn new(provider: Provider, overlay: StateTrieOverlay, is_v2: bool) -> Self {
-        Self { provider, overlay, is_v2 }
+impl<Provider: fmt::Debug, OverlayKind> fmt::Debug for OverlayStateProvider<Provider, OverlayKind> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OverlayStateProvider")
+            .field("provider", &self.provider)
+            .field("state_trie_overlay", &self.state_trie_overlay)
+            .field("execution_overlay", &self.execution_overlay)
+            .field("is_v2", &self.is_v2)
+            .finish()
     }
 }
 
-impl<Provider> TrieCursorFactory for OverlayStateProvider<Provider>
+impl<Provider> OverlayStateProvider<Provider, ExecutionOverlayOnly> {
+    /// Creates an overlay state provider with execution data only.
+    pub const fn new_execution(
+        provider: Provider,
+        execution_overlay: ExecutionOverlay,
+        is_v2: bool,
+    ) -> Self {
+        Self {
+            provider,
+            state_trie_overlay: None,
+            execution_overlay: Some(execution_overlay),
+            is_v2,
+            _kind: PhantomData,
+        }
+    }
+}
+
+impl<Provider> OverlayStateProvider<Provider, StateTrieOverlayOnly> {
+    /// Creates an overlay state provider with state trie data only.
+    pub const fn new_state_trie(
+        provider: Provider,
+        state_trie_overlay: StateTrieOverlay,
+        is_v2: bool,
+    ) -> Self {
+        Self {
+            provider,
+            state_trie_overlay: Some(state_trie_overlay),
+            execution_overlay: None,
+            is_v2,
+            _kind: PhantomData,
+        }
+    }
+}
+
+impl<Provider> OverlayStateProvider<Provider, BothOverlays> {
+    /// Creates an overlay state provider with execution and state trie data.
+    pub const fn new_both(
+        provider: Provider,
+        state_trie_overlay: StateTrieOverlay,
+        execution_overlay: ExecutionOverlay,
+        is_v2: bool,
+    ) -> Self {
+        Self {
+            provider,
+            state_trie_overlay: Some(state_trie_overlay),
+            execution_overlay: Some(execution_overlay),
+            is_v2,
+            _kind: PhantomData,
+        }
+    }
+}
+
+impl<Provider, OverlayKind> TrieCursorFactory for OverlayStateProvider<Provider, OverlayKind>
 where
     Provider: DbTxProvider,
+    OverlayKind: HasStateTrieOverlay,
 {
     type AccountTrieCursor<'a>
         = InMemoryTrieCursor<'a, Box<dyn TrieCursor + Send + 'a>>
@@ -179,6 +255,10 @@ where
         Self: 'a;
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
+        let overlay = self
+            .state_trie_overlay
+            .as_ref()
+            .expect("state trie overlay kind must contain a state trie overlay");
         let cursor: Box<dyn TrieCursor + Send> = if self.is_v2 {
             Box::new(DatabaseAccountTrieCursor::<_, PackedKeyAdapter>::new(
                 self.provider.tx().cursor_read::<PackedAccountsTrie>()?,
@@ -188,13 +268,17 @@ where
                 self.provider.tx().cursor_read::<tables::AccountsTrie>()?,
             ))
         };
-        Ok(InMemoryTrieCursor::new_account(cursor, &self.overlay.trie_updates))
+        Ok(InMemoryTrieCursor::new_account(cursor, &overlay.trie_updates))
     }
 
     fn storage_trie_cursor(
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
+        let overlay = self
+            .state_trie_overlay
+            .as_ref()
+            .expect("state trie overlay kind must contain a state trie overlay");
         let cursor: Box<dyn TrieStorageCursor + Send> = if self.is_v2 {
             Box::new(DatabaseStorageTrieCursor::<_, PackedKeyAdapter>::new(
                 self.provider.tx().cursor_dup_read::<PackedStoragesTrie>()?,
@@ -206,13 +290,14 @@ where
                 hashed_address,
             ))
         };
-        Ok(InMemoryTrieCursor::new_storage(cursor, &self.overlay.trie_updates, hashed_address))
+        Ok(InMemoryTrieCursor::new_storage(cursor, &overlay.trie_updates, hashed_address))
     }
 }
 
-impl<Provider> HashedCursorFactory for OverlayStateProvider<Provider>
+impl<Provider, OverlayKind> HashedCursorFactory for OverlayStateProvider<Provider, OverlayKind>
 where
     Provider: DbTxProvider,
+    OverlayKind: HasStateTrieOverlay,
 {
     type AccountCursor<'a>
         = <HashedPostStateCursorFactory<
@@ -231,9 +316,13 @@ where
         Self: 'a;
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
+        let overlay = self
+            .state_trie_overlay
+            .as_ref()
+            .expect("state trie overlay kind must contain a state trie overlay");
         HashedPostStateCursorFactory::new(
             DatabaseHashedCursorFactory::new(self.provider.tx()),
-            &self.overlay.hashed_post_state,
+            &overlay.hashed_post_state,
         )
         .hashed_account_cursor()
     }
@@ -242,9 +331,13 @@ where
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
+        let overlay = self
+            .state_trie_overlay
+            .as_ref()
+            .expect("state trie overlay kind must contain a state trie overlay");
         HashedPostStateCursorFactory::new(
             DatabaseHashedCursorFactory::new(self.provider.tx()),
-            &self.overlay.hashed_post_state,
+            &overlay.hashed_post_state,
         )
         .hashed_storage_cursor(hashed_address)
     }
