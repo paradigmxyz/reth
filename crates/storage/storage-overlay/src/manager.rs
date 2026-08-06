@@ -102,6 +102,10 @@ impl<N: NodePrimitives> OverlayManager<N> {
         OverlayBuilder::new(parent_hash, self.clone())
     }
 
+    pub(crate) const fn changeset_cache(&self) -> &ChangesetCache {
+        &self.changeset_cache
+    }
+
     /// Gets or computes cached changesets for an inclusive block range.
     pub fn get_or_compute_cached_changesets_range<P>(
         &self,
@@ -140,7 +144,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
             + BlockNumReader
             + StorageSettingsCache,
     {
-        compute_block_trie_updates(self, &self.changeset_cache, provider, block_number)
+        compute_block_trie_updates(self, provider, block_number)
     }
 
     /// Takes the preserved sparse trie if present.

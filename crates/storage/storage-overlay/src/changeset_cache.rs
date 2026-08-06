@@ -50,7 +50,6 @@ use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseHashedPostState, Databas
 ///
 /// # Arguments
 ///
-/// * `cache` - Handle to the changeset cache for retrieving trie reverts
 /// * `provider` - Database provider for accessing changesets and block data
 /// * `block_number` - Block number to compute trie updates for
 ///
@@ -66,7 +65,6 @@ use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseHashedPostState, Databas
 /// - Cache retrieval fails
 pub(crate) fn compute_block_trie_updates<N, Provider>(
     overlay_manager: &OverlayManager<N>,
-    cache: &ChangesetCache,
     provider: &Provider,
     block_number: BlockNumber,
 ) -> ProviderResult<TrieUpdatesSorted>
@@ -81,13 +79,12 @@ where
         + StorageSettingsCache,
 {
     reth_trie_db::with_adapter!(provider, |A| {
-        compute_block_trie_updates_inner::<_, _, A>(overlay_manager, cache, provider, block_number)
+        compute_block_trie_updates_inner::<_, _, A>(overlay_manager, provider, block_number)
     })
 }
 
 fn compute_block_trie_updates_inner<N, Provider, A>(
     overlay_manager: &OverlayManager<N>,
-    cache: &ChangesetCache,
     provider: &Provider,
     block_number: BlockNumber,
 ) -> ProviderResult<TrieUpdatesSorted>
@@ -103,6 +100,7 @@ where
     A: TrieTableAdapter,
 {
     let tx = provider.tx_ref();
+    let cache = overlay_manager.changeset_cache();
 
     let db_tip_block = provider.best_block_number()?;
 
