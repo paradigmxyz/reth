@@ -330,8 +330,20 @@ where
     F: FnOnce(&mut File) -> std::result::Result<(), E>,
     E: Into<Box<dyn core::error::Error + Send + Sync>>,
 {
-    let mut tmp_path = file_path.to_path_buf();
-    tmp_path.set_extension("tmp");
+    // `set_extension` replaces the extension instead of appending to it, so
+    // `a.json` and `a.toml` in one directory both map to `a.tmp`, and a target
+    // that already ends in `.tmp` maps to itself. In that last case the
+    // "temporary" file is the destination, which `File::create` truncates
+    // before `write_fn` runs and `remove_file` deletes if it fails.
+    let file_name = file_path.file_name().ok_or_else(|| {
+        FsPathError::create_file(
+            io::Error::new(io::ErrorKind::InvalidInput, "path has no file name"),
+            file_path,
+        )
+    })?;
+    let mut tmp_name = file_name.to_os_string();
+    tmp_name.push(".tmp");
+    let tmp_path = file_path.with_file_name(tmp_name);
 
     // Write to the temporary file
     let mut file =
@@ -367,4 +379,49 @@ where
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn atomic_write_file_does_not_clobber_a_sibling_tmp_file() {
+        let dir = tempdir().unwrap();
+        let target = dir.path().join("data.json");
+        let decoy = dir.path().join("data.tmp");
+        write(&decoy, b"unrelated").unwrap();
+
+        atomic_write_file(&target, |file| file.write_all(b"payload")).unwrap();
+
+        assert_eq!(read(&target).unwrap(), b"payload");
+        assert_eq!(read(&decoy).unwrap(), b"unrelated");
+    }
+
+    #[test]
+    fn atomic_write_file_keeps_a_tmp_target_intact_when_the_write_fails() {
+        let dir = tempdir().unwrap();
+        let target = dir.path().join("state.tmp");
+        write(&target, b"original").unwrap();
+
+        let err = atomic_write_file(&target, |_file| -> std::result::Result<(), Error> {
+            Err(Error::other("write failed"))
+        })
+        .unwrap_err();
+
+        assert!(matches!(err, FsPathError::Write { .. }));
+        assert_eq!(read(&target).unwrap(), b"original");
+    }
+
+    #[test]
+    fn atomic_write_file_replaces_a_tmp_target_on_success() {
+        let dir = tempdir().unwrap();
+        let target = dir.path().join("state.tmp");
+        write(&target, b"original").unwrap();
+
+        atomic_write_file(&target, |file| file.write_all(b"replacement")).unwrap();
+
+        assert_eq!(read(&target).unwrap(), b"replacement");
+    }
 }
