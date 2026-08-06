@@ -4,7 +4,11 @@
 //! parent has not been persisted yet. [`OverlayManager`] tracks those in-memory blocks and
 //! builds reusable flattened state trie overlays on demand.
 
-use crate::{changeset_cache::compute_block_trie_updates, ChangesetCache, OverlayBuilder};
+use crate::{
+    changeset_cache::compute_block_trie_updates, database_state_frontiers, ChangesetCache,
+    OverlayBuilder,
+};
+use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockNumber, B256};
 use parking_lot::Mutex;
 use reth_chain_state::{ExecutedBlock, PreservedSparseTrie};
@@ -19,7 +23,8 @@ use reth_primitives_traits::{
     AlloyBlockHeader, FastInstant, NodePrimitives,
 };
 use reth_storage_api::{
-    BlockNumReader, ChangeSetReader, DBProvider, StorageChangeSetReader, StorageSettingsCache,
+    BlockNumReader, ChangeSetReader, DBProvider, PruneCheckpointReader, StageCheckpointReader,
+    StorageChangeSetReader, StorageSettingsCache,
 };
 #[cfg(feature = "rayon")]
 use reth_tasks::WorkerPool;
@@ -101,6 +106,10 @@ impl<N: NodePrimitives> OverlayManager<N> {
         OverlayBuilder::new(parent_hash, self.clone())
     }
 
+    pub(crate) const fn changeset_cache(&self) -> &ChangesetCache {
+        &self.changeset_cache
+    }
+
     /// Gets or computes cached changesets for an inclusive block range.
     pub fn get_or_compute_cached_changesets_range<P>(
         &self,
@@ -111,10 +120,36 @@ impl<N: NodePrimitives> OverlayManager<N> {
         P: DBProvider
             + ChangeSetReader
             + StorageChangeSetReader
+            + PruneCheckpointReader
+            + StageCheckpointReader
             + BlockNumReader
             + StorageSettingsCache,
     {
-        self.changeset_cache.get_or_compute_range(provider, range)
+        let (partial_state_trie, finish) = database_state_frontiers(provider)?;
+        self.get_or_compute_cached_changesets_range_at_frontiers(
+            provider,
+            range,
+            partial_state_trie,
+            finish,
+        )
+    }
+
+    pub(crate) fn get_or_compute_cached_changesets_range_at_frontiers<P>(
+        &self,
+        provider: &P,
+        range: RangeInclusive<BlockNumber>,
+        partial_state_trie: BlockNumHash,
+        finish: BlockNumHash,
+    ) -> ProviderResult<Arc<TrieUpdatesSorted>>
+    where
+        P: DBProvider
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + PruneCheckpointReader
+            + BlockNumReader
+            + StorageSettingsCache,
+    {
+        self.changeset_cache.get_or_compute_range(self, provider, range, partial_state_trie, finish)
     }
 
     /// Evicts cached changesets for blocks below `up_to_block`.
@@ -132,10 +167,12 @@ impl<N: NodePrimitives> OverlayManager<N> {
         P: DBProvider
             + ChangeSetReader
             + StorageChangeSetReader
+            + PruneCheckpointReader
+            + StageCheckpointReader
             + BlockNumReader
             + StorageSettingsCache,
     {
-        compute_block_trie_updates(&self.changeset_cache, provider, block_number)
+        compute_block_trie_updates(self, provider, block_number)
     }
 
     /// Takes the preserved sparse trie if present.
@@ -240,11 +277,8 @@ impl<N: NodePrimitives> OverlayManager<N> {
 
         if removed_blocks > 0 {
             let overlays_before = self.overlays.len();
-            let blocks = Arc::clone(&self.blocks);
             self.overlays.retain(|key, _| {
-                key.tip_hash != key.anchor_hash &&
-                    Self::anchor_for_parent_in(blocks.as_ref(), key.tip_hash, key.anchor_hash) ==
-                        Some(key.anchor_hash)
+                self.contains_hash(key.tip_hash, key.anchor_hash, key.anchor_hash)
             });
             pruned_overlays = overlays_before.saturating_sub(self.overlays.len());
             span.record("pruned_overlays", pruned_overlays);
@@ -265,7 +299,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
         skip_all,
         fields(tip_hash = %parent_hash, anchor_hash = %anchor_hash)
     )]
-    pub fn overlay_for_parent(
+    pub(crate) fn overlay_for_parent(
         &self,
         parent_hash: B256,
         anchor_hash: B256,
@@ -394,12 +428,17 @@ impl<N: NodePrimitives> OverlayManager<N> {
         span.record("cache_reused", true);
     }
 
-    /// Returns `preferred_anchor` if it is on the parent chain, otherwise the first missing parent.
-    ///
-    /// Returns `None` if `parent_hash` is not `preferred_anchor` and the manager does not contain a
-    /// block for `parent_hash`, meaning there is no in-memory parent chain to inspect.
-    pub fn anchor_for_parent(&self, parent_hash: B256, preferred_anchor: B256) -> Option<B256> {
-        Self::anchor_for_parent_in(self.blocks.as_ref(), parent_hash, preferred_anchor)
+    /// Returns every in-memory block in the chain whose tip is `parent_hash`.
+    pub(crate) fn parent_chain(
+        &self,
+        parent_hash: B256,
+    ) -> impl Iterator<Item = ExecutedBlock<N>> + '_ {
+        let mut hash = parent_hash;
+        std::iter::from_fn(move || {
+            let block = self.blocks.get(&hash)?;
+            hash = block.recovered_block().parent_hash();
+            Some(block.clone())
+        })
     }
 
     /// Returns true if `hash` is in the parent chain segment from `anchor_hash` inclusive to
@@ -417,29 +456,6 @@ impl<N: NodePrimitives> OverlayManager<N> {
 
             let Some(block) = self.blocks.get(&current_hash) else { return false };
             current_hash = block.recovered_block().parent_hash();
-        }
-    }
-
-    fn anchor_for_parent_in(
-        blocks: &DashMap<B256, ExecutedBlock<N>>,
-        parent_hash: B256,
-        preferred_anchor: B256,
-    ) -> Option<B256> {
-        if parent_hash == preferred_anchor {
-            return Some(preferred_anchor)
-        }
-
-        let mut hash = parent_hash;
-
-        loop {
-            let block_parent_hash = blocks.get(&hash)?.recovered_block().parent_hash();
-            if block_parent_hash == preferred_anchor {
-                return Some(block_parent_hash)
-            }
-            if !blocks.contains_key(&block_parent_hash) {
-                return Some(block_parent_hash)
-            }
-            hash = block_parent_hash;
         }
     }
 
@@ -730,44 +746,6 @@ mod tests {
         let (_, cached_short) =
             manager.overlay_for_parent(blocks[2].recovered_block().hash(), short_anchor).unwrap();
         assert!(Arc::ptr_eq(&short, &cached_short));
-    }
-
-    #[test]
-    fn returns_anchor_for_in_memory_parent() {
-        let manager = OverlayManager::default();
-        let blocks = test_blocks();
-        for block in &blocks {
-            manager.insert_block(block.clone());
-        }
-
-        assert_eq!(
-            manager.anchor_for_parent(blocks[2].recovered_block().hash(), B256::random()),
-            Some(blocks[0].recovered_block().parent_hash())
-        );
-
-        manager.remove_blocks([blocks[0].recovered_block().hash()]);
-        assert_eq!(
-            manager.anchor_for_parent(
-                blocks[2].recovered_block().hash(),
-                blocks[0].recovered_block().hash()
-            ),
-            Some(blocks[0].recovered_block().hash())
-        );
-    }
-
-    #[test]
-    fn prefers_anchor_in_parent_chain() {
-        let manager = OverlayManager::default();
-        let blocks = test_blocks();
-        for block in &blocks {
-            manager.insert_block(block.clone());
-        }
-
-        let db_tip_hash = blocks[1].recovered_block().hash();
-        assert_eq!(
-            manager.anchor_for_parent(blocks[2].recovered_block().hash(), db_tip_hash),
-            Some(db_tip_hash)
-        );
     }
 
     #[test]
