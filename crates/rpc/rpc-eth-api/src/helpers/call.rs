@@ -788,33 +788,6 @@ pub trait Call:
         Ok(index)
     }
 
-    /// Replays all transactions before the target transaction without inspection, then executes
-    /// the target transaction with the configured inspector, all on the given EVM.
-    ///
-    /// Note: This assumes the target transaction is in the given iterator.
-    /// Returns the index of the target transaction in the given iterator and its execution
-    /// result.
-    #[expect(clippy::type_complexity)]
-    fn inspect_transaction_in_block<'a, DB, I, Txs>(
-        &self,
-        evm: &mut EvmFor<Self::Evm, DB, I>,
-        transactions: Txs,
-        target_tx_hash: B256,
-        target_tx_env: TxEnvFor<Self::Evm>,
-    ) -> Result<(usize, ResultAndState<HaltReasonFor<Self::Evm>>), Self::Error>
-    where
-        DB: Database<Error = EvmDatabaseError<ProviderError>> + DatabaseCommit + core::fmt::Debug,
-        I: InspectorFor<Self::Evm, DB>,
-        Txs: IntoIterator<Item = Recovered<&'a ProviderTx<Self::Provider>>>,
-    {
-        evm.disable_inspector();
-        let index = self.replay_transactions_until_with_evm(evm, transactions, target_tx_hash)?;
-        evm.enable_inspector();
-
-        let res = evm.transact(target_tx_env).map_err(Self::Error::from_evm_err)?;
-        Ok((index, res))
-    }
-
     ///
     /// All `TxEnv` fields are derived from the given [`RpcTxReq`], if fields are
     /// `None`, they fall back to the [`reth_evm::EvmEnv`]'s settings.

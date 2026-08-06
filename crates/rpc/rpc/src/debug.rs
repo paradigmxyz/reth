@@ -229,46 +229,28 @@ where
             None => return Err(EthApiError::TracingTransactionNotFound.into()),
             Some(res) => res,
         };
-        let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
-
-        // we need to get the state of the parent block because we're essentially replaying the
-        // block the transaction is included in
-        let state_at: BlockId = block.parent_hash().into();
-        let block_hash = block.hash();
 
         self.eth_api()
-            .spawn_with_state_at_block(state_at, move |eth_api, mut db| {
-                let block_txs = block.transactions_recovered();
-
+            .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
                 // configure env for the target transaction
                 let tx = transaction.into_recovered();
 
-                eth_api.apply_pre_execution_changes(&block, &mut db)?;
-
-                let target_hash = *tx.tx_hash();
-
                 let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
-                let mut evm = eth_api.evm_config().evm_with_env_and_inspector(
-                    &mut db,
-                    evm_env,
-                    &mut inspector,
-                );
-
                 let tx_env = eth_api.evm_config().tx_env(&tx);
-                let (index, res) = eth_api.inspect_transaction_in_block(
-                    &mut evm,
-                    block_txs,
-                    target_hash,
+                let (index, res, evm_env) = eth_api.inspect_transaction_in_block(
+                    &block,
+                    &mut db,
+                    &mut inspector,
+                    *tx.tx_hash(),
                     tx_env.clone(),
                 )?;
-                let (_, evm_env) = evm.finish();
 
                 let trace = inspector
                     .get_result(
                         Some(TransactionContext {
-                            block_hash: Some(block_hash),
+                            block_hash: Some(block.hash()),
                             tx_index: Some(index),
-                            tx_hash: Some(target_hash),
+                            tx_hash: Some(*tx.tx_hash()),
                         }),
                         &tx_env,
                         &evm_env.block_env,
@@ -745,7 +727,6 @@ where
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
                 let mut roots = Vec::with_capacity(block.body().transactions().len());
-                // single EVM for the whole block so that block-scoped EVM state stays intact
                 let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env);
                 for tx in block.transactions_recovered() {
                     let tx_env = eth_api.evm_config().tx_env(tx);
