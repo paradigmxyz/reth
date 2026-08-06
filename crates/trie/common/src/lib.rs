@@ -36,7 +36,6 @@ pub use constants::*;
 mod account;
 pub use account::TrieAccount;
 
-/// Post-block state values committed to by an EIP-7928 block access list entry.
 #[cfg(feature = "eip7928")]
 pub mod bal;
 
