@@ -1,4 +1,5 @@
 use crate::{database_state_frontiers, ExecutionOverlay, OverlayBuilder, StateTrieOverlay};
+use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockHash, B256};
 use metrics::{Counter, Histogram};
 use reth_db_api::{tables, transaction::DbTx, DatabaseError};
@@ -34,8 +35,10 @@ pub(crate) struct OverlayStateProviderFactoryMetrics {
     create_provider_duration: Histogram,
     /// Overall duration of the [`OverlayStateProviderFactory::database_provider_ro`] call.
     database_provider_ro_duration: Histogram,
-    /// Number of cache misses when fetching [`StateTrieOverlay`]s from the overlay cache.
-    overlay_cache_misses: Counter,
+    /// Number of cache misses when fetching state trie overlays.
+    state_trie_overlay_cache_misses: Counter,
+    /// Number of cache misses when fetching execution overlays.
+    execution_overlay_cache_misses: Counter,
 }
 
 /// Factory for creating overlay state providers with optional reverts and overlays.
@@ -43,7 +46,11 @@ pub(crate) struct OverlayStateProviderFactoryMetrics {
 /// This factory allows building an `OverlayStateProvider` whose DB state has been reverted to a
 /// particular block, and/or with additional overlay information added on top.
 #[derive(Debug, Clone)]
-pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
+pub struct OverlayStateProviderFactory<
+    F,
+    N: NodePrimitives = EthPrimitives,
+    OverlayKind = StateTrieOverlayOnly,
+> {
     /// The underlying database provider factory
     factory: F,
     /// Overlay builder containing the configuration and overlay calculation logic.
@@ -52,19 +59,23 @@ pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
     ///
     /// Under partial persistence the overlay depends on both durable frontiers, so both hashes are
     /// part of the cache key.
-    overlay_cache: Arc<DashMap<(BlockHash, BlockHash), StateTrieOverlay>>,
+    state_trie_overlay_cache: Arc<DashMap<(BlockHash, BlockHash), StateTrieOverlay>>,
+    /// A cache which maps durable frontier pairs to [`ExecutionOverlay`]s.
+    execution_overlay_cache: Arc<DashMap<(BlockHash, BlockHash), ExecutionOverlay>>,
     /// Metrics for provider factory operations.
     metrics: OverlayStateProviderFactoryMetrics,
+    _kind: PhantomData<OverlayKind>,
 }
 
-impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
-    /// Create a new overlay state provider factory
-    pub fn new(factory: F, overlay_builder: OverlayBuilder<N>) -> Self {
+impl<F, N: NodePrimitives, OverlayKind> OverlayStateProviderFactory<F, N, OverlayKind> {
+    fn with_kind(factory: F, overlay_builder: OverlayBuilder<N>) -> Self {
         Self {
             factory,
             overlay_builder,
-            overlay_cache: Default::default(),
+            state_trie_overlay_cache: Default::default(),
+            execution_overlay_cache: Default::default(),
             metrics: Default::default(),
+            _kind: PhantomData,
         }
     }
 
@@ -73,14 +84,110 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
     pub fn with_skip_overlay_for_reused_sparse_trie(mut self, anchor_hash: B256) -> Self {
         self.overlay_builder =
             self.overlay_builder.with_skip_overlay_for_reused_sparse_trie(anchor_hash);
-        self.overlay_cache = Default::default();
+        self.state_trie_overlay_cache = Default::default();
+        self.execution_overlay_cache = Default::default();
         self
     }
+}
 
-    /// Fetches a [`StateTrieOverlay`] from the cache based on the current durable frontiers. If
-    /// there is no cached value then this calculates the overlay and populates the cache.
+impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N, StateTrieOverlayOnly> {
+    /// Create a new overlay state provider factory
+    pub fn new(factory: F, overlay_builder: OverlayBuilder<N>) -> Self {
+        Self::with_kind(factory, overlay_builder)
+    }
+}
+
+impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N, ExecutionOverlayOnly> {
+    /// Creates a factory for execution overlays.
+    pub fn new_execution(factory: F, overlay_builder: OverlayBuilder<N>) -> Self {
+        Self::with_kind(factory, overlay_builder)
+    }
+}
+
+impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N, BothOverlays> {
+    /// Creates a factory for execution and state trie overlays.
+    pub fn new_both(factory: F, overlay_builder: OverlayBuilder<N>) -> Self {
+        Self::with_kind(factory, overlay_builder)
+    }
+}
+
+impl<F, N, OverlayKind> OverlayStateProviderFactory<F, N, OverlayKind>
+where
+    N: NodePrimitives,
+    OverlayKind: OverlayKindMarker,
+{
+    /// Fetches a [`StateTrieOverlay`] for known durable frontiers.
     #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
-    fn get_overlay<Provider>(&self, provider: &Provider) -> ProviderResult<StateTrieOverlay>
+    fn get_state_trie_overlay<Provider>(
+        &self,
+        provider: &Provider,
+        state_trie_tip_block: BlockNumHash,
+        finish_tip_block: BlockNumHash,
+    ) -> ProviderResult<StateTrieOverlay>
+    where
+        Provider: StageCheckpointReader
+            + PruneCheckpointReader
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + DBProvider
+            + BlockNumReader
+            + StorageSettingsCache,
+    {
+        let overlay = match self
+            .state_trie_overlay_cache
+            .entry((state_trie_tip_block.hash, finish_tip_block.hash))
+        {
+            dashmap::Entry::Occupied(entry) => entry.get().clone(),
+            dashmap::Entry::Vacant(entry) => {
+                self.metrics.state_trie_overlay_cache_misses.increment(1);
+                let overlay = self.overlay_builder.build_state_trie_overlay_at_frontiers(
+                    provider,
+                    state_trie_tip_block,
+                    finish_tip_block,
+                )?;
+                entry.insert(overlay.clone());
+                overlay
+            }
+        };
+
+        Ok(overlay)
+    }
+
+    /// Fetches an [`ExecutionOverlay`] for known durable frontiers.
+    #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
+    fn get_execution_overlay<Provider>(
+        &self,
+        provider: &Provider,
+        state_trie_tip_block: BlockNumHash,
+        finish_tip_block: BlockNumHash,
+    ) -> ProviderResult<ExecutionOverlay>
+    where
+        Provider: ChangeSetReader + StorageChangeSetReader + BlockNumReader + PruneCheckpointReader,
+    {
+        let overlay = match self
+            .execution_overlay_cache
+            .entry((state_trie_tip_block.hash, finish_tip_block.hash))
+        {
+            dashmap::Entry::Occupied(entry) => entry.get().clone(),
+            dashmap::Entry::Vacant(entry) => {
+                self.metrics.execution_overlay_cache_misses.increment(1);
+                let overlay = self.overlay_builder.build_execution_overlay_at_frontiers(
+                    provider,
+                    state_trie_tip_block,
+                    finish_tip_block,
+                )?;
+                entry.insert(overlay.clone());
+                overlay
+            }
+        };
+
+        Ok(overlay)
+    }
+
+    fn get_overlays<Provider>(
+        &self,
+        provider: &Provider,
+    ) -> ProviderResult<(Option<StateTrieOverlay>, Option<ExecutionOverlay>)>
     where
         Provider: StageCheckpointReader
             + PruneCheckpointReader
@@ -91,29 +198,20 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
             + StorageSettingsCache,
     {
         let (state_trie_tip_block, finish_tip_block) = database_state_frontiers(provider)?;
-
-        let overlay =
-            match self.overlay_cache.entry((state_trie_tip_block.hash, finish_tip_block.hash)) {
-                dashmap::Entry::Occupied(entry) => entry.get().clone(),
-                dashmap::Entry::Vacant(entry) => {
-                    self.metrics.overlay_cache_misses.increment(1);
-                    let overlay = self.overlay_builder.build_state_trie_overlay_at_frontiers(
-                        provider,
-                        state_trie_tip_block,
-                        finish_tip_block,
-                    )?;
-                    entry.insert(overlay.clone());
-                    overlay
-                }
-            };
-
-        Ok(overlay)
+        let state_trie_overlay = OverlayKind::HAS_STATE_TRIE_OVERLAY
+            .then(|| self.get_state_trie_overlay(provider, state_trie_tip_block, finish_tip_block))
+            .transpose()?;
+        let execution_overlay = OverlayKind::HAS_EXECUTION_OVERLAY
+            .then(|| self.get_execution_overlay(provider, state_trie_tip_block, finish_tip_block))
+            .transpose()?;
+        Ok((state_trie_overlay, execution_overlay))
     }
 }
 
-impl<F, N> DatabaseProviderROFactory for OverlayStateProviderFactory<F, N>
+impl<F, N, OverlayKind> DatabaseProviderROFactory for OverlayStateProviderFactory<F, N, OverlayKind>
 where
     N: NodePrimitives,
+    OverlayKind: OverlayKindMarker,
     F: DatabaseProviderFactory,
     F::Provider: StageCheckpointReader
         + PruneCheckpointReader
@@ -122,13 +220,13 @@ where
         + StorageChangeSetReader
         + StorageSettingsCache,
 {
-    type Provider = OverlayStateProvider<F::Provider, StateTrieOverlayOnly>;
+    type Provider = OverlayStateProvider<F::Provider, OverlayKind>;
 
     /// Create a read-only [`OverlayStateProvider`].
     #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
     fn database_provider_ro(
         &self,
-    ) -> ProviderResult<OverlayStateProvider<F::Provider, StateTrieOverlayOnly>> {
+    ) -> ProviderResult<OverlayStateProvider<F::Provider, OverlayKind>> {
         let overall_start = Instant::now();
 
         // Get a read-only provider
@@ -139,11 +237,16 @@ where
             res
         };
 
-        let overlay = self.get_overlay(&provider)?;
+        let (state_trie_overlay, execution_overlay) = self.get_overlays(&provider)?;
 
         let is_v2 = provider.cached_storage_settings().is_v2();
         self.metrics.database_provider_ro_duration.record(overall_start.elapsed());
-        Ok(OverlayStateProvider::new_state_trie(provider, overlay, is_v2))
+        Ok(OverlayStateProvider::from_overlays(
+            provider,
+            state_trie_overlay,
+            execution_overlay,
+            is_v2,
+        ))
     }
 }
 
@@ -159,7 +262,30 @@ pub struct StateTrieOverlayOnly;
 #[derive(Debug)]
 pub struct BothOverlays;
 
-trait HasStateTrieOverlay {}
+/// Selects which overlays an [`OverlayStateProvider`] carries.
+pub trait OverlayKindMarker {
+    /// Whether providers of this kind carry a state trie overlay.
+    const HAS_STATE_TRIE_OVERLAY: bool;
+    /// Whether providers of this kind carry an execution overlay.
+    const HAS_EXECUTION_OVERLAY: bool;
+}
+
+impl OverlayKindMarker for ExecutionOverlayOnly {
+    const HAS_STATE_TRIE_OVERLAY: bool = false;
+    const HAS_EXECUTION_OVERLAY: bool = true;
+}
+
+impl OverlayKindMarker for StateTrieOverlayOnly {
+    const HAS_STATE_TRIE_OVERLAY: bool = true;
+    const HAS_EXECUTION_OVERLAY: bool = false;
+}
+
+impl OverlayKindMarker for BothOverlays {
+    const HAS_STATE_TRIE_OVERLAY: bool = true;
+    const HAS_EXECUTION_OVERLAY: bool = true;
+}
+
+trait HasStateTrieOverlay: OverlayKindMarker {}
 
 impl HasStateTrieOverlay for StateTrieOverlayOnly {}
 impl HasStateTrieOverlay for BothOverlays {}
@@ -174,6 +300,17 @@ pub struct OverlayStateProvider<Provider, OverlayKind = StateTrieOverlayOnly> {
     execution_overlay: Option<ExecutionOverlay>,
     is_v2: bool,
     _kind: PhantomData<OverlayKind>,
+}
+
+impl<Provider, OverlayKind> OverlayStateProvider<Provider, OverlayKind> {
+    const fn from_overlays(
+        provider: Provider,
+        state_trie_overlay: Option<StateTrieOverlay>,
+        execution_overlay: Option<ExecutionOverlay>,
+        is_v2: bool,
+    ) -> Self {
+        Self { provider, state_trie_overlay, execution_overlay, is_v2, _kind: PhantomData }
+    }
 }
 
 impl<Provider: fmt::Debug, OverlayKind> fmt::Debug for OverlayStateProvider<Provider, OverlayKind> {
@@ -442,7 +579,7 @@ mod tests {
         );
 
         let provider = factory.provider().unwrap();
-        let first = overlay_factory.get_overlay(&provider).unwrap();
+        let first = overlay_factory.get_overlays(&provider).unwrap().0.unwrap();
         assert_eq!(account_keys(&first), vec![B256::with_last_byte(3), B256::with_last_byte(4)]);
         drop(provider);
 
@@ -458,9 +595,49 @@ mod tests {
         provider_rw.commit().unwrap();
 
         let provider = factory.provider().unwrap();
-        let second = overlay_factory.get_overlay(&provider).unwrap();
+        let second = overlay_factory.get_overlays(&provider).unwrap().0.unwrap();
         assert_eq!(account_keys(&second), vec![B256::with_last_byte(4)]);
         assert_eq!(account_node_paths(&second), vec![Nibbles::from_nibbles([4])]);
-        assert_eq!(overlay_factory.overlay_cache.len(), 2);
+        assert_eq!(overlay_factory.state_trie_overlay_cache.len(), 2);
+    }
+
+    #[test]
+    fn execution_overlay_factory_skips_state_trie_overlay() {
+        let (factory, blocks) = setup_frontiers(1, 3);
+        let manager = OverlayManager::default();
+        for block in &blocks[2..=3] {
+            manager.insert_block(block.clone());
+        }
+        let overlay_factory = OverlayStateProviderFactory::new_execution(
+            factory,
+            manager.overlay_builder(blocks[3].recovered_block().hash()),
+        );
+
+        let provider = overlay_factory.database_provider_ro().unwrap();
+
+        assert!(provider.state_trie_overlay.is_none());
+        assert!(provider.execution_overlay.is_some());
+        assert!(overlay_factory.state_trie_overlay_cache.is_empty());
+        assert_eq!(overlay_factory.execution_overlay_cache.len(), 1);
+    }
+
+    #[test]
+    fn combined_overlay_factory_builds_both_overlays() {
+        let (factory, blocks) = setup_frontiers(1, 3);
+        let manager = OverlayManager::default();
+        for block in &blocks[2..=3] {
+            manager.insert_block(block.clone());
+        }
+        let overlay_factory = OverlayStateProviderFactory::new_both(
+            factory,
+            manager.overlay_builder(blocks[3].recovered_block().hash()),
+        );
+
+        let provider = overlay_factory.database_provider_ro().unwrap();
+
+        assert!(provider.state_trie_overlay.is_some());
+        assert!(provider.execution_overlay.is_some());
+        assert_eq!(overlay_factory.state_trie_overlay_cache.len(), 1);
+        assert_eq!(overlay_factory.execution_overlay_cache.len(), 1);
     }
 }
