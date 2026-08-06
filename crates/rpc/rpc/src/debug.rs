@@ -233,15 +233,21 @@ where
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
                 // configure env for the target transaction
-                let tx = transaction.into_recovered();
+                let (tx, tx_info) = transaction.split();
+
+                // index should always be available because `transaction_and_block` only
+                // returns transactions included in a block
+                let index =
+                    tx_info.index.expect("transaction_and_block only returns block transactions")
+                        as usize;
 
                 let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
                 let tx_env = eth_api.evm_config().tx_env(&tx);
-                let (index, res, evm_env) = eth_api.inspect_transaction_in_block(
+                let (res, evm_env) = eth_api.inspect_transaction_in_block(
                     &block,
                     &mut db,
                     &mut inspector,
-                    *tx.tx_hash(),
+                    index,
                     tx_env.clone(),
                 )?;
 
@@ -347,11 +353,7 @@ where
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
                 // 1. replay the required number of transactions
-                eth_api.replay_block_until(
-                    &mut db,
-                    &block,
-                    *block.body().transactions()[tx_index].tx_hash(),
-                )?;
+                eth_api.replay_block_until(&mut db, &block, tx_index)?;
 
                 // 2. now execute the trace call on this state
                 let (evm_env, tx_env) =
@@ -422,16 +424,8 @@ where
                 if replay_block_txs {
                     // only need to replay the transactions in the block if not all transactions are
                     // to be replayed
-                    eth_api.apply_pre_execution_changes(&block, &mut db)?;
-
-                    let transactions = block.transactions_recovered().take(num_txs);
-
                     // Execute all transactions until index
-                    let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env.clone());
-                    for tx in transactions {
-                        let tx_env = eth_api.evm_config().tx_env(tx);
-                        evm.transact_commit(tx_env).map_err(Eth::Error::from_evm_err)?;
-                    }
+                    eth_api.replay_block_until(&mut db, &block, num_txs)?;
                 }
 
                 // Trace all bundles

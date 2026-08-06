@@ -105,11 +105,14 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             let parent_block = block.parent_hash();
 
             self.spawn_with_state_at_block(parent_block, move |this, mut db| {
-                let (_, res, _) = this.inspect_transaction_in_block(
+                let (res, _) = this.inspect_transaction_in_block(
                     &block,
                     &mut db,
                     &mut inspector,
-                    *tx.tx_hash(),
+                    // index should always be available because `transaction_and_block` only
+                    // returns transactions included in a block
+                    tx_info.index.expect("transaction_and_block only returns block transactions")
+                        as usize,
                     tx,
                 )?;
                 f(tx_info, inspector, res, db)
@@ -119,19 +122,19 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         }
     }
 
-    /// Replays all the transactions until the target transaction is found.
+    /// Replays all transactions before the target transaction index.
     ///
     /// All transactions before the target transaction are executed and their changes are written to
     /// the _runtime_ db ([`State`]).
     ///
-    /// Note: This assumes the target transaction is in the given iterator.
-    /// Returns the index of the target transaction in the given iterator.
+    /// If the target index is greater than or equal to the block's transaction count, all
+    /// transactions are replayed.
     fn replay_block_until(
         &self,
         db: &mut StateCacheDb,
         block: &RecoveredBlock<BlockTy<Self::Primitives>>,
-        target_tx_hash: B256,
-    ) -> Result<usize, Self::Error> {
+        target_tx_index: usize,
+    ) -> Result<(), Self::Error> {
         self.apply_pre_execution_changes(block, db)?;
 
         let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
@@ -139,26 +142,21 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         self.replay_transactions_until_with_evm(
             &mut evm,
             block.transactions_recovered(),
-            target_tx_hash,
+            target_tx_index,
         )
     }
 
     /// Replays all transactions before the target transaction without inspection, then executes
     /// the target transaction with the configured inspector, all on the given EVM.
-    ///
-    /// Note: This assumes the target transaction is in the given iterator.
-    /// Returns the index of the target transaction in the given iterator and its execution
-    /// result.
     #[expect(clippy::type_complexity)]
     fn inspect_transaction_in_block<'a>(
         &self,
         block: &RecoveredBlock<BlockTy<Self::Primitives>>,
         db: &'a mut StateCacheDb,
         inspector: impl InspectorFor<Self::Evm, &'a mut StateCacheDb>,
-        target_tx_hash: B256,
+        target_tx_index: usize,
         target_tx_env: impl IntoTxEnv<TxEnvFor<Self::Evm>>,
-    ) -> Result<(usize, ResultAndState<HaltReasonFor<Self::Evm>>, EvmEnvFor<Self::Evm>), Self::Error>
-    {
+    ) -> Result<(ResultAndState<HaltReasonFor<Self::Evm>>, EvmEnvFor<Self::Evm>), Self::Error> {
         let block_txs = block.transactions_recovered();
 
         self.apply_pre_execution_changes(block, db)?;
@@ -167,14 +165,14 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env, inspector);
 
         evm.disable_inspector();
-        let index = self.replay_transactions_until_with_evm(&mut evm, block_txs, target_tx_hash)?;
+        self.replay_transactions_until_with_evm(&mut evm, block_txs, target_tx_index)?;
         evm.enable_inspector();
 
         let res = evm.transact(target_tx_env).map_err(Self::Error::from_evm_err)?;
 
         let (_, evm_env) = evm.finish();
 
-        Ok((index, res, evm_env))
+        Ok((res, evm_env))
     }
 
     /// Executes all transactions of a block up to a given index.

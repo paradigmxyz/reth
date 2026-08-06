@@ -24,8 +24,8 @@ use reth_evm::{
     block::BlockExecutor, env::BlockEnvironment, execute::BlockBuilder, ConfigureEvm, Evm,
     EvmEnvFor, EvmFor, HaltReasonFor, InspectorFor, TransactionEnvMut, TxEnvFor,
 };
-use reth_node_api::{BlockBody};
-use reth_primitives_traits::{Recovered};
+use reth_node_api::BlockBody;
+use reth_primitives_traits::Recovered;
 use reth_revm::{
     cancelled::CancelOnDrop,
     database::StateProviderDatabase,
@@ -299,7 +299,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         bundles: Vec<Bundle<RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>>>,
         state_context: Option<StateContext>,
         mut state_override: Option<StateOverride>,
-    ) -> impl Future<Output = Result<Vec<Vec<EthCallResponse>>, Self::Error>> + Send {
+    ) -> impl Future<Output = Result<Vec<Vec<EthCallResponse>>, Self::Error>> + Send
+    where
+        Self: Trace,
+    {
         async move {
             // Check if the vector of bundles is empty
             if bundles.is_empty() {
@@ -354,14 +357,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 let mut all_results = Vec::with_capacity(bundles.len());
 
                 if replay_block_txs {
-                    let mut executor = RpcNodeCore::evm_config(&this)
-                        .executor_for_block(&mut db, block.sealed_block())
-                        .map_err(RethError::other)
-                        .map_err(Self::Error::from_eth_err)?;
-                    executor.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
-                    for tx in block.transactions_recovered().take(num_txs) {
-                        executor.execute_transaction(tx).map_err(Self::Error::from_eth_err)?;
-                    }
+                    this.replay_block_until(&mut db, &block, num_txs)?;
                 }
 
                 // transact all bundles
@@ -732,38 +728,36 @@ pub trait Call:
         }
     }
 
-    /// Replays all the transactions until the target transaction is found, on the given EVM.
+    /// Replays all transactions before the target transaction index on the given EVM.
     ///
-    /// Unlike [`Self::replay_transactions_until`], this executes on a caller provided EVM, so the
-    /// target transaction can then be run on the same EVM, keeping any block-scoped EVM state
-    /// intact. The EVM's inspector configuration is left untouched; see
+    /// This executes on a caller provided EVM, so the target transaction can then be run on the
+    /// same EVM, keeping any block-scoped EVM state intact. The EVM's inspector configuration is
+    /// left untouched; see
     /// [`Self::inspect_transaction_in_block`] to replay without inspection and trace the target.
     ///
-    /// Note: This assumes the target transaction is in the given iterator.
-    /// Returns the index of the target transaction in the given iterator.
+    /// If the target index is greater than or equal to the iterator length, all transactions are
+    /// replayed.
     fn replay_transactions_until_with_evm<'a, DB, I, Txs>(
         &self,
         evm: &mut EvmFor<Self::Evm, DB, I>,
         transactions: Txs,
-        target_tx_hash: B256,
-    ) -> Result<usize, Self::Error>
+        target_tx_index: usize,
+    ) -> Result<(), Self::Error>
     where
         DB: Database<Error = EvmDatabaseError<ProviderError>> + DatabaseCommit + core::fmt::Debug,
         I: InspectorFor<Self::Evm, DB>,
         Txs: IntoIterator<Item = Recovered<&'a ProviderTx<Self::Provider>>>,
     {
-        let mut index = 0;
-        for tx in transactions {
-            if *tx.tx_hash() == target_tx_hash {
+        for (index, tx) in transactions.into_iter().enumerate() {
+            if index == target_tx_index {
                 // reached the target transaction
                 break
             }
 
             let tx_env = self.evm_config().tx_env(tx);
             evm.transact_commit(tx_env).map_err(Self::Error::from_evm_err)?;
-            index += 1;
         }
-        Ok(index)
+        Ok(())
     }
 
     ///
