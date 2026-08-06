@@ -63,9 +63,10 @@ use reth_primitives_traits::{
     AlloyBlockHeader, FastInstant as Instant, NodePrimitives, RecoveredBlock,
 };
 use reth_provider::{
-    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockReader,
+    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader,
     DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider, ProviderError,
-    StateProviderFactory, StateReader, StateRootProvider,
+    PruneCheckpointReader, StageCheckpointReader, StateRootProvider, StorageSettingsCache,
+    TryIntoHistoricalStateProvider,
 };
 use reth_storage_overlay::OverlayManager;
 use reth_tasks::utils::increase_thread_priority;
@@ -872,16 +873,15 @@ fn published_sparse_trie_anchor_hash<N: NodePrimitives>(
 impl<N, P, Evm> StateRootStrategy<N, P, Evm> for DefaultStateRootStrategy
 where
     N: NodePrimitives,
-    P: DatabaseProviderFactory
-        + BlockReader<Header = N::BlockHeader>
-        + StateProviderFactory
-        + StateReader
-        + Clone
+    P: DatabaseProviderFactory + Clone + 'static,
+    P::Provider: BlockNumReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + TryIntoHistoricalStateProvider
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
         + Clone
-        + Send
-        + Sync
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
@@ -1044,7 +1044,13 @@ struct SynchronousStateRootJob<N: NodePrimitives, P> {
 impl<N, P> StateRootJob<N> for SynchronousStateRootJob<N, P>
 where
     N: NodePrimitives,
-    P: BlockReader + StateProviderFactory + StateReader + Clone + Send + Sync + 'static,
+    P: DatabaseProviderFactory + Clone + 'static,
+    P::Provider: BlockNumReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + TryIntoHistoricalStateProvider
+        + 'static,
 {
     fn name(&self) -> &'static str {
         "synchronous"
@@ -1077,12 +1083,15 @@ struct SparseTrieStateRootJob<N: NodePrimitives, P> {
 impl<N, P> SparseTrieStateRootJob<N, P>
 where
     N: NodePrimitives,
-    P: StateProviderFactory + Clone + Send + Sync + 'static,
-    P: BlockReader + StateReader,
+    P: DatabaseProviderFactory + Clone + 'static,
+    P::Provider: BlockNumReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + TryIntoHistoricalStateProvider
+        + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
         + Clone
-        + Send
-        + Sync
         + 'static,
 {
     fn serial_fallback(
@@ -1184,11 +1193,15 @@ where
 impl<N, P> StateRootJob<N> for SparseTrieStateRootJob<N, P>
 where
     N: NodePrimitives,
-    P: BlockReader + StateProviderFactory + StateReader + Clone + Send + Sync + 'static,
+    P: DatabaseProviderFactory + Clone + 'static,
+    P::Provider: BlockNumReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + TryIntoHistoricalStateProvider
+        + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
         + Clone
-        + Send
-        + Sync
         + 'static,
 {
     fn name(&self) -> &'static str {
@@ -1285,7 +1298,13 @@ fn compare_trie_updates_with_serial<N, P>(
 ) -> bool
 where
     N: NodePrimitives,
-    P: BlockReader + StateProviderFactory + StateReader + Clone,
+    P: DatabaseProviderFactory,
+    P::Provider: BlockNumReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + TryIntoHistoricalStateProvider
+        + 'static,
     OverlayStateProviderFactory<P, N>:
         DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>,
 {

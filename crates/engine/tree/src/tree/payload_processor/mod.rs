@@ -16,7 +16,7 @@ use reth_evm::{
 };
 use reth_execution_types::EvmState;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
-use reth_provider::{BlockExecutionOutput, BlockReader, StateProviderFactory, StateReader};
+use reth_provider::{BlockExecutionOutput, BlockReader, StateProviderFactory, StateReader, BlockNumReader, DatabaseProviderFactory, PruneCheckpointReader, StageCheckpointReader, StorageSettingsCache, TryIntoHistoricalStateProvider};
 use reth_tasks::Runtime;
 pub use reth_trie_parallel::{
     error::StateRootTaskError,
@@ -159,7 +159,13 @@ where
         parallel_bal_execution: bool,
     ) -> IteratorPayloadHandle<Evm, I>
     where
-        P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+        P: DatabaseProviderFactory + Clone + 'static,
+        P::Provider: BlockNumReader
+            + PruneCheckpointReader
+            + StageCheckpointReader
+            + StorageSettingsCache
+            + TryIntoHistoricalStateProvider
+            + 'static,
     {
         let (prewarm_rx, execution_rx) =
             self.spawn_tx_iterator(transactions, env.transaction_count, parallel_bal_execution);
@@ -323,7 +329,13 @@ where
         parallel_bal_execution: bool,
     ) -> CacheTaskHandle<<Evm::Primitives as NodePrimitives>::Receipt>
     where
-        P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+        P: DatabaseProviderFactory + Clone + 'static,
+        P::Provider: BlockNumReader
+            + PruneCheckpointReader
+            + StageCheckpointReader
+            + StorageSettingsCache
+            + TryIntoHistoricalStateProvider
+            + 'static,
     {
         // Each mode carries the capability its producers use; the rest is dropped here, so
         // unused capabilities do not keep the state-root task's update channel open.

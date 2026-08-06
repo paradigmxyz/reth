@@ -240,11 +240,8 @@ impl<N: NodePrimitives> OverlayManager<N> {
 
         if removed_blocks > 0 {
             let overlays_before = self.overlays.len();
-            let blocks = Arc::clone(&self.blocks);
             self.overlays.retain(|key, _| {
-                key.tip_hash != key.anchor_hash &&
-                    Self::anchor_for_parent_in(blocks.as_ref(), key.tip_hash, key.anchor_hash) ==
-                        Some(key.anchor_hash)
+                self.contains_hash(key.tip_hash, key.anchor_hash, key.anchor_hash)
             });
             pruned_overlays = overlays_before.saturating_sub(self.overlays.len());
             span.record("pruned_overlays", pruned_overlays);
@@ -265,7 +262,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
         skip_all,
         fields(tip_hash = %parent_hash, anchor_hash = %anchor_hash)
     )]
-    pub fn overlay_for_parent(
+    pub(crate) fn overlay_for_parent(
         &self,
         parent_hash: B256,
         anchor_hash: B256,
@@ -394,12 +391,17 @@ impl<N: NodePrimitives> OverlayManager<N> {
         span.record("cache_reused", true);
     }
 
-    /// Returns `preferred_anchor` if it is on the parent chain, otherwise the first missing parent.
-    ///
-    /// Returns `None` if `parent_hash` is not `preferred_anchor` and the manager does not contain a
-    /// block for `parent_hash`, meaning there is no in-memory parent chain to inspect.
-    pub fn anchor_for_parent(&self, parent_hash: B256, preferred_anchor: B256) -> Option<B256> {
-        Self::anchor_for_parent_in(self.blocks.as_ref(), parent_hash, preferred_anchor)
+    /// Returns every in-memory block in the chain whose tip is `parent_hash`.
+    pub(crate) fn parent_chain(
+        &self,
+        parent_hash: B256,
+    ) -> impl Iterator<Item = ExecutedBlock<N>> + '_ {
+        let mut hash = parent_hash;
+        std::iter::from_fn(move || {
+            let block = self.blocks.get(&hash)?;
+            hash = block.recovered_block().parent_hash();
+            Some(block.clone())
+        })
     }
 
     /// Returns true if `hash` is in the parent chain segment from `anchor_hash` inclusive to
@@ -417,29 +419,6 @@ impl<N: NodePrimitives> OverlayManager<N> {
 
             let Some(block) = self.blocks.get(&current_hash) else { return false };
             current_hash = block.recovered_block().parent_hash();
-        }
-    }
-
-    fn anchor_for_parent_in(
-        blocks: &DashMap<B256, ExecutedBlock<N>>,
-        parent_hash: B256,
-        preferred_anchor: B256,
-    ) -> Option<B256> {
-        if parent_hash == preferred_anchor {
-            return Some(preferred_anchor)
-        }
-
-        let mut hash = parent_hash;
-
-        loop {
-            let block_parent_hash = blocks.get(&hash)?.recovered_block().parent_hash();
-            if block_parent_hash == preferred_anchor {
-                return Some(block_parent_hash)
-            }
-            if !blocks.contains_key(&block_parent_hash) {
-                return Some(block_parent_hash)
-            }
-            hash = block_parent_hash;
         }
     }
 
@@ -730,44 +709,6 @@ mod tests {
         let (_, cached_short) =
             manager.overlay_for_parent(blocks[2].recovered_block().hash(), short_anchor).unwrap();
         assert!(Arc::ptr_eq(&short, &cached_short));
-    }
-
-    #[test]
-    fn returns_anchor_for_in_memory_parent() {
-        let manager = OverlayManager::default();
-        let blocks = test_blocks();
-        for block in &blocks {
-            manager.insert_block(block.clone());
-        }
-
-        assert_eq!(
-            manager.anchor_for_parent(blocks[2].recovered_block().hash(), B256::random()),
-            Some(blocks[0].recovered_block().parent_hash())
-        );
-
-        manager.remove_blocks([blocks[0].recovered_block().hash()]);
-        assert_eq!(
-            manager.anchor_for_parent(
-                blocks[2].recovered_block().hash(),
-                blocks[0].recovered_block().hash()
-            ),
-            Some(blocks[0].recovered_block().hash())
-        );
-    }
-
-    #[test]
-    fn prefers_anchor_in_parent_chain() {
-        let manager = OverlayManager::default();
-        let blocks = test_blocks();
-        for block in &blocks {
-            manager.insert_block(block.clone());
-        }
-
-        let db_tip_hash = blocks[1].recovered_block().hash();
-        assert_eq!(
-            manager.anchor_for_parent(blocks[2].recovered_block().hash(), db_tip_hash),
-            Some(db_tip_hash)
-        );
     }
 
     #[test]
