@@ -841,6 +841,7 @@ fn extend_execution_overlay<N: NodePrimitives>(
     overlay: &mut ExecutionOverlay,
     block: &ExecutedBlock<N>,
 ) {
+    overlay.block_hashes.push(block.recovered_block().num_hash());
     let state = &block.execution_output.state;
     let (accounts, storage, code_hashes) =
         (&mut overlay.accounts, &mut overlay.storage, &mut overlay.code_hashes);
@@ -983,6 +984,10 @@ mod tests {
             assert_eq!(overlay.storage[&address][&U256::from(id)], U256::from(id));
             assert_eq!(overlay.code_hashes[&code_hash], Bytecode::new_raw(vec![id].into()));
         }
+        assert_eq!(
+            overlay.block_hashes,
+            blocks[..=2].iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(),
+        );
 
         let cached = manager
             .execution_overlay_for_parent(blocks[2].recovered_block().hash(), anchor_hash)

@@ -51,6 +51,8 @@ impl StateTrieOverlay {
 /// explicitly observed during execution.
 #[derive(Clone, Debug, Default)]
 pub struct ExecutionOverlay {
+    /// In-memory block hashes in ascending block-number order.
+    pub block_hashes: Vec<BlockNumHash>,
     /// Account state by address.
     pub accounts: AddressMap<Option<AccountInfo>>,
     /// Storage values by address and slot.

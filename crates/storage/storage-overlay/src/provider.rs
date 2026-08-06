@@ -1,6 +1,6 @@
 use crate::{database_state_frontiers, ExecutionOverlay, OverlayBuilder, StateTrieOverlay};
 use alloy_eips::BlockNumHash;
-use alloy_primitives::{BlockHash, B256};
+use alloy_primitives::{Address, BlockHash, BlockNumber, B256, U256};
 use metrics::{Counter, Histogram};
 use reth_db_api::{tables, transaction::DbTx, DatabaseError};
 use reth_errors::ProviderResult;
@@ -8,17 +8,20 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{
     dashmap::{self, DashMap},
-    NodePrimitives,
+    Account, NodePrimitives,
 };
 use reth_storage_api::{
-    BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-    DatabaseProviderROFactory, DbTxProvider, PruneCheckpointReader, StageCheckpointReader,
-    StorageChangeSetReader, StorageSettingsCache,
+    AccountReader, BlockHashReader, BlockNumReader, BytecodeReader, ChangeSetReader, DBProvider,
+    DatabaseProviderFactory, DatabaseProviderROFactory, DbTxProvider, HashedPostStateProvider,
+    PruneCheckpointReader, StageCheckpointReader, StateProofProvider, StateProvider,
+    StateRootProvider, StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
 };
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     trie_cursor::{InMemoryTrieCursor, TrieCursor, TrieCursorFactory, TrieStorageCursor},
-    HashedPostStateSorted,
+    updates::TrieUpdates,
+    AccountProof, ExecutionWitnessMode, HashedPostState, HashedPostStateSorted, HashedStorage,
+    MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 use reth_trie_db::{
     DatabaseAccountTrieCursor, DatabaseHashedCursorFactory, DatabaseStorageTrieCursor,
@@ -80,6 +83,11 @@ trait HasStateTrieOverlay: OverlayKindMarker {}
 
 impl HasStateTrieOverlay for StateTrieOverlayOnly {}
 impl HasStateTrieOverlay for BothOverlays {}
+
+trait HasExecutionOverlay: OverlayKindMarker {}
+
+impl HasExecutionOverlay for ExecutionOverlayOnly {}
+impl HasExecutionOverlay for BothOverlays {}
 
 /// Factory for creating overlay state providers with optional reverts and overlays.
 ///
@@ -376,6 +384,186 @@ impl<Provider> OverlayStateProvider<Provider, BothOverlays> {
     }
 }
 
+impl<Provider, OverlayKind> AccountReader for OverlayStateProvider<Provider, OverlayKind>
+where
+    Provider: AccountReader,
+    OverlayKind: HasExecutionOverlay,
+{
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
+        let overlay = self
+            .execution_overlay
+            .as_ref()
+            .expect("execution overlay kind must contain an execution overlay");
+        if let Some(account) = overlay.accounts.get(address) {
+            return Ok(account.as_ref().map(Account::from))
+        }
+        self.provider.basic_account(address)
+    }
+}
+
+impl<Provider, OverlayKind> BlockHashReader for OverlayStateProvider<Provider, OverlayKind>
+where
+    Provider: BlockHashReader,
+    OverlayKind: HasExecutionOverlay,
+{
+    fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>> {
+        let overlay = self
+            .execution_overlay
+            .as_ref()
+            .expect("execution overlay kind must contain an execution overlay");
+        if let Some(block) = overlay.block_hashes.iter().find(|block| block.number == number) {
+            return Ok(Some(block.hash))
+        }
+        self.provider.block_hash(number)
+    }
+
+    fn canonical_hashes_range(
+        &self,
+        start: BlockNumber,
+        end: BlockNumber,
+    ) -> ProviderResult<Vec<B256>> {
+        let overlay = self
+            .execution_overlay
+            .as_ref()
+            .expect("execution overlay kind must contain an execution overlay");
+        let mut block_hashes =
+            overlay.block_hashes.iter().filter(|block| (start..end).contains(&block.number));
+        let Some(first_block) = block_hashes.next() else {
+            return self.provider.canonical_hashes_range(start, end)
+        };
+
+        let mut hashes = self.provider.canonical_hashes_range(start, first_block.number)?;
+        hashes.push(first_block.hash);
+        hashes.extend(block_hashes.map(|block| block.hash));
+        Ok(hashes)
+    }
+}
+
+impl<Provider, OverlayKind> BytecodeReader for OverlayStateProvider<Provider, OverlayKind>
+where
+    Provider: BytecodeReader,
+    OverlayKind: HasExecutionOverlay,
+{
+    fn bytecode_by_hash(
+        &self,
+        code_hash: &B256,
+    ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>> {
+        let overlay = self
+            .execution_overlay
+            .as_ref()
+            .expect("execution overlay kind must contain an execution overlay");
+        if let Some(bytecode) = overlay.code_hashes.get(code_hash) {
+            return Ok(Some(reth_primitives_traits::Bytecode(bytecode.clone())));
+        }
+        self.provider.bytecode_by_hash(code_hash)
+    }
+}
+
+impl<Provider, OverlayKind> StateRootProvider for OverlayStateProvider<Provider, OverlayKind>
+where
+    OverlayKind: HasExecutionOverlay,
+{
+    fn state_root(&self, _: HashedPostState) -> ProviderResult<B256> {
+        unimplemented!()
+    }
+
+    fn state_root_from_nodes(&self, _: TrieInput) -> ProviderResult<B256> {
+        unimplemented!()
+    }
+
+    fn state_root_with_updates(&self, _: HashedPostState) -> ProviderResult<(B256, TrieUpdates)> {
+        unimplemented!()
+    }
+
+    fn state_root_from_nodes_with_updates(
+        &self,
+        _: TrieInput,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        unimplemented!()
+    }
+}
+
+impl<Provider, OverlayKind> StorageRootProvider for OverlayStateProvider<Provider, OverlayKind>
+where
+    OverlayKind: HasExecutionOverlay,
+{
+    fn storage_root(&self, _: Address, _: HashedStorage) -> ProviderResult<B256> {
+        unimplemented!()
+    }
+
+    fn storage_proof(&self, _: Address, _: B256, _: HashedStorage) -> ProviderResult<StorageProof> {
+        unimplemented!()
+    }
+
+    fn storage_multiproof(
+        &self,
+        _: Address,
+        _: &[B256],
+        _: HashedStorage,
+    ) -> ProviderResult<StorageMultiProof> {
+        unimplemented!()
+    }
+}
+
+impl<Provider, OverlayKind> StateProofProvider for OverlayStateProvider<Provider, OverlayKind>
+where
+    OverlayKind: HasExecutionOverlay,
+{
+    fn proof(&self, _: TrieInput, _: Address, _: &[B256]) -> ProviderResult<AccountProof> {
+        unimplemented!()
+    }
+
+    fn multiproof(&self, _: TrieInput, _: MultiProofTargets) -> ProviderResult<MultiProof> {
+        unimplemented!()
+    }
+
+    fn witness(
+        &self,
+        _: TrieInput,
+        _: HashedPostState,
+        _: ExecutionWitnessMode,
+    ) -> ProviderResult<Vec<alloy_primitives::Bytes>> {
+        unimplemented!()
+    }
+}
+
+impl<Provider, OverlayKind> HashedPostStateProvider for OverlayStateProvider<Provider, OverlayKind>
+where
+    OverlayKind: HasExecutionOverlay,
+{
+    fn hashed_post_state(
+        &self,
+        _: &revm::database::BundleState,
+    ) -> ProviderResult<HashedPostState> {
+        unimplemented!()
+    }
+}
+
+impl<Provider, OverlayKind> StateProvider for OverlayStateProvider<Provider, OverlayKind>
+where
+    Provider: StateProvider,
+    OverlayKind: HasExecutionOverlay,
+{
+    fn storage(
+        &self,
+        address: Address,
+        storage_key: alloy_primitives::StorageKey,
+    ) -> ProviderResult<Option<alloy_primitives::StorageValue>> {
+        let overlay = self
+            .execution_overlay
+            .as_ref()
+            .expect("execution overlay kind must contain an execution overlay");
+        if let Some(value) = overlay
+            .storage
+            .get(&address)
+            .and_then(|storage| storage.get(&U256::from_be_bytes(storage_key.0)))
+        {
+            return Ok(Some(*value));
+        }
+        self.provider.storage(address, storage_key)
+    }
+}
+
 impl<Provider, OverlayKind> TrieCursorFactory for OverlayStateProvider<Provider, OverlayKind>
 where
     Provider: DbTxProvider,
@@ -483,8 +671,8 @@ where
 #[cfg(all(test, feature = "partial-persistence"))]
 mod tests {
     use super::*;
-    use crate::OverlayManager;
-    use alloy_primitives::U256;
+    use crate::{ExecutionOverlay, OverlayManager};
+    use alloy_primitives::{Address, U256};
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
     use reth_primitives_traits::Account;
     use reth_provider::{
@@ -497,6 +685,7 @@ mod tests {
         updates::TrieUpdatesSorted, BranchNodeCompact, ComputedTrieData, HashedPostState,
         HashedStorage, Nibbles,
     };
+    use revm::{bytecode::Bytecode as RevmBytecode, state::AccountInfo};
 
     fn with_unique_trie_data(
         block: &ExecutedBlock<EthPrimitives>,
@@ -639,5 +828,40 @@ mod tests {
         assert!(provider.execution_overlay.is_some());
         assert_eq!(overlay_factory.state_trie_overlay_cache.len(), 1);
         assert_eq!(overlay_factory.execution_overlay_cache.len(), 1);
+    }
+
+    #[test]
+    fn execution_overlay_readers_use_overlay_first() {
+        let address = Address::with_last_byte(1);
+        let account_info = AccountInfo { nonce: 1, balance: U256::from(2), ..Default::default() };
+        let block_hash = B256::with_last_byte(3);
+        let storage_key = B256::with_last_byte(4);
+        let storage_value = U256::from(5);
+        let code_hash = B256::with_last_byte(6);
+        let bytecode = RevmBytecode::new_raw([0x60, 0x01].into());
+        let mut execution_overlay = ExecutionOverlay::default();
+        execution_overlay.accounts.insert(address, Some(account_info.clone()));
+        execution_overlay.block_hashes.push(BlockNumHash::new(1, block_hash));
+        execution_overlay
+            .storage
+            .entry(address)
+            .or_default()
+            .insert(U256::from_be_bytes(storage_key.0), storage_value);
+        execution_overlay.code_hashes.insert(code_hash, bytecode.clone());
+        let provider = OverlayStateProvider::new_execution(
+            reth_storage_api::noop::NoopProvider::default(),
+            execution_overlay,
+            false,
+        );
+
+        assert_eq!(provider.basic_account(&address).unwrap(), Some(Account::from(account_info)));
+        assert!(provider.basic_account(&Address::with_last_byte(2)).unwrap().is_none());
+        assert_eq!(provider.block_hash(1).unwrap(), Some(block_hash));
+        assert_eq!(provider.canonical_hashes_range(0, 2).unwrap(), vec![block_hash]);
+        assert_eq!(provider.storage(address, storage_key).unwrap(), Some(storage_value));
+        assert_eq!(
+            provider.bytecode_by_hash(&code_hash).unwrap(),
+            Some(reth_primitives_traits::Bytecode(bytecode))
+        );
     }
 }
