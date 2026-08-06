@@ -91,7 +91,6 @@ jobs:
           name: hive_assets_${{ matrix.variant }}
           path: ./hive_assets
   test-amsterdam:
-    if: github.repository == 'paradigmxyz/reth' || github.repository == 'paradigmxyz/reth-oss'
     timeout-minutes: 120
     strategy:
       fail-fast: false
@@ -279,7 +278,6 @@ jobs:
         run: .github/scripts/hive/print_client_logs.sh
 
   test-osaka:
-    if: github.repository == 'paradigmxyz/reth' || github.repository == 'paradigmxyz/reth-oss'
     timeout-minutes: 120
     strategy:
       fail-fast: false
