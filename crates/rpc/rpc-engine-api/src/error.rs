@@ -1,7 +1,8 @@
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::{
     ForkchoiceUpdateError, INVALID_FORK_CHOICE_STATE_ERROR, INVALID_FORK_CHOICE_STATE_ERROR_MSG,
-    INVALID_PAYLOAD_ATTRIBUTES_ERROR, INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG,
+    INVALID_PAYLOAD_ATTRIBUTES_ERROR, INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG, TOO_DEEP_REORG_ERROR,
+    TOO_DEEP_REORG_ERROR_MSG,
 };
 use jsonrpsee_types::error::{
     INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE, INVALID_PARAMS_MSG, SERVER_ERROR_MSG,
@@ -195,6 +196,13 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                             None::<()>,
                         )
                     }
+                    ForkchoiceUpdateError::TooDeepReorg => {
+                        jsonrpsee_types::error::ErrorObject::owned(
+                            TOO_DEEP_REORG_ERROR,
+                            TOO_DEEP_REORG_ERROR_MSG,
+                            None::<()>,
+                        )
+                    }
                     // Map future alloy forkchoice errors as internal until handled.
                     #[allow(unreachable_patterns, clippy::needless_return)]
                     _ => {
@@ -276,6 +284,14 @@ mod tests {
             "Invalid payload attributes",
             EngineApiError::ForkChoiceUpdate(BeaconForkChoiceUpdateError::ForkchoiceUpdateError(
                 ForkchoiceUpdateError::UpdatedInvalidPayloadAttributes,
+            )),
+        );
+
+        ensure_engine_rpc_error(
+            -38006,
+            "Too deep reorg",
+            EngineApiError::ForkChoiceUpdate(BeaconForkChoiceUpdateError::ForkchoiceUpdateError(
+                ForkchoiceUpdateError::TooDeepReorg,
             )),
         );
 

@@ -85,8 +85,13 @@ pub enum EthApiError {
     /// requested that has been pruned according to the node's data retention policy.
     ///
     /// See also <https://eips.ethereum.org/EIPS/eip-4444>
-    #[error("Pruned history unavailable")]
-    PrunedHistoryUnavailable,
+    #[error("pruned history unavailable: requested {requested}, earliest available {earliest_available}")]
+    PrunedHistoryUnavailable {
+        /// The requested block number
+        requested: u64,
+        /// The earliest block number that is still available
+        earliest_available: u64,
+    },
     /// Receipts not found for block hash/number/tag
     #[error("receipts not found")]
     ReceiptsNotFound(BlockId),
@@ -356,7 +361,9 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 internal_rpc_err(err.to_string())
             }
             err @ EthApiError::TransactionInputError(_) => invalid_params_rpc_err(err.to_string()),
-            EthApiError::PrunedHistoryUnavailable => rpc_error_with_code(4444, error.to_string()),
+            EthApiError::PrunedHistoryUnavailable { .. } => {
+                rpc_error_with_code(4444, error.to_string())
+            }
             EthApiError::Other(err) => err.to_rpc_error(),
             EthApiError::MuxTracerError(msg) => internal_rpc_err(msg.to_string()),
             EthApiError::BatchTxRecvError(err) => internal_rpc_err(err.to_string()),
@@ -540,7 +547,9 @@ impl From<reth_errors::ProviderError> for EthApiError {
             ProviderError::BlockNumberForTransactionIndexNotFound => Self::UnknownBlockOrTxIndex,
             ProviderError::FinalizedBlockNotFound => Self::HeaderNotFound(BlockId::finalized()),
             ProviderError::SafeBlockNotFound => Self::HeaderNotFound(BlockId::safe()),
-            ProviderError::BlockExpired { .. } => Self::PrunedHistoryUnavailable,
+            ProviderError::BlockExpired { requested, earliest_available } => {
+                Self::PrunedHistoryUnavailable { requested, earliest_available }
+            }
             err => Self::Internal(err.into()),
         }
     }
@@ -1231,6 +1240,24 @@ mod tests {
         let err: jsonrpsee_types::error::ErrorObject<'static> =
             EthApiError::HeaderNotFound(BlockId::finalized()).into();
         assert_eq!(err.message(), "block not found: finalized");
+    }
+
+    #[test]
+    fn pruned_history_error_reports_available_range() {
+        let err: EthApiError =
+            reth_errors::ProviderError::BlockExpired { requested: 5, earliest_available: 100 }
+                .into();
+        assert!(matches!(
+            err,
+            EthApiError::PrunedHistoryUnavailable { requested: 5, earliest_available: 100 }
+        ));
+
+        let err: jsonrpsee_types::error::ErrorObject<'static> = err.into();
+        assert_eq!(err.code(), 4444);
+        assert_eq!(
+            err.message(),
+            "pruned history unavailable: requested 5, earliest available 100"
+        );
     }
 
     #[test]

@@ -51,6 +51,7 @@ where
                     Eip4844PoolTransactionError::MissingEip4844BlobSidecar,
                 )));
             };
+            let sidecar = sidecar.into_sidecar();
 
             let sidecar = match sidecar {
                 BlobTransactionSidecarVariant::Eip4844(sidecar) => {
