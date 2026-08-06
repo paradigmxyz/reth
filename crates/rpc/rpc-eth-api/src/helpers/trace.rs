@@ -119,6 +119,30 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         }
     }
 
+    /// Replays all the transactions until the target transaction is found.
+    ///
+    /// All transactions before the target transaction are executed and their changes are written to
+    /// the _runtime_ db ([`State`]).
+    ///
+    /// Note: This assumes the target transaction is in the given iterator.
+    /// Returns the index of the target transaction in the given iterator.
+    fn replay_block_until(
+        &self,
+        db: &mut StateCacheDb,
+        block: &RecoveredBlock<BlockTy<Self::Primitives>>,
+        target_tx_hash: B256,
+    ) -> Result<usize, Self::Error> {
+        self.apply_pre_execution_changes(block, db)?;
+
+        let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
+        let mut evm = self.evm_config().evm_with_env(db, evm_env);
+        self.replay_transactions_until_with_evm(
+            &mut evm,
+            block.transactions_recovered(),
+            target_tx_hash,
+        )
+    }
+
     /// Replays all transactions before the target transaction without inspection, then executes
     /// the target transaction with the configured inspector, all on the given EVM.
     ///

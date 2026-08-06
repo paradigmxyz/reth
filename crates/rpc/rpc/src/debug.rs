@@ -344,23 +344,16 @@ where
 
         let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
-        // execute after the parent block, replaying `tx_index` transactions
-        let state_at = block.parent_hash();
-
         self.eth_api()
-            .spawn_with_state_at_block(state_at, move |eth_api, mut db| {
-                // 1. apply pre-execution changes
-                eth_api.apply_pre_execution_changes(&block, &mut db)?;
-
-                // 2. replay the required number of transactions
-                eth_api.replay_transactions_until(
+            .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
+                // 1. replay the required number of transactions
+                eth_api.replay_block_until(
                     &mut db,
-                    evm_env.clone(),
-                    block.transactions_recovered(),
+                    &block,
                     *block.body().transactions()[tx_index].tx_hash(),
                 )?;
 
-                // 3. now execute the trace call on this state
+                // 2. now execute the trace call on this state
                 let (evm_env, tx_env) =
                     eth_api.prepare_call_env(evm_env, call, &mut db, overrides)?;
 

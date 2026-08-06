@@ -24,8 +24,8 @@ use reth_evm::{
     block::BlockExecutor, env::BlockEnvironment, execute::BlockBuilder, ConfigureEvm, Evm,
     EvmEnvFor, EvmFor, HaltReasonFor, InspectorFor, TransactionEnvMut, TxEnvFor,
 };
-use reth_node_api::BlockBody;
-use reth_primitives_traits::Recovered;
+use reth_node_api::{BlockBody};
+use reth_primitives_traits::{Recovered};
 use reth_revm::{
     cancelled::CancelOnDrop,
     database::StateProviderDatabase,
@@ -730,28 +730,6 @@ pub trait Call:
             .await
             .map(Some)
         }
-    }
-
-    /// Replays all the transactions until the target transaction is found.
-    ///
-    /// All transactions before the target transaction are executed and their changes are written to
-    /// the _runtime_ db ([`State`]).
-    ///
-    /// Note: This assumes the target transaction is in the given iterator.
-    /// Returns the index of the target transaction in the given iterator.
-    fn replay_transactions_until<'a, DB, I>(
-        &self,
-        db: &mut DB,
-        evm_env: EvmEnvFor<Self::Evm>,
-        transactions: I,
-        target_tx_hash: B256,
-    ) -> Result<usize, Self::Error>
-    where
-        DB: Database<Error = EvmDatabaseError<ProviderError>> + DatabaseCommit + core::fmt::Debug,
-        I: IntoIterator<Item = Recovered<&'a ProviderTx<Self::Provider>>>,
-    {
-        let mut evm = self.evm_config().evm_with_env(db, evm_env);
-        self.replay_transactions_until_with_evm(&mut evm, transactions, target_tx_hash)
     }
 
     /// Replays all the transactions until the target transaction is found, on the given EVM.
