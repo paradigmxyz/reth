@@ -169,6 +169,18 @@ mod tests {
     }
 
     #[test]
+    fn an_account_funded_then_emptied_merges_to_a_deletable_account() {
+        let mut changes = AccountChanges::new(Address::repeat_byte(0xee));
+        changes.balance_changes.push(BalanceChange::new(index(1), U256::from(100)));
+        changes.balance_changes.push(BalanceChange::new(index(2), U256::ZERO));
+
+        let state = BalAccountState::from_changes(&changes);
+
+        assert!(state.changes_state_root(&changes));
+        assert!(state.merge_onto(None).is_empty());
+    }
+
+    #[test]
     fn read_only_entries_are_empty() {
         let mut changes = AccountChanges::new(Address::repeat_byte(0xdd));
         changes.storage_reads.push(U256::from(1));
