@@ -473,28 +473,15 @@ impl ChunkedArchive {
 
     /// Returns the number of tail chunks required to cover at least `distance` blocks from the
     /// tip.
-    ///
-    /// The final chunk may be partial: it holds `total_blocks - (num_chunks - 1) *
-    /// blocks_per_file` blocks, which can be fewer than `blocks_per_file`. A naive
-    /// `distance.div_ceil(blocks_per_file)` assumes every selected chunk is full and can
-    /// therefore under-count, selecting a tail that covers fewer than `distance` blocks (for
-    /// example, `distance = 10064` with a 5000-block final chunk yields one chunk that falls
-    /// 5064 blocks short). This accounts for the partial final chunk so the selected tail
-    /// always covers `distance`; callers prune the surplus.
     pub fn tail_chunks_for_distance(&self, distance: u64) -> u64 {
-        let num_chunks = self.num_chunks();
         let needed = distance.min(self.total_blocks);
-        if num_chunks == 0 || needed == 0 {
+        if needed == 0 {
             return 0;
         }
-        // Blocks held by the final, possibly-partial chunk.
-        let last_chunk_blocks = self.total_blocks - (num_chunks - 1) * self.blocks_per_file;
-        if needed <= last_chunk_blocks {
-            1
-        } else {
-            // One chunk for the partial tail, plus full chunks for the remaining blocks.
-            (1 + (needed - last_chunk_blocks).div_ceil(self.blocks_per_file)).min(num_chunks)
-        }
+
+        // The first needed block determines the earliest chunk, including for a partial tail.
+        let first_chunk = (self.total_blocks - needed) / self.blocks_per_file;
+        self.num_chunks() - first_chunk
     }
 
     /// Returns the extracted plain-output size for one chunk.
