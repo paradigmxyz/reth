@@ -411,6 +411,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         };
 
         let managed_overlay = self.resolve_execution_overlay(anchor.hash)?;
+        overlay.block_hashes.extend_from_slice(&managed_overlay.block_hashes);
         overlay.accounts.extend(
             managed_overlay.accounts.iter().map(|(address, info)| (*address, info.clone())),
         );
@@ -1021,6 +1022,13 @@ mod tests {
             assert_eq!(overlay.storage[&address][&slot], U256::from(id));
             assert!(overlay.code_hashes.contains_key(&B256::with_last_byte(id + 64)));
         }
+        assert_eq!(
+            overlay.block_hashes,
+            blocks[2..=3]
+                .iter()
+                .map(|block| block.recovered_block().num_hash())
+                .collect::<Vec<_>>()
+        );
     }
 
     #[cfg(feature = "partial-persistence")]
