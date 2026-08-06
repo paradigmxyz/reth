@@ -19,7 +19,8 @@ use reth_primitives_traits::{
     AlloyBlockHeader, FastInstant, NodePrimitives,
 };
 use reth_storage_api::{
-    BlockNumReader, ChangeSetReader, DBProvider, StorageChangeSetReader, StorageSettingsCache,
+    BlockNumReader, ChangeSetReader, DBProvider, PruneCheckpointReader, StageCheckpointReader,
+    StorageChangeSetReader, StorageSettingsCache,
 };
 #[cfg(feature = "rayon")]
 use reth_tasks::WorkerPool;
@@ -111,6 +112,8 @@ impl<N: NodePrimitives> OverlayManager<N> {
         P: DBProvider
             + ChangeSetReader
             + StorageChangeSetReader
+            + PruneCheckpointReader
+            + StageCheckpointReader
             + BlockNumReader
             + StorageSettingsCache,
     {
@@ -132,6 +135,8 @@ impl<N: NodePrimitives> OverlayManager<N> {
         P: DBProvider
             + ChangeSetReader
             + StorageChangeSetReader
+            + PruneCheckpointReader
+            + StageCheckpointReader
             + BlockNumReader
             + StorageSettingsCache,
     {

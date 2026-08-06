@@ -20,7 +20,6 @@ pub use state::{
         HistoricalStateProviderRef, HistoryInfo, LowestAvailableBlocks,
     },
     latest::{LatestStateProvider, LatestStateProviderRef},
-    overlay::{OverlayStateProvider, OverlayStateProviderFactory},
 };
 
 mod blockchain_provider;
