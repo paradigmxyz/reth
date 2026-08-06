@@ -20,8 +20,8 @@ use std::sync::Arc;
 
 /// Executes CPU heavy tasks.
 pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
-    /// Executes the [`TxEnvFor`] with [`reth_evm::EvmEnv`] against the given [Database] without
-    /// committing state changes.
+    /// Executes the [`TxEnvFor`] with [`reth_evm::EvmEnv`] against the given [`StateCacheDb`]
+    /// without committing state changes.
     fn inspect<'a>(
         &self,
         db: &'a mut StateCacheDb,
@@ -125,7 +125,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     /// Replays all transactions before the target transaction index.
     ///
     /// All transactions before the target transaction are executed and their changes are written to
-    /// the _runtime_ db ([`State`]).
+    /// the _runtime_ db ([`StateCacheDb`]).
     ///
     /// If the target index is greater than or equal to the block's transaction count, all
     /// transactions are replayed.
@@ -315,8 +315,8 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     /// 2. configures the EVM env
     /// 3. loops over all transactions and executes them
     /// 4. calls the callback with the transaction info, the execution result, the changed state
-    ///    _after_ the transaction [`StateProviderDatabase`] and the database that points to the
-    ///    state right _before_ the transaction.
+    ///    _after_ the transaction [`StateCacheDb`] and the database that points to the state right
+    ///    _before_ the transaction.
     fn trace_block_with<F, R>(
         &self,
         block_id: BlockId,

@@ -733,7 +733,7 @@ pub trait Call:
     /// This executes on a caller provided EVM, so the target transaction can then be run on the
     /// same EVM, keeping any block-scoped EVM state intact. The EVM's inspector configuration is
     /// left untouched; see
-    /// [`Self::inspect_transaction_in_block`] to replay without inspection and trace the target.
+    /// [`Trace::inspect_transaction_in_block`] to replay without inspection and trace the target.
     ///
     /// If the target index is greater than or equal to the iterator length, all transactions are
     /// replayed.
