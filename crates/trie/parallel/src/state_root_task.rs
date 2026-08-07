@@ -516,7 +516,7 @@ pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
             if !destroyed && changed_storage_iter.peek().is_some() {
                 hashed_state
                     .storages
-                    .insert(hashed_address, HashedStorage::from_iter(false, changed_storage_iter));
+                    .insert(hashed_address, HashedStorage::from_iter(changed_storage_iter));
             }
         }
     }
