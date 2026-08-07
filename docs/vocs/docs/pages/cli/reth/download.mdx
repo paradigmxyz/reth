@@ -182,6 +182,11 @@ Storage:
       --with-state-history-distance <BLOCKS>
           Include account and storage history static files covering the last N blocks
 
+      --repair-history
+          Repair execution history to match the configured pruning modes.
+
+          Missing transactions, receipts, account changesets, and storage changesets are downloaded without changing the existing configuration or database checkpoints. History beyond what the database checkpoints already cover is downloaded but not re-indexed.
+
       --with-senders
           Include transaction sender static files. Requires `--with-txs`
 

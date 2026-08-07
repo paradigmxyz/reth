@@ -97,18 +97,22 @@ use archive::run_modular_downloads;
 use clap::{builder::RangedU64ValueParser, Parser};
 use config_gen::{config_for_selections, write_config};
 use extract::stream_and_extract;
-use eyre::Result;
+use eyre::{Result, WrapErr};
 use manifest::{ComponentSelection, SnapshotComponentType, SnapshotManifest};
 use planning::{collect_planned_archives, summarize_download_startup, PlannedDownloads};
 use progress::{DownloadProgress, DownloadRequestLimiter};
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks, MAINNET};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
-use reth_db::{init_db, Database};
-use reth_db_api::transaction::DbTx;
+use reth_config::config::Config;
+use reth_db::{init_db, lockfile::StorageLock, open_db_read_only, tables, Database};
+use reth_db_api::{cursor::DbCursorRO, models::StorageSettings, transaction::DbTx};
 use reth_fs_util as fs;
+use reth_node_api::NodeTypes;
 use reth_node_core::args::DefaultPruningValues;
-use reth_prune_types::PruneMode;
+use reth_provider::providers::StaticFileProvider;
+use reth_stages_types::StageId;
+use reth_static_file_types::StaticFileSegment;
 use source::{
     discover_manifest_url, fetch_manifest_from_source, fetch_snapshot_api_entries,
     print_snapshot_listing, resolve_manifest_base_url,
@@ -127,6 +131,7 @@ const RETH_SNAPSHOTS_API_URL: &str = "https://snapshots.reth.rs/api/snapshots";
 const RETH_SNAPSHOTS_SOURCE: &str = "https://snapshots.reth.rs (default)";
 const SNAPSHOT_API_PATH: &str = "/api/snapshots";
 const FORCE_REMOVED_DATADIR_PATHS: &[&str] = &["db", "rocksdb", "static_files", "reth.toml"];
+const REPAIR_STORAGE_VERSION: u64 = 2;
 
 /// Maximum number of simultaneous HTTP downloads across the entire snapshot job.
 const MAX_CONCURRENT_DOWNLOADS: usize = 8;
@@ -145,6 +150,29 @@ pub(crate) enum SelectionPreset {
 struct ResolvedComponents {
     selections: BTreeMap<SnapshotComponentType, ComponentSelection>,
     preset: Option<SelectionPreset>,
+}
+
+/// Per-stage database frontiers that anchor repair selections.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct RepairFrontiers {
+    /// Highest checkpoint across all stages; rejects stale snapshots.
+    highest: u64,
+    /// Bodies stage checkpoint; governs transaction static files.
+    bodies: u64,
+    /// Execution stage checkpoint; governs receipts and changesets.
+    execution: u64,
+}
+
+impl RepairFrontiers {
+    /// Maps each repairable component to the frontier of the stage that writes it.
+    fn as_targets(&self) -> BTreeMap<SnapshotComponentType, u64> {
+        BTreeMap::from([
+            (SnapshotComponentType::Transactions, self.bodies),
+            (SnapshotComponentType::Receipts, self.execution),
+            (SnapshotComponentType::AccountChangesets, self.execution),
+            (SnapshotComponentType::StorageChangesets, self.execution),
+        ])
+    }
 }
 
 /// Global static download defaults
@@ -391,6 +419,14 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     #[arg(long, value_name = "BLOCKS", value_parser = RangedU64ValueParser::<u64>::new().range(1..), conflicts_with_all = ["with_state_history", "with_state_history_since", "minimal", "full", "archive"])]
     with_state_history_distance: Option<u64>,
 
+    /// Repair execution history to match the configured pruning modes.
+    ///
+    /// Missing transactions, receipts, account changesets, and storage changesets are downloaded
+    /// without changing the existing configuration or database checkpoints. History beyond what
+    /// the database checkpoints already cover is downloaded but not re-indexed.
+    #[arg(long, conflicts_with_all = ["url", "with_txs", "with_txs_since", "with_txs_distance", "with_receipts", "with_receipts_since", "with_receipts_distance", "with_state_history", "with_state_history_since", "with_state_history_distance", "with_senders", "with_rocksdb", "without_rocksdb", "archive", "minimal", "full", "force", "list"])]
+    repair_history: bool,
+
     /// Include transaction sender static files. Requires `--with-txs`.
     #[arg(long, requires = "with_txs", conflicts_with_all = ["minimal", "full", "archive"])]
     with_senders: bool,
@@ -456,7 +492,7 @@ pub struct DownloadCommand<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCommand<C> {
     /// Runs the download command in single-archive or manifest mode.
-    pub async fn execute<N>(self) -> Result<()> {
+    pub async fn execute<N: NodeTypes>(self) -> Result<()> {
         let chain = self.env.chain.chain();
         let chain_id = chain.id();
 
@@ -468,6 +504,24 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         }
 
         let data_dir = self.env.datadir.clone().resolve_datadir(chain);
+
+        // Fail fast before any network access. RW database opens and static-file
+        // writers take these locks, so holding both keeps concurrent writers out.
+        let _repair_locks = if self.repair_history {
+            if !data_dir.db().try_exists()? {
+                eyre::bail!(
+                    "--repair-history requires an existing database at {}",
+                    data_dir.db().display()
+                );
+            }
+            fs::create_dir_all(data_dir.static_files())?;
+            Some((
+                StorageLock::try_acquire(&data_dir.db())?,
+                StorageLock::try_acquire(&data_dir.static_files())?,
+            ))
+        } else {
+            None
+        };
 
         let cancel_token = CancellationToken::new();
         let _cancel_guard = cancel_token.drop_guard();
@@ -501,8 +555,18 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             return Ok(());
         }
 
+        let manifest = self.load_manifest(chain_id).await?;
+        let repair_frontiers = if self.repair_history {
+            Some(self.validate_repair_target::<N>(
+                &data_dir.db(),
+                &data_dir.static_files(),
+                manifest.block,
+            )?)
+        } else {
+            None
+        };
         let ResolvedDownload { manifest, selections, preset, planned } =
-            self.resolve_download(chain_id).await?;
+            self.resolve_loaded_download(manifest, repair_frontiers)?;
         if self.print_plan_json {
             DownloadPlan::from_planned(&manifest, &planned).write_json(std::io::stdout().lock())?;
             return Ok(())
@@ -535,7 +599,17 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         )
         .await?;
 
-        self.finalize_modular_download(&selections, &manifest, preset, target_dir, &data_dir.db())?;
+        if self.repair_history {
+            info!(target: "reth::cli", "History repair complete");
+        } else {
+            self.finalize_modular_download(
+                &selections,
+                &manifest,
+                preset,
+                target_dir,
+                &data_dir.db(),
+            )?;
+        }
 
         Ok(())
     }
@@ -549,7 +623,26 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 
     async fn resolve_download(&self, chain_id: u64) -> Result<ResolvedDownload> {
         let manifest = self.load_manifest(chain_id).await?;
-        let ResolvedComponents { mut selections, preset } = self.resolve_components(&manifest)?;
+        let repair_frontiers = if self.repair_history {
+            let data_dir = self.env.datadir.clone().resolve_datadir(self.env.chain.chain());
+            let frontiers = self.validated_database_frontier(&data_dir.db())?;
+            check_snapshot_covers_frontier(frontiers.highest, manifest.block)?;
+            Some(frontiers)
+        } else {
+            None
+        };
+        self.resolve_loaded_download(manifest, repair_frontiers)
+    }
+
+    fn resolve_loaded_download(
+        &self,
+        manifest: SnapshotManifest,
+        repair_frontiers: Option<RepairFrontiers>,
+    ) -> Result<ResolvedDownload> {
+        let ResolvedComponents { mut selections, preset } = match repair_frontiers {
+            Some(frontiers) => self.resolve_repair_components(&manifest, &frontiers)?,
+            None => self.resolve_components(&manifest)?,
+        };
 
         if matches!(preset, Some(SelectionPreset::Archive)) {
             inject_archive_only_components(&mut selections, &manifest, !self.without_rocksdb);
@@ -614,6 +707,119 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         let start_command = startup_node_command::<C>(self.env.chain.as_ref());
         info!(target: "reth::cli", "Snapshot download complete. Run `{}` to start syncing.", start_command);
 
+        Ok(())
+    }
+
+    /// Validates the repair target and returns the database frontiers.
+    fn validate_repair_target<N: NodeTypes>(
+        &self,
+        db_path: &Path,
+        static_files_path: &Path,
+        snapshot_block: u64,
+    ) -> Result<RepairFrontiers> {
+        let frontiers = self.validated_database_frontier(db_path)?;
+        check_snapshot_covers_frontier(frontiers.highest, snapshot_block)?;
+
+        // Jars are written before checkpoints commit, so after a crash they can hold
+        // blocks the checkpoints don't know about; the snapshot must cover those too.
+        let static_files = StaticFileProvider::<N::Primitives>::read_only(static_files_path)?;
+        for segment in [
+            StaticFileSegment::Transactions,
+            StaticFileSegment::Receipts,
+            StaticFileSegment::AccountChangeSets,
+            StaticFileSegment::StorageChangeSets,
+        ] {
+            if let Some(block) = static_files.get_highest_static_file_block(segment) &&
+                block > snapshot_block
+            {
+                eyre::bail!(
+                    "{} static files reach block {block}, past the snapshot at block {snapshot_block}; use a newer snapshot",
+                    segment.as_str()
+                );
+            }
+        }
+
+        Ok(frontiers)
+    }
+
+    /// Returns the database stage frontiers after validating its persisted storage layout.
+    fn validated_database_frontier(&self, db_path: &Path) -> Result<RepairFrontiers> {
+        let db = open_db_read_only(db_path, self.env.db.database_args())?;
+        let tx = db.tx()?;
+
+        // On the legacy layout receipts and changesets live in MDBX, where static-file
+        // archives cannot restore them; missing settings mean legacy.
+        let is_v2 = tx
+            .get::<tables::Metadata>(
+                reth_storage_api::metadata::keys::STORAGE_SETTINGS.to_string(),
+            )?
+            .and_then(|bytes| serde_json::from_slice::<StorageSettings>(&bytes).ok())
+            .is_some_and(|settings| settings.is_v2());
+        if !is_v2 {
+            eyre::bail!(
+                "--repair-history requires the v2 storage layout (execution history in static files)"
+            );
+        }
+
+        // Selections anchor to the stage that writes each segment, while the overall
+        // maximum rejects snapshots behind any part of the database.
+        let mut frontiers = RepairFrontiers::default();
+        let mut cursor = tx.cursor_read::<tables::StageCheckpoints>()?;
+        for entry in cursor.walk(None)? {
+            let (stage, checkpoint) = entry?;
+            frontiers.highest = frontiers.highest.max(checkpoint.block_number);
+            match stage.as_str() {
+                stage if stage == StageId::Bodies.as_str() => {
+                    frontiers.bodies = checkpoint.block_number;
+                }
+                stage if stage == StageId::Execution.as_str() => {
+                    frontiers.execution = checkpoint.block_number;
+                }
+                _ => {}
+            }
+        }
+        Ok(frontiers)
+    }
+
+    /// Resolves repair selections from the node's prune config at the database frontiers.
+    fn resolve_repair_components(
+        &self,
+        manifest: &SnapshotManifest,
+        frontiers: &RepairFrontiers,
+    ) -> Result<ResolvedComponents> {
+        self.validate_repair_manifest(manifest)?;
+
+        let data_dir = self.env.datadir.clone().resolve_datadir(self.env.chain.chain());
+        let config_path = self.env.config.clone().unwrap_or_else(|| data_dir.config());
+        // Repair must read the prune modes the node actually runs with;
+        // `Config::from_path` would silently create a default config here.
+        if !config_path.try_exists()? {
+            eyre::bail!(
+                "--repair-history requires an existing config at {}",
+                config_path.display()
+            );
+        }
+        let config = Config::from_path(&config_path)
+            .wrap_err_with(|| format!("Failed to load config from {}", config_path.display()))?;
+        let selections = manifest.repair_history_selections(&config, &frontiers.as_targets())?;
+        Ok(ResolvedComponents { selections, preset: None })
+    }
+
+    /// Rejects manifests that cannot safely repair the selected datadir.
+    fn validate_repair_manifest(&self, manifest: &SnapshotManifest) -> Result<()> {
+        let chain_id = self.env.chain.chain().id();
+        if manifest.chain_id != chain_id {
+            eyre::bail!(
+                "snapshot manifest is for chain {}, but the selected chain is {chain_id}",
+                manifest.chain_id
+            );
+        }
+        if manifest.storage_version != REPAIR_STORAGE_VERSION {
+            eyre::bail!(
+                "snapshot manifest uses storage version {}; --repair-history requires version {REPAIR_STORAGE_VERSION}",
+                manifest.storage_version
+            );
+        }
         Ok(())
     }
 
@@ -802,24 +1008,28 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                         None => ComponentSelection::All,
                     }
                 } else {
-                    selection_from_prune_mode(
+                    ComponentSelection::from_prune_mode(
                         defaults.full_prune_modes.bodies_history,
                         snapshot_block,
                     )
                 }
             }
-            SnapshotComponentType::Receipts => {
-                selection_from_prune_mode(defaults.full_prune_modes.receipts, snapshot_block)
-            }
-            SnapshotComponentType::AccountChangesets => {
-                selection_from_prune_mode(defaults.full_prune_modes.account_history, snapshot_block)
-            }
-            SnapshotComponentType::StorageChangesets => {
-                selection_from_prune_mode(defaults.full_prune_modes.storage_history, snapshot_block)
-            }
-            SnapshotComponentType::TransactionSenders => {
-                selection_from_prune_mode(defaults.full_prune_modes.sender_recovery, snapshot_block)
-            }
+            SnapshotComponentType::Receipts => ComponentSelection::from_prune_mode(
+                defaults.full_prune_modes.receipts,
+                snapshot_block,
+            ),
+            SnapshotComponentType::AccountChangesets => ComponentSelection::from_prune_mode(
+                defaults.full_prune_modes.account_history,
+                snapshot_block,
+            ),
+            SnapshotComponentType::StorageChangesets => ComponentSelection::from_prune_mode(
+                defaults.full_prune_modes.storage_history,
+                snapshot_block,
+            ),
+            SnapshotComponentType::TransactionSenders => ComponentSelection::from_prune_mode(
+                defaults.full_prune_modes.sender_recovery,
+                snapshot_block,
+            ),
             // Keep hidden by default in full mode; if users want indices they can use archive.
             SnapshotComponentType::RocksdbIndices => ComponentSelection::None,
         }
@@ -867,22 +1077,6 @@ fn explicit_component_selection(
         (block <= snapshot_block).then_some(ComponentSelection::Since(block))
     } else {
         distance.map(ComponentSelection::Distance)
-    }
-}
-
-/// Converts a prune mode into the matching component selection.
-fn selection_from_prune_mode(mode: Option<PruneMode>, snapshot_block: u64) -> ComponentSelection {
-    match mode {
-        None => ComponentSelection::All,
-        Some(PruneMode::Full) => ComponentSelection::None,
-        Some(PruneMode::Distance(d)) => ComponentSelection::Distance(d),
-        Some(PruneMode::Before(block)) => {
-            if snapshot_block >= block {
-                ComponentSelection::Since(block)
-            } else {
-                ComponentSelection::None
-            }
-        }
     }
 }
 
@@ -940,6 +1134,16 @@ fn inject_archive_only_components(
             selections.insert(component, ComponentSelection::All);
         }
     }
+}
+
+/// Rejects snapshots that predate the database frontier.
+fn check_snapshot_covers_frontier(synced_block: u64, snapshot_block: u64) -> Result<()> {
+    if synced_block > snapshot_block {
+        eyre::bail!(
+            "database is synced to block {synced_block}, past the snapshot at block {snapshot_block}; use a newer snapshot"
+        );
+    }
+    Ok(())
 }
 
 /// Returns `true` when RocksDB-backed index stages should be reset after download.
@@ -1051,7 +1255,9 @@ mod tests {
     use extract::CompressionFormat;
     use manifest::{ComponentManifest, SingleArchive};
     use reth_chainspec::{HOLESKY, MAINNET};
+    use reth_db_api::transaction::DbTxMut;
     use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
+    use reth_provider::test_utils::MockNodeTypes;
 
     #[derive(Parser)]
     struct CommandParser<T: Args> {
@@ -1254,6 +1460,124 @@ mod tests {
         ]);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn repair_history_flag_parses() {
+        let args = CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from([
+            "reth",
+            "--repair-history",
+            "--non-interactive",
+        ])
+        .args;
+
+        assert!(args.repair_history);
+    }
+
+    #[test]
+    fn repair_history_requires_existing_config() {
+        let temp = tempfile::tempdir().unwrap();
+        let args = CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from([
+            "reth",
+            "--repair-history",
+            "--datadir",
+            temp.path().to_str().unwrap(),
+        ])
+        .args;
+
+        let manifest = manifest_with_archive_only_components();
+
+        let err =
+            args.resolve_repair_components(&manifest, &RepairFrontiers::default()).err().unwrap();
+        assert!(err.to_string().contains("requires an existing config"));
+        assert!(!temp.path().join("reth.toml").exists());
+    }
+
+    #[test]
+    fn repair_history_rejects_incompatible_manifests() {
+        let args = CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from([
+            "reth",
+            "--repair-history",
+        ])
+        .args;
+        let mut manifest = manifest_with_archive_only_components();
+
+        manifest.chain_id = HOLESKY.chain.id();
+        let err = args.validate_repair_manifest(&manifest).unwrap_err();
+        assert!(err.to_string().contains("selected chain"));
+
+        manifest.chain_id = MAINNET.chain.id();
+        manifest.storage_version = 1;
+        let err = args.validate_repair_manifest(&manifest).unwrap_err();
+        assert!(err.to_string().contains("requires version 2"));
+    }
+
+    #[test]
+    fn validate_repair_target_checks_layout_and_frontier() {
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join("db");
+        let static_files_path = temp.path().join("static_files");
+        std::fs::create_dir_all(&static_files_path).unwrap();
+        let args = CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from([
+            "reth",
+            "--repair-history",
+        ])
+        .args;
+
+        // A database without persisted storage settings is treated as the legacy layout.
+        drop(init_db(&db_path, args.env.db.database_args()).unwrap());
+        let err = args
+            .validate_repair_target::<MockNodeTypes>(&db_path, &static_files_path, 100)
+            .err()
+            .unwrap();
+        assert!(err.to_string().contains("v2 storage layout"));
+
+        {
+            let db = init_db(&db_path, args.env.db.database_args()).unwrap();
+            let tx = db.tx_mut().unwrap();
+            tx.put::<tables::Metadata>(
+                reth_storage_api::metadata::keys::STORAGE_SETTINGS.to_string(),
+                serde_json::to_vec(&StorageSettings::v2()).unwrap(),
+            )
+            .unwrap();
+            tx.put::<tables::StageCheckpoints>(
+                "Headers".to_string(),
+                reth_stages_types::StageCheckpoint::new(150),
+            )
+            .unwrap();
+            tx.put::<tables::StageCheckpoints>(
+                StageId::Bodies.to_string(),
+                reth_stages_types::StageCheckpoint::new(120),
+            )
+            .unwrap();
+            tx.put::<tables::StageCheckpoints>(
+                StageId::Execution.to_string(),
+                reth_stages_types::StageCheckpoint::new(90),
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+
+        let err = args
+            .validate_repair_target::<MockNodeTypes>(&db_path, &static_files_path, 100)
+            .err()
+            .unwrap();
+        assert!(err.to_string().contains("past the snapshot"));
+
+        let frontiers = args
+            .validate_repair_target::<MockNodeTypes>(&db_path, &static_files_path, 200)
+            .unwrap();
+        assert_eq!(frontiers, RepairFrontiers { highest: 150, bodies: 120, execution: 90 });
+
+        let targets = frontiers.as_targets();
+        assert_eq!(targets[&SnapshotComponentType::Transactions], 120);
+        for component in [
+            SnapshotComponentType::Receipts,
+            SnapshotComponentType::AccountChangesets,
+            SnapshotComponentType::StorageChangesets,
+        ] {
+            assert_eq!(targets[&component], 90);
+        }
     }
 
     #[test]
