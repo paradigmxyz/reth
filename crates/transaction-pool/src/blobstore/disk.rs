@@ -213,14 +213,22 @@ impl DiskFileBlobStore {
 
 impl BlobStore for DiskFileBlobStore {
     fn insert(&self, tx: B256, data: PooledBlobSidecar) -> Result<(), BlobStoreError> {
-        self.inner.insert_one(tx, data.into_sidecar())
+        let data = data.into_sidecar().ok_or(BlobStoreError::IncompleteSidecar(tx))?;
+        self.inner.insert_one(tx, data)
     }
 
     fn insert_all(&self, txs: Vec<(B256, PooledBlobSidecar)>) -> Result<(), BlobStoreError> {
         if txs.is_empty() {
             return Ok(())
         }
-        let txs = txs.into_iter().map(|(tx, data)| (tx, data.into_sidecar())).collect();
+        let txs = txs
+            .into_iter()
+            .map(|(tx, data)| {
+                data.into_sidecar()
+                    .map(|data| (tx, data))
+                    .ok_or(BlobStoreError::IncompleteSidecar(tx))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         self.inner.insert_many(txs)
     }
 

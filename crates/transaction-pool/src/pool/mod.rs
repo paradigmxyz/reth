@@ -746,7 +746,9 @@ where
         // Handle blob sidecar storage and notifications for EIP-4844 transactions
         if let Some(sidecar) = meta.blob_sidecar {
             let hash = *meta.added.hash();
-            self.on_new_blob_sidecar(&hash, &sidecar);
+            if let Some(sidecar) = sidecar.sidecar() {
+                self.on_new_blob_sidecar(&hash, sidecar);
+            }
             self.insert_blob(hash, sidecar);
         }
 
