@@ -59,7 +59,7 @@ pub const DEFAULT_MAX_SIMULATE_BLOCKS: u64 = 256;
 pub const DEFAULT_MAX_STORAGE_VALUES_SLOTS: usize = 1024;
 
 /// The default eth historical proof window.
-pub const DEFAULT_ETH_PROOF_WINDOW: u64 = 0;
+pub const DEFAULT_ETH_PROOF_WINDOW: u64 = 100_000;
 
 /// The default eth tx fee cap is 1 ETH
 pub const DEFAULT_TX_FEE_CAP_WEI: u128 = 1_000_000_000_000_000_000u128;
