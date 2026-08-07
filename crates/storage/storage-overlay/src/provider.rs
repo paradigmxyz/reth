@@ -109,7 +109,7 @@ pub struct OverlayStateProviderFactory<
     /// part of the cache key.
     state_trie_overlay_cache: Arc<DashMap<(BlockHash, BlockHash), StateTrieOverlay>>,
     /// A cache which maps durable frontier pairs to [`ExecutionOverlay`]s.
-    execution_overlay_cache: Arc<DashMap<(BlockHash, BlockHash), ExecutionOverlay>>,
+    execution_overlay_cache: Arc<DashMap<(BlockHash, BlockHash), Arc<ExecutionOverlay>>>,
     /// Metrics for provider factory operations.
     metrics: OverlayStateProviderFactoryMetrics,
     _kind: PhantomData<OverlayKind>,
@@ -208,7 +208,7 @@ where
         provider: &Provider,
         state_trie_tip_block: BlockNumHash,
         finish_tip_block: BlockNumHash,
-    ) -> ProviderResult<ExecutionOverlay>
+    ) -> ProviderResult<Arc<ExecutionOverlay>>
     where
         Provider: ChangeSetReader + StorageChangeSetReader + BlockNumReader + PruneCheckpointReader,
     {
@@ -235,7 +235,7 @@ where
     fn get_overlays<Provider>(
         &self,
         provider: &Provider,
-    ) -> ProviderResult<(Option<StateTrieOverlay>, Option<ExecutionOverlay>)>
+    ) -> ProviderResult<(Option<StateTrieOverlay>, Option<Arc<ExecutionOverlay>>)>
     where
         Provider: StageCheckpointReader
             + PruneCheckpointReader
@@ -305,7 +305,7 @@ where
 pub struct OverlayStateProvider<Provider, OverlayKind = StateTrieOverlayOnly> {
     provider: Provider,
     state_trie_overlay: Option<StateTrieOverlay>,
-    execution_overlay: Option<ExecutionOverlay>,
+    execution_overlay: Option<Arc<ExecutionOverlay>>,
     is_v2: bool,
     _kind: PhantomData<OverlayKind>,
 }
@@ -314,7 +314,7 @@ impl<Provider, OverlayKind> OverlayStateProvider<Provider, OverlayKind> {
     const fn from_overlays(
         provider: Provider,
         state_trie_overlay: Option<StateTrieOverlay>,
-        execution_overlay: Option<ExecutionOverlay>,
+        execution_overlay: Option<Arc<ExecutionOverlay>>,
         is_v2: bool,
     ) -> Self {
         Self { provider, state_trie_overlay, execution_overlay, is_v2, _kind: PhantomData }
@@ -336,7 +336,7 @@ impl<Provider> OverlayStateProvider<Provider, ExecutionOverlayOnly> {
     /// Creates an overlay state provider with execution data only.
     pub const fn new_execution(
         provider: Provider,
-        execution_overlay: ExecutionOverlay,
+        execution_overlay: Arc<ExecutionOverlay>,
         is_v2: bool,
     ) -> Self {
         Self {
@@ -371,7 +371,7 @@ impl<Provider> OverlayStateProvider<Provider, BothOverlays> {
     pub const fn new_both(
         provider: Provider,
         state_trie_overlay: StateTrieOverlay,
-        execution_overlay: ExecutionOverlay,
+        execution_overlay: Arc<ExecutionOverlay>,
         is_v2: bool,
     ) -> Self {
         Self {
@@ -835,6 +835,8 @@ mod tests {
         assert!(provider.execution_overlay.is_some());
         assert!(overlay_factory.state_trie_overlay_cache.is_empty());
         assert_eq!(overlay_factory.execution_overlay_cache.len(), 1);
+        let cached_overlay = overlay_factory.execution_overlay_cache.iter().next().unwrap();
+        assert!(Arc::ptr_eq(provider.execution_overlay.as_ref().unwrap(), cached_overlay.value()));
     }
 
     #[test]
@@ -878,7 +880,7 @@ mod tests {
         execution_overlay.code_hashes.insert(code_hash, bytecode.clone());
         let provider = OverlayStateProvider::new_execution(
             factory.provider().unwrap(),
-            execution_overlay,
+            Arc::new(execution_overlay),
             false,
         );
 

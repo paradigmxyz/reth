@@ -366,7 +366,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     pub fn build_execution_overlay<Provider>(
         &self,
         provider: &Provider,
-    ) -> ProviderResult<ExecutionOverlay>
+    ) -> ProviderResult<Arc<ExecutionOverlay>>
     where
         Provider: StageCheckpointReader
             + PruneCheckpointReader
@@ -390,7 +390,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         provider: &Provider,
         state_trie_tip_block: BlockNumHash,
         finish_tip_block: BlockNumHash,
-    ) -> ProviderResult<ExecutionOverlay>
+    ) -> ProviderResult<Arc<ExecutionOverlay>>
     where
         Provider: ChangeSetReader + StorageChangeSetReader + BlockNumReader + PruneCheckpointReader,
     {
@@ -407,7 +407,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 );
                 execution_reverts(provider, revert_blocks)?
             }
-            None => ExecutionOverlay::default(),
+            None => return self.resolve_execution_overlay(anchor.hash),
         };
 
         let managed_overlay = self.resolve_execution_overlay(anchor.hash)?;
@@ -425,7 +425,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         overlay
             .code_hashes
             .extend(managed_overlay.code_hashes.iter().map(|(hash, code)| (*hash, code.clone())));
-        Ok(overlay)
+        Ok(Arc::new(overlay))
     }
 
     /// Resolves the effective overlay (trie updates, hashed state).
@@ -466,12 +466,11 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     fn resolve_execution_overlay(
         &self,
         anchor_hash: BlockHash,
-    ) -> ProviderResult<ExecutionOverlay> {
+    ) -> ProviderResult<Arc<ExecutionOverlay>> {
         match &self.overlay_source {
             Some(OverlaySource::Managed) if anchor_hash != self.parent_hash => self
                 .overlay_manager
                 .execution_overlay_for_parent(self.parent_hash, anchor_hash)
-                .map(|overlay| (*overlay).clone())
                 .map_err(ProviderError::other),
             Some(OverlaySource::Immediate { .. }) if anchor_hash != self.parent_hash => {
                 Err(ProviderError::other(std::io::Error::other(format!(
@@ -479,7 +478,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     self.parent_hash
                 ))))
             }
-            _ => Ok(ExecutionOverlay::default()),
+            _ => Ok(Arc::new(ExecutionOverlay::default())),
         }
     }
 
