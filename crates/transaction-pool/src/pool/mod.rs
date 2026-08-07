@@ -1739,7 +1739,6 @@ mod tests {
         BlockInfo, GetPooledTransactionLimit, PoolConfig, SubPoolLimit, TransactionOrigin,
         TransactionValidationOutcome, U256,
     };
-    use alloy_consensus::transaction::TxHashRef;
     use alloy_eips::{
         eip4844::{Blob, BlobTransactionSidecar, Bytes48},
         eip7594::{BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant},
@@ -1891,8 +1890,8 @@ mod tests {
             sparse.iter().map(|tx| *tx.tx_hash()).collect::<Vec<_>>()
         );
 
-        let full_blob = full[0].as_eip4844().unwrap().tx().sidecar().unwrap();
-        let sparse_blob = sparse[0].as_eip4844().unwrap().tx().sidecar().unwrap();
+        let full_blob = full[0].as_eip4844().unwrap().tx().sidecar();
+        let sparse_blob = sparse[0].as_eip4844().unwrap().tx().sidecar();
         assert_eq!(full_blob.blobs().len(), 1);
         assert!(sparse_blob.blobs().is_empty());
         assert_eq!(
