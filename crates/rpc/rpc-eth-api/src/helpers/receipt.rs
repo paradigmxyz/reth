@@ -21,7 +21,7 @@ pub trait LoadReceipt:
 {
     /// Helper method for `eth_getBlockReceipts` and `eth_getTransactionReceipt`.
     ///
-    /// If `all_receipts` is `Some`, skips the cache lookup for receipts entirely.
+    /// If a value is `Some`, skips the corresponding cache lookup entirely.
     fn build_transaction_receipt(
         &self,
         tx: Recovered<ProviderTx<Self::Provider>>,
@@ -32,43 +32,54 @@ pub trait LoadReceipt:
     ) -> impl Future<Output = Result<RpcReceipt<Self::NetworkTypes>, Self::Error>> + Send {
         async move {
             let hash = meta.block_hash;
-            let block = match block {
-                Some(block) => block,
-                None => self
-                    .cache()
-                    .get_recovered_block(hash)
-                    .await
-                    .map_err(Self::Error::from_eth_err)?
-                    .ok_or(EthApiError::HeaderNotFound(hash.into()))?,
-            };
-            // Use pre-fetched receipts if available, otherwise fetch from cache.
-            let all_receipts = match all_receipts {
-                Some(receipts) => receipts,
-                None => self
-                    .cache()
-                    .get_receipts(hash)
-                    .await
-                    .map_err(Self::Error::from_eth_err)?
-                    .ok_or(EthApiError::HeaderNotFound(hash.into()))?,
+            let (block, all_receipts) = match (block, all_receipts) {
+                (Some(block), Some(all_receipts)) => (Some(block), all_receipts),
+                (Some(block), None) => {
+                    let all_receipts = self
+                        .cache()
+                        .get_receipts(hash)
+                        .await
+                        .map_err(Self::Error::from_eth_err)?
+                        .ok_or(EthApiError::HeaderNotFound(hash.into()))?;
+                    (Some(block), all_receipts)
+                }
+                (None, Some(all_receipts)) => {
+                    let block = self
+                        .cache()
+                        .get_maybe_block(hash)
+                        .await
+                        .map_err(Self::Error::from_eth_err)?;
+                    (block, all_receipts)
+                }
+                (None, None) => {
+                    let (all_receipts, block) = self
+                        .cache()
+                        .get_receipts_and_maybe_block(hash)
+                        .await
+                        .map_err(Self::Error::from_eth_err)?
+                        .ok_or(EthApiError::HeaderNotFound(hash.into()))?;
+                    (block, all_receipts)
+                }
             };
 
             let (gas_used, next_log_index) =
                 calculate_gas_used_and_next_log_index(meta.index, &all_receipts);
 
-            Ok(self
-                .converter()
-                .convert_receipts(
-                    vec![ConvertReceiptInput {
-                        tx: tx.as_recovered_ref(),
-                        gas_used: receipt.cumulative_gas_used() - gas_used,
-                        receipt,
-                        next_log_index,
-                        meta,
-                    }],
-                    block.sealed_block(),
-                )?
-                .pop()
-                .unwrap())
+            let inputs = vec![ConvertReceiptInput {
+                tx: tx.as_recovered_ref(),
+                gas_used: receipt.cumulative_gas_used() - gas_used,
+                receipt,
+                next_log_index,
+                meta,
+            }];
+            let mut receipts = match block {
+                Some(block) => {
+                    self.converter().convert_receipts_with_block(inputs, block.sealed_block())
+                }
+                None => self.converter().convert_receipts(inputs),
+            }?;
+
+            Ok(receipts.pop().unwrap())
         }
     }
 }
