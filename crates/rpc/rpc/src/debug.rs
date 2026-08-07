@@ -169,9 +169,10 @@ where
     async fn trace_chain_block(
         &self,
         block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
-        evm_env: EvmEnvFor<Eth::Evm>,
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<Option<TraceResult>>, Eth::Error> {
+        let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
+
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
                 let tx_count = block.body().transactions().len();
@@ -1024,16 +1025,6 @@ where
                         break
                     }
                 };
-                let evm_env = match this
-                    .eth_api()
-                    .evm_env_for_header(block.sealed_block().sealed_header())
-                {
-                    Ok(evm_env) => evm_env,
-                    Err(err) => {
-                        tracing::warn!(target: "rpc::debug", %number, %err, "Failed to configure chain tracing block");
-                        break
-                    }
-                };
                 let permit = tokio::select! {
                     _ = sink.closed() => break,
                     permit = this.acquire_trace_permit() => match permit {
@@ -1047,10 +1038,7 @@ where
                 if sink.is_closed() {
                     break
                 }
-                let traces = match this
-                    .trace_chain_block(block.clone(), evm_env, opts.clone())
-                    .await
-                {
+                let traces = match this.trace_chain_block(block.clone(), opts.clone()).await {
                     Ok(traces) => traces,
                     Err(err) => {
                         tracing::warn!(target: "rpc::debug", %number, %err, "Failed to trace chain block");
@@ -1083,8 +1071,9 @@ where
                 }
             }
 
-            // Geth keeps the finite trace subscription registered until the client explicitly
-            // unsubscribes or disconnects.
+            // Dropping jsonrpsee's final sink unregisters the subscription without notifying the
+            // client that this finite stream completed. Retain it so the subscription remains
+            // explicitly unsubscribable until the client unsubscribes or disconnects.
             sink.closed().await;
         });
 
