@@ -12,12 +12,11 @@ use alloy_rpc_types_trace::{
 };
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
-use reth_primitives_traits::TxTy;
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
-    FullEthApiTypes, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
+    FullEthApiTypes, RpcBlock, RpcFilledTransaction, RpcHeader, RpcReceipt, RpcTransaction,
 };
 use reth_rpc_eth_types::{utils::binary_search, EthApiError};
 use reth_rpc_server_types::result::internal_rpc_err;
@@ -74,7 +73,7 @@ where
             RpcBlock<Eth::NetworkTypes>,
             RpcReceipt<Eth::NetworkTypes>,
             RpcHeader<Eth::NetworkTypes>,
-            TxTy<Eth::Primitives>,
+            RpcFilledTransaction,
         > + EthTransactions
         + TraceExt
         + 'static,
