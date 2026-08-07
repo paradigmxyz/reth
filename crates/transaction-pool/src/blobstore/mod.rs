@@ -2,7 +2,7 @@
 
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
-    eip7594::{BlobCellMask, BlobTransactionSidecarVariant, Cell},
+    eip7594::{BlobCellMask, BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant, Cell},
 };
 use alloy_primitives::{TxHash, B128, B256};
 pub use converter::BlobSidecarConverter;
@@ -70,6 +70,51 @@ impl Eq for BlobCellAvailability {}
 pub struct PooledBlobSidecar {
     sidecar: BlobTransactionSidecarVariant,
     availability: BlobCellAvailability,
+}
+
+/// Selects the sidecar representation returned by a blob store read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlobStoreGetMode {
+    /// Return the complete sidecar, including blob payloads.
+    Full,
+    /// Return a payload-elided sidecar while retaining commitments and proofs.
+    ///
+    /// This is the representation required by eth/72 `PooledTransactions` responses. For both
+    /// EIP-4844 and EIP-7594 sidecars, only the blob payload vector is removed; commitments and
+    /// KZG/cell proofs are retained.
+    Sparse,
+}
+
+impl BlobStoreGetMode {
+    /// Returns the sidecar in the requested read representation without modifying the stored
+    /// sidecar.
+    pub fn sidecar(
+        &self,
+        sidecar: &BlobTransactionSidecarVariant,
+    ) -> BlobTransactionSidecarVariant {
+        if matches!(self, Self::Full) {
+            return sidecar.clone();
+        }
+
+        match sidecar {
+            BlobTransactionSidecarVariant::Eip4844(sidecar) => {
+                BlobTransactionSidecarVariant::Eip4844(
+                    alloy_eips::eip4844::BlobTransactionSidecar {
+                        blobs: Vec::new(),
+                        commitments: sidecar.commitments.clone(),
+                        proofs: sidecar.proofs.clone(),
+                    },
+                )
+            }
+            BlobTransactionSidecarVariant::Eip7594(sidecar) => {
+                BlobTransactionSidecarVariant::Eip7594(BlobTransactionSidecarEip7594::new(
+                    Vec::new(),
+                    sidecar.commitments.clone(),
+                    sidecar.cell_proofs.clone(),
+                ))
+            }
+        }
+    }
 }
 
 impl PooledBlobSidecar {
@@ -146,6 +191,19 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     /// Retrieves the decoded blob data for the given transaction hash.
     fn get(&self, tx: B256) -> Result<Option<Arc<BlobTransactionSidecarVariant>>, BlobStoreError>;
 
+    /// Retrieves the blob data in the requested representation.
+    ///
+    /// The default implementation reads the complete sidecar and derives a response copy. Blob
+    /// store implementations can override this later when sparse storage makes payload elision
+    /// possible without reading the full blob data.
+    fn get_with_mode(
+        &self,
+        tx: B256,
+        mode: BlobStoreGetMode,
+    ) -> Result<Option<Arc<BlobTransactionSidecarVariant>>, BlobStoreError> {
+        self.get(tx).map(|sidecar| sidecar.map(|sidecar| Arc::new(mode.sidecar(sidecar.as_ref()))))
+    }
+
     /// Checks if the given transaction hash is in the blob store.
     fn contains(&self, tx: B256) -> Result<bool, BlobStoreError>;
 
@@ -159,6 +217,24 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
         &self,
         txs: Vec<B256>,
     ) -> Result<Vec<(B256, Arc<BlobTransactionSidecarVariant>)>, BlobStoreError>;
+
+    /// Retrieves all requested blob data in the requested representation.
+    ///
+    /// The returned entries retain the existing store behavior: missing transactions are omitted
+    /// and the result follows the order in which the underlying `get_all` implementation returns
+    /// entries.
+    fn get_all_with_mode(
+        &self,
+        txs: Vec<B256>,
+        mode: BlobStoreGetMode,
+    ) -> Result<Vec<(B256, Arc<BlobTransactionSidecarVariant>)>, BlobStoreError> {
+        self.get_all(txs).map(|sidecars| {
+            sidecars
+                .into_iter()
+                .map(|(tx, sidecar)| (tx, Arc::new(mode.sidecar(sidecar.as_ref()))))
+                .collect()
+        })
+    }
 
     /// Returns the exact [`BlobTransactionSidecarVariant`] for the given transaction hashes in the
     /// exact order they were requested.
@@ -329,7 +405,10 @@ pub struct BlobStoreCleanupStat {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::{eip4844::BlobTransactionSidecar, eip7594::BlobTransactionSidecarEip7594};
+    use alloy_eips::{
+        eip4844::{Blob, BlobTransactionSidecar, Bytes48},
+        eip7594::BlobTransactionSidecarEip7594,
+    };
 
     #[expect(dead_code)]
     struct DynStore {
@@ -346,6 +425,31 @@ mod tests {
         for sidecar in sidecars {
             assert!(PooledBlobSidecar::from(sidecar).availability().is_full());
         }
+    }
+
+    #[test]
+    fn sparse_blob_store_mode_elides_only_payloads() {
+        let sidecar = BlobTransactionSidecarVariant::Eip7594(BlobTransactionSidecarEip7594::new(
+            vec![Blob::repeat_byte(1)],
+            vec![Bytes48::repeat_byte(2)],
+            vec![Bytes48::repeat_byte(3)],
+        ));
+
+        let sparse = BlobStoreGetMode::Sparse.sidecar(&sidecar);
+        let full = BlobStoreGetMode::Full.sidecar(&sidecar);
+
+        assert_eq!(full, sidecar);
+        assert_eq!(sidecar.blobs().len(), 1);
+        assert!(sparse.blobs().is_empty());
+        assert_eq!(
+            sparse.as_eip7594().unwrap().commitments,
+            sidecar.as_eip7594().unwrap().commitments
+        );
+        assert_eq!(
+            sparse.as_eip7594().unwrap().cell_proofs,
+            sidecar.as_eip7594().unwrap().cell_proofs
+        );
+        assert_eq!(sidecar.blobs().len(), 1);
     }
 
     #[test]

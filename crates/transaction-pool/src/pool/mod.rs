@@ -66,7 +66,7 @@
 //!    category (2.) and become pending.
 
 use crate::{
-    blobstore::{BlobStore, PooledBlobSidecar},
+    blobstore::{BlobStore, BlobStoreGetMode, PooledBlobSidecar},
     error::{PoolError, PoolErrorKind, PoolResult},
     identifier::{SenderId, SenderIdentifiers, TransactionId},
     metrics::BlobStoreMetrics,
@@ -93,10 +93,10 @@ use alloy_primitives::{
     Address, TxHash, B256,
 };
 use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
-use reth_eth_wire_types::HandleMempoolData;
+use reth_eth_wire_types::{EthVersion, HandleMempoolData};
 use reth_execution_types::ChangedAccount;
 
-use alloy_eips::{eip7594::BlobTransactionSidecarVariant, Typed2718};
+use alloy_eips::{eip7594::BlobTransactionSidecarVariant, Encodable2718, Typed2718};
 use reth_primitives_traits::Recovered;
 use rustc_hash::FxHashMap;
 use std::{
@@ -413,15 +413,49 @@ where
     ) where
         <V as TransactionValidator>::Transaction: EthPoolTransaction,
     {
+        self.append_pooled_transaction_elements_with_mode(
+            tx_hashes,
+            limit,
+            BlobStoreGetMode::Full,
+            out,
+        );
+    }
+
+    /// Extends the given vector with pooled transactions prepared for the negotiated eth version.
+    pub fn append_pooled_transaction_elements_for_version(
+        &self,
+        tx_hashes: &[TxHash],
+        limit: GetPooledTransactionLimit,
+        version: EthVersion,
+        out: &mut Vec<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>,
+    ) where
+        <V as TransactionValidator>::Transaction: EthPoolTransaction,
+    {
+        let mode = if version >= EthVersion::Eth72 {
+            BlobStoreGetMode::Sparse
+        } else {
+            BlobStoreGetMode::Full
+        };
+        self.append_pooled_transaction_elements_with_mode(tx_hashes, limit, mode, out);
+    }
+
+    fn append_pooled_transaction_elements_with_mode(
+        &self,
+        tx_hashes: &[TxHash],
+        limit: GetPooledTransactionLimit,
+        mode: BlobStoreGetMode,
+        out: &mut Vec<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>,
+    ) where
+        <V as TransactionValidator>::Transaction: EthPoolTransaction,
+    {
         let transactions = self.get_all_propagatable(tx_hashes);
         let mut size = 0;
         for transaction in transactions {
-            let encoded_len = transaction.encoded_length();
-            let Some(pooled) = self.to_pooled_transaction(transaction) else {
+            let Some(pooled) = self.to_pooled_transaction_with_mode(transaction, mode) else {
                 continue;
             };
 
-            size += encoded_len;
+            size += pooled.encode_2718_len();
             out.push(pooled.into_inner());
 
             if limit.exceeds(size) {
@@ -484,8 +518,19 @@ where
     where
         <V as TransactionValidator>::Transaction: EthPoolTransaction,
     {
+        self.to_pooled_transaction_with_mode(transaction, BlobStoreGetMode::Full)
+    }
+
+    fn to_pooled_transaction_with_mode(
+        &self,
+        transaction: Arc<ValidPoolTransaction<T::Transaction>>,
+        mode: BlobStoreGetMode,
+    ) -> Option<Recovered<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>>
+    where
+        <V as TransactionValidator>::Transaction: EthPoolTransaction,
+    {
         if transaction.is_eip4844() {
-            let sidecar = self.blob_store.get(*transaction.hash()).ok()??;
+            let sidecar = self.blob_store.get_with_mode(*transaction.hash(), mode).ok()??;
             transaction.transaction.clone().try_into_pooled_eip4844(sidecar)
         } else {
             transaction
@@ -513,6 +558,27 @@ where
     {
         let mut elements = Vec::new();
         self.append_pooled_transaction_elements(&tx_hashes, limit, &mut elements);
+        elements.shrink_to_fit();
+        elements
+    }
+
+    /// Returns pooled transactions prepared for the negotiated eth protocol version.
+    pub fn get_pooled_transaction_elements_for_version(
+        &self,
+        tx_hashes: Vec<TxHash>,
+        limit: GetPooledTransactionLimit,
+        version: EthVersion,
+    ) -> Vec<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>
+    where
+        <V as TransactionValidator>::Transaction: EthPoolTransaction,
+    {
+        let mut elements = Vec::new();
+        self.append_pooled_transaction_elements_for_version(
+            &tx_hashes,
+            limit,
+            version,
+            &mut elements,
+        );
         elements.shrink_to_fit();
         elements
     }
@@ -1670,10 +1736,17 @@ mod tests {
         identifier::SenderId,
         test_utils::{MockTransaction, TestPoolBuilder},
         validate::ValidTransaction,
-        BlockInfo, PoolConfig, SubPoolLimit, TransactionOrigin, TransactionValidationOutcome, U256,
+        BlockInfo, GetPooledTransactionLimit, PoolConfig, SubPoolLimit, TransactionOrigin,
+        TransactionValidationOutcome, U256,
     };
-    use alloy_eips::{eip4844::BlobTransactionSidecar, eip7594::BlobTransactionSidecarVariant};
-    use alloy_primitives::Address;
+    use alloy_consensus::transaction::TxHashRef;
+    use alloy_eips::{
+        eip4844::{Blob, BlobTransactionSidecar, Bytes48},
+        eip7594::{BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant},
+        Encodable2718,
+    };
+    use alloy_primitives::{Address, B256};
+    use reth_eth_wire_types::EthVersion;
     use std::{fs, path::PathBuf};
 
     #[test]
@@ -1759,6 +1832,96 @@ mod tests {
 
         // Assert that the pool's blob store matches the expected blob store.
         assert_eq!(*test_pool.blob_store(), blob_store);
+    }
+
+    #[test]
+    fn version_aware_pooled_transactions_elide_blob_payloads() {
+        let sidecar = BlobTransactionSidecarVariant::Eip7594(BlobTransactionSidecarEip7594::new(
+            vec![Blob::repeat_byte(1)],
+            vec![Bytes48::repeat_byte(2)],
+            vec![Bytes48::repeat_byte(3)],
+        ));
+        let blob_tx = MockTransaction::eip4844_with_sidecar(sidecar.clone());
+        let blob_hash = *blob_tx.get_hash();
+        let legacy_tx = MockTransaction::legacy();
+        let legacy_hash = *legacy_tx.get_hash();
+        let test_pool = &TestPoolBuilder::default().pool;
+
+        test_pool.add_transactions(
+            TransactionOrigin::External,
+            [
+                TransactionValidationOutcome::Valid {
+                    balance: U256::from(1_000),
+                    state_nonce: 0,
+                    bytecode_hash: None,
+                    transaction: ValidTransaction::ValidWithSidecar {
+                        transaction: blob_tx,
+                        sidecar: PooledBlobSidecar::from(sidecar.clone()),
+                    },
+                    propagate: true,
+                    authorities: None,
+                },
+                TransactionValidationOutcome::Valid {
+                    balance: U256::from(1_000),
+                    state_nonce: 0,
+                    bytecode_hash: None,
+                    transaction: ValidTransaction::Valid(legacy_tx),
+                    propagate: true,
+                    authorities: None,
+                },
+            ],
+        );
+
+        let requested = vec![blob_hash, legacy_hash, B256::repeat_byte(9), legacy_hash];
+        let full = test_pool.get_pooled_transaction_elements_for_version(
+            requested.clone(),
+            GetPooledTransactionLimit::None,
+            EthVersion::Eth71,
+        );
+        let sparse = test_pool.get_pooled_transaction_elements_for_version(
+            requested,
+            GetPooledTransactionLimit::None,
+            EthVersion::Eth72,
+        );
+
+        assert_eq!(full.len(), 3);
+        assert_eq!(sparse.len(), 3);
+        assert_eq!(
+            full.iter().map(|tx| *tx.tx_hash()).collect::<Vec<_>>(),
+            sparse.iter().map(|tx| *tx.tx_hash()).collect::<Vec<_>>()
+        );
+
+        let full_blob = full[0].as_eip4844().unwrap().tx().sidecar().unwrap();
+        let sparse_blob = sparse[0].as_eip4844().unwrap().tx().sidecar().unwrap();
+        assert_eq!(full_blob.blobs().len(), 1);
+        assert!(sparse_blob.blobs().is_empty());
+        assert_eq!(
+            sparse_blob.as_eip7594().unwrap().commitments,
+            sidecar.as_eip7594().unwrap().commitments
+        );
+        assert_eq!(
+            sparse_blob.as_eip7594().unwrap().cell_proofs,
+            sidecar.as_eip7594().unwrap().cell_proofs
+        );
+
+        let stored = test_pool.blob_store().get(blob_hash).unwrap().unwrap();
+        assert_eq!(stored.blobs().len(), 1);
+
+        let sparse_blob_size = sparse[0].encode_2718_len();
+        let legacy_size = sparse[1].encode_2718_len();
+        let limited_sparse = test_pool.get_pooled_transaction_elements_for_version(
+            vec![blob_hash, legacy_hash],
+            GetPooledTransactionLimit::ResponseSizeSoftLimit(sparse_blob_size + legacy_size),
+            EthVersion::Eth72,
+        );
+        let limited_full = test_pool.get_pooled_transaction_elements_for_version(
+            vec![blob_hash, legacy_hash],
+            GetPooledTransactionLimit::ResponseSizeSoftLimit(sparse_blob_size + legacy_size),
+            EthVersion::Eth71,
+        );
+
+        assert_eq!(limited_sparse.len(), 2);
+        assert_eq!(limited_full.len(), 1);
     }
 
     #[test]
