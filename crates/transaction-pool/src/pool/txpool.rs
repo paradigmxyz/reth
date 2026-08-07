@@ -1555,7 +1555,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                     tx.state.insert(TxState::NO_NONCE_GAPS);
                     tx.state.insert(TxState::NO_PARKED_ANCESTORS);
                     tx.cumulative_cost = U256::ZERO;
-                    if tx.transaction.cost() > &info.balance {
+                    if *tx.transaction.cost() + tx.transaction.extra_balance_cost() > info.balance {
                         // sender lacks sufficient funds to pay for this transaction
                         tx.state.remove(TxState::ENOUGH_BALANCE);
                     } else {
@@ -1905,7 +1905,9 @@ impl<T: PoolTransaction> AllTransactions<T> {
             }
 
             // the max cost executing this transaction requires
-            let mut cumulative_cost = ancestor_tx.next_cumulative_cost() + new_blob_tx.cost();
+            let mut cumulative_cost = ancestor_tx.next_cumulative_cost() +
+                new_blob_tx.cost() +
+                new_blob_tx.extra_balance_cost();
 
             // check if the new blob would go into overdraft
             if cumulative_cost > on_chain_balance {
@@ -1925,14 +1927,14 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
                 // check if any of descendant blob transactions should be shifted into overdraft
                 for (_, tx) in descendants {
-                    cumulative_cost += tx.transaction.cost();
+                    cumulative_cost += *tx.transaction.cost() + tx.transaction.extra_balance_cost();
                     if tx.transaction.is_eip4844() && cumulative_cost > on_chain_balance {
                         // the transaction would shift
                         return Err(InsertErr::Overdraft { transaction: Arc::new(new_blob_tx) })
                     }
                 }
             }
-        } else if new_blob_tx.cost() > &on_chain_balance {
+        } else if *new_blob_tx.cost() + new_blob_tx.extra_balance_cost() > on_chain_balance {
             // the transaction would go into overdraft
             return Err(InsertErr::Overdraft { transaction: Arc::new(new_blob_tx) })
         }
@@ -2333,7 +2335,7 @@ pub(crate) struct PoolInternalTransaction<T: PoolTransaction> {
 
 impl<T: PoolTransaction> PoolInternalTransaction<T> {
     fn next_cumulative_cost(&self) -> U256 {
-        self.cumulative_cost + self.transaction.cost()
+        self.cumulative_cost + self.transaction.cost() + self.transaction.extra_balance_cost()
     }
 }
 
