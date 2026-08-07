@@ -13,13 +13,14 @@ use crate::{
     },
     AccountReader, BlockBodyWriter, BlockExecutionWriter, BlockHashReader, BlockNumReader,
     BlockReader, BlockWriter, BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter,
-    DBProvider, EitherReader, EitherWriter, EitherWriterDestination, HashingWriter, HeaderProvider,
-    HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter,
-    LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, PersistenceFrontiers,
-    ProviderError, PruneCheckpointReader, PruneCheckpointWriter, RawRocksDBBatch, RevertsInit,
-    RocksBatchArg, RocksDBProviderFactory, StageCheckpointReader, StateProviderBox, StateWriter,
-    StaticFileProviderFactory, StatsReader, StorageReader, StorageTrieWriter, TransactionVariant,
-    TransactionsProvider, TransactionsProviderExt, TrieWriter,
+    DBProvider, DbTxProvider, EitherReader, EitherWriter, EitherWriterDestination, HashingWriter,
+    HeaderProvider, HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef,
+    HistoryWriter, LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown,
+    PersistenceFrontiers, ProviderError, PruneCheckpointReader, PruneCheckpointWriter,
+    RawRocksDBBatch, RevertsInit, RocksBatchArg, RocksDBProviderFactory, StageCheckpointReader,
+    StateProviderBox, StateWriter, StaticFileProviderFactory, StatsReader, StorageReader,
+    StorageTrieWriter, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
+    TrieWriter,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
@@ -3980,13 +3981,15 @@ impl<TX: DbTxMut, N: NodeTypes> ChainStateBlockWriter for DatabaseProvider<TX, N
     }
 }
 
-impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider<TX, N> {
+impl<TX: DbTx + 'static, N: NodeTypes + 'static> DbTxProvider for DatabaseProvider<TX, N> {
     type Tx = TX;
 
-    fn tx_ref(&self) -> &Self::Tx {
+    fn tx(&self) -> &Self::Tx {
         &self.tx
     }
+}
 
+impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider<TX, N> {
     fn tx_mut(&mut self) -> &mut Self::Tx {
         &mut self.tx
     }
