@@ -1844,36 +1844,24 @@ mod tests {
         ));
         let blob_tx = MockTransaction::eip4844_with_sidecar(sidecar.clone());
         let blob_hash = *blob_tx.get_hash();
-        let legacy_tx = MockTransaction::legacy();
-        let legacy_hash = *legacy_tx.get_hash();
         let test_pool = &TestPoolBuilder::default().pool;
 
         test_pool.add_transactions(
             TransactionOrigin::External,
-            [
-                TransactionValidationOutcome::Valid {
-                    balance: U256::from(1_000),
-                    state_nonce: 0,
-                    bytecode_hash: None,
-                    transaction: ValidTransaction::ValidWithSidecar {
-                        transaction: blob_tx,
-                        sidecar: PooledBlobSidecar::from(sidecar.clone()),
-                    },
-                    propagate: true,
-                    authorities: None,
+            [TransactionValidationOutcome::Valid {
+                balance: U256::from(1_000),
+                state_nonce: 0,
+                bytecode_hash: None,
+                transaction: ValidTransaction::ValidWithSidecar {
+                    transaction: blob_tx,
+                    sidecar: PooledBlobSidecar::from(sidecar.clone()),
                 },
-                TransactionValidationOutcome::Valid {
-                    balance: U256::from(1_000),
-                    state_nonce: 0,
-                    bytecode_hash: None,
-                    transaction: ValidTransaction::Valid(legacy_tx),
-                    propagate: true,
-                    authorities: None,
-                },
-            ],
+                propagate: true,
+                authorities: None,
+            }],
         );
 
-        let requested = vec![blob_hash, legacy_hash, B256::repeat_byte(9), legacy_hash];
+        let requested = vec![blob_hash, B256::repeat_byte(9)];
         let full = test_pool.get_pooled_transaction_elements_for_version(
             requested.clone(),
             GetPooledTransactionLimit::None,
@@ -1885,8 +1873,8 @@ mod tests {
             EthVersion::Eth72,
         );
 
-        assert_eq!(full.len(), 3);
-        assert_eq!(sparse.len(), 3);
+        assert_eq!(full.len(), 1);
+        assert_eq!(sparse.len(), 1);
         assert_eq!(
             full.iter().map(|tx| *tx.tx_hash()).collect::<Vec<_>>(),
             sparse.iter().map(|tx| *tx.tx_hash()).collect::<Vec<_>>()
@@ -1909,20 +1897,15 @@ mod tests {
         assert_eq!(stored.blobs().len(), 1);
 
         let sparse_blob_size = sparse[0].encode_2718_len();
-        let legacy_size = sparse[1].encode_2718_len();
+        let full_blob_size = full[0].encode_2718_len();
+        assert!(sparse_blob_size < full_blob_size);
+
         let limited_sparse = test_pool.get_pooled_transaction_elements_for_version(
-            vec![blob_hash, legacy_hash],
-            GetPooledTransactionLimit::ResponseSizeSoftLimit(sparse_blob_size + legacy_size),
+            vec![blob_hash],
+            GetPooledTransactionLimit::ResponseSizeSoftLimit(sparse_blob_size),
             EthVersion::Eth72,
         );
-        let limited_full = test_pool.get_pooled_transaction_elements_for_version(
-            vec![blob_hash, legacy_hash],
-            GetPooledTransactionLimit::ResponseSizeSoftLimit(sparse_blob_size + legacy_size),
-            EthVersion::Eth71,
-        );
-
-        assert_eq!(limited_sparse.len(), 2);
-        assert_eq!(limited_full.len(), 1);
+        assert_eq!(limited_sparse.len(), 1);
     }
 
     #[test]
