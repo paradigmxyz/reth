@@ -1034,7 +1034,7 @@ impl DedupPayload for NewPooledTransactionHashes72 {
     }
 
     fn dedup(self) -> PartiallyValidData<Self::Value> {
-        let Self { hashes, mut sizes, mut types, .. } = self;
+        let Self { hashes, mut sizes, mut types, cell_mask } = self;
 
         let mut deduped_data = B256Map::with_capacity_and_hasher(hashes.len(), Default::default());
 
@@ -1044,7 +1044,7 @@ impl DedupPayload for NewPooledTransactionHashes72 {
             }
         }
 
-        PartiallyValidData::from_raw_data_eth72(deduped_data)
+        PartiallyValidData::from_raw_data_eth72_with_cell_mask(deduped_data, cell_mask)
     }
 }
 
@@ -1161,6 +1161,8 @@ pub struct PartiallyValidData<V> {
     #[into_iterator]
     data: B256Map<V>,
     version: Option<EthVersion>,
+    /// The eth/72 message-level cell mask, if present.
+    cell_mask: Option<B128>,
 }
 
 handle_mempool_data_map_impl!(PartiallyValidData<V>, <V>);
@@ -1168,12 +1170,20 @@ handle_mempool_data_map_impl!(PartiallyValidData<V>, <V>);
 impl<V> PartiallyValidData<V> {
     /// Wraps raw data.
     pub const fn from_raw_data(data: B256Map<V>, version: Option<EthVersion>) -> Self {
-        Self { data, version }
+        Self { data, version, cell_mask: None }
     }
 
     /// Wraps raw data with version [`EthVersion::Eth72`].
     pub const fn from_raw_data_eth72(data: B256Map<V>) -> Self {
         Self::from_raw_data(data, Some(EthVersion::Eth72))
+    }
+
+    /// Wraps raw data with an eth/72 message-level cell mask.
+    pub const fn from_raw_data_eth72_with_cell_mask(
+        data: B256Map<V>,
+        cell_mask: Option<B128>,
+    ) -> Self {
+        Self { data, version: Some(EthVersion::Eth72), cell_mask }
     }
 
     /// Wraps raw data with version [`EthVersion::Eth68`].
@@ -1210,6 +1220,11 @@ impl<V> PartiallyValidData<V> {
         self.version
     }
 
+    /// Returns the eth/72 message-level cell mask, if present.
+    pub const fn eth72_cell_mask(&self) -> Option<B128> {
+        self.cell_mask
+    }
+
     /// Destructs returning the validated data.
     pub fn into_data(self) -> B256Map<V> {
         self.data
@@ -1225,6 +1240,8 @@ pub struct ValidAnnouncementData {
     #[into_iterator]
     data: B256Map<Eth68TxMetadata>,
     version: EthVersion,
+    /// The eth/72 message-level cell mask, if present.
+    cell_mask: Option<B128>,
 }
 
 handle_mempool_data_map_impl!(ValidAnnouncementData,);
@@ -1242,11 +1259,16 @@ impl ValidAnnouncementData {
     /// from an announcement, should have some [`EthVersion`]. Panics if [`PartiallyValidData`] has
     /// version set to `None`.
     pub fn from_partially_valid_data(data: PartiallyValidData<Eth68TxMetadata>) -> Self {
-        let PartiallyValidData { data, version } = data;
+        let PartiallyValidData { data, version, cell_mask } = data;
 
         let version = version.expect("should have eth version for conversion");
 
-        Self { data, version }
+        Self { data, version, cell_mask }
+    }
+
+    /// Returns the eth/72 message-level cell mask, if present.
+    pub const fn eth72_cell_mask(&self) -> Option<B128> {
+        self.cell_mask
     }
 
     /// Destructs returning the validated data.
@@ -1668,6 +1690,23 @@ mod tests {
         let result = NewPooledTransactionHashes72::decode(&mut encoded_eth68_payload.as_ref());
 
         assert!(matches!(result, Err(alloy_rlp::Error::InputTooShort)));
+    }
+
+    #[test]
+    fn eth_72_dedup_preserves_message_cell_mask() {
+        let cell_mask = Some(B128::repeat_byte(0x11));
+        let announcement = NewPooledTransactionHashes72 {
+            types: vec![3],
+            sizes: vec![128],
+            hashes: vec![B256::from([1u8; 32])],
+            cell_mask,
+        };
+
+        let partially_valid = announcement.dedup();
+        assert_eq!(partially_valid.eth72_cell_mask(), cell_mask);
+
+        let valid = ValidAnnouncementData::from_partially_valid_data(partially_valid);
+        assert_eq!(valid.eth72_cell_mask(), cell_mask);
     }
 
     #[test]
