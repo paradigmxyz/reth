@@ -119,8 +119,7 @@ impl TrieTestHarness {
             prefix_set.insert(Nibbles::unpack(hashed_slot));
         }
 
-        let hashed_storage =
-            HashedStorage::from_iter(false, changeset.iter().map(|(&k, &v)| (k, v)));
+        let hashed_storage = HashedStorage::from_iter(changeset.iter().map(|(&k, &v)| (k, v)));
         let overlay = HashedPostStateSorted::new(
             Vec::new(),
             once((self.hashed_address(), hashed_storage.into_sorted())).collect(),
