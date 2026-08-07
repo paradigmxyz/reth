@@ -206,6 +206,19 @@ pub trait EthState: LoadState + SpawnBlocking {
                 .map_err(RethError::other)
                 .map_err(EthApiError::Internal)?;
 
+            // Proof generation is far costlier per slot than a plain storage
+            // read, so the sibling cap in `storage_values` applies here with
+            // more force: an unbounded target list lets one request drive
+            // unbounded trie work.
+            let total_slots: usize = targets.iter().map(|(_, slots)| slots.len()).sum();
+            if total_slots > DEFAULT_MAX_STORAGE_VALUES_SLOTS {
+                return Err(Self::Error::from_eth_err(EthApiError::InvalidParams(
+                    format!(
+                        "total slot count {total_slots} exceeds limit {DEFAULT_MAX_STORAGE_VALUES_SLOTS}",
+                    ),
+                )));
+            }
+
             let block_id = block_id.unwrap_or_default();
             self.ensure_within_proof_window(block_id)?;
 
