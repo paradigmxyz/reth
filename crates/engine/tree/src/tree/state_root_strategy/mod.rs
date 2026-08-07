@@ -505,15 +505,10 @@ impl fmt::Debug for DefaultStateRootStrategy {
 }
 
 impl DefaultStateRootStrategy {
-    /// Transaction count threshold below which proof workers are halved, since fewer transactions
-    /// produce fewer state changes and most workers would be idle overhead.
-    const SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD: usize = 30;
-
     /// Spawns the default state-root computation pipeline.
     ///
     /// The authoritative update capability taken from the returned handle must be dropped or
     /// explicitly finished after execution so the task observes the end of the update stream.
-    /// An unknown transaction count uses the full proof-worker pool.
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_state_root<N, F>(
         &self,
@@ -533,7 +528,6 @@ impl DefaultStateRootStrategy {
         let StateRootTaskOptions {
             parent_header,
             preserved_sparse_trie,
-            transaction_count,
             config,
             pending_sparse_trie_prune_blocks,
         } = options;
@@ -545,10 +539,7 @@ impl DefaultStateRootStrategy {
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
         #[cfg(feature = "trie-debug")]
         let task_ctx = task_ctx.with_proof_jitter(config.proof_jitter());
-        let halve_workers = transaction_count
-            .is_some_and(|count| count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD);
-        let proof_handle =
-            ProofWorkerHandle::new(executor, task_ctx, halve_workers, proof_result_tx.clone());
+        let proof_handle = ProofWorkerHandle::new(executor, task_ctx, proof_result_tx.clone());
 
         let (state_root_tx, state_root_rx) = mpsc::channel();
         let (hashed_state_tx, hashed_state_rx) = mpsc::channel();
@@ -772,7 +763,6 @@ struct SparseTrieTaskOptions<N: NodePrimitives> {
 struct StateRootTaskOptions<'a, N: NodePrimitives> {
     parent_header: SealedHeader<N::BlockHeader>,
     preserved_sparse_trie: Option<PreservedSparseTrie>,
-    transaction_count: Option<usize>,
     config: &'a TreeConfig,
     pending_sparse_trie_prune_blocks: Option<Vec<ExecutedBlock<N>>>,
 }
@@ -877,7 +867,6 @@ where
             StateRootTaskOptions {
                 parent_header: parent_header.clone(),
                 preserved_sparse_trie,
-                transaction_count: Some(env.transaction_count),
                 config,
                 pending_sparse_trie_prune_blocks,
             },
@@ -954,7 +943,6 @@ where
                     parent_header,
                     preserved_sparse_trie,
                     // Tx count unknown at FCU time (block built incrementally): full proof workers.
-                    transaction_count: None,
                     config: ctx.config,
                     pending_sparse_trie_prune_blocks,
                 },
@@ -1348,7 +1336,6 @@ mod tests {
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_evm::OnStateHook;
-    use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
@@ -1506,7 +1493,6 @@ mod tests {
         }
 
         let provider_factory = BlockchainProvider::new(factory).unwrap();
-        let env: ExecutionEnv<EthEvmConfig> = ExecutionEnv::test_default();
         let runtime = reth_tasks::Runtime::test();
         let overlay_manager = OverlayManager::<EthPrimitives>::default();
         let mut state_root_handle = DefaultStateRootStrategy::default().spawn_state_root(
@@ -1519,7 +1505,6 @@ mod tests {
             StateRootTaskOptions {
                 parent_header: SealedHeader::new(Default::default(), genesis_hash),
                 preserved_sparse_trie: None,
-                transaction_count: Some(env.transaction_count),
                 config: &TreeConfig::default(),
                 pending_sparse_trie_prune_blocks: None,
             },
