@@ -14,6 +14,8 @@ use std::{
 };
 use tokio::sync::{mpsc, oneshot};
 
+type BatchTxResponse = oneshot::Sender<Result<AddedTransactionOutcome, PoolError>>;
+
 /// A single batch transaction request
 #[derive(Debug)]
 pub struct BatchTxRequest<T: PoolTransaction> {
@@ -22,7 +24,7 @@ pub struct BatchTxRequest<T: PoolTransaction> {
     /// Tx to be inserted in to the pool
     pool_tx: T,
     /// Channel to send result back to caller
-    response_tx: oneshot::Sender<Result<AddedTransactionOutcome, PoolError>>,
+    response_tx: BatchTxResponse,
 }
 
 impl<T> BatchTxRequest<T>
@@ -30,11 +32,7 @@ where
     T: PoolTransaction,
 {
     /// Create a new batch transaction request
-    pub const fn new(
-        origin: TransactionOrigin,
-        pool_tx: T,
-        response_tx: oneshot::Sender<Result<AddedTransactionOutcome, PoolError>>,
-    ) -> Self {
+    pub const fn new(origin: TransactionOrigin, pool_tx: T, response_tx: BatchTxResponse) -> Self {
         Self { origin, pool_tx, response_tx }
     }
 }
@@ -71,7 +69,6 @@ where
         let pool_result = pool.add_transaction(origin, pool_tx).await;
         let _ = response_tx.send(pool_result);
     }
-
     /// Process a batch of transaction requests with per-transaction origins
     async fn process_batch(pool: &Pool, batch: Vec<BatchTxRequest<Pool::Transaction>>) {
         if batch.len() == 1 {
@@ -85,20 +82,55 @@ where
         if let Some(origin) = batch_iter.next().map(|req| req.origin) &&
             batch_iter.all(|req| req.origin == origin)
         {
-            let (transactions, response_txs): (Vec<_>, Vec<_>) =
-                batch.into_iter().map(|req| (req.pool_tx, req.response_tx)).unzip();
+            let mut response_txs: Vec<BatchTxResponse> = Vec::with_capacity(batch.len());
+            let transactions = batch.into_iter().map(|req| {
+                let len = response_txs.len();
+                debug_assert!(len < response_txs.capacity());
+                // SAFETY: `response_txs` was allocated with capacity `batch.len()`, and this
+                // closure runs at most once for each request in the batch. The length is updated
+                // only after writing the initialized response sender.
+                unsafe {
+                    response_txs.as_mut_ptr().add(len).write(req.response_tx);
+                    response_txs.set_len(len + 1);
+                }
+                req.pool_tx
+            });
 
-            let pool_results = pool.add_transactions(origin, transactions).await;
+            let pool_results = pool.add_transactions_iter(origin, transactions).await;
             for (response_tx, pool_result) in response_txs.into_iter().zip(pool_results) {
                 let _ = response_tx.send(pool_result);
             }
             return
         }
 
-        let (transactions, response_txs): (Vec<_>, Vec<_>) =
-            batch.into_iter().map(|req| ((req.origin, req.pool_tx), req.response_tx)).unzip();
+        let mut origins: Vec<TransactionOrigin> = Vec::with_capacity(batch.len());
+        for req in &batch {
+            let len = origins.len();
+            debug_assert!(len < origins.capacity());
+            // SAFETY: `origins` was allocated with capacity `batch.len()`, and this loop writes one
+            // origin for each request in the batch. The length is updated only after writing the
+            // initialized origin.
+            unsafe {
+                origins.as_mut_ptr().add(len).write(req.origin);
+                origins.set_len(len + 1);
+            }
+        }
 
-        let pool_results = pool.add_transactions_with_origins(transactions).await;
+        let mut response_txs: Vec<BatchTxResponse> = Vec::with_capacity(batch.len());
+        let transactions = batch.into_iter().map(|req| {
+            let len = response_txs.len();
+            debug_assert!(len < response_txs.capacity());
+            // SAFETY: `response_txs` was allocated with capacity `batch.len()`, and this closure
+            // runs at most once for each request in the batch. The length is updated only after
+            // writing the initialized response sender.
+            unsafe {
+                response_txs.as_mut_ptr().add(len).write(req.response_tx);
+                response_txs.set_len(len + 1);
+            }
+            req.pool_tx
+        });
+
+        let pool_results = pool.add_transactions_with_origins_iter(&origins, transactions).await;
         for (response_tx, pool_result) in response_txs.into_iter().zip(pool_results) {
             let _ = response_tx.send(pool_result);
         }
