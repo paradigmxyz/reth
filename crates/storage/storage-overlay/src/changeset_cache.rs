@@ -404,8 +404,8 @@ impl ChangesetCache {
         let overlay = overlay_manager
             .overlay_builder(finish.hash)
             .with_no_reverts()
-            .build_overlay_at_frontiers(provider, partial_state_trie, finish)?;
-        let state_trie_provider = OverlayStateProvider::new(
+            .build_state_trie_overlay_at_frontiers(provider, partial_state_trie, finish)?;
+        let state_trie_provider = OverlayStateProvider::new_state_trie(
             provider,
             overlay,
             provider.cached_storage_settings().is_v2(),
@@ -618,7 +618,7 @@ impl ChangesetCacheInner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Overlay;
+    use crate::StateTrieOverlay;
     use alloy_consensus::Header;
     use alloy_primitives::{
         keccak256,
@@ -644,8 +644,8 @@ mod tests {
         Arc::new(TrieUpdatesSorted::new(vec![], B256Map::default()))
     }
 
-    fn empty_overlay() -> Overlay {
-        Overlay { trie_updates: Arc::default(), hashed_post_state: Arc::default() }
+    fn empty_overlay() -> StateTrieOverlay {
+        StateTrieOverlay { trie_updates: Arc::default(), hashed_post_state: Arc::default() }
     }
 
     fn insert_test_changesets(
@@ -907,7 +907,7 @@ mod tests {
         reth_trie_db::with_adapter!(provider, |A| seed_tip_trie_tables::<_, A>(&*provider));
 
         let overlay = empty_overlay();
-        let state_trie_provider = OverlayStateProvider::new(
+        let state_trie_provider = OverlayStateProvider::new_state_trie(
             &*provider,
             overlay,
             provider.cached_storage_settings().is_v2(),
@@ -998,7 +998,7 @@ mod tests {
 
         let expected = legacy_compute_range_trie_changesets(&*provider, 2..=3);
         let overlay = empty_overlay();
-        let state_trie_provider = OverlayStateProvider::new(
+        let state_trie_provider = OverlayStateProvider::new_state_trie(
             &*provider,
             overlay,
             provider.cached_storage_settings().is_v2(),
