@@ -1741,7 +1741,9 @@ mod tests {
     };
     use alloy_eips::{
         eip4844::{Blob, BlobTransactionSidecar, Bytes48},
-        eip7594::{BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant},
+        eip7594::{
+            BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant, CELLS_PER_EXT_BLOB,
+        },
         Encodable2718,
     };
     use alloy_primitives::{Address, B256};
@@ -1838,7 +1840,7 @@ mod tests {
         let sidecar = BlobTransactionSidecarVariant::Eip7594(BlobTransactionSidecarEip7594::new(
             vec![Blob::repeat_byte(1)],
             vec![Bytes48::repeat_byte(2)],
-            vec![Bytes48::repeat_byte(3)],
+            vec![Bytes48::repeat_byte(3); CELLS_PER_EXT_BLOB],
         ));
         let blob_tx = MockTransaction::eip4844_with_sidecar(sidecar.clone());
         let blob_hash = *blob_tx.get_hash();
