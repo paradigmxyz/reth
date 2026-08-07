@@ -310,7 +310,7 @@ use alloy_eips::{
 use alloy_primitives::{map::AddressSet, Address, TxHash, B128, B256, U256};
 use aquamarine as _;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
-use reth_eth_wire_types::HandleMempoolData;
+use reth_eth_wire_types::{EthVersion, HandleMempoolData};
 use reth_evm::ConfigureEvm;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_execution_types::ChangedAccount;
@@ -584,6 +584,25 @@ where
         out: &mut Vec<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>,
     ) {
         self.pool.append_pooled_transaction_elements(tx_hashes, limit, out)
+    }
+
+    fn get_pooled_transaction_elements_for_version(
+        &self,
+        tx_hashes: Vec<TxHash>,
+        limit: GetPooledTransactionLimit,
+        version: EthVersion,
+    ) -> Vec<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled> {
+        self.pool.get_pooled_transaction_elements_for_version(tx_hashes, limit, version)
+    }
+
+    fn append_pooled_transaction_elements_for_version(
+        &self,
+        tx_hashes: &[TxHash],
+        limit: GetPooledTransactionLimit,
+        version: EthVersion,
+        out: &mut Vec<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>,
+    ) {
+        self.pool.append_pooled_transaction_elements_for_version(tx_hashes, limit, version, out)
     }
 
     fn get_pooled_transaction_element(
