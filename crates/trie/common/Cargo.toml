@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 # alloy
+alloy-eip7928 = { workspace = true, optional = true }
 alloy-primitives.workspace = true
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
 alloy-trie = { workspace = true, features = ["ethereum"] }
@@ -69,6 +70,7 @@ serde_with.workspace = true
 default = ["std"]
 std = [
     "alloy-consensus/std",
+    "alloy-eip7928?/std",
     "alloy-genesis/std",
     "alloy-primitives/std",
     "alloy-rlp/std",
@@ -88,6 +90,7 @@ std = [
     "alloy-eips/std",
 ]
 eip1186 = ["alloy-rpc-types-eth/serde", "dep:alloy-serde"]
+eip7928 = ["dep:alloy-eip7928"]
 serde = [
     "dep:serde",
     "arrayvec?/serde",
@@ -101,6 +104,7 @@ serde = [
     "reth-codecs?/serde",
     "revm/serde",
     "alloy-eips/serde",
+    "alloy-eip7928?/serde",
 ]
 reth-codec = ["dep:reth-codecs", "dep:bytes", "dep:arrayvec"]
 serde-bincode-compat = [
@@ -132,5 +136,6 @@ arbitrary = [
     "alloy-rpc-types-eth?/arbitrary",
     "alloy-eips/arbitrary",
     "revm/arbitrary",
+    "alloy-eip7928?/arbitrary",
 ]
 rayon = ["dep:rayon"]
