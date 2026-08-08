@@ -378,7 +378,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
             },
             "unscoped_endpoints": ["capabilities", "identity"],
             "limits": {
-                "bodies.max_count": 128,
+                "bodies.max_count": 32,
                 "blobs.max_versioned_hashes": 128,
                 "payload.max_bytes": 67108864,
             },
