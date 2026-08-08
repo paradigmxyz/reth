@@ -38,6 +38,9 @@ pub struct TransactionsManagerConfig {
     /// Which peers we accept incoming transactions or announcements from.
     #[cfg_attr(feature = "serde", serde(default))]
     pub ingress_policy: TransactionIngressPolicy,
+    /// Which peers we serve `GetPooledTransactions` requests for.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub serve_policy: TransactionServePolicy,
     /// Memory limit (in bytes) for the channel that carries
     /// `NetworkTransactionEvent`s from the `NetworkManager` to the `TransactionsManager`.
     ///
@@ -64,6 +67,7 @@ impl Default for TransactionsManagerConfig {
             max_pending_pool_imports: DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
             propagation_mode: TransactionPropagationMode::default(),
             ingress_policy: TransactionIngressPolicy::default(),
+            serve_policy: TransactionServePolicy::default(),
             tx_channel_memory_limit_bytes: DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
         }
     }
@@ -258,6 +262,55 @@ impl FromStr for TransactionIngressPolicy {
             "Trusted" | "trusted" => Ok(Self::Trusted),
             "None" | "none" => Ok(Self::None),
             _ => Err(format!("Invalid transaction ingress policy: {s}")),
+        }
+    }
+}
+
+/// Determines which peers we serve `GetPooledTransactions` requests for.
+///
+/// Requests from peers disallowed by this policy are answered with an empty response, which the
+/// protocol permits: a `PooledTransactions` response may omit any or all of the requested hashes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Display)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum TransactionServePolicy {
+    /// Serve requests from any peer.
+    #[default]
+    All,
+    /// Serve requests only from trusted peers.
+    ///
+    /// Only peers configured as trusted, e.g. via `--trusted-peers`, qualify. Peers added at
+    /// runtime with `admin_addPeer` are [`PeerKind::Static`] and are answered with an empty
+    /// response.
+    Trusted,
+    /// Answer every request with an empty response.
+    None,
+}
+
+impl TransactionServePolicy {
+    /// Returns true if the serve policy allows the provided peer kind.
+    pub const fn allows(&self, peer_kind: PeerKind) -> bool {
+        match self {
+            Self::All => true,
+            Self::Trusted => peer_kind.is_trusted(),
+            Self::None => false,
+        }
+    }
+
+    /// Returns true if the serve policy serves requests from any peer.
+    pub const fn allows_all(&self) -> bool {
+        matches!(self, Self::All)
+    }
+}
+
+impl FromStr for TransactionServePolicy {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "All" | "all" => Ok(Self::All),
+            "Trusted" | "trusted" => Ok(Self::Trusted),
+            "None" | "none" => Ok(Self::None),
+            _ => Err(format!("Invalid transaction serve policy: {s}")),
         }
     }
 }

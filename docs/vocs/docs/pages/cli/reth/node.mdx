@@ -282,6 +282,13 @@ Networking:
 
           [default: All]
 
+      --tx-serve-policy <TX_SERVE_POLICY>
+          Transaction serve policy
+
+          Determines which peers `GetPooledTransactions` requests are served for. Peers that are not served receive an empty response. Only peers passed to `--trusted-peers` count as trusted; peers added at runtime with `admin_addPeer` do not. Pair with `--tx-propagation-policy trusted` to avoid announcing transactions that will not be served.
+
+          [default: All]
+
       --disable-tx-gossip
           Disable transaction pool gossip
 

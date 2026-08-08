@@ -1,21 +1,26 @@
 //! Testing gossiping of transactions.
 use alloy_consensus::TxLegacy;
-use alloy_primitives::{Signature, U256};
+use alloy_primitives::{Signature, B256, U256};
 use futures::StreamExt;
-use reth_ethereum_primitives::TransactionSigned;
+use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
 use reth_network::{
     test_utils::{NetworkEventStream, Testnet},
-    transactions::config::{
-        TransactionIngressPolicy, TransactionPropagationKind, TransactionsManagerConfig,
+    transactions::{
+        config::{
+            TransactionIngressPolicy, TransactionPropagationKind, TransactionServePolicy,
+            TransactionsManagerConfig,
+        },
+        TransactionsHandle,
     },
     NetworkEvent, NetworkEventListenerProvider, Peers,
 };
 use reth_network_api::{events::PeerEvent, PeerKind, PeersInfo};
+use reth_network_peers::PeerId;
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 use reth_transaction_pool::{
     test_utils::TransactionGenerator, AddedTransactionOutcome, PoolTransaction, TransactionPool,
 };
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 use tokio::join;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -190,6 +195,100 @@ async fn test_tx_ingress_policy_trusted_only() {
 
     assert!(buff.contains(&outcome_0.hash));
     assert!(buff.contains(&outcome_1.hash));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_tx_serve_policy_trusted_only() {
+    reth_tracing::init_test_tracing();
+
+    let provider = MockEthProvider::default().with_genesis_block();
+
+    let tx_manager_config = TransactionsManagerConfig {
+        serve_policy: TransactionServePolicy::Trusted,
+        ..Default::default()
+    };
+
+    let net = Testnet::create_with(2, provider.clone()).await;
+    let net = net.with_eth_pool_config(tx_manager_config);
+
+    let handle = net.spawn();
+
+    // connect all the peers
+    handle.connect_peers().await;
+
+    // peer0 serves requests, peer1 makes them
+    let peer_0_handle = &handle.peers()[0];
+    let peer_1_handle = &handle.peers()[1];
+
+    let peer_0_id = *peer_0_handle.peer_id();
+    let peer_1_txs = peer_1_handle.transactions().unwrap();
+
+    let mut tx_gen = TransactionGenerator::new(rand::rng());
+    let tx = tx_gen.gen_eip1559_pooled();
+
+    // ensure the sender has balance
+    let sender = tx.sender();
+    provider.add_account(sender, ExtendedAccount::new(0, U256::from(100_000_000)));
+
+    // insert the tx into peer0's pool, so it has something to serve
+    let outcome = peer_0_handle.pool().unwrap().add_external_transaction(tx).await.unwrap();
+
+    // peer1 is not trusted by peer0, so the request is answered with an empty response.
+    //
+    // retried because peer0's `TransactionsManager` may not have registered the session yet, in
+    // which case the response channel is dropped and the request fails outright.
+    let refused = poll_pooled_transactions(peer_1_txs, peer_0_id, outcome.hash, Some)
+        .await
+        .expect("peer0 should answer the request");
+    assert!(refused.is_empty(), "untrusted peer should receive an empty response");
+
+    let mut event_stream_0 = NetworkEventStream::new(peer_0_handle.network().event_listener());
+    let mut event_stream_1 = NetworkEventStream::new(peer_1_handle.network().event_listener());
+
+    // disconnect peer1 from peer0
+    peer_0_handle.network().remove_peer(*peer_1_handle.peer_id(), PeerKind::Static);
+    join!(event_stream_0.next_session_closed(), event_stream_1.next_session_closed());
+
+    // re register peer1 as trusted
+    peer_0_handle.network().add_trusted_peer(*peer_1_handle.peer_id(), peer_1_handle.local_addr());
+    join!(event_stream_0.next_session_established(), event_stream_1.next_session_established());
+
+    // peer1 is now trusted, so peer0 serves the transaction
+    let served = poll_pooled_transactions(peer_1_txs, peer_0_id, outcome.hash, |txs| {
+        (!txs.is_empty()).then_some(txs)
+    })
+    .await
+    .expect("trusted peer should be served the transaction");
+    assert_eq!(served.len(), 1);
+    assert_eq!(*served[0].hash(), outcome.hash);
+}
+
+/// Repeatedly sends a `GetPooledTransactions` request for `hash` until `accept` returns a value,
+/// or the timeout elapses.
+///
+/// Requests that fail outright are retried: a peer that has not yet registered the session in its
+/// `TransactionsManager` drops the response channel rather than replying.
+async fn poll_pooled_transactions<F>(
+    txs: &TransactionsHandle,
+    peer_id: PeerId,
+    hash: B256,
+    accept: F,
+) -> Option<Vec<PooledTransactionVariant>>
+where
+    F: Fn(Vec<PooledTransactionVariant>) -> Option<Vec<PooledTransactionVariant>>,
+{
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Ok(Some(res)) = txs.get_pooled_transactions_from(peer_id, vec![hash]).await &&
+                let Some(accepted) = accept(res)
+            {
+                return accepted
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .ok()
 }
 
 #[tokio::test(flavor = "multi_thread")]
