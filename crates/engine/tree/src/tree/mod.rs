@@ -3452,6 +3452,15 @@ where
         &self,
         state: ForkchoiceState,
     ) -> Result<(), OnForkChoiceUpdated> {
+        // Validate safe before updating finalized so an invalid forkchoice state cannot leave the
+        // finalized marker updated.
+        if !state.safe_block_hash.is_zero() &&
+            matches!(self.find_canonical_header(state.safe_block_hash), Ok(None))
+        {
+            debug!(target: "engine::tree", "Safe block not found in canonical chain");
+            return Err(OnForkChoiceUpdated::invalid_state())
+        }
+
         // Ensure that the finalized block, if not zero, is known and in the canonical chain
         // after the head block is canonicalized.
         //
