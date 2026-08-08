@@ -215,6 +215,11 @@ impl SharedProgress {
         self.completed_download_bytes.fetch_add(bytes, Ordering::Relaxed);
     }
 
+    /// Removes a completed download contribution when the archive must be retried.
+    pub(crate) fn rollback_archive_download(&self, bytes: u64) {
+        sub_bytes(&self.completed_download_bytes, bytes);
+    }
+
     /// Records an archive whose extracted outputs have fully verified.
     pub(crate) fn record_archive_output_complete(&self, bytes: u64) {
         self.completed_output_bytes.fetch_add(bytes, Ordering::Relaxed);
@@ -457,11 +462,6 @@ impl<'a> ArchiveDownloadProgress<'a> {
         if let Some(progress) = self.progress {
             progress.add_active_download_bytes(bytes);
         }
-    }
-
-    /// Returns whether this tracker has recorded any logical bytes itself.
-    pub(crate) fn has_tracked_bytes(&self) -> bool {
-        self.downloaded > 0
     }
 
     /// Moves this archive from active download bytes into completed download bytes.
@@ -803,6 +803,23 @@ mod tests {
 
         assert_eq!(progress.logical_downloaded_bytes(), 0);
         assert_eq!(progress.active_downloads.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn completed_archive_retry_counts_download_once() {
+        let progress = SharedProgress::new(40, 80, 2, CancellationToken::new());
+        progress.record_archive_download_complete(5);
+
+        let mut first_attempt = ArchiveDownloadProgress::new(Some(&progress));
+        first_attempt.record_downloaded(10);
+        first_attempt.complete(20);
+        progress.rollback_archive_download(20);
+
+        let mut second_attempt = ArchiveDownloadProgress::new(Some(&progress));
+        second_attempt.record_downloaded(10);
+        second_attempt.complete(20);
+
+        assert_eq!(progress.logical_downloaded_bytes(), 25);
     }
 
     #[test]
