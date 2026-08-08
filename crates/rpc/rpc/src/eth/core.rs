@@ -307,6 +307,7 @@ where
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache<ProviderHeader<N::Provider>>,
         task_spawner: Runtime,
+        batcher_spawner: Runtime,
         proof_permits: usize,
         converter: Rpc,
         next_env: impl PendingEnvBuilder<N::Evm>,
@@ -333,9 +334,12 @@ where
         let (raw_tx_sender, _) = broadcast::channel(DEFAULT_BROADCAST_CAPACITY);
 
         // Create tx pool insertion batcher
-        let (processor, tx_batch_sender) =
-            BatchTxProcessor::new(components.pool().clone(), max_batch_size);
-        task_spawner.spawn_critical_task("tx-batcher", processor);
+        let (processor, tx_batch_sender) = BatchTxProcessor::new(
+            components.pool().clone(),
+            max_batch_size,
+            batcher_spawner.handle().clone(),
+        );
+        batcher_spawner.spawn_critical_task("tx-batcher", processor);
 
         Self {
             components,

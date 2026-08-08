@@ -68,7 +68,7 @@ where
             TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone(), evm_config)
                 .kzg_settings(ctx.kzg_settings()?)
                 .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
-                .build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
+                .build_with_tasks(ctx.rpc_task_executor().clone(), blob_store.clone());
 
         let transaction_pool =
             Pool::new(validator, CoinbaseTipOrdering::default(), blob_store, self.pool_config);
