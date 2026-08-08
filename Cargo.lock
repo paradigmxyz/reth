@@ -8378,6 +8378,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-eip8304"
+version = "2.4.1"
+dependencies = [
+ "alloy-primitives",
+ "sha2",
+]
+
+[[package]]
 name = "reth-engine-local"
 version = "2.4.1"
 dependencies = [
