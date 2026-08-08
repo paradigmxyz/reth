@@ -515,6 +515,68 @@ mod tests {
         save_checkpoint_and_check(&db, StageId::Headers, 91, Some(PipelineTarget::Unwind(block)));
     }
 
+    /// Regression test: a checkpoint landing on a leading run of *empty* blocks (e.g. genesis
+    /// itself, which has zero transactions) must still prune static files back to exactly the
+    /// checkpoint — not leave a stray row behind. `block.last_tx_num()` degenerates to `0` for
+    /// an empty block whose `first_tx_num` is also `0` (it clips instead of representing "there
+    /// is no last transaction"), which is indistinguishable from "the last transaction really is
+    /// at index 0" and previously caused the unwind to under-prune by exactly one row.
+    #[test]
+    fn test_consistency_checkpoint_on_leading_empty_block_prunes_all_transactions() {
+        let db = TestStageDB::default();
+        let mut rng = generators::rng();
+        let genesis_hash = B256::ZERO;
+
+        // Block 0 is empty (no transactions). Block 1 has 3 real transactions.
+        let block0 = random_block_range(
+            &mut rng,
+            0..=0,
+            BlockRangeParams { parent: Some(genesis_hash), tx_count: 0..1, ..Default::default() },
+        );
+        let block1 = random_block_range(
+            &mut rng,
+            1..=1,
+            BlockRangeParams {
+                parent: Some(block0[0].hash()),
+                tx_count: 3..4,
+                ..Default::default()
+            },
+        );
+        let blocks: Vec<_> = block0.into_iter().chain(block1).collect();
+        db.insert_blocks(blocks.iter(), StorageKind::Static).unwrap();
+
+        let mut receipts = Vec::with_capacity(blocks.len());
+        let mut tx_num = 0u64;
+        for block in &blocks {
+            let mut block_receipts = Vec::with_capacity(block.transaction_count());
+            for transaction in &block.body().transactions {
+                block_receipts.push((tx_num, random_receipt(&mut rng, transaction, Some(0), None)));
+                tx_num += 1;
+            }
+            receipts.push((block.number, block_receipts));
+        }
+        db.insert_receipts_by_block(receipts, StorageKind::Static).unwrap();
+
+        let provider_rw = db.factory.provider_rw().unwrap();
+        for stage in StageId::ALL {
+            provider_rw.save_stage_checkpoint(stage, StageCheckpoint::new(1)).unwrap();
+        }
+        provider_rw.commit().unwrap();
+
+        // Checkpoint regresses to block 0 — simulating a crash where static files already
+        // committed block 1's transactions before the Bodies checkpoint caught up.
+        save_checkpoint_and_check(&db, StageId::Bodies, 0, None);
+
+        // Block 0 has zero transactions, so after pruning back to it, none should remain.
+        assert_eq!(
+            db.factory
+                .static_file_provider()
+                .get_highest_static_file_tx(StaticFileSegment::Transactions),
+            None,
+            "block 0 is empty — no transactions should remain after pruning back to it"
+        );
+    }
+
     #[test]
     fn test_consistency_headers_gap() {
         let db = seed_data(90).unwrap();
