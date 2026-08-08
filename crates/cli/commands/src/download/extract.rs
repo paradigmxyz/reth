@@ -1,8 +1,9 @@
 use super::{
     fetch::{ArchiveFetcher, DownloadedArchive},
     progress::{
-        ArchiveExtractionProgress, ArchiveExtractionProgressHandle, DownloadProgress,
-        DownloadRequestLimiter, ProgressReader, SharedProgress, SharedProgressReader,
+        ArchiveDownloadProgress, ArchiveExtractionProgress, ArchiveExtractionProgressHandle,
+        DownloadProgress, DownloadRequestLimiter, ProgressReader, SharedProgress,
+        SharedProgressReader,
     },
     session::DownloadSession,
     MAX_DOWNLOAD_RETRIES, RETRY_BACKOFF_SECS,
@@ -374,8 +375,13 @@ fn download_and_extract(
     session: DownloadSession,
 ) -> Result<()> {
     let quiet = session.progress().is_some();
-    let fetcher = ArchiveFetcher::new(url.to_string(), target_dir, session.clone());
-    let DownloadedArchive { path: downloaded_path, size: total_size } = fetcher.download(None)?;
+    let fetcher = ArchiveFetcher::new(url.to_string(), target_dir, session.clone(), None);
+    let DownloadedArchive { path: downloaded_path, size: total_size } = {
+        let mut download_progress = ArchiveDownloadProgress::new(session.progress());
+        let downloaded = fetcher.download(Some(&mut download_progress))?;
+        download_progress.complete(downloaded.size);
+        downloaded
+    };
 
     let file_name =
         downloaded_path.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();

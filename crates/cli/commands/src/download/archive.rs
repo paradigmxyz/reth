@@ -178,6 +178,9 @@ impl ArchiveProcessor {
                         state = ArchiveAttemptState::Complete;
                     } else {
                         warn!(target: "reth::cli", file = %archive.file_name, component = %self.archive.component, attempt, "Archive extracted, but output verification failed, retrying");
+                        if mode == ArchiveMode::Cached {
+                            self.ctx.session().rollback_archive_download(archive.size);
+                        }
                         state = ArchiveAttemptState::RetryAttempt;
                     }
                 }
@@ -255,8 +258,12 @@ impl ArchiveProcessor {
     fn run_cached_attempt(&self, format: CompressionFormat) -> Result<()> {
         let cache_dir =
             self.ctx.cache_dir().ok_or_else(|| eyre::eyre!("Missing download cache directory"))?;
-        let fetcher =
-            ArchiveFetcher::new(self.archive().url.clone(), cache_dir, self.ctx.session().clone());
+        let fetcher = ArchiveFetcher::new(
+            self.archive().url.clone(),
+            cache_dir,
+            self.ctx.session().clone(),
+            self.archive().blake3.clone(),
+        );
 
         if self.archive.ty == super::manifest::SnapshotComponentType::State {
             debug!(target: "reth::cli", url = %self.archive().url, "Downloading state snapshot archive");
@@ -265,21 +272,13 @@ impl ArchiveProcessor {
         let download_result = {
             let mut download_progress = ArchiveDownloadProgress::new(self.ctx.session().progress());
             let result = fetcher.download(Some(&mut download_progress));
-            if let Ok(ref downloaded) = result &&
-                download_progress.has_tracked_bytes()
-            {
-                download_progress.complete(downloaded.size);
+            if result.is_ok() {
+                download_progress.complete(self.archive().size);
             }
             result
         };
 
-        let downloaded = match download_result {
-            Ok(downloaded) => downloaded,
-            Err(error) => {
-                fetcher.cleanup_downloaded_files();
-                return Err(error);
-            }
-        };
+        let downloaded = download_result?;
 
         info!(target: "reth::cli",
             file = %self.archive().file_name,
@@ -290,6 +289,9 @@ impl ArchiveProcessor {
 
         let extract_result = self.extract_cached_archive(&downloaded.path, format);
         fetcher.cleanup_downloaded_files();
+        if extract_result.is_err() {
+            self.ctx.session().rollback_archive_download(self.archive().size);
+        }
         extract_result
     }
 
