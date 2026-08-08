@@ -11,7 +11,7 @@ RUN apt-get -o Acquire::Check-Valid-Until=false update && \
     /tmp/install_llvm.sh && rm /tmp/install_llvm.sh
 WORKDIR /app
 COPY . .
-RUN RUSTFLAGS_REPRODUCIBLE_EXTRA="-Clink-arg=-fuse-ld=mold" make build-reth-reproducible && \
+RUN FEATURES="jit" RUSTFLAGS_REPRODUCIBLE_EXTRA="-Clink-arg=-fuse-ld=mold" make build-reth-reproducible && \
   PROFILE=${PROFILE:-reproducible} VERSION=$VERSION make build-deb-x86_64-unknown-linux-gnu
 
 FROM scratch AS artifacts

@@ -12,8 +12,10 @@ variable "BUILD_PROFILE" {
   default = "maxperf-symbols"
 }
 
+// jit is not a default cargo feature; enable it here so published images
+// stay JIT-capable (runtime opt-in via --jit)
 variable "FEATURES" {
-  default = ""
+  default = "jit"
 }
 
 // Git info for vergen (since .git is excluded from Docker context)
@@ -77,7 +79,7 @@ target "ethereum-profiling" {
     BINARY        = "reth"
     MANIFEST_PATH = "bin/reth"
     BUILD_PROFILE = "profiling"
-    FEATURES      = "jemalloc-prof"
+    FEATURES      = "jemalloc-prof jit"
   }
   tags = ["${REGISTRY}/reth:nightly-profiling"]
 }
