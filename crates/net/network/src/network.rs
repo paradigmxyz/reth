@@ -155,11 +155,11 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
 
     /// Send message to get the [`TransactionsHandle`].
     ///
-    /// Returns `None` if no transaction task is installed.
+    /// Returns `None` if no transaction task is installed or if the network manager is unavailable.
     pub async fn transactions_handle(&self) -> Option<TransactionsHandle<N>> {
         let (tx, rx) = oneshot::channel();
         let _ = self.manager().send(NetworkHandleMessage::GetTransactionsHandle(tx));
-        rx.await.unwrap()
+        rx.await.ok().flatten()
     }
 
     /// Send message to gracefully shutdown node.
