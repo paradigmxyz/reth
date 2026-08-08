@@ -1,14 +1,15 @@
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_genesis::ChainConfig;
 use alloy_json_rpc::RpcObject;
-use alloy_primitives::{Address, Bytes, B256, U64};
+use alloy_primitives::{Address, Bytes, B256, U256, U64};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_eth::{Account, AccountInfo, Bundle, Index, StateContext};
 use alloy_rpc_types_trace::geth::{
-    BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
+    GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
 };
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_trie_common::{updates::TrieUpdates, ExecutionWitnessMode, HashedPostState};
+use serde::{Deserialize, Serialize};
 
 /// Debug rpc interface.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "debug"))]
@@ -48,14 +49,20 @@ pub trait DebugApi<TxReq: RpcObject> {
     #[method(name = "clearTxpool")]
     async fn debug_clear_txpool(&self) -> RpcResult<()>;
 
-    /// Returns the structured logs created during the execution of EVM between two blocks
-    /// (excluding start) as a JSON object.
-    #[method(name = "traceChain")]
-    async fn debug_trace_chain(
+    /// Subscribes to structured logs created during EVM execution between two blocks, excluding
+    /// the start block and including the end block.
+    #[subscription(
+        name = "subscribe" => "subscription",
+        unsubscribe = "unsubscribe",
+        item = ChainBlockTraceResult
+    )]
+    async fn debug_subscribe(
         &self,
+        subscription: String,
         start_exclusive: BlockNumberOrTag,
         end_inclusive: BlockNumberOrTag,
-    ) -> RpcResult<Vec<BlockTraceResult>>;
+        opts: Option<GethDebugTracingOptions>,
+    ) -> jsonrpsee::core::SubscriptionResult;
 
     /// The `debug_traceBlock` method will return a full stack trace of all invoked opcodes of all
     /// transaction that were included in this block.
@@ -374,4 +381,51 @@ pub trait DebugApi<TxReq: RpcObject> {
         block_hash: B256,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<Vec<TraceResult>>;
+}
+
+/// Results for one block emitted by a `traceChain` debug subscription.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChainBlockTraceResult {
+    /// Block number corresponding to the trace task.
+    pub block: U256,
+    /// Block hash corresponding to the trace task.
+    pub hash: B256,
+    /// Trace results produced by the task.
+    ///
+    /// Geth leaves entries after the first transaction-level tracing failure as `null`.
+    pub traces: Vec<Option<TraceResult>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chain_block_trace_result_matches_geth_wire_shape() {
+        let block_hash = B256::repeat_byte(0x11);
+        let tx_hash = B256::repeat_byte(0x22);
+        let result = ChainBlockTraceResult {
+            block: U256::from(2),
+            hash: block_hash,
+            traces: vec![
+                Some(TraceResult::Error {
+                    error: "trace failed".to_string(),
+                    tx_hash: Some(tx_hash),
+                }),
+                None,
+            ],
+        };
+
+        assert_eq!(
+            serde_json::to_value(result).unwrap(),
+            serde_json::json!({
+                "block": "0x2",
+                "hash": block_hash,
+                "traces": [
+                    {"error": "trace failed", "txHash": tx_hash},
+                    null
+                ]
+            })
+        );
+    }
 }
