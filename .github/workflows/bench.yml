@@ -267,6 +267,28 @@ jobs:
         id: args
         if: steps.command.outputs.command == 'bench'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          INPUT_BLOCKS: ${{ github.event.inputs.blocks }}
+          INPUT_MODE: ${{ github.event.inputs.mode }}
+          INPUT_WARMUP: ${{ github.event.inputs.warmup }}
+          INPUT_BASELINE: ${{ github.event.inputs.baseline }}
+          INPUT_FEATURE: ${{ github.event.inputs.feature }}
+          INPUT_SAMPLY: ${{ github.event.inputs.samply }}
+          INPUT_TRACING_CHROME: ${{ github.event.inputs.tracing_chrome }}
+          INPUT_SLACK: ${{ github.event.inputs.slack }}
+          INPUT_CORES: ${{ github.event.inputs.cores }}
+          INPUT_BIG_BLOCKS: ${{ github.event.inputs.big_blocks }}
+          INPUT_REORG: ${{ github.event.inputs.reorg }}
+          INPUT_BAL: ${{ github.event.inputs.bal }}
+          INPUT_RUN_PAIRS: ${{ github.event.inputs.run_pairs }}
+          INPUT_OTLP: ${{ github.event.inputs.otlp }}
+          INPUT_METRICS: ${{ github.event.inputs.metrics }}
+          INPUT_WAIT_TIME: ${{ github.event.inputs.wait_time }}
+          INPUT_BLOCK_TIME: ${{ github.event.inputs.block_time }}
+          INPUT_BASELINE_ARGS: ${{ github.event.inputs.baseline_args }}
+          INPUT_FEATURE_ARGS: ${{ github.event.inputs.feature_args }}
         with:
           github-token: ${{ secrets.DEREK_PAT }}
           script: |
@@ -306,43 +328,43 @@ jobs:
             };
 
             if (context.eventName === 'workflow_dispatch') {
-              actor = '${{ github.actor }}';
-              blocks = '${{ github.event.inputs.blocks }}' || '';
-              var mode = '${{ github.event.inputs.mode }}' || 'engine';
+              actor = process.env.GITHUB_ACTOR;
+              blocks = process.env.INPUT_BLOCKS || '';
+              var mode = process.env.INPUT_MODE || 'engine';
               explicitBlocks = blocks !== '';
-              warmup = '${{ github.event.inputs.warmup }}' || '';
+              warmup = process.env.INPUT_WARMUP || '';
               explicitWarmup = warmup !== '';
-              baseline = '${{ github.event.inputs.baseline }}';
-              feature = '${{ github.event.inputs.feature }}';
-              samply = '${{ github.event.inputs.samply }}' === 'true' ? 'true' : 'false';
-              tracingChrome = '${{ github.event.inputs.tracing_chrome }}' === 'true' ? 'true' : 'false';
-              var slack = '${{ github.event.inputs.slack }}' || 'never';
-              cores = '${{ github.event.inputs.cores }}' || '0';
-              const parsedBigBlocks = parseBigBlocks('${{ github.event.inputs.big_blocks }}');
+              baseline = process.env.INPUT_BASELINE;
+              feature = process.env.INPUT_FEATURE;
+              samply = process.env.INPUT_SAMPLY === 'true' ? 'true' : 'false';
+              tracingChrome = process.env.INPUT_TRACING_CHROME === 'true' ? 'true' : 'false';
+              var slack = process.env.INPUT_SLACK || 'never';
+              cores = process.env.INPUT_CORES || '0';
+              const parsedBigBlocks = parseBigBlocks(process.env.INPUT_BIG_BLOCKS);
               if (!parsedBigBlocks) {
-                core.setFailed(`Invalid big_blocks value: ${{ github.event.inputs.big_blocks }} (must be false, true, or a gas value like 100M or 2G)`);
+                core.setFailed(`Invalid big_blocks value: ${process.env.INPUT_BIG_BLOCKS} (must be false, true, or a gas value like 100M or 2G)`);
                 return;
               }
               bigBlocks = parsedBigBlocks.enabled;
               bigBlocksTargetGas = parsedBigBlocks.targetGas;
-              reorg = parseReorg('${{ github.event.inputs.reorg }}');
+              reorg = parseReorg(process.env.INPUT_REORG);
               if (reorg === null) {
-                core.setFailed(`Invalid reorg value: ${{ github.event.inputs.reorg }} (must be a positive integer)`);
+                core.setFailed(`Invalid reorg value: ${process.env.INPUT_REORG} (must be a positive integer)`);
                 return;
               }
-              bal = '${{ github.event.inputs.bal }}' || 'false';
-              var runPairs = '${{ github.event.inputs.run_pairs }}' || '';
+              bal = process.env.INPUT_BAL || 'false';
+              var runPairs = process.env.INPUT_RUN_PAIRS || '';
               explicitRunPairs = runPairs !== '';
-              var otlp = '${{ github.event.inputs.otlp }}' === 'false' ? 'false' : 'true';
-              var metrics = '${{ github.event.inputs.metrics }}' === 'true' ? 'true' : 'false';
-              var waitTime = '${{ github.event.inputs.wait_time }}' || '';
-              var blockTime = '${{ github.event.inputs.block_time }}' || '';
-              var baselineNodeArgs = '${{ github.event.inputs.baseline_args }}' || '';
-              var featureNodeArgs = '${{ github.event.inputs.feature_args }}' || '';
+              var otlp = process.env.INPUT_OTLP === 'false' ? 'false' : 'true';
+              var metrics = process.env.INPUT_METRICS === 'true' ? 'true' : 'false';
+              var waitTime = process.env.INPUT_WAIT_TIME || '';
+              var blockTime = process.env.INPUT_BLOCK_TIME || '';
+              var baselineNodeArgs = process.env.INPUT_BASELINE_ARGS || '';
+              var featureNodeArgs = process.env.INPUT_FEATURE_ARGS || '';
               var skipStateRoot = 'false';
 
               // Find PR for the selected branch
-              const branch = '${{ github.ref_name }}';
+              const branch = process.env.GITHUB_REF_NAME;
               const { data: prs } = await github.rest.pulls.list({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
