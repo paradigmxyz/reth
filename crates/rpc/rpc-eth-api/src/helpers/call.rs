@@ -309,6 +309,24 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into());
             }
 
+            // Match eth_simulateV1 budgets: unbounded eth_callMany holds one blocking-IO
+            // permit while each tx can consume a full call gas cap.
+            let max_call_many = self.max_simulate_blocks() as usize;
+            if bundles.len() > max_call_many {
+                return Err(EthApiError::InvalidParams(format!(
+                    "bundle count {} exceeds limit {max_call_many}",
+                    bundles.len(),
+                ))
+                .into());
+            }
+            let total_txs: usize = bundles.iter().map(|b| b.transactions.len()).sum();
+            if total_txs > max_call_many {
+                return Err(EthApiError::InvalidParams(format!(
+                    "transaction count {total_txs} exceeds limit {max_call_many}",
+                ))
+                .into());
+            }
+
             let _permit = self.acquire_owned_blocking_io().await;
 
             let StateContext { transaction_index, block_number } =
