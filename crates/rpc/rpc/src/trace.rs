@@ -151,6 +151,16 @@ where
         calls: Vec<(RpcTxReq<Eth::NetworkTypes>, HashSet<TraceType>)>,
         block_id: Option<BlockId>,
     ) -> Result<Vec<TraceResults>, Eth::Error> {
+        // Match eth_simulateV1 / eth_callMany budgets for sequential replay floods.
+        let max_call_many = self.eth_api().max_simulate_blocks() as usize;
+        if calls.len() > max_call_many {
+            return Err(EthApiError::InvalidParams(format!(
+                "call count {} exceeds limit {max_call_many}",
+                calls.len(),
+            ))
+            .into())
+        }
+
         let at = block_id.unwrap_or(BlockId::pending());
         let (evm_env, at) = self.eth_api().evm_env_at(at).await?;
 
