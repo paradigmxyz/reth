@@ -1,0 +1,72 @@
+name: rpc-compat
+
+on:
+  workflow_dispatch:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ${{ (github.repository == 'paradigmxyz/reth' || github.repository == 'paradigmxyz/reth-oss') && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444 # v1
+      - run: .github/scripts/install_llvm.sh ubuntu
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          cache-on-failure: true
+      - name: Restore fixture cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/rpc-compat
+          key: rpc-compat-${{ github.run_id }}
+          restore-keys: rpc-compat-
+      - name: Resolve and fetch latest fixture
+        id: fixture
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          revision="$(
+            cargo run --locked -p reth-rpc-compat-tests --bin reth-rpc-compat --no-default-features -- fetch
+          )"
+          echo "revision=$revision"
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+      - name: Save fixture cache
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/rpc-compat
+          key: rpc-compat-${{ steps.fixture.outputs.revision }}
+      - name: Validate fixture and schemas
+        run: cargo run --locked -p reth-rpc-compat-tests --bin reth-rpc-compat --no-default-features -- check --offline
+      - name: Run RPC compatibility suite
+        shell: bash
+        run: |
+          rm -f target/rpc-compat/report.json
+          cargo run --locked -p reth-rpc-compat-tests --bin reth-rpc-compat --features embedded -- run --offline ||
+            test -f target/rpc-compat/report.json
+      - name: Parse test result
+        if: always()
+        run: cargo run --locked -p reth-rpc-compat-tests --bin reth-rpc-compat --no-default-features -- list-unexpected --color always --github-groups --fail-on-unexpected
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rpc-compat-reports
+          path: target/rpc-compat
+          if-no-files-found: warn

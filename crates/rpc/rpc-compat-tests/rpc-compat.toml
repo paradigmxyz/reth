@@ -1,0 +1,19 @@
+[fixture]
+repository = "ethereum/execution-apis"
+branch = "main"
+github_token_env = "GITHUB_TOKEN"
+cache_dir = "../../../.cache/rpc-compat"
+tests_dir = "tests"
+
+[run]
+include = ["*"]
+exclude = []
+skip = []
+ignore = []
+expected_failures = []
+expected_failures_when_error_data_checked = []
+timeout_secs = 5
+fail_fast = false
+ignore_error_data = true
+report_json = "../../../target/rpc-compat/report.json"
+report_junit = "../../../target/rpc-compat/junit.xml"
