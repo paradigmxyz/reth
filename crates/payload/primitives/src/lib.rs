@@ -25,8 +25,8 @@ pub use error::{
 
 mod traits;
 pub use traits::{
-    payload_id, BuildNextEnv, BuiltPayload, BuiltPayloadExecutedBlock, PayloadAttributes,
-    PayloadAttributesBuilder,
+    payload_id, payload_id_with_inclusion_list, BuildNextEnv, BuiltPayload,
+    BuiltPayloadExecutedBlock, PayloadAttributes, PayloadAttributesBuilder,
 };
 
 mod payload;
@@ -143,7 +143,7 @@ pub fn validate_payload_timestamp(
     }
 
     let is_osaka = chain_spec.is_osaka_active_at_timestamp(timestamp);
-    if version.is_v5() && !is_osaka {
+    if version.is_v5() && kind != MessageValidationKind::PayloadAttributes && !is_osaka {
         // From the Engine API spec:
         // <https://github.com/ethereum/execution-apis/blob/15399c2e2f16a5f800bf3f285640357e2c245ad9/src/engine/osaka.md#specification>
         //
@@ -155,6 +155,12 @@ pub fn validate_payload_timestamp(
     }
 
     let is_amsterdam = chain_spec.is_amsterdam_active_at_timestamp(timestamp);
+
+    // Bogota does not have a stable hardfork identifier yet. The experimental devnet activates
+    // its Engine API methods together with the current Amsterdam schedule.
+    if version.is_v5() && kind == MessageValidationKind::PayloadAttributes && !is_amsterdam {
+        return Err(EngineObjectValidationError::UnsupportedFork)
+    }
 
     // Staggered endpoint upgrades must reject Amsterdam payloads until the Amsterdam-specific
     // method version is used.
@@ -279,7 +285,10 @@ pub fn validate_slot_number_presence<T: EthereumHardforks>(
         }
 
         EngineApiMessageVersion::V5 => {
-            if message_validation_kind == MessageValidationKind::Payload {
+            if matches!(
+                message_validation_kind,
+                MessageValidationKind::Payload | MessageValidationKind::PayloadAttributes
+            ) {
                 if is_amsterdam_active && !has_slot_number {
                     return Err(message_validation_kind
                         .to_error(VersionSpecificValidationError::NoSlotNumberPostAmsterdam))
@@ -307,6 +316,30 @@ pub fn validate_slot_number_presence<T: EthereumHardforks>(
     };
 
     Ok(())
+}
+
+/// Validates EIP-7805 inclusion-list presence on forkchoice payload attributes.
+pub fn validate_inclusion_list_presence<Type: PayloadAttributes>(
+    version: EngineApiMessageVersion,
+    attributes: &Type,
+) -> Result<(), EngineObjectValidationError> {
+    let has_inclusion_list = attributes.inclusion_list_transactions().is_some();
+    match version {
+        EngineApiMessageVersion::V1 |
+        EngineApiMessageVersion::V2 |
+        EngineApiMessageVersion::V3 |
+        EngineApiMessageVersion::V4
+            if has_inclusion_list =>
+        {
+            Err(MessageValidationKind::PayloadAttributes
+                .to_error(VersionSpecificValidationError::InclusionListNotSupported))
+        }
+        EngineApiMessageVersion::V5 if !has_inclusion_list => {
+            Err(MessageValidationKind::PayloadAttributes
+                .to_error(VersionSpecificValidationError::NoInclusionList))
+        }
+        _ => Ok(()),
+    }
 }
 
 /// Validates the presence of the `withdrawals` field according to the payload timestamp.
@@ -518,6 +551,8 @@ where
             payload_or_attrs.timestamp(),
             payload_or_attrs.block_access_list().is_some(),
         )?;
+    } else if let PayloadOrAttributes::PayloadAttributes(attributes) = payload_or_attrs {
+        validate_inclusion_list_presence(version, attributes)?;
     }
 
     validate_slot_number_presence(
@@ -610,7 +645,8 @@ impl EngineApiMessageVersion {
             Self::V2 => "engine_newPayloadV2",
             Self::V3 => "engine_newPayloadV3",
             Self::V4 => "engine_newPayloadV4",
-            Self::V5 | Self::V6 => "engine_newPayloadV5",
+            Self::V5 => "engine_newPayloadV5",
+            Self::V6 => "engine_newPayloadV6",
         }
     }
 }
@@ -768,6 +804,29 @@ mod tests {
             true,
         );
         assert_matches!(res, Ok(()));
+
+        let res = validate_slot_number_presence(
+            &chain_spec,
+            EngineApiMessageVersion::V5,
+            MessageValidationKind::PayloadAttributes,
+            0,
+            true,
+        );
+        assert_matches!(res, Ok(()));
+
+        let res = validate_slot_number_presence(
+            &chain_spec,
+            EngineApiMessageVersion::V5,
+            MessageValidationKind::PayloadAttributes,
+            0,
+            false,
+        );
+        assert_matches!(
+            res,
+            Err(EngineObjectValidationError::PayloadAttributes(
+                VersionSpecificValidationError::NoSlotNumberPostAmsterdam
+            ))
+        );
 
         let res = validate_block_access_list_presence(
             &chain_spec,

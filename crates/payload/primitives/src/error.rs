@@ -148,6 +148,12 @@ pub enum VersionSpecificValidationError {
     /// before Amsterdam
     #[error("slot number pre-Amsterdam")]
     HasSlotNumberPreAmsterdam,
+    /// Thrown if an inclusion list is supplied to an earlier forkchoice method.
+    #[error("inclusion list not supported before forkchoiceUpdatedV5")]
+    InclusionListNotSupported,
+    /// Thrown if `forkchoiceUpdatedV5` omits its EIP-7805 inclusion list.
+    #[error("no inclusion list in forkchoiceUpdatedV5 payload attributes")]
+    NoInclusionList,
 }
 
 /// Error validating payload received over `newPayload` API.

@@ -82,6 +82,7 @@ impl EngineMessageStore {
                     })?,
                 )?;
             }
+            BeaconEngineMessage::InclusionListStatus { .. } => {}
         };
         Ok(())
     }

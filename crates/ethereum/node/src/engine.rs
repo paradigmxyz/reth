@@ -3,10 +3,11 @@
 use alloy_rpc_types_engine::ExecutionData;
 pub use alloy_rpc_types_engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
-    ExecutionPayloadV1, PayloadAttributes as EthPayloadAttributes,
+    ExecutionPayloadV1,
 };
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::{EngineApiValidator, PayloadValidator};
+use reth_ethereum_engine_primitives::EthPayloadAttributes;
 use reth_ethereum_payload_builder::EthereumExecutionPayloadValidator;
 use reth_ethereum_primitives::Block;
 use reth_node_api::PayloadTypes;

@@ -33,6 +33,64 @@ pub trait IntoEngineApiRpcModule {
     fn into_rpc_module(self) -> RpcModule<()>;
 }
 
+/// Payload validation result returned by EIP-7805 Engine API methods.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PayloadStatusV2 {
+    /// The ordinary Engine API payload status.
+    #[serde(flatten)]
+    pub payload_status: PayloadStatus,
+    /// Whether the payload satisfies its EIP-7805 inclusion list.
+    pub inclusion_list_satisfied: Option<bool>,
+}
+
+impl PayloadStatusV2 {
+    /// Creates a result from an ordinary payload status and its inclusion-list result.
+    pub const fn new(
+        payload_status: PayloadStatus,
+        inclusion_list_satisfied: Option<bool>,
+    ) -> Self {
+        Self { payload_status, inclusion_list_satisfied }
+    }
+}
+
+/// Forkchoice response returned by `engine_forkchoiceUpdatedV5`.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForkchoiceUpdatedV2 {
+    /// Payload and inclusion-list validation status for the selected head.
+    pub payload_status: PayloadStatusV2,
+    /// Identifier of a payload build started by this update.
+    pub payload_id: Option<PayloadId>,
+}
+
+#[cfg(test)]
+mod eip7805_tests {
+    use super::*;
+    use alloy_rpc_types_engine::PayloadStatusEnum;
+
+    #[test]
+    fn payload_status_v2_serializes_required_satisfaction_field() {
+        let status = PayloadStatusV2::new(
+            PayloadStatus::new(PayloadStatusEnum::Valid, Some(B256::ZERO)),
+            Some(false),
+        );
+        let value = serde_json::to_value(status).unwrap();
+
+        assert_eq!(value["status"], "VALID");
+        assert_eq!(value["inclusionListSatisfied"], false);
+    }
+
+    #[test]
+    fn payload_status_v2_serializes_null_for_non_valid_status() {
+        let status =
+            PayloadStatusV2::new(PayloadStatus::from_status(PayloadStatusEnum::Syncing), None);
+        let value = serde_json::to_value(status).unwrap();
+
+        assert!(value["inclusionListSatisfied"].is_null());
+    }
+}
+
 // NOTE: We can't use associated types in the `EngineApi` trait because of jsonrpsee, so we use a
 // generic here. It would be nice if the rpc macro would understand which types need to have serde.
 // By default, if the trait has a generic, the rpc macro will add e.g. `Engine: DeserializeOwned` to
@@ -86,6 +144,17 @@ pub trait EngineApi<Engine: EngineTypes> {
         parent_beacon_block_root: B256,
         execution_requests: RequestsOrHash,
     ) -> RpcResult<PayloadStatus>;
+
+    /// Post Bogota payload handler with EIP-7805 inclusion-list validation.
+    #[method(name = "newPayloadV6")]
+    async fn new_payload_v6(
+        &self,
+        payload: ExecutionPayloadV4,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+        execution_requests: RequestsOrHash,
+        inclusion_list_transactions: Vec<Bytes>,
+    ) -> RpcResult<PayloadStatusV2>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_forkchoiceupdatedv1>
     ///
@@ -150,6 +219,15 @@ pub trait EngineApi<Engine: EngineTypes> {
         payload_attributes: Option<Engine::PayloadAttributes>,
         custody_columns: Option<B128>,
     ) -> RpcResult<ForkchoiceUpdated>;
+
+    /// Post Bogota forkchoice handler with EIP-7805 inclusion-list status.
+    #[method(name = "forkchoiceUpdatedV5")]
+    async fn fork_choice_updated_v5(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<Engine::PayloadAttributes>,
+        custody_columns: Option<B128>,
+    ) -> RpcResult<ForkchoiceUpdatedV2>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_getpayloadv1>
     ///
@@ -228,6 +306,10 @@ pub trait EngineApi<Engine: EngineTypes> {
         &self,
         payload_id: PayloadId,
     ) -> RpcResult<Engine::ExecutionPayloadEnvelopeV6>;
+
+    /// Builds an EIP-7805 inclusion list from executable pool transactions for `block_hash`.
+    #[method(name = "getInclusionListV1")]
+    async fn get_inclusion_list_v1(&self, block_hash: B256) -> RpcResult<Vec<Bytes>>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1>
     #[method(name = "getPayloadBodiesByHashV1")]
