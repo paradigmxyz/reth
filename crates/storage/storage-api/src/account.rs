@@ -4,10 +4,12 @@ use alloc::{
 };
 use alloy_primitives::{Address, BlockNumber};
 use auto_impl::auto_impl;
-use core::ops::{RangeBounds, RangeInclusive};
+use core::ops::{Bound, RangeBounds, RangeInclusive};
 use reth_db_models::AccountBeforeTx;
 use reth_primitives_traits::Account;
 use reth_storage_errors::provider::ProviderResult;
+
+use crate::StorageChangeSetReader;
 
 /// Account reader
 #[auto_impl(&, Arc, Box)]
@@ -78,4 +80,50 @@ pub trait ChangeSetReader {
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>>;
+
+    /// Returns the number of account changeset rows in the given block range without
+    /// materializing the changesets.
+    ///
+    /// Accepts the same range types as [`Self::account_changesets_range`].
+    fn count_account_changesets_in_range(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<u64>;
+}
+
+/// Converts a block range to an inclusive range for changeset counting.
+///
+/// Returns `None` if the range is empty.
+pub fn inclusive_block_range(
+    range: impl RangeBounds<BlockNumber>,
+) -> Option<RangeInclusive<BlockNumber>> {
+    let start = match range.start_bound() {
+        Bound::Included(&n) => n,
+        Bound::Excluded(&n) => n.saturating_add(1),
+        Bound::Unbounded => 0,
+    };
+    let end = match range.end_bound() {
+        Bound::Included(&n) => n,
+        Bound::Excluded(&n) => n.saturating_sub(1),
+        Bound::Unbounded => BlockNumber::MAX,
+    };
+
+    if start > end {
+        return None
+    }
+
+    Some(start..=end)
+}
+
+/// Counts account and storage changeset rows in the given block range.
+pub fn count_state_changes_in_range(
+    provider: &(impl ChangeSetReader + StorageChangeSetReader),
+    range: impl RangeBounds<BlockNumber>,
+) -> ProviderResult<u64> {
+    let Some(range) = inclusive_block_range(range) else {
+        return Ok(0);
+    };
+    let account = provider.count_account_changesets_in_range(range.clone())?;
+    let storage = provider.count_storage_changesets_in_range(range)?;
+    Ok(account + storage)
 }

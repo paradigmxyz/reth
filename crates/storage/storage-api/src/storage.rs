@@ -76,4 +76,11 @@ pub trait StorageChangeSetReader: Send {
                 .collect()
         })
     }
+
+    /// Returns the number of storage changeset rows in the given block range without
+    /// materializing the changesets.
+    fn count_storage_changesets_in_range(
+        &self,
+        range: impl core::ops::RangeBounds<BlockNumber>,
+    ) -> ProviderResult<u64>;
 }
