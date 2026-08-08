@@ -35,15 +35,15 @@ use reth_primitives_traits::{
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    BlockBodyIndicesProvider, BytecodeReader, DBProvider, DatabaseProviderFactory, DbTxProvider,
-    HashedPostStateProvider, NodePrimitivesProvider, StageCheckpointReader, StateProofProvider,
-    StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
-    TryIntoHistoricalStateProvider,
+    AccountRangeProvider, AccountRangeResult, BlockBodyIndicesProvider, BytecodeReader, DBProvider,
+    DatabaseProviderFactory, DbTxProvider, HashedPostStateProvider, NodePrimitivesProvider,
+    StageCheckpointReader, StateProofProvider, StorageChangeSetReader, StorageRootProvider,
+    StorageSettingsCache, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput, TrieInputSorted,
 };
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -1131,6 +1131,21 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> HashedPostStateProvid
         _bundle_state: &revm::database::BundleState,
     ) -> ProviderResult<HashedPostState> {
         Ok(HashedPostState::default())
+    }
+}
+
+impl<T, ChainSpec> AccountRangeProvider for MockEthProvider<T, ChainSpec>
+where
+    T: NodePrimitives,
+    ChainSpec: EthChainSpec + Send + Sync + 'static,
+{
+    fn account_range_with_nodes(
+        &self,
+        _input: TrieInputSorted,
+        _start: B256,
+        _limit: usize,
+    ) -> ProviderResult<AccountRangeResult> {
+        Err(ProviderError::UnsupportedProvider)
     }
 }
 
