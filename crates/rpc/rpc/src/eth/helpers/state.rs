@@ -103,4 +103,43 @@ mod tests {
         let account = eth_api.get_account(address, Default::default()).await.unwrap();
         assert!(account.is_none());
     }
+
+    #[tokio::test]
+    async fn test_get_proof_rejects_oversized_key_list() {
+        use reth_rpc_server_types::constants::DEFAULT_MAX_STORAGE_VALUES_SLOTS;
+
+        let eth_api = noop_eth_api();
+        let keys = vec![U256::ZERO.into(); DEFAULT_MAX_STORAGE_VALUES_SLOTS + 1];
+        let err = EthState::get_proof(&eth_api, Address::ZERO, keys, None).unwrap().await.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("storage key count") && msg.contains("exceeds limit"),
+            "unexpected error: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_get_multi_proof_rejects_empty_slot_address_flood() {
+        use alloy_primitives::B256;
+        use reth_rpc_server_types::constants::DEFAULT_MAX_STORAGE_VALUES_SLOTS;
+
+        let eth_api = noop_eth_api();
+        // Slot-sum is 0, so a slots-only cap would admit this. Each address still
+        // forces account-trie retention, so proof-units must reject it.
+        let targets = (0..=DEFAULT_MAX_STORAGE_VALUES_SLOTS)
+            .map(|i| {
+                let mut raw = [0u8; 20];
+                raw[12..].copy_from_slice(&(i as u64).to_be_bytes());
+                (Address::from(raw), Vec::<B256>::new())
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(targets.iter().map(|(_, s)| s.len()).sum::<usize>(), 0);
+
+        let err = EthState::get_multi_proof(&eth_api, targets, None).unwrap().await.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("proof target units") && msg.contains("exceeds limit"),
+            "unexpected error: {msg}"
+        );
+    }
 }

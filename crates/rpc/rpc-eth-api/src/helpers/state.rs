@@ -172,6 +172,17 @@ pub trait EthState: LoadState + SpawnBlocking {
                 .map_err(RethError::other)
                 .map_err(EthApiError::Internal)?;
 
+            // Same total-slot budget as `storage_values` / `get_multi_proof`: each
+            // key triggers storage-trie proof work on the blocking IO pool.
+            if keys.len() > DEFAULT_MAX_STORAGE_VALUES_SLOTS {
+                return Err(Self::Error::from_eth_err(EthApiError::InvalidParams(
+                    format!(
+                        "storage key count {} exceeds limit {DEFAULT_MAX_STORAGE_VALUES_SLOTS}",
+                        keys.len(),
+                    ),
+                )));
+            }
+
             let block_id = block_id.unwrap_or_default();
             self.ensure_within_proof_window(block_id)?;
 
@@ -205,6 +216,20 @@ pub trait EthState: LoadState + SpawnBlocking {
                 .await
                 .map_err(RethError::other)
                 .map_err(EthApiError::Internal)?;
+
+            // Multiproof retains every target address in the account trie even
+            // when that address's slot list is empty. A slot-sum-only cap (see
+            // open #26619) therefore fails open on `[(addr, []); N]`. Charge
+            // max(1, slots.len()) per target and reuse the storage_values budget.
+            let proof_units: usize =
+                targets.iter().map(|(_, slots)| slots.len().max(1)).sum();
+            if proof_units > DEFAULT_MAX_STORAGE_VALUES_SLOTS {
+                return Err(Self::Error::from_eth_err(EthApiError::InvalidParams(
+                    format!(
+                        "proof target units {proof_units} exceeds limit {DEFAULT_MAX_STORAGE_VALUES_SLOTS}",
+                    ),
+                )));
+            }
 
             let block_id = block_id.unwrap_or_default();
             self.ensure_within_proof_window(block_id)?;
