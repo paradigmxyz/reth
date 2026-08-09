@@ -16,14 +16,13 @@ use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{ParallelBridgeBuffered, RecoveredBlock, SealedBlock};
 use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, DatabaseProviderFactory,
-    ExecutionOutcome, HistoryWriter, OriginalValuesKnown, StateWriteConfig, StateWriter,
-    StaticFileProviderFactory, StaticFileSegment, StaticFileWriter, StorageSettingsCache,
+    ExecutionOutcome, HashedPostStateProvider, HistoryWriter, OriginalValuesKnown,
+    StateWriteConfig, StateWriter, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
+    StorageSettingsCache,
 };
 use reth_revm::database::StateProviderDatabase;
-use reth_trie::{
-    hashed_cursor::zero_destroyed_account_storage, HashedPostState, KeccakKeyHasher, StateRoot,
-};
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseStateRoot};
+use reth_trie::StateRoot;
+use reth_trie_db::DatabaseStateRoot;
 use std::{
     collections::BTreeMap,
     fs,
@@ -258,14 +257,9 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
             .map_err(|err| Error::block_failed(block_number, err))?;
 
         // Compute and check the post state root
-        let mut hashed_state =
-            HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state());
-        zero_destroyed_account_storage(
-            &DatabaseHashedCursorFactory::new(provider.tx_ref()),
-            output.state.state(),
-            &mut hashed_state,
-        )
-        .map_err(|err| Error::block_failed(block_number, err))?;
+        let hashed_state = state_provider
+            .hashed_post_state(&output.state)
+            .map_err(|err| Error::block_failed(block_number, err))?;
         let sorted = hashed_state.clone_into_sorted();
         let (computed_state_root, _) = reth_trie_db::with_adapter!(provider, |A| {
             StateRoot::<reth_trie_db::DatabaseTrieCursorFactory<_, A>, _>::overlay_root_with_updates(

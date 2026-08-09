@@ -5,7 +5,7 @@ use super::{EthApiSpec, LoadBlock, LoadPendingBlock, SpawnBlocking};
 use crate::{EthApiTypes, FromEthApiError, RpcNodeCore, RpcNodeCoreExt};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::BlockId;
-use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{Account, AccountInfo, EIP1186AccountProofResponse};
 use alloy_serde::JsonStorageKey;
 use futures::Future;
@@ -22,6 +22,7 @@ use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, StateProvider, StateProviderBox, StateProviderFactory,
 };
 use reth_transaction_pool::TransactionPool;
+use reth_trie_common::MultiProofTargets;
 use std::{collections::HashMap, sync::Arc};
 
 /// Helper methods for `eth_` methods relating to state (accounts).
@@ -181,6 +182,59 @@ pub trait EthState: LoadState + SpawnBlocking {
                     .proof(Default::default(), address, &storage_keys)
                     .map_err(Self::Error::from_eth_err)?;
                 Ok(proof.into_eip1186_response(keys))
+            })
+            .await
+        })
+    }
+
+    /// Returns account and storage proofs for multiple targets at the given block number.
+    fn get_multi_proof(
+        &self,
+        targets: Vec<(Address, Vec<B256>)>,
+        block_id: Option<BlockId>,
+    ) -> Result<
+        impl Future<Output = Result<Vec<EIP1186AccountProofResponse>, Self::Error>> + Send,
+        Self::Error,
+    >
+    where
+        Self: EthApiSpec,
+    {
+        Ok(async move {
+            let _permit = self
+                .acquire_owned_tracing()
+                .await
+                .map_err(RethError::other)
+                .map_err(EthApiError::Internal)?;
+
+            let block_id = block_id.unwrap_or_default();
+            self.ensure_within_proof_window(block_id)?;
+
+            self.spawn_blocking_io_fut(async move |this| {
+                let state = this.state_at_block_id(block_id).await?;
+                let mut proof_targets = MultiProofTargets::with_capacity(targets.len());
+                for (address, slots) in &targets {
+                    proof_targets
+                        .entry(keccak256(address))
+                        .or_default()
+                        .extend(slots.iter().map(keccak256));
+                }
+
+                let multiproof = state
+                    .multiproof(Default::default(), proof_targets)
+                    .map_err(Self::Error::from_eth_err)?;
+
+                targets
+                    .into_iter()
+                    .map(|(address, slots)| {
+                        let proof = multiproof
+                            .account_proof(address, &slots)
+                            .map_err(RethError::other)
+                            .map_err(Self::Error::from_eth_err)?;
+                        let storage_keys =
+                            slots.into_iter().map(JsonStorageKey::from).collect::<Vec<_>>();
+                        Ok(proof.into_eip1186_response(storage_keys))
+                    })
+                    .collect::<Result<Vec<_>, Self::Error>>()
             })
             .await
         })
