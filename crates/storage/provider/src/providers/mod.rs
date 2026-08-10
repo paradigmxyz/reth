@@ -1,8 +1,34 @@
 //! Contains the main provider types and traits for interacting with the blockchain's storage.
 
+use alloy_primitives::{Address, StorageKey, StorageValue};
 use reth_chainspec::EthereumHardforks;
 use reth_db_api::table::Value;
 use reth_node_types::{NodePrimitives, NodeTypes, NodeTypesWithDB};
+use reth_primitives_traits::Account;
+use reth_storage_errors::provider::ProviderResult;
+use std::sync::OnceLock;
+
+/// Optional process-wide latest-state point-read callbacks for external state backends.
+///
+/// The engine's in-memory overlays remain layered above these reads. Historical state, proofs,
+/// and trie-table access are intentionally unaffected.
+pub struct FlatStateReads {
+    /// Reads an account from the external canonical-tip state.
+    pub account: Box<dyn Fn(&Address) -> ProviderResult<Option<Account>> + Send + Sync + 'static>,
+    /// Reads a storage slot from the external canonical-tip state.
+    pub storage: Box<
+        dyn Fn(Address, StorageKey) -> ProviderResult<Option<StorageValue>> + Send + Sync + 'static,
+    >,
+}
+
+impl core::fmt::Debug for FlatStateReads {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("FlatStateReads").finish_non_exhaustive()
+    }
+}
+
+/// External latest-state read callbacks, installed at most once during node startup.
+pub static FLAT_STATE_READS: OnceLock<FlatStateReads> = OnceLock::new();
 
 mod database;
 pub use database::*;
