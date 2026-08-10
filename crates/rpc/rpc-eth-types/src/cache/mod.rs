@@ -19,7 +19,7 @@ use reth_revm::{
         BalWrites as RevmBalWrites, StorageBal as RevmStorageBal,
     },
 };
-use reth_storage_api::{get_revm_bal_by_hash, BalProvider, BlockReader, TransactionVariant};
+use reth_storage_api::{BalProvider, BlockReader, TransactionVariant};
 use reth_tasks::Runtime;
 use schnellru::{ByLength, Limiter, LruMap};
 use std::{
@@ -155,6 +155,16 @@ impl<N: NodePrimitives> EthStateCache<N> {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetBlockWithSenders { block_hash, response_tx });
         rx.await.map_err(|_| CacheServiceUnavailable)?
+    }
+
+    /// Requests the block for the given block hash if it is cached.
+    pub async fn get_maybe_block(
+        &self,
+        block_hash: B256,
+    ) -> ProviderResult<Option<Arc<RecoveredBlock<N::Block>>>> {
+        let (response_tx, rx) = oneshot::channel();
+        let _ = self.to_service.send(CacheAction::GetCachedBlock { block_hash, response_tx });
+        rx.await.map_err(|_| CacheServiceUnavailable.into())
     }
 
     /// Requests the receipts for the block hash
@@ -615,7 +625,9 @@ where
                                     ActionSender::new(CacheKind::Bal, block_hash, action_tx);
                                 this.action_task_spawner.spawn_blocking_task(async move {
                                     let _permit = rate_limiter.acquire().await;
-                                    let res = get_revm_bal_by_hash(&provider, block_hash)
+                                    let res = provider
+                                        .bal_store()
+                                        .revm_bal_by_hash(block_hash)
                                         .map(|maybe_bal| maybe_bal.map(CachedRevmBal::new));
                                     action_sender.send_bal(res);
                                 });
@@ -1225,8 +1237,15 @@ mod tests {
         }
 
         fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
+            Ok(block_hashes.iter().map(|_| None).collect())
+        }
+
+        fn revm_bal_by_hash(
+            &self,
+            _block_hash: BlockHash,
+        ) -> ProviderResult<Option<DecodedBal<Arc<RevmBal>>>> {
             self.fetches.fetch_add(1, Ordering::SeqCst);
-            Ok(block_hashes.iter().map(|_| Some(Bytes::from_static(&[0xc0]))).collect())
+            Ok(Some(test_decoded_revm_bal()))
         }
 
         fn bal_stream(&self) -> reth_storage_api::BalNotificationStream {

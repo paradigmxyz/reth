@@ -27,9 +27,7 @@ use reth_payload_primitives::{
 };
 use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
-use reth_storage_api::{
-    get_bals_by_hashes, BalProvider, BlockReader, HeaderProvider, StateProviderFactory,
-};
+use reth_storage_api::{BalProvider, BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::Runtime;
 use reth_transaction_pool::TransactionPool;
 use std::{
@@ -819,7 +817,7 @@ where
         }
 
         let (tx, rx) = oneshot::channel();
-        let inner = self.inner.clone();
+        let bal_store = self.inner.provider.bal_store().clone();
 
         self.inner.task_spawner.spawn_blocking_task(async move {
             if tx.is_closed() {
@@ -827,7 +825,8 @@ where
             }
 
             tx.send(
-                get_bals_by_hashes(&inner.provider, &hashes)
+                bal_store
+                    .get_by_hashes(&hashes)
                     .map_err(|err| EngineApiError::Internal(Box::new(err))),
             )
             .ok();

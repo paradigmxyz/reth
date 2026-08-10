@@ -316,11 +316,13 @@ impl RocksDBBuilder {
     /// - [`tables::AccountsHistory`] - Account history index
     /// - [`tables::StoragesHistory`] - Storage history index
     /// - [`tables::BlockAccessLists`] - Block access list payloads
+    /// - [`tables::BlockAccessListBlockNumbers`] - Block access list hash index
     pub fn with_default_tables(self) -> Self {
         self.with_table::<tables::TransactionHashNumbers>()
             .with_table::<tables::AccountsHistory>()
             .with_table::<tables::StoragesHistory>()
             .with_table::<tables::BlockAccessLists>()
+            .with_table::<tables::BlockAccessListBlockNumbers>()
     }
 
     /// Enables metrics.
@@ -2902,6 +2904,13 @@ mod tests {
             ])));
         provider.put::<tables::BlockAccessLists>(bal_key, &bal_value).unwrap();
         assert_eq!(provider.get::<tables::BlockAccessLists>(bal_key).unwrap(), Some(bal_value));
+        provider
+            .put::<tables::BlockAccessListBlockNumbers>(bal_key.num_hash().hash, &bal_key.number())
+            .unwrap();
+        assert_eq!(
+            provider.get::<tables::BlockAccessListBlockNumbers>(bal_key.num_hash().hash).unwrap(),
+            Some(bal_key.number())
+        );
     }
 
     #[test]

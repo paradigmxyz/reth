@@ -9,11 +9,13 @@ use reth_db_api::{
     tables, DatabaseError,
 };
 use reth_prune_types::PruneMode;
-use reth_storage_api::{BalNotification, BalNotificationStream, BalStore, RawBal};
+use reth_storage_api::{
+    BalNotification, BalNotificationStream, BalStore, GetBlockAccessListLimit, RawBal,
+};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_tokio_util::EventSender;
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     sync::Arc,
 };
 
@@ -22,8 +24,8 @@ const DEFAULT_BAL_BUFFER_RETENTION_DISTANCE: u64 = 32;
 
 /// RocksDB-backed BAL store.
 ///
-/// Persisted BALs are keyed by `(block_number, block_hash)`. Hash-only lookups only read the
-/// in-memory buffer.
+/// Persisted BALs are keyed by `(block_number, block_hash)` for ordered pruning and indexed by
+/// block hash for direct [`BalStore`] lookups.
 #[derive(Clone)]
 pub struct RocksDBBalStore {
     /// Retention policy for persisted BALs.
@@ -84,6 +86,7 @@ impl RocksDBBalStore {
         let mut batch = self.rocksdb.batch();
         for key in &keys {
             batch.delete::<tables::BlockAccessLists>(*key)?;
+            batch.delete::<tables::BlockAccessListBlockNumbers>(key.num_hash().hash)?;
         }
         batch.commit()?;
         Ok(keys.len())
@@ -98,12 +101,20 @@ impl RocksDBBalStore {
         stored.into_verified_raw().map(|raw| Some(raw.into_raw())).map_err(ProviderError::other)
     }
 
-    fn read_one(&self, block: NumHash) -> ProviderResult<Option<Bytes>> {
-        if let Some(bal) = self.buffer.read().get_by_block_num_hash(block) {
+    fn read_one_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<Bytes>> {
+        if let Some(bal) = self.buffer.read().get_by_hash(block_hash) {
             return Ok(Some(bal))
         }
 
-        self.read_one_from_disk(StoredBlockAccessListKey::new(block))
+        let Some(block_number) =
+            self.rocksdb.get::<tables::BlockAccessListBlockNumbers>(block_hash)?
+        else {
+            return Ok(None)
+        };
+        self.read_one_from_disk(StoredBlockAccessListKey::new(NumHash::new(
+            block_number,
+            block_hash,
+        )))
     }
 
     fn buffer_retention(&self) -> PruneMode {
@@ -134,6 +145,8 @@ struct RocksDBBalStoreBuffer {
     hashes_by_number: BTreeMap<BlockNumber, Vec<BlockHash>>,
     /// Ordered writes waiting for flush.
     pending: BTreeMap<StoredBlockAccessListKey, RawBal>,
+    /// Pending writes confirmed canonical by the persistence service.
+    canonical_pending: BTreeSet<StoredBlockAccessListKey>,
     /// Highest block number inserted into the buffer.
     highest_block_number: Option<BlockNumber>,
 }
@@ -149,6 +162,10 @@ impl RocksDBBalStoreBuffer {
                 entry.block_number,
                 block.hash,
             )));
+            self.canonical_pending.remove(&StoredBlockAccessListKey::new(NumHash::new(
+                entry.block_number,
+                block.hash,
+            )));
         }
 
         self.hashes_by_number.entry(block.number).or_default().push(block.hash);
@@ -158,13 +175,19 @@ impl RocksDBBalStoreBuffer {
         );
     }
 
-    fn pending_entries(&self, blocks: &[NumHash]) -> Vec<(StoredBlockAccessListKey, RawBal)> {
-        blocks
+    fn mark_canonical(&mut self, blocks: &[NumHash]) {
+        self.canonical_pending.extend(
+            blocks
+                .iter()
+                .map(|block| StoredBlockAccessListKey::new(*block))
+                .filter(|key| self.pending.contains_key(key)),
+        );
+    }
+
+    fn canonical_pending_entries(&self) -> Vec<(StoredBlockAccessListKey, RawBal)> {
+        self.canonical_pending
             .iter()
-            .filter_map(|block| {
-                let key = StoredBlockAccessListKey::new(*block);
-                self.pending.get(&key).map(|bal| (key, bal.clone()))
-            })
+            .filter_map(|key| self.pending.get(key).map(|bal| (*key, bal.clone())))
             .collect()
     }
 
@@ -181,18 +204,12 @@ impl RocksDBBalStoreBuffer {
                     StoredBlockAccessListKey::new(NumHash::new(*block_number, *hash))
                 })
             })
+            .filter(|key| !self.canonical_pending.contains(key))
             .collect()
     }
 
     fn get_by_hash(&self, hash: BlockHash) -> Option<Bytes> {
         self.entries.get(&hash).map(|entry| entry.bal.as_raw().clone())
-    }
-
-    fn get_by_block_num_hash(&self, block: NumHash) -> Option<Bytes> {
-        self.entries
-            .get(&block.hash)
-            .filter(|entry| entry.block_number == block.number)
-            .map(|entry| entry.bal.as_raw().clone())
     }
 
     fn remove_flushed_pending(&mut self, flushed: &[(StoredBlockAccessListKey, RawBal)]) {
@@ -201,6 +218,7 @@ impl RocksDBBalStoreBuffer {
                 self.pending.get(key).is_some_and(|pending| pending.as_raw() == bal.as_raw());
             if pending_matches {
                 self.pending.remove(key);
+                self.canonical_pending.remove(key);
             }
         }
     }
@@ -215,6 +233,7 @@ impl RocksDBBalStoreBuffer {
         for key in keys {
             let block = key.num_hash();
             let pending_removed = self.pending.remove(key).is_some();
+            self.canonical_pending.remove(key);
             let entry_removed = if self
                 .entries
                 .get(&block.hash)
@@ -282,21 +301,26 @@ impl BalStore for RocksDBBalStore {
     }
 
     fn flush(&self, blocks: &[NumHash]) -> ProviderResult<()> {
-        let mut buffer = self.buffer.write();
-        let pending = buffer.pending_entries(blocks);
+        let pending = {
+            let mut buffer = self.buffer.write();
+            buffer.mark_canonical(blocks);
+            buffer.canonical_pending_entries()
+        };
         if !pending.is_empty() {
             let mut batch = self.rocksdb.batch();
             for (key, bal) in &pending {
+                let block = key.num_hash();
                 let value = StoredBlockAccessList::new(bal.clone());
                 batch.put::<tables::BlockAccessLists>(*key, &value)?;
+                batch.put::<tables::BlockAccessListBlockNumbers>(block.hash, &block.number)?;
             }
             batch.commit()?;
 
-            buffer.remove_flushed_pending(&pending);
+            self.buffer.write().remove_flushed_pending(&pending);
         }
 
         if let Some(tip) = blocks.iter().map(|block| block.number).max() {
-            buffer.prune(self.buffer_retention(), tip);
+            self.buffer.write().prune(self.buffer_retention(), tip);
         }
         Ok(())
     }
@@ -306,12 +330,26 @@ impl BalStore for RocksDBBalStore {
     }
 
     fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
-        let buffer = self.buffer.read();
-        Ok(block_hashes.iter().map(|hash| buffer.get_by_hash(*hash)).collect())
+        block_hashes.iter().map(|hash| self.read_one_by_hash(*hash)).collect()
     }
 
-    fn get_by_block_num_hash(&self, block: NumHash) -> ProviderResult<Option<Bytes>> {
-        self.read_one(block)
+    fn append_by_hashes_with_limit(
+        &self,
+        block_hashes: &[BlockHash],
+        limit: GetBlockAccessListLimit,
+        out: &mut Vec<Option<Bytes>>,
+    ) -> ProviderResult<()> {
+        let mut size = 0;
+        for block_hash in block_hashes {
+            let bal = self.read_one_by_hash(*block_hash)?;
+            size += bal.as_ref().map_or(1, |bytes| bytes.len());
+            out.push(bal);
+
+            if limit.exceeds(size) {
+                break
+            }
+        }
+        Ok(())
     }
 
     fn bal_stream(&self) -> BalNotificationStream {
@@ -347,11 +385,11 @@ mod tests {
     }
 
     fn read_many(store: &RocksDBBalStore, blocks: &[NumHash]) -> Vec<Option<Bytes>> {
-        blocks.iter().map(|block| store.get_by_block_num_hash(*block).unwrap()).collect()
+        blocks.iter().map(|block| store.get_by_hash(block.hash).unwrap()).collect()
     }
 
     #[test]
-    fn inserts_and_reads_by_block_num_hash() {
+    fn inserts_and_reads_by_hash() {
         let (_dir, store) = test_store();
         let hash = B256::random();
         let missing = NumHash::new(1, B256::random());
@@ -371,6 +409,19 @@ mod tests {
         store.insert(block, RawBal::from(bal.clone())).unwrap();
 
         assert_eq!(store.get_by_hashes(&[block.hash]).unwrap(), vec![Some(bal)]);
+    }
+
+    #[test]
+    fn hash_lookup_reads_persisted_bal_through_store() {
+        let (_dir, store) = test_store();
+        let block = NumHash::new(1, B256::random());
+        let bal = Bytes::from_static(&[0xc1, 0x01]);
+
+        store.insert(block, RawBal::from(bal.clone())).unwrap();
+        store.flush(&[block]).unwrap();
+
+        let store_with_empty_buffer = RocksDBBalStore::new(store.rocksdb_provider().clone());
+        assert_eq!(store_with_empty_buffer.get_by_hash(block.hash).unwrap(), Some(bal));
     }
 
     #[test]
@@ -430,7 +481,15 @@ mod tests {
         );
         assert_eq!(
             store.get_by_hashes(&[block_1.hash, block_1_fork.hash, block_2.hash]).unwrap(),
-            vec![Some(bal_1), Some(bal_1_fork), Some(bal_2)]
+            vec![Some(bal_1.clone()), Some(bal_1_fork), Some(bal_2)]
+        );
+
+        let store_with_empty_buffer = RocksDBBalStore::new(store.rocksdb_provider().clone());
+        assert_eq!(
+            store_with_empty_buffer
+                .get_by_hashes(&[block_1.hash, block_1_fork.hash, block_2.hash])
+                .unwrap(),
+            vec![Some(bal_1), None, None]
         );
     }
 
@@ -521,8 +580,33 @@ mod tests {
         let value = StoredBlockAccessList::decompress(&encoded).unwrap();
 
         store.rocksdb_provider().put::<tables::BlockAccessLists>(key, &value).unwrap();
+        store
+            .rocksdb_provider()
+            .put::<tables::BlockAccessListBlockNumbers>(block.hash, &block.number)
+            .unwrap();
 
-        assert!(store.get_by_block_num_hash(block).is_err());
+        assert!(store.get_by_hash(block.hash).is_err());
+    }
+
+    #[test]
+    fn canonical_pending_entries_are_retried() {
+        let mut buffer = RocksDBBalStoreBuffer::default();
+        let first = NumHash::new(1, B256::with_last_byte(1));
+        let second = NumHash::new(2, B256::with_last_byte(2));
+        buffer.insert(first, RawBal::from(Bytes::from_static(&[0xc1, 0x01])));
+        buffer.mark_canonical(&[first]);
+
+        assert_eq!(buffer.canonical_pending_entries().len(), 1);
+
+        // A failed flush leaves the canonical entry pending for the next attempt.
+        buffer.insert(second, RawBal::from(Bytes::from_static(&[0xc1, 0x02])));
+        buffer.mark_canonical(&[second]);
+        let retry = buffer.canonical_pending_entries();
+
+        assert_eq!(
+            retry.iter().map(|(key, _)| key.num_hash()).collect::<Vec<_>>(),
+            vec![first, second]
+        );
     }
 
     #[tokio::test]

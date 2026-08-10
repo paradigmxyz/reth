@@ -358,6 +358,12 @@ tables! {
         type Value = StoredBlockAccessList;
     }
 
+    /// Stores the block number for each persisted block access list hash.
+    table BlockAccessListBlockNumbers {
+        type Key = BlockHash;
+        type Value = BlockNumber;
+    }
+
     /// Canonical only Stores the transaction body for canonical transactions.
     table Transactions<T = TransactionSigned> {
         type Key = TxNumber;

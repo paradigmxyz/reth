@@ -417,7 +417,6 @@ mod tests {
     use reth_db_common::init::init_genesis;
     use reth_exex_types::FinishedExExHeight;
     use reth_provider::{
-        get_bal_by_hash,
         providers::{ProviderFactoryBuilder, ReadOnlyConfig},
         test_utils::{create_test_provider_factory, MockNodeTypes},
         AccountReader, BalConfig, BalNotificationStream, BalStore, BalStoreHandle,
@@ -573,7 +572,7 @@ mod tests {
             table::Decompress,
             tables,
         };
-        use reth_provider::RocksDBProviderFactory;
+        use reth_provider::{RocksDBBalStore, RocksDBProviderFactory};
 
         reth_tracing::init_test_tracing();
         let provider = create_test_provider_factory();
@@ -612,7 +611,8 @@ mod tests {
             .unwrap();
         let stored = StoredBlockAccessList::decompress(&stored).unwrap();
         assert_eq!(stored.into_verified_raw().unwrap().into_raw(), raw_bal);
-        assert_eq!(get_bal_by_hash(&provider, num_hash.hash).unwrap(), Some(raw_bal));
+        let persisted_store = RocksDBBalStore::new(provider.rocksdb_provider());
+        assert_eq!(persisted_store.get_by_hash(num_hash.hash).unwrap(), Some(raw_bal));
     }
 
     #[test]

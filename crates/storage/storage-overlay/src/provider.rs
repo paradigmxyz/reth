@@ -1,3 +1,4 @@
+use crate::{database_state_frontiers, Overlay, OverlayBuilder};
 use alloy_primitives::{BlockHash, B256};
 use metrics::{Counter, Histogram};
 use reth_db_api::{tables, transaction::DbTx, DatabaseError};
@@ -10,14 +11,12 @@ use reth_primitives_traits::{
 };
 use reth_storage_api::{
     BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-    DatabaseProviderROFactory, PruneCheckpointReader, StageCheckpointReader,
+    DatabaseProviderROFactory, DbTxProvider, PruneCheckpointReader, StageCheckpointReader,
     StorageChangeSetReader, StorageSettingsCache,
 };
-use reth_storage_overlay::{database_state_frontiers, Overlay, OverlayBuilder};
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     trie_cursor::{InMemoryTrieCursor, TrieCursor, TrieCursorFactory, TrieStorageCursor},
-    updates::TrieUpdatesSorted,
     HashedPostStateSorted,
 };
 use reth_trie_db::{
@@ -118,7 +117,6 @@ where
     F: DatabaseProviderFactory,
     F::Provider: StageCheckpointReader
         + PruneCheckpointReader
-        + DBProvider
         + BlockNumReader
         + ChangeSetReader
         + StorageChangeSetReader
@@ -139,11 +137,11 @@ where
             res
         };
 
-        let Overlay { trie_updates, hashed_post_state } = self.get_overlay(&provider)?;
+        let overlay = self.get_overlay(&provider)?;
 
         let is_v2 = provider.cached_storage_settings().is_v2();
         self.metrics.database_provider_ro_duration.record(overall_start.elapsed());
-        Ok(OverlayStateProvider::new(provider, trie_updates, hashed_post_state, is_v2))
+        Ok(OverlayStateProvider::new(provider, overlay, is_v2))
     }
 }
 
@@ -153,33 +151,22 @@ where
 /// on top of a database provider, implementing [`TrieCursorFactory`] and [`HashedCursorFactory`]
 /// using the in-memory overlay factories.
 #[derive(Debug)]
-pub struct OverlayStateProvider<Provider: DBProvider> {
+pub struct OverlayStateProvider<Provider> {
     provider: Provider,
-    trie_updates: Arc<TrieUpdatesSorted>,
-    hashed_post_state: Arc<HashedPostStateSorted>,
+    overlay: Overlay,
     is_v2: bool,
 }
 
-impl<Provider> OverlayStateProvider<Provider>
-where
-    Provider: DBProvider,
-{
-    /// Create new overlay state provider. The `Provider` must be cloneable, which generally means
-    /// it should be wrapped in an `Arc`.
-    pub const fn new(
-        provider: Provider,
-        trie_updates: Arc<TrieUpdatesSorted>,
-        hashed_post_state: Arc<HashedPostStateSorted>,
-        is_v2: bool,
-    ) -> Self {
-        Self { provider, trie_updates, hashed_post_state, is_v2 }
+impl<Provider> OverlayStateProvider<Provider> {
+    /// Creates a new overlay state provider.
+    pub const fn new(provider: Provider, overlay: Overlay, is_v2: bool) -> Self {
+        Self { provider, overlay, is_v2 }
     }
 }
 
 impl<Provider> TrieCursorFactory for OverlayStateProvider<Provider>
 where
-    Provider: DBProvider,
-    Provider::Tx: DbTx,
+    Provider: DbTxProvider,
 {
     type AccountTrieCursor<'a>
         = InMemoryTrieCursor<'a, Box<dyn TrieCursor + Send + 'a>>
@@ -192,44 +179,40 @@ where
         Self: 'a;
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
-        let tx = self.provider.tx_ref();
-        let trie_updates = self.trie_updates.as_ref();
         let cursor: Box<dyn TrieCursor + Send> = if self.is_v2 {
             Box::new(DatabaseAccountTrieCursor::<_, PackedKeyAdapter>::new(
-                tx.cursor_read::<PackedAccountsTrie>()?,
+                self.provider.tx().cursor_read::<PackedAccountsTrie>()?,
             ))
         } else {
             Box::new(DatabaseAccountTrieCursor::<_, LegacyKeyAdapter>::new(
-                tx.cursor_read::<tables::AccountsTrie>()?,
+                self.provider.tx().cursor_read::<tables::AccountsTrie>()?,
             ))
         };
-        Ok(InMemoryTrieCursor::new_account(cursor, trie_updates))
+        Ok(InMemoryTrieCursor::new_account(cursor, &self.overlay.trie_updates))
     }
 
     fn storage_trie_cursor(
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
-        let tx = self.provider.tx_ref();
-        let trie_updates = self.trie_updates.as_ref();
         let cursor: Box<dyn TrieStorageCursor + Send> = if self.is_v2 {
             Box::new(DatabaseStorageTrieCursor::<_, PackedKeyAdapter>::new(
-                tx.cursor_dup_read::<PackedStoragesTrie>()?,
+                self.provider.tx().cursor_dup_read::<PackedStoragesTrie>()?,
                 hashed_address,
             ))
         } else {
             Box::new(DatabaseStorageTrieCursor::<_, LegacyKeyAdapter>::new(
-                tx.cursor_dup_read::<tables::StoragesTrie>()?,
+                self.provider.tx().cursor_dup_read::<tables::StoragesTrie>()?,
                 hashed_address,
             ))
         };
-        Ok(InMemoryTrieCursor::new_storage(cursor, trie_updates, hashed_address))
+        Ok(InMemoryTrieCursor::new_storage(cursor, &self.overlay.trie_updates, hashed_address))
     }
 }
 
 impl<Provider> HashedCursorFactory for OverlayStateProvider<Provider>
 where
-    Provider: DBProvider,
+    Provider: DbTxProvider,
 {
     type AccountCursor<'a>
         = <HashedPostStateCursorFactory<
@@ -248,37 +231,42 @@ where
         Self: 'a;
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
-        let db_hashed_cursor_factory = DatabaseHashedCursorFactory::new(self.provider.tx_ref());
-        let hashed_cursor_factory =
-            HashedPostStateCursorFactory::new(db_hashed_cursor_factory, &self.hashed_post_state);
-        hashed_cursor_factory.hashed_account_cursor()
+        HashedPostStateCursorFactory::new(
+            DatabaseHashedCursorFactory::new(self.provider.tx()),
+            &self.overlay.hashed_post_state,
+        )
+        .hashed_account_cursor()
     }
 
     fn hashed_storage_cursor(
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
-        let db_hashed_cursor_factory = DatabaseHashedCursorFactory::new(self.provider.tx_ref());
-        let hashed_cursor_factory =
-            HashedPostStateCursorFactory::new(db_hashed_cursor_factory, &self.hashed_post_state);
-        hashed_cursor_factory.hashed_storage_cursor(hashed_address)
+        HashedPostStateCursorFactory::new(
+            DatabaseHashedCursorFactory::new(self.provider.tx()),
+            &self.overlay.hashed_post_state,
+        )
+        .hashed_storage_cursor(hashed_address)
     }
 }
 
 #[cfg(all(test, feature = "partial-persistence"))]
 mod tests {
     use super::*;
-    use crate::{
-        test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
-        BlockWriter, ProviderFactory,
-    };
+    use crate::OverlayManager;
     use alloy_primitives::U256;
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
     use reth_primitives_traits::Account;
+    use reth_provider::{
+        test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
+        BlockWriter, ProviderFactory,
+    };
     use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
     use reth_storage_api::StageCheckpointWriter;
-    use reth_storage_overlay::OverlayManager;
-    use reth_trie::{BranchNodeCompact, ComputedTrieData, HashedPostState, HashedStorage, Nibbles};
+    use reth_trie::{
+        updates::TrieUpdatesSorted, BranchNodeCompact, ComputedTrieData, HashedPostState,
+        HashedStorage, Nibbles,
+    };
 
     fn with_unique_trie_data(
         block: &ExecutedBlock<EthPrimitives>,
