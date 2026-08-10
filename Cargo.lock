@@ -8144,7 +8144,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs"
 version = "0.6.0"
-source = "git+https://github.com/Rimeeeeee/reth-core?branch=eip-8289#6b56e69d138974e28f6c117da68e621d78ba6a93"
+source = "git+https://github.com/Rimeeeeee/reth-core?branch=eip-8289#57803f022d699c5ec314a887e6671555a5f6b66c"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -8175,7 +8175,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs-derive"
 version = "0.6.0"
-source = "git+https://github.com/Rimeeeeee/reth-core?branch=eip-8289#6b56e69d138974e28f6c117da68e621d78ba6a93"
+source = "git+https://github.com/Rimeeeeee/reth-core?branch=eip-8289#57803f022d699c5ec314a887e6671555a5f6b66c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9894,7 +9894,7 @@ dependencies = [
 [[package]]
 name = "reth-primitives-traits"
 version = "0.6.0"
-source = "git+https://github.com/Rimeeeeee/reth-core?branch=eip-8289#6b56e69d138974e28f6c117da68e621d78ba6a93"
+source = "git+https://github.com/Rimeeeeee/reth-core?branch=eip-8289#57803f022d699c5ec314a887e6671555a5f6b66c"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -9915,9 +9915,9 @@ dependencies = [
  "quanta",
  "rayon",
  "reth-codecs",
- "revm-bytecode 41.0.0",
- "revm-primitives 41.0.0",
- "revm-state 41.0.0",
+ "revm-bytecode 42.0.0",
+ "revm-primitives 42.0.0",
+ "revm-state 42.0.0",
  "secp256k1 0.30.0",
  "serde",
  "thiserror 2.0.20",
@@ -10982,7 +10982,7 @@ dependencies = [
 [[package]]
 name = "reth-zstd-compressors"
 version = "0.6.0"
-source = "git+https://github.com/Rimeeeeee/reth-core?branch=eip-8289#6b56e69d138974e28f6c117da68e621d78ba6a93"
+source = "git+https://github.com/Rimeeeeee/reth-core?branch=eip-8289#57803f022d699c5ec314a887e6671555a5f6b66c"
 dependencies = [
  "zstd",
 ]
