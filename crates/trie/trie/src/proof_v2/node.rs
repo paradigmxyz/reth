@@ -112,14 +112,10 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
 
     /// Trims the given number of nibbles off the head of the short key.
     ///
-    /// If the node is an extension and the given length is the same as its short key length, then
-    /// the node is replaced with its child.
-    ///
     /// # Panics
     ///
     /// - If the given len is longer than the short key
-    /// - If the given len is the same as the length of a leaf's short key
-    /// - If the node is a [`Self::Branch`] or [`Self::RlpNode`]
+    /// - If the node is a [`Self::RlpNode`]
     pub(crate) fn trim_short_key_prefix(&mut self, len: usize) {
         match self {
             Self::Leaf { short_key, .. } => {

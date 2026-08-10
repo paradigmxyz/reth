@@ -41,7 +41,7 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -91,7 +91,13 @@ jobs:
           elif [[ "${EVENT_NAME}" == "schedule" ]] || [[ "${BUILD_TYPE}" == "nightly" ]]; then
             echo "targets=nightly" >> "$GITHUB_OUTPUT"
             echo "ethereum_tags=${REGISTRY}/reth:nightly" >> "$GITHUB_OUTPUT"
-            echo "ethereum_set=ethereum.tags=${REGISTRY}/reth:nightly" >> "$GITHUB_OUTPUT"
+            {
+              echo "ethereum_set<<EOF"
+              echo "ethereum.tags=${REGISTRY}/reth:nightly"
+              echo "ethereum.args.RETH_ENGINE_TXPOOL_PREWARMING=true"
+              echo "ethereum.args.RETH_ENGINE_SENDER_RECOVERY_CACHE=true"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
 
           else
             # git-sha build

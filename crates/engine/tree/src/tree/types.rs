@@ -7,6 +7,7 @@ use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::B256;
 use reth_chain_state::{ExecutedBlock, ExecutionTimingStats};
 use reth_evm::{ConfigureEvm, EvmEnvFor};
+use reth_execution_cache::TxPoolPrewarmCacheSnapshot;
 use reth_primitives_traits::{BlockTy, NodePrimitives};
 use std::sync::Arc;
 
@@ -37,6 +38,10 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     pub decoded_bal: Option<Arc<DecodedBal>>,
     /// Payload BAL accesses that are present in the EIP-8289 warming window.
     pub(crate) warm_accesses: crate::tree::warm_access::WarmAccessSnapshot,
+    /// Latest completed txpool-prewarm snapshot for this block's parent state.
+    ///
+    /// Can be None if txpool prewarming is disabled or the snapshot is not ready for some reason.
+    pub txpool_snapshot: Option<TxPoolPrewarmCacheSnapshot>,
 }
 
 impl<Evm: ConfigureEvm> ExecutionEnv<Evm>
@@ -56,6 +61,7 @@ where
             withdrawals: None,
             decoded_bal: None,
             warm_accesses: Default::default(),
+            txpool_snapshot: None,
         }
     }
 }

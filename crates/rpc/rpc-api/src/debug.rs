@@ -22,6 +22,10 @@ pub trait DebugApi<TxReq: RpcObject> {
     #[method(name = "getRawBlock")]
     async fn raw_block(&self, block_id: BlockId) -> RpcResult<Bytes>;
 
+    /// Returns the RLP-encoded EIP-7928 block access list.
+    #[method(name = "getRawBlockAccessList")]
+    async fn raw_block_access_list(&self, block_id: BlockId) -> RpcResult<Bytes>;
+
     /// Returns an EIP-2718 binary-encoded transaction.
     ///
     /// If this is a pooled EIP-4844 transaction, the blob sidecar is included.
@@ -143,12 +147,12 @@ pub trait DebugApi<TxReq: RpcObject> {
     /// to their preimages that were required during the execution of the block, including during
     /// state root recomputation.
     ///
-    /// The first argument is the block number or tag. The optional second argument selects the
+    /// The first argument is the block identifier. The optional second argument selects the
     /// witness generation mode and defaults to `legacy`.
     #[method(name = "executionWitness")]
     async fn debug_execution_witness(
         &self,
-        block: BlockNumberOrTag,
+        block: BlockId,
         mode: Option<ExecutionWitnessMode>,
     ) -> RpcResult<ExecutionWitness>;
 

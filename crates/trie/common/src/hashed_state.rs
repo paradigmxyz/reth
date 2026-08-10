@@ -3,7 +3,7 @@ use core::ops::Not;
 use crate::{
     added_removed_keys::MultiAddedRemovedKeys,
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
-    utils::{extend_sorted_vec, kway_merge_sorted},
+    utils::{extend_sorted_vec, kway_merge_disjoint_sorted, kway_merge_sorted},
     KeyHasher, MultiProofTargets, Nibbles,
 };
 use alloc::{borrow::Cow, vec::Vec};
@@ -20,7 +20,7 @@ use reth_primitives_traits::Account;
 #[cfg(feature = "rayon")]
 use rayon::prelude::{FromParallelIterator, IntoParallelIterator, ParallelIterator};
 
-use revm::database::{AccountStatus, BundleAccount};
+use revm::database::BundleAccount;
 
 /// In-memory hashed state that stores account and storage changes with keccak256-hashed keys in
 /// hash maps.
@@ -54,9 +54,11 @@ impl HashedPostState {
             .map(|(address, account)| {
                 let hashed_address = KH::hash_key(address);
                 let hashed_account = account.info.as_ref().map(Into::into);
-                let hashed_storage = HashedStorage::from_plain_storage(
-                    account.status,
-                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
+                let hashed_storage = HashedStorage::from_iter(
+                    account
+                        .storage
+                        .iter()
+                        .map(|(slot, value)| (keccak256(B256::from(*slot)), value.present_value)),
                 );
 
                 (
@@ -439,17 +441,14 @@ impl HashedStorage {
     }
 
     /// Create new hashed storage from iterator.
-    pub fn from_iter(wiped: bool, iter: impl IntoIterator<Item = (B256, U256)>) -> Self {
-        Self { wiped, storage: HashMap::from_iter(iter) }
+    #[expect(clippy::should_implement_trait)]
+    pub fn from_iter(iter: impl IntoIterator<Item = (B256, U256)>) -> Self {
+        Self { wiped: false, storage: HashMap::from_iter(iter) }
     }
 
-    /// Create new hashed storage from account status and plain storage.
-    pub fn from_plain_storage<'a>(
-        status: AccountStatus,
-        storage: impl IntoIterator<Item = (&'a U256, &'a U256)>,
-    ) -> Self {
+    /// Create new hashed storage from plain storage.
+    pub fn from_plain_storage<'a>(storage: impl IntoIterator<Item = (&'a U256, &'a U256)>) -> Self {
         Self::from_iter(
-            status.was_destroyed(),
             storage.into_iter().map(|(key, value)| (keccak256(B256::from(*key)), *value)),
         )
     }
@@ -691,6 +690,95 @@ impl HashedPostStateSorted {
         Self { accounts, storages }
     }
 
+    /// Merges the batch and removes overlapping keys whose mask values all differ from the merged
+    /// batch value.
+    ///
+    /// Account keys are masked at the top level, while storage entries are masked at the slot
+    /// level. For duplicate keys in the batch, later items take precedence over earlier ones. An
+    /// overlapping entry is retained if any mask value is equal to the merged batch value. The
+    /// order of the mask does not matter. An empty mask merges the batch without filtering.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any batch or mask entry wipes an entire storage.
+    pub fn disjointed_merge_batch<'a>(batch: &[&'a Self], mask: &[&'a Self]) -> Self {
+        let account_count = batch.iter().map(|item| item.accounts.len()).sum();
+        let mut accounts = Vec::with_capacity(account_count);
+        accounts.extend(kway_merge_disjoint_sorted(
+            batch.iter().rev().map(|item| item.accounts.as_slice()),
+            mask.iter().map(|item| item.accounts.as_slice()),
+        ));
+
+        struct StorageAcc<'a> {
+            slot_count: usize,
+            slices: Vec<&'a [(B256, U256)]>,
+        }
+
+        #[derive(Default)]
+        struct StorageMaskAcc<'a> {
+            slices: Vec<&'a [(B256, U256)]>,
+        }
+
+        let mut storages = B256Map::with_capacity_and_hasher(
+            batch.iter().map(|item| item.storages.len()).sum(),
+            Default::default(),
+        );
+
+        for item in batch.iter().rev() {
+            for (hashed_address, storage) in &item.storages {
+                assert!(
+                    !storage.wiped,
+                    "storage wipes are not supported by disjointed_merge_batch"
+                );
+                let entry = storages
+                    .entry(*hashed_address)
+                    .or_insert_with(|| StorageAcc { slot_count: 0, slices: Vec::new() });
+                entry.slices.push(storage.storage_slots.as_slice());
+                entry.slot_count += storage.storage_slots.len();
+            }
+        }
+
+        let mut storage_masks: B256Map<StorageMaskAcc<'a>> = B256Map::with_capacity_and_hasher(
+            mask.iter().map(|item| item.storages.len()).sum(),
+            Default::default(),
+        );
+        for item in mask {
+            for (hashed_address, storage) in &item.storages {
+                assert!(
+                    !storage.wiped,
+                    "storage wipes are not supported by disjointed_merge_batch"
+                );
+                let entry = storage_masks.entry(*hashed_address).or_default();
+                entry.slices.push(storage.storage_slots.as_slice());
+            }
+        }
+
+        let storages = storages
+            .into_iter()
+            .filter_map(|(hashed_address, entry)| {
+                let slot_count = entry.slot_count;
+                let storage_slots = match storage_masks.get(&hashed_address) {
+                    Some(mask_entry) => {
+                        let mut storage_slots = Vec::with_capacity(slot_count);
+                        storage_slots.extend(kway_merge_disjoint_sorted(
+                            entry.slices,
+                            mask_entry.slices.iter().copied(),
+                        ));
+                        storage_slots
+                    }
+                    None => kway_merge_sorted(entry.slices),
+                };
+
+                (!storage_slots.is_empty() || mask.is_empty()).then_some((
+                    hashed_address,
+                    HashedStorageSorted { wiped: false, storage_slots },
+                ))
+            })
+            .collect();
+
+        Self { accounts, storages }
+    }
+
     /// Clears all accounts and storage data.
     pub fn clear(&mut self) {
         self.accounts.clear();
@@ -907,9 +995,20 @@ mod tests {
     use crate::KeccakKeyHasher;
     use alloy_primitives::Bytes;
     use revm::{
-        database::{states::StorageSlot, StorageWithOriginalValues},
+        database::{states::StorageSlot, AccountStatus, StorageWithOriginalValues},
         state::{AccountInfo, Bytecode},
     };
+
+    fn bundle_hashed_storage(account: &BundleAccount) -> Option<HashedStorage> {
+        let address = Address::ZERO;
+        let mut state =
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>([(&address, account)]);
+        state.storages.remove(&keccak256(address))
+    }
+
+    fn changed_storage(original: U256, present: U256) -> StorageWithOriginalValues {
+        core::iter::once((U256::from(1), StorageSlot::new_changed(original, present))).collect()
+    }
 
     #[test]
     fn hashed_state_wiped_extension() {
@@ -921,17 +1020,17 @@ mod tests {
         let original_slot_value = U256::from(123);
         let mut hashed_state = HashedPostState::default().with_storages([(
             hashed_address,
-            HashedStorage::from_iter(
-                false,
-                [(hashed_slot, original_slot_value), (hashed_slot2, original_slot_value)],
-            ),
+            HashedStorage::from_iter([
+                (hashed_slot, original_slot_value),
+                (hashed_slot2, original_slot_value),
+            ]),
         )]);
 
         // Update single slot value
         let updated_slot_value = U256::from(321);
         let extension = HashedPostState::default().with_storages([(
             hashed_address,
-            HashedStorage::from_iter(false, [(hashed_slot, updated_slot_value)]),
+            HashedStorage::from_iter([(hashed_slot, updated_slot_value)]),
         )]);
         hashed_state.extend(extension);
 
@@ -958,7 +1057,7 @@ mod tests {
         // Reinitialize single slot value
         hashed_state.extend(HashedPostState::default().with_storages([(
             hashed_address,
-            HashedStorage::from_iter(false, [(hashed_slot, original_slot_value)]),
+            HashedStorage::from_iter([(hashed_slot, original_slot_value)]),
         )]));
         let account_storage = hashed_state.storages.get(&hashed_address);
         assert_eq!(
@@ -971,7 +1070,7 @@ mod tests {
         // Reinitialize single slot value
         hashed_state.extend(HashedPostState::default().with_storages([(
             hashed_address,
-            HashedStorage::from_iter(false, [(hashed_slot2, updated_slot_value)]),
+            HashedStorage::from_iter([(hashed_slot2, updated_slot_value)]),
         )]));
         let account_storage = hashed_state.storages.get(&hashed_address);
         assert_eq!(
@@ -1028,6 +1127,71 @@ mod tests {
             *hashed_state.accounts.get(&keccak256(address)).unwrap(),
             Some(account_info.into())
         );
+    }
+
+    #[test]
+    fn destroyed_prefunded_account_without_storage_emits_no_storage() {
+        let original_info = AccountInfo { balance: U256::from(1), ..Default::default() };
+        let account = BundleAccount::new(
+            Some(original_info),
+            None,
+            StorageWithOriginalValues::default(),
+            AccountStatus::Destroyed,
+        );
+
+        assert!(bundle_hashed_storage(&account).is_none());
+    }
+
+    #[test]
+    fn destroyed_accounts_emit_zero_storage_changes_without_wipe() {
+        let existing_contract =
+            AccountInfo { code_hash: B256::repeat_byte(0x01), ..Default::default() };
+        let legacy_empty_account = AccountInfo::default();
+        let prefunded_account = AccountInfo { balance: U256::from(1), ..Default::default() };
+
+        for original_info in
+            [Some(existing_contract), Some(legacy_empty_account), Some(prefunded_account), None]
+        {
+            let account = BundleAccount::new(
+                original_info,
+                None,
+                changed_storage(U256::from(2), U256::ZERO),
+                AccountStatus::Destroyed,
+            );
+
+            let storage = bundle_hashed_storage(&account).unwrap();
+            let hashed_slot = keccak256(B256::from(U256::from(1)));
+            assert!(!storage.wiped);
+            assert_eq!(storage.storage[&hashed_slot], U256::ZERO);
+        }
+    }
+
+    #[test]
+    fn destroyed_recreated_accounts_preserve_storage_without_wipe() {
+        let value = U256::from(2);
+        let new_account = BundleAccount::new(
+            None,
+            Some(AccountInfo::default()),
+            changed_storage(U256::ZERO, value),
+            AccountStatus::DestroyedChanged,
+        );
+        let original_info =
+            AccountInfo { code_hash: B256::repeat_byte(0x01), ..Default::default() };
+        let existing_account = BundleAccount::new(
+            Some(original_info),
+            Some(AccountInfo::default()),
+            changed_storage(U256::ZERO, value),
+            AccountStatus::DestroyedChanged,
+        );
+
+        let new_storage = bundle_hashed_storage(&new_account).unwrap();
+        let existing_storage = bundle_hashed_storage(&existing_account).unwrap();
+        let hashed_slot = keccak256(B256::from(U256::from(1)));
+
+        assert!(!new_storage.wiped);
+        assert!(!existing_storage.wiped);
+        assert_eq!(new_storage.storage[&hashed_slot], value);
+        assert_eq!(existing_storage.storage[&hashed_slot], value);
     }
 
     #[test]
@@ -1536,6 +1700,218 @@ mod tests {
         assert_eq!(state.accounts.get(&addr1), Some(&None));
     }
 
+    #[test]
+    fn test_hashed_post_state_sorted_disjointed_merge_batch() {
+        fn account(nonce: u64) -> Account {
+            Account { nonce, balance: U256::ZERO, bytecode_hash: None }
+        }
+
+        let kept_account = B256::with_last_byte(1);
+        let removed_account = B256::with_last_byte(2);
+        let kept_storage = B256::with_last_byte(3);
+        let slot1 = B256::with_last_byte(11);
+        let slot2 = B256::with_last_byte(12);
+
+        let older = HashedPostStateSorted::new(
+            vec![(kept_account, Some(account(1))), (removed_account, Some(account(10)))],
+            B256Map::from_iter([(
+                kept_storage,
+                HashedStorageSorted { wiped: false, storage_slots: vec![(slot1, U256::from(1))] },
+            )]),
+        );
+
+        let newer = HashedPostStateSorted::new(
+            vec![(kept_account, Some(account(2)))],
+            B256Map::from_iter([(
+                kept_storage,
+                HashedStorageSorted {
+                    wiped: false,
+                    storage_slots: vec![(slot1, U256::from(3)), (slot2, U256::from(4))],
+                },
+            )]),
+        );
+
+        let remove_a = HashedPostStateSorted::new(
+            vec![(removed_account, None)],
+            B256Map::from_iter([(
+                kept_storage,
+                HashedStorageSorted { wiped: false, storage_slots: vec![(slot2, U256::ZERO)] },
+            )]),
+        );
+
+        let remove_b = HashedPostStateSorted::new(
+            vec![(B256::with_last_byte(255), Some(account(99)))],
+            B256Map::default(),
+        );
+
+        let result = HashedPostStateSorted::disjointed_merge_batch(
+            &[&older, &newer],
+            &[&remove_b, &remove_a],
+        );
+
+        assert_eq!(result.accounts, vec![(kept_account, Some(account(2)))]);
+        assert_eq!(result.storages.len(), 1);
+        assert_eq!(
+            result.storages.get(&kept_storage),
+            Some(&HashedStorageSorted {
+                wiped: false,
+                storage_slots: vec![(slot1, U256::from(3))],
+            })
+        );
+    }
+
+    #[test]
+    fn test_hashed_post_state_sorted_disjointed_merge_batch_empty_mask_merges_batch() {
+        let address = B256::with_last_byte(1);
+        let storage = B256::with_last_byte(2);
+        let slot = B256::with_last_byte(3);
+        let empty_storage = B256::with_last_byte(4);
+        let older = HashedPostStateSorted::new(
+            vec![(address, Some(Account { nonce: 1, ..Default::default() }))],
+            B256Map::from_iter([
+                (
+                    storage,
+                    HashedStorageSorted {
+                        wiped: false,
+                        storage_slots: vec![(slot, U256::from(1))],
+                    },
+                ),
+                (empty_storage, HashedStorageSorted::default()),
+            ]),
+        );
+        let newer = HashedPostStateSorted::new(
+            vec![(address, Some(Account { nonce: 2, ..Default::default() }))],
+            B256Map::from_iter([(
+                storage,
+                HashedStorageSorted { wiped: false, storage_slots: vec![(slot, U256::from(2))] },
+            )]),
+        );
+        let expected = HashedPostStateSorted::merge_batch(vec![newer.clone(), older.clone()]);
+
+        let result = HashedPostStateSorted::disjointed_merge_batch(&[&older, &newer], &[]);
+
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_hashed_post_state_sorted_disjointed_merge_batch_removes_overlapping_batch_key() {
+        fn account(nonce: u64) -> Account {
+            Account { nonce, balance: U256::ZERO, bytecode_hash: None }
+        }
+
+        let overlapping_account = B256::with_last_byte(21);
+
+        let older = HashedPostStateSorted::new(
+            vec![(overlapping_account, Some(account(1)))],
+            B256Map::default(),
+        );
+
+        let newer = HashedPostStateSorted::new(
+            vec![(overlapping_account, Some(account(2)))],
+            B256Map::default(),
+        );
+
+        let remove =
+            HashedPostStateSorted::new(vec![(overlapping_account, None)], B256Map::default());
+
+        let result = HashedPostStateSorted::disjointed_merge_batch(&[&older, &newer], &[&remove]);
+
+        assert!(result.accounts.is_empty());
+    }
+
+    #[test]
+    fn test_hashed_post_state_sorted_disjointed_merge_batch_keeps_equal_overlaps() {
+        fn account(nonce: u64) -> Account {
+            Account { nonce, balance: U256::ZERO, bytecode_hash: None }
+        }
+
+        let address = B256::with_last_byte(21);
+        let deleted_address = B256::with_last_byte(24);
+        let storage = B256::with_last_byte(22);
+        let deleted_storage = B256::with_last_byte(25);
+        let slot = B256::with_last_byte(23);
+        let deleted_slot = B256::with_last_byte(26);
+        let batch = HashedPostStateSorted::new(
+            vec![(address, Some(account(1))), (deleted_address, None)],
+            B256Map::from_iter([
+                (
+                    storage,
+                    HashedStorageSorted {
+                        wiped: false,
+                        storage_slots: vec![(slot, U256::from(1))],
+                    },
+                ),
+                (
+                    deleted_storage,
+                    HashedStorageSorted {
+                        wiped: false,
+                        storage_slots: vec![(deleted_slot, U256::ZERO)],
+                    },
+                ),
+            ]),
+        );
+        let different_mask = HashedPostStateSorted::new(
+            vec![(address, Some(account(2))), (deleted_address, Some(account(3)))],
+            B256Map::from_iter([
+                (
+                    storage,
+                    HashedStorageSorted {
+                        wiped: false,
+                        storage_slots: vec![(slot, U256::from(2))],
+                    },
+                ),
+                (
+                    deleted_storage,
+                    HashedStorageSorted {
+                        wiped: false,
+                        storage_slots: vec![(deleted_slot, U256::from(3))],
+                    },
+                ),
+            ]),
+        );
+        let equal_mask = batch.clone();
+
+        let result = HashedPostStateSorted::disjointed_merge_batch(
+            &[&batch],
+            &[&different_mask, &equal_mask],
+        );
+        let reversed = HashedPostStateSorted::disjointed_merge_batch(
+            &[&batch],
+            &[&equal_mask, &different_mask],
+        );
+
+        assert_eq!(result, batch);
+        assert_eq!(reversed, result);
+    }
+
+    #[test]
+    fn test_hashed_post_state_sorted_disjointed_merge_batch_ignores_empty_storage_mask() {
+        let storage = B256::with_last_byte(31);
+        let slot = B256::with_last_byte(32);
+
+        let batch = HashedPostStateSorted::new(
+            vec![],
+            B256Map::from_iter([(
+                storage,
+                HashedStorageSorted { wiped: false, storage_slots: vec![(slot, U256::from(1))] },
+            )]),
+        );
+        let mask = HashedPostStateSorted::new(
+            vec![],
+            B256Map::from_iter([(
+                storage,
+                HashedStorageSorted { wiped: false, storage_slots: vec![] },
+            )]),
+        );
+
+        let result = HashedPostStateSorted::disjointed_merge_batch(&[&batch], &[&mask]);
+
+        assert_eq!(
+            result.storages.get(&storage),
+            Some(&HashedStorageSorted { wiped: false, storage_slots: vec![(slot, U256::from(1))] })
+        );
+    }
+
     /// Test non-wiped storage merges both zero and non-zero valued slots
     #[test]
     fn test_hashed_storage_extend_from_sorted_non_wiped() {
@@ -1543,7 +1919,7 @@ mod tests {
         let slot2 = B256::random();
         let slot3 = B256::random();
 
-        let mut storage = HashedStorage::from_iter(false, [(slot1, U256::from(100))]);
+        let mut storage = HashedStorage::from_iter([(slot1, U256::from(100))]);
 
         let sorted = HashedStorageSorted {
             storage_slots: vec![(slot2, U256::from(200)), (slot3, U256::ZERO)],
@@ -1565,7 +1941,7 @@ mod tests {
         let slot1 = B256::random();
         let slot2 = B256::random();
 
-        let mut storage = HashedStorage::from_iter(false, [(slot1, U256::from(100))]);
+        let mut storage = HashedStorage::from_iter([(slot1, U256::from(100))]);
 
         let sorted =
             HashedStorageSorted { storage_slots: vec![(slot2, U256::from(200))], wiped: true };

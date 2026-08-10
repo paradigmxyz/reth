@@ -139,8 +139,9 @@ pub enum BlockRequest {
     GetReceipts(GetReceipts),
     /// Requests a `snap/2` (EIP-8189) message from the peer.
     ///
-    /// The response should be sent through the channel.
-    GetSnap(SnapProtocolMessage),
+    /// The response should be sent through the channel. Boxed since `SnapProtocolMessage` is
+    /// large relative to the other variants.
+    GetSnap(Box<SnapProtocolMessage>),
 }
 
 /// Corresponding variant for [`PeerRequest`].

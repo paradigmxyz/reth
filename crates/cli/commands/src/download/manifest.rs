@@ -742,7 +742,7 @@ fn state_source_files(source_datadir: &Path) -> Result<Vec<PlannedFile>> {
         return collect_files_recursive(source_datadir, Path::new("db"));
     }
 
-    eyre::bail!("Could not find source state DB directory under {}", source_datadir.display())
+    eyre::bail!("Could not find source state DB directory under {}", source_datadir.display());
 }
 
 fn rocksdb_source_files(source_datadir: &Path) -> Result<Vec<PlannedFile>> {

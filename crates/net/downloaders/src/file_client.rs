@@ -435,7 +435,7 @@ enum FileReader {
     /// Regular uncompressed file with remaining byte tracking.
     Plain { file: File, remaining_bytes: u64 },
     /// Gzip compressed file.
-    Gzip(GzipDecoder<BufReader<File>>),
+    Gzip { decoder: GzipDecoder<BufReader<File>>, eof: bool },
 }
 
 impl FileReader {
@@ -443,7 +443,14 @@ impl FileReader {
     async fn read(&mut self, buf: &mut [u8]) -> Result<usize, io::Error> {
         match self {
             Self::Plain { file, .. } => file.read(buf).await,
-            Self::Gzip(decoder) => decoder.read(buf).await,
+            Self::Gzip { decoder, .. } => decoder.read(buf).await,
+        }
+    }
+
+    const fn is_eof(&self) -> bool {
+        match self {
+            Self::Plain { remaining_bytes, .. } => *remaining_bytes == 0,
+            Self::Gzip { eof, .. } => *eof,
         }
     }
 
@@ -456,7 +463,7 @@ impl FileReader {
     ) -> Result<Option<u64>, FileClientError> {
         match self {
             Self::Plain { .. } => self.read_plain_chunk(chunk, chunk_byte_len).await,
-            Self::Gzip(_) => {
+            Self::Gzip { .. } => {
                 Ok((self.read_gzip_chunk(chunk, chunk_byte_len).await?)
                     .then_some(chunk.len() as u64))
             }
@@ -521,7 +528,11 @@ impl FileReader {
             }
 
             match self.read(&mut buffer).await {
-                Ok(0) => return Ok(!chunk.is_empty()),
+                Ok(0) => {
+                    let Self::Gzip { eof, .. } = self else { unreachable!() };
+                    *eof = true;
+                    return Ok(!chunk.is_empty())
+                }
                 Ok(n) => {
                     chunk.extend_from_slice(&buffer[..n]);
                 }
@@ -574,7 +585,7 @@ impl ChunkedFileReader {
         is_gzip: bool,
     ) -> Result<Self, FileClientError> {
         let file_reader = if is_gzip {
-            FileReader::Gzip(GzipDecoder::new(BufReader::new(file)))
+            FileReader::Gzip { decoder: GzipDecoder::new(BufReader::new(file)), eof: false }
         } else {
             let remaining_bytes = file.metadata().await?.len();
             FileReader::Plain { file, remaining_bytes }
@@ -615,6 +626,10 @@ impl ChunkedFileReader {
             FileClientBuilder { consensus, parent_header, skip_invalid_blocks }
                 .build(&self.chunk[..], chunk_len)
                 .await?;
+
+        if self.file.is_eof() && !remaining_bytes.is_empty() {
+            return Err(FileClientError::Rlp(alloy_rlp::Error::InputTooShort, remaining_bytes))
+        }
 
         // save left over bytes
         self.chunk = remaining_bytes;
@@ -855,6 +870,25 @@ mod tests {
 
         assert_eq!(client.headers_len(), 0);
         assert!(client.tip().is_none());
+    }
+
+    #[tokio::test]
+    async fn trailing_transaction_data_at_eof_is_rejected() {
+        let block = alloy_primitives::hex!(
+            "f902cef90259a01f1e77fa4e08a5ce98ba78db75ca1a4623c10e832eeff5a4a770e9d5048bfa95a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d4934794000000000000000000000000000000000000c0fea059eb85c4cc1486f67674192abb9fff7ae7f38f2ecdd3c87458ae2b8462eb5ca2a0a79a055a833e5c8e9364a9f6f06e1e01856d25a3cc21bad067cd94eb5cf9c7e9a0f78dfb743fbd92ade140711c8bbc542b5e307f0ab7984eff35d751969fe57efab901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080018401c9c3808252080c80a000000000000000000000000000000000000000000000000000000000000000008800000000000000000aa056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b4218080a00000000000000000000000000000000000000000000000000000000000000000a0e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855f86eb86c02f8680180830f4240830f424082520894000000000000000000000000000000000000c0de8080c001a079be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798a03d1613cba75c9e7513aee78156909bdb32050830f2faa3125e8fd64b5778be3000c0c0"
+        );
+        let mut file = File::from_std(tempfile::tempfile().unwrap());
+        file.write_all(&block).await.unwrap();
+        file.seek(SeekFrom::Start(0)).await.unwrap();
+        let mut reader =
+            ChunkedFileReader::from_file(file, block.len() as u64, false).await.unwrap();
+
+        let err = reader.next_chunk::<Block>(NoopConsensus::arc(), None).await.unwrap_err();
+
+        assert_matches!(
+            err,
+            FileClientError::Rlp(alloy_rlp::Error::InputTooShort, bytes) if bytes == block
+        );
     }
 
     #[tokio::test]

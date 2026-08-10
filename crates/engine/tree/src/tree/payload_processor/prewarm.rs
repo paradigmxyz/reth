@@ -27,7 +27,9 @@ use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx,
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, FastInstant as Instant, NodePrimitives};
 use reth_provider::{
-    AccountReader, BlockExecutionOutput, BlockReader, StateProviderFactory, StateReader,
+    AccountReader, BlockExecutionOutput, BlockNumReader, DatabaseProviderFactory,
+    PruneCheckpointReader, StageCheckpointReader, StorageSettingsCache,
+    TryIntoHistoricalStateProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_tasks::{pool::WorkerPool, Runtime};
@@ -90,7 +92,13 @@ where
 impl<N, P, Evm> PrewarmCacheTask<N, P, Evm>
 where
     N: NodePrimitives,
-    P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+    P: DatabaseProviderFactory + Clone + 'static,
+    P::Provider: BlockNumReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + TryIntoHistoricalStateProvider
+        + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Initializes the task with the given transactions pending execution
@@ -413,7 +421,7 @@ where
             let provider_builder = ctx.provider.clone();
             let build = Arc::new(move || provider_builder.build());
 
-            pool.begin_block(build, caches);
+            pool.begin_block(build, caches, ctx.env.txpool_snapshot.clone());
             for account in prefetch_bal.as_bal() {
                 pool.warm_account(account.address);
                 for change in &account.storage_changes {
@@ -561,7 +569,13 @@ type PrewarmEvmState<Evm> =
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
     N: NodePrimitives,
-    P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+    P: DatabaseProviderFactory,
+    P::Provider: BlockNumReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + TryIntoHistoricalStateProvider
+        + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Creates a per-thread EVM for prewarming.
@@ -582,7 +596,10 @@ where
         // Use the caches to create a new provider with caching
         if let Some(saved_cache) = &self.saved_cache {
             let caches = saved_cache.cache().clone();
-            state_provider = Box::new(CachedStateProvider::new_prewarm(state_provider, caches));
+            state_provider = Box::new(
+                CachedStateProvider::new_prewarm(state_provider, caches)
+                    .with_txpool_snapshot(self.env.txpool_snapshot.clone()),
+            );
         }
 
         let state_provider = StateProviderDatabase::new(state_provider);
@@ -655,6 +672,9 @@ where
             return;
         }
 
+        // If there are any storage changes we can assume that the resulting account info will be
+        // non-empty, so the account will exist, and therefore we can pre-emptively send out storage
+        // changes to start processing them before potentially hitting the db in the next step.
         if !account_changes.storage_changes.is_empty() {
             let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
             let mut storage_map = reth_trie::HashedStorage::new(false);
@@ -696,7 +716,10 @@ where
                     match (self.disable_bal_batch_io, &self.saved_cache) {
                         (false, Some(saved)) => {
                             let caches = saved.cache().clone();
-                            Box::new(CachedStateProvider::new_prewarm(inner, caches))
+                            Box::new(
+                                CachedStateProvider::new_prewarm(inner, caches)
+                                    .with_txpool_snapshot(self.env.txpool_snapshot.clone()),
+                            )
                         }
                         _ => Box::new(inner),
                     };
@@ -709,11 +732,23 @@ where
         };
 
         let account = account_fields.into_account(existing_account);
-
         let hashed_address = hashed_address.unwrap_or_else(|| keccak256(address));
-        let mut hashed_state = reth_trie::HashedPostState::default();
-        hashed_state.accounts.insert(hashed_address, Some(account));
 
+        // It is possible for the resulting account info to be empty. This can happen when, in the
+        // same block:
+        // * tx1: A new account is funded
+        // * tx2: CREATE2 is called on the new account, SELFDESTRUCT is called within the init code
+        //
+        // In this case the account will have only balance_changes, one for funding and the second
+        // setting balance back to zero. The resulting account is fully empty, we mark it as None
+        // with no storage changes to indicate that it should be deleted if nothing else.
+        //
+        // We assume that if the account info is all zero then it can't have storage, so we don't
+        // have to explicitly check for empty storage.
+        let account = (!account.is_empty()).then_some(account);
+
+        let mut hashed_state = reth_trie::HashedPostState::default();
+        hashed_state.accounts.insert(hashed_address, account);
         hashed_update_stream.on_hashed_state_update(hashed_state);
     }
 }
