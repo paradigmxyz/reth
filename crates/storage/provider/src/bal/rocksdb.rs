@@ -25,26 +25,28 @@ const DEFAULT_BAL_BUFFER_RETENTION_DISTANCE: u64 = 32;
 /// RocksDB-backed BAL store.
 ///
 /// Persisted BALs are keyed by `(block_number, block_hash)` for ordered pruning and indexed by
-/// block hash for direct [`BalStore`] lookups.
+/// block hash for direct [`BalStore`] lookups. Validated BALs enter a shared in-memory buffer
+/// first; [`BalStore::flush`] makes confirmed canonical entries durable while retaining them in the
+/// read cache until its shorter retention window expires.
 #[derive(Clone)]
 pub struct RocksDBBalStore {
-    /// Retention policy for persisted BALs.
+    /// Retention policy for durable BALs.
     retention: PruneMode,
     /// `RocksDB` provider used for persisted BAL reads and writes.
     rocksdb: RocksDBProvider,
-    /// Recent BALs and pending writes kept in memory.
+    /// Shared recent-read cache and pending-write state.
     buffer: Arc<RwLock<RocksDBBalStoreBuffer>>,
     /// Broadcasts BAL insert notifications.
     notifications: EventSender<BalNotification>,
 }
 
 impl RocksDBBalStore {
-    /// Creates a new store with the default retention distance.
+    /// Creates a new store with the EIP-defined retention distance.
     pub fn new(rocksdb: RocksDBProvider) -> Self {
         Self::with_retention_distance(rocksdb, BAL_RETENTION_PERIOD_SLOTS)
     }
 
-    /// Creates a new store with the given retention distance.
+    /// Creates a new store that retains durable BALs for the given block distance.
     pub fn with_retention_distance(rocksdb: RocksDBProvider, blocks: u64) -> Self {
         Self {
             retention: PruneMode::Distance(blocks),
@@ -133,135 +135,6 @@ impl std::fmt::Debug for RocksDBBalStore {
     }
 }
 
-/// In-memory BAL buffer for recent hash lookups and pending disk writes.
-#[derive(Debug, Default)]
-struct RocksDBBalStoreBuffer {
-    /// Hash index for serving recent hash-only lookups.
-    entries: HashMap<BlockHash, RocksDBBalEntry>,
-    /// Block-number index for pruning buffered entries.
-    hashes_by_number: BTreeMap<BlockNumber, Vec<BlockHash>>,
-    /// Ordered writes waiting for flush.
-    pending: BTreeMap<StoredBlockAccessListKey, RawBal>,
-    /// Pending writes confirmed canonical by the persistence service.
-    canonical_pending: BTreeSet<StoredBlockAccessListKey>,
-    /// Highest block number inserted into the buffer.
-    highest_block_number: Option<BlockNumber>,
-}
-
-impl RocksDBBalStoreBuffer {
-    fn insert(&mut self, block: NumHash, bal: RawBal) {
-        let pending = bal.clone();
-        if let Some(entry) =
-            self.entries.insert(block.hash, RocksDBBalEntry { block_number: block.number, bal })
-        {
-            self.remove_hash_from_number(entry.block_number, block.hash);
-            self.pending.remove(&StoredBlockAccessListKey::new(entry.block_number, block.hash));
-            self.canonical_pending
-                .remove(&StoredBlockAccessListKey::new(entry.block_number, block.hash));
-        }
-
-        self.hashes_by_number.entry(block.number).or_default().push(block.hash);
-        self.pending.insert(StoredBlockAccessListKey::new(block.number, block.hash), pending);
-        self.highest_block_number = Some(
-            self.highest_block_number.map_or(block.number, |highest| highest.max(block.number)),
-        );
-    }
-
-    fn mark_canonical(&mut self, blocks: &[NumHash]) {
-        self.canonical_pending.extend(
-            blocks
-                .iter()
-                .map(|block| StoredBlockAccessListKey::new(block.number, block.hash))
-                .filter(|key| self.pending.contains_key(key)),
-        );
-    }
-
-    fn canonical_pending_entries(&self) -> Vec<(StoredBlockAccessListKey, RawBal)> {
-        self.canonical_pending
-            .iter()
-            .filter_map(|key| self.pending.get(key).map(|bal| (*key, bal.clone())))
-            .collect()
-    }
-
-    fn keys_to_prune(
-        &self,
-        prune_mode: PruneMode,
-        tip: BlockNumber,
-    ) -> Vec<StoredBlockAccessListKey> {
-        self.hashes_by_number
-            .iter()
-            .take_while(|(block_number, _)| prune_mode.should_prune(**block_number, tip))
-            .flat_map(|(block_number, hashes)| {
-                hashes.iter().map(move |hash| StoredBlockAccessListKey::new(*block_number, *hash))
-            })
-            .filter(|key| !self.canonical_pending.contains(key))
-            .collect()
-    }
-
-    fn get_by_hash(&self, hash: BlockHash) -> Option<Bytes> {
-        self.entries.get(&hash).map(|entry| entry.bal.as_raw().clone())
-    }
-
-    fn remove_flushed_pending(&mut self, flushed: &[(StoredBlockAccessListKey, RawBal)]) {
-        for (key, bal) in flushed {
-            let pending_matches =
-                self.pending.get(key).is_some_and(|pending| pending.as_raw() == bal.as_raw());
-            if pending_matches {
-                self.pending.remove(key);
-                self.canonical_pending.remove(key);
-            }
-        }
-    }
-
-    fn prune(&mut self, prune_mode: PruneMode, tip: BlockNumber) -> usize {
-        let keys = self.keys_to_prune(prune_mode, tip);
-        self.remove_keys(&keys)
-    }
-
-    fn remove_keys(&mut self, keys: &[StoredBlockAccessListKey]) -> usize {
-        let mut removed = 0;
-        for key in keys {
-            let block = NumHash::new(key.number(), key.hash());
-            let pending_removed = self.pending.remove(key).is_some();
-            self.canonical_pending.remove(key);
-            let entry_removed = if self
-                .entries
-                .get(&block.hash)
-                .is_some_and(|entry| entry.block_number == block.number)
-            {
-                self.entries.remove(&block.hash).is_some()
-            } else {
-                false
-            };
-
-            if entry_removed {
-                self.remove_hash_from_number(block.number, block.hash);
-            }
-            removed += usize::from(pending_removed || entry_removed);
-        }
-        removed
-    }
-
-    fn remove_hash_from_number(&mut self, block_number: BlockNumber, block_hash: BlockHash) {
-        let empty = self.hashes_by_number.get_mut(&block_number).is_some_and(|hashes| {
-            hashes.retain(|hash| *hash != block_hash);
-            hashes.is_empty()
-        });
-        if empty {
-            self.hashes_by_number.remove(&block_number);
-        }
-    }
-}
-
-/// Buffered BAL entry with its block number.
-#[derive(Debug)]
-struct RocksDBBalEntry {
-    /// Block number for this hash-indexed BAL.
-    block_number: BlockNumber,
-    /// Raw BAL payload.
-    bal: RawBal,
-}
-
 impl BalStore for RocksDBBalStore {
     fn insert(&self, block: NumHash, bal: RawBal) -> ProviderResult<()> {
         let mut buffer = self.buffer.write();
@@ -344,6 +217,138 @@ impl BalStore for RocksDBBalStore {
     fn bal_stream(&self) -> BalNotificationStream {
         self.notifications.new_listener()
     }
+}
+
+/// Shared in-memory state for recent reads and writes awaiting canonical confirmation.
+///
+/// Successful flushes clear only the pending-write state. Cached entries remain available until
+/// the buffer retention window evicts them.
+#[derive(Debug, Default)]
+struct RocksDBBalStoreBuffer {
+    /// Hash index for serving recent hash-only lookups.
+    entries: HashMap<BlockHash, RocksDBBalEntry>,
+    /// Block-number index for pruning buffered entries.
+    hashes_by_number: BTreeMap<BlockNumber, Vec<BlockHash>>,
+    /// Validated BALs waiting to be confirmed canonical and flushed.
+    pending: BTreeMap<StoredBlockAccessListKey, RawBal>,
+    /// Pending writes confirmed canonical, including writes retained for retry after failure.
+    canonical_pending: BTreeSet<StoredBlockAccessListKey>,
+}
+
+impl RocksDBBalStoreBuffer {
+    fn insert(&mut self, block: NumHash, bal: RawBal) {
+        let pending = bal.clone();
+        if let Some(entry) =
+            self.entries.insert(block.hash, RocksDBBalEntry { block_number: block.number, bal })
+        {
+            self.remove_hash_from_number(entry.block_number, block.hash);
+            self.pending.remove(&StoredBlockAccessListKey::new(entry.block_number, block.hash));
+            self.canonical_pending
+                .remove(&StoredBlockAccessListKey::new(entry.block_number, block.hash));
+        }
+
+        self.hashes_by_number.entry(block.number).or_default().push(block.hash);
+        self.pending.insert(StoredBlockAccessListKey::new(block.number, block.hash), pending);
+    }
+
+    /// Marks exact pending block identities as eligible for the next flush.
+    fn mark_canonical(&mut self, blocks: &[NumHash]) {
+        self.canonical_pending.extend(
+            blocks
+                .iter()
+                .map(|block| StoredBlockAccessListKey::new(block.number, block.hash))
+                .filter(|key| self.pending.contains_key(key)),
+        );
+    }
+
+    /// Snapshots confirmed writes so `RocksDB` I/O can run without holding the buffer lock.
+    fn canonical_pending_entries(&self) -> Vec<(StoredBlockAccessListKey, RawBal)> {
+        self.canonical_pending
+            .iter()
+            .filter_map(|key| self.pending.get(key).map(|bal| (*key, bal.clone())))
+            .collect()
+    }
+
+    fn keys_to_prune(
+        &self,
+        prune_mode: PruneMode,
+        tip: BlockNumber,
+    ) -> Vec<StoredBlockAccessListKey> {
+        self.hashes_by_number
+            .iter()
+            .take_while(|(block_number, _)| prune_mode.should_prune(**block_number, tip))
+            .flat_map(|(block_number, hashes)| {
+                hashes.iter().map(move |hash| StoredBlockAccessListKey::new(*block_number, *hash))
+            })
+            .filter(|key| !self.canonical_pending.contains(key))
+            .collect()
+    }
+
+    fn get_by_hash(&self, hash: BlockHash) -> Option<Bytes> {
+        self.entries.get(&hash).map(|entry| entry.bal.as_raw().clone())
+    }
+
+    /// Clears pending state only if it still matches the snapshot written to `RocksDB`.
+    ///
+    /// A concurrent replacement for the same key must remain pending for a later flush.
+    fn remove_flushed_pending(&mut self, flushed: &[(StoredBlockAccessListKey, RawBal)]) {
+        for (key, bal) in flushed {
+            let pending_matches =
+                self.pending.get(key).is_some_and(|pending| pending.as_raw() == bal.as_raw());
+            if pending_matches {
+                self.pending.remove(key);
+                self.canonical_pending.remove(key);
+            }
+        }
+    }
+
+    fn prune(&mut self, prune_mode: PruneMode, tip: BlockNumber) -> usize {
+        let keys = self.keys_to_prune(prune_mode, tip);
+        self.remove_keys(&keys)
+    }
+
+    fn remove_keys(&mut self, keys: &[StoredBlockAccessListKey]) -> usize {
+        let mut removed = 0;
+        for key in keys {
+            let block = NumHash::new(key.number(), key.hash());
+            let pending_removed = self.pending.remove(key).is_some();
+            self.canonical_pending.remove(key);
+            let entry_removed = if self
+                .entries
+                .get(&block.hash)
+                .is_some_and(|entry| entry.block_number == block.number)
+            {
+                self.entries.remove(&block.hash).is_some()
+            } else {
+                false
+            };
+
+            if entry_removed {
+                self.remove_hash_from_number(block.number, block.hash);
+            }
+            removed += usize::from(pending_removed || entry_removed);
+        }
+        removed
+    }
+
+    fn remove_hash_from_number(&mut self, block_number: BlockNumber, block_hash: BlockHash) {
+        let empty = self.hashes_by_number.get_mut(&block_number).is_some_and(|hashes| {
+            hashes.retain(|hash| *hash != block_hash);
+            hashes.is_empty()
+        });
+        if empty {
+            self.hashes_by_number.remove(&block_number);
+        }
+    }
+}
+
+/// Buffered BAL entry with its block number.
+#[derive(Debug)]
+struct RocksDBBalEntry {
+    /// Block number for this hash-indexed BAL.
+    block_number: BlockNumber,
+    /// Raw BAL payload.
+    bal: RawBal,
 }
 
 #[cfg(test)]
