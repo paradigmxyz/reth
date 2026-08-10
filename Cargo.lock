@@ -301,8 +301,26 @@ dependencies = [
 
 [[package]]
 name = "alloy-evm"
-version = "0.37.0"
-source = "git+https://github.com/Rimeeeeee/evm?branch=eip-8289#4cd4c0c12b94732cde2b3fa0c7dcf6435e0000b3"
+version = "0.37.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "acde665074b478c97047dc2a461b4916cac77922d690e5b7415d1941ae7ff7bf"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-hardforks 0.4.7",
+ "alloy-primitives",
+ "alloy-sol-types",
+ "auto_impl",
+ "derive_more",
+ "revm 41.0.0",
+ "thiserror 2.0.20",
+ "tracing",
+]
+
+[[package]]
+name = "alloy-evm"
+version = "0.38.0"
+source = "git+https://github.com/Rimeeeeee/evm?branch=eip-8289#e57536756d006f3a661935251333a556583a73af"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -313,7 +331,7 @@ dependencies = [
  "alloy-sol-types",
  "auto_impl",
  "derive_more",
- "revm 41.0.0",
+ "revm 42.0.1",
  "thiserror 2.0.20",
  "tracing",
 ]
@@ -3717,7 +3735,7 @@ name = "example-custom-beacon-withdrawals"
 version = "0.0.0"
 dependencies = [
  "alloy-eips",
- "alloy-evm",
+ "alloy-evm 0.38.0",
  "alloy-sol-types",
  "eyre",
  "reth-ethereum",
@@ -3758,7 +3776,7 @@ dependencies = [
 name = "example-custom-evm"
 version = "0.0.0"
 dependencies = [
- "alloy-evm",
+ "alloy-evm 0.38.0",
  "alloy-genesis",
  "alloy-primitives",
  "eyre",
@@ -3772,7 +3790,7 @@ name = "example-custom-inspector"
 version = "0.0.0"
 dependencies = [
  "alloy-eips",
- "alloy-evm",
+ "alloy-evm 0.38.0",
  "alloy-primitives",
  "alloy-rpc-types-eth",
  "clap",
@@ -7915,7 +7933,7 @@ version = "2.4.1"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
- "alloy-evm",
+ "alloy-evm 0.38.0",
  "alloy-hardforks 0.4.7",
  "alloy-primitives",
  "alloy-rlp",
@@ -7995,7 +8013,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eip8289",
  "alloy-eips",
- "alloy-evm",
+ "alloy-evm 0.38.0",
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
@@ -8617,7 +8635,7 @@ dependencies = [
  "alloy-eip7928",
  "alloy-eip8289",
  "alloy-eips",
- "alloy-evm",
+ "alloy-evm 0.38.0",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-engine",
@@ -9035,7 +9053,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
  "alloy-eips",
- "alloy-evm",
+ "alloy-evm 0.38.0",
  "alloy-primitives",
  "auto_impl",
  "derive_more",
@@ -9060,7 +9078,7 @@ version = "2.4.1"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
- "alloy-evm",
+ "alloy-evm 0.38.0",
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rpc-types-engine",
@@ -9101,7 +9119,7 @@ dependencies = [
 name = "reth-execution-errors"
 version = "2.4.1"
 dependencies = [
- "alloy-evm",
+ "alloy-evm 0.38.0",
  "alloy-primitives",
  "alloy-rlp",
  "nybbles",
@@ -9115,7 +9133,7 @@ version = "2.4.1"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
- "alloy-evm",
+ "alloy-evm 0.38.0",
  "alloy-primitives",
  "alloy-rlp",
  "arbitrary",
@@ -10052,7 +10070,7 @@ dependencies = [
  "alloy-dyn-abi",
  "alloy-eip7928",
  "alloy-eips",
- "alloy-evm",
+ "alloy-evm 0.38.0",
  "alloy-genesis",
  "alloy-network",
  "alloy-primitives",
@@ -10217,7 +10235,7 @@ name = "reth-rpc-convert"
 version = "2.4.1"
 dependencies = [
  "alloy-consensus",
- "alloy-evm",
+ "alloy-evm 0.38.0",
  "alloy-json-rpc",
  "alloy-network",
  "alloy-primitives",
@@ -10296,7 +10314,7 @@ dependencies = [
  "alloy-dyn-abi",
  "alloy-eip7928",
  "alloy-eips",
- "alloy-evm",
+ "alloy-evm 0.38.0",
  "alloy-json-rpc",
  "alloy-network",
  "alloy-primitives",
@@ -10342,7 +10360,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
  "alloy-eips",
- "alloy-evm",
+ "alloy-evm 0.38.0",
  "alloy-network",
  "alloy-primitives",
  "alloy-rpc-client",
@@ -10915,7 +10933,7 @@ dependencies = [
 name = "reth-trie-parallel"
 version = "2.4.1"
 dependencies = [
- "alloy-evm",
+ "alloy-evm 0.38.0",
  "alloy-primitives",
  "alloy-rlp",
  "crossbeam-channel",
@@ -11498,7 +11516,7 @@ name = "revmc-runtime"
 version = "0.1.0"
 source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#f3b70551cf59d59d073dddb87cd044da090044b6"
 dependencies = [
- "alloy-evm",
+ "alloy-evm 0.37.1",
  "alloy-primitives",
  "crossbeam-channel",
  "crossbeam-queue",

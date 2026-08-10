@@ -448,7 +448,7 @@ alloy-chains = { version = "0.2.33", default-features = false }
 alloy-eip2124 = { version = "0.2.0", default-features = false }
 alloy-eip7928 = { version = "0.4.4", default-features = false, features = ["rlp"] }
 alloy-eip8289 = { version = "0.1.0", default-features = false }
-alloy-evm = { version = "0.37.0", default-features = false }
+alloy-evm = { version = "0.38.0", default-features = false }
 alloy-rlp = { version = "0.3.16", default-features = false, features = ["core-net"] }
 alloy-trie = { version = "0.9.4", default-features = false }
 
