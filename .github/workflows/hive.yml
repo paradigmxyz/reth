@@ -48,7 +48,7 @@ jobs:
       - name: Checkout hive tests
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: Rimeeeeee/hive
+          repository: ethereum/hive
           ref: eip-8268-testing
           path: hivetests
           persist-credentials: false
@@ -253,7 +253,7 @@ jobs:
       - name: Checkout hive tests
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: Rimeeeeee/hive
+          repository: ethereum/hive
           ref: eip-8268-testing
           path: hivetests
           persist-credentials: false
