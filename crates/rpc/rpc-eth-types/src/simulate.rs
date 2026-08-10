@@ -314,22 +314,19 @@ pub fn apply_precompile_overrides(
         }
 
         precompiles.set_precompile_lookup(move |address: &Address| -> Option<DynPrecompile> {
-            moved_precompiles
-                .get(address)
-                .map(|precompile| shared_precompile(Arc::clone(precompile)))
+            moved_precompiles.get(address).map(|precompile| {
+                let precompile = Arc::clone(precompile);
+                let id = precompile.precompile_id().clone();
+                if precompile.supports_caching() {
+                    DynPrecompile::new(id, move |input| precompile.call(input))
+                } else {
+                    DynPrecompile::new_stateful(id, move |input| precompile.call(input))
+                }
+            })
         });
     }
 
     Ok(())
-}
-
-fn shared_precompile(precompile: Arc<DynPrecompile>) -> DynPrecompile {
-    let id = precompile.precompile_id().clone();
-    if precompile.supports_caching() {
-        DynPrecompile::new(id, move |input| precompile.call(input))
-    } else {
-        DynPrecompile::new_stateful(id, move |input| precompile.call(input))
-    }
 }
 
 /// Appends synthetic ETH-transfer logs to the RPC result without adding them to the EVM journal.
