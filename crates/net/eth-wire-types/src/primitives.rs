@@ -1,6 +1,6 @@
 //! Abstraction over primitive types in network messages.
 
-use crate::NewBlockPayload;
+use crate::{EncodableEth72PooledTransaction, NewBlockPayload};
 use alloy_consensus::{RlpDecodableReceipt, RlpEncodableReceipt, TxReceipt};
 use alloy_rlp::{Decodable, Encodable};
 use core::fmt::Debug;
@@ -53,7 +53,10 @@ pub trait NetworkPrimitives: Send + Sync + Unpin + Clone + Debug + 'static {
     /// For EIP-4844 blob transactions, this includes the full blob sidecar with
     /// KZG commitments and proofs that are needed for validation but are not
     /// included in the consensus block format.
-    type PooledTransaction: SignedTransaction + TryFrom<Self::BroadcastedTransaction> + 'static;
+    type PooledTransaction: SignedTransaction
+        + TryFrom<Self::BroadcastedTransaction>
+        + EncodableEth72PooledTransaction
+        + 'static;
 
     /// The transaction type which peers return in `GetReceipts` messages.
     type Receipt: TxReceipt
@@ -102,7 +105,7 @@ pub struct BasicNetworkPrimitives<N: NodePrimitives, Pooled, NewBlock = crate::N
 impl<N, Pooled, NewBlock> NetworkPrimitives for BasicNetworkPrimitives<N, Pooled, NewBlock>
 where
     N: NodePrimitives,
-    Pooled: SignedTransaction + TryFrom<N::SignedTx> + 'static,
+    Pooled: SignedTransaction + TryFrom<N::SignedTx> + EncodableEth72PooledTransaction + 'static,
     NewBlock: NewBlockPayload<Block = N::Block>,
 {
     type BlockHeader = N::BlockHeader;

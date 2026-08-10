@@ -2,8 +2,14 @@
 
 use crate::broadcast::decode_list_with_memory_budget;
 use alloc::vec::Vec;
-use alloy_consensus::transaction::{PooledTransaction, TxHashRef};
-use alloy_eips::eip7594::Cell;
+use alloy_consensus::{
+    transaction::{PooledTransaction, RlpEcdsaEncodableTx, TxEip4844WithSidecar, TxHashRef},
+    Signed,
+};
+use alloy_eips::{
+    eip4844::Blob,
+    eip7594::{BlobTransactionSidecarVariant, Cell, EIP_7594_WRAPPER_VERSION},
+};
 use alloy_primitives::{B128, B256};
 use alloy_rlp::{
     BufMut, Decodable, Encodable, Header, RlpDecodable, RlpDecodableWrapper, RlpEncodable,
@@ -11,6 +17,7 @@ use alloy_rlp::{
 };
 use derive_more::{Constructor, Deref, IntoIterator};
 use reth_codecs_derive::add_arbitrary_tests;
+use reth_ethereum_primitives::PooledTransactionVariant;
 use reth_primitives_traits::InMemorySize;
 
 /// A list of transaction hashes that the peer would like transaction bodies for.
@@ -76,12 +83,31 @@ pub struct PooledTransactions<T = PooledTransaction>(
 /// An eth/72 `PooledTransactions` response.
 ///
 /// Eth/72 elides the blob list from type-3 transactions because blob data is fetched separately
-/// with `GetCells`. The transactions remain typed here; only the wire encoder uses raw RLP to
-/// elide the blob list without making the pool's complete sidecar look partial. This is still the
-/// same `PooledTransactions` message (`0x0a`) on the wire, not a new protocol message.
+/// with `GetCells`. The transactions remain typed here; a borrowed type-3 encoding view elides
+/// the blob list. This is still the same `PooledTransactions` message (`0x0a`) on the wire, not a
+/// new protocol message.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PooledTransactionsEth72<T = PooledTransaction>(pub Vec<T>);
+
+/// Encodes a pooled transaction for an eth/72 response.
+pub trait EncodableEth72PooledTransaction: Encodable {
+    /// Writes this transaction using the eth/72 representation.
+    fn encode_eth72(&self, out: &mut dyn BufMut);
+
+    /// Returns the encoded length of the eth/72 representation.
+    fn eth72_length(&self) -> usize;
+}
+
+impl EncodableEth72PooledTransaction for PooledTransactionVariant {
+    fn encode_eth72(&self, out: &mut dyn BufMut) {
+        Eth72Pooled(self).encode(out);
+    }
+
+    fn eth72_length(&self) -> usize {
+        Eth72Pooled(self).length()
+    }
+}
 
 impl<T> PooledTransactionsEth72<T> {
     /// Converts a regular pooled transaction response into the eth/72 response view.
@@ -106,83 +132,104 @@ impl<T: Decodable + InMemorySize> PooledTransactionsEth72<T> {
     }
 }
 
-impl<T: Encodable> Encodable for PooledTransactionsEth72<T> {
+impl<T: EncodableEth72PooledTransaction> Encodable for PooledTransactionsEth72<T> {
     fn encode(&self, out: &mut dyn BufMut) {
-        // The outer list header needs the elided lengths before any transaction bytes can be
-        // written. The second pass writes the exact transformed transaction items.
-        let payload_length = self
-            .0
-            .iter()
-            .map(|transaction| elide_type_3_blobs(&alloy_rlp::encode(transaction)).len())
-            .sum();
+        let payload_length = self.0.iter().map(T::eth72_length).sum();
         Header { list: true, payload_length }.encode(out);
         for transaction in &self.0 {
-            let encoded = alloy_rlp::encode(transaction);
-            out.put_slice(&elide_type_3_blobs(&encoded));
+            transaction.encode_eth72(out);
         }
     }
 
     fn length(&self) -> usize {
-        let payload_length = self
-            .0
-            .iter()
-            .map(|transaction| elide_type_3_blobs(&alloy_rlp::encode(transaction)).len())
-            .sum();
+        let payload_length = self.0.iter().map(T::eth72_length).sum();
         Header { list: true, payload_length }.length_with_payload()
     }
 }
 
-/// Replaces the blob list in an encoded type-3 pooled transaction with an empty RLP list.
-///
-/// The transaction is encoded as `0x03 || rlp([tx_payload, sidecar])`. The sidecar is either the
-/// EIP-4844 form `[blobs, commitments, proofs]` or the EIP-7594 form
-/// `[wrapper_version, blobs, commitments, cell_proofs]`. This works on the encoded item so that
-/// all non-blob fields, including commitments and proofs, are preserved exactly.
-fn elide_type_3_blobs(encoded: &[u8]) -> Vec<u8> {
-    // Legacy and non-blob typed transactions cannot be elided.
-    if encoded.first() != Some(&3) {
-        return encoded.to_vec()
+/// Borrowed eth/72 view of a pooled transaction.
+struct Eth72Pooled<'a>(&'a PooledTransactionVariant);
+
+impl Encodable for Eth72Pooled<'_> {
+    fn encode(&self, out: &mut dyn BufMut) {
+        match self.0 {
+            PooledTransactionVariant::Eip4844(transaction) => {
+                Eth72PooledEip4844(transaction).encode(out)
+            }
+            transaction => transaction.encode(out),
+        }
     }
 
-    let Some(outer) = encoded.get(1..) else { return encoded.to_vec() };
-    let mut payload = outer;
-    let Ok(header) = Header::decode(&mut payload) else { return encoded.to_vec() };
-    if !header.list || payload.len() < header.payload_length {
-        return encoded.to_vec()
+    fn length(&self) -> usize {
+        match self.0 {
+            PooledTransactionVariant::Eip4844(transaction) => {
+                Eth72PooledEip4844(transaction).length()
+            }
+            transaction => transaction.length(),
+        }
     }
-    let payload = &payload[..header.payload_length];
-
-    // The first outer-list item is the signed transaction payload.
-    let Some(tx_len) = rlp_item_length(payload) else { return encoded.to_vec() };
-    let sidecar = &payload[tx_len..];
-
-    // EIP-7594 prefixes the sidecar fields with its wrapper version byte.
-    let blob_offset = tx_len + usize::from(sidecar.first() == Some(&1));
-    let Some(blob_len) = rlp_item_length(payload.get(blob_offset..).unwrap_or_default()) else {
-        return encoded.to_vec()
-    };
-
-    let Some(new_payload_length) =
-        header.payload_length.checked_sub(blob_len).and_then(|length| length.checked_add(1))
-    else {
-        return encoded.to_vec()
-    };
-
-    let mut result = Vec::with_capacity(encoded.len() - blob_len + 1);
-    result.push(3);
-    Header { list: true, payload_length: new_payload_length }.encode(&mut result);
-    result.extend_from_slice(&payload[..blob_offset]);
-    result.push(0xc0); // RLP empty list: the eth/72 blob elision marker.
-    result.extend_from_slice(&payload[blob_offset + blob_len..]);
-    result
 }
 
-/// Returns the encoded length of the first RLP item in `input`.
-fn rlp_item_length(input: &[u8]) -> Option<usize> {
-    let mut payload = input;
-    let header = Header::decode(&mut payload).ok()?;
-    let header_length = input.len().checked_sub(payload.len())?;
-    header_length.checked_add(header.payload_length).filter(|&length| length <= input.len())
+/// Borrowed eth/72 view of a type-3 transaction.
+struct Eth72PooledEip4844<'a>(&'a Signed<TxEip4844WithSidecar<BlobTransactionSidecarVariant>>);
+
+impl Encodable for Eth72PooledEip4844<'_> {
+    fn encode(&self, out: &mut dyn BufMut) {
+        Header { list: false, payload_length: self.typed_length() }.encode(out);
+        out.put_u8(3);
+        Header { list: true, payload_length: self.payload_length() }.encode(out);
+        self.0.tx().tx.rlp_encode_signed(self.0.signature(), out);
+        Eth72BlobSidecar(&self.0.tx().sidecar).encode(out);
+    }
+
+    fn length(&self) -> usize {
+        Header { list: false, payload_length: self.typed_length() }.length_with_payload()
+    }
+}
+
+impl Eth72PooledEip4844<'_> {
+    fn payload_length(&self) -> usize {
+        self.0.tx().tx.rlp_encoded_length_with_signature(self.0.signature()) +
+            Eth72BlobSidecar(&self.0.tx().sidecar).length()
+    }
+
+    fn typed_length(&self) -> usize {
+        1 + Header { list: true, payload_length: self.payload_length() }.length_with_payload()
+    }
+}
+
+/// Borrowed sidecar view that writes an empty blob vector and preserves metadata.
+struct Eth72BlobSidecar<'a>(&'a BlobTransactionSidecarVariant);
+
+impl Encodable for Eth72BlobSidecar<'_> {
+    fn encode(&self, out: &mut dyn BufMut) {
+        match self.0 {
+            BlobTransactionSidecarVariant::Eip4844(sidecar) => {
+                Vec::<Blob>::new().encode(out);
+                sidecar.commitments.encode(out);
+                sidecar.proofs.encode(out);
+            }
+            BlobTransactionSidecarVariant::Eip7594(sidecar) => {
+                out.put_u8(EIP_7594_WRAPPER_VERSION);
+                Vec::<Blob>::new().encode(out);
+                sidecar.commitments.encode(out);
+                sidecar.cell_proofs.encode(out);
+            }
+        }
+    }
+
+    fn length(&self) -> usize {
+        match self.0 {
+            BlobTransactionSidecarVariant::Eip4844(sidecar) => {
+                Vec::<Blob>::new().length() + sidecar.commitments.length() + sidecar.proofs.length()
+            }
+            BlobTransactionSidecarVariant::Eip7594(sidecar) => {
+                1 + Vec::<Blob>::new().length() +
+                    sidecar.commitments.length() +
+                    sidecar.cell_proofs.length()
+            }
+        }
+    }
 }
 
 impl<T: Decodable + InMemorySize> PooledTransactions<T> {
