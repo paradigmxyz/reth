@@ -39,7 +39,7 @@ use revm::{
 use revm_inspectors::transfer::{
     TransferInspector, TransferOperation, TRANSFER_EVENT_TOPIC, TRANSFER_LOG_EMITTER,
 };
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, rc::Rc};
 
 /// Fallback seconds added between simulated block timestamps when neither the user nor the chain
 /// hint provides a value.
@@ -310,12 +310,12 @@ pub fn apply_precompile_overrides(
         for (dest, precompile) in extracted {
             // Dynamic lookups are only consulted for addresses absent from the main map.
             precompiles.apply_precompile(&dest, |_| None);
-            moved_precompiles.insert(dest, Arc::new(precompile));
+            moved_precompiles.insert(dest, Rc::new(precompile));
         }
 
         precompiles.set_precompile_lookup(move |address: &Address| -> Option<DynPrecompile> {
             moved_precompiles.get(address).map(|precompile| {
-                let precompile = Arc::clone(precompile);
+                let precompile = Rc::clone(precompile);
                 let id = precompile.precompile_id().clone();
                 if precompile.supports_caching() {
                     DynPrecompile::new(id, move |input| precompile.call(input))
@@ -395,10 +395,12 @@ where
         builder,
         state_provider,
         calls,
-        remaining_call_gas_limit,
-        chain_id,
-        compute_state_root,
-        converter,
+        TransactionExecutionConfig {
+            remaining_call_gas_limit,
+            chain_id,
+            compute_state_root,
+            converter,
+        },
         |_, _| {},
     )
 }
@@ -430,12 +432,21 @@ where
         builder,
         state_provider,
         calls,
-        remaining_call_gas_limit,
-        chain_id,
-        compute_state_root,
-        converter,
+        TransactionExecutionConfig {
+            remaining_call_gas_limit,
+            chain_id,
+            compute_state_root,
+            converter,
+        },
         |evm, result| append_transfer_logs(evm.inspector(), result, &mut next_transfer),
     )
+}
+
+struct TransactionExecutionConfig<'a, T> {
+    remaining_call_gas_limit: &'a mut Option<u64>,
+    chain_id: u64,
+    compute_state_root: bool,
+    converter: &'a T,
 }
 
 #[expect(clippy::type_complexity)]
@@ -443,10 +454,7 @@ fn execute_transactions_with_result_hook<S, T, F>(
     mut builder: S,
     state_provider: impl StateProvider,
     calls: Vec<RpcTxReq<T::Network>>,
-    remaining_call_gas_limit: &mut Option<u64>,
-    chain_id: u64,
-    compute_state_root: bool,
-    converter: &T,
+    config: TransactionExecutionConfig<'_, T>,
     mut process_result: F,
 ) -> Result<
     (
@@ -498,7 +506,7 @@ where
             }
         }
 
-        if let Some(remaining_call_gas_limit) = *remaining_call_gas_limit {
+        if let Some(remaining_call_gas_limit) = *config.remaining_call_gas_limit {
             if let Some(gas_limit) = call.as_ref().gas_limit() {
                 if gas_limit > remaining_call_gas_limit {
                     call.as_mut().set_gas_limit(remaining_call_gas_limit);
@@ -514,10 +522,10 @@ where
             call,
             default_gas_limit,
             builder.evm().block().basefee(),
-            chain_id,
+            config.chain_id,
             builder.evm().cfg_env().disable_nonce_check,
             builder.evm_mut().db_mut(),
-            converter,
+            config.converter,
         )?;
         // Create transaction with an empty envelope.
         // The effect for a layer-2 execution client is that it does not charge L1 cost.
@@ -534,7 +542,7 @@ where
         }
 
         let gas_used = gas_output.tx_gas_used();
-        if let Some(remaining_call_gas_limit) = remaining_call_gas_limit.as_mut() {
+        if let Some(remaining_call_gas_limit) = config.remaining_call_gas_limit.as_mut() {
             if gas_used > *remaining_call_gas_limit {
                 return Err(EthApiError::other(EthSimulateError::GasLimitReached))
             }
@@ -546,7 +554,7 @@ where
         block_state_gas_used = block_state_gas_used.saturating_add(gas_output.state_gas_used());
     }
 
-    let result = if compute_state_root {
+    let result = if config.compute_state_root {
         builder.finish(state_provider, None)?
     } else {
         builder.finish(NoopProvider::default(), None)?
