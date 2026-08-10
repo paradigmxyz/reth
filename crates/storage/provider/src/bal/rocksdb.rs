@@ -30,10 +30,8 @@ const DEFAULT_BAL_BUFFER_RETENTION_DISTANCE: u64 = 32;
 /// read cache until its shorter retention window expires.
 #[derive(Clone)]
 pub struct RocksDBBalStore {
-    /// Retention policy for durable BALs.
-    retention: PruneMode,
-    /// Retention policy for already-durable BALs cached in memory.
-    buffer_retention: PruneMode,
+    /// Number of recent blocks retained in the in-memory buffer.
+    buffer_retention_distance: u64,
     /// `RocksDB` provider used for persisted BAL reads and writes.
     rocksdb: RocksDBProvider,
     /// Shared recent-read cache and pending-write state.
@@ -48,26 +46,12 @@ impl RocksDBBalStore {
         Self::with_buffer_retention_distance(rocksdb, DEFAULT_BAL_BUFFER_RETENTION_DISTANCE)
     }
 
-    /// Creates a new store that caches durable BALs for the given block distance.
+    /// Creates a new store that retains buffered BALs for the given block distance.
     ///
-    /// This does not change the EIP-defined retention distance for persisted BALs or pending fork
-    /// BALs.
+    /// This does not change the EIP-defined retention distance for persisted BALs.
     pub fn with_buffer_retention_distance(rocksdb: RocksDBProvider, blocks: u64) -> Self {
-        Self::with_retentions(
-            rocksdb,
-            PruneMode::Distance(BAL_RETENTION_PERIOD_SLOTS),
-            PruneMode::Distance(blocks),
-        )
-    }
-
-    fn with_retentions(
-        rocksdb: RocksDBProvider,
-        retention: PruneMode,
-        buffer_retention: PruneMode,
-    ) -> Self {
         Self {
-            retention,
-            buffer_retention,
+            buffer_retention_distance: blocks,
             rocksdb,
             buffer: Arc::new(RwLock::new(RocksDBBalStoreBuffer::default())),
             notifications: EventSender::new(super::DEFAULT_BAL_NOTIFICATION_CHANNEL_SIZE),
@@ -80,6 +64,7 @@ impl RocksDBBalStore {
     }
 
     fn keys_to_prune(&self, tip: BlockNumber) -> ProviderResult<Vec<StoredBlockAccessListKey>> {
+        let retention = PruneMode::Distance(BAL_RETENTION_PERIOD_SLOTS);
         let mut keys = Vec::new();
         let iter = self.rocksdb.raw_key_iter_from::<tables::BlockAccessLists>(
             StoredBlockAccessListKey::first_at_number(0),
@@ -89,7 +74,7 @@ impl RocksDBBalStore {
             let key_bytes = key_bytes?;
             let key = StoredBlockAccessListKey::decode(&key_bytes)
                 .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
-            if !self.retention.should_prune(key.number(), tip) {
+            if !retention.should_prune(key.number(), tip) {
                 break
             }
             keys.push(key);
@@ -138,8 +123,7 @@ impl RocksDBBalStore {
 impl std::fmt::Debug for RocksDBBalStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RocksDBBalStore")
-            .field("retention", &self.retention)
-            .field("buffer_retention", &self.buffer_retention)
+            .field("buffer_retention_distance", &self.buffer_retention_distance)
             .field("rocksdb", &self.rocksdb)
             .finish_non_exhaustive()
     }
@@ -192,7 +176,7 @@ impl BalStore for RocksDBBalStore {
         }
 
         if let Some(tip) = blocks.iter().map(|block| block.number).max() {
-            self.buffer.write().prune(self.buffer_retention, self.retention, tip);
+            self.buffer.write().prune(self.buffer_retention_distance, tip);
         }
         Ok(())
     }
@@ -284,28 +268,17 @@ impl RocksDBBalStoreBuffer {
 
     fn keys_to_prune(
         &self,
-        prune_mode: PruneMode,
+        retention_distance: u64,
         tip: BlockNumber,
     ) -> Vec<StoredBlockAccessListKey> {
+        let prune_mode = PruneMode::Distance(retention_distance);
         self.hashes_by_number
             .iter()
             .take_while(|(block_number, _)| prune_mode.should_prune(**block_number, tip))
             .flat_map(|(block_number, hashes)| {
                 hashes.iter().map(move |hash| StoredBlockAccessListKey::new(*block_number, *hash))
             })
-            .filter(|key| !self.pending.contains_key(key))
-            .collect()
-    }
-
-    fn pending_keys_to_prune(
-        &self,
-        prune_mode: PruneMode,
-        tip: BlockNumber,
-    ) -> Vec<StoredBlockAccessListKey> {
-        self.pending
-            .keys()
-            .take_while(|key| prune_mode.should_prune(key.number(), tip))
-            .copied()
+            .filter(|key| !self.canonical_pending.contains(key))
             .collect()
     }
 
@@ -327,17 +300,9 @@ impl RocksDBBalStoreBuffer {
         }
     }
 
-    fn prune(
-        &mut self,
-        buffer_retention: PruneMode,
-        pending_retention: PruneMode,
-        tip: BlockNumber,
-    ) {
-        let pending_keys = self.pending_keys_to_prune(pending_retention, tip);
-        self.remove_keys(&pending_keys);
-
-        let cache_keys = self.keys_to_prune(buffer_retention, tip);
-        self.remove_keys(&cache_keys);
+    fn prune(&mut self, retention_distance: u64, tip: BlockNumber) {
+        let keys = self.keys_to_prune(retention_distance, tip);
+        self.remove_keys(&keys);
     }
 
     fn remove_keys(&mut self, keys: &[StoredBlockAccessListKey]) -> usize {
@@ -438,7 +403,7 @@ mod tests {
     }
 
     #[test]
-    fn flush_retains_pending_forks_beyond_cache_retention() {
+    fn flush_prunes_buffer_retention() {
         let (_dir, store) = test_store();
         let old = NumHash::new(1, B256::with_last_byte(1));
         let retained =
@@ -451,19 +416,16 @@ mod tests {
 
         assert_eq!(
             store.get_by_hashes(&[old.hash, retained.hash]).unwrap(),
-            vec![Some(old_bal.clone()), Some(retained_bal.clone())]
+            vec![Some(old_bal), Some(retained_bal.clone())]
         );
 
         store.flush(&[retained]).unwrap();
 
         assert_eq!(
             store.get_by_hashes(&[old.hash, retained.hash]).unwrap(),
-            vec![Some(old_bal.clone()), Some(retained_bal)]
+            vec![None, Some(retained_bal)]
         );
         assert_eq!(disk_bal(&store, old), None);
-
-        store.flush(&[old]).unwrap();
-        assert_eq!(disk_bal(&store, old), Some(old_bal));
     }
 
     #[test]
@@ -480,6 +442,21 @@ mod tests {
         assert!(!store.buffer.read().entries.contains_key(&old.hash));
         assert_eq!(disk_bal(&store, old), Some(old_bal.clone()));
         assert_eq!(store.get_by_hash(old.hash).unwrap(), Some(old_bal));
+    }
+
+    #[test]
+    fn configured_buffer_retention_distance_is_used() {
+        let dir = tempfile::tempdir().unwrap();
+        let rocksdb = RocksDBBuilder::new(dir.path()).with_default_tables().build().unwrap();
+        let store = RocksDBBalStore::with_buffer_retention_distance(rocksdb, 64);
+        let old = NumHash::new(1, B256::with_last_byte(1));
+        let tip = NumHash::new(34, B256::with_last_byte(2));
+
+        store.insert(old, RawBal::from(Bytes::from_static(&[0xc1, 0x01]))).unwrap();
+        store.flush(&[old]).unwrap();
+        store.flush(&[tip]).unwrap();
+
+        assert!(store.buffer.read().entries.contains_key(&old.hash));
     }
 
     #[test]
@@ -550,54 +527,26 @@ mod tests {
     }
 
     #[test]
-    fn prune_uses_configured_retention() {
-        let dir = tempfile::tempdir().unwrap();
-        let rocksdb = RocksDBBuilder::new(dir.path()).with_default_tables().build().unwrap();
-        let store = RocksDBBalStore::with_retentions(
-            rocksdb,
-            PruneMode::Distance(2),
-            PruneMode::Distance(DEFAULT_BAL_BUFFER_RETENTION_DISTANCE),
-        );
+    fn prune_uses_eip_retention() {
+        let (_dir, store) = test_store();
         let old_hash = B256::with_last_byte(1);
         let retained_hash = B256::with_last_byte(2);
         let retained_bal = Bytes::from_static(&[0xc1, 0x02]);
+        let tip = BAL_RETENTION_PERIOD_SLOTS + 2;
 
         store
-            .insert(NumHash::new(7, old_hash), RawBal::from(Bytes::from_static(&[0xc1, 0x01])))
+            .insert(NumHash::new(1, old_hash), RawBal::from(Bytes::from_static(&[0xc1, 0x01])))
             .unwrap();
-        store.insert(NumHash::new(8, retained_hash), RawBal::from(retained_bal.clone())).unwrap();
-        store.flush(&[NumHash::new(7, old_hash), NumHash::new(8, retained_hash)]).unwrap();
+        store.insert(NumHash::new(2, retained_hash), RawBal::from(retained_bal.clone())).unwrap();
+        store.flush(&[NumHash::new(1, old_hash), NumHash::new(2, retained_hash)]).unwrap();
 
-        assert_eq!(store.prune(10).unwrap(), 1);
-        assert_eq!(disk_bal(&store, NumHash::new(7, old_hash)), None);
-        assert_eq!(disk_bal(&store, NumHash::new(8, retained_hash)), Some(retained_bal.clone()));
+        assert_eq!(store.prune(tip).unwrap(), 1);
+        assert_eq!(disk_bal(&store, NumHash::new(1, old_hash)), None);
+        assert_eq!(disk_bal(&store, NumHash::new(2, retained_hash)), Some(retained_bal.clone()));
         assert_eq!(
-            read_many(&store, &[NumHash::new(7, old_hash), NumHash::new(8, retained_hash)]),
+            read_many(&store, &[NumHash::new(1, old_hash), NumHash::new(2, retained_hash)]),
             vec![None, Some(retained_bal)]
         );
-    }
-
-    #[test]
-    fn pending_forks_expire_at_durable_retention() {
-        let dir = tempfile::tempdir().unwrap();
-        let rocksdb = RocksDBBuilder::new(dir.path()).with_default_tables().build().unwrap();
-        let store = RocksDBBalStore::with_retentions(
-            rocksdb,
-            PruneMode::Distance(2),
-            PruneMode::Distance(1),
-        );
-        let old = NumHash::new(7, B256::with_last_byte(1));
-        let tip = NumHash::new(10, B256::with_last_byte(2));
-
-        store.insert(old, RawBal::from(Bytes::from_static(&[0xc1, 0x01]))).unwrap();
-        store.flush(&[tip]).unwrap();
-
-        assert_eq!(store.get_by_hash(old.hash).unwrap(), None);
-        assert!(!store
-            .buffer
-            .read()
-            .pending
-            .contains_key(&StoredBlockAccessListKey::new(old.number, old.hash)));
     }
 
     #[test]
