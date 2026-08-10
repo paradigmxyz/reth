@@ -301,24 +301,6 @@ dependencies = [
 
 [[package]]
 name = "alloy-evm"
-version = "0.37.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "acde665074b478c97047dc2a461b4916cac77922d690e5b7415d1941ae7ff7bf"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-hardforks 0.4.7",
- "alloy-primitives",
- "alloy-sol-types",
- "auto_impl",
- "derive_more",
- "revm 41.0.0",
- "thiserror 2.0.20",
- "tracing",
-]
-
-[[package]]
-name = "alloy-evm"
 version = "0.38.0"
 source = "git+https://github.com/Rimeeeeee/evm?branch=eip-8289#e57536756d006f3a661935251333a556583a73af"
 dependencies = [
@@ -3735,7 +3717,7 @@ name = "example-custom-beacon-withdrawals"
 version = "0.0.0"
 dependencies = [
  "alloy-eips",
- "alloy-evm 0.38.0",
+ "alloy-evm",
  "alloy-sol-types",
  "eyre",
  "reth-ethereum",
@@ -3776,7 +3758,7 @@ dependencies = [
 name = "example-custom-evm"
 version = "0.0.0"
 dependencies = [
- "alloy-evm 0.38.0",
+ "alloy-evm",
  "alloy-genesis",
  "alloy-primitives",
  "eyre",
@@ -3790,7 +3772,7 @@ name = "example-custom-inspector"
 version = "0.0.0"
 dependencies = [
  "alloy-eips",
- "alloy-evm 0.38.0",
+ "alloy-evm",
  "alloy-primitives",
  "alloy-rpc-types-eth",
  "clap",
@@ -7933,7 +7915,7 @@ version = "2.4.1"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
- "alloy-evm 0.38.0",
+ "alloy-evm",
  "alloy-hardforks 0.4.7",
  "alloy-primitives",
  "alloy-rlp",
@@ -8013,7 +7995,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eip8289",
  "alloy-eips",
- "alloy-evm 0.38.0",
+ "alloy-evm",
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
@@ -8635,7 +8617,7 @@ dependencies = [
  "alloy-eip7928",
  "alloy-eip8289",
  "alloy-eips",
- "alloy-evm 0.38.0",
+ "alloy-evm",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-engine",
@@ -9053,7 +9035,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
  "alloy-eips",
- "alloy-evm 0.38.0",
+ "alloy-evm",
  "alloy-primitives",
  "auto_impl",
  "derive_more",
@@ -9078,7 +9060,7 @@ version = "2.4.1"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
- "alloy-evm 0.38.0",
+ "alloy-evm",
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rpc-types-engine",
@@ -9119,7 +9101,7 @@ dependencies = [
 name = "reth-execution-errors"
 version = "2.4.1"
 dependencies = [
- "alloy-evm 0.38.0",
+ "alloy-evm",
  "alloy-primitives",
  "alloy-rlp",
  "nybbles",
@@ -9133,7 +9115,7 @@ version = "2.4.1"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
- "alloy-evm 0.38.0",
+ "alloy-evm",
  "alloy-primitives",
  "alloy-rlp",
  "arbitrary",
@@ -10070,7 +10052,7 @@ dependencies = [
  "alloy-dyn-abi",
  "alloy-eip7928",
  "alloy-eips",
- "alloy-evm 0.38.0",
+ "alloy-evm",
  "alloy-genesis",
  "alloy-network",
  "alloy-primitives",
@@ -10235,7 +10217,7 @@ name = "reth-rpc-convert"
 version = "2.4.1"
 dependencies = [
  "alloy-consensus",
- "alloy-evm 0.38.0",
+ "alloy-evm",
  "alloy-json-rpc",
  "alloy-network",
  "alloy-primitives",
@@ -10314,7 +10296,7 @@ dependencies = [
  "alloy-dyn-abi",
  "alloy-eip7928",
  "alloy-eips",
- "alloy-evm 0.38.0",
+ "alloy-evm",
  "alloy-json-rpc",
  "alloy-network",
  "alloy-primitives",
@@ -10360,7 +10342,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
  "alloy-eips",
- "alloy-evm 0.38.0",
+ "alloy-evm",
  "alloy-network",
  "alloy-primitives",
  "alloy-rpc-client",
@@ -10933,7 +10915,7 @@ dependencies = [
 name = "reth-trie-parallel"
 version = "2.4.1"
 dependencies = [
- "alloy-evm 0.38.0",
+ "alloy-evm",
  "alloy-primitives",
  "alloy-rlp",
  "crossbeam-channel",
@@ -11049,7 +11031,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e33493cf6d996e9242db4f2002caef48ec9aa8c4f3fff3b18aed10ef3942eec7"
 dependencies = [
  "bitvec",
- "paste",
  "phf 0.13.1",
  "revm-primitives 41.0.0",
  "serde",
@@ -11061,6 +11042,7 @@ version = "42.0.0"
 source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#128b7546265076bc88b04d86f7c902a6629817f4"
 dependencies = [
  "bitvec",
+ "paste",
  "phf 0.14.0",
  "revm-primitives 42.0.0",
  "serde",
@@ -11406,14 +11388,14 @@ dependencies = [
 [[package]]
 name = "revmc"
 version = "0.1.0"
-source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#f3b70551cf59d59d073dddb87cd044da090044b6"
+source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#2025375a258161b81a6d93dea65553f1f583f5e3"
 dependencies = [
- "revm-bytecode 41.0.0",
- "revm-context-interface 41.0.0",
- "revm-handler 41.0.0",
- "revm-inspector 41.0.0",
- "revm-interpreter 41.0.0",
- "revm-primitives 41.0.0",
+ "revm-bytecode 42.0.0",
+ "revm-context-interface 42.0.0",
+ "revm-handler 42.0.1",
+ "revm-inspector 42.0.1",
+ "revm-interpreter 42.0.0",
+ "revm-primitives 42.0.0",
  "revmc-backend",
  "revmc-build",
  "revmc-builtins",
@@ -11426,7 +11408,7 @@ dependencies = [
 [[package]]
 name = "revmc-backend"
 version = "0.1.0"
-source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#f3b70551cf59d59d073dddb87cd044da090044b6"
+source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#2025375a258161b81a6d93dea65553f1f583f5e3"
 dependencies = [
  "eyre",
  "ruint",
@@ -11435,18 +11417,18 @@ dependencies = [
 [[package]]
 name = "revmc-build"
 version = "0.1.0"
-source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#f3b70551cf59d59d073dddb87cd044da090044b6"
+source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#2025375a258161b81a6d93dea65553f1f583f5e3"
 
 [[package]]
 name = "revmc-builtins"
 version = "0.1.0"
-source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#f3b70551cf59d59d073dddb87cd044da090044b6"
+source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#2025375a258161b81a6d93dea65553f1f583f5e3"
 dependencies = [
  "paste",
- "revm-bytecode 41.0.0",
- "revm-context-interface 41.0.0",
- "revm-interpreter 41.0.0",
- "revm-primitives 41.0.0",
+ "revm-bytecode 42.0.0",
+ "revm-context-interface 42.0.0",
+ "revm-interpreter 42.0.0",
+ "revm-primitives 42.0.0",
  "revmc-backend",
  "revmc-context",
  "tracing",
@@ -11455,7 +11437,7 @@ dependencies = [
 [[package]]
 name = "revmc-codegen"
 version = "0.1.0"
-source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#f3b70551cf59d59d073dddb87cd044da090044b6"
+source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#2025375a258161b81a6d93dea65553f1f583f5e3"
 dependencies = [
  "alloy-primitives",
  "bitflags 2.13.1",
@@ -11464,15 +11446,15 @@ dependencies = [
  "either",
  "indexmap 2.14.0",
  "oxc_index",
- "revm-bytecode 41.0.0",
- "revm-context 41.0.0",
- "revm-context-interface 41.0.0",
- "revm-database-interface 41.0.0",
- "revm-handler 41.0.0",
- "revm-inspector 41.0.0",
- "revm-interpreter 41.0.0",
- "revm-primitives 41.0.0",
- "revm-state 41.0.0",
+ "revm-bytecode 42.0.0",
+ "revm-context 42.0.0",
+ "revm-context-interface 42.0.0",
+ "revm-database-interface 42.0.0",
+ "revm-handler 42.0.1",
+ "revm-inspector 42.0.1",
+ "revm-interpreter 42.0.0",
+ "revm-primitives 42.0.0",
+ "revm-state 42.0.0",
  "revmc-backend",
  "revmc-build",
  "revmc-builtins",
@@ -11486,22 +11468,22 @@ dependencies = [
 [[package]]
 name = "revmc-context"
 version = "0.1.0"
-source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#f3b70551cf59d59d073dddb87cd044da090044b6"
+source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#2025375a258161b81a6d93dea65553f1f583f5e3"
 dependencies = [
- "revm-context 41.0.0",
- "revm-context-interface 41.0.0",
- "revm-handler 41.0.0",
- "revm-inspector 41.0.0",
- "revm-interpreter 41.0.0",
- "revm-primitives 41.0.0",
- "revm-state 41.0.0",
+ "revm-context 42.0.0",
+ "revm-context-interface 42.0.0",
+ "revm-handler 42.0.1",
+ "revm-inspector 42.0.1",
+ "revm-interpreter 42.0.0",
+ "revm-primitives 42.0.0",
+ "revm-state 42.0.0",
  "ruint",
 ]
 
 [[package]]
 name = "revmc-llvm"
 version = "0.1.0"
-source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#f3b70551cf59d59d073dddb87cd044da090044b6"
+source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#2025375a258161b81a6d93dea65553f1f583f5e3"
 dependencies = [
  "alloy-primitives",
  "cc",
@@ -11514,9 +11496,9 @@ dependencies = [
 [[package]]
 name = "revmc-runtime"
 version = "0.1.0"
-source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#f3b70551cf59d59d073dddb87cd044da090044b6"
+source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#2025375a258161b81a6d93dea65553f1f583f5e3"
 dependencies = [
- "alloy-evm 0.37.1",
+ "alloy-evm",
  "alloy-primitives",
  "crossbeam-channel",
  "crossbeam-queue",
@@ -11527,16 +11509,16 @@ dependencies = [
  "libloading 0.9.0",
  "quanta",
  "rayon",
- "revm-bytecode 41.0.0",
- "revm-context 41.0.0",
- "revm-context-interface 41.0.0",
- "revm-database 41.0.0",
- "revm-database-interface 41.0.0",
- "revm-handler 41.0.0",
- "revm-inspector 41.0.0",
- "revm-interpreter 41.0.0",
- "revm-primitives 41.0.0",
- "revm-state 41.0.0",
+ "revm-bytecode 42.0.0",
+ "revm-context 42.0.0",
+ "revm-context-interface 42.0.0",
+ "revm-database 42.0.0",
+ "revm-database-interface 42.0.0",
+ "revm-handler 42.0.1",
+ "revm-inspector 42.0.1",
+ "revm-interpreter 42.0.0",
+ "revm-primitives 42.0.0",
+ "revm-state 42.0.0",
  "revmc-backend",
  "revmc-builtins",
  "revmc-codegen",
