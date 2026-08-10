@@ -1121,10 +1121,8 @@ mod tests {
     use super::*;
     use alloy_primitives::{keccak256, Address, B256, U256};
     use reth_db_common::init::init_genesis;
-    use reth_provider::{
-        providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory,
-    };
-    use reth_storage_overlay::OverlayManager;
+    use reth_provider::test_utils::create_test_provider_factory;
+    use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
     use reth_trie_parallel::proof_task::ProofTaskCtx;
     use reth_trie_sparse::ArenaParallelSparseTrie;
 

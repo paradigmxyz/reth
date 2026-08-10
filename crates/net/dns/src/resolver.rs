@@ -1,9 +1,10 @@
 //! Perform DNS lookups
 
+use crate::tree::has_entry_prefix;
 use dashmap::DashMap;
 pub use hickory_resolver::{net::NetError, TokioResolver};
 use hickory_resolver::{
-    proto::rr::{rdata::TXT, RData},
+    proto::rr::{rdata::TXT, RData, Record},
     ConnectionProvider,
 };
 use std::future::Future;
@@ -25,15 +26,20 @@ impl<P: ConnectionProvider> Resolver for hickory_resolver::Resolver<P> {
                 trace!(target: "disc::dns", %err, ?query, "dns lookup failed");
                 None
             }
-            Ok(lookup) => {
-                let txt = lookup.answers().iter().find_map(|r| match &r.data {
-                    RData::TXT(txt) => Some(txt),
-                    _ => None,
-                })?;
-                txt_entry(txt)
-            }
+            Ok(lookup) => find_txt_entry(lookup.answers()),
         }
     }
+}
+
+/// Returns the first TXT record with a recognized EIP-1459 entry prefix.
+fn find_txt_entry(records: &[Record]) -> Option<String> {
+    records
+        .iter()
+        .filter_map(|record| {
+            let RData::TXT(txt) = &record.data else { return None };
+            txt_entry(txt)
+        })
+        .find(|entry| has_entry_prefix(entry))
 }
 
 /// Joins all `<character-string>`s of a TXT record into a single entry.
@@ -138,7 +144,7 @@ mod tests {
         net::runtime::TokioRuntimeProvider,
         proto::{
             op::{Message, OpCode},
-            rr::Record,
+            rr::{Name, Record},
             serialize::binary::{BinDecodable, BinEncodable},
         },
     };
@@ -226,5 +232,21 @@ mod tests {
         let resolved = resolver_for(addr).lookup_txt("YNEGZIWHOM7TOOSUATAPTM.example.org").await;
 
         assert_eq!(resolved, Some(entry));
+    }
+
+    fn txt_record(entry: &str) -> Record {
+        Record::from_rdata(Name::root(), 60, RData::TXT(TXT::new(vec![entry.to_string()])))
+    }
+
+    #[test]
+    fn find_txt_entry_skips_unrelated_records() {
+        let entry = "enrtree-root:v1 e=enr-root l=link-root seq=1 sig=signature";
+        let records = [
+            txt_record("v=spf1 -all"),
+            txt_record(entry),
+            txt_record("enrtree-branch:YNEGZIWHOM7TOOSUATAPTM"),
+        ];
+
+        assert_eq!(find_txt_entry(&records).as_deref(), Some(entry));
     }
 }
