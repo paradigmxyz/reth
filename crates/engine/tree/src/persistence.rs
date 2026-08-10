@@ -211,8 +211,7 @@ where
         }
 
         provider_rw.commit()?;
-        // BALs live outside the main database and are intentionally flushed last. A crash can leave
-        // auxiliary BAL data missing, but cannot persist it ahead of its canonical block data.
+        // BALs live outside the main database and are intentionally flushed last.
         let _ = self.provider.bal_store().flush(&canonical_blocks).inspect_err(|err| {
             warn!(target: "engine::persistence", last=?last_block, ?err, "Failed to flush BAL store");
         });
