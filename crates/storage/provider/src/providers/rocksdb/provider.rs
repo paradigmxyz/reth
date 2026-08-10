@@ -2857,8 +2857,6 @@ const fn convert_log_level(level: LogLevel) -> rocksdb::LogLevel {
 mod tests {
     use super::*;
     use crate::providers::HistoryInfo;
-    use alloy_eip7928::bal::RawBal;
-    use alloy_eips::NumHash;
     use alloy_primitives::{Address, Bytes, TxHash, B256};
     use reth_db_api::{
         models::{
@@ -2894,21 +2892,17 @@ mod tests {
         provider.put::<tables::StoragesHistory>(key.clone(), &value).unwrap();
         assert!(provider.get::<tables::StoragesHistory>(key).unwrap().is_some());
 
-        let bal_key = reth_db_api::models::StoredBlockAccessListKey::new(NumHash::new(
-            1,
-            B256::with_last_byte(1),
-        ));
+        let bal_key =
+            reth_db_api::models::StoredBlockAccessListKey::new(1, B256::with_last_byte(1));
         let bal_value =
-            reth_db_api::models::StoredBlockAccessList::new(RawBal::from(Bytes::from_static(&[
-                0xc0,
-            ])));
+            reth_db_api::models::StoredBlockAccessList::new(Bytes::from_static(&[0xc0]));
         provider.put::<tables::BlockAccessLists>(bal_key, &bal_value).unwrap();
         assert_eq!(provider.get::<tables::BlockAccessLists>(bal_key).unwrap(), Some(bal_value));
         provider
-            .put::<tables::BlockAccessListBlockNumbers>(bal_key.num_hash().hash, &bal_key.number())
+            .put::<tables::BlockAccessListBlockNumbers>(bal_key.hash(), &bal_key.number())
             .unwrap();
         assert_eq!(
-            provider.get::<tables::BlockAccessListBlockNumbers>(bal_key.num_hash().hash).unwrap(),
+            provider.get::<tables::BlockAccessListBlockNumbers>(bal_key.hash()).unwrap(),
             Some(bal_key.number())
         );
     }
@@ -2917,16 +2911,13 @@ mod tests {
     fn block_access_lists_store_large_payloads_in_blob_files() {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
-        let bal_key = reth_db_api::models::StoredBlockAccessListKey::new(NumHash::new(
-            1,
-            B256::with_last_byte(1),
-        ));
-        let bal_value =
-            reth_db_api::models::StoredBlockAccessList::new(RawBal::from(Bytes::from(vec![
-                0;
-                DEFAULT_BAL_MIN_BLOB_SIZE as usize +
-                    1
-            ])));
+        let bal_key =
+            reth_db_api::models::StoredBlockAccessListKey::new(1, B256::with_last_byte(1));
+        let bal_value = reth_db_api::models::StoredBlockAccessList::new(Bytes::from(vec![
+            0;
+            DEFAULT_BAL_MIN_BLOB_SIZE as usize +
+                1
+        ]));
 
         provider.put::<tables::BlockAccessLists>(bal_key, &bal_value).unwrap();
         provider.flush(&[tables::BlockAccessLists::NAME]).unwrap();

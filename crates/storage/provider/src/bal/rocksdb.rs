@@ -86,7 +86,7 @@ impl RocksDBBalStore {
         let mut batch = self.rocksdb.batch();
         for key in &keys {
             batch.delete::<tables::BlockAccessLists>(*key)?;
-            batch.delete::<tables::BlockAccessListBlockNumbers>(key.num_hash().hash)?;
+            batch.delete::<tables::BlockAccessListBlockNumbers>(key.hash())?;
         }
         batch.commit()?;
         Ok(keys.len())
@@ -98,7 +98,7 @@ impl RocksDBBalStore {
         };
         let stored = StoredBlockAccessList::decompress(&value)
             .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
-        stored.into_verified_raw().map(|raw| Some(raw.into_raw())).map_err(ProviderError::other)
+        stored.into_verified_raw().map(Some).map_err(ProviderError::other)
     }
 
     fn read_one_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<Bytes>> {
@@ -111,10 +111,7 @@ impl RocksDBBalStore {
         else {
             return Ok(None)
         };
-        self.read_one_from_disk(StoredBlockAccessListKey::new(NumHash::new(
-            block_number,
-            block_hash,
-        )))
+        self.read_one_from_disk(StoredBlockAccessListKey::new(block_number, block_hash))
     }
 
     fn buffer_retention(&self) -> PruneMode {
@@ -158,18 +155,13 @@ impl RocksDBBalStoreBuffer {
             self.entries.insert(block.hash, RocksDBBalEntry { block_number: block.number, bal })
         {
             self.remove_hash_from_number(entry.block_number, block.hash);
-            self.pending.remove(&StoredBlockAccessListKey::new(NumHash::new(
-                entry.block_number,
-                block.hash,
-            )));
-            self.canonical_pending.remove(&StoredBlockAccessListKey::new(NumHash::new(
-                entry.block_number,
-                block.hash,
-            )));
+            self.pending.remove(&StoredBlockAccessListKey::new(entry.block_number, block.hash));
+            self.canonical_pending
+                .remove(&StoredBlockAccessListKey::new(entry.block_number, block.hash));
         }
 
         self.hashes_by_number.entry(block.number).or_default().push(block.hash);
-        self.pending.insert(StoredBlockAccessListKey::new(block), pending);
+        self.pending.insert(StoredBlockAccessListKey::new(block.number, block.hash), pending);
         self.highest_block_number = Some(
             self.highest_block_number.map_or(block.number, |highest| highest.max(block.number)),
         );
@@ -179,7 +171,7 @@ impl RocksDBBalStoreBuffer {
         self.canonical_pending.extend(
             blocks
                 .iter()
-                .map(|block| StoredBlockAccessListKey::new(*block))
+                .map(|block| StoredBlockAccessListKey::new(block.number, block.hash))
                 .filter(|key| self.pending.contains_key(key)),
         );
     }
@@ -200,9 +192,7 @@ impl RocksDBBalStoreBuffer {
             .iter()
             .take_while(|(block_number, _)| prune_mode.should_prune(**block_number, tip))
             .flat_map(|(block_number, hashes)| {
-                hashes.iter().map(move |hash| {
-                    StoredBlockAccessListKey::new(NumHash::new(*block_number, *hash))
-                })
+                hashes.iter().map(move |hash| StoredBlockAccessListKey::new(*block_number, *hash))
             })
             .filter(|key| !self.canonical_pending.contains(key))
             .collect()
@@ -231,7 +221,7 @@ impl RocksDBBalStoreBuffer {
     fn remove_keys(&mut self, keys: &[StoredBlockAccessListKey]) -> usize {
         let mut removed = 0;
         for key in keys {
-            let block = key.num_hash();
+            let block = NumHash::new(key.number(), key.hash());
             let pending_removed = self.pending.remove(key).is_some();
             self.canonical_pending.remove(key);
             let entry_removed = if self
@@ -309,10 +299,9 @@ impl BalStore for RocksDBBalStore {
         if !pending.is_empty() {
             let mut batch = self.rocksdb.batch();
             for (key, bal) in &pending {
-                let block = key.num_hash();
-                let value = StoredBlockAccessList::new(bal.clone());
+                let value = StoredBlockAccessList::new(bal.as_raw().clone());
                 batch.put::<tables::BlockAccessLists>(*key, &value)?;
-                batch.put::<tables::BlockAccessListBlockNumbers>(block.hash, &block.number)?;
+                batch.put::<tables::BlockAccessListBlockNumbers>(key.hash(), &key.number())?;
             }
             batch.commit()?;
 
@@ -373,14 +362,13 @@ mod tests {
     fn disk_bal(store: &RocksDBBalStore, block: NumHash) -> Option<Bytes> {
         store
             .rocksdb_provider()
-            .get_raw::<tables::BlockAccessLists>(StoredBlockAccessListKey::new(block))
+            .get_raw::<tables::BlockAccessLists>(StoredBlockAccessListKey::new(
+                block.number,
+                block.hash,
+            ))
             .unwrap()
             .map(|value| {
-                StoredBlockAccessList::decompress(&value)
-                    .unwrap()
-                    .into_verified_raw()
-                    .unwrap()
-                    .into_raw()
+                StoredBlockAccessList::decompress(&value).unwrap().into_verified_raw().unwrap()
             })
     }
 
@@ -447,7 +435,11 @@ mod tests {
             store.get_by_hashes(&[old.hash, retained.hash]).unwrap(),
             vec![None, Some(retained_bal)]
         );
-        assert!(!store.buffer.read().pending.contains_key(&StoredBlockAccessListKey::new(old)));
+        assert!(!store
+            .buffer
+            .read()
+            .pending
+            .contains_key(&StoredBlockAccessListKey::new(old.number, old.hash)));
         assert_eq!(disk_bal(&store, old), None);
     }
 
@@ -471,7 +463,11 @@ mod tests {
 
         store.flush(&[block_1]).unwrap();
 
-        assert!(!store.buffer.read().pending.contains_key(&StoredBlockAccessListKey::new(block_1)));
+        assert!(!store
+            .buffer
+            .read()
+            .pending
+            .contains_key(&StoredBlockAccessListKey::new(block_1.number, block_1.hash)));
         assert_eq!(disk_bal(&store, block_1), Some(bal_1.clone()));
         assert_eq!(disk_bal(&store, block_1_fork), None);
         assert_eq!(disk_bal(&store, block_2), None);
@@ -573,7 +569,7 @@ mod tests {
     fn corrupt_payload_hash_is_not_served() {
         let (_dir, store) = test_store();
         let block = NumHash::new(1, B256::with_last_byte(1));
-        let key = StoredBlockAccessListKey::new(block);
+        let key = StoredBlockAccessListKey::new(block.number, block.hash);
         let mut encoded = Vec::new();
         encoded.extend_from_slice(B256::ZERO.as_slice());
         encoded.extend_from_slice(&[0xc0]);
@@ -604,7 +600,7 @@ mod tests {
         let retry = buffer.canonical_pending_entries();
 
         assert_eq!(
-            retry.iter().map(|(key, _)| key.num_hash()).collect::<Vec<_>>(),
+            retry.iter().map(|(key, _)| NumHash::new(key.number(), key.hash())).collect::<Vec<_>>(),
             vec![first, second]
         );
     }

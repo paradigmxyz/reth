@@ -606,11 +606,14 @@ mod tests {
         assert_eq!(provider.bal_store().get_by_hash(num_hash.hash).unwrap(), Some(raw_bal.clone()));
         let stored = provider
             .rocksdb_provider()
-            .get_raw::<tables::BlockAccessLists>(StoredBlockAccessListKey::new(num_hash))
+            .get_raw::<tables::BlockAccessLists>(StoredBlockAccessListKey::new(
+                num_hash.number,
+                num_hash.hash,
+            ))
             .unwrap()
             .unwrap();
         let stored = StoredBlockAccessList::decompress(&stored).unwrap();
-        assert_eq!(stored.into_verified_raw().unwrap().into_raw(), raw_bal);
+        assert_eq!(stored.into_verified_raw().unwrap(), raw_bal);
         let persisted_store = RocksDBBalStore::new(provider.rocksdb_provider());
         assert_eq!(persisted_store.get_by_hash(num_hash.hash).unwrap(), Some(raw_bal));
     }
