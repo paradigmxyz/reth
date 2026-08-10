@@ -2,8 +2,6 @@ use alloy_primitives::{Address, B256, U256};
 use reth_primitives_traits::{Account, Bytecode};
 use revm::database::{states::BundleState, BundleAccount};
 
-use crate::conversions::{account_from_revm, bytecode_from_revm};
-
 pub use alloy_evm::block::BlockExecutionResult;
 
 /// [`BlockExecutionResult`] combined with state.
@@ -31,12 +29,12 @@ pub struct BlockExecutionOutput<T> {
 impl<T> BlockExecutionOutput<T> {
     /// Return bytecode if known.
     pub fn bytecode(&self, code_hash: &B256) -> Option<Bytecode> {
-        self.state.bytecode(code_hash).map(bytecode_from_revm)
+        self.state.bytecode(code_hash).map(Bytecode)
     }
 
     /// Get account if account is known.
     pub fn account(&self, address: &Address) -> Option<Option<Account>> {
-        self.state.account(address).map(|a| a.info.as_ref().map(account_from_revm))
+        self.state.account(address).map(|a| a.info.as_ref().map(Into::into))
     }
 
     /// Returns the state [`BundleAccount`] for the given address.
