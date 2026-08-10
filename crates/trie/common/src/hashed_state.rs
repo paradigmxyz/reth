@@ -7,6 +7,7 @@ use crate::{
     KeyHasher, MultiProofTargets, Nibbles,
 };
 use alloc::{borrow::Cow, vec::Vec};
+use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
     keccak256,
     map::{hash_map, B256Map, HashMap, HashSet},
@@ -53,7 +54,11 @@ impl HashedPostState {
             .into_iter()
             .map(|(address, account)| {
                 let hashed_address = KH::hash_key(address);
-                let hashed_account = account.info.as_ref().map(Into::into);
+                let hashed_account = account.info.as_ref().map(|info| Account {
+                    nonce: info.nonce,
+                    balance: info.balance,
+                    bytecode_hash: (info.code_hash != KECCAK_EMPTY).then_some(info.code_hash),
+                });
                 let hashed_storage = HashedStorage::from_iter(
                     account
                         .storage
