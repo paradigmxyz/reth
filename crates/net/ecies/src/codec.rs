@@ -159,18 +159,16 @@ impl Encoder<EgressECIESValue> for ECIESCodec {
             EgressECIESValue::Auth => {
                 self.state = ECIESState::Ack;
                 self.ecies.write_auth(buf);
-                Ok(())
             }
             EgressECIESValue::Ack => {
                 self.state = ECIESState::InitialHeader;
                 self.ecies.write_ack(buf);
-                Ok(())
             }
             EgressECIESValue::Message(data) => {
                 self.ecies.write_header(buf, data.len());
                 self.ecies.write_body(buf, &data);
-                Ok(())
             }
         }
+        Ok(())
     }
 }
