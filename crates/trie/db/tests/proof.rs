@@ -344,12 +344,13 @@ fn storage_overlay_from_nodes_matches_db_overlay() {
     let slot_c = b256!("0x51e6784c736ef8548f856909870b38e49ef7a4e3e77e5e945e0d5e6fcaa3037f");
     let slot_d = b256!("0x00deb8486ad8edccfdedfc07109b3667b38a03a8009271aac250cce062d90917");
 
-    let initial_storage = HashedStorage::from_iter(
-        false,
-        [(slot_a, U256::from(1)), (slot_b, U256::from(2)), (slot_c, U256::from(3))],
-    );
+    let initial_storage = HashedStorage::from_iter([
+        (slot_a, U256::from(1)),
+        (slot_b, U256::from(2)),
+        (slot_c, U256::from(3)),
+    ]);
     let overlay_storage =
-        HashedStorage::from_iter(false, [(slot_b, U256::from(22)), (slot_d, U256::from(44))]);
+        HashedStorage::from_iter([(slot_b, U256::from(22)), (slot_d, U256::from(44))]);
 
     let mut hashed_storage_cursor = tx.cursor_dup_write::<tables::HashedStorages>().unwrap();
     for (&key, &value) in &initial_storage.storage {

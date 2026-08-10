@@ -1,6 +1,8 @@
 use super::ExecutedBlock;
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use alloy_primitives::{
+    keccak256, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256, U256,
+};
 use reth_errors::ProviderResult;
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives};
 use reth_storage_api::{
@@ -285,8 +287,26 @@ impl<N: NodePrimitives> StateProofProvider for MemoryOverlayStateProviderRef<'_,
 }
 
 impl<N: NodePrimitives> HashedPostStateProvider for MemoryOverlayStateProviderRef<'_, N> {
-    fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
-        self.historical.hashed_post_state(bundle_state)
+    fn hashed_post_state(&self, bundle_state: &BundleState) -> ProviderResult<HashedPostState> {
+        let mut hashed_state = self.historical.hashed_post_state(bundle_state)?;
+
+        for (address, account) in bundle_state.state() {
+            // Accounts created in this bundle cannot have parent storage to zero.
+            if !account.was_destroyed() || account.original_info.is_none() {
+                continue
+            }
+
+            let hashed_address = keccak256(address);
+            let Some(parent_storage) = self.trie_input().state.storages.get(&hashed_address) else {
+                continue
+            };
+            let storage = &mut hashed_state.storages.entry(hashed_address).or_default().storage;
+            for hashed_slot in parent_storage.storage.keys() {
+                storage.entry(*hashed_slot).or_insert(U256::ZERO);
+            }
+        }
+
+        Ok(hashed_state)
     }
 }
 
@@ -365,10 +385,12 @@ reth_storage_api::macros::delegate_provider_impls!(MemoryOverlayStateProvider<N>
 mod tests {
     use super::*;
     use reth_ethereum_primitives::EthPrimitives;
+    use reth_storage_api::noop::NoopProvider;
     use reth_trie::{
         updates::StorageTrieUpdates, ComputedTrieData, ExecutionWitnessMode, HashedPostStateSorted,
         LazyTrieData, StorageProof,
     };
+    use revm::database::{AccountStatus, BundleAccount};
     use std::sync::Arc;
 
     /// Sentinel returned by the fallback (`storage_root`) path.
@@ -445,8 +467,11 @@ mod tests {
     }
 
     impl HashedPostStateProvider for DispatchMock {
-        fn hashed_post_state(&self, _bundle_state: &BundleState) -> HashedPostState {
-            HashedPostState::default()
+        fn hashed_post_state(
+            &self,
+            _bundle_state: &BundleState,
+        ) -> ProviderResult<HashedPostState> {
+            Ok(HashedPostState::default())
         }
     }
 
@@ -554,5 +579,23 @@ mod tests {
             plain_root(),
             "overlay should fall back to storage_root when no in-memory nodes exist",
         );
+    }
+
+    #[test]
+    fn created_and_destroyed_account_skips_in_memory_trie_aggregation() {
+        let address = Address::with_last_byte(1);
+        let provider = MemoryOverlayStateProviderRef::<EthPrimitives>::new(
+            Box::new(NoopProvider::default()),
+            Vec::new(),
+        );
+        let mut bundle_state = BundleState::default();
+        bundle_state.state.insert(
+            address,
+            BundleAccount::new(None, None, Default::default(), AccountStatus::Destroyed),
+        );
+
+        provider.hashed_post_state(&bundle_state).unwrap();
+
+        assert!(provider.trie_input.get().is_none());
     }
 }

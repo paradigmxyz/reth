@@ -31,13 +31,12 @@ use reth_metrics::{
 };
 use reth_node_api::{NewPayloadError, PayloadTypes};
 use reth_primitives_traits::{
-    constants::GAS_LIMIT_BOUND_DIVISOR, BlockBody, GotExpected, NodePrimitives, RecoveredBlock,
-    SealedBlock, SealedHeaderFor,
+    BlockBody, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeaderFor,
 };
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
 use reth_rpc_api::BlockSubmissionValidationApiServer;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
-use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
+use reth_storage_api::{BlockReaderIdExt, HashedPostStateProvider, StateProviderFactory};
 use reth_tasks::Runtime;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -174,7 +173,14 @@ where
         };
 
         self.consensus.validate_header_against_parent(block.sealed_header(), &parent_header)?;
-        self.validate_gas_limit(registered_gas_limit, &parent_header, block.sealed_header())?;
+        parent_header.validate_gas_limit(registered_gas_limit, block.gas_limit()).map_err(
+            |err| {
+                ValidationApiError::GasLimitMismatch(GotExpected {
+                    got: err.got,
+                    expected: err.expected,
+                })
+            },
+        )?;
 
         // Ensure the submitted block access list does not exceed the block gas limit (EIP-7928)
         if let Some(decoded_bal) = decoded_bal {
@@ -229,8 +235,8 @@ where
 
         self.ensure_payment(&block, &output, &message)?;
 
-        let state_root =
-            state_provider.state_root(state_provider.hashed_post_state(&output.state))?;
+        let hashed_state = state_provider.hashed_post_state(&output.state)?;
+        let state_root = state_provider.state_root(hashed_state)?;
 
         if state_root != block.header().state_root() {
             return Err(ConsensusError::BodyStateRootDiff(
@@ -271,34 +277,6 @@ where
         } else {
             Ok(())
         }
-    }
-
-    /// Ensures that the chosen gas limit is the closest possible value for the validator's
-    /// registered gas limit.
-    ///
-    /// Ref: <https://github.com/flashbots/builder/blob/a742641e24df68bc2fc476199b012b0abce40ffe/core/blockchain.go#L2474-L2477>
-    fn validate_gas_limit(
-        &self,
-        registered_gas_limit: u64,
-        parent_header: &SealedHeaderFor<E::Primitives>,
-        header: &SealedHeaderFor<E::Primitives>,
-    ) -> Result<(), ValidationApiError> {
-        let max_gas_limit =
-            parent_header.gas_limit() + parent_header.gas_limit() / GAS_LIMIT_BOUND_DIVISOR - 1;
-        let min_gas_limit =
-            parent_header.gas_limit() - parent_header.gas_limit() / GAS_LIMIT_BOUND_DIVISOR + 1;
-
-        let best_gas_limit =
-            std::cmp::max(min_gas_limit, std::cmp::min(max_gas_limit, registered_gas_limit));
-
-        if best_gas_limit != header.gas_limit() {
-            return Err(ValidationApiError::GasLimitMismatch(GotExpected {
-                got: header.gas_limit(),
-                expected: best_gas_limit,
-            }))
-        }
-
-        Ok(())
     }
 
     /// Ensures that the proposer has received [`BidTrace::value`] for this block.

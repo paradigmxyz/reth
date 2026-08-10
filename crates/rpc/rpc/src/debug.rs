@@ -40,7 +40,8 @@ use reth_storage_api::{
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use reth_transaction_pool::TransactionPool;
 use reth_trie_common::{
-    updates::TrieUpdates, ExecutionWitnessMode, HashedPostState, HashedStorage,
+    root::storage_root_unsorted, updates::TrieUpdates, ExecutionWitnessMode, HashedPostState,
+    HashedStorage,
 };
 use revm::{database::states::bundle_state::BundleRetention, Database, DatabaseCommit};
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
@@ -123,33 +124,33 @@ where
 
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
+                let block_env = evm_env.block_env.clone();
+
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
-                let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
+                let inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
+                let mut evm =
+                    eth_api.evm_config().evm_with_env_and_inspector(&mut db, evm_env, inspector);
                 while let Some((index, tx)) = transactions.next() {
-                    let tx_hash = *tx.tx_hash();
                     let tx_env = eth_api.evm_config().tx_env(tx);
 
-                    let res = eth_api.inspect(
-                        &mut db,
-                        evm_env.clone(),
-                        tx_env.clone(),
-                        &mut inspector,
-                    )?;
+                    let res = evm.transact(tx_env.clone()).map_err(Eth::Error::from_evm_err)?;
+
+                    let (db, inspector, _) = evm.components_mut();
                     let result = inspector
                         .get_result(
                             Some(TransactionContext {
                                 block_hash: Some(block.hash()),
-                                tx_hash: Some(tx_hash),
+                                tx_hash: Some(*tx.tx_hash()),
                                 tx_index: Some(index),
                             }),
                             &tx_env,
-                            &evm_env.block_env,
+                            &block_env,
                             &res,
-                            &mut db,
+                            db,
                         )
                         .map_err(Eth::Error::from_eth_err)?;
 
-                    results.push(TraceResult::Success { result, tx_hash: Some(tx_hash) });
+                    results.push(TraceResult::Success { result, tx_hash: Some(*tx.tx_hash()) });
                     if transactions.peek().is_some() {
                         inspector.fuse().map_err(Eth::Error::from_eth_err)?;
                         // need to apply the state changes of this transaction before executing the
@@ -228,39 +229,32 @@ where
             None => return Err(EthApiError::TracingTransactionNotFound.into()),
             Some(res) => res,
         };
-        let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
-
-        // we need to get the state of the parent block because we're essentially replaying the
-        // block the transaction is included in
-        let state_at: BlockId = block.parent_hash().into();
-        let block_hash = block.hash();
 
         self.eth_api()
-            .spawn_with_state_at_block(state_at, move |eth_api, mut db| {
-                let block_txs = block.transactions_recovered();
-
+            .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
                 // configure env for the target transaction
-                let tx = transaction.into_recovered();
+                let (tx, tx_info) = transaction.split();
 
-                eth_api.apply_pre_execution_changes(&block, &mut db)?;
-
-                // replay all transactions prior to the targeted transaction
-                let index = eth_api.replay_transactions_until(
-                    &mut db,
-                    evm_env.clone(),
-                    block_txs,
-                    *tx.tx_hash(),
-                )?;
-
-                let tx_env = eth_api.evm_config().tx_env(&tx);
+                // index should always be available because `transaction_and_block` only
+                // returns transactions included in a block
+                let index =
+                    tx_info.index.expect("transaction_and_block only returns block transactions")
+                        as usize;
 
                 let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
-                let res =
-                    eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?;
+                let tx_env = eth_api.evm_config().tx_env(&tx);
+                let (res, evm_env) = eth_api.inspect_transaction_in_block(
+                    &block,
+                    &mut db,
+                    &mut inspector,
+                    index,
+                    tx_env.clone(),
+                )?;
+
                 let trace = inspector
                     .get_result(
                         Some(TransactionContext {
-                            block_hash: Some(block_hash),
+                            block_hash: Some(block.hash()),
                             tx_index: Some(index),
                             tx_hash: Some(*tx.tx_hash()),
                         }),
@@ -356,23 +350,12 @@ where
 
         let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
-        // execute after the parent block, replaying `tx_index` transactions
-        let state_at = block.parent_hash();
-
         self.eth_api()
-            .spawn_with_state_at_block(state_at, move |eth_api, mut db| {
-                // 1. apply pre-execution changes
-                eth_api.apply_pre_execution_changes(&block, &mut db)?;
+            .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
+                // 1. replay the required number of transactions
+                eth_api.replay_block_until(&mut db, &block, tx_index)?;
 
-                // 2. replay the required number of transactions
-                eth_api.replay_transactions_until(
-                    &mut db,
-                    evm_env.clone(),
-                    block.transactions_recovered(),
-                    *block.body().transactions()[tx_index].tx_hash(),
-                )?;
-
-                // 3. now execute the trace call on this state
+                // 2. now execute the trace call on this state
                 let (evm_env, tx_env) =
                     eth_api.prepare_call_env(evm_env, call, &mut db, overrides)?;
 
@@ -441,16 +424,8 @@ where
                 if replay_block_txs {
                     // only need to replay the transactions in the block if not all transactions are
                     // to be replayed
-                    eth_api.apply_pre_execution_changes(&block, &mut db)?;
-
-                    let transactions = block.transactions_recovered().take(num_txs);
-
                     // Execute all transactions until index
-                    for tx in transactions {
-                        let tx_env = eth_api.evm_config().tx_env(tx);
-                        let res = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
-                        db.commit(res.state);
-                    }
+                    eth_api.replay_block_until(&mut db, &block, num_txs)?;
                 }
 
                 // Trace all bundles
@@ -524,15 +499,15 @@ where
     /// root recomputation.
     pub async fn debug_execution_witness(
         &self,
-        block_id: BlockNumberOrTag,
+        block_id: BlockId,
         mode: Option<ExecutionWitnessMode>,
     ) -> Result<ExecutionWitness, Eth::Error> {
         let this = self.clone();
         let block = this
             .eth_api()
-            .recovered_block(block_id.into())
+            .recovered_block(block_id)
             .await?
-            .ok_or(EthApiError::HeaderNotFound(block_id.into()))?;
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
 
         self.debug_execution_witness_for_block(block, mode.unwrap_or_default()).await
     }
@@ -548,16 +523,21 @@ where
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
                 let block_executor = eth_api.evm_config().executor(&mut db);
 
-                let mut witness_record = ExecutionWitnessRecord::default();
-
+                let mut witness = None;
                 let _ = block_executor
                     .execute_with_state_closure(&block, |statedb: &State<_>| {
-                        witness_record.record_executed_state(statedb, mode);
+                        witness =
+                            Some(ExecutionWitnessRecord::new(statedb).into_execution_witness(
+                                &statedb.database.database.0,
+                                eth_api.provider(),
+                                block_number,
+                                mode,
+                            ));
                     })
                     .map_err(|err| EthApiError::Internal(err.into()))?;
 
-                Ok(witness_record
-                    .into_execution_witness(&db.database.0, eth_api.provider(), block_number, mode)
+                Ok(witness
+                    .expect("state closure is called after successful execution")
                     .map_err(EthApiError::from)?)
             })
             .await
@@ -641,18 +621,25 @@ where
         let balance = account.balance;
         let nonce = account.nonce;
         let code_hash = account.code_hash;
-        let hashed_storage = db
+        let (hashed_storage, status) = db
             .cache
             .accounts
             .get(&address)
             .and_then(|account| {
                 account.account.as_ref().map(|plain_account| {
-                    HashedStorage::from_plain_storage(account.status, plain_account.storage.iter())
+                    (HashedStorage::from_plain_storage(&plain_account.storage), account.status)
                 })
             })
             .unwrap_or_default();
-        let storage_root =
-            db.database.storage_root(address, hashed_storage).map_err(Eth::Error::from_eth_err)?;
+        let storage_root = if status.was_destroyed() {
+            // Destruction makes every slot not present in the cache zero, so the cache contains the
+            // complete storage trie for the account's new incarnation.
+            storage_root_unsorted(
+                hashed_storage.storage.into_iter().filter(|(_, value)| !value.is_zero()),
+            )
+        } else {
+            db.database.storage_root(address, hashed_storage).map_err(Eth::Error::from_eth_err)?
+        };
 
         Ok(Some(Account { balance, nonce, code_hash, storage_root }))
     }
@@ -727,18 +714,23 @@ where
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
                 let mut roots = Vec::with_capacity(block.body().transactions().len());
+                let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env);
                 for tx in block.transactions_recovered() {
                     let tx_env = eth_api.evm_config().tx_env(tx);
-                    {
-                        let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env.clone());
-                        evm.transact_commit(tx_env).map_err(Eth::Error::from_evm_err)?;
-                    }
+                    evm.transact_commit(tx_env).map_err(Eth::Error::from_evm_err)?;
+
+                    let state = evm.db_mut();
                     // Merge transitions into cumulative bundle_state
-                    db.merge_transitions(BundleRetention::PlainState);
+                    state.merge_transitions(BundleRetention::PlainState);
                     // Compute state root from the accumulated state changes
-                    let hashed_state = db.database.hashed_post_state(&db.bundle_state);
-                    let root =
-                        db.database.state_root(hashed_state).map_err(Eth::Error::from_eth_err)?;
+                    let hashed_state = state
+                        .database
+                        .hashed_post_state(&state.bundle_state)
+                        .map_err(Eth::Error::from_eth_err)?;
+                    let root = state
+                        .database
+                        .state_root(hashed_state)
+                        .map_err(Eth::Error::from_eth_err)?;
                     roots.push(root);
                 }
 
@@ -953,7 +945,7 @@ where
     /// Handler for `debug_executionWitness`
     async fn debug_execution_witness(
         &self,
-        block: BlockNumberOrTag,
+        block: BlockId,
         mode: Option<ExecutionWitnessMode>,
     ) -> RpcResult<ExecutionWitness> {
         let _permit = self.acquire_trace_permit().await;
@@ -1272,5 +1264,61 @@ impl<B: BlockTrait> BadBlockStore<B> {
 impl<B: BlockTrait> Default for BadBlockStore<B> {
     fn default() -> Self {
         Self::new(64)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{keccak256, U256};
+    use reth_db_api::{tables, transaction::DbTxMut};
+    use reth_primitives_traits::StorageEntry;
+    use reth_provider::test_utils::create_test_provider_factory;
+    use revm::{
+        database::{states::StorageSlot, AccountStatus, BundleAccount, BundleState},
+        state::AccountInfo as RevmAccountInfo,
+    };
+
+    #[test]
+    fn hashed_post_state_zeroes_destroyed_account_parent_storage() {
+        let factory = create_test_provider_factory();
+        let address = Address::with_last_byte(1);
+        let old_slot = U256::from(1);
+        let new_slot = U256::from(2);
+        let old_value = U256::from(10);
+        let new_value = U256::from(20);
+        let hashed_address = keccak256(address);
+        let hashed_old_slot = keccak256(B256::from(old_slot));
+        let hashed_new_slot = keccak256(B256::from(new_slot));
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::HashedStorages>(
+                hashed_address,
+                StorageEntry { key: hashed_old_slot, value: old_value },
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        let mut bundle_state = BundleState::default();
+        bundle_state.state.insert(
+            address,
+            BundleAccount::new(
+                Some(RevmAccountInfo::default()),
+                Some(RevmAccountInfo::default()),
+                std::iter::once((new_slot, StorageSlot::new_changed(U256::ZERO, new_value)))
+                    .collect(),
+                AccountStatus::DestroyedChanged,
+            ),
+        );
+
+        let provider = factory.latest().unwrap();
+        let hashed_state = provider.hashed_post_state(&bundle_state).unwrap();
+        let storage = &hashed_state.storages[&hashed_address];
+
+        assert!(!storage.wiped);
+        assert_eq!(storage.storage[&hashed_old_slot], U256::ZERO);
+        assert_eq!(storage.storage[&hashed_new_slot], new_value);
     }
 }
