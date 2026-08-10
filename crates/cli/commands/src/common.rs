@@ -199,7 +199,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             .db
             .balstore_cache_size
             .map(|distance| {
-                RocksDBBalStore::with_retention_distance(rocksdb_provider.clone(), distance)
+                RocksDBBalStore::with_buffer_retention_distance(rocksdb_provider.clone(), distance)
             })
             .unwrap_or_else(|| RocksDBBalStore::new(rocksdb_provider.clone()));
         let bal_store = BalStoreHandle::new(bal_store);

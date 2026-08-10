@@ -210,10 +210,10 @@ where
             }
         }
 
+        // A canonical database commit must never become durable without its corresponding BALs.
+        // Extra RocksDB entries are harmless fork data if the database commit subsequently fails.
+        self.provider.bal_store().flush(&canonical_blocks)?;
         provider_rw.commit()?;
-        let _ = self.provider.bal_store().flush(&canonical_blocks).inspect_err(|err| {
-            warn!(target: "engine::persistence", last=?last_block, ?err, "Failed to flush BAL store");
-        });
         debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
 
         let elapsed = start_time.elapsed();
@@ -544,6 +544,31 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    struct FailingFlushBalStore;
+
+    impl BalStore for FailingFlushBalStore {
+        fn insert(&self, _num_hash: NumHash, _bal: RawBal) -> ProviderResult<()> {
+            Ok(())
+        }
+
+        fn flush(&self, _blocks: &[NumHash]) -> ProviderResult<()> {
+            Err(ProviderError::other(std::io::Error::other("BAL store flush failed")))
+        }
+
+        fn prune(&self, _tip: BlockNumber) -> ProviderResult<usize> {
+            Ok(0)
+        }
+
+        fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
+            Ok(vec![None; block_hashes.len()])
+        }
+
+        fn bal_stream(&self) -> BalNotificationStream {
+            BalStoreHandle::noop().bal_stream()
+        }
+    }
+
     #[test]
     fn test_save_blocks_single_block() {
         reth_tracing::init_test_tracing();
@@ -571,6 +596,8 @@ mod tests {
 
         reth_tracing::init_test_tracing();
         let provider = create_test_provider_factory();
+        let bal_store = BalStoreHandle::new(RocksDBBalStore::new(provider.rocksdb_provider()));
+        let provider = provider.with_bal_store(bal_store);
         init_genesis(&provider).unwrap();
 
         let mut test_block_builder = TestBlockBuilder::eth();
@@ -598,6 +625,28 @@ mod tests {
         assert_eq!(result.last_block, num_hash);
         let persisted_store = RocksDBBalStore::new(provider.rocksdb_provider());
         assert_eq!(persisted_store.get_by_hash(num_hash.hash).unwrap(), Some(raw_bal));
+    }
+
+    #[test]
+    fn test_save_blocks_does_not_commit_when_bal_flush_fails() {
+        reth_tracing::init_test_tracing();
+        let provider = create_test_provider_factory()
+            .with_bal_store(BalStoreHandle::new(FailingFlushBalStore));
+        init_genesis(&provider).unwrap();
+
+        let mut test_block_builder = TestBlockBuilder::eth();
+        let executed = test_block_builder.get_executed_block_with_number(1, B256::random());
+        let (_finished_exex_height_tx, finished_exex_height_rx) =
+            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+        let pruner =
+            Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
+        let (_db_service_tx, db_service_rx) = std::sync::mpsc::channel();
+        let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
+        let mut service =
+            PersistenceService::new(provider.clone(), db_service_rx, pruner, sync_metrics_tx);
+
+        assert!(service.on_save_blocks(full_save_input(vec![executed])).is_err());
+        assert_eq!(provider.block_hash(1).unwrap(), None);
     }
 
     #[test]
