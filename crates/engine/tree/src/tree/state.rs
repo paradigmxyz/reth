@@ -554,7 +554,7 @@ mod tests {
         let mut tree_state = TreeState::new(
             BlockNumHash::default(),
             EngineApiKind::Ethereum,
-            StateTrieOverlayManager::default(),
+            OverlayManager::default(),
         );
         let mut test_block_builder = TestBlockBuilder::eth();
         let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..5).collect();
@@ -593,7 +593,7 @@ mod tests {
         let mut tree_state = TreeState::new(
             BlockNumHash::default(),
             EngineApiKind::Ethereum,
-            StateTrieOverlayManager::default(),
+            OverlayManager::default(),
         );
         let mut test_block_builder = TestBlockBuilder::eth();
         let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..3).collect();
