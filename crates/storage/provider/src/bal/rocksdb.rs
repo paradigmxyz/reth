@@ -98,7 +98,7 @@ impl RocksDBBalStore {
         };
         let stored = StoredBlockAccessList::decompress(&value)
             .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
-        stored.into_verified_raw().map(Some).map_err(ProviderError::other)
+        Ok(Some(stored.into_raw()))
     }
 
     fn read_one_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<Bytes>> {
@@ -299,7 +299,7 @@ impl BalStore for RocksDBBalStore {
         if !pending.is_empty() {
             let mut batch = self.rocksdb.batch();
             for (key, bal) in &pending {
-                let value = StoredBlockAccessList::new(bal.as_raw().clone());
+                let value = StoredBlockAccessList::new_unchecked(bal.hash(), bal.as_raw().clone());
                 batch.put::<tables::BlockAccessLists>(*key, &value)?;
                 batch.put::<tables::BlockAccessListBlockNumbers>(key.hash(), &key.number())?;
             }
@@ -367,9 +367,7 @@ mod tests {
                 block.hash,
             ))
             .unwrap()
-            .map(|value| {
-                StoredBlockAccessList::decompress(&value).unwrap().into_verified_raw().unwrap()
-            })
+            .map(|value| StoredBlockAccessList::decompress(&value).unwrap().into_raw())
     }
 
     fn read_many(store: &RocksDBBalStore, blocks: &[NumHash]) -> Vec<Option<Bytes>> {
@@ -566,7 +564,7 @@ mod tests {
     }
 
     #[test]
-    fn corrupt_payload_hash_is_not_served() {
+    fn stored_payload_hash_is_not_reverified() {
         let (_dir, store) = test_store();
         let block = NumHash::new(1, B256::with_last_byte(1));
         let key = StoredBlockAccessListKey::new(block.number, block.hash);
@@ -581,7 +579,7 @@ mod tests {
             .put::<tables::BlockAccessListBlockNumbers>(block.hash, &block.number)
             .unwrap();
 
-        assert!(store.get_by_hash(block.hash).is_err());
+        assert_eq!(store.get_by_hash(block.hash).unwrap(), Some(Bytes::from_static(&[0xc0])));
     }
 
     #[test]

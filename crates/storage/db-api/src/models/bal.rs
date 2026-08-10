@@ -87,11 +87,9 @@ impl Decode for StoredBlockAccessListKey {
 }
 
 /// Stored block access list value.
-///
-/// The hash prefix lets reads detect corrupted payload bytes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct StoredBlockAccessList {
-    /// Expected keccak hash of the raw BAL bytes.
+    /// Stored keccak hash of the raw BAL bytes.
     hash: B256,
     /// Raw BAL RLP bytes.
     raw: Bytes,
@@ -101,27 +99,19 @@ impl StoredBlockAccessList {
     /// Creates a stored BAL from raw bytes.
     pub fn new(raw: Bytes) -> Self {
         let hash = keccak256(&raw);
+        Self::new_unchecked(hash, raw)
+    }
+
+    /// Creates a stored BAL from its hash and raw bytes without verifying that they match.
+    pub const fn new_unchecked(hash: B256, raw: Bytes) -> Self {
         Self { hash, raw }
     }
 
-    fn has_valid_hash(&self) -> bool {
-        keccak256(&self.raw) == self.hash
-    }
-
-    /// Returns the raw BAL after verifying its hash prefix.
-    pub fn into_verified_raw(self) -> Result<Bytes, StoredBlockAccessListHashError> {
-        if self.has_valid_hash() {
-            Ok(self.raw)
-        } else {
-            Err(StoredBlockAccessListHashError)
-        }
+    /// Consumes the stored BAL and returns its raw bytes.
+    pub fn into_raw(self) -> Bytes {
+        self.raw
     }
 }
-
-/// Error returned when stored BAL bytes do not match their stored hash.
-#[derive(Debug, derive_more::Display, derive_more::Error)]
-#[display("stored block access list hash mismatch")]
-pub struct StoredBlockAccessListHashError;
 
 impl Compress for StoredBlockAccessList {
     type Compressed = Vec<u8>;
@@ -148,7 +138,7 @@ impl Decompress for StoredBlockAccessList {
         let hash = B256::from_slice(&value[..STORED_BLOCK_ACCESS_LIST_HASH_BYTES]);
         let raw = Bytes::copy_from_slice(&value[STORED_BLOCK_ACCESS_LIST_HASH_BYTES..]);
 
-        Ok(Self { hash, raw })
+        Ok(Self::new_unchecked(hash, raw))
     }
 }
 
@@ -181,23 +171,24 @@ mod tests {
     }
 
     #[test]
-    fn stored_bal_roundtrip_and_hash_check() {
+    fn stored_bal_roundtrip() {
         let raw = Bytes::from_static(&[0xc0]);
         let stored = StoredBlockAccessList::new(raw.clone());
         let encoded = stored.clone().compress();
         let decoded = StoredBlockAccessList::decompress(&encoded).unwrap();
 
         assert_eq!(decoded, stored);
-        assert_eq!(decoded.into_verified_raw().unwrap(), raw);
+        assert_eq!(decoded.into_raw(), raw);
     }
 
     #[test]
-    fn stored_bal_rejects_hash_mismatch() {
-        let mut encoded = Vec::new();
-        encoded.extend_from_slice(B256::ZERO.as_slice());
-        encoded.extend_from_slice(&[0xc0]);
-        let stored = StoredBlockAccessList::decompress(&encoded).unwrap();
+    fn stored_bal_unchecked_preserves_hash_and_raw_bytes() {
+        let hash = B256::with_last_byte(1);
+        let raw = Bytes::from_static(&[0xc0]);
+        let stored = StoredBlockAccessList::new_unchecked(hash, raw.clone());
+        let encoded = stored.compress();
 
-        assert!(stored.into_verified_raw().is_err());
+        assert_eq!(&encoded[..STORED_BLOCK_ACCESS_LIST_HASH_BYTES], hash.as_slice());
+        assert_eq!(&encoded[STORED_BLOCK_ACCESS_LIST_HASH_BYTES..], raw.as_ref());
     }
 }

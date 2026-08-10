@@ -613,7 +613,7 @@ mod tests {
             .unwrap()
             .unwrap();
         let stored = StoredBlockAccessList::decompress(&stored).unwrap();
-        assert_eq!(stored.into_verified_raw().unwrap(), raw_bal);
+        assert_eq!(stored.into_raw(), raw_bal);
         let persisted_store = RocksDBBalStore::new(provider.rocksdb_provider());
         assert_eq!(persisted_store.get_by_hash(num_hash.hash).unwrap(), Some(raw_bal));
     }
