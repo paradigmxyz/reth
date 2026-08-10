@@ -41,7 +41,6 @@ use reth_stages_api::ControlFlow;
 use reth_storage_overlay::OverlayManager;
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie::ComputedTrieData;
-use reth_trie_db::ChangesetCache;
 use revm::{interpreter::debug_unreachable, primitives::hardfork::SpecId};
 use state::TreeState;
 use std::{
