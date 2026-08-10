@@ -939,6 +939,21 @@ impl Decodable for NewPooledTransactionHashes72 {
 
         ensure_pooled_transaction_hashes_lengths(hashes.len(), types.len(), sizes.len())?;
 
+        let has_type3_tx = types.contains(&3);
+        match (has_type3_tx, cell_mask) {
+            (true, None) => {
+                return Err(alloy_rlp::Error::Custom(
+                    "cell_mask is required when type 3 transactions are present",
+                ))
+            }
+            (false, Some(_)) => {
+                return Err(alloy_rlp::Error::Custom(
+                    "cell_mask must be None when no type 3 transactions are present",
+                ))
+            }
+            _ => {}
+        }
+
         *buf = rest;
 
         Ok(Self { types, sizes, hashes, cell_mask })
@@ -1657,30 +1672,35 @@ mod tests {
 
     #[test]
     fn eth_72_tx_hash_roundtrip() {
-        let vectors = vec![
-            (
-                NewPooledTransactionHashes72 {
-                    types: vec![],
-                    sizes: vec![],
-                    hashes: vec![],
-                    cell_mask: None,
-                },
-                &hex!("c480c0c080")[..],
-            ),
-            (
-                NewPooledTransactionHashes72 {
-                    types: vec![],
-                    sizes: vec![],
-                    hashes: vec![],
-                    cell_mask: Some(B128::repeat_byte(0x11)),
-                },
-                &hex!("d480c0c09011111111111111111111111111111111")[..],
-            ),
-        ];
+        let vectors = vec![(
+            NewPooledTransactionHashes72 {
+                types: vec![],
+                sizes: vec![],
+                hashes: vec![],
+                cell_mask: None,
+            },
+            &hex!("c480c0c080")[..],
+        )];
 
         for vector in vectors {
             test_encoding_vector(vector);
         }
+    }
+
+    #[test]
+    fn eth_72_type_3_cell_mask_roundtrip() {
+        let expected = NewPooledTransactionHashes72 {
+            types: vec![3],
+            sizes: vec![128],
+            hashes: vec![B256::from([1u8; 32])],
+            cell_mask: Some(B128::repeat_byte(0x11)),
+        };
+
+        let mut encoded = Vec::new();
+        expected.encode(&mut encoded);
+        let decoded = NewPooledTransactionHashes72::decode(&mut encoded.as_slice()).unwrap();
+
+        assert_eq!(decoded, expected);
     }
 
     #[test]
@@ -1690,6 +1710,38 @@ mod tests {
         let result = NewPooledTransactionHashes72::decode(&mut encoded_eth68_payload.as_ref());
 
         assert!(matches!(result, Err(alloy_rlp::Error::InputTooShort)));
+    }
+
+    #[test]
+    fn eth_72_rejects_type_3_transaction_without_cell_mask() {
+        let announcement = NewPooledTransactionHashes72 {
+            types: vec![3],
+            sizes: vec![128],
+            hashes: vec![B256::from([1u8; 32])],
+            cell_mask: None,
+        };
+
+        let mut encoded = Vec::new();
+        announcement.encode(&mut encoded);
+        let result = NewPooledTransactionHashes72::decode(&mut encoded.as_slice());
+
+        assert!(matches!(result, Err(alloy_rlp::Error::Custom(_))));
+    }
+
+    #[test]
+    fn eth_72_rejects_cell_mask_without_type_3_transaction() {
+        let announcement = NewPooledTransactionHashes72 {
+            types: vec![0],
+            sizes: vec![128],
+            hashes: vec![B256::from([1u8; 32])],
+            cell_mask: Some(B128::repeat_byte(0x11)),
+        };
+
+        let mut encoded = Vec::new();
+        announcement.encode(&mut encoded);
+        let result = NewPooledTransactionHashes72::decode(&mut encoded.as_slice());
+
+        assert!(matches!(result, Err(alloy_rlp::Error::Custom(_))));
     }
 
     #[test]
