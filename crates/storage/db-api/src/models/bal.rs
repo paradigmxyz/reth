@@ -89,7 +89,11 @@ impl Decode for StoredBlockAccessListKey {
 /// Stored block access list value.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct StoredBlockAccessList {
-    /// Stored keccak hash of the raw BAL bytes.
+    /// Keccak hash carried by the source BAL at insertion time.
+    ///
+    /// Persisting the already-computed hash preserves the complete raw BAL representation without
+    /// hashing the payload again. It is intentionally not verified when decoding trusted database
+    /// contents.
     hash: B256,
     /// Raw BAL RLP bytes.
     raw: Bytes,
@@ -105,6 +109,11 @@ impl StoredBlockAccessList {
     /// Creates a stored BAL from its hash and raw bytes without verifying that they match.
     pub const fn new_unchecked(hash: B256, raw: Bytes) -> Self {
         Self { hash, raw }
+    }
+
+    /// Returns the stored hash without verifying it against the raw bytes.
+    pub const fn hash(&self) -> B256 {
+        self.hash
     }
 
     /// Consumes the stored BAL and returns its raw bytes.
@@ -178,6 +187,7 @@ mod tests {
         let decoded = StoredBlockAccessList::decompress(&encoded).unwrap();
 
         assert_eq!(decoded, stored);
+        assert_eq!(decoded.hash(), keccak256(&raw));
         assert_eq!(decoded.into_raw(), raw);
     }
 

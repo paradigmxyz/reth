@@ -114,7 +114,7 @@ impl<ChainSpec, N> Clone for NoopProvider<ChainSpec, N> {
     }
 }
 
-impl<ChainSpec: Send + Sync, N: Send + Sync> BalProvider for NoopProvider<ChainSpec, N> {
+impl<ChainSpec, N> BalProvider for NoopProvider<ChainSpec, N> {
     fn bal_store(&self) -> &BalStoreHandle {
         &self.bal_store
     }
