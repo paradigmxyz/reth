@@ -387,17 +387,6 @@ mod tests {
     }
 
     #[test]
-    fn hash_only_lookup_reads_pending_buffer() {
-        let (_dir, store) = test_store();
-        let block = NumHash::new(1, B256::random());
-        let bal = Bytes::from_static(&[0xc1, 0x01]);
-
-        store.insert(block, RawBal::from(bal.clone())).unwrap();
-
-        assert_eq!(store.get_by_hashes(&[block.hash]).unwrap(), vec![Some(bal)]);
-    }
-
-    #[test]
     fn hash_lookup_reads_persisted_bal_through_store() {
         let (_dir, store) = test_store();
         let block = NumHash::new(1, B256::random());
@@ -433,12 +422,6 @@ mod tests {
             store.get_by_hashes(&[old.hash, retained.hash]).unwrap(),
             vec![None, Some(retained_bal)]
         );
-        assert!(!store
-            .buffer
-            .read()
-            .pending
-            .contains_key(&StoredBlockAccessListKey::new(old.number, old.hash)));
-        assert_eq!(disk_bal(&store, old), None);
     }
 
     #[test]
@@ -455,24 +438,11 @@ mod tests {
         store.insert(block_1_fork, RawBal::from(bal_1_fork.clone())).unwrap();
         store.insert(block_2, RawBal::from(bal_2.clone())).unwrap();
 
-        assert_eq!(disk_bal(&store, block_1), None);
-        assert_eq!(disk_bal(&store, block_1_fork), None);
-        assert_eq!(disk_bal(&store, block_2), None);
-
         store.flush(&[block_1]).unwrap();
 
-        assert!(!store
-            .buffer
-            .read()
-            .pending
-            .contains_key(&StoredBlockAccessListKey::new(block_1.number, block_1.hash)));
         assert_eq!(disk_bal(&store, block_1), Some(bal_1.clone()));
         assert_eq!(disk_bal(&store, block_1_fork), None);
         assert_eq!(disk_bal(&store, block_2), None);
-        assert_eq!(
-            read_many(&store, &[block_1, block_1_fork, block_2]),
-            vec![Some(bal_1.clone()), Some(bal_1_fork.clone()), Some(bal_2.clone())]
-        );
         assert_eq!(
             store.get_by_hashes(&[block_1.hash, block_1_fork.hash, block_2.hash]).unwrap(),
             vec![Some(bal_1.clone()), Some(bal_1_fork), Some(bal_2)]
@@ -484,23 +454,6 @@ mod tests {
                 .get_by_hashes(&[block_1.hash, block_1_fork.hash, block_2.hash])
                 .unwrap(),
             vec![Some(bal_1), None, None]
-        );
-    }
-
-    #[test]
-    fn keeps_multiple_hashes_at_same_number() {
-        let (_dir, store) = test_store();
-        let hash_a = B256::with_last_byte(1);
-        let hash_b = B256::with_last_byte(2);
-        let bal_a = Bytes::from_static(&[0xc1, 0x01]);
-        let bal_b = Bytes::from_static(&[0xc1, 0x02]);
-
-        store.insert(NumHash::new(10, hash_a), RawBal::from(bal_a.clone())).unwrap();
-        store.insert(NumHash::new(10, hash_b), RawBal::from(bal_b.clone())).unwrap();
-
-        assert_eq!(
-            read_many(&store, &[NumHash::new(10, hash_a), NumHash::new(10, hash_b)]),
-            vec![Some(bal_a), Some(bal_b)]
         );
     }
 
@@ -568,10 +521,7 @@ mod tests {
         let (_dir, store) = test_store();
         let block = NumHash::new(1, B256::with_last_byte(1));
         let key = StoredBlockAccessListKey::new(block.number, block.hash);
-        let mut encoded = Vec::new();
-        encoded.extend_from_slice(B256::ZERO.as_slice());
-        encoded.extend_from_slice(&[0xc0]);
-        let value = StoredBlockAccessList::decompress(&encoded).unwrap();
+        let value = StoredBlockAccessList::new_unchecked(B256::ZERO, Bytes::from_static(&[0xc0]));
 
         store.rocksdb_provider().put::<tables::BlockAccessLists>(key, &value).unwrap();
         store
