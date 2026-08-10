@@ -604,7 +604,7 @@ impl<N: NodeTypesWithDB> NodePrimitivesProvider for ProviderFactory<N> {
     type Primitives = N::Primitives;
 }
 
-impl<N: NodeTypesWithDB> BalProvider for ProviderFactory<N> {
+impl<N: ProviderNodeTypes> BalProvider for ProviderFactory<N> {
     fn bal_store(&self) -> &BalStoreHandle {
         &self.bal_store
     }

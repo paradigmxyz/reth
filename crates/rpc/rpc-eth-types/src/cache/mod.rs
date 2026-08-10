@@ -626,8 +626,7 @@ where
                                 this.action_task_spawner.spawn_blocking_task(async move {
                                     let _permit = rate_limiter.acquire().await;
                                     let res = provider
-                                        .bal_store()
-                                        .revm_bal_by_hash(block_hash)
+                                        .get_revm_bal_by_hash(block_hash)
                                         .map(|maybe_bal| maybe_bal.map(CachedRevmBal::new));
                                     action_sender.send_bal(res);
                                 });

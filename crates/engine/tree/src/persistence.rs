@@ -584,7 +584,7 @@ mod tests {
         let raw_bal = Bytes::from_static(&[0xc0]);
 
         provider.bal_store().insert(num_hash, RawBal::new(raw_bal.clone())).unwrap();
-        assert_eq!(provider.bal_store().get_by_hash(num_hash.hash).unwrap(), Some(raw_bal.clone()));
+        assert_eq!(provider.get_bal_by_hash(num_hash.hash).unwrap(), Some(raw_bal.clone()));
 
         let (_finished_exex_height_tx, finished_exex_height_rx) =
             tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
@@ -603,7 +603,7 @@ mod tests {
         let result = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("test timed out");
         assert_eq!(result.last_block, num_hash);
         assert_eq!(result.last_state_trie_block, num_hash);
-        assert_eq!(provider.bal_store().get_by_hash(num_hash.hash).unwrap(), Some(raw_bal.clone()));
+        assert_eq!(provider.get_bal_by_hash(num_hash.hash).unwrap(), Some(raw_bal.clone()));
         let stored = provider
             .rocksdb_provider()
             .get_raw::<tables::BlockAccessLists>(StoredBlockAccessListKey::new(

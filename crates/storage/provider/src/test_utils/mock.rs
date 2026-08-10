@@ -369,7 +369,9 @@ impl Default for MockEthProvider {
     }
 }
 
-impl<T: NodePrimitives, ChainSpec> BalProvider for MockEthProvider<T, ChainSpec> {
+impl<T: NodePrimitives, ChainSpec: Send + Sync + 'static> BalProvider
+    for MockEthProvider<T, ChainSpec>
+{
     fn bal_store(&self) -> &BalStoreHandle {
         &self.bal_store
     }

@@ -1,3 +1,4 @@
+use crate::BlockNumReader;
 use alloc::{sync::Arc, vec::Vec};
 use alloy_eip7928::bal::DecodedBal;
 pub use alloy_eip7928::bal::RawBal;
@@ -279,9 +280,37 @@ impl core::fmt::Debug for BalStoreHandle {
 
 /// Provider-side access to BAL storage.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait BalProvider {
+pub trait BalProvider: BlockNumReader {
     /// Returns the configured BAL store handle.
     fn bal_store(&self) -> &BalStoreHandle;
+
+    /// Fetches the BAL for the given block hash.
+    fn get_bal_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<Bytes>> {
+        self.bal_store().get_by_hash(block_hash)
+    }
+
+    /// Fetches BALs for the given block hashes.
+    fn get_bals_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
+        self.bal_store().get_by_hashes(block_hashes)
+    }
+
+    /// Fetches BAL response entries for the given block hashes, stopping after the soft limit is
+    /// exceeded.
+    fn get_bals_by_hashes_with_limit(
+        &self,
+        block_hashes: &[BlockHash],
+        limit: GetBlockAccessListLimit,
+    ) -> ProviderResult<Vec<Option<Bytes>>> {
+        self.bal_store().get_by_hashes_with_limit(block_hashes, limit)
+    }
+
+    /// Fetches the BAL for the given block hash in revm representation.
+    fn get_revm_bal_by_hash(
+        &self,
+        block_hash: BlockHash,
+    ) -> ProviderResult<Option<DecodedBal<Arc<RevmBal>>>> {
+        self.bal_store().revm_bal_by_hash(block_hash)
+    }
 }
 
 /// No-op BAL store used as the default wiring target until a concrete implementation is injected.
@@ -348,6 +377,25 @@ mod tests {
         assert_eq!(by_hash, vec![None, None]);
         assert!(store.get_by_hash(B256::random()).unwrap().is_none());
         assert_eq!(store.prune(10).unwrap(), 0);
+    }
+
+    #[test]
+    fn noop_provider_returns_empty_results() {
+        let provider = crate::noop::NoopProvider::default();
+        let hashes = [B256::random(), B256::random()];
+
+        assert_eq!(provider.get_bals_by_hashes(&hashes).unwrap(), vec![None, None]);
+        assert_eq!(
+            provider
+                .get_bals_by_hashes_with_limit(
+                    &hashes,
+                    GetBlockAccessListLimit::ResponseSizeSoftLimit(0),
+                )
+                .unwrap(),
+            vec![None]
+        );
+        assert!(provider.get_bal_by_hash(B256::random()).unwrap().is_none());
+        assert!(provider.get_revm_bal_by_hash(B256::random()).unwrap().is_none());
     }
 
     #[test]
