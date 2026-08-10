@@ -1702,7 +1702,7 @@ async fn test_fcu_with_canonical_ancestor_below_finalized_is_rejected() {
             .await
             .unwrap_err();
 
-        assert_matches!(err, ForkchoiceUpdateError::TooDeepReorg);
+        assert_matches!(err, ForkchoiceUpdateError::InvalidState);
     }
 
     // no payload build is started and the canonical head remains untouched
