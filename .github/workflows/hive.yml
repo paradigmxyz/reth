@@ -213,14 +213,14 @@ jobs:
             limit: .*tests/homestead.*
           - sim: ethereum/eels/consume-rlp
             limit: .*tests/frontier.*
-           - sim: ethereum/eels/consume-rlp
-             limit: .*tests/paris.*
+          - sim: ethereum/eels/consume-rlp
+            limit: .*tests/paris.*
 
           # execute-blobs
           - sim: ethereum/eels/execute-blobs
             limit: .*tests/amsterdam.*
-           - sim: ethereum/eels/execute-blobs
-             limit: .*tests/osaka.*
+          - sim: ethereum/eels/execute-blobs
+            limit: .*tests/osaka.*
     needs:
       - build-reth
       - prepare-hive
