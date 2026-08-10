@@ -11,6 +11,8 @@
 
 extern crate alloc;
 
+mod conversions;
+
 mod chain;
 pub use chain::*;
 

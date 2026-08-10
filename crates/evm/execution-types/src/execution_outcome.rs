@@ -13,6 +13,10 @@ use revm::{
     state::AccountInfo,
 };
 
+use crate::conversions::{
+    account_from_revm, account_into_revm, bytecode_from_revm, bytecode_into_revm,
+};
+
 /// Type used to initialize revms bundle state.
 pub type BundleStateInit = AddressMap<(Option<Account>, Option<Account>, B256Map<(U256, U256)>)>;
 
@@ -110,8 +114,8 @@ impl<T> ExecutionOutcome<T> {
             state_init.into_iter().map(|(address, (original, present, storage))| {
                 (
                     address,
-                    original.map(Into::into),
-                    present.map(Into::into),
+                    original.map(account_into_revm),
+                    present.map(account_into_revm),
                     storage.into_iter().map(|(k, s)| (k.into(), s)).collect(),
                 )
             }),
@@ -120,12 +124,14 @@ impl<T> ExecutionOutcome<T> {
                 reverts.into_iter().map(|(address, (original, storage))| {
                     (
                         address,
-                        original.map(|i| i.map(Into::into)),
+                        original.map(|i| i.map(account_into_revm)),
                         storage.into_iter().map(|entry| (entry.key.into(), entry.value)),
                     )
                 })
             }),
-            contracts_init.into_iter().map(|(code_hash, bytecode)| (code_hash, bytecode.0)),
+            contracts_init
+                .into_iter()
+                .map(|(code_hash, bytecode)| (code_hash, bytecode_into_revm(bytecode))),
         );
 
         Self { bundle, receipts, first_block, requests }
@@ -187,7 +193,7 @@ impl<T> ExecutionOutcome<T> {
 
     /// Get account if account is known.
     pub fn account(&self, address: &Address) -> Option<Option<Account>> {
-        self.bundle.account(address).map(|a| a.info.as_ref().map(Into::into))
+        self.bundle.account(address).map(|a| a.info.as_ref().map(account_from_revm))
     }
 
     /// Returns the state [`BundleAccount`] for the given account.
@@ -204,7 +210,7 @@ impl<T> ExecutionOutcome<T> {
 
     /// Return bytecode if known.
     pub fn bytecode(&self, code_hash: &B256) -> Option<Bytecode> {
-        self.bundle.bytecode(code_hash).map(Bytecode)
+        self.bundle.bytecode(code_hash).map(bytecode_from_revm)
     }
 
     /// Returns [`HashedPostState`] for this execution outcome.
