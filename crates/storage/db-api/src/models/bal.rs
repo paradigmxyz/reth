@@ -89,11 +89,7 @@ impl Decode for StoredBlockAccessListKey {
 /// Stored block access list value.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct StoredBlockAccessList {
-    /// Keccak hash carried by the source BAL at insertion time.
-    ///
-    /// Persisting the already-computed hash preserves the complete raw BAL representation without
-    /// hashing the payload again. It is intentionally not verified when decoding trusted database
-    /// contents.
+    /// Keccak hash carried by the source BAL, trusted without verification on decode.
     hash: B256,
     /// Raw BAL RLP bytes.
     raw: Bytes,
