@@ -148,6 +148,8 @@ impl SessionError for EthStreamError {
                                     DisconnectReason::ProtocolBreach
                             )
                     ) | P2PStreamError::UnknownReservedMessageId(_) |
+                        P2PStreamError::UnknownSubprotocolMessageId(_) |
+                        P2PStreamError::SubprotocolMessageTooBig { .. } |
                         P2PStreamError::EmptyProtocolMessage |
                         P2PStreamError::ParseSharedCapability(_) |
                         P2PStreamError::CapabilityNotShared |
@@ -220,12 +222,17 @@ impl SessionError for EthStreamError {
             Self::P2PStreamError(
                 P2PStreamError::Rlp(_) |
                 P2PStreamError::UnknownReservedMessageId(_) |
+                P2PStreamError::UnknownSubprotocolMessageId(_) |
                 P2PStreamError::UnknownDisconnectReason(_) |
                 P2PStreamError::MessageTooBig { .. } |
+                P2PStreamError::SubprotocolMessageTooBig { .. } |
                 P2PStreamError::EmptyProtocolMessage |
                 P2PStreamError::PingerError(_) |
                 P2PStreamError::Snap(_),
             ) => Some(BackoffKind::Medium),
+            Self::P2PStreamError(P2PStreamError::SubprotocolInboundBufferFull { .. }) => {
+                Some(BackoffKind::Low)
+            }
             Self::EthHandshakeError(EthHandshakeError::InvalidFork(_)) => {
                 // the remote can come back online after updating client version, so we can back off
                 // for a bit
@@ -342,6 +349,24 @@ mod tests {
             P2PHandshakeError::NoResponse,
         ));
         assert_eq!(err.should_backoff(), Some(BackoffKind::Low));
+    }
+
+    #[test]
+    fn subprotocol_ingress_errors_have_distinct_reputation_outcomes() {
+        let capability = reth_eth_wire::Capability::new_static("test", 1);
+        let oversized = EthStreamError::P2PStreamError(P2PStreamError::SubprotocolMessageTooBig {
+            capability: capability.clone(),
+            message_size: 5,
+            max_size: 4,
+        });
+        assert!(oversized.is_fatal_protocol_error());
+        assert_eq!(oversized.should_backoff(), Some(BackoffKind::Medium));
+
+        let full = EthStreamError::P2PStreamError(P2PStreamError::SubprotocolInboundBufferFull {
+            capability,
+        });
+        assert!(!full.is_fatal_protocol_error());
+        assert_eq!(full.should_backoff(), Some(BackoffKind::Low));
     }
 
     #[test]
