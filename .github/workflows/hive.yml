@@ -18,14 +18,14 @@ concurrency:
 permissions: {}
 
 jobs:
-  build-reth:
+  build-reth-oss:
     permissions:
       contents: read
       id-token: write
     uses: ./.github/workflows/docker-test.yml
     with:
       hive_target: hive
-      artifact_name: "reth"
+      artifact_name: "reth-oss"
     secrets: inherit
 
   prepare-hive:
@@ -110,7 +110,7 @@ jobs:
           #  limit: eth
           #  include:
           #    - MaliciousHandshake
-          #    # failures tracked in https://github.com/paradigmxyz/reth/issues/14825
+          #    # failures tracked in https://github.com/paradigmxyz/reth-oss/issues/14825
           #    - Status
           #    - GetBlockHeaders
           #    - ZeroRequestID
@@ -120,7 +120,7 @@ jobs:
           - sim: devp2p
             limit: discv5
             include:
-              # failures tracked at https://github.com/paradigmxyz/reth/issues/14825
+              # failures tracked at https://github.com/paradigmxyz/reth-oss/issues/14825
               - PingLargeRequestID
           - sim: ethereum/engine
             limit: engine-exchange-capabilities
@@ -205,7 +205,7 @@ jobs:
           # - sim: ethereum/eels/execute-blobs
           #   limit: .*tests/osaka.*
     needs:
-      - build-reth
+      - build-reth-oss
       - prepare-hive
     name: Hive-Amsterdam / ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
     # Use larger runners for eels tests to avoid OOM runner crashes
@@ -228,10 +228,10 @@ jobs:
           name: hive_assets_amsterdam
           path: /tmp
 
-      - name: Download reth image
+      - name: Download reth-oss image
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: reth
+          name: reth-oss
           path: /tmp
 
       - name: Load Docker images
@@ -280,7 +280,7 @@ jobs:
         run: |
           cat hivetests/workspace/logs/*simulator*.log
 
-      - name: Print reth client logs
+      - name: Print reth-oss client logs
         if: ${{ failure() }}
         run: .github/scripts/hive/print_client_logs.sh
 
@@ -303,7 +303,7 @@ jobs:
           #  limit: eth
           #  include:
           #    - MaliciousHandshake
-          #    # failures tracked in https://github.com/paradigmxyz/reth/issues/14825
+          #    # failures tracked in https://github.com/paradigmxyz/reth-oss/issues/14825
           #    - Status
           #    - GetBlockHeaders
           #    - ZeroRequestID
@@ -313,7 +313,7 @@ jobs:
           - sim: devp2p
             limit: discv5
             include:
-              # failures tracked at https://github.com/paradigmxyz/reth/issues/14825
+              # failures tracked at https://github.com/paradigmxyz/reth-oss/issues/14825
               - PingLargeRequestID
           - sim: ethereum/engine
             limit: engine-exchange-capabilities
@@ -581,7 +581,7 @@ jobs:
           - sim: ethereum/eels/execute-blobs
             limit: .*tests/bogota.*
     needs:
-      - build-reth
+      - build-reth-oss
       - prepare-hive
     name: Hive-Bogota / ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
     # Use larger runners for eels tests to avoid OOM runner crashes
@@ -604,10 +604,10 @@ jobs:
           name: hive_assets_bogota
           path: /tmp
 
-      - name: Download reth image
+      - name: Download reth-oss image
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: reth
+          name: reth-oss
           path: /tmp
 
       - name: Load Docker images
@@ -655,7 +655,7 @@ jobs:
         run: |
           cat hivetests/workspace/logs/*simulator*.log
 
-      - name: Print reth client logs
+      - name: Print reth-oss client logs
         if: ${{ failure() }}
         run: .github/scripts/hive/print_client_logs.sh
 
