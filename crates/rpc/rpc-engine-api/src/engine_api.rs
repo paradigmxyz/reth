@@ -397,9 +397,7 @@ where
         if let Some(custody_columns) = custody_columns {
             // Engine API bitvectors are little-endian, while B128 integer conversions are
             // big-endian. `cell_custody` uses the latter representation as a numeric cell mask.
-            self.inner
-                .cell_custody
-                .set(B128::from(u128::from_le_bytes(custody_columns.into())));
+            self.inner.cell_custody.set(B128::from(u128::from_le_bytes(custody_columns.into())));
         }
         self.validate_and_execute_forkchoice(EngineApiMessageVersion::V4, state, payload_attrs)
             .await
@@ -2016,9 +2014,7 @@ mod tests {
             B128::from(1u128 << 127)
         );
         assert_eq!(
-            B128::from(u128::from_le_bytes(
-                B128::from(((1u128 << 64) - 1).to_le_bytes()).into(),
-            )),
+            B128::from(u128::from_le_bytes(B128::from(((1u128 << 64) - 1).to_le_bytes()).into(),)),
             B128::from((1u128 << 64) - 1)
         );
     }
