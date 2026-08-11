@@ -821,7 +821,7 @@ where
         }
 
         let (tx, rx) = oneshot::channel();
-        let bal_store = self.inner.provider.bal_store().clone();
+        let inner = self.inner.clone();
 
         self.inner.task_spawner.spawn_blocking_task(async move {
             if tx.is_closed() {
@@ -829,8 +829,9 @@ where
             }
 
             tx.send(
-                bal_store
-                    .get_by_hashes(&hashes)
+                inner
+                    .provider
+                    .get_bals_by_hashes(&hashes)
                     .map_err(|err| EngineApiError::Internal(Box::new(err))),
             )
             .ok();
