@@ -168,11 +168,6 @@ use tracing::{debug, debug_span, error, info, instrument, trace, warn, Level, Sp
 
 pub use crate::tree::types::ValidationOutcome;
 
-/// Multiplier over the parent's gas limit beyond which a block's claimed gas usage cannot be
-/// legitimate. Gas limit can change by at most 1/1024 per block, so anything over this is rejected
-/// without entering execution.
-const MAX_EXPECTED_GAS_USAGE_MULTIPLIER: u64 = 2;
-
 /// Worker name for deferred trie data preparation.
 const DEFERRED_TRIE_WORKER_NAME: &str = "deferred-trie";
 
@@ -530,9 +525,13 @@ where
             };
         }
 
-        // If the gas usage is suspiciously high (multiple times higher than parent's gas limit), be
+        // If the gas limit is higher than the parent's or the gas usage exceeds the gas limit, be
         // cautious and block on pre-execution checks of the block.
-        if input.gas_used() > parent_block.gas_limit() * MAX_EXPECTED_GAS_USAGE_MULTIPLIER {
+        if should_await_pre_execution_validation(
+            input.gas_limit(),
+            input.gas_used(),
+            parent_block.gas_limit(),
+        ) {
             // Call `.get()` to await the pre-execution checks and exit early if they fail.
             if validated_block.get().is_err() {
                 return Err(validated_block
@@ -2066,5 +2065,40 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
             Self::Payload(payload) => payload.gas_limit(),
             Self::Block(block) => block.gas_limit(),
         }
+    }
+}
+
+const fn should_await_pre_execution_validation(
+    gas_limit: u64,
+    gas_used: u64,
+    parent_gas_limit: u64,
+) -> bool {
+    gas_limit > parent_gas_limit || gas_used > gas_limit
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_await_pre_execution_validation;
+
+    #[test]
+    fn suspicious_gas_fields_require_pre_execution_validation() {
+        let parent_gas_limit = 30_000_000;
+
+        assert!(should_await_pre_execution_validation(parent_gas_limit + 1, 0, parent_gas_limit));
+        assert!(should_await_pre_execution_validation(
+            parent_gas_limit,
+            parent_gas_limit + 1,
+            parent_gas_limit
+        ));
+        assert!(!should_await_pre_execution_validation(
+            parent_gas_limit,
+            parent_gas_limit,
+            parent_gas_limit
+        ));
+        assert!(!should_await_pre_execution_validation(
+            parent_gas_limit - 1,
+            parent_gas_limit - 1,
+            parent_gas_limit
+        ));
     }
 }
