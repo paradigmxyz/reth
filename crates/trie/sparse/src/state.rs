@@ -508,6 +508,18 @@ where
     }
 }
 
+impl Clone for SparseStateTrie {
+    fn clone(&self) -> Self {
+        Self {
+            state: self.state.clone(),
+            storage: self.storage.clone(),
+            retain_updates: self.retain_updates,
+            deferred_drops: DeferredDrops::default(),
+            metrics: self.metrics.clone(),
+        }
+    }
+}
+
 /// The fields of [`SparseStateTrie`] related to storage tries. This is kept separate from the rest
 /// of [`SparseStateTrie`] to help enforce allocation re-use.
 #[derive(Debug, Default)]
@@ -585,6 +597,16 @@ impl<S: SparseTrieTrait + Clone> StorageTries<S> {
         self.tries.entry(address).or_insert_with(|| {
             self.cleared_tries.pop().unwrap_or_else(|| self.default_trie.clone())
         })
+    }
+}
+
+impl<S: Clone> Clone for StorageTries<S> {
+    fn clone(&self) -> Self {
+        Self {
+            tries: self.tries.clone(),
+            cleared_tries: Vec::new(),
+            default_trie: self.default_trie.clone(),
+        }
     }
 }
 

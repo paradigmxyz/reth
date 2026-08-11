@@ -3,7 +3,7 @@
 use reth_metrics::{metrics::Histogram, Metrics};
 
 /// Metrics for the sparse state trie
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub(crate) struct SparseStateTrieMetrics {
     /// Number of total account nodes, including those that were skipped.
     pub(crate) multiproof_total_account_nodes: u64,
@@ -37,7 +37,7 @@ impl SparseStateTrieMetrics {
 }
 
 /// Metrics for the sparse state trie
-#[derive(Metrics)]
+#[derive(Metrics, Clone)]
 #[metrics(scope = "sparse_state_trie")]
 pub(crate) struct SparseStateTrieInnerMetrics {
     /// Histogram of total account nodes, including those that were skipped.
