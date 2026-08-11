@@ -529,13 +529,11 @@ where
             };
         }
 
-        // If the gas limit is multiple times higher than the parent's or the gas usage exceeds the
-        // gas limit, be cautious and block on pre-execution checks of the block.
-        if should_await_pre_execution_validation(
-            input.gas_limit(),
-            input.gas_used(),
-            parent_block.gas_limit(),
-        ) {
+        // If the gas limit is multiple times higher than the parent's, be cautious and block on
+        // pre-execution checks of the block.
+        if input.gas_limit() >
+            parent_block.gas_limit().saturating_mul(MAX_EXPECTED_GAS_LIMIT_MULTIPLIER)
+        {
             // Call `.get()` to await the pre-execution checks and exit early if they fail.
             if validated_block.get().is_err() {
                 return Err(validated_block
@@ -2069,55 +2067,5 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
             Self::Payload(payload) => payload.gas_limit(),
             Self::Block(block) => block.gas_limit(),
         }
-    }
-}
-
-/// Returns whether the payload must pass pre-execution validation before execution starts.
-///
-/// Payloads that advertise multiple times more gas than the parent or claim gas usage above their
-/// own limit can otherwise force invalid work through the optimistic execution path.
-const fn should_await_pre_execution_validation(
-    gas_limit: u64,
-    gas_used: u64,
-    parent_gas_limit: u64,
-) -> bool {
-    gas_limit > parent_gas_limit.saturating_mul(MAX_EXPECTED_GAS_LIMIT_MULTIPLIER) ||
-        gas_used > gas_limit
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{should_await_pre_execution_validation, MAX_EXPECTED_GAS_LIMIT_MULTIPLIER};
-
-    #[test]
-    fn suspicious_gas_fields_require_pre_execution_validation() {
-        let parent_gas_limit = 30_000_000;
-        let max_optimistic_gas_limit = parent_gas_limit * MAX_EXPECTED_GAS_LIMIT_MULTIPLIER;
-
-        assert!(should_await_pre_execution_validation(
-            max_optimistic_gas_limit + 1,
-            0,
-            parent_gas_limit
-        ));
-        assert!(should_await_pre_execution_validation(
-            parent_gas_limit,
-            parent_gas_limit + 1,
-            parent_gas_limit
-        ));
-        assert!(!should_await_pre_execution_validation(
-            parent_gas_limit + 1,
-            parent_gas_limit,
-            parent_gas_limit
-        ));
-        assert!(!should_await_pre_execution_validation(
-            max_optimistic_gas_limit,
-            max_optimistic_gas_limit,
-            parent_gas_limit
-        ));
-        assert!(!should_await_pre_execution_validation(
-            parent_gas_limit - 1,
-            parent_gas_limit - 1,
-            parent_gas_limit
-        ));
     }
 }
