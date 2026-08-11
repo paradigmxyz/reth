@@ -1244,11 +1244,12 @@ async fn authenticate_stream<N: NetworkPrimitives>(
 
         // install additional handlers
         for handler in extra_handlers.into_iter() {
-            let cap = handler.protocol().cap;
+            let protocol = handler.protocol();
+            let limits = handler.inbound_limits();
             let remote_peer_id = authenticated_peer_id;
 
             multiplex_stream
-                .install_protocol(&cap, move |conn| {
+                .install_protocol_with_limits(&protocol.cap, limits, move |conn| {
                     handler.into_connection(direction, remote_peer_id, conn)
                 })
                 .ok();
