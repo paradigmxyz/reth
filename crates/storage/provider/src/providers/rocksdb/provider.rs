@@ -29,7 +29,7 @@ use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, CompactionPri, DBCompressionType,
     DBRawIteratorWithThreadMode, IteratorMode, OptimisticTransactionDB,
     OptimisticTransactionOptions, Options, SnapshotWithThreadMode, Transaction,
-    WriteBatchWithTransaction, WriteBufferManager, WriteOptions, DB,
+    WriteBatchWithTransaction, WriteBufferManager, WriteOptions, DB, DEFAULT_COLUMN_FAMILY_NAME,
 };
 use std::{
     collections::BTreeMap,
@@ -364,7 +364,7 @@ impl RocksDBBuilder {
         let options =
             Self::default_options(self.log_level, &self.block_cache, self.enable_statistics);
 
-        let cf_descriptors: Vec<ColumnFamilyDescriptor> = self
+        let mut cf_descriptors: Vec<ColumnFamilyDescriptor> = self
             .column_families
             .iter()
             .map(|name| {
@@ -378,6 +378,30 @@ impl RocksDBBuilder {
                 ColumnFamilyDescriptor::new(name.clone(), cf_options)
             })
             .collect();
+
+        // RocksDB requires every existing column family to be opened. Preserve column families
+        // unknown to this configuration so databases remain openable after a downgrade.
+        if RocksDBProvider::exists(&self.path) {
+            let existing_column_families = DB::list_cf(&options, &self.path).map_err(|e| {
+                ProviderError::Database(DatabaseError::Open(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))
+            })?;
+            cf_descriptors.extend(
+                existing_column_families
+                    .into_iter()
+                    .filter(|name| {
+                        name != DEFAULT_COLUMN_FAMILY_NAME && !self.column_families.contains(name)
+                    })
+                    .map(|name| {
+                        ColumnFamilyDescriptor::new(
+                            name,
+                            Self::default_column_family_options(&self.block_cache),
+                        )
+                    }),
+            );
+        }
 
         let metrics = self.enable_metrics.then(RocksDBMetrics::default);
 
@@ -2929,6 +2953,55 @@ mod tests {
         const DUPSORT: bool = false;
         type Key = u64;
         type Value = Vec<u8>;
+    }
+
+    #[test]
+    fn test_reopens_with_unknown_column_family() {
+        let temp_dir = TempDir::new().unwrap();
+        let value = b"test_value".to_vec();
+
+        let provider = RocksDBBuilder::new(temp_dir.path())
+            .with_default_tables()
+            .with_table::<TestTable>()
+            .build()
+            .unwrap();
+        provider.put::<TestTable>(42, &value).unwrap();
+        drop(provider);
+
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        assert_eq!(provider.get::<TestTable>(42).unwrap(), Some(value));
+    }
+
+    #[test]
+    fn test_reopens_blob_column_family_with_legacy_table_set() {
+        let temp_dir = TempDir::new().unwrap();
+        let bal_key =
+            reth_db_api::models::StoredBlockAccessListKey::new(1, B256::with_last_byte(1));
+        let bal_value = reth_db_api::models::StoredBlockAccessList::new(Bytes::from(vec![
+            0;
+            DEFAULT_BAL_MIN_BLOB_SIZE as usize +
+                1
+        ]));
+
+        let provider = RocksDBBuilder::new(temp_dir.path())
+            .with_default_tables()
+            .with_table::<tables::BlockAccessLists>()
+            .with_table::<tables::BlockAccessListBlockNumbers>()
+            .build()
+            .unwrap();
+        provider.put::<tables::BlockAccessLists>(bal_key, &bal_value).unwrap();
+        provider
+            .put::<tables::BlockAccessListBlockNumbers>(bal_key.hash(), &bal_key.number())
+            .unwrap();
+        provider.flush(&[tables::BlockAccessLists::NAME]).unwrap();
+        drop(provider);
+
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        assert_eq!(provider.get::<tables::BlockAccessLists>(bal_key).unwrap(), Some(bal_value));
+        assert_eq!(
+            provider.get::<tables::BlockAccessListBlockNumbers>(bal_key.hash()).unwrap(),
+            Some(bal_key.number())
+        );
     }
 
     #[test]
