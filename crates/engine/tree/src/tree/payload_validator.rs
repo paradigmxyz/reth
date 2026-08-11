@@ -1005,7 +1005,7 @@ where
     {
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
-        let has_bal = env.decoded_bal.is_some();
+        let has_bal = input.should_build_bal();
         let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
             State::builder()
                 .with_database(StateProviderDatabase::new(state_provider))
@@ -2024,6 +2024,14 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         }
     }
 
+    /// Returns true if execution should rebuild the block access list.
+    fn should_build_bal(&self) -> bool {
+        match self {
+            Self::Payload(payload) => payload.block_access_list().is_some(),
+            Self::Block(block) => block.block_access_list_hash().is_some(),
+        }
+    }
+
     /// Returns the number of transactions in the payload or block.
     pub fn transaction_count(&self) -> usize
     where
@@ -2066,5 +2074,24 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
             Self::Payload(payload) => payload.gas_limit(),
             Self::Block(block) => block.gas_limit(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_ethereum_engine_primitives::EthEngineTypes;
+    use reth_ethereum_primitives::Block;
+    use reth_primitives_traits::Block as _;
+
+    #[test]
+    fn downloaded_block_with_bal_hash_rebuilds_bal() {
+        let without_bal = BlockOrPayload::<EthEngineTypes>::Block(Block::default().seal_slow());
+        assert!(!without_bal.should_build_bal());
+
+        let mut block = Block::default();
+        block.header.block_access_list_hash = Some(B256::ZERO);
+        let with_bal = BlockOrPayload::<EthEngineTypes>::Block(block.seal_slow());
+        assert!(with_bal.should_build_bal());
     }
 }
