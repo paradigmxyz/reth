@@ -395,9 +395,7 @@ where
         custody_columns: Option<B128>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         if let Some(custody_columns) = custody_columns {
-            // Engine API bitvectors are little-endian, while B128 integer conversions are
-            // big-endian. `cell_custody` uses the latter representation as a numeric cell mask.
-            self.inner.cell_custody.set(B128::from(u128::from_le_bytes(custody_columns.into())));
+            self.inner.cell_custody.set_from_engine_api(custody_columns);
         }
         self.validate_and_execute_forkchoice(EngineApiMessageVersion::V4, state, payload_attrs)
             .await
