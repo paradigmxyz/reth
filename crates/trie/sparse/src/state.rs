@@ -515,6 +515,7 @@ impl Clone for SparseStateTrie {
             storage: self.storage.clone(),
             retain_updates: self.retain_updates,
             deferred_drops: DeferredDrops::default(),
+            #[cfg(feature = "metrics")]
             metrics: self.metrics.clone(),
         }
     }
