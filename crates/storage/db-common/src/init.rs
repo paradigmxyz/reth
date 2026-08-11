@@ -369,7 +369,7 @@ where
         B256Map::with_capacity_and_hasher(capacity, Default::default());
 
     for (address, account) in alloc {
-        let bytecode_hash = if let Some(code) = &account.code {
+        let bytecode_hash = if let Some(code) = account.non_empty_code() {
             match Bytecode::new_raw_checked(code.clone()) {
                 Ok(bytecode) => {
                     let hash = bytecode.hash_slow();
@@ -448,7 +448,16 @@ where
     Provider: DBProvider<Tx: DbTxMut> + HashingWriter,
 {
     // insert and hash accounts to hashing table
-    let alloc_accounts = alloc.clone().map(|(addr, account)| (*addr, Some(Account::from(account))));
+    let alloc_accounts = alloc.clone().map(|(addr, account)| {
+        (
+            *addr,
+            Some(Account {
+                nonce: account.nonce.unwrap_or_default(),
+                balance: account.balance,
+                bytecode_hash: account.code_hash(),
+            }),
+        )
+    });
     provider.insert_account_for_hashing(alloc_accounts)?;
 
     trace!(target: "reth::cli", "Inserted account hashes");
@@ -981,7 +990,7 @@ fn write_account_to_db<TX: DbTxMut>(
     history_list: &IntegerList,
     seen_bytecodes: &mut B256Set,
 ) -> Result<(), eyre::Error> {
-    let bytecode_hash = if let Some(code) = &genesis_account.code {
+    let bytecode_hash = if let Some(code) = genesis_account.non_empty_code() {
         let bytecode = Bytecode::new_raw_checked(code.clone())
             .map_err(|e| eyre::eyre!("Invalid bytecode for {address}: {e}"))?;
         let hash = bytecode.hash_slow();
@@ -1069,7 +1078,7 @@ where
     TX: DbTxMut,
     N: NodePrimitives,
 {
-    let bytecode_hash = if let Some(code) = &genesis_account.code {
+    let bytecode_hash = if let Some(code) = genesis_account.non_empty_code() {
         let bytecode = Bytecode::new_raw_checked(code.clone())
             .map_err(|e| eyre::eyre!("Invalid bytecode for {address}: {e}"))?;
         let hash = bytecode.hash_slow();
@@ -1294,6 +1303,7 @@ mod tests {
         HOLESKY_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
     };
     use alloy_genesis::Genesis;
+    use alloy_primitives::Bytes;
     use reth_chainspec::{Chain, ChainSpec, HOLESKY, MAINNET, SEPOLIA};
     use reth_db::DatabaseEnv;
     use reth_db_api::{
@@ -1531,6 +1541,43 @@ mod tests {
 
         // actual, expected
         assert_eq!(genesis_hash, HOLESKY_GENESIS_HASH);
+    }
+
+    #[test]
+    fn empty_genesis_code_is_canonicalized() {
+        let address = Address::with_last_byte(1);
+
+        for settings in [StorageSettings::v1(), StorageSettings::v2()] {
+            let chain_spec = Arc::new(ChainSpec {
+                chain: Chain::from_id(1),
+                genesis: Genesis {
+                    alloc: BTreeMap::from([(
+                        address,
+                        GenesisAccount {
+                            balance: U256::from(1),
+                            code: Some(Bytes::new()),
+                            ..Default::default()
+                        },
+                    )]),
+                    ..Default::default()
+                },
+                hardforks: Default::default(),
+                paris_block_and_final_difficulty: None,
+                deposit_contract: None,
+                ..Default::default()
+            });
+            let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+
+            init_genesis_with_settings(&factory, settings).unwrap();
+
+            let provider = factory.provider().unwrap();
+            let tx = provider.tx_ref();
+            assert_eq!(
+                tx.get::<tables::HashedAccounts>(keccak256(address)).unwrap(),
+                Some(Account { nonce: 0, balance: U256::from(1), bytecode_hash: None })
+            );
+            assert_eq!(tx.entries::<tables::Bytecodes>().unwrap(), 0);
+        }
     }
 
     #[test]
