@@ -17,9 +17,8 @@ use reth_evm_ethereum::factory::RethEvmFactory;
 #[cfg(feature = "jit")]
 use reth_evm_ethereum::factory::{JitBackend, JitMode, RevmcMetrics, RuntimeConfig, RuntimeTuning};
 use reth_network::{
-    primitives::BasicNetworkPrimitives,
-    types::EncodableEth72PooledTransaction,
-    NetworkHandle, PeersInfo,
+    primitives::BasicNetworkPrimitives, types::EncodableEth72PooledTransaction, NetworkHandle,
+    PeersInfo,
 };
 use reth_node_api::{
     AddOnsContext, FullNodeComponents, HeaderTy, NodeAddOns, NodePrimitives,
