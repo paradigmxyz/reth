@@ -14,6 +14,7 @@ workspace = true
 [dependencies]
 # alloy
 alloy-primitives.workspace = true
+thiserror.workspace = true
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
 alloy-trie = { workspace = true, features = ["ethereum"] }
 alloy-consensus.workspace = true
@@ -71,6 +72,7 @@ std = [
     "alloy-consensus/std",
     "alloy-genesis/std",
     "alloy-primitives/std",
+    "thiserror/std",
     "alloy-rlp/std",
     "alloy-rpc-types-eth?/std",
     "alloy-serde?/std",
