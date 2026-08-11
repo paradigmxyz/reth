@@ -176,6 +176,11 @@ where
 
         let start_time = Instant::now();
 
+        let canonical_blocks = input
+            .persist_rest_blocks()
+            .iter()
+            .map(|block| block.recovered_block().num_hash())
+            .collect::<Vec<_>>();
         let provider_rw = self.provider.database_provider_rw()?;
         let last_state_trie_block = if let Some(block) = input.state_trie_blocks().last() {
             // Newly written static-file headers are not readable until commit finalizes their
@@ -206,7 +211,8 @@ where
         }
 
         provider_rw.commit()?;
-        let _ = self.provider.bal_store().flush().inspect_err(|err| {
+        // BALs live outside the main database and are intentionally flushed last.
+        let _ = self.provider.bal_store().flush(&canonical_blocks).inspect_err(|err| {
             warn!(target: "engine::persistence", last=?last_block, ?err, "Failed to flush BAL store");
         });
         debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
@@ -558,6 +564,43 @@ mod tests {
 
         assert_eq!(block_hash, result.last_block.hash);
         assert_eq!(result.last_state_trie_block, result.last_block);
+    }
+
+    #[test]
+    fn test_save_blocks_flushes_bal_store() {
+        use reth_provider::{RocksDBBalStore, RocksDBProviderFactory};
+
+        reth_tracing::init_test_tracing();
+        let provider = create_test_provider_factory();
+        let bal_store = BalStoreHandle::new(RocksDBBalStore::new(provider.rocksdb_provider()));
+        let provider = provider.with_bal_store(bal_store);
+        init_genesis(&provider).unwrap();
+
+        let mut test_block_builder = TestBlockBuilder::eth();
+        let executed = test_block_builder.get_executed_block_with_number(1, B256::random());
+        let num_hash = executed.recovered_block().num_hash();
+        let raw_bal = Bytes::from_static(&[0xc0]);
+
+        provider.bal_store().insert(num_hash, RawBal::new(raw_bal.clone())).unwrap();
+
+        let (_finished_exex_height_tx, finished_exex_height_rx) =
+            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+        let pruner =
+            Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
+        let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
+        let handle = PersistenceHandle::<EthPrimitives>::spawn_service(
+            provider.clone(),
+            pruner,
+            sync_metrics_tx,
+        );
+        let (tx, rx) = crossbeam_channel::bounded(1);
+
+        handle.save_blocks(full_save_input(vec![executed]), tx).unwrap();
+
+        let result = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("test timed out");
+        assert_eq!(result.last_block, num_hash);
+        let persisted_store = RocksDBBalStore::new(provider.rocksdb_provider());
+        assert_eq!(persisted_store.get_by_hash(num_hash.hash).unwrap(), Some(raw_bal));
     }
 
     #[test]

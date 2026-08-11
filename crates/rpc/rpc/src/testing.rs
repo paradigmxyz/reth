@@ -152,7 +152,13 @@ where
                     suggested_fee_recipient: request.payload_attributes.suggested_fee_recipient,
                     prev_randao: request.payload_attributes.prev_randao,
                     gas_limit: gas_limit_override.unwrap_or_else(|| {
-                        calculate_block_gas_limit(parent.gas_limit(), desired_gas_limit)
+                        calculate_block_gas_limit(
+                            parent.gas_limit(),
+                            request
+                                .payload_attributes
+                                .target_gas_limit
+                                .unwrap_or(desired_gas_limit),
+                        )
                     }),
                     parent_beacon_block_root: request.payload_attributes.parent_beacon_block_root,
                     withdrawals: withdrawals.map(Into::into),

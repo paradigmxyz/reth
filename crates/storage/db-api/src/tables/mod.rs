@@ -19,6 +19,7 @@ pub use raw::{RawDupSort, RawKey, RawTable, RawValue, TableRawRow};
 use crate::{
     models::{
         accounts::BlockNumberAddress,
+        bal::{StoredBlockAccessList, StoredBlockAccessListKey},
         blocks::{HeaderHash, StoredBlockOmmers},
         storage_sharded_key::StorageShardedKey,
         AccountBeforeTx, ClientVersion, CompactU256, IntegerList, ShardedKey,
@@ -349,6 +350,18 @@ tables! {
     table BlockWithdrawals {
         type Key = BlockNumber;
         type Value = StoredBlockWithdrawals;
+    }
+
+    /// Stores block access list payloads by block number and block hash.
+    table BlockAccessLists {
+        type Key = StoredBlockAccessListKey;
+        type Value = StoredBlockAccessList;
+    }
+
+    /// Stores the block number for each persisted block access list hash.
+    table BlockAccessListBlockNumbers {
+        type Key = BlockHash;
+        type Value = BlockNumber;
     }
 
     /// Canonical only Stores the transaction body for canonical transactions.
