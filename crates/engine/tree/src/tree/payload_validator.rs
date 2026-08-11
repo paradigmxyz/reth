@@ -2068,6 +2068,10 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
     }
 }
 
+/// Returns whether the payload must pass pre-execution validation before execution starts.
+///
+/// Payloads that advertise more gas than the parent or claim gas usage above their own limit can
+/// otherwise force invalid work through the optimistic execution path.
 const fn should_await_pre_execution_validation(
     gas_limit: u64,
     gas_used: u64,
