@@ -388,19 +388,25 @@ impl RocksDBBuilder {
                     code: -1,
                 }))
             })?;
-            cf_descriptors.extend(
-                existing_column_families
-                    .into_iter()
-                    .filter(|name| {
-                        name != DEFAULT_COLUMN_FAMILY_NAME && !self.column_families.contains(name)
-                    })
-                    .map(|name| {
-                        ColumnFamilyDescriptor::new(
-                            name,
-                            Self::default_column_family_options(&self.block_cache),
-                        )
-                    }),
-            );
+            let unknown_column_families: Vec<String> = existing_column_families
+                .into_iter()
+                .filter(|name| {
+                    name != DEFAULT_COLUMN_FAMILY_NAME && !self.column_families.contains(name)
+                })
+                .collect();
+            if !unknown_column_families.is_empty() {
+                tracing::debug!(
+                    target: "providers::rocksdb",
+                    column_families = ?unknown_column_families,
+                    "Preserving unknown column families"
+                );
+                cf_descriptors.extend(unknown_column_families.into_iter().map(|name| {
+                    ColumnFamilyDescriptor::new(
+                        name,
+                        Self::default_column_family_options(&self.block_cache),
+                    )
+                }));
+            }
         }
 
         let metrics = self.enable_metrics.then(RocksDBMetrics::default);
