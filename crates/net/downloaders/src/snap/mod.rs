@@ -86,6 +86,20 @@ impl<C: SnapClient> AccountRangeDownloader<C> {
             }
         }
 
+        // A responder appends the first account past the limit to prove the interval is complete.
+        // Anything beyond that was not requested, so it is rejected before the range is decoded
+        // and hashed rather than trimmed away after the work is done.
+        if response
+            .accounts
+            .iter()
+            .filter(|data| data.hash > self.request.limit_hash)
+            .nth(1)
+            .is_some()
+        {
+            debug!(target: "downloaders::snap", "Account range runs past the requested limit");
+            return Err(RequestError::BadResponse)
+        }
+
         let mut accounts = Vec::with_capacity(response.accounts.len());
         for data in response.accounts {
             let hash = data.hash;
@@ -450,6 +464,33 @@ mod tests {
             })
         );
         assert!(client.reported.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn range_running_past_the_limit_is_rejected() {
+        let accounts = vec![(key(1), account(7)), (key(3), account(8)), (key(4), account(9))];
+        let (root_hash, proof) = root_and_proof(&accounts, &[key(1), key(4)]);
+        let peer = PeerId::random();
+        let message = AccountRangeMessage {
+            request_id: 1,
+            accounts: accounts
+                .iter()
+                .map(|(key, account)| AccountData::from_trie_account(*key, account))
+                .collect(),
+            proof,
+        };
+        let attempts = usize::from(MAX_RETRIES) + 1;
+        let client = Arc::new(TestSnapClient::new(
+            std::iter::repeat_with(|| response(peer, message.clone())).take(attempts),
+        ));
+        let mut request = request(root_hash);
+        request.limit_hash = key(2);
+
+        let error =
+            AccountRangeDownloader::new(Arc::clone(&client), request).unwrap().await.unwrap_err();
+
+        assert_eq!(error, RequestError::BadResponse);
+        assert_eq!(client.reported.lock().unwrap().len(), attempts);
     }
 
     #[tokio::test]
