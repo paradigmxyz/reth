@@ -12,6 +12,7 @@ use reth_network_p2p::{
     priority::Priority,
     snap::client::{SnapClient, SnapResponse},
 };
+use reth_network_peers::PeerId;
 use reth_trie_common::{range_proof::verify_range_proof, TrieAccount, EMPTY_ROOT_HASH};
 use std::{
     pin::Pin,
@@ -60,7 +61,11 @@ impl<C: SnapClient> AccountRangeDownloader<C> {
     }
 
     /// Decodes and verifies a response from a peer.
-    fn verify_response(&self, response: SnapResponse) -> Result<AccountRangeOutcome, RequestError> {
+    fn verify_response(
+        &self,
+        peer_id: PeerId,
+        response: SnapResponse,
+    ) -> Result<AccountRangeOutcome, RequestError> {
         let SnapResponse::AccountRange(response) = response else {
             debug!(target: "downloaders::snap", "Expected account range response");
             return Err(RequestError::BadResponse)
@@ -82,7 +87,7 @@ impl<C: SnapClient> AccountRangeDownloader<C> {
                     has_more: false,
                 }))
             } else {
-                Ok(AccountRangeOutcome::Unavailable)
+                Ok(AccountRangeOutcome::Unavailable { peer_id })
             }
         }
 
@@ -147,7 +152,7 @@ where
             match ready!(this.fut.poll_unpin(cx)) {
                 Ok(response) => {
                     let (peer_id, response) = response.split();
-                    match this.verify_response(response) {
+                    match this.verify_response(peer_id, response) {
                         Ok(outcome) => return Poll::Ready(Ok(outcome)),
                         Err(error) => {
                             debug!(target: "downloaders::snap", ?peer_id, %error, "Invalid account range response");
@@ -177,9 +182,12 @@ where
 pub enum AccountRangeOutcome {
     /// The selected peer does not have the requested state root.
     ///
-    /// This is not a protocol violation and does not affect peer reputation. The orchestrator can
-    /// retry elsewhere or advance its pivot.
-    Unavailable,
+    /// This is not a protocol violation and does not affect peer reputation. The peer is named so
+    /// the orchestrator can retry elsewhere, deprioritize it, or advance its pivot.
+    Unavailable {
+        /// Peer that answered without the requested state.
+        peer_id: PeerId,
+    },
     /// An account range authenticated against the requested state root.
     Verified(VerifiedAccountRange),
 }
@@ -211,7 +219,7 @@ mod tests {
         GetByteCodesMessage, GetStorageRangesMessage,
     };
     use reth_network_p2p::{download::DownloadClient, error::PeerRequestResult};
-    use reth_network_peers::{PeerId, WithPeerId};
+    use reth_network_peers::WithPeerId;
     use reth_trie_common::{proof::ProofRetainer, HashBuilder, Nibbles};
     use std::{
         collections::VecDeque,
@@ -418,7 +426,7 @@ mod tests {
                 .await
                 .unwrap();
 
-        assert_eq!(outcome, AccountRangeOutcome::Unavailable);
+        assert_eq!(outcome, AccountRangeOutcome::Unavailable { peer_id: peer });
         assert!(client.reported.lock().unwrap().is_empty());
     }
 
