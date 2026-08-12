@@ -56,10 +56,7 @@
 mod sparse_trie;
 
 use self::sparse_trie::{SparseTrieCacheTask, SparseTrieTaskMetrics};
-use crate::tree::{
-    metrics::BlockValidationMetrics, EngineApiTreeState, ExecutionEnv, StateProviderBuilder,
-    TreeConfig,
-};
+use crate::tree::{metrics::BlockValidationMetrics, EngineApiTreeState, ExecutionEnv, TreeConfig};
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use reth_chain_state::{ExecutedBlock, PreservedSparseTrie};
@@ -70,8 +67,8 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, DatabaseProviderFactory, DatabaseProviderROFactory,
-    HashedPostStateProvider, ProviderError, PruneCheckpointReader, StageCheckpointReader,
-    StateRootProvider, StorageSettingsCache, TryIntoHistoricalStateProvider,
+    HashedPostStateProvider, IntoLatestStateProvider, ProviderError, PruneCheckpointReader,
+    StageCheckpointReader, StateRootProvider, TryIntoHistoricalStateProvider,
 };
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_tasks::utils::increase_thread_priority;
@@ -146,7 +143,6 @@ where
     parent_header: &'a N::BlockHeader,
     timestamp: u64,
     state: &'a mut EngineApiTreeState<N>,
-    provider_builder: StateProviderBuilder<N, P>,
     overlay_factory: OverlayStateProviderFactory<P, N>,
     config: &'a TreeConfig,
 }
@@ -178,7 +174,6 @@ where
         parent_header: &'a N::BlockHeader,
         timestamp: u64,
         state: &'a mut EngineApiTreeState<N>,
-        provider_builder: StateProviderBuilder<N, P>,
         overlay_factory: OverlayStateProviderFactory<P, N>,
         config: &'a TreeConfig,
     ) -> Self {
@@ -189,7 +184,6 @@ where
             parent_header,
             timestamp,
             state,
-            provider_builder,
             overlay_factory,
             config,
         }
@@ -225,12 +219,12 @@ where
         self.executor
     }
 
-    /// Returns a clone of the state provider builder.
-    pub fn provider_builder(&self) -> StateProviderBuilder<N, P>
+    /// Returns a clone of the overlay state provider factory.
+    pub fn overlay_factory(&self) -> OverlayStateProviderFactory<P, N>
     where
         P: Clone,
     {
-        self.provider_builder.clone()
+        self.overlay_factory.clone()
     }
 
     /// Consumes the pending sparse trie prune request as in-memory parent-chain blocks, if any.
@@ -252,7 +246,6 @@ where
     overlay_manager: &'a OverlayManager<N>,
     env: &'a ExecutionEnv<Evm>,
     parent_header: &'a SealedHeader<N::BlockHeader>,
-    provider_builder: StateProviderBuilder<N, P>,
     overlay_factory: OverlayStateProviderFactory<P, N>,
     config: &'a TreeConfig,
     parallel_bal_execution: bool,
@@ -284,7 +277,6 @@ where
         overlay_manager: &'a OverlayManager<N>,
         env: &'a ExecutionEnv<Evm>,
         parent_header: &'a SealedHeader<N::BlockHeader>,
-        provider_builder: StateProviderBuilder<N, P>,
         overlay_factory: OverlayStateProviderFactory<P, N>,
         config: &'a TreeConfig,
         parallel_bal_execution: bool,
@@ -295,7 +287,6 @@ where
             overlay_manager,
             env,
             parent_header,
-            provider_builder,
             overlay_factory,
             config,
             parallel_bal_execution,
@@ -323,12 +314,12 @@ where
         self.parallel_bal_execution
     }
 
-    /// Returns a clone of the state provider builder.
-    pub fn provider_builder(&self) -> StateProviderBuilder<N, P>
+    /// Returns a clone of the overlay state provider factory.
+    pub fn overlay_factory(&self) -> OverlayStateProviderFactory<P, N>
     where
         P: Clone,
     {
-        self.provider_builder.clone()
+        self.overlay_factory.clone()
     }
 
     /// Consumes the pending sparse trie prune request as in-memory parent-chain blocks, if any.
@@ -823,7 +814,7 @@ where
     P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
-        + StorageSettingsCache
+        + IntoLatestStateProvider
         + TryIntoHistoricalStateProvider
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -841,7 +832,7 @@ where
 
         if !ctx.config.use_state_root_task() {
             return Ok(PreparedStateRootJob::new(
-                Box::new(SynchronousStateRootJob { provider_builder: ctx.provider_builder }),
+                Box::new(SynchronousStateRootJob { overlay_factory: ctx.overlay_factory }),
                 None,
             ))
         }
@@ -852,7 +843,6 @@ where
             overlay_manager,
             env,
             parent_header,
-            provider_builder,
             overlay_factory,
             config,
             parallel_bal_execution,
@@ -900,7 +890,6 @@ where
         let mut prepared = PreparedStateRootJob::new(
             Box::new(SparseTrieStateRootJob {
                 handle,
-                provider_builder,
                 overlay_factory,
                 executor: executor.clone(),
                 timeout: config.state_root_task_timeout(),
@@ -984,7 +973,7 @@ impl<N: NodePrimitives> StateRootJob<N> for SkippedStateRootJob {
 
 #[derive(Debug)]
 struct SynchronousStateRootJob<N: NodePrimitives, P> {
-    provider_builder: StateProviderBuilder<N, P>,
+    overlay_factory: OverlayStateProviderFactory<P, N>,
 }
 
 impl<N, P> StateRootJob<N> for SynchronousStateRootJob<N, P>
@@ -994,7 +983,7 @@ where
     P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
-        + StorageSettingsCache
+        + IntoLatestStateProvider
         + TryIntoHistoricalStateProvider
         + 'static,
 {
@@ -1008,7 +997,7 @@ where
         _output: Arc<BlockExecutionOutput<N::Receipt>>,
         hashed_state: &LazyHashedPostState,
     ) -> ProviderResult<StateRootJobOutcome> {
-        let provider = self.provider_builder.clone().build()?;
+        let provider = self.overlay_factory.state_provider()?;
         let (state_root, trie_updates) =
             provider.state_root_with_updates(hashed_state.get().as_ref().clone())?;
         Ok(StateRootJobOutcome::new(state_root, Arc::new(trie_updates)))
@@ -1018,7 +1007,6 @@ where
 #[derive(Debug)]
 struct SparseTrieStateRootJob<N: NodePrimitives, P> {
     handle: StateRootHandle,
-    provider_builder: StateProviderBuilder<N, P>,
     overlay_factory: OverlayStateProviderFactory<P, N>,
     executor: reth_tasks::Runtime,
     timeout: Option<Duration>,
@@ -1033,7 +1021,7 @@ where
     P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
-        + StorageSettingsCache
+        + IntoLatestStateProvider
         + TryIntoHistoricalStateProvider
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -1042,10 +1030,10 @@ where
 {
     fn serial_fallback(
         executor: &reth_tasks::Runtime,
-        provider_builder: StateProviderBuilder<N, P>,
+        overlay_factory: OverlayStateProviderFactory<P, N>,
         output: Arc<BlockExecutionOutput<N::Receipt>>,
     ) -> ProviderResult<SerialFallbackRx> {
-        let provider = provider_builder.build()?;
+        let provider = overlay_factory.state_provider()?;
         let (fallback_tx, fallback_rx) = mpsc::channel();
         executor.spawn_blocking_named("serial-root", move || {
             let result = (|| {
@@ -1068,7 +1056,7 @@ where
         &self,
         output: &BlockExecutionOutput<N::Receipt>,
     ) -> ProviderResult<StateRootJobOutcome> {
-        let provider = self.provider_builder.clone().build()?;
+        let provider = self.overlay_factory.state_provider()?;
         let hashed_state = Arc::new(provider.hashed_post_state(&output.state)?);
         let (state_root, trie_updates) =
             provider.state_root_with_updates(hashed_state.as_ref().clone())?;
@@ -1116,7 +1104,6 @@ where
 
         if self.compare_trie_updates {
             let _has_diff = compare_trie_updates_with_serial(
-                self.provider_builder.clone(),
                 self.overlay_factory.clone(),
                 output,
                 trie_updates.as_ref().clone(),
@@ -1143,7 +1130,7 @@ where
     P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
-        + StorageSettingsCache
+        + IntoLatestStateProvider
         + TryIntoHistoricalStateProvider
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -1176,28 +1163,16 @@ where
             Ok(Ok(outcome)) => return self.verified_sparse_outcome(block, &output, outcome),
             Ok(Err(err)) => {
                 debug!(target: "engine::tree::state_root_strategy", %err, "State root task failed, falling back to serial root");
-                Self::serial_fallback(
-                    &self.executor,
-                    self.provider_builder.clone(),
-                    output.clone(),
-                )?
+                Self::serial_fallback(&self.executor, self.overlay_factory.clone(), output.clone())?
             }
             Err(RecvTimeoutError::Timeout) => {
                 warn!(target: "engine::tree::state_root_strategy", ?timeout, "State root task timed out, racing serial fallback");
                 self.metrics.state_root_task_timeout_total.increment(1);
-                Self::serial_fallback(
-                    &self.executor,
-                    self.provider_builder.clone(),
-                    output.clone(),
-                )?
+                Self::serial_fallback(&self.executor, self.overlay_factory.clone(), output.clone())?
             }
             Err(RecvTimeoutError::Disconnected) => {
                 debug!(target: "engine::tree::state_root_strategy", "State root task dropped, falling back to serial root");
-                Self::serial_fallback(
-                    &self.executor,
-                    self.provider_builder.clone(),
-                    output.clone(),
-                )?
+                Self::serial_fallback(&self.executor, self.overlay_factory.clone(), output.clone())?
             }
         };
 
@@ -1237,7 +1212,6 @@ where
 }
 
 fn compare_trie_updates_with_serial<N, P>(
-    state_provider_builder: StateProviderBuilder<N, P>,
     overlay_factory: OverlayStateProviderFactory<P, N>,
     output: &BlockExecutionOutput<N::Receipt>,
     task_trie_updates: TrieUpdates,
@@ -1248,7 +1222,7 @@ where
     P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
-        + StorageSettingsCache
+        + IntoLatestStateProvider
         + TryIntoHistoricalStateProvider
         + 'static,
     OverlayStateProviderFactory<P, N>:
@@ -1256,7 +1230,7 @@ where
 {
     debug!(target: "engine::tree::state_root_strategy", "Comparing trie updates with serial computation");
 
-    match state_provider_builder.build().and_then(|provider| {
+    match overlay_factory.state_provider().and_then(|provider| {
         let hashed_state = provider.hashed_post_state(&output.state)?;
         provider.state_root_with_updates(hashed_state)
     }) {

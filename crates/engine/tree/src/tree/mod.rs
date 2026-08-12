@@ -13,8 +13,7 @@ use alloy_rpc_types_engine::{
 };
 use error::{InsertBlockError, InsertBlockFatalError, InsertBlockValidationError};
 use reth_chain_state::{
-    CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, MemoryOverlayStateProvider,
-    NewCanonicalChain,
+    CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, NewCanonicalChain,
 };
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
@@ -29,15 +28,14 @@ use reth_primitives_traits::{
     FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
 use reth_provider::{
-    BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockNumReader, BlockReader,
-    ChangeSetReader, DatabaseProviderFactory, LatestStateProvider, ProviderError,
-    PruneCheckpointReader, SaveBlocksInput, StageCheckpointReader, StateProviderBox,
-    StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
-    TransactionVariant, TryIntoHistoricalStateProvider,
+    BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
+    DatabaseProviderFactory, ProviderError, PruneCheckpointReader, SaveBlocksInput,
+    StageCheckpointReader, StateProviderFactory, StateReader, StorageChangeSetReader,
+    StorageSettingsCache, TransactionVariant, TryIntoHistoricalStateProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
-use reth_storage_overlay::OverlayManager;
+use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie::ComputedTrieData;
 use revm::interpreter::debug_unreachable;
@@ -111,67 +109,6 @@ pub(crate) const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 /// This ensures that recent changesets are kept in memory for potential reorgs,
 /// even when the finalized block is not set (e.g., on L2s like Optimism).
 const CHANGESET_CACHE_RETENTION_BLOCKS: u64 = 64;
-
-/// A builder for creating state providers that can be used across threads.
-#[derive(Clone, Debug)]
-pub struct StateProviderBuilder<N: NodePrimitives, P> {
-    /// The provider factory used to create providers.
-    provider_factory: P,
-    /// Hash of the block whose state to provide.
-    parent_hash: B256,
-    /// Tracks the in-memory parent chain and its overlays.
-    overlay_manager: OverlayManager<N>,
-}
-
-impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
-    /// Creates a new state provider builder for `parent_hash`.
-    pub const fn new(
-        provider_factory: P,
-        parent_hash: B256,
-        overlay_manager: OverlayManager<N>,
-    ) -> Self {
-        Self { provider_factory, parent_hash, overlay_manager }
-    }
-}
-
-impl<N: NodePrimitives, P> StateProviderBuilder<N, P>
-where
-    P: DatabaseProviderFactory,
-    P::Provider: BlockNumReader
-        + PruneCheckpointReader
-        + StageCheckpointReader
-        + StorageSettingsCache
-        + TryIntoHistoricalStateProvider
-        + 'static,
-{
-    /// Creates a new state provider from this builder.
-    pub fn build(&self) -> ProviderResult<StateProviderBox> {
-        let overlay_builder = self.overlay_manager.overlay_builder(self.parent_hash);
-        let provider = self.provider_factory.database_provider_ro()?;
-        let anchor = overlay_builder.anchor_at_parent(&provider)?;
-        let (provider, overlay): (StateProviderBox, _) = match anchor {
-            reth_storage_overlay::AnchorForParent::NoReverts { anchor, overlay } => {
-                debug!(
-                    target: "engine::tree",
-                    parent_hash = %self.parent_hash,
-                    ?anchor,
-                    "creating state provider from latest state"
-                );
-                (Box::new(LatestStateProvider::new(provider)), overlay)
-            }
-            reth_storage_overlay::AnchorForParent::RevertsRequired { anchor, overlay, .. } => {
-                debug!(
-                    target: "engine::tree",
-                    parent_hash = %self.parent_hash,
-                    ?anchor,
-                    "creating state provider from historical state"
-                );
-                (provider.try_into_history_at_block(anchor.number)?, overlay)
-            }
-        };
-        Ok(Box::new(MemoryOverlayStateProvider::new(provider, overlay)))
-    }
-}
 
 /// Tracks the state of the engine api internals.
 ///
@@ -3185,7 +3122,7 @@ where
         }
 
         // Ensure that the parent state is available.
-        match self.state_provider_builder(block_id.parent) {
+        match self.overlay_factory(block_id.parent) {
             Err(err) => {
                 let block = convert_to_block(self, input)?;
                 return Err(InsertBlockError::new(block, err.into()).into());
@@ -3565,14 +3502,14 @@ where
         Ok(())
     }
 
-    /// Returns a builder for creating state providers for the given hash.
+    /// Returns an [`OverlayStateProviderFactory`] for the given hash.
     ///
     /// This is an optimization for parallel execution contexts where we want to avoid
     /// creating state providers in the critical path.
-    pub fn state_provider_builder(
+    pub fn overlay_factory(
         &self,
         hash: B256,
-    ) -> ProviderResult<Option<StateProviderBuilder<N, P>>>
+    ) -> ProviderResult<Option<OverlayStateProviderFactory<P, N>>>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone,
     {
@@ -3581,10 +3518,9 @@ where
             return Ok(None)
         }
 
-        Ok(Some(StateProviderBuilder::new(
+        Ok(Some(OverlayStateProviderFactory::new(
             self.provider.clone(),
-            hash,
-            self.state.tree_state.overlay_manager.clone(),
+            self.state.tree_state.overlay_manager.overlay_builder(hash),
         )))
     }
 }

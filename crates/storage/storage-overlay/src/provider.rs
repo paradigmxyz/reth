@@ -1,6 +1,7 @@
-use crate::{database_state_frontiers, Overlay, OverlayBuilder};
+use crate::{database_state_frontiers, AnchorForParent, Overlay, OverlayBuilder};
 use alloy_primitives::{BlockHash, B256};
 use metrics::{Counter, Histogram};
+use reth_chain_state::MemoryOverlayStateProvider;
 use reth_db_api::{tables, transaction::DbTx, DatabaseError};
 use reth_errors::ProviderResult;
 use reth_ethereum_primitives::EthPrimitives;
@@ -11,8 +12,9 @@ use reth_primitives_traits::{
 };
 use reth_storage_api::{
     BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-    DatabaseProviderROFactory, DbTxProvider, PruneCheckpointReader, StageCheckpointReader,
-    StorageChangeSetReader, StorageSettingsCache,
+    DatabaseProviderROFactory, DbTxProvider, IntoLatestStateProvider, PruneCheckpointReader,
+    StageCheckpointReader, StateProviderBox, StorageChangeSetReader, StorageSettingsCache,
+    TryIntoHistoricalStateProvider,
 };
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
@@ -24,7 +26,7 @@ use reth_trie_db::{
     LegacyKeyAdapter, PackedAccountsTrie, PackedKeyAdapter, PackedStoragesTrie,
 };
 use std::{sync::Arc, time::Instant};
-use tracing::instrument;
+use tracing::{debug, instrument};
 
 /// Metrics for overlay state provider factory operations.
 #[derive(Clone, Metrics)]
@@ -108,6 +110,46 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
             };
 
         Ok(overlay)
+    }
+}
+
+impl<F, N> OverlayStateProviderFactory<F, N>
+where
+    N: NodePrimitives,
+    F: DatabaseProviderFactory,
+    F::Provider: BlockNumReader
+        + StageCheckpointReader
+        + PruneCheckpointReader
+        + IntoLatestStateProvider
+        + TryIntoHistoricalStateProvider,
+{
+    /// Creates a [`reth_storage_api::StateProvider`] for this factory's parent block by layering
+    /// the in-memory parent chain on top of the latest or historical database state.
+    #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
+    pub fn state_provider(&self) -> ProviderResult<StateProviderBox> {
+        let provider = self.factory.database_provider_ro()?;
+        let anchor = self.overlay_builder.anchor_at_parent(&provider)?;
+        let (provider, overlay): (StateProviderBox, _) = match anchor {
+            AnchorForParent::NoReverts { anchor, overlay } => {
+                debug!(
+                    target: "providers::state::overlay",
+                    parent_hash = %self.overlay_builder.parent_hash(),
+                    ?anchor,
+                    "creating state provider from latest state"
+                );
+                (provider.into_latest(), overlay)
+            }
+            AnchorForParent::RevertsRequired { anchor, overlay, .. } => {
+                debug!(
+                    target: "providers::state::overlay",
+                    parent_hash = %self.overlay_builder.parent_hash(),
+                    ?anchor,
+                    "creating state provider from historical state"
+                );
+                (provider.try_into_history_at_block(anchor.number)?, overlay)
+            }
+        };
+        Ok(Box::new(MemoryOverlayStateProvider::new(provider, overlay)))
     }
 }
 

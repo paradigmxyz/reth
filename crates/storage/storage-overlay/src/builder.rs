@@ -89,6 +89,11 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         }
     }
 
+    /// Returns the parent hash this builder targets.
+    pub const fn parent_hash(&self) -> B256 {
+        self.parent_hash
+    }
+
     /// Set the overlay source.
     ///
     /// This overlay will be applied on top of any reverts.

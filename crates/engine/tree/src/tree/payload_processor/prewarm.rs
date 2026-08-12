@@ -15,7 +15,7 @@ use super::{bal_prewarm_pool::BalPrewarmPool, StateRootHintStream, StateRootUpda
 use crate::tree::{
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
-    PayloadExecutionCache, SavedCache, StateProviderBuilder,
+    PayloadExecutionCache, SavedCache,
 };
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
@@ -28,10 +28,11 @@ use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     AccountReader, BlockExecutionOutput, BlockNumReader, DatabaseProviderFactory,
-    PruneCheckpointReader, StageCheckpointReader, StorageSettingsCache,
+    IntoLatestStateProvider, PruneCheckpointReader, StageCheckpointReader,
     TryIntoHistoricalStateProvider,
 };
 use reth_revm::database::StateProviderDatabase;
+use reth_storage_overlay::OverlayStateProviderFactory;
 use reth_tasks::{pool::WorkerPool, Runtime};
 use reth_trie_common::MultiProofTargetsV2;
 use std::sync::{
@@ -96,7 +97,7 @@ where
     P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
-        + StorageSettingsCache
+        + IntoLatestStateProvider
         + TryIntoHistoricalStateProvider
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
@@ -418,8 +419,8 @@ where
             // This runs side-by-side with the parallel transaction execution reducing the time it
             // spends blocking on the data.
             let caches = saved_cache.cache().clone();
-            let provider_builder = ctx.provider.clone();
-            let build = Arc::new(move || provider_builder.build());
+            let overlay_factory = ctx.provider.clone();
+            let build = Arc::new(move || overlay_factory.state_provider());
 
             pool.begin_block(build, caches, ctx.env.txpool_snapshot.clone());
             for account in prefetch_bal.as_bal() {
@@ -533,7 +534,7 @@ where
     /// The saved cache.
     pub saved_cache: Option<SavedCache>,
     /// Provider to obtain the state
-    pub provider: StateProviderBuilder<N, P>,
+    pub provider: OverlayStateProviderFactory<P, N>,
     /// Dedicated blocking pool for warming the BAL read-set. `Some` only on the BAL parallel
     /// execution path; the pool is owned by the [`PayloadProcessor`](super::PayloadProcessor).
     pub(crate) bal_prewarm_pool: Option<Arc<BalPrewarmPool>>,
@@ -573,7 +574,7 @@ where
     P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
-        + StorageSettingsCache
+        + IntoLatestStateProvider
         + TryIntoHistoricalStateProvider
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
@@ -581,7 +582,7 @@ where
     /// Creates a per-thread EVM for prewarming.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn evm_for_ctx(&self) -> PrewarmEvmState<Evm> {
-        let mut state_provider = match self.provider.build() {
+        let mut state_provider = match self.provider.state_provider() {
             Ok(provider) => provider,
             Err(err) => {
                 trace!(
@@ -701,7 +702,7 @@ where
                 )
                 .entered();
 
-                let inner = match self.provider.build() {
+                let inner = match self.provider.state_provider() {
                     Ok(p) => p,
                     Err(err) => {
                         warn!(

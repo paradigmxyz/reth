@@ -62,9 +62,10 @@ use reth_prune_types::{
 use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, BlockBodyReader, MetadataProvider, MetadataWriter,
-    NodePrimitivesProvider, StateProvider, StateReader, StateWriteConfig, StorageChangeSetReader,
-    StoragePath, StorageSettingsCache, TryIntoHistoricalStateProvider, WriteStateInput,
+    BlockBodyIndicesProvider, BlockBodyReader, IntoLatestStateProvider, MetadataProvider,
+    MetadataWriter, NodePrimitivesProvider, StateProvider, StateReader, StateWriteConfig,
+    StorageChangeSetReader, StoragePath, StorageSettingsCache, TryIntoHistoricalStateProvider,
+    WriteStateInput,
 };
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_storage_overlay::OverlayManager;
@@ -1051,6 +1052,12 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
         }
 
         Ok(Box::new(state_provider))
+    }
+}
+
+impl<TX: DbTx + 'static, N: NodeTypes> IntoLatestStateProvider for DatabaseProvider<TX, N> {
+    fn into_latest(self) -> StateProviderBox {
+        Box::new(LatestStateProvider::new(self))
     }
 }
 
