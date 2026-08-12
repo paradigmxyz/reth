@@ -180,26 +180,28 @@ where
 
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
-                for (index, tx) in block.transactions_recovered().enumerate() {
-                    let tx_hash = *tx.tx_hash();
-                    let tx_env = eth_api.evm_config().tx_env(tx);
-                    let mut inspector = match DebugInspector::new(opts.clone()) {
-                        Ok(inspector) => inspector,
-                        Err(err) => {
+                let block_env = evm_env.block_env.clone();
+                let mut transactions = block.transactions_recovered().enumerate().peekable();
+                let inspector = match DebugInspector::new(opts) {
+                    Ok(inspector) => inspector,
+                    Err(err) => {
+                        if let Some((_, tx)) = transactions.peek() {
                             results.push(Some(TraceResult::Error {
                                 error: err.to_string(),
-                                tx_hash: Some(tx_hash),
+                                tx_hash: Some(*tx.tx_hash()),
                             }));
-                            break
                         }
-                    };
+                        results.resize(tx_count, None);
+                        return Ok(results)
+                    }
+                };
+                let mut evm =
+                    eth_api.evm_config().evm_with_env_and_inspector(&mut db, evm_env, inspector);
 
-                    let res = match eth_api.inspect(
-                        &mut db,
-                        evm_env.clone(),
-                        tx_env.clone(),
-                        &mut inspector,
-                    ) {
+                while let Some((index, tx)) = transactions.next() {
+                    let tx_hash = *tx.tx_hash();
+                    let tx_env = eth_api.evm_config().tx_env(tx);
+                    let res = match evm.transact(tx_env.clone()) {
                         Ok(res) => res,
                         Err(err) => {
                             results.push(Some(TraceResult::Error {
@@ -209,6 +211,8 @@ where
                             break
                         }
                     };
+
+                    let (db, inspector, _) = evm.components_mut();
                     let result = match inspector.get_result(
                         Some(TransactionContext {
                             block_hash: Some(block.hash()),
@@ -216,9 +220,9 @@ where
                             tx_index: Some(index),
                         }),
                         &tx_env,
-                        &evm_env.block_env,
+                        &block_env,
                         &res,
-                        &mut db,
+                        db,
                     ) {
                         Ok(result) => result,
                         Err(err) => {
@@ -231,7 +235,16 @@ where
                     };
 
                     results.push(Some(TraceResult::Success { result, tx_hash: Some(tx_hash) }));
-                    db.commit(res.state);
+                    if let Some((_, next_tx)) = transactions.peek() {
+                        if let Err(err) = inspector.fuse() {
+                            results.push(Some(TraceResult::Error {
+                                error: err.to_string(),
+                                tx_hash: Some(*next_tx.tx_hash()),
+                            }));
+                            break
+                        }
+                        db.commit(res.state);
+                    }
                 }
 
                 results.resize(tx_count, None);
