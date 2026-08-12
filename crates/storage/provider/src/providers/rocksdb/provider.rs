@@ -29,7 +29,7 @@ use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, CompactionPri, DBCompressionType,
     DBRawIteratorWithThreadMode, IteratorMode, OptimisticTransactionDB,
     OptimisticTransactionOptions, Options, SnapshotWithThreadMode, Transaction,
-    WriteBatchWithTransaction, WriteBufferManager, WriteOptions, DB,
+    WriteBatchWithTransaction, WriteBufferManager, WriteOptions, DB, DEFAULT_COLUMN_FAMILY_NAME,
 };
 use std::{
     collections::BTreeMap,
@@ -153,6 +153,14 @@ const DEFAULT_COMPRESS_BUF_CAPACITY: usize = 4096;
 /// The consistency check on startup heals any crash that occurs between auto-commits.
 const DEFAULT_AUTO_COMMIT_THRESHOLD: usize = 512 * 1024 * 1024;
 
+/// Minimum BAL value size stored in `BlobDB` files.
+///
+/// Smaller BALs stay inline. Larger payloads avoid regular LSM value compaction.
+const DEFAULT_BAL_MIN_BLOB_SIZE: u64 = 4 * 1024;
+
+/// Target BAL blob file size.
+const DEFAULT_BAL_BLOB_FILE_SIZE: u64 = 256 * 1024 * 1024;
+
 /// Builder for [`RocksDBProvider`].
 pub struct RocksDBBuilder {
     path: PathBuf,
@@ -259,6 +267,16 @@ impl RocksDBBuilder {
         cf_options
     }
 
+    /// Creates column family options for block access list payloads.
+    fn block_access_lists_column_family_options(cache: &Cache) -> Options {
+        let mut cf_options = Self::default_column_family_options(cache);
+        cf_options.set_enable_blob_files(true);
+        cf_options.set_min_blob_size(DEFAULT_BAL_MIN_BLOB_SIZE);
+        cf_options.set_blob_file_size(DEFAULT_BAL_BLOB_FILE_SIZE);
+        cf_options.set_blob_compression_type(DBCompressionType::Lz4);
+        cf_options
+    }
+
     /// Creates optimized column family options for `TransactionHashNumbers`.
     ///
     /// This table stores `B256 -> TxNumber` mappings where:
@@ -346,18 +364,50 @@ impl RocksDBBuilder {
         let options =
             Self::default_options(self.log_level, &self.block_cache, self.enable_statistics);
 
-        let cf_descriptors: Vec<ColumnFamilyDescriptor> = self
+        let mut cf_descriptors: Vec<ColumnFamilyDescriptor> = self
             .column_families
             .iter()
             .map(|name| {
                 let cf_options = if name == tables::TransactionHashNumbers::NAME {
                     Self::tx_hash_numbers_column_family_options(&self.block_cache)
+                } else if name == tables::BlockAccessLists::NAME {
+                    Self::block_access_lists_column_family_options(&self.block_cache)
                 } else {
                     Self::default_column_family_options(&self.block_cache)
                 };
                 ColumnFamilyDescriptor::new(name.clone(), cf_options)
             })
             .collect();
+
+        // RocksDB requires every existing column family to be opened. Preserve column families
+        // unknown to this configuration so databases remain openable after a downgrade.
+        if RocksDBProvider::exists(&self.path) {
+            let existing_column_families = DB::list_cf(&options, &self.path).map_err(|e| {
+                ProviderError::Database(DatabaseError::Open(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))
+            })?;
+            let unknown_column_families: Vec<String> = existing_column_families
+                .into_iter()
+                .filter(|name| {
+                    name != DEFAULT_COLUMN_FAMILY_NAME && !self.column_families.contains(name)
+                })
+                .collect();
+            if !unknown_column_families.is_empty() {
+                tracing::debug!(
+                    target: "providers::rocksdb",
+                    column_families = ?unknown_column_families,
+                    "Preserving unknown column families"
+                );
+                cf_descriptors.extend(unknown_column_families.into_iter().map(|name| {
+                    ColumnFamilyDescriptor::new(
+                        name,
+                        Self::default_column_family_options(&self.block_cache),
+                    )
+                }));
+            }
+        }
 
         let metrics = self.enable_metrics.then(RocksDBMetrics::default);
 
@@ -1101,6 +1151,18 @@ impl RocksDBProvider {
         let cf = self.get_cf_handle::<T>()?;
         let iter = self.0.iterator_cf(cf, IteratorMode::Start);
         Ok(RocksDBRawIter { inner: iter })
+    }
+
+    /// Creates a raw key iterator positioned at `key`.
+    pub(crate) fn raw_key_iter_from<T: Table>(
+        &self,
+        key: T::Key,
+    ) -> ProviderResult<RocksDBRawKeyIter<'_>> {
+        let cf = self.get_cf_handle::<T>()?;
+        let encoded_key = key.encode();
+        let mut iter = self.0.raw_iterator_cf(cf);
+        iter.seek(encoded_key.as_ref());
+        Ok(RocksDBRawKeyIter { inner: iter })
     }
 
     /// Returns all account history shards for the given address in ascending key order.
@@ -2730,6 +2792,39 @@ impl Iterator for RocksDBRawIter<'_> {
     }
 }
 
+/// Raw key iterator over a `RocksDB` table (non-transactional).
+pub(crate) struct RocksDBRawKeyIter<'db> {
+    inner: RocksDBRawIterEnum<'db>,
+}
+
+impl fmt::Debug for RocksDBRawKeyIter<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RocksDBRawKeyIter").finish_non_exhaustive()
+    }
+}
+
+impl Iterator for RocksDBRawKeyIter<'_> {
+    type Item = ProviderResult<Box<[u8]>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if !self.inner.valid() {
+            return self.inner.status().err().map(|e| {
+                Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                })))
+            })
+        }
+
+        let Some(key) = self.inner.key() else {
+            return Some(Err(ProviderError::Database(DatabaseError::Decode)))
+        };
+        let key = Box::from(key);
+        self.inner.next();
+        Some(Ok(key))
+    }
+}
+
 /// Iterator over a `RocksDB` table within a transaction.
 ///
 /// Yields decoded `(Key, Value)` pairs. Sees uncommitted writes.
@@ -2788,7 +2883,7 @@ const fn convert_log_level(level: LogLevel) -> rocksdb::LogLevel {
 mod tests {
     use super::*;
     use crate::providers::HistoryInfo;
-    use alloy_primitives::{Address, TxHash, B256};
+    use alloy_primitives::{Address, Bytes, TxHash, B256};
     use reth_db_api::{
         models::{
             sharded_key::{ShardedKey, NUM_OF_INDICES_IN_SHARD},
@@ -2822,6 +2917,38 @@ mod tests {
         let key = StorageShardedKey::new(Address::ZERO, B256::ZERO, 100);
         provider.put::<tables::StoragesHistory>(key.clone(), &value).unwrap();
         assert!(provider.get::<tables::StoragesHistory>(key).unwrap().is_some());
+
+        drop(provider);
+
+        let column_families = DB::list_cf(&Options::default(), temp_dir.path()).unwrap();
+        assert!(!column_families.iter().any(|name| name == tables::BlockAccessLists::NAME));
+        assert!(!column_families
+            .iter()
+            .any(|name| name == tables::BlockAccessListBlockNumbers::NAME));
+    }
+
+    #[test]
+    fn block_access_lists_store_large_payloads_in_blob_files() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path())
+            .with_table::<tables::BlockAccessLists>()
+            .build()
+            .unwrap();
+        let bal_key =
+            reth_db_api::models::StoredBlockAccessListKey::new(1, B256::with_last_byte(1));
+        let bal_value = reth_db_api::models::StoredBlockAccessList::new(Bytes::from(vec![
+            0;
+            DEFAULT_BAL_MIN_BLOB_SIZE as usize +
+                1
+        ]));
+
+        provider.put::<tables::BlockAccessLists>(bal_key, &bal_value).unwrap();
+        provider.flush(&[tables::BlockAccessLists::NAME]).unwrap();
+
+        let has_blob_file = std::fs::read_dir(temp_dir.path()).unwrap().any(|entry| {
+            entry.unwrap().path().extension().is_some_and(|extension| extension == "blob")
+        });
+        assert!(has_blob_file);
     }
 
     #[derive(Debug)]
@@ -2832,6 +2959,55 @@ mod tests {
         const DUPSORT: bool = false;
         type Key = u64;
         type Value = Vec<u8>;
+    }
+
+    #[test]
+    fn test_reopens_with_unknown_column_family() {
+        let temp_dir = TempDir::new().unwrap();
+        let value = b"test_value".to_vec();
+
+        let provider = RocksDBBuilder::new(temp_dir.path())
+            .with_default_tables()
+            .with_table::<TestTable>()
+            .build()
+            .unwrap();
+        provider.put::<TestTable>(42, &value).unwrap();
+        drop(provider);
+
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        assert_eq!(provider.get::<TestTable>(42).unwrap(), Some(value));
+    }
+
+    #[test]
+    fn test_reopens_blob_column_family_with_legacy_table_set() {
+        let temp_dir = TempDir::new().unwrap();
+        let bal_key =
+            reth_db_api::models::StoredBlockAccessListKey::new(1, B256::with_last_byte(1));
+        let bal_value = reth_db_api::models::StoredBlockAccessList::new(Bytes::from(vec![
+            0;
+            DEFAULT_BAL_MIN_BLOB_SIZE as usize +
+                1
+        ]));
+
+        let provider = RocksDBBuilder::new(temp_dir.path())
+            .with_default_tables()
+            .with_table::<tables::BlockAccessLists>()
+            .with_table::<tables::BlockAccessListBlockNumbers>()
+            .build()
+            .unwrap();
+        provider.put::<tables::BlockAccessLists>(bal_key, &bal_value).unwrap();
+        provider
+            .put::<tables::BlockAccessListBlockNumbers>(bal_key.hash(), &bal_key.number())
+            .unwrap();
+        provider.flush(&[tables::BlockAccessLists::NAME]).unwrap();
+        drop(provider);
+
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        assert_eq!(provider.get::<tables::BlockAccessLists>(bal_key).unwrap(), Some(bal_value));
+        assert_eq!(
+            provider.get::<tables::BlockAccessListBlockNumbers>(bal_key.hash()).unwrap(),
+            Some(bal_key.number())
+        );
     }
 
     #[test]
