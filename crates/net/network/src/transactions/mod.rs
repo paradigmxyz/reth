@@ -1,6 +1,6 @@
 //! Transactions management for the p2p network.
 
-use alloy_consensus::transaction::TxHashRef;
+use alloy_consensus::{constants::EIP4844_TX_TYPE_ID, transaction::TxHashRef};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use smallvec::SmallVec;
 
@@ -517,8 +517,19 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             // Blob sidecar errors: penalize but do NOT cache the hash as bad.
             // The transaction may be valid — only the sidecar from this peer was wrong.
             // Using regular penalties means repeated offenders still get disconnected.
+            //
+            // Eth/72 peers are exempt: they elide blob payloads from `PooledTransactions`
+            // responses per EIP-8070 (cells are fetched separately), so a sidecar validation
+            // failure is expected rather than evidence of misbehavior.
             if let Some(peers) = peers {
                 for peer_id in peers {
+                    if self
+                        .peers
+                        .get(&peer_id)
+                        .is_some_and(|peer| peer.version() == EthVersion::Eth72)
+                    {
+                        continue
+                    }
                     self.report_peer_bad_transactions(peer_id);
                 }
             }
@@ -2058,7 +2069,12 @@ impl PooledTransactionsHashesBuilder {
             Self::Eth72(msg) => {
                 msg.hashes.push(*pooled_tx.hash());
                 msg.sizes.push(pooled_tx.encoded_length());
-                msg.types.push(pooled_tx.transaction.ty());
+                let ty = pooled_tx.transaction.ty();
+                msg.types.push(ty);
+                if ty == EIP4844_TX_TYPE_ID {
+                    // The pool holds the full sidecar, so every cell can be served.
+                    msg.cell_mask = Some(NewPooledTransactionHashes72::ALL_CELLS_MASK);
+                }
             }
         }
     }
@@ -2099,7 +2115,12 @@ impl PooledTransactionsHashesBuilder {
             Self::Eth72(msg) => {
                 msg.hashes.push(*tx.tx_hash());
                 msg.sizes.push(tx.propagation_size());
-                msg.types.push(tx.tx_type());
+                let ty = tx.tx_type();
+                msg.types.push(ty);
+                if ty == EIP4844_TX_TYPE_ID {
+                    // The pool holds the full sidecar, so every cell can be served.
+                    msg.cell_mask = Some(NewPooledTransactionHashes72::ALL_CELLS_MASK);
+                }
             }
         }
     }
@@ -3331,6 +3352,31 @@ mod tests {
             PropagationMode::Basic,
         );
         assert!(propagated.is_empty());
+    }
+
+    #[test]
+    fn test_eth72_hashes_builder_sets_cell_mask_for_blob_txs() {
+        let mut tx_gen = TransactionGenerator::new(rand::rng());
+
+        // no blob transactions: the mask stays unset and encodes as a zero mask
+        let mut builder = PooledTransactionsHashesBuilder::new(EthVersion::Eth72);
+        builder.push(&PropagateTransaction::pool_tx(valid_eth_pool_transaction(
+            tx_gen.gen_eip1559_pooled(),
+        )));
+        let msg = builder.build();
+        assert_eq!(msg.as_eth72().unwrap().cell_mask, None);
+
+        // announcing a blob transaction advertises every cell as available
+        let mut builder = PooledTransactionsHashesBuilder::new(EthVersion::Eth72);
+        builder.push(&PropagateTransaction::pool_tx(valid_eth_pool_transaction(
+            tx_gen.gen_eip1559_pooled(),
+        )));
+        builder.push_pooled(valid_eth_pool_transaction(tx_gen.gen_eip4844_pooled()));
+        let msg = builder.build();
+        assert_eq!(
+            msg.as_eth72().unwrap().cell_mask,
+            Some(NewPooledTransactionHashes72::ALL_CELLS_MASK)
+        );
     }
 
     #[tokio::test]
