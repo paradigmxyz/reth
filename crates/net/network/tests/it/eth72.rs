@@ -198,8 +198,8 @@ async fn test_eth72_blob_announcements_and_elided_pooled_response() {
         .await
         .unwrap();
 
-    // The import fails because the blob payloads are missing (cell fetching is not implemented
-    // yet), but the eth/72 peer served a spec compliant response and must not be penalized.
+    // The blob-elided body is dropped before the pool import (cell fetching is not implemented
+    // yet), and the eth/72 peer served a spec compliant response so it must not be penalized.
     tokio::time::sleep(Duration::from_secs(1)).await;
 
     assert!(!node_pool.contains(&blob_tx_hash));
