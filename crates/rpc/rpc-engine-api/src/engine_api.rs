@@ -395,7 +395,7 @@ where
         custody_columns: Option<B128>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         if let Some(custody_columns) = custody_columns {
-            self.inner.cell_custody.set(custody_columns);
+            self.inner.cell_custody.set_from_engine_api(custody_columns);
         }
         self.validate_and_execute_forkchoice(EngineApiMessageVersion::V4, state, payload_attrs)
             .await
@@ -817,7 +817,7 @@ where
         }
 
         let (tx, rx) = oneshot::channel();
-        let bal_store = self.inner.provider.bal_store().clone();
+        let inner = self.inner.clone();
 
         self.inner.task_spawner.spawn_blocking_task(async move {
             if tx.is_closed() {
@@ -825,8 +825,9 @@ where
             }
 
             tx.send(
-                bal_store
-                    .get_by_hashes(&hashes)
+                inner
+                    .provider
+                    .get_bals_by_hashes(&hashes)
                     .map_err(|err| EngineApiError::Internal(Box::new(err))),
             )
             .ok();
@@ -1064,6 +1065,9 @@ where
         versioned_hashes: Vec<B256>,
         indices_bitarray: B128,
     ) -> EngineApiResult<Option<Vec<Option<BlobCellsAndProofsV1>>>> {
+        // Engine API bitvectors are little-endian, while B128 integer conversions are
+        // big-endian. The transaction pool uses the latter representation as a numeric cell mask.
+        let indices_bitarray = B128::from(u128::from_le_bytes(indices_bitarray.into()));
         let current_timestamp =
             SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_secs();
         if !self.inner.chain_spec.is_amsterdam_active_at_timestamp(current_timestamp) {
@@ -1993,8 +1997,24 @@ mod tests {
             TestNetworkInfo { syncing: true },
         );
 
-        let res = api.get_blobs_v4_metered(vec![B256::ZERO], B128::from(1u128));
+        let res = api.get_blobs_v4_metered(vec![B256::ZERO], B128::from(1u128.to_le_bytes()));
         assert_matches!(res, Ok(None));
+    }
+
+    #[test]
+    fn engine_bitvector_uses_little_endian_cell_indices() {
+        assert_eq!(
+            B128::from(u128::from_le_bytes(B128::from(1u128.to_le_bytes()).into())),
+            B128::from(1u128)
+        );
+        assert_eq!(
+            B128::from(u128::from_le_bytes(B128::from((1u128 << 127).to_le_bytes()).into())),
+            B128::from(1u128 << 127)
+        );
+        assert_eq!(
+            B128::from(u128::from_le_bytes(B128::from(((1u128 << 64) - 1).to_le_bytes()).into(),)),
+            B128::from((1u128 << 64) - 1)
+        );
     }
 
     #[tokio::test]
@@ -2031,7 +2051,8 @@ mod tests {
             safe_block_hash: B256::ZERO,
             finalized_block_hash: B256::ZERO,
         };
-        let custody_columns = B128::from(0b1010u128);
+        let custody_columns = B128::from(0b1010u128.to_le_bytes());
+        let expected_custody_columns = B128::from(0b1010u128);
 
         let api_task = tokio::spawn(async move {
             api.fork_choice_updated_v4(state, None, Some(custody_columns)).await
@@ -2048,7 +2069,7 @@ mod tests {
             }
             other => panic!("unexpected engine message: {other:?}"),
         };
-        assert_eq!(cell_custody.get(), custody_columns);
+        assert_eq!(cell_custody.get(), expected_custody_columns);
 
         response_tx
             .send(Ok(OnForkChoiceUpdated::valid(PayloadStatus::from_status(
@@ -2060,7 +2081,7 @@ mod tests {
             .await
             .expect("api task should not panic")
             .expect("forkchoiceUpdatedV4 should succeed");
-        assert_eq!(cell_custody.get(), custody_columns);
+        assert_eq!(cell_custody.get(), expected_custody_columns);
     }
 
     #[tokio::test]
@@ -2106,7 +2127,8 @@ mod tests {
             slot_number: None,
             target_gas_limit: None,
         };
-        let custody_columns = B128::from(0b1010u128);
+        let custody_columns = B128::from(0b1010u128.to_le_bytes());
+        let expected_custody_columns = B128::from(0b1010u128);
 
         let api_task = tokio::spawn(async move {
             api.fork_choice_updated_v4(state, Some(payload_attributes), Some(custody_columns)).await
@@ -2126,7 +2148,7 @@ mod tests {
             }
             other => panic!("unexpected engine message: {other:?}"),
         };
-        assert_eq!(cell_custody.get(), custody_columns);
+        assert_eq!(cell_custody.get(), expected_custody_columns);
 
         response_tx
             .send(Ok(OnForkChoiceUpdated::valid(PayloadStatus::from_status(

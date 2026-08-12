@@ -412,7 +412,7 @@ where
 
         let limit = GetBlockAccessListLimit::ResponseSizeSoftLimit(SOFT_RESPONSE_LIMIT);
         let access_lists =
-            self.client.bal_store().get_by_hashes_with_limit(&request.0, limit).unwrap_or_default();
+            self.client.get_bals_by_hashes_with_limit(&request.0, limit).unwrap_or_default();
         let _ = response.send(Ok(BlockAccessLists(access_lists)));
     }
 }
@@ -470,8 +470,7 @@ where
                 );
                 let block_access_lists = self
                     .client
-                    .bal_store()
-                    .get_by_hashes_with_limit(&req.block_hashes, limit)
+                    .get_bals_by_hashes_with_limit(&req.block_hashes, limit)
                     .unwrap_or_default();
                 Ok(SnapResponse::BlockAccessLists(BlockAccessListsMessage {
                     request_id: req.request_id,
