@@ -103,9 +103,6 @@ impl<'a> RangeProofVerifier<'a> {
         prefix: Nibbles,
         reference: &RlpNode,
     ) -> Result<(), RangeProofError> {
-        if prefix.len() > KEY_NIBBLES {
-            return Err(RangeProofError::PathTooLong { path: prefix })
-        }
         if let Some(hash) = reference.as_hash() {
             self.frontier.push_subtree(prefix, hash);
             return Ok(())
@@ -351,23 +348,15 @@ where
 {
     let (frontier, last_key) = ProofFrontier::from_leaves(origin, leaves)?;
 
-    // An empty trie has no subtrie for a proof to authenticate, so the reconstructed root alone
-    // settles whether the response is the empty range the root commits to.
-    if root == EMPTY_ROOT_HASH {
+    // An empty trie has no subtrie for a proof to authenticate, and a proof is omitted only when
+    // the leaves are the entire trie. In both cases the reconstructed root alone authenticates the
+    // response, since a shorter range cannot reproduce the root.
+    if root == EMPTY_ROOT_HASH || proof.is_empty() {
         let got = frontier.root()?;
         if got != root {
             return Err(RangeProofError::RootMismatch { expected: root, got })
         }
         return Ok(false)
-    }
-
-    // A proof is omitted only when the leaves are the entire trie. A shorter range cannot
-    // reconstruct the root, so a match authenticates the range without a boundary proof.
-    if proof.is_empty() {
-        let got = frontier.root()?;
-        return (got == root)
-            .then_some(false)
-            .ok_or(RangeProofError::RootMismatch { expected: root, got })
     }
 
     RangeProofVerifier::new(origin, last_key.unwrap_or(MAX_HASH), proof, frontier).verify(root)
