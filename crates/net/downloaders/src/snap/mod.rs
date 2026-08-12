@@ -23,13 +23,14 @@ const MAX_RETRIES: u8 = 2;
 
 /// Downloads and verifies one account range against its requested state root.
 ///
-/// Invalid responses penalize their peer and retry at high priority. Proof verification runs
-/// inline while polling.
+/// Invalid responses penalize their peer and retry at high priority. Proof verification runs on
+/// Tokio's blocking pool.
 #[derive(Debug)]
 pub struct AccountRangeDownloader<C: SnapClient> {
     client: C,
     request: GetAccountRangeMessage,
     fut: C::Output,
+    verification: Option<VerificationTask>,
     retries: u8,
 }
 
@@ -43,7 +44,7 @@ impl<C: SnapClient> AccountRangeDownloader<C> {
             })
         }
         let fut = client.get_account_range(request.clone());
-        Ok(Self { client, request, fut, retries: 0 })
+        Ok(Self { client, request, fut, verification: None, retries: 0 })
     }
 
     fn retry(&mut self) -> bool {
@@ -56,25 +57,29 @@ impl<C: SnapClient> AccountRangeDownloader<C> {
         true
     }
 
-    fn verify_response(
-        &self,
+    fn start_verification(
+        &mut self,
         peer_id: PeerId,
         response: SnapResponse,
-    ) -> Result<AccountRangeOutcome, RequestError> {
+    ) -> Result<Option<AccountRangeOutcome>, RequestError> {
         let response = self.account_range_response(response)?;
 
         if response.accounts.is_empty() && response.proof.is_empty() {
             return if self.request.root_hash == EMPTY_ROOT_HASH {
-                Ok(AccountRangeOutcome::Verified(VerifiedAccountRange {
+                Ok(Some(AccountRangeOutcome::Verified(VerifiedAccountRange {
                     accounts: Vec::new(),
                     has_more: false,
-                }))
+                })))
             } else {
-                Ok(AccountRangeOutcome::Unavailable { peer_id })
+                Ok(Some(AccountRangeOutcome::Unavailable { peer_id }))
             }
         }
 
-        self.verify_account_range(response).map(AccountRangeOutcome::Verified)
+        let request = self.request.clone();
+        let fut =
+            tokio::task::spawn_blocking(move || Self::verify_account_range(&request, response));
+        self.verification = Some(VerificationTask { peer_id, fut });
+        Ok(None)
     }
 
     fn account_range_response(
@@ -98,24 +103,24 @@ impl<C: SnapClient> AccountRangeDownloader<C> {
     }
 
     fn verify_account_range(
-        &self,
+        request: &GetAccountRangeMessage,
         response: AccountRangeMessage,
     ) -> Result<VerifiedAccountRange, RequestError> {
-        self.validate_account_limit(&response.accounts)?;
+        Self::validate_account_limit(request.limit_hash, &response.accounts)?;
 
         let mut accounts = Self::decode_accounts(response.accounts)?;
-        let next = self.verify_proof(&accounts, &response.proof)?;
+        let next = Self::verify_proof(request, &accounts, &response.proof)?;
 
         // Authenticate the boundary account before removing it from the requested range.
-        accounts.truncate(accounts.partition_point(|(hash, _)| *hash <= self.request.limit_hash));
-        let has_more = next.is_some_and(|next| next <= self.request.limit_hash);
+        accounts.truncate(accounts.partition_point(|(hash, _)| *hash <= request.limit_hash));
+        let has_more = next.is_some_and(|next| next <= request.limit_hash);
 
         Ok(VerifiedAccountRange { accounts, has_more })
     }
 
-    fn validate_account_limit(&self, accounts: &[AccountData]) -> Result<(), RequestError> {
+    fn validate_account_limit(limit: B256, accounts: &[AccountData]) -> Result<(), RequestError> {
         // Only the first account past the limit is needed to prove the interval is complete.
-        if accounts.iter().filter(|data| data.hash > self.request.limit_hash).nth(1).is_some() {
+        if accounts.iter().filter(|data| data.hash > limit).nth(1).is_some() {
             debug!(target: "downloaders::snap", "Account range runs past the requested limit");
             return Err(RequestError::BadResponse)
         }
@@ -123,16 +128,17 @@ impl<C: SnapClient> AccountRangeDownloader<C> {
     }
 
     fn verify_proof(
-        &self,
+        request: &GetAccountRangeMessage,
         accounts: &[(B256, TrieAccount)],
         proof: &[alloy_primitives::Bytes],
     ) -> Result<Option<B256>, RequestError> {
         let leaves = accounts.iter().map(|(hash, account)| (*hash, alloy_rlp::encode(account)));
-        verify_range_proof(self.request.root_hash, self.request.starting_hash, leaves, proof)
-            .map_err(|error| {
+        verify_range_proof(request.root_hash, request.starting_hash, leaves, proof).map_err(
+            |error| {
                 debug!(target: "downloaders::snap", %error, "Invalid account range proof");
                 RequestError::BadResponse
-            })
+            },
+        )
     }
 
     fn decode_accounts(data: Vec<AccountData>) -> Result<Vec<(B256, TrieAccount)>, RequestError> {
@@ -155,8 +161,8 @@ impl<C: SnapClient> AccountRangeDownloader<C> {
         match response {
             Ok(response) => {
                 let (peer_id, response) = response.split();
-                match self.verify_response(peer_id, response) {
-                    Ok(outcome) => Ok(Some(outcome)),
+                match self.start_verification(peer_id, response) {
+                    Ok(outcome) => Ok(outcome),
                     Err(error) => {
                         debug!(target: "downloaders::snap", ?peer_id, %error, "Invalid account range response");
                         self.client.report_bad_message(peer_id);
@@ -172,6 +178,29 @@ impl<C: SnapClient> AccountRangeDownloader<C> {
             Err(error) => Err(error),
         }
     }
+
+    fn poll_verification(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Option<AccountRangeOutcome>, RequestError>> {
+        let verification = self.verification.as_mut().expect("verification task is present");
+        let result = ready!(verification.fut.poll_unpin(cx));
+        let peer_id = verification.peer_id;
+        self.verification = None;
+
+        match result {
+            Ok(Ok(range)) => Poll::Ready(Ok(Some(AccountRangeOutcome::Verified(range)))),
+            Ok(Err(error)) => {
+                debug!(target: "downloaders::snap", ?peer_id, %error, "Invalid account range response");
+                self.client.report_bad_message(peer_id);
+                Poll::Ready(self.retry().then_some(None).ok_or(error))
+            }
+            Err(error) => {
+                debug!(target: "downloaders::snap", %error, "Account range verification task failed");
+                Poll::Ready(Err(RequestError::ChannelClosed))
+            }
+        }
+    }
 }
 
 impl<C> Future for AccountRangeDownloader<C>
@@ -184,6 +213,14 @@ where
         let this = self.get_mut();
 
         loop {
+            if this.verification.is_some() {
+                match ready!(this.poll_verification(cx)) {
+                    Ok(Some(outcome)) => return Poll::Ready(Ok(outcome)),
+                    Ok(None) => {}
+                    Err(error) => return Poll::Ready(Err(error)),
+                }
+            }
+
             let response = ready!(this.fut.poll_unpin(cx));
             match this.handle_response(response) {
                 Ok(Some(outcome)) => return Poll::Ready(Ok(outcome)),
@@ -221,6 +258,12 @@ pub struct VerifiedAccountRange {
 pub struct InvalidAccountRange {
     origin: B256,
     limit: B256,
+}
+
+#[derive(Debug)]
+struct VerificationTask {
+    peer_id: PeerId,
+    fut: tokio::task::JoinHandle<Result<VerifiedAccountRange, RequestError>>,
 }
 
 #[cfg(test)]
