@@ -351,6 +351,10 @@ impl<S> P2PStream<S> {
         limits: ProtocolIngressLimits,
     ) {
         let Some(max_frame_bytes) = limits.max_frame_bytes() else { return };
+        if capability.num_messages() == 0 {
+            return
+        }
+
         let start = capability.message_id_offset();
         let end = u16::from(start) + u16::from(capability.num_messages());
         let configured = InboundProtocolLimit {
@@ -360,8 +364,10 @@ impl<S> P2PStream<S> {
             max_frame_bytes,
         };
 
-        if let Some(current) =
-            self.inbound_protocol_limits.iter_mut().find(|current| current.start == start)
+        if let Some(current) = self
+            .inbound_protocol_limits
+            .iter_mut()
+            .find(|current| current.capability == configured.capability)
         {
             *current = configured;
         } else {
@@ -1052,6 +1058,40 @@ mod tests {
                 message_size: 5,
                 max_size: 4,
             } if capability == cap
+        ));
+    }
+
+    #[tokio::test]
+    async fn zero_message_protocol_does_not_replace_neighboring_frame_limit() {
+        let zero = Capability::new_static("aaa", 1);
+        let limited = Capability::new_static("bbb", 1);
+        let shared_capabilities = SharedCapabilities::try_new(
+            vec![Protocol::new(zero.clone(), 0), Protocol::new(limited.clone(), 1)],
+            vec![zero.clone(), limited.clone()],
+        )
+        .unwrap();
+        let zero_shared = shared_capabilities.find(&zero).unwrap().clone();
+        let limited_shared = shared_capabilities.find(&limited).unwrap().clone();
+        assert_eq!(zero_shared.message_id_offset(), limited_shared.message_id_offset());
+
+        let mut encoder = snap::raw::Encoder::new();
+        let mut scratch = Vec::new();
+        let oversized =
+            compress_frame(&mut encoder, &mut scratch, limited_shared.message_id_offset(), &[0; 4])
+                .unwrap();
+        let transport =
+            InboundTransport { incoming: VecDeque::from([BytesMut::from(oversized.as_ref())]) };
+        let mut stream = P2PStream::new(transport, shared_capabilities);
+        stream.set_protocol_ingress_limits(&limited_shared, ProtocolIngressLimits::new(4));
+        stream.set_protocol_ingress_limits(&zero_shared, ProtocolIngressLimits::new(1));
+
+        assert!(matches!(
+            stream.next().await.unwrap().unwrap_err(),
+            P2PStreamError::SubprotocolMessageTooBig {
+                capability,
+                message_size: 5,
+                max_size: 4,
+            } if capability == limited
         ));
     }
 
