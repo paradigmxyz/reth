@@ -1,8 +1,10 @@
 use crate::utils::{eth_payload_attributes, eth_payload_attributes_amsterdam};
-use alloy_eips::{eip2718::Encodable2718, eip7910::EthConfig};
+use alloy_eips::{eip2718::Encodable2718, eip7910::EthConfig, BlockNumberOrTag};
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, Bytes, B256, U256};
-use alloy_provider::{network::EthereumWallet, Provider, ProviderBuilder, SendableTx};
+use alloy_provider::{
+    ext::DebugApi, network::EthereumWallet, Provider, ProviderBuilder, SendableTx,
+};
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
     BuilderBlockValidationRequestV6, SignedBidSubmissionV3, SignedBidSubmissionV4,
@@ -13,6 +15,7 @@ use alloy_rpc_types_engine::{
     ExecutionPayloadV3, PraguePayloadFields,
 };
 use alloy_rpc_types_eth::TransactionRequest;
+use alloy_rpc_types_trace::geth::GethDebugTracingOptions;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::{ChainSpecBuilder, EthChainSpec, MAINNET};
 use reth_e2e_test_utils::setup_engine;
@@ -132,6 +135,73 @@ async fn test_fee_history() -> eyre::Result<()> {
             prev_header = header;
         }
     }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_debug_trace_chain() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .cancun_activated()
+            .build(),
+    );
+
+    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
+        1,
+        chain_spec.clone(),
+        false,
+        Default::default(),
+        eth_payload_attributes,
+    )
+    .await?;
+    let mut node = nodes.pop().unwrap();
+    let provider = ProviderBuilder::new()
+        .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
+        .connect_http(node.rpc_url());
+
+    // Produce 3 blocks, each containing a contract-deploy tx that executes opcodes to trace.
+    for _ in 0..3 {
+        let _ = GasWaster::deploy_builder(&provider, U256::from(5)).send().await?;
+        node.advance_block().await?;
+    }
+    assert_eq!(provider.get_block_number().await?, 3);
+
+    // `debug_traceChain` over the range `(0, 3]` must return exactly one entry per block: 1, 2, 3.
+    let chain_traces = provider
+        .debug_trace_chain(BlockNumberOrTag::Number(0), BlockNumberOrTag::Number(3))
+        .await?;
+    assert_eq!(chain_traces.len(), 3, "expected one BlockTraceResult per block in (0, 3]");
+
+    // Oracle check: each block's traces from `debug_traceChain` must exactly match the traces from
+    // the already-correct per-block `debug_traceBlockByNumber` (same tracer, same block and state).
+    // This proves the range iteration and result assembly are correct without re-deriving traces.
+    for (idx, block_result) in chain_traces.iter().enumerate() {
+        let number = idx as u64 + 1;
+        assert_eq!(block_result.block, U256::from(number), "wrong block number in result");
+
+        let block = provider.get_block_by_number(number.into()).await?.unwrap();
+        assert_eq!(block_result.hash, block.header.hash, "wrong block hash in result");
+
+        let expected = provider
+            .debug_trace_block_by_number(number.into(), GethDebugTracingOptions::default())
+            .await?;
+        assert_eq!(
+            serde_json::to_value(&block_result.traces)?,
+            serde_json::to_value(&expected)?,
+            "debug_traceChain traces differ from debug_traceBlockByNumber for block {number}"
+        );
+    }
+
+    // A degenerate range where `start >= end` must yield an empty result (geth-compatible).
+    let empty = provider
+        .debug_trace_chain(BlockNumberOrTag::Number(3), BlockNumberOrTag::Number(3))
+        .await?;
+    assert!(empty.is_empty(), "start >= end must produce an empty result");
 
     Ok(())
 }
