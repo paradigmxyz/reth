@@ -79,6 +79,7 @@ impl<N: NodePrimitives> FullConsensus<N> for NoopConsensus {
         _result: &BlockExecutionResult<N::Receipt>,
         _receipt_root_bloom: Option<ReceiptRootBloom>,
         _block_access_list_hash: Option<B256>,
+        _wam_root: Option<B256>,
     ) -> Result<(), ConsensusError> {
         Ok(())
     }

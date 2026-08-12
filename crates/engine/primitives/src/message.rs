@@ -88,7 +88,9 @@ impl OnForkChoiceUpdated {
     pub fn too_deep_reorg() -> Self {
         Self {
             forkchoice_status: ForkchoiceStatus::Invalid,
-            fut: Either::Left(futures::future::ready(Err(ForkchoiceUpdateError::TooDeepReorg))),
+            // The branch's custom Alloy RPC types do not expose a dedicated error variant for
+            // this condition; it is still rejected as an invalid forkchoice state.
+            fut: Either::Left(futures::future::ready(Err(ForkchoiceUpdateError::InvalidState))),
         }
     }
 

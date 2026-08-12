@@ -102,11 +102,13 @@ use crate::tree::{
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     txpool_prewarm,
     types::{InsertPayloadResult, ValidationOutput},
+    warm_access::WarmAccessSnapshot,
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};
+use alloy_eip8289::{CommittedWarmAccessMultiset, WamItems, WarmAccessMultiset, WARMING_WINDOW};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::{
@@ -123,7 +125,7 @@ use crate::tree::{
         StateRootUpdateStream,
     },
 };
-use alloy_consensus::constants::KECCAK_EMPTY;
+use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader};
 use alloy_primitives::Address;
 use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats};
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
@@ -142,11 +144,11 @@ use reth_payload_primitives::{
     PayloadTypes,
 };
 use reth_primitives_traits::{
-    AlloyBlockHeader, BlockBody, BlockTy, FastInstant as Instant, GotExpected, NodePrimitives,
-    RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
+    BlockBody, BlockTy, FastInstant as Instant, GotExpected, NodePrimitives, RecoveredBlock,
+    SealedBlock, SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
-    BlockExecutionOutput, BlockReader, ChangeSetReader, DatabaseProviderFactory,
+    BalProvider, BlockExecutionOutput, BlockReader, ChangeSetReader, DatabaseProviderFactory,
     DatabaseProviderROFactory, ProviderError, PruneCheckpointReader, StageCheckpointReader,
     StateProvider, StateProviderBox, StateProviderFactory, StateReader, StorageChangeSetReader,
     StorageSettingsCache, TryIntoHistoricalStateProvider,
@@ -157,6 +159,7 @@ use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
     HashedPostState, KeccakKeyHasher, LazyTrieData,
 };
+use revm::primitives::hardfork::SpecId;
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -310,6 +313,7 @@ where
                           + TryIntoHistoricalStateProvider
                           + 'static,
         > + BlockReader<Header = N::BlockHeader>
+        + BalProvider
         + ChangeSetReader
         + StateProviderFactory
         + StateReader
@@ -465,7 +469,9 @@ where
             type_name = ?input.type_name(),
         )
     )]
-    pub fn validate_block_with_state<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
+    pub(crate) fn validate_block_with_state<
+        T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
+    >(
         &mut self,
         input: BlockOrPayload<T>,
         mut ctx: TreeCtx<'_, N>,
@@ -576,6 +582,28 @@ where
                 .map_err(ConsensusError::from));
         }
 
+        let is_amsterdam_active =
+            Into::<SpecId>::into(*evm_env.spec_id()).is_enabled_in(SpecId::AMSTERDAM);
+        let (warm_accesses, wam_root) = if is_amsterdam_active {
+            let parent_wam = ensure_ok!(self.warm_accesses_for_parent(input.parent_hash(), &ctx));
+            let wam_root = CommittedWarmAccessMultiset::from_wam(parent_wam.clone()).root();
+            info!(
+                target: "engine::tree::payload_validator",
+                block_hash = ?input.hash(),
+                parent_hash = ?input.parent_hash(),
+                wam = ?parent_wam,
+                ?wam_root,
+                decoded_bal = ?decoded_bal,
+                "Prepared WAM before block execution"
+            );
+            (
+                WarmAccessSnapshot::from_wam_and_bal(&parent_wam, decoded_bal.as_deref()),
+                Some(wam_root),
+            )
+        } else {
+            (WarmAccessSnapshot::default(), None)
+        };
+
         let env = ExecutionEnv {
             evm_env,
             hash: input.hash(),
@@ -585,6 +613,7 @@ where
             gas_used: input.gas_used(),
             withdrawals: input.withdrawals().map(|w| w.to_vec()),
             decoded_bal: decoded_bal.as_ref().map(Arc::clone),
+            warm_accesses,
             txpool_snapshot: txpool_snapshot.clone(),
         };
 
@@ -785,6 +814,8 @@ where
                 .ok()
         };
 
+        let wam_items =
+            is_amsterdam_active.then(|| built_bal.as_ref().map(WamItems::from_bal)).flatten();
         ensure_ok_post_block!(
             self.validate_post_execution(
                 &block,
@@ -792,7 +823,8 @@ where
                 &output,
                 &mut ctx,
                 receipt_root_bloom,
-                built_bal
+                built_bal,
+                wam_root,
             ),
             block
         );
@@ -898,7 +930,9 @@ where
         let executed_block =
             self.spawn_deferred_trie_task(Arc::new(block), output, hashed_state, trie_output);
         let raw_bal = decoded_bal.map(|decoded_bal| decoded_bal.as_raw_bal().clone());
-        Ok(ValidationOutput::new(executed_block, timing_stats).with_raw_bal(raw_bal))
+        Ok(ValidationOutput::new(executed_block, timing_stats)
+            .with_raw_bal(raw_bal)
+            .with_wam_items(wam_items))
     }
 
     /// Spawns a background task to convert a [`BlockOrPayload`] into a [`SealedBlock`] and perform
@@ -1017,9 +1051,11 @@ where
 
         let (spec_id, mut executor) = {
             let _span = debug_span!(target: "engine::tree", "create_evm").entered();
-            let spec_id = *env.evm_env.spec_id();
+            let mut evm_env = env.evm_env;
+            env.warm_accesses.apply_to_block_env(&mut evm_env.block_env);
+            let spec_id = *evm_env.spec_id();
             let evm_config = self.evm_config.clone().with_jit_support();
-            let evm = evm_config.evm_with_env(&mut db, env.evm_env);
+            let evm = evm_config.evm_with_env(&mut db, evm_env);
             let ctx = self
                 .execution_ctx_for(input)
                 .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
@@ -1107,6 +1143,89 @@ where
         Ok(parallel_execution)
     }
 
+    fn warm_accesses_for_parent(
+        &self,
+        parent_hash: B256,
+        ctx: &TreeCtx<'_, N>,
+    ) -> ProviderResult<WarmAccessMultiset> {
+        let state = ctx.state();
+        let tree_state = state.tree_state();
+        if parent_hash == tree_state.canonical_block_hash() {
+            return Ok(tree_state.warm_accesses.clone());
+        }
+
+        let parent_number = if let Some(header) = tree_state.sealed_header_by_hash(&parent_hash) {
+            header.number()
+        } else {
+            self.provider
+                .header(parent_hash)?
+                .ok_or(ProviderError::HeaderNotFound(parent_hash.into()))?
+                .number()
+        };
+
+        self.reconstruct_warm_accesses(parent_hash, parent_number, ctx)
+    }
+
+    fn reconstruct_warm_accesses(
+        &self,
+        tip_hash: B256,
+        tip_number: u64,
+        ctx: &TreeCtx<'_, N>,
+    ) -> ProviderResult<WarmAccessMultiset> {
+        let state = ctx.state();
+        let mut warm_accesses = WarmAccessMultiset::default();
+        let start = tip_number.saturating_sub(WARMING_WINDOW.saturating_sub(1));
+
+        for number in start..=tip_number {
+            let hash = if number == tip_number {
+                Some(tip_hash)
+            } else {
+                // After restart/reset, the tree can be empty; the provider fallback is the
+                // recoverable canonical history path for the warming window.
+                state.tree_state().block_hash_on_chain(tip_hash, number, |number| {
+                    self.provider.block_hash(number).ok().flatten()
+                })
+            };
+            let Some(hash) = hash else {
+                return Err(Self::missing_canonical_hash_error(number, tip_hash, tip_number))
+            };
+
+            let Some(bal) = self.provider.bal_store().get_decoded_by_hash(hash)? else {
+                if self.block_has_bal_hash(hash, ctx)? {
+                    warn!(target: "engine::tree::payload_validator", ?number, ?hash, "Expected BAL is unavailable while reconstructing WAM; skipping block");
+                }
+                continue;
+            };
+            let items = WamItems::from_accounts(bal.as_bal().as_slice());
+            warm_accesses.apply_item_transition(&items, None);
+        }
+
+        Ok(warm_accesses)
+    }
+
+    fn block_has_bal_hash(&self, hash: B256, ctx: &TreeCtx<'_, N>) -> ProviderResult<bool> {
+        let state = ctx.state();
+        if let Some(header) = state.tree_state().sealed_header_by_hash(&hash) {
+            return Ok(header.block_access_list_hash().is_some())
+        }
+
+        let canonical_head = ctx.canonical_in_memory_state().get_canonical_head();
+        if canonical_head.hash() == hash {
+            return Ok(canonical_head.block_access_list_hash().is_some())
+        }
+
+        self.provider
+            .header(hash)?
+            .ok_or(ProviderError::HeaderNotFound(hash.into()))
+            .map(|header| header.block_access_list_hash().is_some())
+    }
+
+    fn missing_canonical_hash_error(number: u64, tip_hash: B256, tip_number: u64) -> ProviderError {
+        ProviderError::other(std::io::Error::other(format!(
+            "failed to resolve canonical block #{number} while reconstructing WAM for tip #{tip_number} ({tip_hash})"
+        )))
+    }
+
     /// Executes the block on the BAL path. Mirrors the return shape of [`Self::execute_block`]
     /// so the dispatch site stays uniform.
     ///
@@ -1164,6 +1283,7 @@ where
             env.evm_env,
             ctx,
             env.transaction_count,
+            env.warm_accesses,
             handle.clone_transaction_receiver(),
             receipt_tx,
         )?;
@@ -1310,6 +1430,7 @@ where
         ctx: &mut TreeCtx<'_, N>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
         built_bal: Option<BlockAccessList>,
+        wam_root: Option<B256>,
     ) -> Result<(), InsertBlockErrorKind>
     where
         V: PayloadValidator<T, Block = N::Block>,
@@ -1330,6 +1451,7 @@ where
             output,
             receipt_root_bloom,
             block_access_list_hash,
+            wam_root,
         ) {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
@@ -1783,6 +1905,7 @@ where
                           + TryIntoHistoricalStateProvider
                           + 'static,
         > + BlockReader<Header = N::BlockHeader>
+        + BalProvider
         + StateProviderFactory
         + StateReader
         + ChangeSetReader

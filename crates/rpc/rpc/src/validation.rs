@@ -231,6 +231,7 @@ where
             &output,
             None,
             block_access_list_hash,
+            None,
         )?;
 
         self.ensure_payment(&block, &output, &message)?;

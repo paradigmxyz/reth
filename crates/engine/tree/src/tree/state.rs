@@ -1,6 +1,7 @@
 //! Functionality related to tree state.
 
 use crate::engine::EngineApiKind;
+use alloy_eip8289::{WamItem, WarmAccessMultiset, WARMING_WINDOW};
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{
     map::{B256Map, B256Set},
@@ -41,6 +42,11 @@ pub struct TreeState<N: NodePrimitives = EthPrimitives> {
     pub(crate) engine_kind: EngineApiKind,
     /// Manages state trie overlays for in-memory blocks.
     pub(crate) overlay_manager: OverlayManager<N>,
+    /// Warm accesses for the current canonical head.
+    pub warm_accesses: WarmAccessMultiset,
+    /// Number of BAL-bearing canonical blocks represented in `warm_accesses`, capped at the
+    /// warming window.
+    pub(crate) warm_access_depth: u64,
 }
 
 impl<N: NodePrimitives> TreeState<N> {
@@ -57,6 +63,8 @@ impl<N: NodePrimitives> TreeState<N> {
             parent_to_child: B256Map::default(),
             engine_kind,
             overlay_manager,
+            warm_accesses: WarmAccessMultiset::default(),
+            warm_access_depth: 0,
         }
     }
 
@@ -70,6 +78,8 @@ impl<N: NodePrimitives> TreeState<N> {
         self.blocks_by_hash.clear();
         self.blocks_by_number.clear();
         self.parent_to_child.clear();
+        self.warm_accesses = WarmAccessMultiset::default();
+        self.warm_access_depth = 0;
         self.current_canonical_head = current_canonical_head;
         self.engine_kind = engine_kind;
     }
@@ -77,6 +87,49 @@ impl<N: NodePrimitives> TreeState<N> {
     /// Returns the number of executed blocks stored.
     pub fn block_count(&self) -> usize {
         self.blocks_by_hash.len()
+    }
+
+    /// Returns the refcount for a warm account or storage slot.
+    pub fn warm_access_count(&self, item: &WamItem) -> u32 {
+        self.warm_accesses.count(item)
+    }
+
+    /// Updates the canonical head WAM.
+    pub fn set_warm_accesses(&mut self, warm_accesses: WarmAccessMultiset, depth: u64) {
+        self.warm_accesses = warm_accesses;
+        self.warm_access_depth = depth.min(WARMING_WINDOW);
+    }
+
+    /// Finds the hash at `target_number` on the chain ending at `hash`.
+    ///
+    /// The canonical fallback is used only after the in-memory walk reaches the tracked canonical
+    /// head or a block that the provider confirms is canonical at its number. Missing side-chain
+    /// ancestors return `None` instead of mixing canonical hashes into a noncanonical branch.
+    pub fn block_hash_on_chain(
+        &self,
+        mut hash: B256,
+        target_number: BlockNumber,
+        mut canonical_hash: impl FnMut(BlockNumber) -> Option<B256>,
+    ) -> Option<B256> {
+        loop {
+            if hash == self.canonical_block_hash() {
+                return canonical_hash(target_number)
+            }
+
+            let Some(block) = self.blocks_by_hash.get(&hash) else { return None };
+
+            let number = block.block_number();
+            if canonical_hash(number).is_some_and(|canonical| canonical == hash) {
+                return canonical_hash(target_number)
+            }
+            if number == target_number {
+                return Some(hash)
+            }
+            if number < target_number {
+                return None
+            }
+            hash = block.recovered_block().parent_hash();
+        }
     }
 
     /// Returns the [`ExecutedBlock`] by hash.
@@ -494,6 +547,83 @@ mod tests {
 
         assert_eq!(tree_state.blocks_by_number[&4].len(), 2);
         assert_eq!(tree_state.blocks_by_number[&5].len(), 2);
+    }
+
+    #[test]
+    fn block_hash_on_chain_uses_canonical_fallback_only_after_rejoin() {
+        let mut tree_state = TreeState::new(
+            BlockNumHash::default(),
+            EngineApiKind::Ethereum,
+            OverlayManager::default(),
+        );
+        let mut test_block_builder = TestBlockBuilder::eth();
+        let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..5).collect();
+
+        for block in &blocks {
+            tree_state.insert_executed(block.clone());
+        }
+
+        let canonical_head = blocks[1].recovered_block().num_hash();
+        tree_state.set_canonical_head(canonical_head);
+
+        let fork_block_3 = test_block_builder
+            .get_executed_block_with_number(3, blocks[1].recovered_block().hash());
+        let fork_block_4 = test_block_builder
+            .get_executed_block_with_number(4, fork_block_3.recovered_block().hash());
+
+        tree_state.insert_executed(fork_block_3.clone());
+        tree_state.insert_executed(fork_block_4.clone());
+
+        let expected = blocks[0].recovered_block().hash();
+        let canonical_block_2 = blocks[1].recovered_block().hash();
+        let actual =
+            tree_state.block_hash_on_chain(fork_block_4.recovered_block().hash(), 1, |number| {
+                match number {
+                    1 => Some(expected),
+                    2 => Some(canonical_block_2),
+                    _ => None,
+                }
+            });
+
+        assert_eq!(actual, Some(expected));
+    }
+
+    #[test]
+    fn block_hash_on_chain_rejects_missing_sidechain_ancestor() {
+        let mut tree_state = TreeState::new(
+            BlockNumHash::default(),
+            EngineApiKind::Ethereum,
+            OverlayManager::default(),
+        );
+        let mut test_block_builder = TestBlockBuilder::eth();
+        let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..3).collect();
+
+        for block in &blocks {
+            tree_state.insert_executed(block.clone());
+        }
+
+        tree_state.set_canonical_head(blocks[1].recovered_block().num_hash());
+
+        let missing_fork_block_3 = test_block_builder
+            .get_executed_block_with_number(3, blocks[1].recovered_block().hash());
+        let fork_block_4 = test_block_builder
+            .get_executed_block_with_number(4, missing_fork_block_3.recovered_block().hash());
+
+        tree_state.insert_executed(fork_block_4.clone());
+
+        let mut canonical_fallback_called = false;
+        let actual =
+            tree_state.block_hash_on_chain(fork_block_4.recovered_block().hash(), 1, |number| {
+                if number == 1 {
+                    canonical_fallback_called = true;
+                    Some(blocks[0].recovered_block().hash())
+                } else {
+                    None
+                }
+            });
+
+        assert_eq!(actual, None);
+        assert!(!canonical_fallback_called);
     }
 
     #[tokio::test]

@@ -14,6 +14,7 @@ use reth_primitives_traits::{
 /// - Compares the receipts root in the block header to the block body
 /// - Compares the gas used in the block header to the actual gas usage after execution
 /// - Compares the computed Block Access List Hash to the value in the header if Amsterdam is active
+/// - Compares the computed WAM root to the value in the header if Bogota is active
 ///
 /// If `receipt_root_bloom` is provided, the pre-computed receipt root and logs bloom are used
 /// instead of computing them from the receipts.
@@ -23,6 +24,7 @@ pub fn validate_block_post_execution<B, R, ChainSpec>(
     result: &BlockExecutionResult<R>,
     receipt_root_bloom: Option<(B256, Bloom)>,
     block_access_list_hash: Option<B256>,
+    wam_root: Option<B256>,
 ) -> Result<(), ConsensusError>
 where
     B: Block,
@@ -35,6 +37,7 @@ where
         result,
         receipt_root_bloom,
         block_access_list_hash,
+        wam_root,
         false,
     )
 }
@@ -46,6 +49,7 @@ pub(crate) fn validate_block_post_execution_with_bal_hashes<B, R, ChainSpec>(
     result: &BlockExecutionResult<R>,
     receipt_root_bloom: Option<(B256, Bloom)>,
     block_access_list_hash: Option<B256>,
+    wam_root: Option<B256>,
     allow_bal_hashes: bool,
 ) -> Result<(), ConsensusError>
 where
@@ -118,6 +122,18 @@ where
         if block_access_list_hash != block_bal_hash {
             return Err(ConsensusError::BlockAccessListHashMismatch(
                 GotExpected::new(block_access_list_hash, block_bal_hash).into(),
+            ))
+        }
+    }
+
+    if chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) &&
+        let Some(header_wam_root) = block.header().wam_root()
+    {
+        let Some(wam_root) = wam_root else { return Err(ConsensusError::WamRootMissing) };
+
+        if wam_root != header_wam_root {
+            return Err(ConsensusError::WamRootMismatch(
+                GotExpected::new(wam_root, header_wam_root).into(),
             ))
         }
     }

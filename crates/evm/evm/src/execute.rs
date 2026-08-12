@@ -170,6 +170,7 @@ pub trait Executor<DB: Database>: Sized {
 /// - `state_provider`: Access to the current state for additional lookups
 /// - `state_root`: The calculated state root after all changes
 /// - `block_access_list_hash`: Block access list hash (EIP-7928, Amsterdam)
+/// - `wam_root`: Warm-access multiset root (EIP-8289, Bogota)
 ///
 /// # Usage
 ///
@@ -216,6 +217,8 @@ pub struct BlockAssemblerInput<'a, 'b, F: BlockExecutorFactory, H = Header> {
     pub state_root: B256,
     /// Block access list hash (EIP-7928, Amsterdam).
     pub block_access_list_hash: Option<B256>,
+    /// Warm-access multiset root (EIP-8289, Bogota).
+    pub wam_root: Option<B256>,
 }
 
 impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
@@ -234,6 +237,7 @@ impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
         state_provider: &'b dyn StateProvider,
         state_root: B256,
         block_access_list_hash: Option<B256>,
+        wam_root: Option<B256>,
     ) -> Self {
         Self {
             evm_env,
@@ -245,6 +249,7 @@ impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
             state_provider,
             state_root,
             block_access_list_hash,
+            wam_root,
         }
     }
 }
@@ -384,6 +389,9 @@ pub trait BlockBuilder {
     /// Provides access to the inner [`BlockExecutor`].
     fn executor(&self) -> &Self::Executor;
 
+    /// Sets the warm-access multiset root to include in the built block header.
+    fn set_wam_root(&mut self, wam_root: Option<B256>);
+
     /// Helper to access inner [`BlockExecutor::Evm`] mutably.
     fn evm_mut(&mut self) -> &mut <Self::Executor as BlockExecutor>::Evm {
         self.executor_mut().evm_mut()
@@ -414,6 +422,8 @@ where
     pub parent: &'a SealedHeader<HeaderTy<N>>,
     /// The assembler used to build the block.
     pub assembler: Builder,
+    /// Warm-access multiset root to include in the built block header.
+    pub wam_root: Option<B256>,
 }
 
 /// Conversions for executable transactions.
@@ -536,6 +546,7 @@ where
             state_provider: &state,
             state_root,
             block_access_list_hash,
+            wam_root: self.wam_root,
         })?;
 
         let block = RecoveredBlock::new_unhashed(block, senders);
@@ -555,6 +566,10 @@ where
 
     fn executor(&self) -> &Self::Executor {
         &self.executor
+    }
+
+    fn set_wam_root(&mut self, wam_root: Option<B256>) {
+        self.wam_root = wam_root;
     }
 
     fn into_executor(self) -> Self::Executor {

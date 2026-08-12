@@ -301,6 +301,8 @@ impl TestHarness {
             parent_to_child,
             engine_kind: EngineApiKind::Ethereum,
             overlay_manager,
+            warm_accesses: Default::default(),
+            warm_access_depth: Default::default(),
         };
 
         let last_executed_block = blocks.last().unwrap().clone();
@@ -1700,7 +1702,7 @@ async fn test_fcu_with_canonical_ancestor_below_finalized_is_rejected() {
             .await
             .unwrap_err();
 
-        assert_matches!(err, ForkchoiceUpdateError::TooDeepReorg);
+        assert_matches!(err, ForkchoiceUpdateError::InvalidState);
     }
 
     // no payload build is started and the canonical head remains untouched
