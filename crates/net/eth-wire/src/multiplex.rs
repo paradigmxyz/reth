@@ -121,6 +121,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
                 shared_cap,
             },
             next_outbound: 0,
+            producer_polls_since_inbound: 0,
         })
     }
 
@@ -198,6 +199,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
                                 shared_cap,
                             },
                             next_outbound: 0,
+                            producer_polls_since_inbound: 0,
                         },
                         extra,
                     ))
@@ -635,6 +637,8 @@ pub struct RlpxSatelliteStream<St, Primary> {
     primary: PrimaryProtocol<Primary>,
     /// Round-robin cursor for the next outbound producer to poll.
     next_outbound: usize,
+    /// Number of round-robin producers polled since the last inbound frame.
+    producer_polls_since_inbound: usize,
 }
 
 impl<St, Primary> RlpxSatelliteStream<St, Primary> {
@@ -651,7 +655,11 @@ impl<St, Primary> RlpxSatelliteStream<St, Primary> {
         F: FnOnce(ProtocolConnection) -> Proto,
         Proto: Stream<Item = BytesMut> + Send + 'static,
     {
-        self.inner.install_protocol(cap, ProtocolIngressLimits::default(), f)
+        let result = self.inner.install_protocol(cap, ProtocolIngressLimits::default(), f);
+        if result.is_ok() {
+            self.producer_polls_since_inbound = 0;
+        }
+        result
     }
 
     /// Installs a new protocol with local limits for inbound messages.
@@ -665,7 +673,11 @@ impl<St, Primary> RlpxSatelliteStream<St, Primary> {
         F: FnOnce(ProtocolConnection) -> Proto,
         Proto: Stream<Item = BytesMut> + Send + 'static,
     {
-        self.inner.install_protocol(cap, limits, f)
+        let result = self.inner.install_protocol(cap, limits, f);
+        if result.is_ok() {
+            self.producer_polls_since_inbound = 0;
+        }
+        result
     }
 
     /// Returns the primary protocol.
@@ -718,6 +730,9 @@ impl<St, Primary> RlpxSatelliteStream<St, Primary> {
 
             let producer = self.next_outbound;
             self.next_outbound = (self.next_outbound + 1) % producers;
+            if self.producer_polls_since_inbound < producers {
+                self.producer_polls_since_inbound += 1;
+            }
 
             let msg = if producer == 0 {
                 match self.primary.from_primary.poll_next_unpin(cx) {
@@ -809,6 +824,16 @@ where
             }
 
             match this.poll_outbound_producers(cx) {
+                Ok(ProducerPoll::Full)
+                    if this.producer_polls_since_inbound < this.inner.protocols.len() + 1 =>
+                {
+                    // A full buffer prevents protocol streams from being polled. Pause ingress
+                    // until every consumer has had a chance to drain the previous frame.
+                    if conn_ready {
+                        cx.waker().wake_by_ref();
+                    }
+                    return Poll::Pending
+                }
                 Ok(ProducerPoll::Pending | ProducerPoll::Full) => {}
                 Ok(ProducerPoll::Closed) => return Poll::Ready(None),
                 Err(err) => return Poll::Ready(Some(Err(P2PStreamError::Io(err).into()))),
@@ -844,6 +869,7 @@ where
                     if let Err(err) = result {
                         return Poll::Ready(Some(Err(err.into())))
                     }
+                    this.producer_polls_since_inbound = 0;
 
                     inbound_messages += 1;
                     if inbound_messages == MAX_INBOUND_MESSAGES_PER_POLL {
@@ -1069,7 +1095,7 @@ mod tests {
     };
     use futures::{stream, task::noop_waker_ref};
     use reth_eth_wire_types::EthNetworkPrimitives;
-    use std::task::Poll;
+    use std::{sync::atomic::AtomicBool, task::Poll};
     use tokio::{net::TcpListener, sync::oneshot};
     use tokio_util::codec::Decoder;
 
@@ -1082,6 +1108,24 @@ mod tests {
         type Item = Result<(), P2PStreamError>;
 
         fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            Poll::Pending
+        }
+    }
+
+    #[derive(Debug)]
+    struct BurstingPrimary {
+        proxy: ProtocolProxy,
+        remaining: usize,
+    }
+
+    impl Stream for BurstingPrimary {
+        type Item = Result<(), P2PStreamError>;
+
+        fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            if self.remaining > 0 {
+                self.remaining -= 1;
+                self.proxy.try_send(Bytes::from_static(&[0, 0])).unwrap();
+            }
             Poll::Pending
         }
     }
@@ -1129,6 +1173,7 @@ mod tests {
     #[derive(Debug)]
     struct InboundFramesTransport {
         frames: VecDeque<BytesMut>,
+        writable: AtomicBool,
     }
 
     impl Stream for InboundFramesTransport {
@@ -1146,25 +1191,23 @@ mod tests {
             self: Pin<&mut Self>,
             _cx: &mut Context<'_>,
         ) -> Poll<Result<(), Self::Error>> {
-            Poll::Ready(Ok(()))
+            if self.writable.load(Ordering::Relaxed) {
+                Poll::Ready(Ok(()))
+            } else {
+                Poll::Pending
+            }
         }
 
         fn start_send(self: Pin<&mut Self>, _item: Bytes) -> Result<(), Self::Error> {
             Ok(())
         }
 
-        fn poll_flush(
-            self: Pin<&mut Self>,
-            _cx: &mut Context<'_>,
-        ) -> Poll<Result<(), Self::Error>> {
-            Poll::Ready(Ok(()))
+        fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            self.poll_ready(cx)
         }
 
-        fn poll_close(
-            self: Pin<&mut Self>,
-            _cx: &mut Context<'_>,
-        ) -> Poll<Result<(), Self::Error>> {
-            Poll::Ready(Ok(()))
+        fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            self.poll_ready(cx)
         }
     }
 
@@ -1233,7 +1276,10 @@ mod tests {
         let test = shared_capabilities.find(&TestProtoMessage::capability()).unwrap().clone();
         let frames =
             (0..frame_count).map(|_| compressed_frame(test.message_id_offset(), &[0])).collect();
-        let conn = P2PStream::new(InboundFramesTransport { frames }, shared_capabilities);
+        let conn = P2PStream::new(
+            InboundFramesTransport { frames, writable: AtomicBool::new(true) },
+            shared_capabilities,
+        );
         (RlpxProtocolMultiplexer::new(conn), eth, test)
     }
 
@@ -1326,6 +1372,54 @@ mod tests {
         let mut cx = Context::from_waker(noop_waker_ref());
         assert!(Pin::new(&mut stream).poll_next(&mut cx).is_pending());
         assert_eq!(stream.inner.conn.inner().frames.len(), MAX_INBOUND_MESSAGES_PER_POLL);
+    }
+
+    #[tokio::test]
+    async fn outbound_backpressure_preserves_inbound_fairness() {
+        let (hello, _) = test_hello();
+        let shared_capabilities =
+            SharedCapabilities::try_new(hello.protocols.clone(), hello.message().capabilities)
+                .unwrap();
+        let eth = shared_capabilities.eth().unwrap().clone();
+        let test = shared_capabilities.find(&TestProtoMessage::capability()).unwrap().clone();
+        let frames = (0..2)
+            .map(|_| compressed_frame(test.message_id_offset(), &[0]))
+            .collect::<VecDeque<_>>();
+        let conn = P2PStream::new(
+            InboundFramesTransport { frames, writable: AtomicBool::new(false) },
+            shared_capabilities,
+        );
+        let mut mux = RlpxProtocolMultiplexer::new(conn);
+        let limits =
+            ProtocolIngressLimits::new(2).with_max_buffered_bytes(2).with_max_buffered_messages(1);
+        mux.install_protocol_with_limits(&TestProtoMessage::capability(), limits, |conn| {
+            DrainingProtocol { conn }
+        })
+        .unwrap();
+        let mut stream = mux
+            .into_satellite_stream(eth.capability().as_ref(), |proxy| BurstingPrimary {
+                proxy,
+                remaining: 3,
+            })
+            .unwrap();
+        stream.inner.conn.start_send_unpin(Bytes::from_static(&[0, 0])).unwrap();
+        stream.inner.conn.start_send_unpin(Bytes::from_static(&[0, 0])).unwrap();
+        stream.inner.out_buffer.max_bytes = 1;
+        stream.inner.out_buffer.push_back(Bytes::from_static(&[0, 0]));
+
+        let mut cx = Context::from_waker(noop_waker_ref());
+        assert!(Pin::new(&mut stream).poll_next(&mut cx).is_pending());
+        assert_eq!(stream.inner.conn.inner().frames.len(), 2);
+
+        assert!(Pin::new(&mut stream).poll_next(&mut cx).is_pending());
+        assert_eq!(stream.inner.conn.inner().frames.len(), 2);
+
+        stream.inner.conn.inner().writable.store(true, Ordering::Relaxed);
+        assert!(Pin::new(&mut stream).poll_next(&mut cx).is_pending());
+        assert_eq!(stream.inner.conn.inner().frames.len(), 2);
+
+        assert!(matches!(Pin::new(&mut stream).poll_next(&mut cx), Poll::Ready(None)));
+        assert_eq!(stream.inner.conn.inner().frames.len(), 0);
     }
 
     #[tokio::test]
