@@ -1253,6 +1253,8 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> IntoLat
     for MockEthProvider<T, ChainSpec>
 {
     fn into_latest(self) -> StateProviderBox {
+        // Matches `StateProviderFactory::latest` for this mock: state reads are served from the
+        // scripted account/storage maps rather than the empty `TxMock` database.
         Box::new(self)
     }
 }

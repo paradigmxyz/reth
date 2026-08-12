@@ -94,6 +94,11 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         self.parent_hash
     }
 
+    /// Returns true if this builder resolves overlays through the [`OverlayManager`].
+    pub(crate) const fn is_managed(&self) -> bool {
+        matches!(self.overlay_source, Some(OverlaySource::Managed))
+    }
+
     /// Set the overlay source.
     ///
     /// This overlay will be applied on top of any reverts.

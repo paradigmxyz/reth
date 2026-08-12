@@ -3,7 +3,7 @@ use alloy_primitives::{BlockHash, B256};
 use metrics::{Counter, Histogram};
 use reth_chain_state::MemoryOverlayStateProvider;
 use reth_db_api::{tables, transaction::DbTx, DatabaseError};
-use reth_errors::ProviderResult;
+use reth_errors::{ProviderError, ProviderResult};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{
@@ -125,8 +125,15 @@ where
 {
     /// Creates a [`reth_storage_api::StateProvider`] for this factory's parent block by layering
     /// the in-memory parent chain on top of the latest or historical database state.
+    ///
+    /// Only supported for manager-backed factories: immediate overlays carry pre-merged
+    /// hashed-state/trie data for trie cursors and are not applied to state reads, so building a
+    /// state provider from such a factory would silently serve stale state.
     #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
     pub fn state_provider(&self) -> ProviderResult<StateProviderBox> {
+        if !self.overlay_builder.is_managed() {
+            return Err(ProviderError::UnsupportedProvider)
+        }
         let provider = self.factory.database_provider_ro()?;
         let anchor = self.overlay_builder.anchor_at_parent(&provider)?;
         let (provider, overlay): (StateProviderBox, _) = match anchor {
