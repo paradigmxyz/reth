@@ -15,7 +15,7 @@ use alloy_rpc_types_engine::{
     ExecutionPayloadV3, PraguePayloadFields,
 };
 use alloy_rpc_types_eth::TransactionRequest;
-use alloy_rpc_types_trace::geth::GethDebugTracingOptions;
+use alloy_rpc_types_trace::geth::{ChainBlockTraceResult, GethDebugTracingOptions};
 use jsonrpsee::core::client::{Subscription, SubscriptionClientT};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::{ChainSpecBuilder, EthChainSpec, MAINNET};
@@ -29,7 +29,7 @@ use reth_node_core::{
 use reth_node_ethereum::EthereumNode;
 use reth_payload_primitives::BuiltPayload;
 use reth_primitives_traits::Block as _;
-use reth_rpc_api::{servers::AdminApiServer, ChainBlockTraceResult};
+use reth_rpc_api::servers::AdminApiServer;
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::Runtime;
 use std::{

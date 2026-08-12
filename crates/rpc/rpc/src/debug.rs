@@ -10,7 +10,8 @@ use alloy_rpc_types_eth::{
     state::EvmOverrides, Account, AccountInfo, BlockError, Bundle, Index, StateContext,
 };
 use alloy_rpc_types_trace::geth::{
-    GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
+    ChainBlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
+    TraceResult,
 };
 use async_trait::async_trait;
 use futures::Stream;
@@ -24,7 +25,7 @@ use reth_primitives_traits::{
     Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
 };
 use reth_revm::{db::State, witness::ExecutionWitnessRecord};
-use reth_rpc_api::{ChainBlockTraceResult, DebugApiServer};
+use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
