@@ -19,7 +19,10 @@
 //!    streaming state-root job can provide a sink for prewarm and execution updates.
 //! 5. Execute the block. BAL payloads use the parallel BAL execute path only when state caching and
 //!    BAL parallel execution are enabled. Otherwise the regular executor still builds and validates
-//!    the BAL before post-execution consensus uses the decoded BAL hash.
+//!    the BAL before post-execution consensus uses the decoded BAL hash. Serial execution can be
+//!    overridden via [`CustomBlockExecutionHook`] installed on
+//!    [`BasicEngineValidator::with_custom_block_execution_hook`]. Returning `None` from the hook
+//!    falls back to the default execution path.
 //! 6. Stop prewarming, terminate execution caching, spawn `hash-post-state`, await
 //!    `payload-convert` and `receipt-root`, then run post-execution consensus validation.
 //! 7. Resolve the state root by finishing the prepared job. The sparse-trie job falls back to
@@ -61,12 +64,16 @@
 //!         Main->>Trie: spawn proof workers and sparse trie
 //!     end
 //!     Main->>Prewarm: spawn transaction, BAL, or skipped prewarm
-//!     Main->>Receipt: spawn receipt root task
 //!     alt BAL path eligible
+//!         Main->>Receipt: spawn receipt root task
 //!         Main->>Exec: execute_block_bal
 //!         Prewarm->>Trie: BAL-derived sparse trie updates
+//!     else custom execution hook hit
+//!         Main->>Exec: CustomBlockExecutionHook
+//!         Note over Trie: no execution updates; finish may serial-recompute on mismatch
 //!     else regular execution
 //!         Tx-->>Exec: recovered transactions in block order
+//!         Main->>Receipt: spawn receipt root task
 //!         Main->>Exec: execute_block
 //!         Exec->>Receipt: stream receipts
 //!         Exec->>Trie: stream state hook updates
@@ -175,9 +182,11 @@ const MAX_EXPECTED_GAS_LIMIT_MULTIPLIER: u64 = 2;
 /// Worker name for deferred trie data preparation.
 const DEFERRED_TRIE_WORKER_NAME: &str = "deferred-trie";
 
-type ReceiptRootSender<N> =
+/// Sender half of the incremental receipt root computation channel.
+pub type ReceiptRootSender<N> =
     crossbeam_channel::Sender<IndexedReceipt<<N as NodePrimitives>::Receipt>>;
-type ReceiptRootReceiver = tokio::sync::oneshot::Receiver<(B256, alloy_primitives::Bloom)>;
+/// Receiver for the receipt root computed during block execution.
+pub type ReceiptRootReceiver = tokio::sync::oneshot::Receiver<(B256, alloy_primitives::Bloom)>;
 
 /// Context providing access to tree state during validation.
 ///
@@ -295,6 +304,12 @@ where
     /// None if txpool prewarming is disabled.
     #[debug(skip)]
     txpool_prewarm: Option<txpool_prewarm::Handle<Evm::Primitives, P, Evm>>,
+    /// Optional hook to override serial block execution.
+    ///
+    /// When set, the hook is invoked on the non-BAL execution path. Returning `None` falls back
+    /// to the default [`Self::execute_block`] implementation.
+    #[debug(skip)]
+    custom_block_execution_hook: Option<CustomBlockExecutionHook<Evm::Primitives, Evm>>,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
@@ -354,6 +369,7 @@ where
             overlay_manager,
             state_root_strategy: Arc::new(DefaultStateRootStrategy::default()),
             txpool_prewarm: None,
+            custom_block_execution_hook: None,
         }
     }
 
@@ -376,6 +392,18 @@ where
             Arc::new(source),
             self.evm_config.clone(),
         ));
+        self
+    }
+
+    /// Sets a custom block execution hook for the serial (non-BAL) execution path.
+    ///
+    /// The hook is called during [`Self::validate_block_with_state`]. If it returns `None`, the
+    /// validator falls back to the default execution path.
+    pub fn with_custom_block_execution_hook(
+        mut self,
+        custom_block_execution_hook: CustomBlockExecutionHook<N, Evm>,
+    ) -> Self {
+        self.custom_block_execution_hook = Some(custom_block_execution_hook);
         self
     }
 
@@ -714,7 +742,7 @@ where
         } else {
             let state_provider = make_state_provider(false);
             match state_provider {
-                Ok(state_provider) => self.execute_block(
+                Ok(state_provider) => self.execute_serial_block(
                     state_provider,
                     env,
                     &input,
@@ -972,6 +1000,65 @@ where
         }
     }
 
+    /// Executes a block on the serial path, optionally delegating to a custom execution hook.
+    ///
+    /// On a custom cache hit the streaming [`OnStateHook`] from the state-root job is unused:
+    /// there is no live EVM to feed incremental trie updates. Dropping the hook finishes the
+    /// sparse-trie update stream with no execution updates; [`PreparedStateRootJob::finish`]
+    /// accepts that task root only if it matches the block header, otherwise it recomputes
+    /// serially. Integrators that need streaming state-root latency on cache hits should also
+    /// install a custom [`StateRootStrategy`].
+    #[expect(clippy::type_complexity)]
+    fn execute_serial_block<S, Err, T>(
+        &mut self,
+        state_provider: S,
+        env: ExecutionEnv<Evm>,
+        input: &BlockOrPayload<T>,
+        handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
+        state_hook: Option<Box<dyn OnStateHook + 'static>>,
+    ) -> Result<
+        (
+            BlockExecutionOutput<N::Receipt>,
+            Vec<Address>,
+            ReceiptRootReceiver,
+            Option<BlockAccessList>,
+        ),
+        InsertBlockErrorKind,
+    >
+    where
+        S: StateProvider + Send,
+        Err: core::error::Error + Send + Sync + 'static,
+        V: PayloadValidator<T, Block = N::Block>,
+        T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
+        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
+    {
+        if let Some(custom) = &self.custom_block_execution_hook {
+            let spawn_receipt_root = |len: usize| self.spawn_receipt_root_task_inner(len);
+            let custom_input =
+                CustomBlockExecutionHookInput::new(&env, &state_provider, &spawn_receipt_root);
+            let execution_start = Instant::now();
+            if let Some(result) = custom(custom_input)? {
+                // Leave `state_hook` unused: Drop finishes the sparse-trie stream with no
+                // execution updates. finish() then keeps the task root only if it matches the
+                // header; otherwise it recomputes serially from the cached BundleState.
+                let execution_duration = execution_start.elapsed();
+                self.metrics.record_block_execution(&result.output, execution_duration);
+                self.metrics.record_block_execution_gas_bucket(
+                    result.output.result.gas_used,
+                    execution_duration,
+                );
+                return Ok((
+                    result.output,
+                    result.senders,
+                    result.receipt_root_rx,
+                    result.built_bal,
+                ));
+            }
+        }
+
+        self.execute_block(state_provider, env, input, handle, state_hook)
+    }
+
     /// Executes a block with the given state provider.
     ///
     /// This method orchestrates block execution:
@@ -1047,7 +1134,7 @@ where
         }
 
         let transaction_count = input.transaction_count();
-        let (receipt_tx, result_rx) = self.spawn_receipt_root_task(transaction_count);
+        let (receipt_tx, result_rx) = self.spawn_receipt_root_task_inner(transaction_count);
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
         executor.evm_mut().db_mut().set_state_hook(state_hook);
 
@@ -1143,7 +1230,7 @@ where
     {
         debug!(target: "engine::tree::payload_validator", "Executing block via BAL path");
 
-        let (receipt_tx, result_rx) = self.spawn_receipt_root_task(env.transaction_count);
+        let (receipt_tx, result_rx) = self.spawn_receipt_root_task_inner(env.transaction_count);
         let input_bal = env.decoded_bal.ok_or_else(|| {
             InsertBlockErrorKind::Other("BAL execute path: no decoded BAL available".into())
         })?;
@@ -1180,7 +1267,7 @@ where
         Ok((output, senders, result_rx, Some(built_bal)))
     }
 
-    fn spawn_receipt_root_task(
+    fn spawn_receipt_root_task_inner(
         &self,
         receipts_len: usize,
     ) -> (ReceiptRootSender<N>, ReceiptRootReceiver) {
@@ -2067,5 +2154,188 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
             Self::Payload(payload) => payload.gas_limit(),
             Self::Block(block) => block.gas_limit(),
         }
+    }
+}
+
+/// Output of a [`CustomBlockExecutionHook`].
+///
+/// Must match the return shape of the default serial execution path.
+///
+/// # Integration
+///
+/// **Full-block cache hit** — when execution was completed earlier (e.g. via flashblocks), return
+/// the cached [`BlockExecutionOutput`] and a pre-resolved `receipt_root_rx` from a completed
+/// `tokio::sync::oneshot` channel. Key the external cache by [`ExecutionEnv::hash`].
+///
+/// The streaming state-root [`OnStateHook`] is not passed into the hook and is unused on a hit.
+/// Dropping it finishes the sparse-trie update stream with no execution updates;
+/// [`PreparedStateRootJob::finish`] keeps that task root only if it matches the header, otherwise
+/// it recomputes serially. For streaming state-root latency on cache hits, also install a custom
+/// [`StateRootStrategy`].
+///
+/// **Receipt roots from hook-run execution** — if the hook executes transactions itself, call
+/// [`CustomBlockExecutionHookInput::spawn_receipt_root_task`] and stream [`IndexedReceipt`]s on the
+/// returned [`ReceiptRootSender`]. The hook still does not receive the state-root [`OnStateHook`],
+/// so sparse-trie streaming remains unavailable on this path.
+pub struct CustomBlockExecutionOutput<N: NodePrimitives> {
+    /// Block execution output.
+    pub output: BlockExecutionOutput<N::Receipt>,
+    /// Recovered transaction senders.
+    pub senders: Vec<Address>,
+    /// Receiver for the receipt root computed during execution.
+    pub receipt_root_rx: ReceiptRootReceiver,
+    /// Built block access list, if any.
+    pub built_bal: Option<BlockAccessList>,
+}
+
+impl<N: NodePrimitives> std::fmt::Debug for CustomBlockExecutionOutput<N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CustomBlockExecutionOutput")
+            .field("output", &self.output)
+            .field("senders", &self.senders)
+            .field("receipt_root_rx", &"<ReceiptRootReceiver>")
+            .field("built_bal", &self.built_bal.as_ref().map(|_| "<BlockAccessList>"))
+            .finish()
+    }
+}
+
+/// Input for [`CustomBlockExecutionHook`].
+///
+/// Transaction bodies are not included. Full-block reuse should key an external cache by
+/// [`ExecutionEnv::hash`]. Transaction-granular (prefix) reuse is the integrator's responsibility
+/// outside this hook; validate any reused prefix against the payload before returning
+/// [`CustomBlockExecutionOutput`].
+pub struct CustomBlockExecutionHookInput<'a, Evm: ConfigureEvm, N: NodePrimitives> {
+    /// Execution environment for the block.
+    pub env: &'a ExecutionEnv<Evm>,
+    /// State provider at the parent block.
+    pub state_provider: &'a dyn StateProvider,
+    receipt_root_spawner: &'a dyn Fn(usize) -> (ReceiptRootSender<N>, ReceiptRootReceiver),
+}
+
+impl<Evm: ConfigureEvm, N: NodePrimitives> std::fmt::Debug
+    for CustomBlockExecutionHookInput<'_, Evm, N>
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CustomBlockExecutionHookInput")
+            .field("env", self.env)
+            .field("state_provider", &"<dyn StateProvider>")
+            .field("receipt_root_spawner", &"<Fn>")
+            .finish()
+    }
+}
+
+impl<'a, Evm: ConfigureEvm, N: NodePrimitives> CustomBlockExecutionHookInput<'a, Evm, N> {
+    /// Creates a new custom block execution hook input.
+    pub fn new(
+        env: &'a ExecutionEnv<Evm>,
+        state_provider: &'a dyn StateProvider,
+        receipt_root_spawner: &'a dyn Fn(usize) -> (ReceiptRootSender<N>, ReceiptRootReceiver),
+    ) -> Self {
+        Self { env, state_provider, receipt_root_spawner }
+    }
+
+    /// Spawns a background receipt root computation task.
+    ///
+    /// This is the supported way to spawn the task from a hook. Stream [`IndexedReceipt`]s on the
+    /// returned [`ReceiptRootSender`] so `receipt_root_rx` can be awaited downstream.
+    pub fn spawn_receipt_root_task(
+        &self,
+        receipts_len: usize,
+    ) -> (ReceiptRootSender<N>, ReceiptRootReceiver) {
+        (self.receipt_root_spawner)(receipts_len)
+    }
+}
+
+/// Custom block execution hook for the serial (non-BAL) execution path.
+///
+/// Return `Ok(None)` to fall back to the default execution path.
+///
+/// On `Ok(Some(_))`, the streaming state-root [`OnStateHook`] is unused; see
+/// [`CustomBlockExecutionOutput`] for the state-root implications.
+///
+/// Named to avoid colliding with `BlockExecutor` implementations such as the
+/// `CustomBlockExecutor` type in `examples/custom-beacon-withdrawals`.
+pub type CustomBlockExecutionHook<N, Evm> = Arc<
+    dyn Fn(
+            CustomBlockExecutionHookInput<'_, Evm, N>,
+        ) -> Result<Option<CustomBlockExecutionOutput<N>>, InsertBlockErrorKind>
+        + Send
+        + Sync
+        + 'static,
+>;
+
+#[cfg(test)]
+mod custom_block_execution_hook_tests {
+    use super::*;
+    use alloy_primitives::Bloom;
+    use reth_ethereum_primitives::EthPrimitives;
+    use reth_evm_ethereum::MockEvmConfig;
+    use reth_revm::test_utils::StateProviderTest;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn test_receipt_root_spawner(
+        _len: usize,
+    ) -> (ReceiptRootSender<EthPrimitives>, ReceiptRootReceiver) {
+        let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
+        let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+        drop(receipt_rx);
+        drop(result_tx);
+        (receipt_tx, result_rx)
+    }
+
+    /// Contract test: `Ok(None)` is the documented fallback signal. Does not exercise
+    /// `execute_serial_block` dispatch.
+    #[test]
+    fn hook_none_is_fallback_signal() {
+        let state = StateProviderTest::default();
+        let env = ExecutionEnv::<MockEvmConfig>::test_default();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_clone = Arc::clone(&calls);
+        let hook: CustomBlockExecutionHook<EthPrimitives, MockEvmConfig> = Arc::new(move |input| {
+            calls_clone.fetch_add(1, Ordering::SeqCst);
+            assert_eq!(input.env.transaction_count, 0);
+            assert!(input.env.hash.is_zero());
+            let (_tx, _rx) = input.spawn_receipt_root_task(0);
+            Ok(None)
+        });
+
+        let input = CustomBlockExecutionHookInput::new(&env, &state, &test_receipt_root_spawner);
+        let result = hook(input);
+        assert!(result.unwrap().is_none());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    /// Contract test: `Ok(Some(_))` carries the cached output shape, including a pre-resolved
+    /// receipt root. Does not exercise `execute_serial_block` dispatch.
+    #[test]
+    fn hook_some_returns_cached_output_shape() {
+        let state = StateProviderTest::default();
+        let env = ExecutionEnv::<MockEvmConfig>::test_default();
+        let expected_root = B256::repeat_byte(0xab);
+        let expected_bloom = Bloom::repeat_byte(0xcd);
+
+        let hook: CustomBlockExecutionHook<EthPrimitives, MockEvmConfig> =
+            Arc::new(move |_input| {
+                let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+                result_tx.send((expected_root, expected_bloom)).unwrap();
+                Ok(Some(CustomBlockExecutionOutput {
+                    output: BlockExecutionOutput {
+                        result: Default::default(),
+                        state: Default::default(),
+                    },
+                    senders: vec![Address::repeat_byte(0x11)],
+                    receipt_root_rx: result_rx,
+                    built_bal: None,
+                }))
+            });
+
+        let input = CustomBlockExecutionHookInput::new(&env, &state, &test_receipt_root_spawner);
+        let result = hook(input).unwrap().expect("cache hit");
+        assert_eq!(result.senders, vec![Address::repeat_byte(0x11)]);
+        assert!(result.built_bal.is_none());
+        let (root, bloom) = result.receipt_root_rx.blocking_recv().unwrap();
+        assert_eq!(root, expected_root);
+        assert_eq!(bloom, expected_bloom);
     }
 }
