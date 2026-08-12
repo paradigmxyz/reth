@@ -241,7 +241,7 @@ impl<N: NodeTypesWithDB> NodePrimitivesProvider for BlockchainProvider<N> {
     type Primitives = N::Primitives;
 }
 
-impl<N: NodeTypesWithDB> BalProvider for BlockchainProvider<N> {
+impl<N: ProviderNodeTypes> BalProvider for BlockchainProvider<N> {
     fn bal_store(&self) -> &BalStoreHandle {
         &self.bal_store
     }

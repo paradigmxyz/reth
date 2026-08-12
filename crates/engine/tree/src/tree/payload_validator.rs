@@ -168,10 +168,9 @@ use tracing::{debug, debug_span, error, info, instrument, trace, warn, Level, Sp
 
 pub use crate::tree::types::ValidationOutcome;
 
-/// Multiplier over the parent's gas limit beyond which a block's claimed gas usage cannot be
-/// legitimate. Gas limit can change by at most 1/1024 per block, so anything over this is rejected
-/// without entering execution.
-const MAX_EXPECTED_GAS_USAGE_MULTIPLIER: u64 = 2;
+/// Multiplier over the parent's gas limit beyond which a payload must pass pre-execution
+/// validation.
+const MAX_EXPECTED_GAS_LIMIT_MULTIPLIER: u64 = 2;
 
 /// Worker name for deferred trie data preparation.
 const DEFERRED_TRIE_WORKER_NAME: &str = "deferred-trie";
@@ -530,9 +529,11 @@ where
             };
         }
 
-        // If the gas usage is suspiciously high (multiple times higher than parent's gas limit), be
-        // cautious and block on pre-execution checks of the block.
-        if input.gas_used() > parent_block.gas_limit() * MAX_EXPECTED_GAS_USAGE_MULTIPLIER {
+        // If the gas limit is multiple times higher than the parent's, be cautious and block on
+        // pre-execution checks of the block.
+        if input.gas_limit() >
+            parent_block.gas_limit().saturating_mul(MAX_EXPECTED_GAS_LIMIT_MULTIPLIER)
+        {
             // Call `.get()` to await the pre-execution checks and exit early if they fail.
             if validated_block.get().is_err() {
                 return Err(validated_block
