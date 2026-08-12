@@ -518,18 +518,11 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             // The transaction may be valid — only the sidecar from this peer was wrong.
             // Using regular penalties means repeated offenders still get disconnected.
             //
-            // Eth/72 peers are exempt: they elide blob payloads from `PooledTransactions`
-            // responses per EIP-8070 (cells are fetched separately), so a sidecar validation
-            // failure is expected rather than evidence of misbehavior.
+            // Eth/72 peers cannot reach this path with an elided sidecar: their blob
+            // transactions are dropped before import in `import_transactions`, so any sidecar
+            // failure here means actual blob data failed validation.
             if let Some(peers) = peers {
                 for peer_id in peers {
-                    if self
-                        .peers
-                        .get(&peer_id)
-                        .is_some_and(|peer| peer.version() == EthVersion::Eth72)
-                    {
-                        continue
-                    }
                     self.report_peer_bad_transactions(peer_id);
                 }
             }
@@ -1434,6 +1427,23 @@ where
         for tx in &transactions {
             if source.is_broadcast() && !peer.seen_transactions.insert(*tx.tx_hash()) {
                 num_already_seen_by_peer += 1;
+            }
+        }
+
+        // Eth/72 `PooledTransactions` responses elide blob payloads from type 3 transactions per
+        // EIP-8070, so their sidecars can never validate. Drop them before touching the pool;
+        // geth equivalently diverts these bodies into a buffer that is completed with cells
+        // fetched via `GetCells`, which is not implemented yet.
+        if peer.version() == EthVersion::Eth72 {
+            let len_before = transactions.len();
+            transactions.retain(|tx| !tx.is_eip4844());
+            let dropped = len_before - transactions.len();
+            if dropped > 0 {
+                trace!(target: "net::tx",
+                    peer_id=format!("{peer_id:#}"),
+                    dropped,
+                    "dropped blob transactions from eth72 response, cell fetching not implemented"
+                );
             }
         }
 
