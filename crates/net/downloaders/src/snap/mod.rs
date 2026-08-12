@@ -25,9 +25,13 @@ const MAX_RETRIES: u8 = 2;
 
 /// Downloads and verifies one account range against its requested state root.
 ///
-/// Invalid peer responses are reported and the same request is retried with high priority. The
-/// future is storage agnostic: persisting a verified range and choosing the next range are left to
-/// the snap sync orchestrator.
+/// Invalid peer responses are reported and the same request is reissued at high priority. The
+/// client picks the peer, so a retry can land on the same one; only its falling reputation moves
+/// the request elsewhere. Polling verifies the range proof inline, which costs work proportional
+/// to the response.
+///
+/// The future is storage agnostic: persisting a verified range and choosing the next range are
+/// left to the snap sync orchestrator.
 #[derive(Debug)]
 pub struct AccountRangeDownloader<C: SnapClient> {
     client: C,
@@ -163,8 +167,8 @@ where
                         }
                     }
                 }
-                // A wrong wire response is already attributed and penalized by the session. It is
-                // still safe to retry the request with another snap peer.
+                // A wrong wire response is already attributed and penalized by the session, so the
+                // request is reissued without reporting the peer a second time.
                 Err(error) if error.is_retryable() || error == RequestError::BadResponse => {
                     debug!(target: "downloaders::snap", %error, "Account range request failed, retrying");
                     if !this.retry() {
