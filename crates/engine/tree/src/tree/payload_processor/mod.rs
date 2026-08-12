@@ -376,7 +376,7 @@ where
             env,
             evm_config: self.evm_config.clone(),
             saved_cache: saved_cache.clone(),
-            provider: overlay_factory,
+            overlay_factory,
             bal_prewarm_pool: parallel_bal_execution.then(|| self.bal_prewarm_pool()),
             metrics: PrewarmMetrics::default(),
             cache_metrics: self.cache_metrics.clone(),

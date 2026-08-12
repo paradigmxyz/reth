@@ -68,8 +68,8 @@ impl BalPrewarmPool {
         Arc::new(Self { workers, next: AtomicUsize::new(0), _handles: handles })
     }
 
-    /// Begins a block: hands every worker the provider builder and shared cache so each opens its
-    /// own read txn over the parent state. Pair with [`end_block`](Self::end_block).
+    /// Begins a block: hands every worker the provider-building closure and shared cache so each
+    /// opens its own read txn over the parent state. Pair with [`end_block`](Self::end_block).
     pub(crate) fn begin_block(
         &self,
         build: Arc<BuildProviderFn>,
