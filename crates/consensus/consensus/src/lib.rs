@@ -87,6 +87,7 @@ pub trait FullConsensus<N: NodePrimitives>: Consensus<N::Block> {
         result: &BlockExecutionResult<N::Receipt>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
         block_access_list_hash: Option<B256>,
+        wam_root: Option<B256>,
     ) -> Result<(), ConsensusError>;
 }
 
@@ -338,6 +339,10 @@ pub enum ConsensusError {
     #[error("missing slot number")]
     SlotNumberMissing,
 
+    /// Error when the warm-access multiset root is missing.
+    #[error("missing WAM root")]
+    WamRootMissing,
+
     /// Error when an unexpected withdrawals root is encountered.
     #[error("unexpected withdrawals root")]
     WithdrawalsRootUnexpected,
@@ -353,6 +358,10 @@ pub enum ConsensusError {
     /// Error when an unexpected slot number is encountered.
     #[error("unexpected slot number")]
     SlotNumberUnexpected,
+
+    /// Error when an unexpected warm-access multiset root is encountered.
+    #[error("unexpected WAM root")]
+    WamRootUnexpected,
 
     /// Error when withdrawals are missing.
     #[error("missing withdrawals")]
@@ -498,6 +507,9 @@ pub enum ConsensusError {
     /// EIP-7928: Error when the block access list hash doesn't match the expected value.
     #[error("block access list hash mismatch: {0}")]
     BlockAccessListHashMismatch(GotExpectedBoxed<B256>),
+    /// EIP-8289: Error when the WAM root doesn't match the expected value.
+    #[error("WAM root mismatch: {0}")]
+    WamRootMismatch(GotExpectedBoxed<B256>),
     /// EIP-7928: Error when the block access list cannot be decoded or converted.
     #[error("invalid block access list: {0}")]
     BlockAccessListInvalid(String),

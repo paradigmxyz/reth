@@ -21,6 +21,7 @@ reth-primitives-traits.workspace = true
 alloy-evm.workspace = true
 alloy-chains = { workspace = true, features = ["serde", "rlp"] }
 alloy-eips = { workspace = true, features = ["serde"] }
+alloy-eip8289.workspace = true
 alloy-genesis.workspace = true
 alloy-primitives = { workspace = true, features = ["rlp"] }
 alloy-consensus.workspace = true
@@ -52,6 +53,7 @@ std = [
     "reth-network-peers/std",
     "serde_json/std",
     "alloy-evm/std",
+    "alloy-eip8289/std",
 ]
 arbitrary = [
     "alloy-chains/arbitrary",
@@ -61,6 +63,7 @@ arbitrary = [
     "alloy-eips/arbitrary",
     "alloy-primitives/arbitrary",
     "alloy-trie/arbitrary",
+    "alloy-eip8289/arbitrary",
 ]
 test-utils = [
     "reth-primitives-traits/test-utils",

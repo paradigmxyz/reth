@@ -9,7 +9,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 use alloy_consensus::{BlockHeader, Transaction};
-use alloy_primitives::{Bytes, U256};
+use alloy_eip8289::{CommittedWarmAccessMultiset, WamItems, WarmAccessMultiset, WARMING_WINDOW};
+use alloy_primitives::{Bytes, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::PayloadAttributes as EthPayloadAttributes;
 use reth_basic_payload_builder::{
@@ -18,7 +19,7 @@ use reth_basic_payload_builder::{
 };
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
-use reth_errors::{BlockExecutionError, BlockValidationError, ConsensusError};
+use reth_errors::{BlockExecutionError, BlockValidationError, ConsensusError, ProviderError};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
     block::TxResult,
@@ -32,7 +33,7 @@ use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadAttributes;
 use reth_primitives_traits::transaction::error::InvalidTransactionError;
 use reth_revm::{database::StateProviderDatabase, db::State};
-use reth_storage_api::StateProviderFactory;
+use reth_storage_api::{BalProvider, BlockReader, StateProviderFactory};
 use reth_transaction_pool::{
     error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
     BestTransactions, BestTransactionsAttributes, PoolTransaction, TransactionPool,
@@ -81,7 +82,11 @@ impl<Pool, Client, EvmConfig> EthereumPayloadBuilder<Pool, Client, EvmConfig> {
 impl<Pool, Client, EvmConfig> PayloadBuilder for EthereumPayloadBuilder<Pool, Client, EvmConfig>
 where
     EvmConfig: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks> + Clone,
+    Client: StateProviderFactory
+        + ChainSpecProvider<ChainSpec: EthereumHardforks>
+        + BalProvider
+        + BlockReader
+        + Clone,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
 {
     type Attributes = EthPayloadAttributes;
@@ -154,7 +159,10 @@ pub fn default_ethereum_payload<EvmConfig, Client, Pool, F>(
 ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
 where
     EvmConfig: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks>,
+    Client: StateProviderFactory
+        + ChainSpecProvider<ChainSpec: EthereumHardforks>
+        + BalProvider
+        + BlockReader,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
 {
@@ -182,6 +190,11 @@ where
     let state = StateProviderDatabase::new(state_provider.as_ref());
     let chain_spec = client.chain_spec();
     let is_amsterdam = chain_spec.is_amsterdam_active_at_timestamp(attributes.timestamp());
+    let wam_root = if chain_spec.is_amsterdam_active_at_timestamp(attributes.timestamp()) {
+        Some(compute_wam_root(&client, parent_header.num_hash())?)
+    } else {
+        None
+    };
     let mut db = State::builder()
         .with_database(cached_reads.as_db_mut(state))
         .with_bundle_update()
@@ -206,6 +219,7 @@ where
             },
         )
         .map_err(PayloadBuilderError::other)?;
+    builder.set_wam_root(wam_root);
 
     debug!(target: "payload_builder", id=%payload_id, parent_header = ?parent_header.hash(), parent_number = parent_header.number, "building new payload");
     let mut cumulative_tx_gas_used = 0;
@@ -504,4 +518,75 @@ where
         .with_sidecars(blob_sidecars);
 
     Ok(BuildOutcome::Better { payload, cached_reads })
+}
+
+fn compute_wam_root<Client>(
+    client: &Client,
+    tip: alloy_eips::BlockNumHash,
+) -> Result<B256, PayloadBuilderError>
+where
+    Client: BalProvider + BlockReader,
+{
+    let mut warm_accesses = WarmAccessMultiset::default();
+
+    if tip.number <= WARMING_WINDOW {
+        for number in 1..=tip.number {
+            if let Some(items) = wam_items_for_block(client, number, tip)? {
+                warm_accesses.apply_item_transition(&items, None);
+            }
+        }
+    } else {
+        let leaving_number = tip.number - WARMING_WINDOW;
+
+        for number in leaving_number..tip.number {
+            if let Some(items) = wam_items_for_block(client, number, tip)? {
+                warm_accesses.apply_item_transition(&items, None);
+            }
+        }
+
+        let add = wam_items_for_block(client, tip.number, tip)?;
+        let remove = wam_items_for_block(client, leaving_number, tip)?;
+
+        if let Some(add) = add {
+            warm_accesses.apply_item_transition(&add, remove.as_ref());
+        } else if let Some(remove) = remove {
+            warm_accesses.apply_item_transition(&WamItems::default(), Some(&remove));
+        }
+    }
+
+    Ok(CommittedWarmAccessMultiset::from_wam(warm_accesses).root())
+}
+
+fn wam_items_for_block<Client>(
+    client: &Client,
+    number: u64,
+    tip: alloy_eips::BlockNumHash,
+) -> Result<Option<WamItems>, PayloadBuilderError>
+where
+    Client: BalProvider + BlockReader,
+{
+    let hash = if number == tip.number {
+        tip.hash
+    } else {
+        client.block_hash(number)?.ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?
+    };
+
+    let Some(bal) = client.bal_store().get_decoded_by_hash(hash)? else {
+        if block_has_bal_hash(client, hash)? {
+            warn!(target: "payload_builder", ?number, ?hash, "Expected BAL is unavailable while computing WAM root; skipping block");
+        }
+        return Ok(None)
+    };
+
+    Ok(Some(WamItems::from_accounts(bal.as_bal().as_slice())))
+}
+
+fn block_has_bal_hash<Client>(client: &Client, hash: B256) -> Result<bool, ProviderError>
+where
+    Client: BlockReader,
+{
+    client
+        .header(hash)?
+        .ok_or(ProviderError::HeaderNotFound(hash.into()))
+        .map(|header| header.block_access_list_hash().is_some())
 }

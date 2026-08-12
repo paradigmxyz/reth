@@ -119,6 +119,7 @@ where
         result: &BlockExecutionResult<N::Receipt>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
         block_access_list_hash: Option<B256>,
+        wam_root: Option<B256>,
     ) -> Result<(), ConsensusError> {
         let res = validation::validate_block_post_execution_with_bal_hashes(
             block,
@@ -126,6 +127,7 @@ where
             result,
             receipt_root_bloom,
             block_access_list_hash,
+            wam_root,
             self.allow_bal_hashes,
         );
 
@@ -261,6 +263,12 @@ where
             }
         }
 
+        if !self.chain_spec.is_amsterdam_active_at_timestamp(header.timestamp()) &&
+            header.wam_root().is_some()
+        {
+            return Err(ConsensusError::WamRootUnexpected)
+        }
+
         Ok(())
     }
 
@@ -298,7 +306,7 @@ mod tests {
     use alloy_consensus::Header;
     use alloy_eips::eip7685::EMPTY_REQUESTS_HASH;
     use alloy_primitives::B256;
-    use reth_chainspec::{ChainSpec, ChainSpecBuilder};
+    use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, ForkCondition};
     use reth_consensus_common::validation::validate_against_parent_gas_limit;
     use reth_ethereum_primitives::{Block as EthBlock, EthPrimitives, Receipt};
     use reth_primitives_traits::{
@@ -326,6 +334,21 @@ mod tests {
     fn prague_recovered_block_with_bal_hash(hash: B256) -> RecoveredBlock<EthBlock> {
         let mut header = valid_prague_header();
         header.block_access_list_hash = Some(hash);
+        RecoveredBlock::new_unhashed(EthBlock { header, body: Default::default() }, Vec::new())
+    }
+
+    fn amsterdam_recovered_block_with_wam_root(root: B256) -> RecoveredBlock<EthBlock> {
+        let mut header = valid_prague_header();
+        header.block_access_list_hash = Some(B256::ZERO);
+        header.slot_number = Some(0);
+        header.wam_root = Some(root);
+        RecoveredBlock::new_unhashed(EthBlock { header, body: Default::default() }, Vec::new())
+    }
+
+    fn amsterdam_recovered_block_without_wam_root() -> RecoveredBlock<EthBlock> {
+        let mut header = valid_prague_header();
+        header.block_access_list_hash = Some(B256::ZERO);
+        header.slot_number = Some(0);
         RecoveredBlock::new_unhashed(EthBlock { header, body: Default::default() }, Vec::new())
     }
 
@@ -482,11 +505,12 @@ mod tests {
             &result,
             None,
             Some(expected_hash),
+            None,
         )
         .is_ok());
 
         assert!(FullConsensus::<EthPrimitives>::validate_block_post_execution(
-            &consensus, &block, &result, None, None,
+            &consensus, &block, &result, None, None, None,
         )
         .is_ok());
 
@@ -497,10 +521,79 @@ mod tests {
                 &result,
                 None,
                 Some(B256::repeat_byte(0x24)),
+                None,
             )
             .unwrap_err(),
             ConsensusError::BlockAccessListHashMismatch(_)
         ));
+    }
+
+    #[test]
+    fn amsterdam_post_execution_validates_present_wam_root() {
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::mainnet()
+                .amsterdam_activated()
+                .with_fork(EthereumHardfork::Amsterdam, ForkCondition::Timestamp(0))
+                .build(),
+        );
+        let expected_root = B256::repeat_byte(0x42);
+        let block = amsterdam_recovered_block_with_wam_root(expected_root);
+        let result = BlockExecutionResult::<Receipt>::default();
+        let consensus = EthBeaconConsensus::new(chain_spec);
+
+        assert!(matches!(
+            FullConsensus::<EthPrimitives>::validate_block_post_execution(
+                &consensus,
+                &block,
+                &result,
+                None,
+                Some(B256::ZERO),
+                None,
+            )
+            .unwrap_err(),
+            ConsensusError::WamRootMissing
+        ));
+
+        assert!(FullConsensus::<EthPrimitives>::validate_block_post_execution(
+            &consensus,
+            &block,
+            &result,
+            None,
+            Some(B256::ZERO),
+            Some(expected_root),
+        )
+        .is_ok());
+
+        assert!(matches!(
+            FullConsensus::<EthPrimitives>::validate_block_post_execution(
+                &consensus,
+                &block,
+                &result,
+                None,
+                Some(B256::ZERO),
+                Some(B256::repeat_byte(0x24)),
+            )
+            .unwrap_err(),
+            ConsensusError::WamRootMismatch(_)
+        ));
+    }
+
+    #[test]
+    fn amsterdam_post_execution_accepts_missing_header_wam_root() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build());
+        let block = amsterdam_recovered_block_without_wam_root();
+        let result = BlockExecutionResult::<Receipt>::default();
+        let consensus = EthBeaconConsensus::new(chain_spec);
+
+        assert!(FullConsensus::<EthPrimitives>::validate_block_post_execution(
+            &consensus,
+            &block,
+            &result,
+            None,
+            Some(B256::ZERO),
+            Some(B256::repeat_byte(0x42)),
+        )
+        .is_ok());
     }
 
     #[test]
@@ -540,6 +633,19 @@ mod tests {
 
         assert!(EthBeaconConsensus::new(chain_spec)
             .validate_header(&SealedHeader::seal_slow(header,))
+            .is_ok());
+    }
+
+    #[test]
+    fn amsterdam_header_accepts_missing_wam_root() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build());
+        let mut header = valid_prague_header();
+        header.block_access_list_hash = Some(B256::ZERO);
+        header.slot_number = Some(0);
+        header.wam_root = None;
+
+        assert!(EthBeaconConsensus::new(chain_spec)
+            .validate_header(&SealedHeader::seal_slow(header))
             .is_ok());
     }
 }
