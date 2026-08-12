@@ -706,7 +706,19 @@ where
             (results, added_metas, discarded)
         };
 
-        for meta in added_metas {
+        // Linear search avoids allocating a hash set for small eviction batches.
+        const MAX_LINEAR_SEARCH_DISCARDS: usize = 4;
+        let discarded_hashes = (discarded.len() > MAX_LINEAR_SEARCH_DISCARDS)
+            .then(|| discarded.iter().map(|tx| *tx.hash()).collect::<HashSet<_>>());
+        let is_discarded = |hash: &TxHash| match &discarded_hashes {
+            Some(hashes) => hashes.contains(hash),
+            None => discarded.iter().any(|tx| tx.hash() == hash),
+        };
+
+        for mut meta in added_metas {
+            if is_discarded(meta.added.hash()) {
+                meta.blob_sidecar = None;
+            }
             self.on_added_transaction(meta);
         }
 
@@ -714,15 +726,6 @@ where
             // Delete any blobs associated with discarded blob transactions
             self.delete_discarded_blobs(discarded.iter());
             self.with_event_listener(|listener| listener.discarded_many(&discarded));
-
-            // Linear search avoids allocating a hash set for small eviction batches.
-            const MAX_LINEAR_SEARCH_DISCARDS: usize = 4;
-            let discarded_hashes = (discarded.len() > MAX_LINEAR_SEARCH_DISCARDS)
-                .then(|| discarded.iter().map(|tx| *tx.hash()).collect::<HashSet<_>>());
-            let is_discarded = |hash: &TxHash| match &discarded_hashes {
-                Some(hashes) => hashes.contains(hash),
-                None => discarded.iter().any(|tx| tx.hash() == hash),
-            };
 
             // A newly added transaction may be immediately discarded, so we need to
             // adjust the result here
@@ -1666,15 +1669,37 @@ impl<T: PoolTransaction> OnNewCanonicalStateOutcome<T> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        blobstore::{BlobStore, InMemoryBlobStore, PooledBlobSidecar},
+        blobstore::{BlobStore, DiskFileBlobStore, InMemoryBlobStore, PooledBlobSidecar},
         identifier::SenderId,
-        test_utils::{MockTransaction, TestPoolBuilder},
+        noop::MockTransactionValidator,
+        test_utils::{MockOrdering, MockTransaction, TestPoolBuilder},
         validate::ValidTransaction,
-        BlockInfo, PoolConfig, SubPoolLimit, TransactionOrigin, TransactionValidationOutcome, U256,
+        BlockInfo, Pool, PoolConfig, SubPoolLimit, TransactionOrigin, TransactionPool,
+        TransactionValidationOutcome, U256,
     };
     use alloy_eips::{eip4844::BlobTransactionSidecar, eip7594::BlobTransactionSidecarVariant};
     use alloy_primitives::Address;
     use std::{fs, path::PathBuf};
+
+    #[tokio::test]
+    async fn discarded_blob_is_not_stored() {
+        let dir = tempfile::tempdir().unwrap();
+        let blob_store = DiskFileBlobStore::open(dir.path(), Default::default()).unwrap();
+        let pool = Pool::new(
+            MockTransactionValidator::default(),
+            MockOrdering::default(),
+            blob_store.clone(),
+            PoolConfig { blob_limit: SubPoolLimit::new(0, usize::MAX), ..Default::default() },
+        );
+        pool.inner()
+            .set_block_info(BlockInfo { pending_blob_fee: Some(10_000_000), ..Default::default() });
+
+        let transaction = MockTransaction::eip4844();
+        let hash = *transaction.get_hash();
+
+        assert!(pool.add_transaction(TransactionOrigin::External, transaction).await.is_err());
+        assert!(!blob_store.contains(hash).unwrap());
+    }
 
     #[test]
     fn test_discard_blobs_on_blob_tx_eviction() {
