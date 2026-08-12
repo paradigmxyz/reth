@@ -15,7 +15,6 @@ use reth_network_p2p::{
 use reth_trie_common::{range_proof::verify_range_proof, TrieAccount, EMPTY_ROOT_HASH};
 use std::{
     pin::Pin,
-    sync::Arc,
     task::{ready, Context, Poll},
 };
 use tracing::debug;
@@ -30,7 +29,7 @@ const MAX_RETRIES: u8 = 2;
 /// the snap sync orchestrator.
 #[derive(Debug)]
 pub struct AccountRangeDownloader<C: SnapClient> {
-    client: Arc<C>,
+    client: C,
     request: GetAccountRangeMessage,
     fut: C::Output,
     retries: u8,
@@ -38,10 +37,7 @@ pub struct AccountRangeDownloader<C: SnapClient> {
 
 impl<C: SnapClient> AccountRangeDownloader<C> {
     /// Validates the range, then creates a downloader and submits `request` at normal priority.
-    pub fn new(
-        client: Arc<C>,
-        request: GetAccountRangeMessage,
-    ) -> Result<Self, InvalidAccountRange> {
+    pub fn new(client: C, request: GetAccountRangeMessage) -> Result<Self, InvalidAccountRange> {
         if request.starting_hash > request.limit_hash {
             return Err(InvalidAccountRange {
                 origin: request.starting_hash,
@@ -126,7 +122,7 @@ impl<C: SnapClient> AccountRangeDownloader<C> {
 
 impl<C> Future for AccountRangeDownloader<C>
 where
-    C: SnapClient + 'static,
+    C: SnapClient + Unpin + 'static,
 {
     type Output = Result<AccountRangeOutcome, RequestError>;
 
@@ -203,7 +199,10 @@ mod tests {
     use reth_network_p2p::{download::DownloadClient, error::PeerRequestResult};
     use reth_network_peers::{PeerId, WithPeerId};
     use reth_trie_common::{proof::ProofRetainer, HashBuilder, Nibbles};
-    use std::{collections::VecDeque, sync::Mutex};
+    use std::{
+        collections::VecDeque,
+        sync::{Arc, Mutex},
+    };
 
     const MAX_HASH: B256 = B256::new([0xff; B256::len_bytes()]);
 
