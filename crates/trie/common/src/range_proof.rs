@@ -11,20 +11,14 @@ use alloy_rlp::Decodable;
 const KEY_NIBBLES: usize = B256::len_bytes() * 2;
 const MAX_HASH: B256 = B256::new([0xff; B256::len_bytes()]);
 
-/// Reconstructs the parts of a trie outside an authenticated leaf range.
 struct RangeProofVerifier<'a> {
-    /// Hashed-key bounds of the range the response is expected to cover.
     range: ProofRange,
-    /// Boundary proof nodes the peer supplied, indexed by the hash that references them.
     nodes: ProofNodes<'a>,
-    /// Returned leaves plus the subtries outside the range, awaiting root reconstruction.
     frontier: ProofFrontier,
-    /// Leftmost path proven to lie right of the range, if the trie continues past the response.
     next: Option<Nibbles>,
 }
 
 impl<'a> RangeProofVerifier<'a> {
-    /// Indexes proof nodes by hash and initializes the authenticated range boundaries.
     fn new(left: B256, right: B256, proof: &'a [Bytes], frontier: ProofFrontier) -> Self {
         Self {
             range: ProofRange::new(left, right),
@@ -34,7 +28,6 @@ impl<'a> RangeProofVerifier<'a> {
         }
     }
 
-    /// Reconstructs the root from returned leaves and the proof subtries outside the range.
     fn verify(mut self, root: B256) -> Result<Option<B256>, RangeProofError> {
         self.visit_reference(Nibbles::new(), &RlpNode::word_rlp(&root))?;
 
@@ -45,7 +38,6 @@ impl<'a> RangeProofVerifier<'a> {
         Ok(self.next.as_ref().map(TriePath::lowest_key))
     }
 
-    /// Traverses boundary references while retaining subtries wholly outside the returned range.
     fn visit_reference(
         &mut self,
         prefix: Nibbles,
@@ -65,7 +57,6 @@ impl<'a> RangeProofVerifier<'a> {
         }
     }
 
-    /// Expands a boundary node and records any leaf proven to lie outside the returned range.
     fn visit_node(&mut self, node: TrieNode, prefix: Nibbles) -> Result<(), RangeProofError> {
         match node {
             TrieNode::EmptyRoot => Ok(()),
@@ -97,7 +88,6 @@ impl<'a> RangeProofVerifier<'a> {
         }
     }
 
-    /// Adds an outside subtree to the frontier without expanding hashed references.
     fn add_outside_reference(
         &mut self,
         prefix: Nibbles,
@@ -110,7 +100,6 @@ impl<'a> RangeProofVerifier<'a> {
         self.add_outside_node(TrieNode::decode(&mut reference.as_slice())?, prefix)
     }
 
-    /// Flattens an inline outside node into frontier entries accepted by [`HashBuilder`].
     fn add_outside_node(&mut self, node: TrieNode, prefix: Nibbles) -> Result<(), RangeProofError> {
         match node {
             TrieNode::EmptyRoot => Ok(()),
@@ -134,7 +123,6 @@ impl<'a> RangeProofVerifier<'a> {
         }
     }
 
-    /// Keeps the leftmost of the paths proven to lie right of the authenticated range.
     fn note_next(&mut self, path: Nibbles) {
         if self.next.is_none_or(|next| path < next) {
             self.next = Some(path);
@@ -142,25 +130,16 @@ impl<'a> RangeProofVerifier<'a> {
     }
 }
 
-/// Fixed hashed-key boundaries for the range being authenticated.
 struct ProofRange {
-    /// Inclusive origin requested by the downloader.
     left: Nibbles,
-    /// Inclusive final returned key, or the maximum key for an empty response.
     right: Nibbles,
 }
 
 impl ProofRange {
-    /// Converts the inclusive hashed-key boundaries into trie paths.
     fn new(left: B256, right: B256) -> Self {
         Self { left: Nibbles::unpack(left), right: Nibbles::unpack(right) }
     }
 
-    /// Classifies a subtree as outside, inside, or intersecting a range boundary.
-    ///
-    /// A subtree holds exactly the keys starting with `prefix`, so the bounds truncated to the
-    /// same depth decide the relation. A prefix equal to a bound is treated as a boundary and
-    /// expanded; the node is always resolvable, since it sits on that bound's proof path.
     fn subtree_relation(&self, prefix: &Nibbles) -> Result<SubtreeRelation, RangeProofError> {
         if prefix.len() > KEY_NIBBLES {
             return Err(RangeProofError::PathTooLong { path: *prefix })
@@ -179,7 +158,6 @@ impl ProofRange {
         })
     }
 
-    /// Classifies a complete leaf path relative to the authenticated range.
     fn key_relation(&self, path: &Nibbles) -> KeyRelation {
         if path < &self.left {
             KeyRelation::Before
@@ -191,16 +169,13 @@ impl ProofRange {
     }
 }
 
-/// Proof nodes indexed by the hash used in trie references.
 struct ProofNodes<'a>(B256Map<&'a [u8]>);
 
 impl<'a> ProofNodes<'a> {
-    /// Indexes the wire proof nodes for constant-time reference resolution.
     fn new(proof: &'a [Bytes]) -> Self {
         Self(proof.iter().map(|node| (keccak256(node), node.as_ref())).collect())
     }
 
-    /// Resolves a hashed reference from the proof, or decodes an inline trie node directly.
     fn resolve(&self, path: Nibbles, reference: &RlpNode) -> Result<TrieNode, RangeProofError> {
         let Some(hash) = reference.as_hash() else {
             return Ok(TrieNode::decode(&mut reference.as_slice())?)
@@ -210,12 +185,10 @@ impl<'a> ProofNodes<'a> {
     }
 }
 
-/// Ordered leaves and opaque subtries used to reconstruct a trie root.
 #[derive(Default)]
 struct ProofFrontier(Vec<FrontierEntry>);
 
 impl ProofFrontier {
-    /// Builds the initial frontier from returned leaves and validates their ordering.
     fn from_leaves<I, V>(origin: B256, leaves: I) -> Result<(Self, Option<B256>), RangeProofError>
     where
         I: IntoIterator<Item = (B256, V)>,
@@ -242,19 +215,16 @@ impl ProofFrontier {
         Ok((frontier, previous))
     }
 
-    /// Adds a complete trie leaf to the root reconstruction frontier.
     fn push_leaf(&mut self, path: Nibbles, value: Vec<u8>) {
         debug_assert_eq!(path.len(), KEY_NIBBLES);
         self.0.push(FrontierEntry::Leaf { path, value });
     }
 
-    /// Adds an opaque subtree hash to the root reconstruction frontier.
     fn push_subtree(&mut self, path: Nibbles, hash: B256) {
         debug_assert!(path.len() <= KEY_NIBBLES);
         self.0.push(FrontierEntry::Subtree { path, hash });
     }
 
-    /// Sorts the frontier and reconstructs its Merkle Patricia trie root.
     fn root(mut self) -> Result<B256, RangeProofError> {
         // Outside subtries are disjoint from returned leaves, so sorting produces the strict path
         // order required by HashBuilder. Reject duplicates before they reach its assertion.
@@ -342,9 +312,7 @@ pub enum RangeProofError {
 
 /// Verifies a consecutive leaf range against `root`, starting at `origin`.
 ///
-/// Returns the lowest key the trie can still hold to the right of the last verified leaf, or
-/// `None` when the range exhausts the trie. A subtree the boundary proof leaves unexpanded pins
-/// only a prefix, so the key is a lower bound rather than the exact next key.
+/// Returns a lower bound for the next key, or `None` if the range exhausts the trie.
 pub fn verify_range_proof<I, V>(
     root: B256,
     origin: B256,
@@ -357,9 +325,7 @@ where
 {
     let (frontier, last_key) = ProofFrontier::from_leaves(origin, leaves)?;
 
-    // An empty trie has no subtrie for a proof to authenticate, and a proof is omitted only when
-    // the leaves are the entire trie. In both cases the reconstructed root alone authenticates the
-    // response, since a shorter range cannot reproduce the root.
+    // Empty tries and proof-free ranges are authenticated by their reconstructed root.
     if root == EMPTY_ROOT_HASH || proof.is_empty() {
         let got = frontier.root()?;
         if got != root {
@@ -371,24 +337,15 @@ where
     RangeProofVerifier::new(origin, last_key.unwrap_or(MAX_HASH), proof, frontier).verify(root)
 }
 
-/// Depth-checked descents along a hashed-key trie path.
-///
-/// [`Nibbles`] holds at most [`KEY_NIBBLES`] nibbles and panics when extended past that, corrupting
-/// its length in release builds, so every descent is bounded before the path is appended to.
 trait TriePath: Sized {
-    /// Lowest hashed key the subtree at this path can hold.
     fn lowest_key(&self) -> B256;
 
-    /// Descends through an extension node's key.
     fn descend_extension(self, key: &Nibbles) -> Result<Self, RangeProofError>;
 
-    /// Descends into a branch node's child.
     fn descend_child(self, nibble: u8) -> Result<Self, RangeProofError>;
 
-    /// Descends through a leaf node's key onto the complete hashed key it terminates.
     fn descend_leaf(self, key: &Nibbles) -> Result<Self, RangeProofError>;
 
-    /// Appends a node key, rejecting one that would run past a hashed key.
     fn join_checked(self, key: &Nibbles) -> Result<Self, RangeProofError>;
 }
 
@@ -439,7 +396,6 @@ enum FrontierEntry {
 }
 
 impl FrontierEntry {
-    /// Returns the trie path used to order entries before root reconstruction.
     const fn path(&self) -> Nibbles {
         match self {
             Self::Leaf { path, .. } | Self::Subtree { path, .. } => *path,
@@ -512,8 +468,7 @@ mod tests {
         );
     }
 
-    /// A subtree the proof leaves unexpanded pins only a prefix, so the reported key is the lowest
-    /// key that subtree can hold rather than the next leaf itself.
+    // An unexpanded subtree reports its lowest possible key.
     #[test]
     fn unexpanded_right_subtree_reports_a_prefix_bound() {
         let right = |tail: u8| {
@@ -561,8 +516,7 @@ mod tests {
         );
     }
 
-    /// A crafted node key that would push a path past the hashed-key length must be rejected,
-    /// because `Nibbles` panics (and corrupts its length in release) when extended past capacity.
+    // Reject paths before they exceed the fixed hashed-key length.
     #[test]
     fn node_paths_are_bounded_before_they_overflow_a_key() {
         let dangling = RlpNode::word_rlp(&B256::repeat_byte(0xaa));
@@ -598,8 +552,7 @@ mod tests {
         ));
     }
 
-    /// An extension consuming no nibble leaves the depth unchanged, so a chain of them would
-    /// recurse until the stack is exhausted rather than hitting the hashed-key bound.
+    // Empty extensions could recurse indefinitely without increasing the path depth.
     #[test]
     fn empty_extension_keys_are_rejected() {
         let empty_key = Nibbles::new();
