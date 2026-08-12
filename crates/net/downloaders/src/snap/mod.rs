@@ -101,7 +101,7 @@ impl<C: SnapClient> AccountRangeDownloader<C> {
         }
 
         let leaves = accounts.iter().map(|(hash, account)| (*hash, alloy_rlp::encode(account)));
-        let mut has_more = verify_range_proof(
+        let next = verify_range_proof(
             self.request.root_hash,
             self.request.starting_hash,
             leaves,
@@ -114,15 +114,11 @@ impl<C: SnapClient> AccountRangeDownloader<C> {
 
         // Responders append the boundary account before checking the requested limit. Authenticate
         // an overshooting account as part of the response before removing it.
-        let reached_limit =
-            accounts.last().is_some_and(|(hash, _)| *hash >= self.request.limit_hash);
-        let retained = accounts.partition_point(|(hash, _)| *hash <= self.request.limit_hash);
-        if retained < accounts.len() {
-            accounts.truncate(retained);
-        }
-        if reached_limit {
-            has_more = false;
-        }
+        accounts.truncate(accounts.partition_point(|(hash, _)| *hash <= self.request.limit_hash));
+
+        // The proof pins where the trie continues, so the interval is complete unless a key the
+        // response did not cover can still fall inside it.
+        let has_more = next.is_some_and(|next| next <= self.request.limit_hash);
 
         Ok(AccountRangeOutcome::Verified(VerifiedAccountRange { accounts, has_more }))
     }
@@ -515,6 +511,60 @@ mod tests {
             })
         );
         assert!(client.reported.lock().unwrap().is_empty());
+    }
+
+    /// A response cut short by the responder's byte budget completes the interval anyway when the
+    /// proof shows the trie continues past the limit.
+    #[tokio::test]
+    async fn range_ending_before_the_limit_needs_no_further_request() {
+        let accounts = vec![(key(1), account(7)), (key(9), account(8))];
+        let (root_hash, proof) = root_and_proof(&accounts, &[key(1)]);
+        let peer = PeerId::random();
+        let message = AccountRangeMessage {
+            request_id: 1,
+            accounts: vec![AccountData::from_trie_account(accounts[0].0, &accounts[0].1)],
+            proof,
+        };
+        let client = Arc::new(TestSnapClient::new([response(peer, message)]));
+        let mut request = request(root_hash);
+        request.limit_hash = key(5);
+
+        let outcome =
+            AccountRangeDownloader::new(Arc::clone(&client), request).unwrap().await.unwrap();
+
+        assert_eq!(
+            outcome,
+            AccountRangeOutcome::Verified(VerifiedAccountRange {
+                accounts: vec![accounts[0]],
+                has_more: false,
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn range_ending_before_a_covered_key_reports_more() {
+        let accounts = vec![(key(1), account(7)), (key(3), account(8))];
+        let (root_hash, proof) = root_and_proof(&accounts, &[key(1)]);
+        let peer = PeerId::random();
+        let message = AccountRangeMessage {
+            request_id: 1,
+            accounts: vec![AccountData::from_trie_account(accounts[0].0, &accounts[0].1)],
+            proof,
+        };
+        let client = Arc::new(TestSnapClient::new([response(peer, message)]));
+        let mut request = request(root_hash);
+        request.limit_hash = key(5);
+
+        let outcome =
+            AccountRangeDownloader::new(Arc::clone(&client), request).unwrap().await.unwrap();
+
+        assert_eq!(
+            outcome,
+            AccountRangeOutcome::Verified(VerifiedAccountRange {
+                accounts: vec![accounts[0]],
+                has_more: true,
+            })
+        );
     }
 
     #[tokio::test]
