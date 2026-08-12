@@ -240,7 +240,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
                     inbound_messages += 1;
                     if inbound_messages == MAX_INBOUND_MESSAGES_PER_POLL {
                         inbound_messages = 0;
-                        tokio::task::yield_now().await;
+                        yield_once().await;
                     }
                 }
             }
@@ -577,7 +577,7 @@ impl InboundBudget {
     fn try_reserve(budget: &Arc<Self>, size: usize) -> Option<InboundBudgetGuard> {
         budget
             .used
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |used| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |used| {
                 used.checked_add(size).filter(|next| *next <= budget.max)
             })
             .ok()
@@ -1017,6 +1017,19 @@ impl<'a> Future for ProtocolsPoller<'a> {
         // All protocols processed, nothing ready
         Poll::Pending
     }
+}
+
+fn yield_once() -> impl Future<Output = ()> {
+    let mut yielded = false;
+    std::future::poll_fn(move |cx| {
+        if yielded {
+            Poll::Ready(())
+        } else {
+            yielded = true;
+            cx.waker().wake_by_ref();
+            Poll::Pending
+        }
+    })
 }
 
 /// Aggregate byte budget for inbound messages queued across all protocols on one connection.
