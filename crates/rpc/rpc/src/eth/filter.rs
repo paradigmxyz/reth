@@ -224,6 +224,31 @@ where
         FilterChanges<RpcTransaction<Eth::NetworkTypes>, RpcLog<Eth::NetworkTypes>>,
         EthFilterError,
     > {
+        // Pending transaction filters are backed by a pool listener rather than by block
+        // production, so drain them and refresh their poll timestamp independently of the
+        // canonical head gate below. Otherwise a stalled head both withholds already buffered
+        // transactions and lets the filter go stale from a poll timestamp that never advances.
+        {
+            let mut filters = self.inner.active_filters.inner.lock().await;
+            let filter =
+                filters.get_mut(&id).ok_or_else(|| EthFilterError::FilterNotFound(id.clone()))?;
+
+            if let FilterKind::PendingTransaction(pending) = filter.kind.clone() {
+                filter.last_poll_timestamp = Instant::now();
+                drop(filters);
+                return Ok(match pending.drain().await {
+                    FilterChanges::Empty => FilterChanges::Empty,
+                    FilterChanges::Hashes(hashes) => FilterChanges::Hashes(hashes),
+                    FilterChanges::Transactions(transactions) => {
+                        FilterChanges::Transactions(transactions)
+                    }
+                    FilterChanges::Logs(_) => {
+                        unreachable!("pending transaction filter returned logs")
+                    }
+                })
+            }
+        }
+
         let info = self.provider().chain_info()?;
         let best_number = info.best_number;
 
@@ -231,7 +256,8 @@ where
         // the last time changes were polled, in other words the best block at last poll + 1
         let (start_block, kind) = {
             let mut filters = self.inner.active_filters.inner.lock().await;
-            let filter = filters.get_mut(&id).ok_or(EthFilterError::FilterNotFound(id))?;
+            let filter =
+                filters.get_mut(&id).ok_or_else(|| EthFilterError::FilterNotFound(id.clone()))?;
 
             if filter.block > best_number {
                 // no new blocks since the last poll
@@ -249,14 +275,9 @@ where
         };
 
         match kind {
-            FilterKind::PendingTransaction(filter) => Ok(match filter.drain().await {
-                FilterChanges::Empty => FilterChanges::Empty,
-                FilterChanges::Hashes(hashes) => FilterChanges::Hashes(hashes),
-                FilterChanges::Transactions(transactions) => {
-                    FilterChanges::Transactions(transactions)
-                }
-                FilterChanges::Logs(_) => unreachable!("pending transaction filter returned logs"),
-            }),
+            FilterKind::PendingTransaction(_) => {
+                unreachable!("pending transaction filters are handled above the head gate")
+            }
             FilterKind::Block => {
                 // Note: we need to fetch the block hashes from inclusive range
                 // [start_block..best_block]
@@ -2020,5 +2041,62 @@ mod tests {
         // Each block hash should be the hash of its own header, not derived from any other header
         assert_eq!(logs[0].block_hash, Some(expected_hashes[0])); // block 100
         assert_eq!(logs[1].block_hash, Some(expected_hashes[2])); // block 102
+    }
+
+    /// Regression test for a pending transaction filter being gated by canonical head progress.
+    /// A poll must drain newly pooled transactions and refresh the filter's poll timestamp even
+    /// when the provider reports no new blocks since the previous poll.
+    #[tokio::test]
+    async fn test_pending_transaction_filter_independent_of_head() {
+        use reth_transaction_pool::{test_utils::MockTransactionFactory, TransactionOrigin};
+
+        let provider = MockEthProvider::default();
+        let genesis = alloy_consensus::Header::default();
+        provider.add_header(genesis.hash_slow(), genesis);
+        let pool = testing_pool();
+        let eth_api = EthApiBuilder::new(
+            provider.clone(),
+            pool.clone(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build();
+
+        let eth_filter = EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
+
+        let id = eth_filter
+            .new_pending_transaction_filter(Some(PendingTransactionFilterKind::Hashes))
+            .await
+            .unwrap();
+
+        // Baseline poll while the provider has no blocks at all.
+        let changes = eth_filter.filter_changes(id.clone()).await.unwrap();
+        assert!(matches!(changes, FilterChanges::Hashes(hashes) if hashes.is_empty()));
+
+        let first_poll_timestamp = {
+            let filters = eth_filter.active_filters().inner.lock().await;
+            filters.get(&id).unwrap().last_poll_timestamp
+        };
+
+        // Add a transaction to the pool without ever producing a block, so the provider's best
+        // block number never advances between polls.
+        let mut mock_tx_factory = MockTransactionFactory::default();
+        let transaction = mock_tx_factory.create_eip1559();
+        let tx_hash = *transaction.transaction.hash();
+        pool.add_transaction(TransactionOrigin::External, transaction.transaction.clone())
+            .await
+            .unwrap();
+
+        tokio::time::sleep(Duration::from_millis(5)).await;
+
+        let changes = eth_filter.filter_changes(id.clone()).await.unwrap();
+        let FilterChanges::Hashes(hashes) = changes else { panic!("expected hashes") };
+        assert_eq!(hashes, vec![tx_hash]);
+
+        let second_poll_timestamp = {
+            let filters = eth_filter.active_filters().inner.lock().await;
+            filters.get(&id).unwrap().last_poll_timestamp
+        };
+        assert!(second_poll_timestamp > first_poll_timestamp);
     }
 }
