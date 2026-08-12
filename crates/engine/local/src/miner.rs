@@ -112,21 +112,19 @@ impl<Pool: TransactionPool + Unpin> Future for MiningMode<Pool> {
                         return Poll::Ready(());
                     }
                 }
-                Poll::Pending
             }
             Self::Interval(interval) => {
                 if interval.poll_tick(cx).is_ready() {
                     return Poll::Ready(())
                 }
-                Poll::Pending
             }
             Self::Trigger(trigger) => {
                 if trigger.poll_next_unpin(cx).is_ready() {
                     return Poll::Ready(())
                 }
-                Poll::Pending
             }
         }
+        Poll::Pending
     }
 }
 

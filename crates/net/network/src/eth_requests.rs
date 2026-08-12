@@ -4,13 +4,10 @@ use crate::{
     budget::DEFAULT_BUDGET_TRY_DRAIN_DOWNLOADERS, metered_poll_nested_stream_with_budget,
     metrics::EthRequestHandlerMetrics,
 };
-use alloy_consensus::{
-    constants::{EMPTY_ROOT_HASH, KECCAK_EMPTY},
-    BlockHeader, ReceiptWithBloom,
-};
+use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader, ReceiptWithBloom};
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{Bytes, B256, U256};
-use alloy_rlp::{Encodable, RlpEncodable};
+use alloy_primitives::{Bytes, B256};
+use alloy_rlp::Encodable;
 use futures::StreamExt;
 use reth_eth_wire::{
     snap::{
@@ -28,7 +25,7 @@ use reth_network_p2p::{
     snap::client::SnapResponse,
 };
 use reth_network_peers::PeerId;
-use reth_primitives_traits::{Account, Block};
+use reth_primitives_traits::Block;
 use reth_storage_api::{
     errors::provider::ProviderResult, BalProvider, BlockReader, BytecodeReader,
     GetBlockAccessListLimit, HeaderProvider, RangeEnd, RangeResponse, StateProviderFactory,
@@ -415,7 +412,7 @@ where
 
         let limit = GetBlockAccessListLimit::ResponseSizeSoftLimit(SOFT_RESPONSE_LIMIT);
         let access_lists =
-            self.client.bal_store().get_by_hashes_with_limit(&request.0, limit).unwrap_or_default();
+            self.client.get_bals_by_hashes_with_limit(&request.0, limit).unwrap_or_default();
         let _ = response.send(Ok(BlockAccessLists(access_lists)));
     }
 }
@@ -473,8 +470,7 @@ where
                 );
                 let block_access_lists = self
                     .client
-                    .bal_store()
-                    .get_by_hashes_with_limit(&req.block_hashes, limit)
+                    .get_bals_by_hashes_with_limit(&req.block_hashes, limit)
                     .unwrap_or_default();
                 Ok(SnapResponse::BlockAccessLists(BlockAccessListsMessage {
                     request_id: req.request_id,
@@ -553,8 +549,10 @@ where
         let mut account_data = Vec::with_capacity(accounts.len());
         for (hash, account) in accounts {
             let storage_root = state.storage_root_by_hash(hash)?;
-            account_data
-                .push(AccountData { hash, body: slim_account_body(&account, storage_root) });
+            account_data.push(AccountData::from_trie_account(
+                hash,
+                &account.into_trie_account(storage_root),
+            ));
         }
 
         Ok(AccountRangeMessage { request_id: req.request_id, accounts: account_data, proof })
@@ -610,11 +608,8 @@ where
             slots.push(
                 account_slots
                     .into_iter()
-                    .map(|(hash, value)| StorageData {
-                        hash,
-                        // snap clients verify proofs against RLP-encoded storage trie leaves.
-                        data: alloy_rlp::encode(value).into(),
-                    })
+                    // snap clients verify proofs against RLP-encoded storage trie leaves.
+                    .map(|(hash, value)| StorageData::from_value(hash, value))
                     .collect(),
             );
 
@@ -638,39 +633,6 @@ fn boundary_proof_keys<T>(origin: B256, last: Option<&(B256, T)>) -> Vec<B256> {
         Some((last, _)) => vec![origin, *last],
         None => vec![origin],
     }
-}
-
-/// Like the consensus trie account, but the code hash and storage root are empty byte strings
-/// rather than [`KECCAK_EMPTY`]/[`EMPTY_ROOT_HASH`] when the account has no code/storage, to
-/// avoid transferring the same 32 bytes for every EOA. Borrowed to encode without allocating.
-#[derive(RlpEncodable)]
-struct SlimAccountBody<'a> {
-    /// The account's nonce.
-    nonce: u64,
-    /// The account's balance.
-    balance: U256,
-    /// Empty when the account has no storage.
-    storage_root: &'a [u8],
-    /// Empty when the account has no code.
-    code_hash: &'a [u8],
-}
-
-/// RLP-encodes `account` in snap/2's slim format; see [`SlimAccountBody`].
-fn slim_account_body(account: &Account, storage_root: B256) -> Bytes {
-    let storage_root: &[u8] =
-        if storage_root == EMPTY_ROOT_HASH { &[] } else { storage_root.as_slice() };
-    let code_hash: &[u8] = match &account.bytecode_hash {
-        Some(hash) if *hash != KECCAK_EMPTY => hash.as_slice(),
-        _ => &[],
-    };
-
-    alloy_rlp::encode(SlimAccountBody {
-        nonce: account.nonce,
-        balance: account.balance,
-        storage_root,
-        code_hash,
-    })
-    .into()
 }
 
 /// An endless future.
@@ -850,12 +812,14 @@ pub enum IncomingEthRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::constants::EMPTY_ROOT_HASH;
     use alloy_eips::{
         eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
         eip7594::{BlobTransactionSidecarVariant, Cell},
     };
-    use alloy_primitives::{keccak256, Address, TxHash, B128};
+    use alloy_primitives::{keccak256, Address, TxHash, B128, U256};
     use reth_network_api::test_utils::PeersHandle;
+    use reth_primitives_traits::Account;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_storage_api::noop::NoopProvider;
     use reth_transaction_pool::blobstore::{
