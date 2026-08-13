@@ -127,8 +127,6 @@ pub mod pending;
 pub mod size;
 pub(crate) mod state;
 pub mod txpool;
-#[cfg(test)]
-mod txpool_blob_queued_test;
 mod update;
 
 /// Bound on number of pending transactions from `reth_network::TransactionsManager` to buffer.

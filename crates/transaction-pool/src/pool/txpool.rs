@@ -2515,6 +2515,29 @@ mod tests {
         assert!(pool.blob_pool.is_empty());
     }
 
+    #[test]
+    fn test_queued_count_includes_blob_pool() {
+        let on_chain_balance = U256::MAX;
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let tx = MockTransaction::eip4844().inc_price().inc_limit();
+
+        // set block info so the tx is underpriced w.r.t. blob fee and lands in the blob pool
+        let mut block_info = pool.block_info();
+        block_info.pending_blob_fee = Some(tx.max_fee_per_blob_gas().unwrap() + 1);
+        pool.set_block_info(block_info);
+
+        let validated = f.validated(tx);
+        pool.add_transaction(validated, on_chain_balance, on_chain_nonce, None).unwrap();
+
+        assert_eq!(pool.blob_pool.len(), 1);
+        assert!(pool.pending_pool.is_empty());
+
+        // blob pool transactions are parked and must be reported as queued
+        assert_eq!(pool.queued_transactions_count(), 1);
+    }
+
     /// A struct representing a txpool promotion test instance
     #[derive(Debug, PartialEq, Eq, Clone, Hash)]
     struct PromotionTest {
