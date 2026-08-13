@@ -1,11 +1,14 @@
 use super::txpool::PendingFees;
 use crate::{
-    identifier::TransactionId, pool::size::SizeTracker, traits::BestTransactionsAttributes,
+    identifier::{SenderId, TransactionId},
+    pool::size::SizeTracker,
+    traits::BestTransactionsAttributes,
     PoolTransaction, SubPoolLimit, ValidPoolTransaction,
 };
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
+    ops::Bound::Unbounded,
     sync::Arc,
 };
 
@@ -63,6 +66,23 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         let id = self.submission_id;
         self.submission_id = self.submission_id.wrapping_add(1);
         id
+    }
+
+    /// Returns an iterator over all transactions in the pool
+    pub(crate) fn all(&self) -> impl ExactSizeIterator<Item = Arc<ValidPoolTransaction<T>>> + '_ {
+        self.by_id.values().map(|tx| tx.transaction.clone())
+    }
+
+    /// Returns an iterator over all transactions for the given sender, using a `BTree` range
+    /// query.
+    pub(crate) fn txs_by_sender(
+        &self,
+        sender: SenderId,
+    ) -> impl Iterator<Item = Arc<ValidPoolTransaction<T>>> + '_ {
+        self.by_id
+            .range((sender.start_bound(), Unbounded))
+            .take_while(move |(other, _)| sender == other.sender)
+            .map(|(_, tx)| Arc::clone(&tx.transaction))
     }
 
     /// Removes the transaction from the pool
