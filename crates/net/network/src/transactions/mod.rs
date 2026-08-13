@@ -48,7 +48,7 @@ use alloy_rlp::Encodable;
 use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
-    BroadcastPoolTransactions, DedupPayload, EthNetworkPrimitives, EthVersion,
+    BroadcastPoolTransactions, Cells, DedupPayload, EthNetworkPrimitives, EthVersion, GetCells,
     GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData, LazyEncoded,
     LazyEncodedTransaction, NetworkPrimitives, NewPooledTransactionHashes,
     NewPooledTransactionHashes66, NewPooledTransactionHashes68, NewPooledTransactionHashes72,
@@ -224,6 +224,33 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
         peer.try_send(request).ok();
 
         rx.await?.map(|res| Some(res.0))
+    }
+
+    /// Requests cells from a specific eth/72 peer.
+    ///
+    /// This is the transport-level client primitive for EIP-8070. The caller supplies the
+    /// transaction hashes and the common cell mask for the request. Announcement-driven batching,
+    /// retries, cell verification, and blob reconstruction are layered above this method.
+    ///
+    /// Returns `None` if the peer is no longer connected.
+    pub async fn get_cells_from(
+        &self,
+        peer_id: PeerId,
+        hashes: Vec<B256>,
+        cell_mask: alloy_primitives::B128,
+    ) -> Result<Option<Cells>, RequestError> {
+        if hashes.is_empty() {
+            return Ok(Some(Cells { cell_mask, ..Default::default() }))
+        }
+
+        let Some(peer) = self.peer_handle(peer_id).await? else { return Ok(None) };
+
+        let (tx, rx) = oneshot::channel();
+        let request =
+            PeerRequest::GetCells { request: GetCells { hashes, cell_mask }, response: tx };
+        peer.try_send(request).map_err(|_| RequestError::ChannelClosed)?;
+
+        rx.await?.map(Some)
     }
 }
 

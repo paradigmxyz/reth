@@ -229,6 +229,12 @@ pub trait EngineApi<Engine: EngineTypes> {
         payload_id: PayloadId,
     ) -> RpcResult<Engine::ExecutionPayloadEnvelopeV6>;
 
+    /// Returns transactions selected from the local transaction pool for the FOCIL inclusion list.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/pull/609>.
+    #[method(name = "getInclusionListV1")]
+    async fn get_inclusion_list_v1(&self) -> RpcResult<Vec<Bytes>>;
+
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1>
     #[method(name = "getPayloadBodiesByHashV1")]
     async fn get_payload_bodies_by_hash_v1(
