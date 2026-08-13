@@ -14,9 +14,10 @@ use rayon::prelude::*;
 use reth_evm::{
     block::ExecutableTxParts,
     execute::{ExecutableTxFor, WithTxEnv},
-    ConfigureEvm, ConvertTx, ExecutableTxIterator, ExecutableTxTuple, SpecFor, TxEnvFor,
+    ConfigureEvm, ConvertTx, ExecutableTxIterator, ExecutableTxTuple, RecoveredTx as _, SpecFor,
+    TxEnvFor,
 };
-use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
+use reth_primitives_traits::{FastInstant as Instant, NodePrimitives, TxTy};
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, DatabaseProviderFactory, PruneCheckpointReader,
     StageCheckpointReader, StorageSettingsCache, TryIntoHistoricalStateProvider,
@@ -75,6 +76,9 @@ type PrewarmTxReceiver<TxEnv, Recovered> = mpsc::Receiver<(usize, RecoveredTx<Tx
 type ExecuteTxReceiver<TxEnv, Recovered, Err> =
     IndexedTxReceiver<RecoveredTx<TxEnv, Recovered>, Err>;
 type ExecuteTxSender<TxEnv, Recovered, Err> = IndexedTxSender<RecoveredTx<TxEnv, Recovered>, Err>;
+/// Sender streaming decoded transactions from the fan-out to payload conversion, so conversion
+/// can assemble the block body without re-decoding the payload.
+type BodyTxSender<Evm> = mpsc::SyncSender<(usize, TxTy<<Evm as ConfigureEvm>::Primitives>)>;
 
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
@@ -164,6 +168,7 @@ where
 {
     /// Spawns transaction conversion and cache prewarming, optionally wiring prewarm output into
     /// an externally-owned state-root task.
+    #[expect(clippy::too_many_arguments)]
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     pub fn spawn_with_state_root_streams<P, I: ExecutableTxIterator<Evm>>(
         &self,
@@ -173,6 +178,7 @@ where
         hint_stream: Option<StateRootHintStream>,
         hashed_update_stream: Option<StateRootUpdateStream>,
         parallel_bal_execution: bool,
+        body_tx: Option<BodyTxSender<Evm>>,
     ) -> IteratorPayloadHandle<Evm, I>
     where
         P: DatabaseProviderFactory + Clone + 'static,
@@ -183,8 +189,12 @@ where
             + TryIntoHistoricalStateProvider
             + 'static,
     {
-        let (prewarm_rx, execution_rx) =
-            self.spawn_tx_iterator(transactions, env.transaction_count, parallel_bal_execution);
+        let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(
+            transactions,
+            env.transaction_count,
+            parallel_bal_execution,
+            body_tx,
+        );
         let prewarm_handle = self.spawn_caching_with(
             env,
             prewarm_rx,
@@ -230,6 +240,7 @@ where
         transactions: I,
         transaction_count: usize,
         parallel_bal_execution: bool,
+        body_tx: Option<BodyTxSender<Evm>>,
     ) -> (IteratorPrewarmTxReceiver<Evm, I>, IteratorExecuteTxReceiver<Evm, I>) {
         let (prewarm_tx, prewarm_rx) = mpsc::sync_channel(transaction_count);
         let (execute_tx, execute_rx) = crossbeam_channel::bounded(transaction_count);
@@ -246,7 +257,13 @@ where
             );
             self.executor.spawn_blocking_named("tx-iterator", move || {
                 let (transactions, convert) = transactions.into_parts();
-                convert_serial(transactions.into_iter(), &convert, &prewarm_tx, &execute_tx);
+                convert_serial(
+                    transactions.into_iter(),
+                    &convert,
+                    &prewarm_tx,
+                    &execute_tx,
+                    body_tx.as_ref(),
+                );
             });
         } else {
             // Parallel path — recover signatures in parallel on rayon, stream results
@@ -268,6 +285,9 @@ where
                             .for_each(|(idx, tx)| {
                                 let tx = tx.map(|tx| {
                                     let tx = WithTxEnv::new(tx);
+                                    if let Some(body_tx) = &body_tx {
+                                        let _ = body_tx.send((idx, tx.tx().clone()));
+                                    }
                                     let _ = prewarm_tx.send((idx, tx.clone()));
                                     tx
                                 });
@@ -284,7 +304,13 @@ where
 
                     // Convert the first few transactions sequentially so execution can
                     // start immediately without waiting for rayon work-stealing.
-                    convert_serial(iter.by_ref().take(prefetch), &convert, &prewarm_tx, &execute_tx);
+                    convert_serial(
+                        iter.by_ref().take(prefetch),
+                        &convert,
+                        &prewarm_tx,
+                        &execute_tx,
+                        body_tx.as_ref(),
+                    );
 
                     let mut iter = iter.enumerate();
 
@@ -315,6 +341,9 @@ where
 
                             for (idx, tx) in chunk {
                                 if let Ok(tx) = &tx {
+                                    if let Some(body_tx) = &body_tx {
+                                        let _ = body_tx.send((idx, tx.tx().clone()));
+                                    }
                                     let _ = prewarm_tx.send((idx, tx.clone()));
                                 }
                                 let _ = execute_tx.send((idx, tx));
@@ -486,15 +515,21 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
     convert: &C,
     prewarm_tx: &mpsc::SyncSender<(usize, WithTxEnv<TxEnv, Recovered>)>,
     execute_tx: &ExecuteTxSender<TxEnv, Recovered, Err>,
+    body_tx: Option<&mpsc::SyncSender<(usize, InnerTx)>>,
 ) where
     Tx: ExecutableTxParts<TxEnv, InnerTx, Recovered = Recovered>,
     TxEnv: Clone,
+    InnerTx: Clone,
+    Recovered: reth_evm::RecoveredTx<InnerTx>,
     C: ConvertTx<RawTx, Tx = Tx, Error = Err>,
 {
     for (idx, raw_tx) in iter.enumerate() {
         let tx = convert.convert(raw_tx);
         let tx = tx.map(|tx| WithTxEnv::new(tx));
         if let Ok(tx) = &tx {
+            if let Some(body_tx) = body_tx {
+                let _ = body_tx.send((idx, tx.tx().clone()));
+            }
             let _ = prewarm_tx.send((idx, tx.clone()));
         }
         let _ = execute_tx.send((idx, tx));

@@ -1,12 +1,13 @@
 //! Validates execution payload wrt Ethereum Execution Engine API version.
 
+use alloy_primitives::B256;
 use alloy_rpc_types_engine::ExecutionData;
 pub use alloy_rpc_types_engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
     ExecutionPayloadV1, PayloadAttributes as EthPayloadAttributes,
 };
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_engine_primitives::{EngineApiValidator, PayloadValidator};
+use reth_engine_primitives::{EngineApiValidator, PayloadTxStream, PayloadValidator};
 use reth_ethereum_payload_builder::EthereumExecutionPayloadValidator;
 use reth_ethereum_primitives::Block;
 use reth_node_api::PayloadTypes;
@@ -48,6 +49,21 @@ where
         payload: ExecutionData,
     ) -> Result<SealedBlock<Self::Block>, NewPayloadError> {
         self.inner.ensure_well_formed_payload(payload).map_err(Into::into)
+    }
+
+    fn supports_payload_tx_stream(&self) -> bool {
+        true
+    }
+
+    fn convert_payload_to_block_with_tx_stream(
+        &self,
+        payload: ExecutionData,
+        txs: PayloadTxStream<Self::Block>,
+    ) -> Result<(SealedBlock<Self::Block>, Option<B256>), NewPayloadError> {
+        self.inner
+            .ensure_well_formed_payload_with_tx_stream(payload, txs)
+            .map(|(block, tx_root)| (block, Some(tx_root)))
+            .map_err(Into::into)
     }
 }
 

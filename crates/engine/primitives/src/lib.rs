@@ -212,6 +212,44 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
         sealed_block.try_recover().map_err(|e| NewPayloadError::Other(e.into()))
     }
 
+    /// Returns `true` if this validator implements
+    /// [`convert_payload_to_block_with_tx_stream`](Self::convert_payload_to_block_with_tx_stream)
+    /// and the engine should stream decoded transactions to payload conversion.
+    ///
+    /// When `false` (the default), the engine does not create the stream channel and payload
+    /// conversion decodes transactions itself via
+    /// [`convert_payload_to_block`](Self::convert_payload_to_block).
+    #[cfg(feature = "std")]
+    fn supports_payload_tx_stream(&self) -> bool {
+        false
+    }
+
+    /// Converts the given payload into a sealed block, taking decoded transactions from `txs`
+    /// instead of re-decoding them from the payload.
+    ///
+    /// The engine feeds `txs` from the execution-side decode fan-out, so implementations can
+    /// assemble the block body from already-decoded transactions. If the stream disconnects
+    /// before all transactions arrive, implementations must fall back to decoding from the
+    /// payload and reproduce the exact errors of
+    /// [`convert_payload_to_block`](Self::convert_payload_to_block).
+    ///
+    /// Returns the block together with the transactions root computed from the raw payload
+    /// transaction bytes; `None` means the caller recomputes it from the block body.
+    ///
+    /// The default drops the stream and delegates to
+    /// [`convert_payload_to_block`](Self::convert_payload_to_block), preserving today's
+    /// behavior for implementations that don't opt in via
+    /// [`supports_payload_tx_stream`](Self::supports_payload_tx_stream).
+    #[cfg(feature = "std")]
+    fn convert_payload_to_block_with_tx_stream(
+        &self,
+        payload: Types::ExecutionData,
+        txs: PayloadTxStream<Self::Block>,
+    ) -> Result<(SealedBlock<Self::Block>, Option<alloy_primitives::B256>), NewPayloadError> {
+        drop(txs);
+        self.convert_payload_to_block(payload).map(|block| (block, None))
+    }
+
     /// Verifies payload post-execution w.r.t. hashed state updates.
     ///
     /// `state_updates` lazily yields the block's hashed post-state; call it only if the
@@ -261,3 +299,20 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
         Ok(())
     }
 }
+
+/// Item streamed from the execution-side transaction decoder to payload conversion: the
+/// transaction's original payload index plus the decoded transaction.
+///
+/// The index is required because the parallel decode fan-out may send transactions out of order.
+#[cfg(feature = "std")]
+pub type PayloadTxStreamItem<B> =
+    (usize, <<B as Block>::Body as reth_primitives_traits::BlockBody>::Transaction);
+
+/// Receiving half of the decoded transaction stream consumed by
+/// [`PayloadValidator::convert_payload_to_block_with_tx_stream`].
+#[cfg(feature = "std")]
+pub type PayloadTxStream<B> = std::sync::mpsc::Receiver<PayloadTxStreamItem<B>>;
+
+/// Sending half of the decoded transaction stream, fed by the engine's decode fan-out.
+#[cfg(feature = "std")]
+pub type PayloadTxStreamSender<B> = std::sync::mpsc::SyncSender<PayloadTxStreamItem<B>>;

@@ -128,7 +128,8 @@ use alloy_primitives::Address;
 use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats};
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
-    ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
+    ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadTxStream,
+    PayloadTxStreamSender, PayloadValidator,
 };
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
@@ -496,10 +497,24 @@ where
             }
         };
 
+        // Stream decoded transactions from the execution-side decode fan-out to payload
+        // conversion so payloads are only decoded once. Capacity equals the transaction count so
+        // the fan-out never blocks on this channel; a dropped receiver just means conversion
+        // already finished or fell back to decoding itself.
+        let (mut body_tx, body_rx) = if matches!(input, BlockOrPayload::Payload(_)) &&
+            self.validator.supports_payload_tx_stream()
+        {
+            let (tx, rx) = std::sync::mpsc::sync_channel(input.transaction_count());
+            (Some(tx), Some(rx))
+        } else {
+            (None, None)
+        };
+
         // Spawn payload conversion and basic validation on a background thread so it runs
         // concurrently with the rest of the function (setup + execution). For payloads this
         // overlaps the cost of RLP decoding + header hashing.
-        let validated_block = self.spawn_convert_and_validate(&input, parent_block.clone());
+        let validated_block =
+            self.spawn_convert_and_validate(&input, parent_block.clone(), body_rx);
 
         /// A helper macro that returns the block in case there was an error
         /// This macro is used for early returns before block conversion
@@ -508,6 +523,10 @@ where
                 match $expr {
                     Ok(val) => val,
                     Err(e) => {
+                        // Conversion may be blocked on the tx stream, which is only fed once the
+                        // payload processor is spawned. Drop the sender first so it falls back to
+                        // decoding instead of deadlocking the join below.
+                        drop(body_tx.take());
                         let block = validated_block.try_into_inner().expect("sole handle")?;
                         return Err(InsertBlockError::new(block, e.into()).into())
                     }
@@ -534,6 +553,16 @@ where
         if input.gas_limit() >
             parent_block.gas_limit().saturating_mul(MAX_EXPECTED_GAS_LIMIT_MULTIPLIER)
         {
+            // Conversion may be blocked on the tx stream, which is only fed once the payload
+            // processor is spawned below. Drop the sender so it falls back to decoding instead
+            // of deadlocking the blocking `.get()`.
+            if let Some(sender) = body_tx.take() {
+                debug!(
+                    target: "engine::tree::payload_validator",
+                    "dropping payload tx sender before blocking pre-execution checks"
+                );
+                drop(sender);
+            }
             // Call `.get()` to await the pre-execution checks and exit early if they fail.
             if validated_block.get().is_err() {
                 return Err(validated_block
@@ -550,6 +579,8 @@ where
             ensure_ok!(self.state_provider_builder(parent_hash, ctx.state()))
         else {
             // this is pre-validated in the tree
+            // Unblock conversion before the blocking join, see `ensure_ok!`.
+            drop(body_tx.take());
             return Err(InsertBlockError::new(
                 validated_block.try_into_inner().expect("sole handle")?,
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
@@ -635,6 +666,7 @@ where
             hint_stream,
             hashed_update_stream,
             parallel_bal_execution,
+            body_tx.take(),
         ));
 
         // Create optional cache stats for detailed block logging
@@ -903,11 +935,16 @@ where
 
     /// Spawns a background task to convert a [`BlockOrPayload`] into a [`SealedBlock`] and perform
     /// basic consensus validations on it.
+    ///
+    /// If `body_rx` is provided, payload conversion assembles the block body from transactions
+    /// decoded by the execution-side fan-out instead of decoding them again, see
+    /// [`PayloadValidator::convert_payload_to_block_with_tx_stream`].
     #[expect(clippy::type_complexity)]
     pub fn spawn_convert_and_validate<T>(
         &self,
         input: &BlockOrPayload<T>,
         parent: SealedHeader<N::BlockHeader>,
+        body_rx: Option<PayloadTxStream<N::Block>>,
     ) -> LazyHandle<Result<SealedBlock<N::Block>, InsertPayloadError<N::Block>>>
     where
         T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
@@ -924,11 +961,12 @@ where
                 "convert_and_validate",
             )
             .entered();
-            let block = match input {
-                BlockOrPayload::Block(block) => block,
-                BlockOrPayload::Payload(payload) => {
-                    validator.convert_payload_to_block(payload)?
-                }
+            let (block, tx_root) = match input {
+                BlockOrPayload::Block(block) => (block, None),
+                BlockOrPayload::Payload(payload) => match body_rx {
+                    Some(rx) => validator.convert_payload_to_block_with_tx_stream(payload, rx)?,
+                    None => (validator.convert_payload_to_block(payload)?, None),
+                },
             };
 
             if let Err(e) = consensus.validate_header(block.sealed_header()) {
@@ -946,7 +984,7 @@ where
             drop(_enter);
 
             if let Err(e) =
-                consensus.validate_block_pre_execution_with_tx_root(&block, None)
+                consensus.validate_block_pre_execution_with_tx_root(&block, tx_root)
             {
                 error!(target: "engine::tree::payload_validator", ?block, "Failed to validate block {}: {e}", block.hash());
                 return Err(InsertBlockError::consensus_error(e, block).into())
@@ -1350,6 +1388,7 @@ where
     ///
     /// State-root tasks are prepared before this method and can provide capabilities that
     /// prewarm uses for BAL-derived authoritative updates or transaction-derived hints.
+    #[expect(clippy::too_many_arguments)]
     #[instrument(
         level = "debug",
         target = "engine::tree::payload_validator",
@@ -1368,6 +1407,7 @@ where
         hint_stream: Option<StateRootHintStream>,
         hashed_update_stream: Option<StateRootUpdateStream>,
         parallel_bal_execution: bool,
+        body_tx: Option<PayloadTxStreamSender<N::Block>>,
     ) -> Result<
         PayloadHandle<
             impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
@@ -1384,6 +1424,7 @@ where
             hint_stream,
             hashed_update_stream,
             parallel_bal_execution,
+            body_tx,
         );
 
         self.metrics.block_validation.spawn_payload_processor.record(start.elapsed().as_secs_f64());

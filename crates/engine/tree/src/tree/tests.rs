@@ -3195,3 +3195,191 @@ async fn test_on_backfill_sync_finished_opstack_retriggers_backfill_to_buffered_
 async fn test_on_backfill_sync_finished_eth_retriggers_backfill_to_buffered_finalized() {
     assert_post_backfill_recheck_retriggers_to_buffered_target(EngineApiKind::Ethereum).await;
 }
+
+// ================================================================================================
+// PAYLOAD TX STREAM TEST SUITE
+// ================================================================================================
+//
+// These tests drive `validate_block_with_state` with the real Ethereum payload validator, so the
+// decoded transaction stream between the execution-side tx iterator and payload conversion is
+// exercised end to end, including the disconnect fallback and the sender drop in the gas-limit
+// spike guard.
+
+/// Harness driving payload validation with [`reth_node_ethereum::EthereumEngineValidator`], which
+/// opts into the payload tx stream.
+struct StreamingValidatorHarness {
+    harness: TestHarness,
+    validator: BasicEngineValidator<
+        MockEthProvider,
+        reth_evm_ethereum::EthEvmConfig,
+        reth_node_ethereum::EthereumEngineValidator,
+    >,
+}
+
+impl StreamingValidatorHarness {
+    fn new(chain_spec: Arc<ChainSpec>) -> Self {
+        let harness = TestHarness::new(chain_spec.clone());
+
+        // Make the genesis parent resolvable for payload validation.
+        let genesis = SealedHeader::seal_slow(chain_spec.genesis_header().clone());
+        harness.provider.add_header(genesis.hash(), genesis.clone_header());
+
+        let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
+        let overlay_manager = harness.tree.state.tree_state.overlay_manager.clone();
+        let validator = BasicEngineValidator::new(
+            harness.provider.clone(),
+            consensus,
+            reth_evm_ethereum::EthEvmConfig::new(chain_spec.clone()),
+            reth_node_ethereum::EthereumEngineValidator::new(chain_spec),
+            TreeConfig::default(),
+            Box::new(NoopInvalidBlockHook::default()),
+            overlay_manager,
+            reth_tasks::Runtime::test(),
+        );
+
+        Self { harness, validator }
+    }
+
+    fn genesis_header(&self) -> SealedHeader {
+        self.harness.tree.canonical_in_memory_state.get_canonical_head()
+    }
+
+    fn validate_payload(&mut self, payload: ExecutionData) -> ValidationOutcome<EthPrimitives> {
+        let ctx = TreeCtx::new(
+            &mut self.harness.tree.state,
+            &self.harness.tree.canonical_in_memory_state,
+        );
+        EngineValidator::<EthEngineTypes>::validate_payload(&mut self.validator, payload, ctx)
+    }
+}
+
+/// Builds a V1 payload on top of `parent` whose advertised block hash is consistent with its
+/// (possibly garbage) raw transaction bytes.
+fn streaming_payload(parent: &SealedHeader, raw_txs: Vec<Bytes>, gas_limit: u64) -> ExecutionData {
+    let mut payload = ExecutionPayloadV1 {
+        parent_hash: parent.hash(),
+        fee_recipient: alloy_primitives::Address::ZERO,
+        state_root: B256::ZERO,
+        receipts_root: B256::ZERO,
+        logs_bloom: Default::default(),
+        prev_randao: B256::ZERO,
+        block_number: parent.number + 1,
+        gas_limit,
+        gas_used: 0,
+        timestamp: parent.timestamp + 12,
+        extra_data: Bytes::new(),
+        base_fee_per_gas: alloy_primitives::U256::ZERO,
+        block_hash: B256::ZERO,
+        transactions: raw_txs,
+    };
+    payload.block_hash = payload.clone().into_block_raw().unwrap().header.hash_slow();
+    ExecutionData { payload: payload.into(), sidecar: ExecutionPayloadSidecar::none() }
+}
+
+/// Returns an encoded, signed transaction usable as a raw payload transaction.
+fn streaming_raw_tx(nonce: u64) -> Bytes {
+    use alloy_consensus::SignableTransaction;
+    use alloy_eips::eip2718::Encodable2718;
+    let tx = alloy_consensus::TxLegacy {
+        chain_id: Some(1),
+        nonce,
+        gas_price: 7,
+        gas_limit: 21_000,
+        to: alloy_primitives::TxKind::Call(alloy_primitives::Address::ZERO),
+        value: alloy_primitives::U256::ZERO,
+        input: Default::default(),
+    };
+    let signed: reth_ethereum_primitives::TransactionSigned =
+        tx.into_signed(alloy_primitives::Signature::test_signature()).into();
+    signed.encoded_2718().into()
+}
+
+/// A malformed transaction with a self-consistent block hash must report the same decode error
+/// as the non-streaming path (via the disconnect fallback re-decode).
+#[test]
+fn test_payload_tx_stream_malformed_tx_reports_decode_error() {
+    reth_tracing::init_test_tracing();
+
+    let mut harness = StreamingValidatorHarness::new(MAINNET.clone());
+    let genesis = harness.genesis_header();
+
+    let payload =
+        streaming_payload(&genesis, vec![Bytes::from_static(b"garbage")], genesis.gas_limit);
+
+    let err = harness.validate_payload(payload).unwrap_err();
+    match err {
+        InsertPayloadError::Payload(reth_payload_primitives::NewPayloadError::Eth(
+            alloy_rpc_types_engine::PayloadError::Decode(_),
+        )) => {}
+        other => panic!("expected decode error, got: {other:?}"),
+    }
+}
+
+/// A payload with both a bad hash and a malformed transaction must report the hash mismatch:
+/// the streaming conversion validates the block hash before touching transactions.
+#[test]
+fn test_payload_tx_stream_block_hash_takes_precedence() {
+    reth_tracing::init_test_tracing();
+
+    let mut harness = StreamingValidatorHarness::new(MAINNET.clone());
+    let genesis = harness.genesis_header();
+
+    let ExecutionData { payload, sidecar } =
+        streaming_payload(&genesis, vec![Bytes::from_static(b"garbage")], genesis.gas_limit);
+    let mut payload = payload.into_v1();
+    payload.block_hash = B256::repeat_byte(0xab);
+    let payload = ExecutionData { payload: payload.into(), sidecar };
+
+    let err = harness.validate_payload(payload).unwrap_err();
+    match err {
+        InsertPayloadError::Payload(reth_payload_primitives::NewPayloadError::Eth(
+            alloy_rpc_types_engine::PayloadError::BlockHash { .. },
+        )) => {}
+        other => panic!("expected block hash mismatch, got: {other:?}"),
+    }
+}
+
+/// A gas-limit spike blocks on pre-execution checks before the payload processor (and thus the
+/// tx stream producer) is spawned. The sender must be dropped first so conversion falls back to
+/// decoding instead of deadlocking.
+#[test]
+fn test_payload_tx_stream_gas_limit_spike_does_not_deadlock() {
+    reth_tracing::init_test_tracing();
+
+    let mut harness = StreamingValidatorHarness::new(MAINNET.clone());
+    let genesis = harness.genesis_header();
+
+    // More than MAX_EXPECTED_GAS_LIMIT_MULTIPLIER (2x) the parent gas limit, with transactions
+    // so conversion actually waits on the stream.
+    let payload = streaming_payload(&genesis, vec![streaming_raw_tx(0)], genesis.gas_limit * 3);
+
+    // The gas limit jump is consensus-invalid. A block-level consensus error proves conversion
+    // completed via the disconnect fallback (transactions decoded, block assembled) instead of
+    // deadlocking on the blocking pre-execution checks or failing to decode.
+    let err = harness.validate_payload(payload).unwrap_err();
+    assert!(
+        matches!(err, InsertPayloadError::Block(_)),
+        "expected post-conversion consensus error, got: {err:?}"
+    );
+}
+
+/// Execution of the payload fails (mock EVM), but conversion must still complete via the
+/// streamed transactions (or the disconnect fallback) instead of hanging.
+#[test]
+fn test_payload_tx_stream_aborted_execution_does_not_hang() {
+    reth_tracing::init_test_tracing();
+
+    let mut harness = StreamingValidatorHarness::new(MAINNET.clone());
+    let genesis = harness.genesis_header();
+
+    let payload = streaming_payload(&genesis, vec![streaming_raw_tx(0)], genesis.gas_limit);
+
+    // The crafted payload cannot pass consensus/execution. A block-level error proves the
+    // streamed transactions were assembled into a block (conversion terminated) rather than
+    // validation waiting on the tx stream forever or failing to decode.
+    let err = harness.validate_payload(payload).unwrap_err();
+    assert!(
+        matches!(err, InsertPayloadError::Block(_)),
+        "expected post-conversion error, got: {err:?}"
+    );
+}
