@@ -10205,7 +10205,6 @@ dependencies = [
  "jsonrpsee-http-client",
  "pin-project",
  "reqwest",
- "reth-rpc-server-types",
  "tokio",
  "tower",
  "tower-http",

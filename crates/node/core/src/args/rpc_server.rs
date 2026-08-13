@@ -54,7 +54,7 @@ pub struct DefaultRpcServerArgs {
     http_addr: IpAddr,
     http_port: u16,
     http_disable_compression: bool,
-    http_compression_algorithms: Vec<String>,
+    http_compression_algorithms: Option<Vec<String>>,
     http_api: Option<RpcModuleSelection>,
     http_corsdomain: Option<String>,
     ws: bool,
@@ -133,7 +133,7 @@ impl DefaultRpcServerArgs {
     }
 
     /// Set the default allowed HTTP response compression algorithms
-    pub fn with_http_compression_algorithms(mut self, v: Vec<String>) -> Self {
+    pub fn with_http_compression_algorithms(mut self, v: Option<Vec<String>>) -> Self {
         self.http_compression_algorithms = v;
         self
     }
@@ -386,7 +386,7 @@ impl Default for DefaultRpcServerArgs {
             http_addr: Ipv4Addr::LOCALHOST.into(),
             http_port: constants::DEFAULT_HTTP_RPC_PORT,
             http_disable_compression: false,
-            http_compression_algorithms: constants::default_http_compression_algos(),
+            http_compression_algorithms: None,
             http_api: None,
             http_corsdomain: None,
             ws: false,
@@ -454,16 +454,19 @@ pub struct RpcServerArgs {
 
     /// Comma-separated list of allowed compression algorithms for HTTP responses.
     ///
+    /// If not specified, all supported algorithms are enabled.
+    ///
     /// Client `Accept-Encoding` quality values select among allowed algorithms; ties prefer
     /// zstd > br > gzip > deflate. Omitted quality values default to 1; without an acceptable
-    /// allowed algorithm, the response is uncompressed. List order is ignored. Brotli is opt-in.
+    /// allowed algorithm, the response is uncompressed. List order is ignored.
     #[arg(
         long = "http.compression",
         value_name = "ALGOS",
         value_delimiter = ',',
-        default_value = DefaultRpcServerArgs::get_global().http_compression_algorithms.join(",")
+        value_parser = ["zstd", "gzip", "deflate", "br"],
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().http_compression_algorithms.as_ref().map(|v| v.join(",").into()))
     )]
-    pub http_compression_algorithms: Vec<String>,
+    pub http_compression_algorithms: Option<Vec<String>>,
 
     /// Rpc Modules to be configured for the HTTP server
     #[arg(long = "http.api", value_parser = RpcModuleSelectionValueParser::default(), default_value = Resettable::from(DefaultRpcServerArgs::get_global().http_api.as_ref().map(|v| v.to_string().into())))]
@@ -1029,6 +1032,27 @@ mod tests {
     }
 
     #[test]
+    fn http_compression_algorithms_are_optional() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        assert!(args.http_compression_algorithms.is_none());
+
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--http.compression",
+            "zstd,gzip,deflate,br",
+        ])
+        .args;
+        assert_eq!(
+            args.http_compression_algorithms.as_deref().unwrap(),
+            ["zstd", "gzip", "deflate", "br"]
+        );
+
+        let result =
+            CommandParser::<RpcServerArgs>::try_parse_from(["reth", "--http.compression", "gizp"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn rpc_server_args_default_sanity_test() {
         let default_args = RpcServerArgs::default();
         let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
@@ -1081,7 +1105,7 @@ mod tests {
             http_addr: "127.0.0.1".parse().unwrap(),
             http_port: 8545,
             http_disable_compression: false,
-            http_compression_algorithms: constants::default_http_compression_algos(),
+            http_compression_algorithms: None,
             http_api: Some(RpcModuleSelection::try_from_selection(["eth", "admin"]).unwrap()),
             http_corsdomain: Some("*".to_string()),
             ws: true,

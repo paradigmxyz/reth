@@ -1087,8 +1087,10 @@ pub struct RpcServerConfig<RpcMiddleware = Identity> {
     http_addr: Option<SocketAddr>,
     /// Control whether http responses should be compressed
     http_disable_compression: bool,
-    /// Compression algorithms for HTTP responses
-    http_compression_algorithms: Vec<String>,
+    /// Allowed compression algorithms for HTTP responses.
+    ///
+    /// If `None`, all supported algorithms are enabled.
+    http_compression_algorithms: Option<Vec<String>>,
     /// Configs for WS server
     ws_server_config: Option<ServerConfigBuilder>,
     /// Allowed CORS Domains for ws.
@@ -1117,7 +1119,7 @@ impl Default for RpcServerConfig<Identity> {
             http_cors_domains: None,
             http_addr: None,
             http_disable_compression: false,
-            http_compression_algorithms: Vec::new(),
+            http_compression_algorithms: None,
             ws_server_config: None,
             ws_cors_domains: None,
             ws_addr: None,
@@ -1218,14 +1220,18 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
         self
     }
 
-    /// Configure HTTP response compression.
-    pub fn with_http_compression(
-        mut self,
-        disable_compression: bool,
-        algos: &[String],
-    ) -> Self {
-        self.http_disable_compression = disable_compression;
-        self.http_compression_algorithms = algos.to_vec();
+    /// Configure whether HTTP responses should be compressed
+    pub const fn with_http_disable_compression(mut self, http_disable_compression: bool) -> Self {
+        self.http_disable_compression = http_disable_compression;
+        self
+    }
+
+    /// Configure the allowed compression algorithms for HTTP responses.
+    ///
+    /// If `None`, all supported algorithms are enabled. See
+    /// [`CompressionLayer::with_algorithms`] for how the algorithms are applied.
+    pub fn with_http_compression_algorithms(mut self, algos: Option<Vec<String>>) -> Self {
+        self.http_compression_algorithms = algos;
         self
     }
 
@@ -1341,17 +1347,16 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
     /// based on the client's `Accept-Encoding` header.
     fn maybe_compression_layer(
         disable_compression: bool,
-        algos: &[String],
+        algos: Option<&[String]>,
     ) -> Option<CompressionLayer> {
         if disable_compression {
             None
-        } else if algos.is_empty() {
-            // Use default algorithms when none are specified
-            Some(CompressionLayer::new(
-                &constants::DEFAULT_HTTP_COMPRESSION_ALGOS,
-            ))
         } else {
-            Some(CompressionLayer::new(algos))
+            match algos {
+                // All supported algorithms are enabled when none are specified
+                None => Some(CompressionLayer::new()),
+                Some(algos) => Some(CompressionLayer::with_algorithms(algos)),
+            }
         }
     }
 
@@ -1426,7 +1431,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                             .option_layer(Self::maybe_jwt_layer(self.jwt_secret))
                             .option_layer(Self::maybe_compression_layer(
                                 self.http_disable_compression,
-                                &self.http_compression_algorithms,
+                                self.http_compression_algorithms.as_deref(),
                             )),
                     )
                     .set_rpc_middleware(
@@ -1513,7 +1518,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                         .option_layer(Self::maybe_jwt_layer(self.jwt_secret))
                         .option_layer(Self::maybe_compression_layer(
                             self.http_disable_compression,
-                            &self.http_compression_algorithms,
+                            self.http_compression_algorithms.as_deref(),
                         )),
                 )
                 .set_rpc_middleware(
