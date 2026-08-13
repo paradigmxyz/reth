@@ -1552,7 +1552,7 @@ pub struct EthPooledTransaction<T = TransactionSigned> {
     /// Cached blob cell availability for this transaction.
     ///
     /// This is shared with the blob sidecar so that availability updates are reflected here.
-    blob_cell_availability: Option<BlobCellAvailability>,
+    pub blob_cell_availability: Option<BlobCellAvailability>,
 }
 
 impl<T: SignedTransaction> EthPooledTransaction<T> {
