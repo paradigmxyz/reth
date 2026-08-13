@@ -9,11 +9,11 @@ use alloy_eips::{
 };
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealable, B128, B256, U64};
 use alloy_rpc_types_engine::{
-    BogotaPayloadFields, CancunPayloadFields, ClientVersionV1, ExecutionData,
-    ExecutionPayloadBodiesV1, ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1,
-    ExecutionPayloadBodyV2, ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1,
-    ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated,
-    ForkchoiceUpdatedResponseV2, PayloadId, PayloadStatus, PayloadStatusV2, PraguePayloadFields,
+    CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1,
+    ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1, ExecutionPayloadBodyV2,
+    ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3,
+    ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, ForkchoiceUpdatedResponseV2, PayloadId,
+    PayloadStatus, PayloadStatusV2, PraguePayloadFields,
 };
 use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
@@ -1326,7 +1326,7 @@ where
             sidecar: ExecutionPayloadSidecar::v6(
                 CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
                 PraguePayloadFields { requests: execution_requests },
-                BogotaPayloadFields::new(inclusion_list_transactions),
+                inclusion_list_transactions.into(),
             ),
         };
 
