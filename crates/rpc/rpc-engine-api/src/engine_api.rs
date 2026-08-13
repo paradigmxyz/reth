@@ -1432,6 +1432,14 @@ where
         Ok(self.get_payload_v6_metered(payload_id).await?)
     }
 
+    /// Handler for `engine_getInclusionListV1`.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/pull/609>.
+    async fn get_inclusion_list_v1(&self) -> RpcResult<Vec<Bytes>> {
+        trace!(target: "rpc::engine", "Serving engine_getInclusionListV1");
+        Ok(Vec::new())
+    }
+
     /// Handler for `engine_getPayloadBodiesByHashV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1>
     async fn get_payload_bodies_by_hash_v1(
@@ -1688,6 +1696,14 @@ mod tests {
         let (_, api) = setup_engine_api();
         let res = api.get_client_version_v1(client.clone());
         assert_eq!(res.unwrap(), vec![client]);
+    }
+
+    #[tokio::test]
+    async fn get_inclusion_list_v1_returns_empty_list() {
+        let (_, api) = setup_engine_api();
+
+        let res = EngineApiServer::get_inclusion_list_v1(&api).await.unwrap();
+        assert!(res.is_empty());
     }
 
     #[tokio::test]

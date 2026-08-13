@@ -29,6 +29,7 @@ pub const CAPABILITIES: &[&str] = &[
     "engine_getPayloadV4",
     "engine_getPayloadV5",
     "engine_getPayloadV6",
+    "engine_getInclusionListV1",
     "engine_newPayloadV1",
     "engine_newPayloadV2",
     "engine_newPayloadV3",
@@ -250,6 +251,7 @@ mod tests {
         assert!(!is_critical_method("engine_getPayloadBodiesByHashV1"));
         assert!(!is_critical_method("engine_getPayloadBodiesByRangeV1"));
         assert!(!is_critical_method("engine_getClientVersionV1"));
+        assert!(!is_critical_method("engine_getInclusionListV1"));
     }
 
     #[test]
