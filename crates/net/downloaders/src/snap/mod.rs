@@ -12,6 +12,7 @@ use reth_network_p2p::{
     snap::client::{SnapClient, SnapResponse},
 };
 use reth_network_peers::PeerId;
+use reth_tasks::Runtime;
 use reth_trie_common::{range_proof::verify_range_proof, TrieAccount, EMPTY_ROOT_HASH};
 use std::{
     pin::Pin,
@@ -28,6 +29,7 @@ const MAX_RETRIES: u8 = 2;
 #[derive(Debug)]
 pub struct AccountRangeDownloader<C: SnapClient> {
     client: C,
+    runtime: Runtime,
     request: GetAccountRangeMessage,
     fut: C::Output,
     verification: Option<VerificationTask>,
@@ -35,10 +37,13 @@ pub struct AccountRangeDownloader<C: SnapClient> {
 }
 
 impl<C: SnapClient> AccountRangeDownloader<C> {
-    /// Creates a downloader and submits the initial request at normal priority.
-    ///
-    /// Returns an error when the origin exceeds the limit because such a range cannot be proven.
-    pub fn new(client: C, request: GetAccountRangeMessage) -> Result<Self, InvalidAccountRange> {
+    /// Creates a downloader using `runtime` for proof verification and submits the initial request.
+    /// Returns an error when the origin exceeds the limit.
+    pub fn new(
+        client: C,
+        request: GetAccountRangeMessage,
+        runtime: Runtime,
+    ) -> Result<Self, InvalidAccountRange> {
         if request.starting_hash > request.limit_hash {
             return Err(InvalidAccountRange {
                 origin: request.starting_hash,
@@ -46,7 +51,7 @@ impl<C: SnapClient> AccountRangeDownloader<C> {
             })
         }
         let fut = client.get_account_range(request.clone());
-        Ok(Self { client, request, fut, verification: None, retries: 0 })
+        Ok(Self { client, runtime, request, fut, verification: None, retries: 0 })
     }
 
     // Raise retry priority so transient failures cannot leave range progress behind new work.
@@ -80,7 +85,7 @@ impl<C: SnapClient> AccountRangeDownloader<C> {
         }
 
         let request = self.request.clone();
-        let fut = tokio::task::spawn_blocking(move || verify_account_range(&request, response));
+        let fut = self.runtime.spawn_blocking(move || verify_account_range(&request, response));
         self.verification = Some(VerificationTask { peer_id, fut });
         Ok(None)
     }
@@ -414,8 +419,15 @@ mod tests {
         Ok(WithPeerId::new(peer, SnapResponse::AccountRange(message)))
     }
 
-    #[tokio::test]
-    async fn verifies_and_decodes_a_complete_account_range() {
+    fn downloader(
+        client: Arc<TestSnapClient>,
+        request: GetAccountRangeMessage,
+    ) -> Result<AccountRangeDownloader<Arc<TestSnapClient>>, InvalidAccountRange> {
+        AccountRangeDownloader::new(client, request, Runtime::test())
+    }
+
+    #[test]
+    fn verifies_and_decodes_without_an_ambient_runtime() {
         let accounts = vec![(key(1), account(7)), (key(2), account(8))];
         let root_hash = root(&accounts);
         let peer = PeerId::random();
@@ -429,10 +441,8 @@ mod tests {
         };
         let client = Arc::new(TestSnapClient::new([response(peer, message)]));
 
-        let outcome = AccountRangeDownloader::new(Arc::clone(&client), request(root_hash))
-            .unwrap()
-            .await
-            .unwrap();
+        let downloader = downloader(Arc::clone(&client), request(root_hash)).unwrap();
+        let outcome = futures::executor::block_on(downloader).unwrap();
 
         assert_eq!(
             outcome,
@@ -462,10 +472,7 @@ mod tests {
         );
         let client = Arc::new(TestSnapClient::new([bad, good]));
 
-        let outcome = AccountRangeDownloader::new(Arc::clone(&client), request(root_hash))
-            .unwrap()
-            .await
-            .unwrap();
+        let outcome = downloader(Arc::clone(&client), request(root_hash)).unwrap().await.unwrap();
 
         assert!(matches!(outcome, AccountRangeOutcome::Verified(_)));
         assert_eq!(*client.reported.lock().unwrap(), [bad_peer]);
@@ -479,11 +486,10 @@ mod tests {
             AccountRangeMessage { request_id: 1, accounts: Vec::new(), proof: Vec::new() };
         let client = Arc::new(TestSnapClient::new([response(peer, message)]));
 
-        let outcome =
-            AccountRangeDownloader::new(Arc::clone(&client), request(B256::repeat_byte(0x11)))
-                .unwrap()
-                .await
-                .unwrap();
+        let outcome = downloader(Arc::clone(&client), request(B256::repeat_byte(0x11)))
+            .unwrap()
+            .await
+            .unwrap();
 
         assert_eq!(outcome, AccountRangeOutcome::Unavailable { peer_id: peer });
         assert!(client.reported.lock().unwrap().is_empty());
@@ -497,7 +503,7 @@ mod tests {
         request.limit_hash = key(1);
 
         assert!(matches!(
-            AccountRangeDownloader::new(Arc::clone(&client), request),
+            downloader(Arc::clone(&client), request),
             Err(InvalidAccountRange { .. })
         ));
         assert!(client.priorities.lock().unwrap().is_empty());
@@ -520,8 +526,7 @@ mod tests {
         let mut request = request(root_hash);
         request.limit_hash = key(2);
 
-        let outcome =
-            AccountRangeDownloader::new(Arc::clone(&client), request).unwrap().await.unwrap();
+        let outcome = downloader(Arc::clone(&client), request).unwrap().await.unwrap();
 
         assert_eq!(
             outcome,
@@ -553,8 +558,7 @@ mod tests {
         let mut request = request(root_hash);
         request.limit_hash = key(2);
 
-        let error =
-            AccountRangeDownloader::new(Arc::clone(&client), request).unwrap().await.unwrap_err();
+        let error = downloader(Arc::clone(&client), request).unwrap().await.unwrap_err();
 
         assert_eq!(error, RequestError::BadResponse);
         assert_eq!(client.reported.lock().unwrap().len(), attempts);
@@ -577,8 +581,7 @@ mod tests {
         let mut request = request(root_hash);
         request.limit_hash = key(2);
 
-        let outcome =
-            AccountRangeDownloader::new(Arc::clone(&client), request).unwrap().await.unwrap();
+        let outcome = downloader(Arc::clone(&client), request).unwrap().await.unwrap();
 
         assert_eq!(
             outcome,
@@ -606,8 +609,7 @@ mod tests {
         request.starting_hash = key(3);
         request.limit_hash = key(5);
 
-        let outcome =
-            AccountRangeDownloader::new(Arc::clone(&client), request).unwrap().await.unwrap();
+        let outcome = downloader(Arc::clone(&client), request).unwrap().await.unwrap();
 
         assert_eq!(
             outcome,
@@ -634,8 +636,7 @@ mod tests {
         let mut request = request(root_hash);
         request.limit_hash = key(5);
 
-        let outcome =
-            AccountRangeDownloader::new(Arc::clone(&client), request).unwrap().await.unwrap();
+        let outcome = downloader(Arc::clone(&client), request).unwrap().await.unwrap();
 
         assert_eq!(
             outcome,
@@ -660,8 +661,7 @@ mod tests {
         let mut request = request(root_hash);
         request.limit_hash = key(5);
 
-        let outcome =
-            AccountRangeDownloader::new(Arc::clone(&client), request).unwrap().await.unwrap();
+        let outcome = downloader(Arc::clone(&client), request).unwrap().await.unwrap();
 
         assert_eq!(
             outcome,
@@ -691,10 +691,7 @@ mod tests {
             good,
         ]));
 
-        AccountRangeDownloader::new(Arc::clone(&client), request(root_hash))
-            .unwrap()
-            .await
-            .unwrap();
+        downloader(Arc::clone(&client), request(root_hash)).unwrap().await.unwrap();
 
         assert!(client.reported.lock().unwrap().is_empty());
         assert_eq!(
@@ -714,11 +711,10 @@ mod tests {
         });
         let client = Arc::new(TestSnapClient::new(responses));
 
-        let error =
-            AccountRangeDownloader::new(Arc::clone(&client), request(B256::repeat_byte(0x11)))
-                .unwrap()
-                .await
-                .unwrap_err();
+        let error = downloader(Arc::clone(&client), request(B256::repeat_byte(0x11)))
+            .unwrap()
+            .await
+            .unwrap_err();
 
         assert_eq!(error, RequestError::BadResponse);
         assert_eq!(*client.reported.lock().unwrap(), peers);
