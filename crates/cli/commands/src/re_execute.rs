@@ -5,6 +5,7 @@ use crate::common::{
     EnvironmentArgs,
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, TxReceipt};
+use alloy_eip7928::compute_block_access_list_hash;
 use alloy_primitives::{Address, B256, U256};
 use clap::Parser;
 use eyre::WrapErr;
@@ -199,8 +200,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             }
                         };
 
+                        let bal_hash = executor
+                            .take_bal()
+                            .as_ref()
+                            .map(|bal| compute_block_access_list_hash(bal.as_slice()));
+
                         if let Err(err) = consensus
-                            .validate_block_post_execution(&block, &result, None,None)
+                            .validate_block_post_execution(&block, &result, None, bal_hash)
                             .wrap_err_with(|| {
                                 format!(
                                     "Failed to validate block {} {}",
