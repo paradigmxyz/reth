@@ -102,9 +102,33 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// which case the transaction's subgraph is also automatically marked invalid, See (1.).
     /// Invalid transactions are skipped.
     pub fn best(&self) -> BestTransactions<T> {
+        let mut independent: Vec<_> = self.independent_transactions.values().cloned().collect();
+        independent.sort_unstable();
+        let dependent_count = self.by_id.len() - independent.len();
+        let mut dependents = Vec::with_capacity(dependent_count);
+        let mut next_dependent = FxHashMap::default();
+        if dependent_count > 0 {
+            for (id, transaction) in &self.by_id {
+                if self
+                    .independent_transactions
+                    .get(&id.sender)
+                    .is_some_and(|independent| independent.transaction.id() == id)
+                {
+                    continue
+                }
+                next_dependent.entry(id.sender).or_insert(dependents.len());
+                dependents.push(transaction.clone());
+            }
+        }
         BestTransactions {
             all: self.by_id.clone(),
-            independent: self.independent_transactions.values().cloned().collect(),
+            independent,
+            unlocked: Default::default(),
+            dependents,
+            next_dependent,
+            has_updates: false,
+            yielded: Default::default(),
+            yielded_count: 0,
             invalid: Default::default(),
             new_transaction_receiver: Some(self.new_transaction_notifier.subscribe()),
             last_priority: None,
@@ -140,12 +164,13 @@ impl<T: TransactionOrdering> PendingPool<T> {
     ) -> BestTransactionsWithFees<T> {
         let mut best = self.best();
         for (submission_id, tx) in (self.submission_id + 1..).zip(unlocked) {
+            best.has_updates = true;
             debug_assert!(!best.all.contains_key(tx.id()), "transaction already included");
             let priority = self.ordering.priority(&tx.transaction, base_fee);
             let tx_id = *tx.id();
             let transaction = PendingTransaction { submission_id, transaction: tx, priority };
             if best.ancestor(&tx_id).is_none() {
-                best.independent.insert(transaction.clone());
+                best.unlocked.push(transaction.clone());
             }
             best.all.insert(tx_id, transaction);
         }
