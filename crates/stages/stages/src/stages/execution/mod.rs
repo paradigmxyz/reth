@@ -363,13 +363,13 @@ where
             })?;
 
             let built_bal = executor.take_bal().map(Bal::from);
-            if let Some(bal) = &built_bal {
-                if let Err(err) = bal.validate_gas_limit(block.header().gas_limit()) {
-                    return Err(StageError::Block {
-                        block: Box::new(block.block_with_parent()),
-                        error: BlockErrorKind::Validation(err.into()),
-                    })
-                }
+            if let Some(bal) = &built_bal &&
+                let Err(err) = bal.validate_gas_limit(block.header().gas_limit())
+            {
+                return Err(StageError::Block {
+                    block: Box::new(block.block_with_parent()),
+                    error: BlockErrorKind::Validation(err.into()),
+                })
             }
             let bal_hash = built_bal.as_ref().map(|bal| bal.compute_hash_with_buf(&mut bal_buf));
 
