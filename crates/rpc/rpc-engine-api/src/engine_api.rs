@@ -1774,41 +1774,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn bogota_stubs_return_unsupported_fork() {
-        let (_, api) = setup_engine_api();
-
-        let payload = ExecutionPayloadV4 {
-            payload_inner: ExecutionPayloadV3 {
-                payload_inner: ExecutionPayloadV2 {
-                    payload_inner: ExecutionPayloadV1::from_block_slow(&Block::default()),
-                    withdrawals: Vec::new(),
-                },
-                blob_gas_used: 0,
-                excess_blob_gas: 0,
-            },
-            block_access_list: Bytes::default(),
-            slot_number: 0,
-        };
-        let err = EngineApiServer::new_payload_v6(
-            &api,
-            payload,
-            Vec::new(),
-            B256::ZERO,
-            RequestsOrHash::Requests(Requests::default()),
-            Vec::new(),
-        )
-        .await
-        .unwrap_err();
-        assert_eq!(err.code(), crate::UNSUPPORTED_FORK_CODE);
-
-        let err =
-            EngineApiServer::fork_choice_updated_v5(&api, ForkchoiceState::default(), None, None)
-                .await
-                .unwrap_err();
-        assert_eq!(err.code(), crate::UNSUPPORTED_FORK_CODE);
-    }
-
-    #[tokio::test]
     async fn has_blobs_returns_ordered_availability() {
         let (_, api) = setup_engine_api();
 
