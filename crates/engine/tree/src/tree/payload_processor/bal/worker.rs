@@ -99,14 +99,17 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
                 let tx_gas_limit = tx.tx().gas_limit();
 
                 executor.evm_mut().db_mut().set_bal_index(BlockAccessIndex::new(index as u64 + 1));
-                let result = executor
-                    .execute_transaction_without_commit(tx)
-                    .map_err(|source| BalWorkerError::Execution { index, tx_gas_limit, source })?;
+                // A speculative failure is a per-transaction result: report it and keep
+                // serving the queue so the ordered commit loop can re-execute the
+                // transaction canonically while later transactions stay parallel.
+                let message = match executor.execute_transaction_without_commit(tx) {
+                    Ok(result) => Ok(BalWorkerOutput { index, signer, tx_gas_limit, result }),
+                    Err(source) => {
+                        Err(BalWorkerError::Execution { index, tx_gas_limit, source })
+                    }
+                };
 
-                if result_tx
-                    .send(Ok(BalWorkerOutput { index, signer, tx_gas_limit, result }))
-                    .is_err()
-                {
+                if result_tx.send(message).is_err() {
                     break;
                 }
             }

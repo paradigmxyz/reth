@@ -32,15 +32,13 @@ impl From<OrderedWorkerOutputError> for BalExecutionError {
 /// state and performs no canonical commit work.
 ///
 /// Behavior:
-/// - each yielded `Ok` output has the next transaction index
-/// - indexed execution errors are deferred to their transaction slot, so every earlier
-///   transaction's output is yielded first and the consumer sees the failure in block order
-/// - non-indexed worker errors are forwarded immediately
-/// - closed channels before `total` outputs yield the deferred error if one is held, otherwise
-///   `Err`
+/// - each yielded item has the next transaction index, `Ok` and indexed execution errors
+///   alike: an execution error is a per-transaction result, deferred to its slot so the
+///   consumer observes it in block order and can recover and keep consuming
+/// - non-indexed worker errors are forwarded immediately and exhaust the iterator
+/// - closed channels before `total` outputs yield `Err` and exhaust the iterator
 /// - out-of-bounds and duplicate indices panic because they violate the internal worker/dispatcher
 ///   index invariant
-/// - after the first yielded error, the iterator is exhausted
 pub(super) fn ordered_worker_outputs<R>(
     result_rx: &Receiver<Result<BalWorkerOutput<R>, BalWorkerError>>,
     total: usize,
@@ -50,8 +48,7 @@ pub(super) fn ordered_worker_outputs<R>(
 
 struct OrderedWorkerOutputs<'a, R> {
     result_rx: &'a Receiver<Result<BalWorkerOutput<R>, BalWorkerError>>,
-    pending: Vec<Option<BalWorkerOutput<R>>>,
-    pending_error: Option<(usize, BalWorkerError)>,
+    pending: Vec<Option<Result<BalWorkerOutput<R>, BalWorkerError>>>,
     next: usize,
     total: usize,
     failed: bool,
@@ -65,7 +62,6 @@ impl<'a, R> OrderedWorkerOutputs<'a, R> {
         Self {
             result_rx,
             pending: (0..total).map(|_| None).collect(),
-            pending_error: None,
             next: 0,
             total,
             failed: false,
@@ -82,46 +78,28 @@ impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
         }
 
         loop {
-            if let Some((index, _)) = &self.pending_error {
-                if *index == self.next {
-                    self.failed = true;
-                    let (_, err) = self.pending_error.take().expect("pending error present");
-                    return Some(Err(err.into()));
-                }
-            }
-
-            if let Some(output) = self.pending[self.next].take() {
+            if let Some(slot) = self.pending[self.next].take() {
                 self.next += 1;
-                return Some(Ok(output));
+                return Some(slot.map_err(Into::into));
             }
 
-            let output = match self.result_rx.recv() {
-                Ok(Ok(output)) => output,
+            let (index, slot) = match self.result_rx.recv() {
+                Ok(Ok(output)) => (output.index, Ok(output)),
                 Ok(Err(err)) => {
-                    // Defer indexed execution errors until every earlier transaction has
-                    // been yielded, so the consumer observes the failure in block order.
-                    if let BalWorkerError::Execution { index, .. } = &err {
-                        if *index > self.next {
-                            match &self.pending_error {
-                                Some((held, _)) if *held <= *index => {}
-                                _ => self.pending_error = Some((*index, err)),
-                            }
-                            continue;
-                        }
-                    }
-                    self.failed = true;
-                    return Some(Err(err.into()));
+                    // An indexed execution error is a per-transaction result and takes
+                    // its transaction slot; anything else is fatal to the whole block.
+                    let BalWorkerError::Execution { index, .. } = &err else {
+                        self.failed = true;
+                        return Some(Err(err.into()));
+                    };
+                    (*index, Err(err))
                 }
                 Err(_) => {
                     self.failed = true;
-                    if let Some((_, err)) = self.pending_error.take() {
-                        return Some(Err(err.into()));
-                    }
                     return Some(Err(OrderedWorkerOutputError::ResultChannelClosed));
                 }
             };
 
-            let index = output.index;
             assert!(
                 index < self.total,
                 "BAL worker returned out-of-bounds transaction index {index}; total={}",
@@ -132,7 +110,7 @@ impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
                 "BAL worker returned duplicate transaction index {index}",
             );
 
-            self.pending[index] = Some(output);
+            self.pending[index] = Some(slot);
         }
     }
 }
@@ -207,19 +185,21 @@ mod tests {
     }
 
     #[test]
-    fn yields_deferred_error_when_channel_closes_early() {
+    fn continues_past_indexed_execution_errors() {
         let (tx, rx) = crossbeam_channel::unbounded();
         tx.send(Err(BalWorkerError::Execution {
-            index: 1,
+            index: 0,
             tx_gas_limit: 42,
             source: alloy_evm::block::BlockExecutionError::msg("bal miss"),
         }))
         .unwrap();
+        tx.send(Ok(output(1, 10))).unwrap();
         drop(tx);
 
-        let mut outputs = ordered_worker_outputs::<u64>(&rx, 2);
+        let mut outputs = ordered_worker_outputs(&rx, 2);
 
         expect_err_contains(outputs.next().expect("first item"), "bal miss");
+        assert_eq!(outputs.next().expect("second item").expect("second output").result, 10);
         assert!(outputs.next().is_none());
     }
 

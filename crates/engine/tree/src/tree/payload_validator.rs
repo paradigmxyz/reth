@@ -1134,7 +1134,7 @@ where
         InsertBlockErrorKind,
     >
     where
-        Tx: ExecutableTxFor<Evm> + Send,
+        Tx: ExecutableTxFor<Evm> + Clone + Send,
         Err: core::error::Error + Send + Sync + 'static,
         MakeStateProvider: Fn(bool) -> ProviderResult<StateProviderBox> + Sync,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
@@ -1370,7 +1370,7 @@ where
         parallel_bal_execution: bool,
     ) -> Result<
         PayloadHandle<
-            impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
+            impl ExecutableTxFor<Evm> + Clone + Send + use<N, P, Evm, V, T>,
             impl core::error::Error + Send + Sync + 'static + use<N, P, Evm, V, T>,
             N::Receipt,
         >,
