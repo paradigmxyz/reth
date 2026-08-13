@@ -9,11 +9,11 @@ use alloy_eips::{
 };
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealable, B128, B256, U64};
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1,
-    ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1, ExecutionPayloadBodyV2,
-    ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3,
-    ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, ForkchoiceUpdatedResponseV2, PayloadId,
-    PayloadStatus, PayloadStatusV2, PraguePayloadFields,
+    BogotaPayloadFields, CancunPayloadFields, ClientVersionV1, ExecutionData,
+    ExecutionPayloadBodiesV1, ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1,
+    ExecutionPayloadBodyV2, ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1,
+    ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated,
+    ForkchoiceUpdatedResponseV2, PayloadId, PayloadStatus, PayloadStatusV2, PraguePayloadFields,
 };
 use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
@@ -298,9 +298,8 @@ where
     pub async fn new_payload_v6(
         &self,
         payload: PayloadT::ExecutionData,
-        inclusion_list_transactions: Vec<Bytes>,
     ) -> EngineApiResult<PayloadStatusV2> {
-        let _ = (payload, inclusion_list_transactions);
+        let _ = payload;
         Err(EngineApiError::EngineObjectValidationError(
             reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
         ))
@@ -1324,13 +1323,14 @@ where
         trace!(target: "rpc::engine", "Serving engine_newPayloadV6 stub");
         let payload = ExecutionData {
             payload: payload.into(),
-            sidecar: ExecutionPayloadSidecar::v4(
+            sidecar: ExecutionPayloadSidecar::v6(
                 CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
                 PraguePayloadFields { requests: execution_requests },
+                BogotaPayloadFields::new(inclusion_list_transactions),
             ),
         };
 
-        Ok(self.new_payload_v6(payload, inclusion_list_transactions).await?)
+        Ok(self.new_payload_v6(payload).await?)
     }
 
     /// Handler for `engine_forkchoiceUpdatedV1`
