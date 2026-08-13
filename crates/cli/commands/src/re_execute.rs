@@ -150,6 +150,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 let evm_config = evm_config.with_jit_support();
                 let executor_lifetime = Duration::from_secs(600);
                 let provider = provider_factory.database_provider_ro()?.disable_long_read_transaction_safety();
+                // Reused across blocks for BAL hash encoding.
+                let mut bal_buf = Vec::new();
 
                 let db_at = {
                     |block_number: u64| {
@@ -200,8 +202,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             }
                         };
 
-                        let bal_hash =
-                            executor.take_bal().map(|bal| Bal::from(bal).compute_hash());
+                        let bal_hash = executor
+                            .take_bal()
+                            .map(|bal| Bal::from(bal).compute_hash_with_buf(&mut bal_buf));
 
                         if let Err(err) = consensus
                             .validate_block_post_execution(&block, &result, None, bal_hash)

@@ -334,6 +334,8 @@ where
 
         let mut blocks = Vec::new();
         let mut results = Vec::new();
+        // Reused across blocks for BAL hash encoding.
+        let mut bal_buf = Vec::new();
         for block_number in start_block..=max_block {
             // Fetch the block
             let fetch_block_start = Instant::now();
@@ -369,7 +371,7 @@ where
                     })
                 }
             }
-            let bal_hash = built_bal.as_ref().map(|bal| bal.compute_hash());
+            let bal_hash = built_bal.as_ref().map(|bal| bal.compute_hash_with_buf(&mut bal_buf));
 
             if let Err(err) =
                 self.consensus.validate_block_post_execution(&block, &result, None, bal_hash)
