@@ -59,6 +59,7 @@ reth-discv4.workspace = true
 reth-discv5.workspace = true
 
 # ethereum
+alloy-eip7928.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
@@ -122,6 +123,7 @@ arbitrary = [
     "reth-db/arbitrary",
     "reth-chainspec/arbitrary",
     "alloy-chains/arbitrary",
+    "alloy-eip7928/arbitrary",
     "alloy-eips/arbitrary",
     "alloy-primitives/arbitrary",
     "reth-codecs/test-utils",
