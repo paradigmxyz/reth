@@ -135,6 +135,11 @@ pub trait StateWriter {
 /// skipping those types in the database write to avoid duplication.
 #[derive(Debug, Clone, Copy)]
 pub struct StateWriteConfig {
+    /// Whether to write plain account and storage state to the database.
+    ///
+    /// Set to `false` when canonical state is owned by an external backend. Contract bytecodes
+    /// and any enabled receipts are still written.
+    pub write_plain_state: bool,
     /// Whether to write receipts to the database.
     ///
     /// Set to `false` when receipts are being written to static files instead.
@@ -152,6 +157,7 @@ pub struct StateWriteConfig {
 impl Default for StateWriteConfig {
     fn default() -> Self {
         Self {
+            write_plain_state: true,
             write_receipts: true,
             write_account_changesets: true,
             write_storage_changesets: true,

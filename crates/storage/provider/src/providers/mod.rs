@@ -8,17 +8,27 @@ use reth_primitives_traits::Account;
 use reth_storage_errors::provider::ProviderResult;
 use std::sync::OnceLock;
 
+/// External canonical-tip account read callback.
+pub type FlatAccountRead =
+    dyn Fn(&Address) -> ProviderResult<Option<Account>> + Send + Sync + 'static;
+/// External canonical-tip storage read callback.
+pub type FlatStorageRead =
+    dyn Fn(Address, StorageKey) -> ProviderResult<Option<StorageValue>> + Send + Sync + 'static;
+
 /// Optional process-wide latest-state point-read callbacks for external state backends.
 ///
 /// The engine's in-memory overlays remain layered above these reads. Historical state, proofs,
 /// and trie-table access are intentionally unaffected.
 pub struct FlatStateReads {
     /// Reads an account from the external canonical-tip state.
-    pub account: Box<dyn Fn(&Address) -> ProviderResult<Option<Account>> + Send + Sync + 'static>,
+    pub account: Box<FlatAccountRead>,
     /// Reads a storage slot from the external canonical-tip state.
-    pub storage: Box<
-        dyn Fn(Address, StorageKey) -> ProviderResult<Option<StorageValue>> + Send + Sync + 'static,
-    >,
+    pub storage: Box<FlatStorageRead>,
+    /// Whether the external backend owns canonical state persistence.
+    ///
+    /// When enabled, Reth continues to persist block data, receipts, and bytecodes, but skips its
+    /// plain state, changesets, hashed state, trie nodes, and history indices.
+    pub owns_state_persistence: bool,
 }
 
 impl core::fmt::Debug for FlatStateReads {
