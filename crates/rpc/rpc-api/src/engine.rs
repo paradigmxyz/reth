@@ -13,7 +13,7 @@ use alloy_primitives::{Address, BlockHash, Bytes, B128, B256, U256, U64};
 use alloy_rpc_types_engine::{
     ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadBodiesV2, ExecutionPayloadInputV2,
     ExecutionPayloadV1, ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated,
-    PayloadId, PayloadStatus,
+    PayloadAttributes, PayloadId, PayloadStatus,
 };
 use alloy_rpc_types_eth::{
     state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, SyncStatus,
@@ -22,6 +22,8 @@ use alloy_serde::JsonStorageKey;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc, RpcModule};
 use reth_engine_primitives::EngineTypes;
 use serde_json::Value;
+
+pub use alloy_rpc_types_engine::{ForkchoiceUpdatedResponseV2, PayloadStatusV2};
 
 /// Helper trait for the engine api server.
 ///
@@ -87,6 +89,17 @@ pub trait EngineApi<Engine: EngineTypes> {
         execution_requests: RequestsOrHash,
     ) -> RpcResult<PayloadStatus>;
 
+    /// Bogota payload handler stub.
+    #[method(name = "newPayloadV6")]
+    async fn new_payload_v6(
+        &self,
+        payload: ExecutionPayloadV4,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+        execution_requests: RequestsOrHash,
+        inclusion_list_transactions: Vec<Bytes>,
+    ) -> RpcResult<PayloadStatusV2>;
+
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_forkchoiceupdatedv1>
     ///
     /// Caution: This should not accept the `withdrawals` field in the payload attributes.
@@ -150,6 +163,15 @@ pub trait EngineApi<Engine: EngineTypes> {
         payload_attributes: Option<Engine::PayloadAttributes>,
         custody_columns: Option<B128>,
     ) -> RpcResult<ForkchoiceUpdated>;
+
+    /// Bogota forkchoice update stub.
+    #[method(name = "forkchoiceUpdatedV5")]
+    async fn fork_choice_updated_v5(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<PayloadAttributes>,
+        custody_columns: Option<B128>,
+    ) -> RpcResult<ForkchoiceUpdatedResponseV2>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_getpayloadv1>
     ///

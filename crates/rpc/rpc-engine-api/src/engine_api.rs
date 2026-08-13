@@ -12,8 +12,8 @@ use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1,
     ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1, ExecutionPayloadBodyV2,
     ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3,
-    ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
-    PraguePayloadFields,
+    ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, ForkchoiceUpdatedResponseV2,
+    PayloadAttributes, PayloadId, PayloadStatus, PayloadStatusV2, PraguePayloadFields,
 };
 use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
@@ -292,6 +292,27 @@ where
         Ok(res?)
     }
 
+    /// Handler stub for `engine_newPayloadV6`.
+    pub async fn new_payload_v6(
+        &self,
+        payload: PayloadT::ExecutionData,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+        execution_requests: RequestsOrHash,
+        inclusion_list_transactions: Vec<Bytes>,
+    ) -> EngineApiResult<PayloadStatusV2> {
+        let _ = (
+            payload,
+            versioned_hashes,
+            parent_beacon_block_root,
+            execution_requests,
+            inclusion_list_transactions,
+        );
+        Err(EngineApiError::EngineObjectValidationError(
+            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
+        ))
+    }
+
     /// Returns whether the engine accepts execution requests hash.
     pub fn accept_execution_requests_hash(&self) -> bool {
         self.inner.accept_execution_requests_hash
@@ -412,6 +433,19 @@ where
         let res = Self::fork_choice_updated_v4(self, state, payload_attrs, custody_columns).await;
         self.inner.metrics.latency.fork_choice_updated_v4.record(start.elapsed());
         res
+    }
+
+    /// Handler stub for `engine_forkchoiceUpdatedV5`.
+    pub async fn fork_choice_updated_v5(
+        &self,
+        state: ForkchoiceState,
+        payload_attrs: Option<PayloadAttributes>,
+        custody_columns: Option<B128>,
+    ) -> EngineApiResult<ForkchoiceUpdatedResponseV2> {
+        let _ = (state, payload_attrs, custody_columns);
+        Err(EngineApiError::EngineObjectValidationError(
+            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
+        ))
     }
 
     /// Helper function for retrieving the build payload by id.
@@ -1281,6 +1315,27 @@ where
         Ok(self.new_payload_v5_metered(payload).await?)
     }
 
+    /// Handler for the stubbed `engine_newPayloadV6` endpoint.
+    async fn new_payload_v6(
+        &self,
+        payload: ExecutionPayloadV4,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+        execution_requests: RequestsOrHash,
+        inclusion_list_transactions: Vec<Bytes>,
+    ) -> RpcResult<PayloadStatusV2> {
+        trace!(target: "rpc::engine", "Serving engine_newPayloadV6 stub");
+        Ok(self
+            .new_payload_v6(
+                ExecutionData { payload: payload.into(), sidecar: ExecutionPayloadSidecar::none() },
+                versioned_hashes,
+                parent_beacon_block_root,
+                execution_requests,
+                inclusion_list_transactions,
+            )
+            .await?)
+    }
+
     /// Handler for `engine_forkchoiceUpdatedV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_forkchoiceupdatedv1>
     ///
@@ -1329,6 +1384,19 @@ where
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV4");
         Ok(self
             .fork_choice_updated_v4_metered(fork_choice_state, payload_attributes, custody_columns)
+            .await?)
+    }
+
+    /// Handler for the stubbed `engine_forkchoiceUpdatedV5` endpoint.
+    async fn fork_choice_updated_v5(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<PayloadAttributes>,
+        custody_columns: Option<B128>,
+    ) -> RpcResult<ForkchoiceUpdatedResponseV2> {
+        trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV5 stub");
+        Ok(self
+            .fork_choice_updated_v5(fork_choice_state, payload_attributes, custody_columns)
             .await?)
     }
 
