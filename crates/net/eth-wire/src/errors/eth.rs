@@ -84,6 +84,7 @@ impl EthStreamError {
                         P2PStreamError::MessageTooBig { .. } |
                         P2PStreamError::UnknownReservedMessageId(_) |
                         P2PStreamError::EmptyProtocolMessage |
+                        P2PStreamError::InvalidPingPongPayload(_) |
                         P2PStreamError::UnknownDisconnectReason(_)
                 )
         )

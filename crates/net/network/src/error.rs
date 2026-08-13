@@ -223,6 +223,7 @@ impl SessionError for EthStreamError {
                 P2PStreamError::UnknownDisconnectReason(_) |
                 P2PStreamError::MessageTooBig { .. } |
                 P2PStreamError::EmptyProtocolMessage |
+                P2PStreamError::InvalidPingPongPayload(_) |
                 P2PStreamError::PingerError(_) |
                 P2PStreamError::Snap(_),
             ) => Some(BackoffKind::Medium),
@@ -342,6 +343,9 @@ mod tests {
             P2PHandshakeError::NoResponse,
         ));
         assert_eq!(err.should_backoff(), Some(BackoffKind::Low));
+
+        let err = EthStreamError::P2PStreamError(P2PStreamError::InvalidPingPongPayload(0x02));
+        assert_eq!(err.should_backoff(), Some(BackoffKind::Medium));
     }
 
     #[test]
