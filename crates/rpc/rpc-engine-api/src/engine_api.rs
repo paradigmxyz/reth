@@ -12,8 +12,8 @@ use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1,
     ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1, ExecutionPayloadBodyV2,
     ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3,
-    ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, ForkchoiceUpdatedResponseV2,
-    PayloadAttributes, PayloadId, PayloadStatus, PayloadStatusV2, PraguePayloadFields,
+    ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, ForkchoiceUpdatedResponseV2, PayloadId,
+    PayloadStatus, PayloadStatusV2, PraguePayloadFields,
 };
 use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
@@ -298,18 +298,9 @@ where
     pub async fn new_payload_v6(
         &self,
         payload: PayloadT::ExecutionData,
-        versioned_hashes: Vec<B256>,
-        parent_beacon_block_root: B256,
-        execution_requests: RequestsOrHash,
         inclusion_list_transactions: Vec<Bytes>,
     ) -> EngineApiResult<PayloadStatusV2> {
-        let _ = (
-            payload,
-            versioned_hashes,
-            parent_beacon_block_root,
-            execution_requests,
-            inclusion_list_transactions,
-        );
+        let _ = (payload, inclusion_list_transactions);
         Err(EngineApiError::EngineObjectValidationError(
             reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
         ))
@@ -443,7 +434,7 @@ where
     pub async fn fork_choice_updated_v5(
         &self,
         state: ForkchoiceState,
-        payload_attrs: Option<PayloadAttributes>,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
         custody_columns: Option<B128>,
     ) -> EngineApiResult<ForkchoiceUpdatedResponseV2> {
         let _ = (state, payload_attrs, custody_columns);
@@ -1331,15 +1322,15 @@ where
         inclusion_list_transactions: Vec<Bytes>,
     ) -> RpcResult<PayloadStatusV2> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV6 stub");
-        Ok(self
-            .new_payload_v6(
-                ExecutionData { payload: payload.into(), sidecar: ExecutionPayloadSidecar::none() },
-                versioned_hashes,
-                parent_beacon_block_root,
-                execution_requests,
-                inclusion_list_transactions,
-            )
-            .await?)
+        let payload = ExecutionData {
+            payload: payload.into(),
+            sidecar: ExecutionPayloadSidecar::v4(
+                CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
+                PraguePayloadFields { requests: execution_requests },
+            ),
+        };
+
+        Ok(self.new_payload_v6(payload, inclusion_list_transactions).await?)
     }
 
     /// Handler for `engine_forkchoiceUpdatedV1`
@@ -1399,7 +1390,7 @@ where
     async fn fork_choice_updated_v5(
         &self,
         fork_choice_state: ForkchoiceState,
-        payload_attributes: Option<PayloadAttributes>,
+        payload_attributes: Option<EngineT::PayloadAttributes>,
         custody_columns: Option<B128>,
     ) -> RpcResult<ForkchoiceUpdatedResponseV2> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV5 stub");
@@ -1780,6 +1771,41 @@ mod tests {
 
         let res = EngineApiServer::get_inclusion_list_v1(&api).await.unwrap();
         assert!(res.is_empty());
+    }
+
+    #[tokio::test]
+    async fn bogota_stubs_return_unsupported_fork() {
+        let (_, api) = setup_engine_api();
+
+        let payload = ExecutionPayloadV4 {
+            payload_inner: ExecutionPayloadV3 {
+                payload_inner: ExecutionPayloadV2 {
+                    payload_inner: ExecutionPayloadV1::from_block_slow(&Block::default()),
+                    withdrawals: Vec::new(),
+                },
+                blob_gas_used: 0,
+                excess_blob_gas: 0,
+            },
+            block_access_list: Bytes::default(),
+            slot_number: 0,
+        };
+        let err = EngineApiServer::new_payload_v6(
+            &api,
+            payload,
+            Vec::new(),
+            B256::ZERO,
+            RequestsOrHash::Requests(Requests::default()),
+            Vec::new(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code(), crate::UNSUPPORTED_FORK_CODE);
+
+        let err =
+            EngineApiServer::fork_choice_updated_v5(&api, ForkchoiceState::default(), None, None)
+                .await
+                .unwrap_err();
+        assert_eq!(err.code(), crate::UNSUPPORTED_FORK_CODE);
     }
 
     #[tokio::test]
