@@ -494,17 +494,17 @@ impl<T: TransactionOrdering> TxPool<T> {
         &self,
         sender: SenderId,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        self.pending_pool.txs_by_sender(sender)
+        self.pending_pool.txs_by_sender(sender).collect()
     }
 
     /// Returns all transactions from parked pools
     pub(crate) fn queued_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        self.basefee_pool.all().chain(self.queued_pool.all()).collect()
+        self.basefee_pool.all().chain(self.queued_pool.all()).chain(self.blob_pool.all()).collect()
     }
 
     /// Returns the number of transactions in parked pools
     pub(crate) fn queued_transactions_count(&self) -> usize {
-        self.basefee_pool.len() + self.queued_pool.len()
+        self.basefee_pool.len() + self.queued_pool.len() + self.blob_pool.len()
     }
 
     /// Returns queued and pending transactions for the specified sender
@@ -520,9 +520,11 @@ impl<T: TransactionOrdering> TxPool<T> {
         &self,
         sender: SenderId,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let mut txs = self.basefee_pool.txs_by_sender(sender);
-        txs.extend(self.queued_pool.txs_by_sender(sender));
-        txs
+        self.basefee_pool
+            .txs_by_sender(sender)
+            .chain(self.queued_pool.txs_by_sender(sender))
+            .chain(self.blob_pool.txs_by_sender(sender))
+            .collect()
     }
 
     /// Returns `true` if the transaction with the given hash is already included in this pool.
@@ -2515,6 +2517,29 @@ mod tests {
         assert!(pool.blob_pool.is_empty());
     }
 
+    #[test]
+    fn test_queued_count_includes_blob_pool() {
+        let on_chain_balance = U256::MAX;
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let tx = MockTransaction::eip4844().inc_price().inc_limit();
+
+        // set block info so the tx is underpriced w.r.t. blob fee and lands in the blob pool
+        let mut block_info = pool.block_info();
+        block_info.pending_blob_fee = Some(tx.max_fee_per_blob_gas().unwrap() + 1);
+        pool.set_block_info(block_info);
+
+        let validated = f.validated(tx);
+        pool.add_transaction(validated, on_chain_balance, on_chain_nonce, None).unwrap();
+
+        assert_eq!(pool.blob_pool.len(), 1);
+        assert!(pool.pending_pool.is_empty());
+
+        // blob pool transactions are parked and must be reported as queued
+        assert_eq!(pool.queued_transactions_count(), 1);
+    }
+
     /// A struct representing a txpool promotion test instance
     #[derive(Debug, PartialEq, Eq, Clone, Hash)]
     struct PromotionTest {
@@ -3644,6 +3669,34 @@ mod tests {
         assert_eq!(tx_meta.subpool, SubPool::Pending);
         assert!(tx_meta.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
         assert!(tx_meta.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK));
+    }
+
+    #[test]
+    fn queued_transactions_include_blob_pool() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let initial_blob_fee = pool.all_transactions.pending_fees.blob_fee;
+        let tx = MockTransaction::eip4844()
+            .with_max_fee(500)
+            .with_priority_fee(1)
+            .with_blob_fee(initial_blob_fee + 100);
+        let validated = f.validated(tx);
+        let id = *validated.id();
+        let sender = validated.sender_id();
+        pool.add_transaction(validated, U256::from(1_000_000), 0, None).unwrap();
+
+        // Raise the base fee beyond the transaction's cap so it gets parked in the blob pool.
+        pool.update_basefee(600, |_| {});
+        assert_eq!(pool.blob_pool.len(), 1);
+
+        let queued = pool.queued_transactions();
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].id(), &id);
+
+        let by_sender = pool.queued_txs_by_sender(sender);
+        assert_eq!(by_sender.len(), 1);
+        assert_eq!(by_sender[0].id(), &id);
     }
 
     #[test]

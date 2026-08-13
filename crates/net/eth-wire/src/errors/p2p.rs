@@ -67,6 +67,10 @@ pub enum P2PStreamError {
     #[error("empty protocol message received")]
     EmptyProtocolMessage,
 
+    /// Ping or Pong payload is not an RLP empty list.
+    #[error("invalid ping/pong payload for p2p message id: {0:#x}")]
+    InvalidPingPongPayload(u8),
+
     /// Error related to the Pinger.
     #[error(transparent)]
     PingerError(#[from] PingerError),

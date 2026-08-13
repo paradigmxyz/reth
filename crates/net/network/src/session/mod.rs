@@ -1248,11 +1248,14 @@ async fn authenticate_stream<N: NetworkPrimitives>(
             let limits = handler.inbound_limits();
             let remote_peer_id = authenticated_peer_id;
 
+            // The unsupported-handler pass above guarantees that every remaining handler has a
+            // matching negotiated capability. The multiplexer retains the same immutable set of
+            // shared capabilities, so installing one of these handlers cannot fail.
             multiplex_stream
                 .install_protocol_with_limits(&protocol.cap, limits, move |conn| {
                     handler.into_connection(direction, remote_peer_id, conn)
                 })
-                .ok();
+                .expect("remaining handler capability was negotiated");
         }
 
         let (multiplex_stream, their_status) = match multiplex_stream

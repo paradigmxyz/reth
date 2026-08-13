@@ -290,6 +290,12 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                             self.update_request_timeout(req.timestamp, Instant::now());
                         }
                         RequestState::Waiting(request) => {
+                            // The peer replied to a request id we handed out, but with the wrong
+                            // response type. This cancels the pending request, so it must cost the
+                            // peer reputation. Without the penalty the peer can kill any request we
+                            // send it, repeatedly and for free.
+                            debug!(target: "net::session", ?request_id, remote_peer_id=?self.remote_peer_id, "received response of wrong type");
+                            self.on_bad_message();
                             request.send_bad_response();
                         }
                         RequestState::TimedOut => {
@@ -475,7 +481,11 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 }
             }
             RequestState::Waiting(request) => {
-                // A different PeerRequest kind was pending for this id.
+                // A different PeerRequest kind was pending for this id: the peer answered an `eth`
+                // request with a `snap` message. Same as the wrong-type case above, this cancels
+                // the pending request and must be penalized.
+                debug!(target: "net::session", ?request_id, msg_id=?msg.message_id(), remote_peer_id=?self.remote_peer_id, "received snap response for non-snap request");
+                self.on_bad_message();
                 request.send_bad_response();
             }
             RequestState::TimedOut => {
@@ -1316,9 +1326,10 @@ mod tests {
     use reth_chainspec::MAINNET;
     use reth_ecies::stream::ECIESStream;
     use reth_eth_wire::{
-        handshake::EthHandshake, protocol::Protocol, EthNetworkPrimitives, EthStream,
-        GetBlockAccessLists, GetBlockBodies, HelloMessageWithProtocols, P2PStream, StatusBuilder,
-        UnauthedEthStream, UnauthedP2PStream, UnifiedStatus,
+        handshake::EthHandshake, protocol::Protocol, BlockBodies, BlockHeaders,
+        EthNetworkPrimitives, EthStream, GetBlockAccessLists, GetBlockBodies,
+        HelloMessageWithProtocols, P2PStream, StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
+        UnifiedStatus,
     };
     use reth_eth_wire_types::{
         message::MAX_MESSAGE_SIZE,
@@ -1530,6 +1541,22 @@ mod tests {
         let deadline = session.request_deadline();
         session.on_internal_peer_request(PeerRequest::GetSnap { request, response }, deadline);
         let id = *session.inflight_requests.keys().next().expect("snap request tracked");
+        (id, rx)
+    }
+
+    /// Dispatches an `eth` `GetBlockBodies` request via
+    /// [`ActiveSession::on_internal_peer_request`] and returns the session-assigned request id plus
+    /// the caller's response receiver.
+    fn dispatch_block_bodies_request(
+        session: &mut ActiveSession<EthNetworkPrimitives>,
+    ) -> (u64, oneshot::Receiver<RequestResult<BlockBodies>>) {
+        let (response, rx) = oneshot::channel();
+        let deadline = session.request_deadline();
+        session.on_internal_peer_request(
+            PeerRequest::GetBlockBodies { request: GetBlockBodies(Vec::new()), response },
+            deadline,
+        );
+        let id = *session.inflight_requests.keys().next().expect("eth request tracked");
         (id, rx)
     }
 
@@ -1847,6 +1874,93 @@ mod tests {
         assert!(session.queued_outgoing.pop_front().is_none());
         assert!(matches!(
             builder.active_session_rx.next().await,
+            Some(ActiveSessionMessage::BadMessage { .. })
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn wrong_type_eth_response_is_penalized() {
+        let mut builder = SessionBuilder::default();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+        let fut = builder.with_client_stream(local_addr, async move |client_stream| {
+            let _client_stream = client_stream;
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        });
+        tokio::task::spawn(fut);
+        let (incoming, _) = listener.accept().await.unwrap();
+        let mut session = builder.connect_incoming(incoming).await;
+
+        let (id, rx) = dispatch_block_bodies_request(&mut session);
+
+        // The peer knows this id because we sent it. Answering the GetBlockBodies with BlockHeaders
+        // cancels our request, so it must cost the peer reputation, otherwise the peer can kill
+        // every request we make for free.
+        let outcome = session.on_incoming_message(EthMessage::BlockHeaders(RequestPair {
+            request_id: id,
+            message: BlockHeaders(Vec::new()),
+        }));
+        assert!(matches!(outcome, OnIncomingMessageOutcome::Ok));
+        assert!(!session.inflight_requests.contains_key(&id));
+        assert_eq!(rx.await.unwrap().unwrap_err(), RequestError::BadResponse);
+        assert!(matches!(
+            futures::FutureExt::now_or_never(builder.active_session_rx.next()).flatten(),
+            Some(ActiveSessionMessage::BadMessage { .. })
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn matching_eth_response_is_not_penalized() {
+        let mut builder = SessionBuilder::default();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+        let fut = builder.with_client_stream(local_addr, async move |client_stream| {
+            let _client_stream = client_stream;
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        });
+        tokio::task::spawn(fut);
+        let (incoming, _) = listener.accept().await.unwrap();
+        let mut session = builder.connect_incoming(incoming).await;
+
+        let (id, rx) = dispatch_block_bodies_request(&mut session);
+
+        let outcome = session.on_incoming_message(EthMessage::BlockBodies(RequestPair {
+            request_id: id,
+            message: BlockBodies(Vec::new()),
+        }));
+        assert!(matches!(outcome, OnIncomingMessageOutcome::Ok));
+        assert!(!session.inflight_requests.contains_key(&id));
+        assert!(rx.await.unwrap().is_ok());
+        assert!(futures::FutureExt::now_or_never(builder.active_session_rx.next())
+            .flatten()
+            .is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn snap_response_to_eth_request_is_penalized() {
+        let mut builder = snap_session_builder();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+        let fut = builder.with_client_stream(local_addr, async move |client_stream| {
+            let _client_stream = client_stream;
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        });
+        tokio::task::spawn(fut);
+        let (incoming, _) = listener.accept().await.unwrap();
+        let mut session = builder.connect_incoming(incoming).await;
+
+        // `eth` and `snap/2` requests share one id space, so a snap response can land on a pending
+        // eth request. It cancels that request just the same and is penalized the same way.
+        let (id, rx) = dispatch_block_bodies_request(&mut session);
+
+        let outcome = session.on_incoming_snap_message(SnapProtocolMessage::AccountRange(
+            AccountRangeMessage { request_id: id, accounts: Vec::new(), proof: Vec::new() },
+        ));
+        assert!(matches!(outcome, OnIncomingMessageOutcome::Ok));
+        assert!(!session.inflight_requests.contains_key(&id));
+        assert_eq!(rx.await.unwrap().unwrap_err(), RequestError::BadResponse);
+        assert!(matches!(
+            futures::FutureExt::now_or_never(builder.active_session_rx.next()).flatten(),
             Some(ActiveSessionMessage::BadMessage { .. })
         ));
     }

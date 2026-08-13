@@ -253,7 +253,7 @@ mod tests {
             withdrawals: None,
             parent_beacon_block_root: None,
             slot_number: None,
-            target_gas_limit: None,
+            ..Default::default()
         };
 
         // Verify that the generated payload ID matches the expected value
@@ -292,7 +292,7 @@ mod tests {
             ]),
             parent_beacon_block_root: None,
             slot_number: None,
-            target_gas_limit: None,
+            ..Default::default()
         };
 
         // Verify that the generated payload ID matches the expected value
@@ -326,7 +326,7 @@ mod tests {
                 .unwrap(),
             ),
             slot_number: None,
-            target_gas_limit: None,
+            ..Default::default()
         };
 
         // Verify that the generated payload ID matches the expected value
@@ -351,7 +351,7 @@ mod tests {
             withdrawals: Some(vec![]),
             parent_beacon_block_root: Some(B256::from_slice(&[2; 32])),
             slot_number: Some(1),
-            target_gas_limit: None,
+            ..Default::default()
         };
 
         let first = payload_id(&parent, &attributes);
@@ -365,6 +365,7 @@ mod tests {
         let parent =
             B256::from_str("0x9876543210abcdef9876543210abcdef9876543210abcdef9876543210abcdef")
                 .unwrap();
+        #[allow(clippy::needless_update)]
         let mut attributes = EthPayloadAttributes {
             timestamp: 1622553200,
             prev_randao: B256::from_slice(&[1; 32]),
@@ -376,6 +377,7 @@ mod tests {
             parent_beacon_block_root: Some(B256::from_slice(&[2; 32])),
             slot_number: Some(1),
             target_gas_limit: Some(30_000_000),
+            ..Default::default()
         };
 
         let first = payload_id(&parent, &attributes);

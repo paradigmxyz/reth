@@ -12,8 +12,8 @@ use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1,
     ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1, ExecutionPayloadBodyV2,
     ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3,
-    ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
-    PraguePayloadFields,
+    ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, ForkchoiceUpdatedResponseV2, PayloadId,
+    PayloadStatus, PayloadStatusV2, PraguePayloadFields,
 };
 use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
@@ -292,6 +292,19 @@ where
         Ok(res?)
     }
 
+    /// Handler stub for `engine_newPayloadV6`.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/bogota.md#engine_newpayloadv6>
+    pub async fn new_payload_v6(
+        &self,
+        payload: PayloadT::ExecutionData,
+    ) -> EngineApiResult<PayloadStatusV2> {
+        let _ = payload;
+        Err(EngineApiError::EngineObjectValidationError(
+            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
+        ))
+    }
+
     /// Returns whether the engine accepts execution requests hash.
     pub fn accept_execution_requests_hash(&self) -> bool {
         self.inner.accept_execution_requests_hash
@@ -395,7 +408,7 @@ where
         custody_columns: Option<B128>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         if let Some(custody_columns) = custody_columns {
-            self.inner.cell_custody.set(custody_columns);
+            self.inner.cell_custody.set_from_engine_api(custody_columns);
         }
         self.validate_and_execute_forkchoice(EngineApiMessageVersion::V4, state, payload_attrs)
             .await
@@ -412,6 +425,21 @@ where
         let res = Self::fork_choice_updated_v4(self, state, payload_attrs, custody_columns).await;
         self.inner.metrics.latency.fork_choice_updated_v4.record(start.elapsed());
         res
+    }
+
+    /// Handler stub for `engine_forkchoiceUpdatedV5`.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/bogota.md#engine_forkchoiceupdatedv5>
+    pub async fn fork_choice_updated_v5(
+        &self,
+        state: ForkchoiceState,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
+        custody_columns: Option<B128>,
+    ) -> EngineApiResult<ForkchoiceUpdatedResponseV2> {
+        let _ = (state, payload_attrs, custody_columns);
+        Err(EngineApiError::EngineObjectValidationError(
+            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
+        ))
     }
 
     /// Helper function for retrieving the build payload by id.
@@ -1065,6 +1093,9 @@ where
         versioned_hashes: Vec<B256>,
         indices_bitarray: B128,
     ) -> EngineApiResult<Option<Vec<Option<BlobCellsAndProofsV1>>>> {
+        // Engine API bitvectors are little-endian, while B128 integer conversions are
+        // big-endian. The transaction pool uses the latter representation as a numeric cell mask.
+        let indices_bitarray = B128::from(u128::from_le_bytes(indices_bitarray.into()));
         let current_timestamp =
             SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_secs();
         if !self.inner.chain_spec.is_amsterdam_active_at_timestamp(current_timestamp) {
@@ -1278,6 +1309,30 @@ where
         Ok(self.new_payload_v5_metered(payload).await?)
     }
 
+    /// Handler for the stubbed `engine_newPayloadV6` endpoint.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/bogota.md#engine_newpayloadv6>
+    async fn new_payload_v6(
+        &self,
+        payload: ExecutionPayloadV4,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+        execution_requests: RequestsOrHash,
+        inclusion_list_transactions: Vec<Bytes>,
+    ) -> RpcResult<PayloadStatusV2> {
+        trace!(target: "rpc::engine", "Serving engine_newPayloadV6 stub");
+        let payload = ExecutionData {
+            payload: payload.into(),
+            sidecar: ExecutionPayloadSidecar::v6(
+                CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
+                PraguePayloadFields { requests: execution_requests },
+                inclusion_list_transactions.into(),
+            ),
+        };
+
+        Ok(self.new_payload_v6(payload).await?)
+    }
+
     /// Handler for `engine_forkchoiceUpdatedV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_forkchoiceupdatedv1>
     ///
@@ -1326,6 +1381,21 @@ where
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV4");
         Ok(self
             .fork_choice_updated_v4_metered(fork_choice_state, payload_attributes, custody_columns)
+            .await?)
+    }
+
+    /// Handler for the stubbed `engine_forkchoiceUpdatedV5` endpoint.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/bogota.md#engine_forkchoiceupdatedv5>
+    async fn fork_choice_updated_v5(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<EngineT::PayloadAttributes>,
+        custody_columns: Option<B128>,
+    ) -> RpcResult<ForkchoiceUpdatedResponseV2> {
+        trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV5 stub");
+        Ok(self
+            .fork_choice_updated_v5(fork_choice_state, payload_attributes, custody_columns)
             .await?)
     }
 
@@ -1427,6 +1497,14 @@ where
     ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV6> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV6");
         Ok(self.get_payload_v6_metered(payload_id).await?)
+    }
+
+    /// Handler for `engine_getInclusionListV1`.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/pull/609>.
+    async fn get_inclusion_list_v1(&self) -> RpcResult<Vec<Bytes>> {
+        trace!(target: "rpc::engine", "Serving engine_getInclusionListV1");
+        Ok(Vec::new())
     }
 
     /// Handler for `engine_getPayloadBodiesByHashV1`
@@ -1685,6 +1763,14 @@ mod tests {
         let (_, api) = setup_engine_api();
         let res = api.get_client_version_v1(client.clone());
         assert_eq!(res.unwrap(), vec![client]);
+    }
+
+    #[tokio::test]
+    async fn get_inclusion_list_v1_returns_empty_list() {
+        let (_, api) = setup_engine_api();
+
+        let res = EngineApiServer::get_inclusion_list_v1(&api).await.unwrap();
+        assert!(res.is_empty());
     }
 
     #[tokio::test]
@@ -1994,8 +2080,24 @@ mod tests {
             TestNetworkInfo { syncing: true },
         );
 
-        let res = api.get_blobs_v4_metered(vec![B256::ZERO], B128::from(1u128));
+        let res = api.get_blobs_v4_metered(vec![B256::ZERO], B128::from(1u128.to_le_bytes()));
         assert_matches!(res, Ok(None));
+    }
+
+    #[test]
+    fn engine_bitvector_uses_little_endian_cell_indices() {
+        assert_eq!(
+            B128::from(u128::from_le_bytes(B128::from(1u128.to_le_bytes()).into())),
+            B128::from(1u128)
+        );
+        assert_eq!(
+            B128::from(u128::from_le_bytes(B128::from((1u128 << 127).to_le_bytes()).into())),
+            B128::from(1u128 << 127)
+        );
+        assert_eq!(
+            B128::from(u128::from_le_bytes(B128::from(((1u128 << 64) - 1).to_le_bytes()).into(),)),
+            B128::from((1u128 << 64) - 1)
+        );
     }
 
     #[tokio::test]
@@ -2032,7 +2134,8 @@ mod tests {
             safe_block_hash: B256::ZERO,
             finalized_block_hash: B256::ZERO,
         };
-        let custody_columns = B128::from(0b1010u128);
+        let custody_columns = B128::from(0b1010u128.to_le_bytes());
+        let expected_custody_columns = B128::from(0b1010u128);
 
         let api_task = tokio::spawn(async move {
             api.fork_choice_updated_v4(state, None, Some(custody_columns)).await
@@ -2049,7 +2152,7 @@ mod tests {
             }
             other => panic!("unexpected engine message: {other:?}"),
         };
-        assert_eq!(cell_custody.get(), custody_columns);
+        assert_eq!(cell_custody.get(), expected_custody_columns);
 
         response_tx
             .send(Ok(OnForkChoiceUpdated::valid(PayloadStatus::from_status(
@@ -2061,7 +2164,7 @@ mod tests {
             .await
             .expect("api task should not panic")
             .expect("forkchoiceUpdatedV4 should succeed");
-        assert_eq!(cell_custody.get(), custody_columns);
+        assert_eq!(cell_custody.get(), expected_custody_columns);
     }
 
     #[tokio::test]
@@ -2105,9 +2208,10 @@ mod tests {
             withdrawals: Some(vec![]),
             parent_beacon_block_root: None,
             slot_number: None,
-            target_gas_limit: None,
+            ..Default::default()
         };
-        let custody_columns = B128::from(0b1010u128);
+        let custody_columns = B128::from(0b1010u128.to_le_bytes());
+        let expected_custody_columns = B128::from(0b1010u128);
 
         let api_task = tokio::spawn(async move {
             api.fork_choice_updated_v4(state, Some(payload_attributes), Some(custody_columns)).await
@@ -2127,7 +2231,7 @@ mod tests {
             }
             other => panic!("unexpected engine message: {other:?}"),
         };
-        assert_eq!(cell_custody.get(), custody_columns);
+        assert_eq!(cell_custody.get(), expected_custody_columns);
 
         response_tx
             .send(Ok(OnForkChoiceUpdated::valid(PayloadStatus::from_status(
@@ -2161,7 +2265,7 @@ mod tests {
             // Invalid for V3/Cancun, but should be ignored if forkchoice is SYNCING.
             parent_beacon_block_root: None,
             slot_number: None,
-            target_gas_limit: None,
+            ..Default::default()
         };
 
         let api_task = tokio::spawn(async move {
@@ -2210,7 +2314,7 @@ mod tests {
             withdrawals: Some(vec![]),
             parent_beacon_block_root: None,
             slot_number: None,
-            target_gas_limit: None,
+            ..Default::default()
         };
 
         let api_task = tokio::spawn(async move {

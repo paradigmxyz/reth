@@ -693,7 +693,7 @@ mod tests {
                     withdrawals: None,
                     parent_beacon_block_root: None,
                     slot_number: None,
-                    target_gas_limit: None,
+                    ..Default::default()
                 },
                 parent_hash: B256::ZERO,
                 resources: PayloadBuilderResources::default().with_lease(lease),
