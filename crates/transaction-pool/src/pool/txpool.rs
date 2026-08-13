@@ -504,7 +504,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
     /// Returns the number of transactions in parked pools
     pub(crate) fn queued_transactions_count(&self) -> usize {
-        self.basefee_pool.len() + self.queued_pool.len()
+        self.basefee_pool.len() + self.queued_pool.len() + self.blob_pool.len()
     }
 
     /// Returns queued and pending transactions for the specified sender
