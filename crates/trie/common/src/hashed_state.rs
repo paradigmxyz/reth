@@ -694,13 +694,10 @@ impl HashedPostStateSorted {
     /// batch value.
     ///
     /// Account keys are masked at the top level, while storage entries are masked at the slot
-    /// level. For duplicate keys in the batch, later items take precedence over earlier ones. An
-    /// overlapping entry is retained if any mask value is equal to the merged batch value. The
-    /// order of the mask does not matter. An empty mask merges the batch without filtering.
-    ///
-    /// # Panics
-    ///
-    /// Panics if any batch or mask entry wipes an entire storage.
+    /// level unless the mask wipes the entire storage. For duplicate keys in the batch, later items
+    /// take precedence over earlier ones. An overlapping entry is retained if any mask value is
+    /// equal to the merged batch value. The order of the mask does not matter. An empty mask merges
+    /// the batch without filtering.
     pub fn disjointed_merge_batch<'a>(batch: &[&'a Self], mask: &[&'a Self]) -> Self {
         let account_count = batch.iter().map(|item| item.accounts.len()).sum();
         let mut accounts = Vec::with_capacity(account_count);
@@ -710,12 +707,14 @@ impl HashedPostStateSorted {
         ));
 
         struct StorageAcc<'a> {
-            slot_count: usize,
+            wiped: bool,
+            sealed: bool,
             slices: Vec<&'a [(B256, U256)]>,
         }
 
         #[derive(Default)]
         struct StorageMaskAcc<'a> {
+            wiped: bool,
             slices: Vec<&'a [(B256, U256)]>,
         }
 
@@ -726,15 +725,21 @@ impl HashedPostStateSorted {
 
         for item in batch.iter().rev() {
             for (hashed_address, storage) in &item.storages {
-                assert!(
-                    !storage.wiped,
-                    "storage wipes are not supported by disjointed_merge_batch"
-                );
-                let entry = storages
-                    .entry(*hashed_address)
-                    .or_insert_with(|| StorageAcc { slot_count: 0, slices: Vec::new() });
+                let entry = storages.entry(*hashed_address).or_insert_with(|| StorageAcc {
+                    wiped: false,
+                    sealed: false,
+                    slices: Vec::new(),
+                });
+
+                if entry.sealed {
+                    continue;
+                }
+
                 entry.slices.push(storage.storage_slots.as_slice());
-                entry.slot_count += storage.storage_slots.len();
+                if storage.wiped {
+                    entry.wiped = true;
+                    entry.sealed = true;
+                }
             }
         }
 
@@ -744,34 +749,34 @@ impl HashedPostStateSorted {
         );
         for item in mask {
             for (hashed_address, storage) in &item.storages {
-                assert!(
-                    !storage.wiped,
-                    "storage wipes are not supported by disjointed_merge_batch"
-                );
                 let entry = storage_masks.entry(*hashed_address).or_default();
-                entry.slices.push(storage.storage_slots.as_slice());
+                if entry.wiped {
+                    continue;
+                }
+                if storage.wiped {
+                    entry.wiped = true;
+                    entry.slices.clear();
+                } else {
+                    entry.slices.push(storage.storage_slots.as_slice());
+                }
             }
         }
 
         let storages = storages
             .into_iter()
             .filter_map(|(hashed_address, entry)| {
-                let slot_count = entry.slot_count;
                 let storage_slots = match storage_masks.get(&hashed_address) {
+                    Some(mask_entry) if mask_entry.wiped => return None,
                     Some(mask_entry) => {
-                        let mut storage_slots = Vec::with_capacity(slot_count);
-                        storage_slots.extend(kway_merge_disjoint_sorted(
-                            entry.slices,
-                            mask_entry.slices.iter().copied(),
-                        ));
-                        storage_slots
+                        kway_merge_disjoint_sorted(entry.slices, mask_entry.slices.iter().copied())
+                            .collect()
                     }
                     None => kway_merge_sorted(entry.slices),
                 };
 
-                (!storage_slots.is_empty() || mask.is_empty()).then_some((
+                (!storage_slots.is_empty() || entry.wiped).then_some((
                     hashed_address,
-                    HashedStorageSorted { wiped: false, storage_slots },
+                    HashedStorageSorted { wiped: entry.wiped, storage_slots },
                 ))
             })
             .collect();
@@ -1791,6 +1796,64 @@ mod tests {
         let result = HashedPostStateSorted::disjointed_merge_batch(&[&older, &newer], &[]);
 
         assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_hashed_post_state_sorted_disjointed_merge_batch_supports_storage_wipes() {
+        let address = B256::with_last_byte(1);
+        let old_slot = B256::with_last_byte(2);
+        let new_slot = B256::with_last_byte(3);
+        let older = HashedPostStateSorted::new(
+            vec![],
+            B256Map::from_iter([(
+                address,
+                HashedStorageSorted {
+                    wiped: false,
+                    storage_slots: vec![(old_slot, U256::from(1))],
+                },
+            )]),
+        );
+        let wipe = HashedPostStateSorted::new(
+            vec![],
+            B256Map::from_iter([(
+                address,
+                HashedStorageSorted { wiped: true, storage_slots: vec![(new_slot, U256::from(2))] },
+            )]),
+        );
+
+        let result = HashedPostStateSorted::disjointed_merge_batch(&[&older, &wipe], &[]);
+
+        assert_eq!(
+            result.storages.get(&address),
+            Some(&HashedStorageSorted {
+                wiped: true,
+                storage_slots: vec![(new_slot, U256::from(2))],
+            })
+        );
+    }
+
+    #[test]
+    fn test_hashed_post_state_sorted_disjointed_merge_batch_masks_storage_wipes() {
+        let address = B256::with_last_byte(1);
+        let slot = B256::with_last_byte(2);
+        let batch = HashedPostStateSorted::new(
+            vec![],
+            B256Map::from_iter([(
+                address,
+                HashedStorageSorted { wiped: true, storage_slots: vec![(slot, U256::from(1))] },
+            )]),
+        );
+        let mask = HashedPostStateSorted::new(
+            vec![],
+            B256Map::from_iter([(
+                address,
+                HashedStorageSorted { wiped: true, storage_slots: vec![] },
+            )]),
+        );
+
+        let result = HashedPostStateSorted::disjointed_merge_batch(&[&batch], &[&mask]);
+
+        assert!(result.storages.is_empty());
     }
 
     #[test]
