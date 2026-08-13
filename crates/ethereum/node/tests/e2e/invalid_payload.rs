@@ -3,9 +3,11 @@
 //! This module tests the scenario where a node receives invalid payloads (e.g., with modified
 //! state roots) before receiving valid ones, ensuring the node can recover and continue.
 
-use crate::utils::eth_payload_attributes;
-use alloy_primitives::B256;
+use crate::utils::{eth_payload_attributes, eth_payload_attributes_amsterdam};
+use alloy_eips::eip7685::RequestsOrHash;
+use alloy_primitives::{keccak256, Bytes, B256};
 use alloy_rpc_types_engine::{ExecutionPayloadV3, PayloadStatusEnum};
+use jsonrpsee::types::error::INVALID_PARAMS_CODE;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::{setup_engine, transaction::TransactionTestContext};
@@ -352,6 +354,79 @@ async fn can_handle_invalid_payload_with_transactions() -> eyre::Result<()> {
     );
 
     println!("Test passed: Receiver handled invalid payloads with transactions correctly");
+
+    Ok(())
+}
+
+/// Tests that `engine_newPayloadV5` rejects undecodable block access list bytes with an invalid
+/// params error (`-32602`) instead of an `INVALID` payload status.
+#[tokio::test]
+async fn undecodable_bal_is_rejected_as_invalid_params() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .amsterdam_activated()
+            .build(),
+    );
+
+    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
+        1,
+        chain_spec,
+        false,
+        Default::default(),
+        eth_payload_attributes_amsterdam,
+    )
+    .await?;
+    let mut node = nodes.pop().unwrap();
+
+    // Build a valid Amsterdam payload without making it canonical.
+    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
+    node.rpc.inject_tx(raw_tx).await?;
+    let payload = node.new_payload().await?;
+    let block = payload.block().clone();
+    let envelope = payload.try_into_v6()?;
+    let valid_payload = envelope.execution_payload;
+
+    // Corrupt the block access list bytes and recompute the block hash for the corresponding
+    // header, so the payload converts cleanly and the undecodable bytes are the only defect.
+    let garbage = Bytes::from_static(b"not-rlp");
+    let mut header = block.header().clone();
+    header.block_access_list_hash = Some(keccak256(&garbage));
+
+    let mut corrupted = valid_payload.clone();
+    corrupted.block_access_list = garbage;
+    corrupted.payload_inner.payload_inner.payload_inner.block_hash = header.hash_slow();
+
+    let engine = node.auth_server_handle().http_client();
+    let parent_beacon_block_root = block.header().parent_beacon_block_root.unwrap();
+    let err = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v5(
+        &engine,
+        corrupted,
+        vec![],
+        parent_beacon_block_root,
+        RequestsOrHash::Requests(envelope.execution_requests.clone()),
+    )
+    .await
+    .unwrap_err();
+
+    let jsonrpsee::core::client::Error::Call(err) = err else {
+        panic!("expected an invalid params error object, got {err:?}")
+    };
+    assert_eq!(err.code(), INVALID_PARAMS_CODE);
+
+    // The same block with well-formed block access list bytes is processed normally.
+    let status = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v5(
+        &engine,
+        valid_payload,
+        vec![],
+        parent_beacon_block_root,
+        RequestsOrHash::Requests(envelope.execution_requests),
+    )
+    .await?;
+    assert!(matches!(status.status, PayloadStatusEnum::Valid));
 
     Ok(())
 }
