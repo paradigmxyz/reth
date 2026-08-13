@@ -55,6 +55,7 @@ pub struct DefaultRpcServerArgs {
     http_port: u16,
     http_disable_compression: bool,
     http_compression_algorithms: Option<Vec<String>>,
+    http_decompression_algorithms: Option<Vec<String>>,
     http_api: Option<RpcModuleSelection>,
     http_corsdomain: Option<String>,
     ws: bool,
@@ -135,6 +136,12 @@ impl DefaultRpcServerArgs {
     /// Set the default allowed HTTP response compression algorithms
     pub fn with_http_compression_algorithms(mut self, v: Option<Vec<String>>) -> Self {
         self.http_compression_algorithms = v;
+        self
+    }
+
+    /// Set the default allowed HTTP request decompression algorithms
+    pub fn with_http_decompression_algorithms(mut self, v: Option<Vec<String>>) -> Self {
+        self.http_decompression_algorithms = v;
         self
     }
 
@@ -387,6 +394,7 @@ impl Default for DefaultRpcServerArgs {
             http_port: constants::DEFAULT_HTTP_RPC_PORT,
             http_disable_compression: false,
             http_compression_algorithms: None,
+            http_decompression_algorithms: None,
             http_api: None,
             http_corsdomain: None,
             ws: false,
@@ -467,6 +475,18 @@ pub struct RpcServerArgs {
         default_value = Resettable::from(DefaultRpcServerArgs::get_global().http_compression_algorithms.as_ref().map(|v| v.join(",").into()))
     )]
     pub http_compression_algorithms: Option<Vec<String>>,
+
+    /// Comma-separated list of allowed decompression algorithms for HTTP requests.
+    ///
+    /// Request decompression is disabled when not specified.
+    #[arg(
+        long = "http.decompression",
+        value_name = "ALGOS",
+        value_delimiter = ',',
+        value_parser = ["zstd", "gzip", "deflate", "br"],
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().http_decompression_algorithms.as_ref().map(|v| v.join(",").into()))
+    )]
+    pub http_decompression_algorithms: Option<Vec<String>>,
 
     /// Rpc Modules to be configured for the HTTP server
     #[arg(long = "http.api", value_parser = RpcModuleSelectionValueParser::default(), default_value = Resettable::from(DefaultRpcServerArgs::get_global().http_api.as_ref().map(|v| v.to_string().into())))]
@@ -556,6 +576,9 @@ pub struct RpcServerArgs {
     pub rpc_disable_metrics: bool,
 
     /// Set the maximum RPC request payload size for both HTTP and WS in megabytes.
+    ///
+    /// For compressed HTTP requests, this limit applies to both the compressed and decompressed
+    /// payloads.
     #[arg(long = "rpc.max-request-size", alias = "rpc-max-request-size", default_value_t = DefaultRpcServerArgs::get_global().rpc_max_request_size)]
     pub rpc_max_request_size: MaxU32,
 
@@ -864,6 +887,7 @@ impl Default for RpcServerArgs {
             http_port,
             http_disable_compression,
             http_compression_algorithms,
+            http_decompression_algorithms,
             http_api,
             http_corsdomain,
             ws,
@@ -911,6 +935,7 @@ impl Default for RpcServerArgs {
             http_port,
             http_disable_compression,
             http_compression_algorithms,
+            http_decompression_algorithms,
             http_api,
             http_corsdomain,
             ws,
@@ -1061,6 +1086,33 @@ mod tests {
     }
 
     #[test]
+    fn http_request_decompression_is_opt_in() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        assert!(args.http_decompression_algorithms.is_none());
+
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--http.decompression",
+            "zstd,gzip,deflate,br",
+        ])
+        .args;
+        assert_eq!(
+            args.http_decompression_algorithms.as_deref().unwrap(),
+            ["zstd", "gzip", "deflate", "br"]
+        );
+    }
+
+    #[test]
+    fn invalid_http_request_decompression_algorithm_is_rejected() {
+        let result = CommandParser::<RpcServerArgs>::try_parse_from([
+            "reth",
+            "--http.decompression",
+            "gizp",
+        ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn test_rpc_disable_metrics_arg() {
         let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
         assert!(!args.rpc_disable_metrics);
@@ -1106,6 +1158,7 @@ mod tests {
             http_port: 8545,
             http_disable_compression: false,
             http_compression_algorithms: None,
+            http_decompression_algorithms: None,
             http_api: Some(RpcModuleSelection::try_from_selection(["eth", "admin"]).unwrap()),
             http_corsdomain: Some("*".to_string()),
             ws: true,

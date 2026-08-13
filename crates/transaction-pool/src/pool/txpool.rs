@@ -494,7 +494,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         &self,
         sender: SenderId,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        self.pending_pool.txs_by_sender(sender)
+        self.pending_pool.txs_by_sender(sender).collect()
     }
 
     /// Returns all transactions from parked pools
@@ -520,10 +520,11 @@ impl<T: TransactionOrdering> TxPool<T> {
         &self,
         sender: SenderId,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let mut txs = self.basefee_pool.txs_by_sender(sender);
-        txs.extend(self.queued_pool.txs_by_sender(sender));
-        txs.extend(self.blob_pool.txs_by_sender(sender));
-        txs
+        self.basefee_pool
+            .txs_by_sender(sender)
+            .chain(self.queued_pool.txs_by_sender(sender))
+            .chain(self.blob_pool.txs_by_sender(sender))
+            .collect()
     }
 
     /// Returns `true` if the transaction with the given hash is already included in this pool.
