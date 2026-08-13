@@ -1,11 +1,11 @@
-//! Downloads and verifies snap/2 account ranges against [EIP-8189] pivot state roots.
-//! Persistence and range selection are handled by the snap sync orchestrator.
+//! Downloads and verifies snap/2 account ranges against
+//! [EIP-8189](https://eips.ethereum.org/EIPS/eip-8189) pivot state roots.
 //!
-//! [EIP-8189]: https://eips.ethereum.org/EIPS/eip-8189
+//! Persistence and range selection are handled by the snap sync orchestrator.
 
 use alloy_primitives::B256;
 use futures::{Future, FutureExt};
-use reth_eth_wire_types::snap::{AccountData, AccountRangeMessage, GetAccountRangeMessage};
+use reth_eth_wire_types::snap::{AccountRangeMessage, GetAccountRangeMessage};
 use reth_network_p2p::{
     error::{PeerRequestResult, RequestError},
     priority::Priority,
@@ -24,7 +24,7 @@ const MAX_RETRIES: u8 = 2;
 /// Downloads and verifies one account range against its requested state root.
 ///
 /// Invalid responses penalize their peer and retry at high priority. Proof verification runs on
-/// Tokio's blocking pool.
+/// the blocking pool.
 #[derive(Debug)]
 pub struct AccountRangeDownloader<C: SnapClient> {
     client: C,
@@ -35,7 +35,9 @@ pub struct AccountRangeDownloader<C: SnapClient> {
 }
 
 impl<C: SnapClient> AccountRangeDownloader<C> {
-    /// Validates the range, then creates a downloader and submits `request` at normal priority.
+    /// Creates a downloader and submits the initial request at normal priority.
+    ///
+    /// Returns an error when the origin exceeds the limit because such a range cannot be proven.
     pub fn new(client: C, request: GetAccountRangeMessage) -> Result<Self, InvalidAccountRange> {
         if request.starting_hash > request.limit_hash {
             return Err(InvalidAccountRange {
@@ -47,6 +49,7 @@ impl<C: SnapClient> AccountRangeDownloader<C> {
         Ok(Self { client, request, fut, verification: None, retries: 0 })
     }
 
+    // Raise retry priority so transient failures cannot leave range progress behind new work.
     fn retry(&mut self) -> bool {
         if self.retries >= MAX_RETRIES {
             return false
@@ -57,6 +60,7 @@ impl<C: SnapClient> AccountRangeDownloader<C> {
         true
     }
 
+    // Verify peer-controlled proofs off the async worker while retaining peer attribution.
     fn start_verification(
         &mut self,
         peer_id: PeerId,
@@ -76,12 +80,12 @@ impl<C: SnapClient> AccountRangeDownloader<C> {
         }
 
         let request = self.request.clone();
-        let fut =
-            tokio::task::spawn_blocking(move || Self::verify_account_range(&request, response));
+        let fut = tokio::task::spawn_blocking(move || verify_account_range(&request, response));
         self.verification = Some(VerificationTask { peer_id, fut });
         Ok(None)
     }
 
+    // Bind replies to the expected request before trusting peer-supplied data.
     fn account_range_response(
         &self,
         response: SnapResponse,
@@ -102,58 +106,7 @@ impl<C: SnapClient> AccountRangeDownloader<C> {
         Ok(response)
     }
 
-    fn verify_account_range(
-        request: &GetAccountRangeMessage,
-        response: AccountRangeMessage,
-    ) -> Result<VerifiedAccountRange, RequestError> {
-        Self::validate_account_limit(request.limit_hash, &response.accounts)?;
-
-        let mut accounts = Self::decode_accounts(response.accounts)?;
-        let next = Self::verify_proof(request, &accounts, &response.proof)?;
-
-        // Authenticate the boundary account before removing it from the requested range.
-        accounts.truncate(accounts.partition_point(|(hash, _)| *hash <= request.limit_hash));
-        let has_more = next.is_some_and(|next| next <= request.limit_hash);
-
-        Ok(VerifiedAccountRange { accounts, has_more })
-    }
-
-    fn validate_account_limit(limit: B256, accounts: &[AccountData]) -> Result<(), RequestError> {
-        // Only the first account past the limit is needed to prove the interval is complete.
-        if accounts.iter().filter(|data| data.hash > limit).nth(1).is_some() {
-            debug!(target: "downloaders::snap", "Account range runs past the requested limit");
-            return Err(RequestError::BadResponse)
-        }
-        Ok(())
-    }
-
-    fn verify_proof(
-        request: &GetAccountRangeMessage,
-        accounts: &[(B256, TrieAccount)],
-        proof: &[alloy_primitives::Bytes],
-    ) -> Result<Option<B256>, RequestError> {
-        let leaves = accounts.iter().map(|(hash, account)| (*hash, alloy_rlp::encode(account)));
-        verify_range_proof(request.root_hash, request.starting_hash, leaves, proof).map_err(
-            |error| {
-                debug!(target: "downloaders::snap", %error, "Invalid account range proof");
-                RequestError::BadResponse
-            },
-        )
-    }
-
-    fn decode_accounts(data: Vec<AccountData>) -> Result<Vec<(B256, TrieAccount)>, RequestError> {
-        data.into_iter()
-            .map(|data| {
-                let hash = data.hash;
-                let account = data.trie_account().map_err(|error| {
-                    debug!(target: "downloaders::snap", %error, "Invalid account data");
-                    RequestError::BadResponse
-                })?;
-                Ok((hash, account))
-            })
-            .collect()
-    }
-
+    // Keep validation and retry accounting together so peers are penalized exactly once.
     fn handle_response(
         &mut self,
         response: PeerRequestResult<SnapResponse>,
@@ -179,6 +132,7 @@ impl<C: SnapClient> AccountRangeDownloader<C> {
         }
     }
 
+    // Preserve peer attribution until blocking verification finishes.
     fn poll_verification(
         &mut self,
         cx: &mut Context<'_>,
@@ -209,6 +163,7 @@ where
 {
     type Output = Result<AccountRangeOutcome, RequestError>;
 
+    // Finish an active verification before accepting another response.
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
@@ -243,6 +198,15 @@ pub enum AccountRangeOutcome {
     Verified(VerifiedAccountRange),
 }
 
+// Couples blocking proof work with its responder so failures remain attributable.
+#[derive(Debug)]
+struct VerificationTask {
+    // Identifies the responder to penalize if verification rejects the range.
+    peer_id: PeerId,
+    // Carries the verified result back without blocking the async worker.
+    fut: tokio::task::JoinHandle<Result<VerifiedAccountRange, RequestError>>,
+}
+
 /// A decoded account range authenticated against a state root.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VerifiedAccountRange {
@@ -250,6 +214,50 @@ pub struct VerifiedAccountRange {
     pub accounts: Vec<(B256, TrieAccount)>,
     /// Whether another request is needed to complete the requested interval.
     pub has_more: bool,
+}
+
+// Authenticate the full response before trimming its optional boundary account.
+fn verify_account_range(
+    request: &GetAccountRangeMessage,
+    response: AccountRangeMessage,
+) -> Result<VerifiedAccountRange, RequestError> {
+    // Allow only the single out-of-range account needed as a boundary witness.
+    if response.accounts.iter().filter(|data| data.hash > request.limit_hash).nth(1).is_some() {
+        debug!(target: "downloaders::snap", "Account range runs past the requested limit");
+        return Err(RequestError::BadResponse)
+    }
+
+    // Decode first so malformed account values are attributed to the responder.
+    let mut accounts = response
+        .accounts
+        .into_iter()
+        .map(|data| {
+            data.into_trie_entry().map_err(|error| {
+                debug!(target: "downloaders::snap", %error, "Invalid account data");
+                RequestError::BadResponse
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let next = verify_proof(request, &accounts, &response.proof)?;
+
+    // Authenticate the boundary account before removing it from the requested range.
+    accounts.truncate(accounts.partition_point(|(hash, _)| *hash <= request.limit_hash));
+    let has_more = next.is_some_and(|next| next <= request.limit_hash);
+
+    Ok(VerifiedAccountRange { accounts, has_more })
+}
+
+// Re-encode decoded accounts so the proof authenticates their canonical trie values.
+fn verify_proof(
+    request: &GetAccountRangeMessage,
+    accounts: &[(B256, TrieAccount)],
+    proof: &[alloy_primitives::Bytes],
+) -> Result<Option<B256>, RequestError> {
+    let leaves = accounts.iter().map(|(hash, account)| (*hash, alloy_rlp::encode(account)));
+    verify_range_proof(request.root_hash, request.starting_hash, leaves, proof).map_err(|error| {
+        debug!(target: "downloaders::snap", %error, "Invalid account range proof");
+        RequestError::BadResponse
+    })
 }
 
 /// An account-range request whose origin exceeds its limit.
@@ -260,19 +268,14 @@ pub struct InvalidAccountRange {
     limit: B256,
 }
 
-#[derive(Debug)]
-struct VerificationTask {
-    peer_id: PeerId,
-    fut: tokio::task::JoinHandle<Result<VerifiedAccountRange, RequestError>>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloy_primitives::{Bytes, KECCAK256_EMPTY, U256};
     use futures::future::{ready, Ready};
     use reth_eth_wire_types::snap::{
-        ByteCodesMessage, GetBlockAccessListsMessage, GetByteCodesMessage, GetStorageRangesMessage,
+        AccountData, ByteCodesMessage, GetBlockAccessListsMessage, GetByteCodesMessage,
+        GetStorageRangesMessage,
     };
     use reth_network_p2p::download::DownloadClient;
     use reth_network_peers::WithPeerId;
