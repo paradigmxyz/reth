@@ -500,6 +500,7 @@ dyn-clone = "1.0.17"
 eyre = "0.6"
 fdlimit = "0.3.0"
 fixed-map = { version = "0.9", default-features = false }
+flate2 = "1.0"
 humantime = "2.1"
 imbl = "7"
 humantime-serde = "1.1"
