@@ -1,9 +1,6 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD;
 use alloy_consensus::BlockHeader;
-use alloy_eip7928::{
-    compute_block_access_list_hash, constants::ITEM_COST, total_bal_items,
-    BlockAccessListGasError,
-};
+use alloy_eip7928::bal::Bal;
 use alloy_primitives::BlockNumber;
 use num_traits::Zero;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
@@ -363,21 +360,16 @@ where
                 })
             })?;
 
-            let built_bal = executor.take_bal();
+            let built_bal = executor.take_bal().map(Bal::from);
             if let Some(bal) = &built_bal {
-                let gas_limit = block.header().gas_limit();
-                let items = total_bal_items(bal);
-                if items > gas_limit / ITEM_COST as u64 {
+                if let Err(err) = bal.validate_gas_limit(block.header().gas_limit()) {
                     return Err(StageError::Block {
                         block: Box::new(block.block_with_parent()),
-                        error: BlockErrorKind::Validation(
-                            BlockAccessListGasError::new(items, gas_limit).into(),
-                        ),
+                        error: BlockErrorKind::Validation(err.into()),
                     })
                 }
             }
-            let bal_hash =
-                built_bal.as_ref().map(|bal| compute_block_access_list_hash(bal.as_slice()));
+            let bal_hash = built_bal.as_ref().map(|bal| bal.compute_hash());
 
             if let Err(err) =
                 self.consensus.validate_block_post_execution(&block, &result, None, bal_hash)
