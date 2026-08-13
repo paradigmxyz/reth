@@ -89,7 +89,9 @@ pub trait EngineApi<Engine: EngineTypes> {
         execution_requests: RequestsOrHash,
     ) -> RpcResult<PayloadStatus>;
 
-    /// Bogota payload handler stub.
+    /// Post Bogota payload handler stub.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/bogota.md#engine_newpayloadv6>
     #[method(name = "newPayloadV6")]
     async fn new_payload_v6(
         &self,
@@ -164,7 +166,9 @@ pub trait EngineApi<Engine: EngineTypes> {
         custody_columns: Option<B128>,
     ) -> RpcResult<ForkchoiceUpdated>;
 
-    /// Bogota forkchoice update stub.
+    /// Post Bogota forkchoice update stub.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/bogota.md#engine_forkchoiceupdatedv5>
     #[method(name = "forkchoiceUpdatedV5")]
     async fn fork_choice_updated_v5(
         &self,

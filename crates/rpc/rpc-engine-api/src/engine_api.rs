@@ -293,6 +293,8 @@ where
     }
 
     /// Handler stub for `engine_newPayloadV6`.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/bogota.md#engine_newpayloadv6>
     pub async fn new_payload_v6(
         &self,
         payload: PayloadT::ExecutionData,
@@ -436,6 +438,8 @@ where
     }
 
     /// Handler stub for `engine_forkchoiceUpdatedV5`.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/bogota.md#engine_forkchoiceupdatedv5>
     pub async fn fork_choice_updated_v5(
         &self,
         state: ForkchoiceState,
@@ -1316,6 +1320,8 @@ where
     }
 
     /// Handler for the stubbed `engine_newPayloadV6` endpoint.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/bogota.md#engine_newpayloadv6>
     async fn new_payload_v6(
         &self,
         payload: ExecutionPayloadV4,
@@ -1388,6 +1394,8 @@ where
     }
 
     /// Handler for the stubbed `engine_forkchoiceUpdatedV5` endpoint.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/bogota.md#engine_forkchoiceupdatedv5>
     async fn fork_choice_updated_v5(
         &self,
         fork_choice_state: ForkchoiceState,
