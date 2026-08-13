@@ -900,7 +900,7 @@ fn process_payload_attributes_shares_sparse_trie_during_validation_fallback() {
             withdrawals: None,
             parent_beacon_block_root: None,
             slot_number: None,
-            target_gas_limit: None,
+            ..Default::default()
         },
         &head,
         state,
@@ -1682,7 +1682,7 @@ async fn test_fcu_with_canonical_ancestor_below_finalized_is_rejected() {
         withdrawals: None,
         parent_beacon_block_root: None,
         slot_number: None,
-        target_gas_limit: None,
+        ..Default::default()
     };
     for attrs in [Some(payload_attributes), None] {
         let err = test_harness
@@ -1716,7 +1716,7 @@ async fn test_fcu_with_canonical_ancestor_below_finalized_is_rejected() {
         withdrawals: None,
         parent_beacon_block_root: None,
         slot_number: None,
-        target_gas_limit: None,
+        ..Default::default()
     };
     let outcome = test_harness
         .tree
@@ -1759,7 +1759,7 @@ async fn test_fcu_with_canonical_ancestor_above_finalized_starts_payload_build()
         withdrawals: None,
         parent_beacon_block_root: None,
         slot_number: None,
-        target_gas_limit: None,
+        ..Default::default()
     };
     let outcome = test_harness
         .tree
