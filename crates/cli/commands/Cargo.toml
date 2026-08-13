@@ -123,6 +123,7 @@ arbitrary = [
     "reth-db/arbitrary",
     "reth-chainspec/arbitrary",
     "alloy-chains/arbitrary",
+    "alloy-eip7928/arbitrary",
     "alloy-eips/arbitrary",
     "alloy-primitives/arbitrary",
     "reth-codecs/test-utils",
