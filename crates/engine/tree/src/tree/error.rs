@@ -127,4 +127,13 @@ pub enum InsertPayloadError<B: Block> {
     /// Payload validation error
     #[error(transparent)]
     Payload(#[from] NewPayloadError),
+    /// A failure that is not attributable to the block itself and must be returned as an actual
+    /// error instead of a `PayloadStatus`, e.g. malformed request params.
+    ///
+    /// Unlike [`Self::Block`], this variant does not require a converted block: it is used for
+    /// failures detected before payload conversion succeeds, such as undecodable block access
+    /// list bytes, which must be rejected with an invalid params error even if the payload also
+    /// fails conversion or block hash validation.
+    #[error(transparent)]
+    Fatal(#[from] InsertBlockFatalError),
 }

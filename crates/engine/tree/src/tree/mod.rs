@@ -951,6 +951,9 @@ where
                     InsertPayloadError::Payload(error) => {
                         self.on_new_payload_error(error, num_hash, parent_hash)?
                     }
+                    // Failures that are not attributable to the block, e.g. malformed request
+                    // params, are returned as actual errors instead of a `PayloadStatus`.
+                    InsertPayloadError::Fatal(error) => return Err(error),
                 };
 
                 Ok(TryInsertPayloadResult { status, already_seen: false })

@@ -106,7 +106,10 @@ use crate::tree::{
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
-use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash_with_buf, BlockAccessList};
+use alloy_eip7928::{
+    bal::DecodedBal, compute_block_access_list_hash, compute_block_access_list_hash_with_buf,
+    BlockAccessList,
+};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::{
@@ -132,8 +135,9 @@ use reth_engine_primitives::{
 };
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
-    block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
-    OnStateHook, SpecFor,
+    block::BlockExecutor,
+    execute::{BasicBlockExecutor, ExecutableTxFor, Executor as _},
+    ConfigureEvm, EvmEnvFor, ExecutionCtxFor, OnStateHook, SpecFor,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats};
 use reth_payload_builder::{PayloadBuilderLease, PayloadBuilderResources};
@@ -566,11 +570,19 @@ where
             .map_err(NewPayloadError::other)?;
 
         // Extract the decoded BAL, if present. Undecodable block access list bytes are malformed
-        // request params, not an invalid block.
-        let decoded_bal = ensure_ok!(input
-            .try_decoded_access_list()
-            .map_err(ConsensusError::BlockAccessListDecode))
-        .map(Arc::new);
+        // request params, not an invalid block, and take precedence over any conversion or
+        // validation failure of the block itself (notably the block hash mismatch that malformed
+        // BAL bytes also cause, because the header's BAL hash is derived from them), so this must
+        // not join the concurrent block conversion for its error path.
+        let decoded_bal = match input.try_decoded_access_list() {
+            Ok(decoded_bal) => decoded_bal.map(Arc::new),
+            Err(err) => {
+                return Err(crate::tree::error::InsertBlockFatalError::InvalidParams(Box::new(
+                    ConsensusError::BlockAccessListDecode(err),
+                ))
+                .into())
+            }
+        };
 
         if let Some(decoded_bal) = decoded_bal.as_deref() {
             // Reject oversized BAL sidecars before executing the block.
@@ -732,7 +744,19 @@ where
         if let (Some(metrics), Some(stats)) = (&state_provider_metrics, &state_provider_stats) {
             metrics.record_totals(stats);
         }
-        let (output, senders, receipt_root_rx, built_bal) = ensure_ok!(execution_result);
+        let (output, senders, receipt_root_rx, built_bal) = match execution_result {
+            Ok(val) => val,
+            Err(e) => {
+                let block = validated_block.try_into_inner().expect("sole handle")?;
+                let e = if parallel_bal_execution && matches!(e, InsertBlockErrorKind::Execution(_))
+                {
+                    self.refine_bal_execution_error(&block, &provider_builder, e)
+                } else {
+                    e
+                };
+                return Err(InsertBlockError::new(block, e).into())
+            }
+        };
 
         // After executing the block we can stop prewarming transactions
         handle.stop_prewarming_execution();
@@ -789,17 +813,23 @@ where
                 .ok()
         };
 
-        ensure_ok_post_block!(
-            self.validate_post_execution(
-                &block,
-                &parent_block,
-                &output,
-                &mut ctx,
-                receipt_root_bloom,
-                built_bal
-            ),
-            block
-        );
+        if let Err(e) = self.validate_post_execution(
+            &block,
+            &parent_block,
+            &output,
+            &mut ctx,
+            receipt_root_bloom,
+            built_bal,
+        ) {
+            // On the BAL path a consensus failure can be a consequence of executing against a
+            // corrupt BAL (e.g. wrong gas used), so re-derive the precise error serially.
+            let e = if parallel_bal_execution && matches!(e, InsertBlockErrorKind::Consensus(_)) {
+                self.refine_bal_execution_error(block.sealed_block(), &provider_builder, e)
+            } else {
+                e
+            };
+            return Err(InsertBlockError::new(block.into_sealed_block(), e).into())
+        }
 
         let mut hashed_state_validate_result = debug_span!(
             target: "engine::tree::payload_validator",
@@ -1182,6 +1212,63 @@ where
         );
 
         Ok((output, senders, result_rx, Some(built_bal)))
+    }
+
+    /// Re-executes a block serially to refine the error reported by a failed BAL-path execution.
+    ///
+    /// BAL-path workers resolve state through the received BAL, so an invalid block often
+    /// surfaces as an internal BAL lookup error (e.g. "account not found in BAL") instead of the
+    /// consensus error that caused it. Serial execution against the parent state re-derives the
+    /// precise validation error: a block-level gas admission failure, a failed system contract
+    /// call, or — when serial execution succeeds — a block access list mismatch found by
+    /// post-execution validation. Only runs for blocks that are already known to be invalid, so
+    /// the extra execution is bounded by the block gas limit and never on the happy path.
+    fn refine_bal_execution_error(
+        &self,
+        block: &SealedBlock<N::Block>,
+        provider_builder: &StateProviderBuilder<N, P>,
+        original_error: InsertBlockErrorKind,
+    ) -> InsertBlockErrorKind {
+        // Build an uncached parent-state provider: the shared execution cache and txpool
+        // snapshot may already reflect this block's own execution by the time post-execution
+        // validation fails, which would poison the serial re-execution.
+        let Ok(state_provider) = provider_builder.build() else { return original_error };
+        let Ok(block) = block.clone().try_recover() else { return original_error };
+
+        let mut executor = BasicBlockExecutor::new(
+            self.evm_config.clone(),
+            StateProviderDatabase::new(state_provider),
+        );
+        let refined = match executor.execute_one(&block) {
+            Err(err) => err.into(),
+            Ok(result) => {
+                let bal_hash =
+                    executor.take_bal().map(|bal| compute_block_access_list_hash(bal.as_slice()));
+                match self.consensus.validate_block_post_execution(&block, &result, None, bal_hash)
+                {
+                    Err(err) => err.into(),
+                    Ok(()) => {
+                        // Serial execution fully validated the block even though the BAL path
+                        // rejected it; keep the original error but make the divergence visible.
+                        debug!(
+                            target: "engine::tree::payload_validator",
+                            block = ?block.num_hash(),
+                            %original_error,
+                            "Serial re-execution validated block rejected by BAL-path execution",
+                        );
+                        return original_error
+                    }
+                }
+            }
+        };
+        debug!(
+            target: "engine::tree::payload_validator",
+            block = ?block.num_hash(),
+            %original_error,
+            %refined,
+            "Refined BAL-path execution error via serial re-execution",
+        );
+        refined
     }
 
     fn spawn_receipt_root_task(
