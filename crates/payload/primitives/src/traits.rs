@@ -99,6 +99,11 @@ pub trait PayloadAttributes:
     fn target_gas_limit(&self) -> Option<u64> {
         None
     }
+
+    /// Returns the EIP-7805 inclusion-list transactions supplied by the consensus layer.
+    fn inclusion_list_transactions(&self) -> Option<&[Bytes]> {
+        None
+    }
 }
 
 impl PayloadAttributes for EthPayloadAttributes {
