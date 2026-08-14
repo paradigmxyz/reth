@@ -38,24 +38,24 @@ impl From<OrderedWorkerOutputError> for BalExecutionError {
 /// - out-of-bounds and duplicate indices panic because they violate the internal worker/dispatcher
 ///   index invariant
 /// - after the first error, the iterator is exhausted
-pub(super) fn ordered_worker_outputs<R>(
-    result_rx: &Receiver<Result<BalWorkerOutput<R>, BalWorkerError>>,
+pub(super) fn ordered_worker_outputs<R, Tx>(
+    result_rx: &Receiver<Result<BalWorkerOutput<R, Tx>, BalWorkerError>>,
     total: usize,
-) -> impl Iterator<Item = Result<BalWorkerOutput<R>, OrderedWorkerOutputError>> + '_ {
+) -> impl Iterator<Item = Result<BalWorkerOutput<R, Tx>, OrderedWorkerOutputError>> + '_ {
     OrderedWorkerOutputs::new(result_rx, total)
 }
 
-struct OrderedWorkerOutputs<'a, R> {
-    result_rx: &'a Receiver<Result<BalWorkerOutput<R>, BalWorkerError>>,
-    pending: Vec<Option<BalWorkerOutput<R>>>,
+struct OrderedWorkerOutputs<'a, R, Tx> {
+    result_rx: &'a Receiver<Result<BalWorkerOutput<R, Tx>, BalWorkerError>>,
+    pending: Vec<Option<BalWorkerOutput<R, Tx>>>,
     next: usize,
     total: usize,
     failed: bool,
 }
 
-impl<'a, R> OrderedWorkerOutputs<'a, R> {
+impl<'a, R, Tx> OrderedWorkerOutputs<'a, R, Tx> {
     fn new(
-        result_rx: &'a Receiver<Result<BalWorkerOutput<R>, BalWorkerError>>,
+        result_rx: &'a Receiver<Result<BalWorkerOutput<R, Tx>, BalWorkerError>>,
         total: usize,
     ) -> Self {
         Self {
@@ -68,8 +68,8 @@ impl<'a, R> OrderedWorkerOutputs<'a, R> {
     }
 }
 
-impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
-    type Item = Result<BalWorkerOutput<R>, OrderedWorkerOutputError>;
+impl<R, Tx> Iterator for OrderedWorkerOutputs<'_, R, Tx> {
+    type Item = Result<BalWorkerOutput<R, Tx>, OrderedWorkerOutputError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.failed || self.next >= self.total {
@@ -116,12 +116,12 @@ mod tests {
     use crate::tree::payload_processor::bal::BalExecutionError;
     use alloy_primitives::Address;
 
-    fn output(index: usize, result: u64) -> BalWorkerOutput<u64> {
-        BalWorkerOutput { index, signer: Address::ZERO, tx_gas_limit: 0, result }
+    fn output(index: usize, result: u64) -> BalWorkerOutput<u64, ()> {
+        BalWorkerOutput { index, signer: Address::ZERO, tx_gas_limit: 0, result: Ok(result) }
     }
 
-    fn expect_err_contains<R>(
-        result: Result<BalWorkerOutput<R>, OrderedWorkerOutputError>,
+    fn expect_err_contains<R, Tx>(
+        result: Result<BalWorkerOutput<R, Tx>, OrderedWorkerOutputError>,
         text: &str,
     ) {
         let Err(err) = result else {
@@ -139,7 +139,7 @@ mod tests {
         drop(tx);
 
         let results = ordered_worker_outputs(&rx, 3)
-            .map(|output| output.expect("ordered output").result)
+            .map(|output| output.expect("ordered output").result.expect("tx result"))
             .collect::<Vec<_>>();
 
         assert_eq!(results, vec![0, 10, 20]);
@@ -154,7 +154,7 @@ mod tests {
         .unwrap();
         drop(tx);
 
-        let mut outputs = ordered_worker_outputs::<u64>(&rx, 1);
+        let mut outputs = ordered_worker_outputs::<u64, ()>(&rx, 1);
 
         expect_err_contains(outputs.next().expect("first item"), "worker failed");
         assert!(outputs.next().is_none());
@@ -165,7 +165,7 @@ mod tests {
         let (tx, rx) = crossbeam_channel::unbounded();
         drop(tx);
 
-        let mut outputs = ordered_worker_outputs::<u64>(&rx, 1);
+        let mut outputs = ordered_worker_outputs::<u64, ()>(&rx, 1);
 
         expect_err_contains(outputs.next().expect("first item"), "waiting for ordered outputs");
         assert!(outputs.next().is_none());
@@ -204,7 +204,10 @@ mod tests {
 
         let mut outputs = ordered_worker_outputs(&rx, 2);
 
-        assert_eq!(outputs.next().expect("first item").expect("first output").result, 0);
+        assert_eq!(
+            outputs.next().expect("first item").expect("first output").result.expect("tx result"),
+            0
+        );
         let _ = outputs.next();
     }
 }

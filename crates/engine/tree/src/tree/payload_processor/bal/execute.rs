@@ -8,11 +8,16 @@
 //!
 //! The canonical state owns block effects. It runs the normal pre/post block hooks, commits
 //! worker results in transaction order, tracks block gas admission, and builds the BAL that this
-//! execution actually produced.
+//! execution actually produced. A transaction whose speculative execution failed is re-executed
+//! on the canonical state instead of failing the payload: block-gas admission is adjudicated in
+//! transaction order first, and otherwise the speculative failure is either a BAL divergence or a
+//! transient worker error, neither of which is a block verdict.
 //!
-//! The rebuilt BAL is returned to the outer payload validator for consensus post-execution
-//! validation. This module only logs the first divergence between the received BAL and the BAL
-//! rebuilt from canonical execution.
+//! Mixing worker results with canonical re-executions is sound because only computed results are
+//! ever committed: any divergence between the received BAL and canonical execution surfaces in
+//! the rebuilt BAL, which the outer payload validator checks against the header's BAL hash during
+//! consensus post-execution validation. This module only logs the first divergence between the
+//! received BAL and the BAL rebuilt from canonical execution.
 
 use super::{ordered_outputs::ordered_worker_outputs, worker, BalExecutionError};
 use alloy_eip7928::{
@@ -56,7 +61,7 @@ pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
 >
 where
     Evm: ConfigureEvm + 'static,
-    Tx: ExecutableTxFor<Evm> + Send + 'a,
+    Tx: ExecutableTxFor<Evm> + Clone + Send + 'a,
     Err: core::error::Error + Send + Sync + 'static,
     DB: Database + Send + 'a,
     MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync + 'a,
@@ -99,7 +104,7 @@ fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
 >
 where
     Evm: ConfigureEvm + 'scope,
-    Tx: ExecutableTxFor<Evm> + Send + 'scope,
+    Tx: ExecutableTxFor<Evm> + Clone + Send + 'scope,
     Err: core::error::Error + Send + Sync + 'static,
     DB: Database + Send + 'scope,
     MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync + 'scope,
@@ -147,11 +152,26 @@ where
         for output in ordered_worker_outputs(&result_rx, transaction_count) {
             let output = output?;
 
+            // Block-level admission is the consensus verdict for a transaction that cannot
+            // fit the remaining block gas; it takes precedence over any speculative failure.
             gas_tracker.validate_tx_limit(output.tx_gas_limit)?;
-            gas_tracker.record_result(output.result.result());
             canonical_executor.evm_mut().db_mut().bump_bal_index();
 
-            let _ = canonical_executor.commit_transaction(output.result);
+            let result = match output.result {
+                Ok(result) => result,
+                Err(failed) => {
+                    tracing::debug!(
+                        target: "engine::tree::payload_processor::bal",
+                        index = output.index,
+                        err = %failed.source,
+                        "Re-executing transaction canonically after speculative failure"
+                    );
+                    canonical_executor.execute_transaction_without_commit(failed.tx)?
+                }
+            };
+            gas_tracker.record_result(result.result());
+
+            let _ = canonical_executor.commit_transaction(result);
             senders.push(output.signer);
 
             let current_len = canonical_executor.receipts().len();
@@ -473,7 +493,7 @@ mod tests {
         txs: Vec<Tx>,
     ) -> Result<BlockExecutionOutput<Receipt>, BalExecutionError>
     where
-        Tx: ExecutableTxFor<EthEvmConfig> + Send,
+        Tx: ExecutableTxFor<EthEvmConfig> + Clone + Send,
         DB: Database + Send,
         MakeDb: Fn() -> Result<DB, BalExecutionError> + Sync,
     {
@@ -490,7 +510,7 @@ mod tests {
         txs: Vec<Tx>,
     ) -> Result<(BlockExecutionOutput<Receipt>, BlockAccessList), BalExecutionError>
     where
-        Tx: ExecutableTxFor<EthEvmConfig> + Send,
+        Tx: ExecutableTxFor<EthEvmConfig> + Clone + Send,
         DB: Database + Send,
         MakeDb: Fn() -> Result<DB, BalExecutionError> + Sync,
     {
@@ -910,6 +930,158 @@ mod tests {
                 err.as_validation(),
                 Some(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas { .. })
             )),
+            Err(err) => panic!("expected block gas validation error, got {err:?}"),
+            Ok(_) => panic!("expected block gas validation error, got Ok"),
+        }
+    }
+
+    #[test]
+    fn reexecutes_canonically_when_bal_misses_admitted_transactions() {
+        // The BAL covers neither transaction, so both workers fail speculative
+        // execution. Both transactions pass admission, so each is re-executed
+        // canonically and the block completes with the canonical verdict.
+        use alloy_consensus::TxLegacy;
+        use alloy_primitives::TxKind;
+        use reth_chainspec::MAINNET;
+        use reth_ethereum_primitives::Transaction;
+        use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
+        use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
+
+        let evm_config = EthEvmConfig::mainnet();
+        let carol: alloy_primitives::Address = alloy_primitives::Address::from([0xCA; 20]);
+        let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
+
+        let alice_kp = generate_key(&mut rng());
+        let alice = public_key_to_address(alice_kp.public_key());
+        let bob_kp = generate_key(&mut rng());
+        let bob = public_key_to_address(bob_kp.public_key());
+
+        let mut pre_block_db = system_contracts_db();
+        insert_funded(&mut pre_block_db, alice, sender_balance);
+        insert_funded(&mut pre_block_db, bob, sender_balance);
+
+        let chain_id = MAINNET.chain.id();
+        let make_tx = |kp, value| {
+            sign_tx_with_key_pair(
+                kp,
+                Transaction::Legacy(TxLegacy {
+                    chain_id: Some(chain_id),
+                    nonce: 0,
+                    gas_price: 1,
+                    gas_limit: 100_000,
+                    to: TxKind::Call(carol),
+                    value: U256::from(value),
+                    input: Default::default(),
+                }),
+            )
+        };
+        let tx1 = Recovered::new_unchecked(make_tx(alice_kp, 100u64), alice);
+        let tx2 = Recovered::new_unchecked(make_tx(bob_kp, 200u64), bob);
+
+        // Reference BAL covers no transactions at all.
+        let reference_block = empty_amsterdam_block(B256::ZERO);
+        let no_txs: Vec<Recovered<reth_ethereum_primitives::TransactionSigned>> = vec![];
+        let reference_bal =
+            reference_bal_for_block(&evm_config, pre_block_db.clone(), &reference_block, no_txs);
+        let bal_hash = alloy_eip7928::compute_block_access_list_hash(&reference_bal);
+        let block = empty_amsterdam_block(bal_hash);
+
+        let (output, built_bal) = run_execute_block_full(
+            &Runtime::test(),
+            evm_config,
+            db_factory(pre_block_db),
+            to_arc_decoded(reference_bal),
+            &block,
+            vec![tx1, tx2],
+        )
+        .expect("canonical re-execution completes the block");
+
+        assert_eq!(output.result.receipts.len(), 2);
+        assert!(output.result.receipts.iter().all(|r| r.success));
+        // Canonical re-execution rebuilt the BAL the block actually produced.
+        assert!(built_bal.iter().any(|account| account.address == alice));
+        assert!(built_bal.iter().any(|account| account.address == bob));
+        // The rebuilt BAL diverges from the received one, so the outer post-execution
+        // hash check rejects this block: completing execution must not mask the
+        // divergence verdict.
+        assert_ne!(alloy_eip7928::compute_block_access_list_hash(&built_bal), bal_hash);
+    }
+
+    #[test]
+    fn admission_rejects_before_speculative_worker_failure_surfaces() {
+        // tx2 exceeds the remaining block gas AND touches accounts absent from the BAL,
+        // so its worker fails speculative execution. Block-level admission is the
+        // consensus verdict: the ordered commit loop must reject tx2 for block gas
+        // instead of surfacing the worker's BAL-state failure.
+        use alloy_consensus::TxLegacy;
+        use alloy_evm::block::BlockValidationError;
+        use alloy_primitives::TxKind;
+        use reth_chainspec::MAINNET;
+        use reth_ethereum_primitives::Transaction;
+        use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
+        use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
+
+        let evm_config = EthEvmConfig::mainnet();
+        let carol: alloy_primitives::Address = alloy_primitives::Address::from([0xCA; 20]);
+        let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
+        let block_gas_limit = 1_000_000;
+        let tx_gas_limit = 990_000;
+
+        let alice_kp = generate_key(&mut rng());
+        let alice = public_key_to_address(alice_kp.public_key());
+        let bob_kp = generate_key(&mut rng());
+        let bob = public_key_to_address(bob_kp.public_key());
+
+        let mut pre_block_db = system_contracts_db();
+        insert_funded(&mut pre_block_db, alice, sender_balance);
+        insert_funded(&mut pre_block_db, bob, sender_balance);
+
+        let chain_id = MAINNET.chain.id();
+        let make_tx = |kp, value| {
+            sign_tx_with_key_pair(
+                kp,
+                Transaction::Legacy(TxLegacy {
+                    chain_id: Some(chain_id),
+                    nonce: 0,
+                    gas_price: 1,
+                    gas_limit: tx_gas_limit,
+                    to: TxKind::Call(carol),
+                    value: U256::from(value),
+                    input: Default::default(),
+                }),
+            )
+        };
+        let tx1 = Recovered::new_unchecked(make_tx(alice_kp, 100u64), alice);
+        let tx2 = Recovered::new_unchecked(make_tx(bob_kp, 200u64), bob);
+
+        // Reference BAL covers only tx1, so tx2's worker fails on the missing accounts.
+        let reference_block = empty_amsterdam_block(B256::ZERO);
+        let reference_bal = reference_bal_for_block(
+            &evm_config,
+            pre_block_db.clone(),
+            &reference_block,
+            vec![tx1.clone()],
+        );
+        let bal_hash = alloy_eip7928::compute_block_access_list_hash(&reference_bal);
+        let low_gas_block = empty_amsterdam_block_with_gas_limit(bal_hash, block_gas_limit);
+
+        let result = run_execute_block(
+            &Runtime::test(),
+            evm_config,
+            db_factory(pre_block_db),
+            to_arc_decoded(reference_bal),
+            &low_gas_block,
+            vec![tx1, tx2],
+        );
+
+        match result {
+            Err(BalExecutionError::Execution(err)) => assert!(
+                matches!(
+                    err.as_validation(),
+                    Some(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas { .. })
+                ),
+                "expected block gas validation error, got {err:?}"
+            ),
             Err(err) => panic!("expected block gas validation error, got {err:?}"),
             Ok(_) => panic!("expected block gas validation error, got Ok"),
         }
