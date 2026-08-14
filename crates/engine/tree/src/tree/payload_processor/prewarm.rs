@@ -487,6 +487,9 @@ where
                 }
                 PrewarmTaskEvent::Terminate { execution_outcome, valid_block_rx } => {
                     trace!(target: "engine::tree::payload_processor::prewarm", "Received termination signal");
+                    // `Terminate` can arrive without `TerminateTransactionExecution` when the
+                    // handle is dropped on an execution error, so stop workers before waiting.
+                    self.ctx.stop();
                     final_execution_outcome =
                         Some(execution_outcome.map(|outcome| (outcome, valid_block_rx)));
 
@@ -824,11 +827,58 @@ fn multiproof_targets_from_withdrawals(withdrawals: &[Withdrawal]) -> MultiProof
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::transaction::Recovered;
     use alloy_eip7928::{
         AccountChanges, BalanceChange, BlockAccessIndex, CodeChange, NonceChange, SlotChanges,
         StorageChange,
     };
     use alloy_primitives::{address, bytes};
+    use reth_chainspec::ChainSpec;
+    use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
+    use reth_evm::{execute::WithTxEnv, TxEnvFor};
+    use reth_evm_ethereum::EthEvmConfig;
+    use reth_provider::test_utils::MockEthProvider;
+    use reth_storage_overlay::OverlayManager;
+
+    #[test]
+    fn terminate_event_stops_transaction_execution() {
+        let terminate_execution = Arc::new(AtomicBool::new(false));
+        let ctx = PrewarmContext {
+            env: ExecutionEnv::test_default(),
+            evm_config: EthEvmConfig::new(Arc::new(ChainSpec::default())),
+            saved_cache: None,
+            provider: StateProviderBuilder::<EthPrimitives, _>::new(
+                MockEthProvider::default(),
+                B256::ZERO,
+                OverlayManager::default(),
+            ),
+            bal_prewarm_pool: None,
+            metrics: PrewarmMetrics::default(),
+            cache_metrics: None,
+            cache_state_metrics: None,
+            terminate_execution: Arc::clone(&terminate_execution),
+            executed_tx_index: Arc::new(AtomicUsize::new(0)),
+            precompile_cache_disabled: false,
+            precompile_cache_map: PrecompileCacheMap::default(),
+            disable_bal_parallel_state_root: false,
+            disable_bal_batch_io: false,
+        };
+        let (task, actions_tx) =
+            PrewarmCacheTask::new(Runtime::test(), PayloadExecutionCache::default(), ctx);
+        actions_tx
+            .send(PrewarmTaskEvent::Terminate {
+                execution_outcome: None,
+                valid_block_rx: mpsc::channel().1,
+            })
+            .unwrap();
+
+        task.run::<WithTxEnv<TxEnvFor<EthEvmConfig>, Recovered<TransactionSigned>>>(
+            PrewarmMode::Skipped,
+            actions_tx,
+        );
+
+        assert!(terminate_execution.load(Ordering::Relaxed));
+    }
 
     #[test]
     fn bal_read_only_account_does_not_change_state_root() {
