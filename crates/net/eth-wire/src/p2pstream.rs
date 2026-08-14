@@ -3,6 +3,7 @@ use crate::{
     disconnect::CanDisconnect,
     errors::{P2PHandshakeError, P2PStreamError},
     pinger::{Pinger, PingerEvent},
+    protocol::ProtocolIngressLimits,
     DisconnectReason, HelloMessage, HelloMessageWithProtocols,
 };
 use alloy_primitives::{
@@ -284,6 +285,9 @@ pub struct P2PStream<S> {
     /// The supported capability for this stream.
     shared_capabilities: SharedCapabilities,
 
+    /// Explicit frame limits registered by installed subprotocol handlers.
+    inbound_protocol_limits: Vec<InboundProtocolLimit>,
+
     /// Outgoing messages buffered for sending to the underlying stream.
     outgoing_messages: VecDeque<Bytes>,
 
@@ -316,6 +320,7 @@ impl<S> P2PStream<S> {
             pinger: Pinger::new(PING_INTERVAL, PING_TIMEOUT),
             ping_token_bucket: PingTokenBucket::new(Instant::now()),
             shared_capabilities,
+            inbound_protocol_limits: Vec::new(),
             outgoing_messages: VecDeque::new(),
             outgoing_message_buffer_capacity: MAX_P2P_CAPACITY,
             disconnecting: false,
@@ -345,6 +350,40 @@ impl<S> P2PStream<S> {
     /// their offsets based on the number of messages of each capability.
     pub const fn shared_capabilities(&self) -> &SharedCapabilities {
         &self.shared_capabilities
+    }
+
+    pub(crate) fn set_protocol_ingress_limits(
+        &mut self,
+        capability: &crate::capability::SharedCapability,
+        limits: ProtocolIngressLimits,
+    ) {
+        let Some(max_frame_bytes) = limits.max_frame_bytes() else { return };
+        if capability.num_messages() == 0 {
+            return
+        }
+
+        let start = capability.message_id_offset();
+        let end = u16::from(start) + u16::from(capability.num_messages());
+        let configured = InboundProtocolLimit {
+            capability: capability.capability().into_owned(),
+            start,
+            end,
+            max_frame_bytes,
+        };
+
+        if let Some(current) = self
+            .inbound_protocol_limits
+            .iter_mut()
+            .find(|current| current.capability == configured.capability)
+        {
+            *current = configured;
+        } else {
+            self.inbound_protocol_limits.push(configured);
+        }
+    }
+
+    fn inbound_protocol_limit(&self, message_id: u8) -> Option<&InboundProtocolLimit> {
+        self.inbound_protocol_limits.iter().find(|limit| limit.contains(message_id))
     }
 
     /// Returns `true` if the stream has outgoing capacity.
@@ -395,6 +434,20 @@ impl PingTokenBucket {
         }
         self.tokens -= 1;
         true
+    }
+}
+
+#[derive(Debug)]
+struct InboundProtocolLimit {
+    capability: crate::Capability,
+    start: u8,
+    end: u16,
+    max_frame_bytes: usize,
+}
+
+impl InboundProtocolLimit {
+    const fn contains(&self, message_id: u8) -> bool {
+        message_id >= self.start && (message_id as u16) < self.end
     }
 }
 
@@ -561,6 +614,11 @@ where
                 continue
             }
 
+            if id > MAX_RESERVED_MESSAGE_ID && this.shared_capabilities.find_by_offset(id).is_none()
+            {
+                return Poll::Ready(Some(Err(P2PStreamError::UnknownSubprotocolMessageId(id))))
+            }
+
             // first check that the compressed message length does not exceed the max
             // payload size
             let decompressed_len = snap::raw::decompress_len(&bytes[1..])?;
@@ -571,9 +629,21 @@ where
                 })))
             }
 
+            let frame_len = decompressed_len + 1;
+            if let Some(limit) = this.inbound_protocol_limit(id) &&
+                frame_len > limit.max_frame_bytes
+            {
+                counter!("p2pstream.subprotocol_message_too_big").increment(1);
+                return Poll::Ready(Some(Err(P2PStreamError::SubprotocolMessageTooBig {
+                    capability: limit.capability.clone(),
+                    message_size: frame_len,
+                    max_size: limit.max_frame_bytes,
+                })))
+            }
+
             // create a buffer to hold the decompressed message, adding a byte to the length for
             // the message ID byte, which is the first byte in this buffer
-            let mut decompress_buf = BytesMut::zeroed(decompressed_len + 1);
+            let mut decompress_buf = BytesMut::zeroed(frame_len);
 
             // each message following a successful handshake is compressed with snappy, so we need
             // to decompress the message before we can decode it.
@@ -943,8 +1013,8 @@ fn compress_frame(
 mod tests {
     use super::*;
     use crate::{
-        capability::SharedCapability, test_utils::eth_hello, Capability, EthVersion,
-        ProtocolVersion,
+        capability::SharedCapability, protocol::Protocol, test_utils::eth_hello, Capability,
+        EthVersion, ProtocolVersion,
     };
     use futures::task::noop_waker_ref;
     use tokio::net::{TcpListener, TcpStream};
@@ -956,6 +1026,39 @@ mod tests {
         incoming: VecDeque<io::Result<BytesMut>>,
         sent: Vec<Bytes>,
         flushes: usize,
+    }
+
+    #[derive(Default)]
+    struct InboundTransport {
+        incoming: VecDeque<BytesMut>,
+    }
+
+    impl Stream for InboundTransport {
+        type Item = io::Result<BytesMut>;
+
+        fn poll_next(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            Poll::Ready(self.incoming.pop_front().map(Ok))
+        }
+    }
+
+    impl Sink<Bytes> for InboundTransport {
+        type Error = io::Error;
+
+        fn poll_ready(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn start_send(self: Pin<&mut Self>, _item: Bytes) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_close(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
     }
 
     impl Stream for FlushCountingTransport {
@@ -1129,6 +1232,74 @@ mod tests {
             Poll::Ready(Some(Err(P2PStreamError::TooManyPings)))
         ));
         assert_eq!(stream.outgoing_messages.len(), usize::from(PING_TOKEN_BUCKET_CAPACITY));
+    }
+
+    #[tokio::test]
+    async fn rejects_subprotocol_frame_before_decompression_when_declared_size_exceeds_limit() {
+        let cap = Capability::new_static("test", 1);
+        let shared_capabilities =
+            SharedCapabilities::try_new(vec![Protocol::new(cap.clone(), 1)], vec![cap.clone()])
+                .unwrap();
+        let shared_capability = shared_capabilities.find(&cap).unwrap().clone();
+        let wire_id = shared_capability.message_id_offset();
+        let mut encoder = snap::raw::Encoder::new();
+        let mut scratch = Vec::new();
+        let accepted = compress_frame(&mut encoder, &mut scratch, wire_id, &[0; 3]).unwrap();
+        let oversized = compress_frame(&mut encoder, &mut scratch, wire_id, &[0; 4]).unwrap();
+        let transport = InboundTransport {
+            incoming: [accepted, oversized]
+                .into_iter()
+                .map(|frame| BytesMut::from(frame.as_ref()))
+                .collect(),
+        };
+        let mut stream = P2PStream::new(transport, shared_capabilities);
+        stream.set_protocol_ingress_limits(&shared_capability, ProtocolIngressLimits::new(4));
+
+        let frame = stream.next().await.unwrap().unwrap();
+        assert_eq!(frame.len(), 4);
+
+        assert!(matches!(
+            stream.next().await.unwrap().unwrap_err(),
+            P2PStreamError::SubprotocolMessageTooBig {
+                capability,
+                message_size: 5,
+                max_size: 4,
+            } if capability == cap
+        ));
+    }
+
+    #[tokio::test]
+    async fn zero_message_protocol_does_not_replace_neighboring_frame_limit() {
+        let zero = Capability::new_static("aaa", 1);
+        let limited = Capability::new_static("bbb", 1);
+        let shared_capabilities = SharedCapabilities::try_new(
+            vec![Protocol::new(zero.clone(), 0), Protocol::new(limited.clone(), 1)],
+            vec![zero.clone(), limited.clone()],
+        )
+        .unwrap();
+        let zero_shared = shared_capabilities.find(&zero).unwrap().clone();
+        let limited_shared = shared_capabilities.find(&limited).unwrap().clone();
+        assert_eq!(zero_shared.message_id_offset(), limited_shared.message_id_offset());
+
+        let mut encoder = snap::raw::Encoder::new();
+        let mut scratch = Vec::new();
+        let oversized =
+            compress_frame(&mut encoder, &mut scratch, limited_shared.message_id_offset(), &[0; 4])
+                .unwrap();
+        let transport =
+            InboundTransport { incoming: VecDeque::from([BytesMut::from(oversized.as_ref())]) };
+        let mut stream = P2PStream::new(transport, shared_capabilities);
+        stream.set_protocol_ingress_limits(&limited_shared, ProtocolIngressLimits::new(4));
+        stream.set_protocol_ingress_limits(&zero_shared, ProtocolIngressLimits::new(1));
+
+        assert!(matches!(
+            stream.next().await.unwrap().unwrap_err(),
+            P2PStreamError::SubprotocolMessageTooBig {
+                capability,
+                message_size: 5,
+                max_size: 4,
+            } if capability == limited
+        ));
     }
 
     #[tokio::test]
