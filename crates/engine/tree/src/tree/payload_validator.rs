@@ -565,10 +565,11 @@ where
             .in_scope(|| self.evm_env_for(&input))
             .map_err(NewPayloadError::other)?;
 
-        // Extract the decoded BAL, if valid and available.
+        // Extract the decoded BAL, if present. Undecodable block access list bytes are malformed
+        // request params, not an invalid block.
         let decoded_bal = ensure_ok!(input
             .try_decoded_access_list()
-            .map_err(|err| ConsensusError::BlockAccessListInvalid(err.to_string())))
+            .map_err(ConsensusError::BlockAccessListDecode))
         .map(Arc::new);
 
         if let Some(decoded_bal) = decoded_bal.as_deref() {
