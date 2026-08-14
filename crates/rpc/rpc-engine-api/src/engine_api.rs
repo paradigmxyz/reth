@@ -9,11 +9,11 @@ use alloy_eips::{
 };
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealable, B128, B256, U64};
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1,
-    ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1, ExecutionPayloadBodyV2,
-    ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3,
-    ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, ForkchoiceUpdatedResponseV2, PayloadId,
-    PayloadStatus, PayloadStatusV2, PraguePayloadFields,
+    BogotaPayloadFields, CancunPayloadFields, ClientVersionV1, ExecutionData,
+    ExecutionPayloadBodiesV1, ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1,
+    ExecutionPayloadBodyV2, ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1,
+    ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated,
+    ForkchoiceUpdatedResponseV2, PayloadId, PayloadStatus, PayloadStatusV2, PraguePayloadFields,
 };
 use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
@@ -292,17 +292,34 @@ where
         Ok(res?)
     }
 
-    /// Handler stub for `engine_newPayloadV6`.
+    /// Handler for `engine_newPayloadV6`.
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/bogota.md#engine_newpayloadv6>
     pub async fn new_payload_v6(
         &self,
         payload: PayloadT::ExecutionData,
     ) -> EngineApiResult<PayloadStatusV2> {
-        let _ = payload;
-        Err(EngineApiError::EngineObjectValidationError(
-            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
-        ))
+        let payload_or_attrs = PayloadOrAttributes::<
+            '_,
+            PayloadT::ExecutionData,
+            PayloadT::PayloadAttributes,
+        >::from_execution_payload(&payload);
+        self.inner
+            .validator
+            .validate_version_specific_fields(EngineApiMessageVersion::V6, payload_or_attrs)?;
+
+        Ok(self.inner.beacon_consensus.new_payload(payload).await?.into())
+    }
+
+    /// Metrics version of `new_payload_v6`.
+    pub async fn new_payload_v6_metered(
+        &self,
+        payload: PayloadT::ExecutionData,
+    ) -> EngineApiResult<PayloadStatusV2> {
+        let start = Instant::now();
+        let result = Self::new_payload_v6(self, payload).await;
+        self.inner.metrics.latency.new_payload_v6.record(start.elapsed());
+        result
     }
 
     /// Returns whether the engine accepts execution requests hash.
@@ -427,7 +444,7 @@ where
         res
     }
 
-    /// Handler stub for `engine_forkchoiceUpdatedV5`.
+    /// Handler for `engine_forkchoiceUpdatedV5`.
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/bogota.md#engine_forkchoiceupdatedv5>
     pub async fn fork_choice_updated_v5(
@@ -436,10 +453,28 @@ where
         payload_attrs: Option<EngineT::PayloadAttributes>,
         custody_columns: Option<B128>,
     ) -> EngineApiResult<ForkchoiceUpdatedResponseV2> {
-        let _ = (state, payload_attrs, custody_columns);
-        Err(EngineApiError::EngineObjectValidationError(
-            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
-        ))
+        if let Some(custody_columns) = custody_columns {
+            self.inner.cell_custody.set_from_engine_api(custody_columns);
+        }
+
+        // Todo: Validate IL and populate `inclusion_list_satisfied` properly and test.
+        Ok(self
+            .validate_and_execute_forkchoice(EngineApiMessageVersion::V5, state, payload_attrs)
+            .await?
+            .into())
+    }
+
+    /// Metrics version of `fork_choice_updated_v5`
+    pub async fn fork_choice_updated_v5_metered(
+        &self,
+        state: ForkchoiceState,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
+        custody_columns: Option<B128>,
+    ) -> EngineApiResult<ForkchoiceUpdatedResponseV2> {
+        let start = Instant::now();
+        let res = Self::fork_choice_updated_v5(self, state, payload_attrs, custody_columns).await;
+        self.inner.metrics.latency.fork_choice_updated_v5.record(start.elapsed());
+        res
     }
 
     /// Helper function for retrieving the build payload by id.
@@ -1309,7 +1344,7 @@ where
         Ok(self.new_payload_v5_metered(payload).await?)
     }
 
-    /// Handler for the stubbed `engine_newPayloadV6` endpoint.
+    /// Handler for `engine_newPayloadV6`.
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/bogota.md#engine_newpayloadv6>
     async fn new_payload_v6(
@@ -1320,17 +1355,23 @@ where
         execution_requests: RequestsOrHash,
         inclusion_list_transactions: Vec<Bytes>,
     ) -> RpcResult<PayloadStatusV2> {
-        trace!(target: "rpc::engine", "Serving engine_newPayloadV6 stub");
+        trace!(target: "rpc::engine", "Serving engine_newPayloadV6");
+        if execution_requests.is_hash() && !self.inner.accept_execution_requests_hash {
+            return Err(EngineApiError::UnexpectedRequestsHash.into());
+        }
+
         let payload = ExecutionData {
             payload: payload.into(),
             sidecar: ExecutionPayloadSidecar::v6(
                 CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
                 PraguePayloadFields { requests: execution_requests },
-                inclusion_list_transactions.into(),
+                BogotaPayloadFields { inclusion_list_transactions },
             ),
         };
 
-        Ok(self.new_payload_v6(payload).await?)
+        // TODO: perform structural validation of the inclusion list transactions and populate
+        // `inclusion_list_satisfied` for VALID payloads
+        Ok(self.new_payload_v6_metered(payload).await?)
     }
 
     /// Handler for `engine_forkchoiceUpdatedV1`
@@ -1384,7 +1425,7 @@ where
             .await?)
     }
 
-    /// Handler for the stubbed `engine_forkchoiceUpdatedV5` endpoint.
+    /// Handler for `engine_forkchoiceUpdatedV5`.
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/bogota.md#engine_forkchoiceupdatedv5>
     async fn fork_choice_updated_v5(
@@ -1393,9 +1434,9 @@ where
         payload_attributes: Option<EngineT::PayloadAttributes>,
         custody_columns: Option<B128>,
     ) -> RpcResult<ForkchoiceUpdatedResponseV2> {
-        trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV5 stub");
+        trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV5");
         Ok(self
-            .fork_choice_updated_v5(fork_choice_state, payload_attributes, custody_columns)
+            .fork_choice_updated_v5_metered(fork_choice_state, payload_attributes, custody_columns)
             .await?)
     }
 

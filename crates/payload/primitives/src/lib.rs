@@ -279,7 +279,10 @@ pub fn validate_slot_number_presence<T: EthereumHardforks>(
         }
 
         EngineApiMessageVersion::V5 => {
-            if message_validation_kind == MessageValidationKind::Payload {
+            if matches!(
+                message_validation_kind,
+                MessageValidationKind::Payload | MessageValidationKind::PayloadAttributes
+            ) {
                 if is_amsterdam_active && !has_slot_number {
                     return Err(message_validation_kind
                         .to_error(VersionSpecificValidationError::NoSlotNumberPostAmsterdam))
@@ -764,6 +767,15 @@ mod tests {
             &chain_spec,
             EngineApiMessageVersion::V5,
             MessageValidationKind::Payload,
+            0,
+            true,
+        );
+        assert_matches!(res, Ok(()));
+
+        let res = validate_slot_number_presence(
+            &chain_spec,
+            EngineApiMessageVersion::V5,
+            MessageValidationKind::PayloadAttributes,
             0,
             true,
         );
