@@ -5,23 +5,15 @@ use alloc::vec::Vec;
 use alloy_consensus::transaction::{PooledTransaction, TxHashRef};
 use alloy_eips::eip7594::Cell;
 use alloy_primitives::{B128, B256};
-use alloy_rlp::{Decodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
+use alloy_rlp::{
+    Decodable, Header, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
+};
 use derive_more::{Constructor, Deref, IntoIterator};
 use reth_codecs_derive::add_arbitrary_tests;
 use reth_primitives_traits::InMemorySize;
 
 /// A list of transaction hashes that the peer would like transaction bodies for.
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    RlpEncodableWrapper,
-    RlpDecodableWrapper,
-    Default,
-    Deref,
-    IntoIterator,
-)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, Default, Deref, IntoIterator)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp)]
@@ -29,6 +21,25 @@ pub struct GetPooledTransactions(
     /// The transaction hashes to request transaction bodies for.
     pub Vec<B256>,
 );
+
+// Some clients use the 4096-hash announcement limit for requests.
+const GET_POOLED_TRANSACTIONS_DECODE_LIMIT: usize = 4096;
+
+impl Decodable for GetPooledTransactions {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let mut payload = Header::decode_bytes(buf, true)?;
+        let mut hashes = Vec::new();
+
+        while !payload.is_empty() {
+            if hashes.len() >= GET_POOLED_TRANSACTIONS_DECODE_LIMIT {
+                return Err(alloy_rlp::Error::Custom("too many pooled transaction hashes"))
+            }
+            hashes.push(B256::decode(&mut payload)?);
+        }
+
+        Ok(Self(hashes))
+    }
+}
 
 impl<T> From<Vec<T>> for GetPooledTransactions
 where
@@ -147,9 +158,10 @@ pub struct Cells {
 
 #[cfg(test)]
 mod tests {
+    use super::GET_POOLED_TRANSACTIONS_DECODE_LIMIT;
     use crate::{message::RequestPair, GetPooledTransactions, PooledTransactions};
     use alloy_consensus::{transaction::PooledTransaction, TxEip1559, TxLegacy};
-    use alloy_primitives::{hex, Signature, TxKind, U256};
+    use alloy_primitives::{hex, Signature, TxKind, B256, U256};
     use alloy_rlp::{Decodable, Encodable};
     use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_ethereum_primitives::{Transaction, TransactionSigned};
@@ -190,6 +202,37 @@ mod tests {
                 ])
             }
         );
+    }
+
+    #[test]
+    fn decode_get_pooled_transactions_at_limit() {
+        let request = RequestPair {
+            request_id: 1,
+            message: GetPooledTransactions(vec![B256::ZERO; GET_POOLED_TRANSACTIONS_DECODE_LIMIT]),
+        };
+        let encoded = alloy_rlp::encode(&request);
+
+        let decoded = RequestPair::<GetPooledTransactions>::decode(&mut encoded.as_slice())
+            .expect("request at decode limit should be valid");
+
+        assert_eq!(decoded, request);
+    }
+
+    #[test]
+    fn reject_get_pooled_transactions_above_limit() {
+        let request = RequestPair {
+            request_id: 1,
+            message: GetPooledTransactions(vec![
+                B256::ZERO;
+                GET_POOLED_TRANSACTIONS_DECODE_LIMIT + 1
+            ]),
+        };
+        let encoded = alloy_rlp::encode(request);
+
+        let err = RequestPair::<GetPooledTransactions>::decode(&mut encoded.as_slice())
+            .expect_err("request above decode limit should be rejected");
+
+        assert_eq!(err, alloy_rlp::Error::Custom("too many pooled transaction hashes"));
     }
 
     #[test]
