@@ -1827,6 +1827,68 @@ async fn test_fcu_with_unknown_safe_hash_does_not_change_canonical_head() {
     );
 }
 
+#[tokio::test]
+async fn test_fcu_reorg_with_reorged_out_safe_hash_does_not_change_canonical_head() {
+    // Regression test for the reorg variant: an FCU that would reorg the canonical chain to a new
+    // head, but whose safe (or finalized) hash points at a block the reorg removes (a known block
+    // above the fork point, so not an ancestor of the new head), must be rejected with -38002
+    // without committing the reorg. This exercises the fork-point height check in
+    // `validate_forkchoice_state_for_new_chain`; the reorged-out block is still persisted, so a
+    // naive existence check would wrongly accept it.
+    reth_tracing::init_test_tracing();
+    let chain_spec = MAINNET.clone();
+    let mut test_harness = TestHarness::new(chain_spec.clone());
+    let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
+
+    // canonical chain of five blocks, head is block 5
+    let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..6).collect();
+    let canonical_head = blocks.last().unwrap().recovered_block().clone();
+    // block 4 is canonical now but is reorged out by the competing fork below
+    let reorged_out = blocks[3].recovered_block().clone();
+    // the competing fork branches off block 2
+    let fork_base = blocks[1].recovered_block().hash();
+    test_harness = test_harness.with_blocks(blocks);
+
+    // a fork off block 2 that is one block longer, so an FCU to its tip reorgs the canonical chain
+    let fork_3 = test_block_builder.get_executed_block_with_number(3, fork_base);
+    let fork_4 =
+        test_block_builder.get_executed_block_with_number(4, fork_3.recovered_block().hash());
+    let fork_5 =
+        test_block_builder.get_executed_block_with_number(5, fork_4.recovered_block().hash());
+    let fork_6 =
+        test_block_builder.get_executed_block_with_number(6, fork_5.recovered_block().hash());
+    let fork_head = fork_6.recovered_block().hash();
+    for block in [fork_3, fork_4, fork_5, fork_6] {
+        test_harness.tree.state.tree_state.insert_executed(block);
+    }
+
+    // FCU to the fork tip with a safe hash that the reorg removes (block 4 of the old chain)
+    let err = test_harness
+        .tree
+        .on_forkchoice_updated(
+            ForkchoiceState {
+                head_block_hash: fork_head,
+                safe_block_hash: reorged_out.hash(),
+                finalized_block_hash: B256::ZERO,
+            },
+            None,
+        )
+        .unwrap()
+        .outcome
+        .await
+        .unwrap_err();
+
+    // the forkchoice state is rejected as invalid (-38002)
+    assert_matches!(err, ForkchoiceUpdateError::InvalidState);
+
+    // the reorg is not applied: the canonical head is unchanged
+    assert_eq!(test_harness.tree.state.tree_state.canonical_block_hash(), canonical_head.hash());
+    assert_eq!(
+        test_harness.tree.canonical_in_memory_state.get_canonical_head().hash(),
+        canonical_head.hash()
+    );
+}
+
 /// Test that verifies the happy path where a new payload extends the canonical chain
 #[test]
 fn test_on_new_payload_canonical_insertion() {
