@@ -10,7 +10,7 @@ use alloy_primitives::{
     Bytes, TxHash, B128, B256, U128,
 };
 use alloy_rlp::{
-    decode_append, Decodable, Encodable, Header, RlpDecodable, RlpDecodableWrapper, RlpEncodable,
+    Decodable, Encodable, Header, RlpDecodable, RlpDecodableWrapper, RlpEncodable,
     RlpEncodableWrapper,
 };
 use core::{fmt::Debug, mem};
@@ -557,16 +557,7 @@ impl From<NewPooledTransactionHashes72> for NewPooledTransactionHashes {
 /// This informs peers of transaction hashes for transactions that have appeared on the network,
 /// but have not been included in a block.
 #[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    RlpEncodableWrapper,
-    RlpDecodableWrapper,
-    Default,
-    Deref,
-    DerefMut,
-    IntoIterator,
+    Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, Default, Deref, DerefMut, IntoIterator,
 )]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
@@ -577,6 +568,14 @@ pub struct NewPooledTransactionHashes66(
     /// [`GetPooledTransactions`](crate::GetPooledTransactions) message.
     pub Vec<B256>,
 );
+
+impl Decodable for NewPooledTransactionHashes66 {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let mut hashes = Vec::new();
+        decode_append_with_limit(buf, &mut hashes, NEW_POOLED_TRANSACTION_HASHES_DECODE_LIMIT)?;
+        Ok(Self(hashes))
+    }
+}
 
 impl NewPooledTransactionHashes66 {
     /// Returns a new instance with capacity for `capacity` hashes.
@@ -945,27 +944,43 @@ impl Decodable for NewPooledTransactionHashes72 {
     }
 }
 
-/// Twice the spec'd soft limit for `NewPooledTransactionHashes` announcements.
-///
-/// This keeps capacity hints bounded when a malformed packet spends most of its bytes on the
-/// one-byte `types` string before the size and hash lists are validated.
-const NEW_POOLED_TRANSACTION_HASHES_DECODE_CAP: usize =
-    2 * SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
+const NEW_POOLED_TRANSACTION_HASHES_DECODE_LIMIT: usize =
+    SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
+const TOO_MANY_POOLED_TRANSACTION_HASH_ENTRIES: &str = "too many pooled transaction hash entries";
 
 #[inline]
 fn decode_pooled_transaction_hashes_payload(
     payload: &mut &[u8],
 ) -> alloy_rlp::Result<(Vec<u8>, Vec<usize>, Vec<B256>)> {
-    let types = Bytes::decode(payload)?;
-    let capacity = types.len().min(NEW_POOLED_TRANSACTION_HASHES_DECODE_CAP);
+    let types = Header::decode_bytes(payload, false)?;
+    if types.len() > NEW_POOLED_TRANSACTION_HASHES_DECODE_LIMIT {
+        return Err(alloy_rlp::Error::Custom(TOO_MANY_POOLED_TRANSACTION_HASH_ENTRIES))
+    }
+    let types = types.to_vec();
 
-    let mut sizes = Vec::with_capacity(capacity);
-    decode_append(payload, &mut sizes)?;
+    let mut sizes = Vec::with_capacity(types.len());
+    decode_append_with_limit(payload, &mut sizes, types.len())?;
 
-    let mut hashes = Vec::with_capacity(capacity);
-    decode_append(payload, &mut hashes)?;
+    let mut hashes = Vec::with_capacity(types.len());
+    decode_append_with_limit(payload, &mut hashes, types.len())?;
 
-    Ok((types.into(), sizes, hashes))
+    Ok((types, sizes, hashes))
+}
+
+#[inline]
+fn decode_append_with_limit<T: Decodable>(
+    buf: &mut &[u8],
+    out: &mut Vec<T>,
+    limit: usize,
+) -> alloy_rlp::Result<()> {
+    let mut payload = Header::decode_bytes(buf, true)?;
+    while !payload.is_empty() {
+        if out.len() >= limit {
+            return Err(alloy_rlp::Error::Custom(TOO_MANY_POOLED_TRANSACTION_HASH_ENTRIES))
+        }
+        out.push(T::decode(&mut payload)?);
+    }
+    Ok(())
 }
 
 #[inline]
@@ -1487,6 +1502,8 @@ mod tests {
                 sizes,
                 hashes,
             };
+            let has_surplus = encodable.sizes.len() > encodable.types.len() ||
+                encodable.hashes.len() > encodable.types.len();
             let encoded = encoded(&encodable);
 
             let mut derived_buf = encoded.as_slice();
@@ -1496,7 +1513,15 @@ mod tests {
             let handrolled = NewPooledTransactionHashes68::decode(&mut handrolled_buf);
 
             let handrolled_is_ok = handrolled.is_ok();
-            prop_assert_eq!(&handrolled, &derived);
+            if has_surplus {
+                prop_assert_eq!(
+                    handrolled,
+                    Err(alloy_rlp::Error::Custom(TOO_MANY_POOLED_TRANSACTION_HASH_ENTRIES))
+                );
+                prop_assert!(derived.is_err());
+            } else {
+                prop_assert_eq!(handrolled, derived);
+            }
             if handrolled_is_ok {
                 prop_assert!(derived_buf.is_empty());
                 prop_assert!(handrolled_buf.is_empty());
@@ -1514,6 +1539,112 @@ mod tests {
         blocks.push(BlockHashNumber { hash: B256::random(), number: 2 });
         let latest = blocks.latest().unwrap();
         assert_eq!(latest.number, 100);
+    }
+
+    #[test]
+    fn eth_66_enforces_pooled_transaction_hashes_decode_limit() {
+        let at_limit = NewPooledTransactionHashes66(vec![
+            B256::ZERO;
+            NEW_POOLED_TRANSACTION_HASHES_DECODE_LIMIT
+        ]);
+        let encoded_at_limit = encoded(&at_limit);
+        let decoded = NewPooledTransactionHashes66::decode(&mut encoded_at_limit.as_slice())
+            .expect("announcement at decode limit should be valid");
+        assert_eq!(decoded, at_limit);
+
+        let above_limit = NewPooledTransactionHashes66(vec![
+            B256::ZERO;
+            NEW_POOLED_TRANSACTION_HASHES_DECODE_LIMIT +
+                1
+        ]);
+        let encoded_above_limit = encoded(&above_limit);
+        let err = NewPooledTransactionHashes66::decode(&mut encoded_above_limit.as_slice())
+            .expect_err("announcement above decode limit should be rejected");
+        assert_eq!(err, alloy_rlp::Error::Custom(TOO_MANY_POOLED_TRANSACTION_HASH_ENTRIES));
+    }
+
+    #[test]
+    fn eth_68_enforces_pooled_transaction_hashes_decode_limit() {
+        let at_limit = NewPooledTransactionHashes68 {
+            types: vec![0; NEW_POOLED_TRANSACTION_HASHES_DECODE_LIMIT],
+            sizes: vec![0; NEW_POOLED_TRANSACTION_HASHES_DECODE_LIMIT],
+            hashes: vec![B256::ZERO; NEW_POOLED_TRANSACTION_HASHES_DECODE_LIMIT],
+        };
+        let encoded_at_limit = encoded(&at_limit);
+        let decoded = NewPooledTransactionHashes68::decode(&mut encoded_at_limit.as_slice())
+            .expect("announcement at decode limit should be valid");
+        assert_eq!(decoded, at_limit);
+
+        let above_limit = EncodableNewPooledTransactionHashes68 {
+            types: Bytes::from(vec![0; NEW_POOLED_TRANSACTION_HASHES_DECODE_LIMIT + 1]),
+            sizes: vec![],
+            hashes: vec![],
+        };
+        let encoded_above_limit = encoded(&above_limit);
+        let err = NewPooledTransactionHashes68::decode(&mut encoded_above_limit.as_slice())
+            .expect_err("announcement above decode limit should be rejected");
+        assert_eq!(err, alloy_rlp::Error::Custom(TOO_MANY_POOLED_TRANSACTION_HASH_ENTRIES));
+    }
+
+    #[test]
+    fn eth_72_enforces_pooled_transaction_hashes_decode_limit() {
+        let at_limit = NewPooledTransactionHashes72 {
+            types: vec![0; NEW_POOLED_TRANSACTION_HASHES_DECODE_LIMIT],
+            sizes: vec![0; NEW_POOLED_TRANSACTION_HASHES_DECODE_LIMIT],
+            hashes: vec![B256::ZERO; NEW_POOLED_TRANSACTION_HASHES_DECODE_LIMIT],
+            cell_mask: None,
+        };
+        let encoded_at_limit = encoded(&at_limit);
+        let decoded = NewPooledTransactionHashes72::decode(&mut encoded_at_limit.as_slice())
+            .expect("announcement at decode limit should be valid");
+        assert_eq!(decoded, at_limit);
+
+        let above_limit = NewPooledTransactionHashes72 {
+            types: vec![0; NEW_POOLED_TRANSACTION_HASHES_DECODE_LIMIT + 1],
+            sizes: vec![],
+            hashes: vec![],
+            cell_mask: None,
+        };
+        let encoded_above_limit = encoded(&above_limit);
+        let err = NewPooledTransactionHashes72::decode(&mut encoded_above_limit.as_slice())
+            .expect_err("announcement above decode limit should be rejected");
+        assert_eq!(err, alloy_rlp::Error::Custom(TOO_MANY_POOLED_TRANSACTION_HASH_ENTRIES));
+    }
+
+    #[test]
+    fn eth_68_rejects_metadata_lists_longer_than_types() {
+        #[derive(RlpEncodable)]
+        struct EncodableWithInvalidSizes {
+            types: Bytes,
+            sizes: Vec<Vec<usize>>,
+            hashes: Vec<B256>,
+        }
+
+        #[derive(RlpEncodable)]
+        struct EncodableWithInvalidHashes {
+            types: Bytes,
+            sizes: Vec<usize>,
+            hashes: Vec<Vec<usize>>,
+        }
+
+        let messages = [
+            encoded(&EncodableWithInvalidSizes {
+                types: Bytes::default(),
+                sizes: vec![vec![]],
+                hashes: vec![],
+            }),
+            encoded(&EncodableWithInvalidHashes {
+                types: Bytes::default(),
+                sizes: vec![],
+                hashes: vec![vec![]],
+            }),
+        ];
+
+        for encoded in messages {
+            let err = NewPooledTransactionHashes68::decode(&mut encoded.as_slice())
+                .expect_err("metadata list longer than types should be rejected");
+            assert_eq!(err, alloy_rlp::Error::Custom(TOO_MANY_POOLED_TRANSACTION_HASH_ENTRIES));
+        }
     }
 
     #[test]
