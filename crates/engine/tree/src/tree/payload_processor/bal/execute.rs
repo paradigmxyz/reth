@@ -10,11 +10,18 @@
 //! worker results in transaction order, tracks block gas admission, and builds the BAL that this
 //! execution actually produced.
 //!
+//! Speculative execution failures are deferred to their transaction slot and adjudicated in
+//! block order: block-gas admission at an earlier slot takes precedence, otherwise the first
+//! failure decides the block's verdict.
+//!
 //! The rebuilt BAL is returned to the outer payload validator for consensus post-execution
 //! validation. This module only logs the first divergence between the received BAL and the BAL
 //! rebuilt from canonical execution.
 
-use super::{ordered_outputs::ordered_worker_outputs, worker, BalExecutionError};
+use super::{
+    ordered_outputs::{ordered_worker_outputs, OrderedWorkerOutputError},
+    worker, BalExecutionError,
+};
 use alloy_eip7928::{
     bal::{Bal as AlloyBal, DecodedBal},
     compute_block_access_list_hash, BlockAccessList,
@@ -145,7 +152,29 @@ where
         let mut senders = Vec::with_capacity(transaction_count);
         let mut last_sent_len = 0usize;
         for output in ordered_worker_outputs(&result_rx, transaction_count) {
-            let output = output?;
+            let output = match output {
+                Ok(output) => output,
+                Err(OrderedWorkerOutputError::Worker(worker::BalWorkerError::Execution {
+                    index,
+                    tx_gas_limit,
+                    source,
+                })) => {
+                    // Block-gas admission is adjudicated in transaction order and takes
+                    // precedence over the failure at this slot.
+                    gas_tracker.validate_tx_limit(tx_gas_limit)?;
+
+                    // The transaction is admitted, so its execution failure is the block's
+                    // verdict: a BAL miss proves the received BAL diverges from this execution.
+                    tracing::debug!(
+                        target: "engine::tree::payload_processor::bal",
+                        index,
+                        err = %source,
+                        "Speculative BAL execution failed; rejecting block in transaction order"
+                    );
+                    return Err(BalExecutionError::Execution(source));
+                }
+                Err(err) => return Err(err.into()),
+            };
 
             gas_tracker.validate_tx_limit(output.tx_gas_limit)?;
             gas_tracker.record_result(output.result.result());
@@ -910,6 +939,121 @@ mod tests {
                 err.as_validation(),
                 Some(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas { .. })
             )),
+            Err(err) => panic!("expected block gas validation error, got {err:?}"),
+            Ok(_) => panic!("expected block gas validation error, got Ok"),
+        }
+    }
+
+    /// Two funded senders each transferring to a fresh recipient, plus the reference BAL of a
+    /// block containing only the covered subset of those transfers.
+    fn two_transfers_with_reference_bal(
+        tx_gas_limit: u64,
+        bal_covers_first: bool,
+    ) -> (
+        CacheDB<EmptyDB>,
+        BlockAccessList,
+        Recovered<reth_ethereum_primitives::TransactionSigned>,
+        Recovered<reth_ethereum_primitives::TransactionSigned>,
+    ) {
+        use alloy_consensus::TxLegacy;
+        use alloy_primitives::TxKind;
+        use reth_chainspec::MAINNET;
+        use reth_ethereum_primitives::Transaction;
+        use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
+        use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
+
+        let evm_config = EthEvmConfig::mainnet();
+        let recipient = alloy_primitives::Address::from([0xCA; 20]);
+        let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
+
+        let alice_kp = generate_key(&mut rng());
+        let alice = public_key_to_address(alice_kp.public_key());
+        let bob_kp = generate_key(&mut rng());
+        let bob = public_key_to_address(bob_kp.public_key());
+
+        let mut pre_block_db = system_contracts_db();
+        insert_funded(&mut pre_block_db, alice, sender_balance);
+        insert_funded(&mut pre_block_db, bob, sender_balance);
+
+        let chain_id = MAINNET.chain.id();
+        let make_tx = |kp, value| {
+            sign_tx_with_key_pair(
+                kp,
+                Transaction::Legacy(TxLegacy {
+                    chain_id: Some(chain_id),
+                    nonce: 0,
+                    gas_price: 1,
+                    gas_limit: tx_gas_limit,
+                    to: TxKind::Call(recipient),
+                    value: U256::from(value),
+                    input: Default::default(),
+                }),
+            )
+        };
+        let tx1 = Recovered::new_unchecked(make_tx(alice_kp, 100u64), alice);
+        let tx2 = Recovered::new_unchecked(make_tx(bob_kp, 200u64), bob);
+
+        let reference_block = empty_amsterdam_block(B256::ZERO);
+        let covered = if bal_covers_first { vec![tx1.clone()] } else { vec![] };
+        let reference_bal =
+            reference_bal_for_block(&evm_config, pre_block_db.clone(), &reference_block, covered);
+        (pre_block_db, reference_bal, tx1, tx2)
+    }
+
+    #[test]
+    fn propagates_bal_miss_of_admitted_transaction_as_block_verdict() {
+        // The BAL covers neither transaction: the first slot's speculative failure is
+        // adjudicated in block order and becomes the block's verdict.
+        let (pre_block_db, reference_bal, tx1, tx2) =
+            two_transfers_with_reference_bal(100_000, false);
+        let bal_hash = alloy_eip7928::compute_block_access_list_hash(&reference_bal);
+        let block = empty_amsterdam_block(bal_hash);
+
+        let result = run_execute_block(
+            &Runtime::test(),
+            EthEvmConfig::mainnet(),
+            db_factory(pre_block_db),
+            to_arc_decoded(reference_bal),
+            &block,
+            vec![tx1, tx2],
+        );
+
+        match result {
+            Err(BalExecutionError::Execution(err)) => {
+                let msg = err.to_string();
+                assert!(msg.contains("not found in BAL"), "expected BAL miss error, got {msg}");
+            }
+            Err(err) => panic!("expected BAL execution error, got {err:?}"),
+            Ok(_) => panic!("expected BAL execution error, got Ok"),
+        }
+    }
+
+    #[test]
+    fn admission_rejects_before_speculative_worker_failure_surfaces() {
+        // tx2 exceeds the remaining block gas AND misses the BAL; block-gas admission is
+        // adjudicated first, so the verdict is the gas error, not tx2's BAL failure.
+        let (pre_block_db, reference_bal, tx1, tx2) =
+            two_transfers_with_reference_bal(990_000, true);
+        let bal_hash = alloy_eip7928::compute_block_access_list_hash(&reference_bal);
+        let low_gas_block = empty_amsterdam_block_with_gas_limit(bal_hash, 1_000_000);
+
+        let result = run_execute_block(
+            &Runtime::test(),
+            EthEvmConfig::mainnet(),
+            db_factory(pre_block_db),
+            to_arc_decoded(reference_bal),
+            &low_gas_block,
+            vec![tx1, tx2],
+        );
+
+        match result {
+            Err(BalExecutionError::Execution(err)) => assert!(
+                matches!(
+                    err.as_validation(),
+                    Some(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas { .. })
+                ),
+                "expected block gas validation error, got {err:?}"
+            ),
             Err(err) => panic!("expected block gas validation error, got {err:?}"),
             Ok(_) => panic!("expected block gas validation error, got Ok"),
         }

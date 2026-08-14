@@ -20,8 +20,16 @@ pub(super) enum BalWorkerError {
     #[error("BAL worker transaction conversion failed: {0}")]
     Transaction(Box<dyn core::error::Error + Send + Sync + 'static>),
     /// EVM transaction execution failed.
-    #[error("BAL worker EVM execution failed: {0}")]
-    Execution(BlockExecutionError),
+    #[error("BAL worker EVM execution failed: {source}")]
+    Execution {
+        /// Index of the transaction that failed.
+        index: usize,
+        /// Gas limit of the transaction that failed.
+        tx_gas_limit: u64,
+        /// The underlying execution error.
+        #[source]
+        source: BlockExecutionError,
+    },
 }
 
 impl From<BalWorkerError> for BalExecutionError {
@@ -29,7 +37,7 @@ impl From<BalWorkerError> for BalExecutionError {
         match err {
             BalWorkerError::Setup(err) => err,
             BalWorkerError::Transaction(err) => Self::Other(err),
-            BalWorkerError::Execution(err) => Self::Execution(err),
+            BalWorkerError::Execution { source, .. } => Self::Execution(source),
         }
     }
 }
@@ -91,14 +99,15 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
                 let tx_gas_limit = tx.tx().gas_limit();
 
                 executor.evm_mut().db_mut().set_bal_index(BlockAccessIndex::new(index as u64 + 1));
-                let result = executor
-                    .execute_transaction_without_commit(tx)
-                    .map_err(BalWorkerError::Execution)?;
+                // An execution failure is a per-transaction result: report it with its
+                // index and keep serving the queue so the commit loop can adjudicate it
+                // in block order.
+                let message = match executor.execute_transaction_without_commit(tx) {
+                    Ok(result) => Ok(BalWorkerOutput { index, signer, tx_gas_limit, result }),
+                    Err(source) => Err(BalWorkerError::Execution { index, tx_gas_limit, source }),
+                };
 
-                if result_tx
-                    .send(Ok(BalWorkerOutput { index, signer, tx_gas_limit, result }))
-                    .is_err()
-                {
+                if result_tx.send(message).is_err() {
                     break;
                 }
             }
