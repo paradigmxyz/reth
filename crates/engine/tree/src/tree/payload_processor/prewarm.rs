@@ -938,13 +938,23 @@ mod tests {
 /// execution path without cloning the expensive `BundleState`.
 #[derive(Debug)]
 pub enum PrewarmTaskEvent<R> {
-    /// Forcefully terminate all remaining transaction execution.
+    /// Signals the prewarm workers to stop executing further transactions.
+    ///
+    /// This only sets the termination flag the workers poll; the task keeps running to save the
+    /// cache. Sent once the authoritative execution no longer needs prewarming, so the workers do
+    /// not race ahead on transactions that will never be used.
     TerminateTransactionExecution,
-    /// Forcefully terminate the task on demand and update the shared cache with the given output
-    /// before exiting.
+    /// Tears the whole task down: stops the workers, optionally saves the warmed cache from the
+    /// final output, and exits.
+    ///
+    /// Sent when execution completed successfully (carrying the output to save) or when the task
+    /// handle is dropped (carrying no output, e.g. after an execution error). Handling this event
+    /// also stops the workers, since a teardown may arrive without a preceding
+    /// [`TerminateTransactionExecution`](Self::TerminateTransactionExecution).
     Terminate {
-        /// The final execution outcome. Using `Arc` allows sharing with the main execution
-        /// path without cloning the expensive `BundleState`.
+        /// The final execution outcome, or `None` when the task is torn down without one (e.g. a
+        /// dropped handle). Using `Arc` allows sharing with the main execution path without
+        /// cloning the expensive `BundleState`.
         execution_outcome: Option<Arc<BlockExecutionOutput<R>>>,
         /// Receiver for the block validation result.
         ///
@@ -952,7 +962,8 @@ pub enum PrewarmTaskEvent<R> {
         /// updated cache but only save it once we know the block is valid.
         valid_block_rx: mpsc::Receiver<()>,
     },
-    /// Finished executing all transactions
+    /// Emitted by the worker-dispatch side once every dispatched transaction has finished or been
+    /// cancelled, reporting how many were executed.
     FinishedTxExecution {
         /// Number of transactions executed
         executed_transactions: usize,
