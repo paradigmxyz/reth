@@ -47,18 +47,6 @@ const MAX_PAYLOAD_BODIES_LIMIT: u64 = 1024;
 /// The upper limit for blobs in `engine_getBlobsVx`.
 const MAX_BLOB_LIMIT: usize = 128;
 
-fn validate_inclusion_list_size(transactions: &[Bytes]) -> EngineApiResult<()> {
-    if alloy_rlp::list_length::<Bytes, [u8]>(&transactions) > MAX_BYTES_PER_INCLUSION_LIST as usize
-    {
-        return Err(EngineApiError::EngineObjectValidationError(
-            reth_payload_primitives::EngineObjectValidationError::InvalidParams(
-                "InclusionListTooLarge".into(),
-            ),
-        ))
-    }
-    Ok(())
-}
-
 /// The Engine API implementation that grants the Consensus layer access to data and
 /// functions in the Execution layer that are crucial for the consensus process.
 ///
@@ -1368,7 +1356,16 @@ where
         inclusion_list_transactions: Vec<Bytes>,
     ) -> RpcResult<PayloadStatusV2> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV6");
-        validate_inclusion_list_size(&inclusion_list_transactions)?;
+        if alloy_rlp::list_length::<Bytes, [u8]>(&inclusion_list_transactions) >
+            MAX_BYTES_PER_INCLUSION_LIST as usize
+        {
+            return Err(EngineApiError::EngineObjectValidationError(
+                reth_payload_primitives::EngineObjectValidationError::InvalidParams(
+                    "InclusionListTooLarge".into(),
+                ),
+            )
+            .into())
+        }
         if execution_requests.is_hash() && !self.inner.accept_execution_requests_hash {
             return Err(EngineApiError::UnexpectedRequestsHash.into());
         }
