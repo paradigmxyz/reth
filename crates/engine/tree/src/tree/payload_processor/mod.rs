@@ -11,13 +11,14 @@ use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
+use reth_engine_primitives::PayloadTxStreamSender;
 use reth_evm::{
     block::ExecutableTxParts,
     execute::{ExecutableTxFor, WithTxEnv},
     ConfigureEvm, ConvertTx, ExecutableTxIterator, ExecutableTxTuple, RecoveredTx as _, SpecFor,
     TxEnvFor,
 };
-use reth_primitives_traits::{FastInstant as Instant, NodePrimitives, TxTy};
+use reth_primitives_traits::{BlockTy, FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, DatabaseProviderFactory, PruneCheckpointReader,
     StageCheckpointReader, StorageSettingsCache, TryIntoHistoricalStateProvider,
@@ -78,7 +79,7 @@ type ExecuteTxReceiver<TxEnv, Recovered, Err> =
 type ExecuteTxSender<TxEnv, Recovered, Err> = IndexedTxSender<RecoveredTx<TxEnv, Recovered>, Err>;
 /// Sender streaming decoded transactions from the fan-out to payload conversion, so conversion
 /// can assemble the block body without re-decoding the payload.
-type BodyTxSender<Evm> = mpsc::SyncSender<(usize, TxTy<<Evm as ConfigureEvm>::Primitives>)>;
+type BodyTxSender<Evm> = PayloadTxStreamSender<BlockTy<<Evm as ConfigureEvm>::Primitives>>;
 
 /// Entrypoint for executing the payload.
 #[derive(Debug)]

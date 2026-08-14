@@ -143,8 +143,8 @@ use reth_payload_primitives::{
     PayloadTypes,
 };
 use reth_primitives_traits::{
-    AlloyBlockHeader, BlockBody, BlockTy, FastInstant as Instant, GotExpected, NodePrimitives,
-    RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
+    AlloyBlockHeader, Block, BlockBody, BlockTy, FastInstant as Instant, GotExpected,
+    NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
     BlockExecutionOutput, BlockReader, ChangeSetReader, DatabaseProviderFactory,
@@ -501,20 +501,18 @@ where
         // conversion so payloads are only decoded once. Capacity equals the transaction count so
         // the fan-out never blocks on this channel; a dropped receiver just means conversion
         // already finished or fell back to decoding itself.
-        let (mut body_tx, body_rx) = if matches!(input, BlockOrPayload::Payload(_)) &&
-            self.validator.supports_payload_tx_stream()
-        {
-            let (tx, rx) = std::sync::mpsc::sync_channel(input.transaction_count());
-            (Some(tx), Some(rx))
-        } else {
-            (None, None)
-        };
+        let (body_tx, body_rx) = (matches!(input, BlockOrPayload::Payload(_)) &&
+            self.validator.supports_payload_tx_stream())
+        .then(|| std::sync::mpsc::sync_channel(input.transaction_count()))
+        .unzip();
 
         // Spawn payload conversion and basic validation on a background thread so it runs
         // concurrently with the rest of the function (setup + execution). For payloads this
         // overlaps the cost of RLP decoding + header hashing.
-        let validated_block =
-            self.spawn_convert_and_validate(&input, parent_block.clone(), body_rx);
+        let mut validated_block = PendingValidatedBlock {
+            handle: self.spawn_convert_and_validate(&input, parent_block.clone(), body_rx),
+            body_tx,
+        };
 
         /// A helper macro that returns the block in case there was an error
         /// This macro is used for early returns before block conversion
@@ -523,11 +521,7 @@ where
                 match $expr {
                     Ok(val) => val,
                     Err(e) => {
-                        // Conversion may be blocked on the tx stream, which is only fed once the
-                        // payload processor is spawned. Drop the sender first so it falls back to
-                        // decoding instead of deadlocking the join below.
-                        drop(body_tx.take());
-                        let block = validated_block.try_into_inner().expect("sole handle")?;
+                        let block = validated_block.into_inner()?;
                         return Err(InsertBlockError::new(block, e.into()).into())
                     }
                 }
@@ -553,22 +547,9 @@ where
         if input.gas_limit() >
             parent_block.gas_limit().saturating_mul(MAX_EXPECTED_GAS_LIMIT_MULTIPLIER)
         {
-            // Conversion may be blocked on the tx stream, which is only fed once the payload
-            // processor is spawned below. Drop the sender so it falls back to decoding instead
-            // of deadlocking the blocking `.get()`.
-            if let Some(sender) = body_tx.take() {
-                debug!(
-                    target: "engine::tree::payload_validator",
-                    "dropping payload tx sender before blocking pre-execution checks"
-                );
-                drop(sender);
-            }
             // Call `.get()` to await the pre-execution checks and exit early if they fail.
             if validated_block.get().is_err() {
-                return Err(validated_block
-                    .try_into_inner()
-                    .expect("sole handle")
-                    .expect_err("Err result checked"))
+                return Err(validated_block.into_inner().expect_err("Err result checked"))
             }
         }
 
@@ -579,10 +560,8 @@ where
             ensure_ok!(self.state_provider_builder(parent_hash, ctx.state()))
         else {
             // this is pre-validated in the tree
-            // Unblock conversion before the blocking join, see `ensure_ok!`.
-            drop(body_tx.take());
             return Err(InsertBlockError::new(
-                validated_block.try_into_inner().expect("sole handle")?,
+                validated_block.into_inner()?,
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
             .into())
@@ -666,7 +645,7 @@ where
             hint_stream,
             hashed_update_stream,
             parallel_bal_execution,
-            body_tx.take(),
+            validated_block.take_sender(),
         ));
 
         // Create optional cache stats for detailed block logging
@@ -795,7 +774,7 @@ where
                 }
             });
 
-        let block = validated_block.try_into_inner().expect("sole handle")?;
+        let block = validated_block.into_inner()?;
         let block = block.with_senders(senders);
 
         // Wait for the receipt root computation to complete.
@@ -2108,5 +2087,34 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
             Self::Payload(payload) => payload.gas_limit(),
             Self::Block(block) => block.gas_limit(),
         }
+    }
+}
+
+/// Pending payload conversion paired with the sender feeding its transaction stream.
+///
+/// Conversion may block on the stream, which is only fed once the payload processor is spawned,
+/// so every join drops the sender first: conversion then falls back to decoding the payload
+/// itself instead of deadlocking.
+struct PendingValidatedBlock<B: Block + 'static> {
+    handle: LazyHandle<Result<SealedBlock<B>, InsertPayloadError<B>>>,
+    body_tx: Option<PayloadTxStreamSender<B>>,
+}
+
+impl<B: Block + 'static> PendingValidatedBlock<B> {
+    /// Takes the sender for the payload processor's decode fan-out.
+    const fn take_sender(&mut self) -> Option<PayloadTxStreamSender<B>> {
+        self.body_tx.take()
+    }
+
+    /// Blocks until conversion completes and returns a reference to the result.
+    fn get(&mut self) -> &Result<SealedBlock<B>, InsertPayloadError<B>> {
+        drop(self.body_tx.take());
+        self.handle.get()
+    }
+
+    /// Consumes the handle and returns the conversion result.
+    fn into_inner(mut self) -> Result<SealedBlock<B>, InsertPayloadError<B>> {
+        drop(self.body_tx.take());
+        self.handle.try_into_inner().expect("sole handle")
     }
 }

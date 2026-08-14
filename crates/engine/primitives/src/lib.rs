@@ -219,6 +219,10 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
     /// When `false` (the default), the engine does not create the stream channel and payload
     /// conversion decodes transactions itself via
     /// [`convert_payload_to_block`](Self::convert_payload_to_block).
+    ///
+    /// Implementations returning `true` must also override
+    /// [`convert_payload_to_block_with_tx_stream`](Self::convert_payload_to_block_with_tx_stream);
+    /// otherwise the engine streams transactions that the default implementation discards.
     #[cfg(feature = "std")]
     fn supports_payload_tx_stream(&self) -> bool {
         false

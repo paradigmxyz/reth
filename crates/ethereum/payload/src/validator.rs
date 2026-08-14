@@ -2,7 +2,7 @@
 
 use alloy_consensus::Block;
 use alloy_primitives::{Bytes, B256};
-use alloy_rpc_types_engine::{ExecutionData, PayloadError};
+use alloy_rpc_types_engine::{ExecutionData, ExecutionPayloadSidecar, PayloadError};
 use reth_chainspec::EthereumHardforks;
 use reth_payload_validator::{cancun, prague, shanghai};
 use reth_primitives_traits::{Block as _, SealedBlock, SignedTransaction};
@@ -100,22 +100,7 @@ where
         })
     }
 
-    shanghai::ensure_well_formed_fields(
-        sealed_block.body(),
-        chain_spec.is_shanghai_active_at_timestamp(sealed_block.timestamp),
-    )?;
-
-    cancun::ensure_well_formed_fields(
-        &sealed_block,
-        sidecar.cancun(),
-        chain_spec.is_cancun_active_at_timestamp(sealed_block.timestamp),
-    )?;
-
-    prague::ensure_well_formed_fields(
-        sealed_block.body(),
-        sidecar.prague(),
-        chain_spec.is_prague_active_at_timestamp(sealed_block.timestamp),
-    )?;
+    ensure_well_formed_fork_fields(&chain_spec, &sealed_block, &sidecar)?;
 
     Ok(sealed_block)
 }
@@ -168,8 +153,7 @@ where
         )
         .entered();
         let transaction_count = raw_body.transactions.len();
-        let mut slots: Vec<Option<T>> = Vec::new();
-        slots.resize_with(transaction_count, || None);
+        let mut slots: Vec<Option<T>> = vec![None; transaction_count];
         let mut received = 0usize;
 
         loop {
@@ -212,13 +196,28 @@ where
     // The header hash was already computed and verified above, no need to reseal.
     let sealed_block = SealedBlock::new_unchecked(block, hash);
 
+    ensure_well_formed_fork_fields(&chain_spec, &sealed_block, &sidecar)?;
+
+    Ok((sealed_block, transactions_root))
+}
+
+/// Validates the fork-specific fields of the block and sidecar (shanghai, cancun, prague).
+fn ensure_well_formed_fork_fields<ChainSpec, T>(
+    chain_spec: &ChainSpec,
+    sealed_block: &SealedBlock<Block<T>>,
+    sidecar: &ExecutionPayloadSidecar,
+) -> Result<(), PayloadError>
+where
+    ChainSpec: EthereumHardforks,
+    T: SignedTransaction,
+{
     shanghai::ensure_well_formed_fields(
         sealed_block.body(),
         chain_spec.is_shanghai_active_at_timestamp(sealed_block.timestamp),
     )?;
 
     cancun::ensure_well_formed_fields(
-        &sealed_block,
+        sealed_block,
         sidecar.cancun(),
         chain_spec.is_cancun_active_at_timestamp(sealed_block.timestamp),
     )?;
@@ -227,9 +226,7 @@ where
         sealed_block.body(),
         sidecar.prague(),
         chain_spec.is_prague_active_at_timestamp(sealed_block.timestamp),
-    )?;
-
-    Ok((sealed_block, transactions_root))
+    )
 }
 
 /// Decodes raw payload transactions, mirroring the errors produced by

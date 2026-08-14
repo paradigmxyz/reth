@@ -9,15 +9,16 @@ use crate::{
 };
 use reth_storage_overlay::OverlayManager;
 
-use alloy_eips::eip1898::BlockWithParent;
+use alloy_consensus::{SignableTransaction, TxLegacy};
+use alloy_eips::{eip1898::BlockWithParent, eip2718::Encodable2718};
 use alloy_primitives::{
     map::{B256Map, B256Set},
-    Bytes, B256,
+    Address, Bytes, Signature, TxKind, B256, U256,
 };
 use alloy_rlp::Decodable;
 use alloy_rpc_types_engine::{
     ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1, ForkchoiceState,
-    ForkchoiceUpdateError,
+    ForkchoiceUpdateError, PayloadError,
 };
 use assert_matches::assert_matches;
 use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
@@ -25,8 +26,9 @@ use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
 use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{EthEngineTypes, EthPayloadAttributes};
-use reth_ethereum_primitives::{Block, EthPrimitives};
-use reth_evm_ethereum::MockEvmConfig;
+use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
+use reth_evm_ethereum::{EthEvmConfig, MockEvmConfig};
+use reth_node_ethereum::EthereumEngineValidator;
 use reth_payload_builder::PayloadServiceCommand;
 use reth_primitives_traits::Block as _;
 use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStore, RawBal};
@@ -3205,15 +3207,11 @@ async fn test_on_backfill_sync_finished_eth_retriggers_backfill_to_buffered_fina
 // exercised end to end, including the disconnect fallback and the sender drop in the gas-limit
 // spike guard.
 
-/// Harness driving payload validation with [`reth_node_ethereum::EthereumEngineValidator`], which
-/// opts into the payload tx stream.
+/// Harness driving payload validation with [`EthereumEngineValidator`], which opts into the
+/// payload tx stream.
 struct StreamingValidatorHarness {
     harness: TestHarness,
-    validator: BasicEngineValidator<
-        MockEthProvider,
-        reth_evm_ethereum::EthEvmConfig,
-        reth_node_ethereum::EthereumEngineValidator,
-    >,
+    validator: BasicEngineValidator<MockEthProvider, EthEvmConfig, EthereumEngineValidator>,
 }
 
 impl StreamingValidatorHarness {
@@ -3229,8 +3227,8 @@ impl StreamingValidatorHarness {
         let validator = BasicEngineValidator::new(
             harness.provider.clone(),
             consensus,
-            reth_evm_ethereum::EthEvmConfig::new(chain_spec.clone()),
-            reth_node_ethereum::EthereumEngineValidator::new(chain_spec),
+            EthEvmConfig::new(chain_spec.clone()),
+            EthereumEngineValidator::new(chain_spec),
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
             overlay_manager,
@@ -3258,7 +3256,7 @@ impl StreamingValidatorHarness {
 fn streaming_payload(parent: &SealedHeader, raw_txs: Vec<Bytes>, gas_limit: u64) -> ExecutionData {
     let mut payload = ExecutionPayloadV1 {
         parent_hash: parent.hash(),
-        fee_recipient: alloy_primitives::Address::ZERO,
+        fee_recipient: Address::ZERO,
         state_root: B256::ZERO,
         receipts_root: B256::ZERO,
         logs_bloom: Default::default(),
@@ -3268,7 +3266,7 @@ fn streaming_payload(parent: &SealedHeader, raw_txs: Vec<Bytes>, gas_limit: u64)
         gas_used: 0,
         timestamp: parent.timestamp + 12,
         extra_data: Bytes::new(),
-        base_fee_per_gas: alloy_primitives::U256::ZERO,
+        base_fee_per_gas: U256::ZERO,
         block_hash: B256::ZERO,
         transactions: raw_txs,
     };
@@ -3278,19 +3276,16 @@ fn streaming_payload(parent: &SealedHeader, raw_txs: Vec<Bytes>, gas_limit: u64)
 
 /// Returns an encoded, signed transaction usable as a raw payload transaction.
 fn streaming_raw_tx(nonce: u64) -> Bytes {
-    use alloy_consensus::SignableTransaction;
-    use alloy_eips::eip2718::Encodable2718;
-    let tx = alloy_consensus::TxLegacy {
+    let tx = TxLegacy {
         chain_id: Some(1),
         nonce,
         gas_price: 7,
         gas_limit: 21_000,
-        to: alloy_primitives::TxKind::Call(alloy_primitives::Address::ZERO),
-        value: alloy_primitives::U256::ZERO,
+        to: TxKind::Call(Address::ZERO),
+        value: U256::ZERO,
         input: Default::default(),
     };
-    let signed: reth_ethereum_primitives::TransactionSigned =
-        tx.into_signed(alloy_primitives::Signature::test_signature()).into();
+    let signed: TransactionSigned = tx.into_signed(Signature::test_signature()).into();
     signed.encoded_2718().into()
 }
 
@@ -3309,7 +3304,7 @@ fn test_payload_tx_stream_malformed_tx_reports_decode_error() {
     let err = harness.validate_payload(payload).unwrap_err();
     match err {
         InsertPayloadError::Payload(reth_payload_primitives::NewPayloadError::Eth(
-            alloy_rpc_types_engine::PayloadError::Decode(_),
+            PayloadError::Decode(_),
         )) => {}
         other => panic!("expected decode error, got: {other:?}"),
     }
@@ -3333,7 +3328,7 @@ fn test_payload_tx_stream_block_hash_takes_precedence() {
     let err = harness.validate_payload(payload).unwrap_err();
     match err {
         InsertPayloadError::Payload(reth_payload_primitives::NewPayloadError::Eth(
-            alloy_rpc_types_engine::PayloadError::BlockHash { .. },
+            PayloadError::BlockHash { .. },
         )) => {}
         other => panic!("expected block hash mismatch, got: {other:?}"),
     }
