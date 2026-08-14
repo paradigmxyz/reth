@@ -795,7 +795,7 @@ impl TrieUpdatesSorted {
                     None => kway_merge_sorted(entry.slices),
                 };
 
-                (!storage_nodes.is_empty() || entry.is_deleted).then_some((
+                (!storage_nodes.is_empty() || entry.is_deleted || mask.is_empty()).then_some((
                     hashed_address,
                     StorageTrieUpdatesSorted { is_deleted: entry.is_deleted, storage_nodes },
                 ))

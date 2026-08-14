@@ -774,7 +774,7 @@ impl HashedPostStateSorted {
                     None => kway_merge_sorted(entry.slices),
                 };
 
-                (!storage_slots.is_empty() || entry.wiped).then_some((
+                (!storage_slots.is_empty() || entry.wiped || mask.is_empty()).then_some((
                     hashed_address,
                     HashedStorageSorted { wiped: entry.wiped, storage_slots },
                 ))
