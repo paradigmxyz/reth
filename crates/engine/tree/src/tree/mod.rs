@@ -1438,9 +1438,20 @@ where
         // Ensure we can apply a new chain update for the head block
         if let Some(chain_update) = self.on_new_head(state.head_block_hash)? {
             let tip = chain_update.tip().clone_sealed_header();
+
+            // Validate the safe and finalized hashes against the new chain *before* committing it.
+            // Committing the head first and validating afterwards would return -38002 while
+            // leaving the rejected head as the canonical head, corrupting the chain (e.g.
+            // `eth_getBlockByNumber("latest")` would report the rejected head).
+            if let Err(outcome) = self.validate_forkchoice_state_for_new_chain(state, &chain_update)
+            {
+                // safe or finalized hashes are invalid
+                return Ok(Some(TreeOutcome::new(outcome)));
+            }
+
             self.on_canonical_chain_update(chain_update);
 
-            // Update the safe and finalized blocks and ensure their values are valid
+            // Record the validated safe and finalized blocks now that the head is canonical.
             if let Err(outcome) = self.ensure_consistent_forkchoice_state(state) {
                 // safe or finalized hashes are invalid
                 return Ok(Some(TreeOutcome::new(outcome)));
@@ -3468,6 +3479,59 @@ where
         // This ensures that the safe block is consistent with the head block, i.e. the safe
         // block is an ancestor of the head block.
         self.update_safe_block(state.safe_block_hash)
+    }
+
+    /// Validates that the `safe` and `finalized` hashes of the given forkchoice `state` belong to
+    /// the new canonical chain described by `chain_update`, without mutating any tracked state.
+    ///
+    /// This must be called *before* [`Self::on_canonical_chain_update`] commits the new head.
+    /// [`Self::ensure_consistent_forkchoice_state`] only reflects the new chain once the head has
+    /// been made canonical, so relying on it alone updates the canonical head first and rejects the
+    /// update afterwards, leaving the rejected head applied (and its canonical notifications
+    /// emitted).
+    ///
+    /// The blocks in `chain_update` are not yet part of the canonical in-memory state, so they are
+    /// consulted directly: any non-zero hash must be one of the newly added blocks (this includes
+    /// the new head itself) or a canonical ancestor at or below the fork point. Anything else, an
+    /// unknown block or a reorged-out sibling above the fork, makes the forkchoice state invalid.
+    fn validate_forkchoice_state_for_new_chain(
+        &self,
+        state: ForkchoiceState,
+        chain_update: &NewCanonicalChain<N>,
+    ) -> Result<(), OnForkChoiceUpdated> {
+        let new_blocks = match chain_update {
+            NewCanonicalChain::Commit { new } | NewCanonicalChain::Reorg { new, .. } => new,
+        };
+
+        // The highest block still shared with the current canonical chain. Ancestors at or below
+        // this number are validated against the existing canonical chain; anything above must be
+        // part of the newly added blocks to be an ancestor of the new head.
+        let fork_number = chain_update.tip().number().saturating_sub(new_blocks.len() as u64);
+
+        for hash in [state.finalized_block_hash, state.safe_block_hash] {
+            if hash.is_zero() {
+                continue
+            }
+
+            // part of the newly added chain segment
+            if new_blocks.iter().any(|block| block.recovered_block().hash() == hash) {
+                continue
+            }
+
+            match self.find_canonical_header(hash) {
+                // a known canonical ancestor at or below the fork point
+                Ok(Some(header)) if header.number() <= fork_number => {}
+                // known but not an ancestor of the new head, or entirely unknown
+                Ok(_) => return Err(OnForkChoiceUpdated::invalid_state()),
+                // mirror the lenient behavior of `update_{safe,finalized}_block`: a transient
+                // lookup failure must not reject an otherwise valid forkchoice update
+                Err(err) => {
+                    error!(target: "engine::tree", %err, "Failed to fetch forkchoice block header");
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Validates the payload attributes with respect to the header and fork choice state.

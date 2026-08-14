@@ -1779,6 +1779,54 @@ async fn test_fcu_with_canonical_ancestor_above_finalized_starts_payload_build()
     );
 }
 
+#[tokio::test]
+async fn test_fcu_with_unknown_safe_hash_does_not_change_canonical_head() {
+    // Regression test: an FCU whose head is a valid new block but whose safe (or finalized) hash
+    // is unknown must be rejected with -38002 *without* making the new head canonical. Previously
+    // the new head was committed before the safe and finalized hashes were validated, so a rejected
+    // FCU left the chain on the invalid head (`eth_getBlockByNumber("latest")` would report it).
+    reth_tracing::init_test_tracing();
+    let chain_spec = MAINNET.clone();
+    let mut test_harness = TestHarness::new(chain_spec.clone());
+    let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
+
+    // canonical chain of five blocks, head is block 5
+    let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..6).collect();
+    let head = blocks.last().unwrap().recovered_block().clone();
+    test_harness = test_harness.with_blocks(blocks);
+
+    // a valid child of the current head that is not part of the canonical chain yet
+    let child = test_block_builder.get_executed_block_with_number(6, head.hash());
+    let child_hash = child.recovered_block().hash();
+    test_harness.tree.state.tree_state.insert_executed(child);
+
+    // FCU to the new head with an unknown safe hash
+    let err = test_harness
+        .tree
+        .on_forkchoice_updated(
+            ForkchoiceState {
+                head_block_hash: child_hash,
+                safe_block_hash: B256::random(),
+                finalized_block_hash: B256::ZERO,
+            },
+            None,
+        )
+        .unwrap()
+        .outcome
+        .await
+        .unwrap_err();
+
+    // the forkchoice state is rejected as invalid (-38002)
+    assert_matches!(err, ForkchoiceUpdateError::InvalidState);
+
+    // the canonical head is untouched: the rejected head must not be applied
+    assert_eq!(test_harness.tree.state.tree_state.canonical_block_hash(), head.hash());
+    assert_eq!(
+        test_harness.tree.canonical_in_memory_state.get_canonical_head().hash(),
+        head.hash()
+    );
+}
+
 /// Test that verifies the happy path where a new payload extends the canonical chain
 #[test]
 fn test_on_new_payload_canonical_insertion() {
