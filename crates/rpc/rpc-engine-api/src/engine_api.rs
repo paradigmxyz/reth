@@ -14,7 +14,6 @@ use alloy_rpc_types_engine::{
     ExecutionPayloadBodyV2, ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1,
     ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated,
     ForkchoiceUpdatedResponseV2, PayloadId, PayloadStatus, PayloadStatusV2, PraguePayloadFields,
-    MAX_BYTES_PER_INCLUSION_LIST,
 };
 use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
@@ -455,9 +454,10 @@ where
         custody_columns: Option<B128>,
     ) -> EngineApiResult<ForkchoiceUpdatedResponseV2> {
         if let Some(custody_columns) = custody_columns {
-            self.inner.cell_custody.set(custody_columns);
+            self.inner.cell_custody.set_from_engine_api(custody_columns);
         }
 
+        // Todo: Validate IL and populate `inclusion_list_satisfied` properly and test.
         Ok(self
             .validate_and_execute_forkchoice(EngineApiMessageVersion::V5, state, payload_attrs)
             .await?
@@ -1356,20 +1356,11 @@ where
         inclusion_list_transactions: Vec<Bytes>,
     ) -> RpcResult<PayloadStatusV2> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV6");
-        if alloy_rlp::list_length::<Bytes, [u8]>(&inclusion_list_transactions) >
-            MAX_BYTES_PER_INCLUSION_LIST as usize
-        {
-            return Err(EngineApiError::EngineObjectValidationError(
-                reth_payload_primitives::EngineObjectValidationError::InvalidParams(
-                    "InclusionListTooLarge".into(),
-                ),
-            )
-            .into())
-        }
         if execution_requests.is_hash() && !self.inner.accept_execution_requests_hash {
             return Err(EngineApiError::UnexpectedRequestsHash.into());
         }
 
+        // Todo: Validate IL and populate `inclusion_list_satisfied` properly and test.
         let inclusion_list_satisfied = inclusion_list_transactions.iter().all(|transaction| {
             payload.payload_inner.payload_inner.payload_inner.transactions.contains(transaction)
         });
