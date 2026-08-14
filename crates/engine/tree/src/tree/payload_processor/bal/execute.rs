@@ -266,6 +266,22 @@ impl BlockGasTracker {
         }
     }
 
+    /// Verifies that the transaction's gas limit fits the block's remaining gas budget(s): the
+    /// admission check `EthBlockExecutor::execute_transaction_without_commit` performs before
+    /// executing a transaction.
+    ///
+    /// The commit loop never calls that entry point — workers execute speculatively and their
+    /// results are committed directly via `commit_transaction` — so the check must be replayed
+    /// here for BAL and serial execution to reach the same block validity verdict.
+    ///
+    /// Pre-Amsterdam there is one budget: the tx gas limit, capped by `tx_gas_limit_cap`
+    /// (EIP-7825), must fit `block_gas_limit - cumulative_tx_gas_used`.
+    ///
+    /// Amsterdam (EIP-8037) splits gas into two lanes, each budgeted at `block_gas_limit`:
+    /// - regular: the capped tx gas limit must fit the remaining regular budget
+    /// - state: the full, uncapped tx gas limit must fit the remaining state budget, since state
+    ///   gas is drawn from the reservoir above `tx_gas_limit_cap` (execution-specs
+    ///   `check_block_gas_capacity`)
     fn validate_tx_limit(&self, tx_gas_limit: u64) -> Result<(), BlockExecutionError> {
         let block_gas_used = if self.enable_amsterdam_eip8037 {
             self.block_regular_gas_used
@@ -284,9 +300,6 @@ impl BlockGasTracker {
             .into());
         }
 
-        // Amsterdam+: the state-gas dimension has its own budget of `block_gas_limit`. The
-        // transaction's full gas limit counts against it — state gas is drawn from the reservoir
-        // above `tx_gas_limit_cap`, so the cap does not bound it.
         if self.enable_amsterdam_eip8037 {
             let state_gas_available =
                 self.block_gas_limit.saturating_sub(self.block_state_gas_used);
