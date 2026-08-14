@@ -16,7 +16,7 @@ use reth_payload_primitives::{
     EngineApiMessageVersion, EngineObjectValidationError, InvalidPayloadAttributesError,
     NewPayloadError, PayloadAttributes, PayloadOrAttributes, PayloadTypes,
 };
-use reth_primitives_traits::{Block, RecoveredBlock, SealedBlock, SealedHeader};
+use reth_primitives_traits::{Block, BlockBody, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_storage_api::{errors::ProviderResult, StateProviderBox};
 use reth_trie_common::HashedPostState;
 use serde::{de::DeserializeOwned, Serialize};
@@ -237,21 +237,18 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
     /// payload and reproduce the exact errors of
     /// [`convert_payload_to_block`](Self::convert_payload_to_block).
     ///
-    /// Returns the block together with the transactions root computed from the raw payload
-    /// transaction bytes; `None` means the caller recomputes it from the block body.
-    ///
     /// The default drops the stream and delegates to
-    /// [`convert_payload_to_block`](Self::convert_payload_to_block), preserving today's
-    /// behavior for implementations that don't opt in via
-    /// [`supports_payload_tx_stream`](Self::supports_payload_tx_stream).
+    /// [`convert_payload_to_block`](Self::convert_payload_to_block), so implementations that
+    /// don't opt in via [`supports_payload_tx_stream`](Self::supports_payload_tx_stream) decode
+    /// transactions themselves.
     #[cfg(feature = "std")]
     fn convert_payload_to_block_with_tx_stream(
         &self,
         payload: Types::ExecutionData,
         txs: PayloadTxStream<Self::Block>,
-    ) -> Result<(SealedBlock<Self::Block>, Option<alloy_primitives::B256>), NewPayloadError> {
+    ) -> Result<SealedBlock<Self::Block>, NewPayloadError> {
         drop(txs);
-        self.convert_payload_to_block(payload).map(|block| (block, None))
+        self.convert_payload_to_block(payload)
     }
 
     /// Verifies payload post-execution w.r.t. hashed state updates.
@@ -309,8 +306,7 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
 ///
 /// The index is required because the parallel decode fan-out may send transactions out of order.
 #[cfg(feature = "std")]
-pub type PayloadTxStreamItem<B> =
-    (usize, <<B as Block>::Body as reth_primitives_traits::BlockBody>::Transaction);
+pub type PayloadTxStreamItem<B> = (usize, <<B as Block>::Body as BlockBody>::Transaction);
 
 /// Receiving half of the decoded transaction stream consumed by
 /// [`PayloadValidator::convert_payload_to_block_with_tx_stream`].

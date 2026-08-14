@@ -940,11 +940,11 @@ where
                 "convert_and_validate",
             )
             .entered();
-            let (block, tx_root) = match input {
-                BlockOrPayload::Block(block) => (block, None),
+            let block = match input {
+                BlockOrPayload::Block(block) => block,
                 BlockOrPayload::Payload(payload) => match body_rx {
                     Some(rx) => validator.convert_payload_to_block_with_tx_stream(payload, rx)?,
-                    None => (validator.convert_payload_to_block(payload)?, None),
+                    None => validator.convert_payload_to_block(payload)?,
                 },
             };
 
@@ -962,9 +962,7 @@ where
             }
             drop(_enter);
 
-            if let Err(e) =
-                consensus.validate_block_pre_execution_with_tx_root(&block, tx_root)
-            {
+            if let Err(e) = consensus.validate_block_pre_execution_with_tx_root(&block, None) {
                 error!(target: "engine::tree::payload_validator", ?block, "Failed to validate block {}: {e}", block.hash());
                 return Err(InsertBlockError::consensus_error(e, block).into())
             }
@@ -2108,13 +2106,24 @@ impl<B: Block + 'static> PendingValidatedBlock<B> {
 
     /// Blocks until conversion completes and returns a reference to the result.
     fn get(&mut self) -> &Result<SealedBlock<B>, InsertPayloadError<B>> {
-        drop(self.body_tx.take());
+        self.drop_sender();
         self.handle.get()
     }
 
     /// Consumes the handle and returns the conversion result.
     fn into_inner(mut self) -> Result<SealedBlock<B>, InsertPayloadError<B>> {
-        drop(self.body_tx.take());
+        self.drop_sender();
         self.handle.try_into_inner().expect("sole handle")
+    }
+
+    /// Disconnects the transaction stream so conversion can never block on transactions that
+    /// will not arrive.
+    fn drop_sender(&mut self) {
+        if self.body_tx.take().is_some() {
+            debug!(
+                target: "engine::tree::payload_validator",
+                "dropping payload tx sender before blocking on conversion"
+            );
+        }
     }
 }

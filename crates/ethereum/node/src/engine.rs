@@ -1,6 +1,5 @@
 //! Validates execution payload wrt Ethereum Execution Engine API version.
 
-use alloy_primitives::B256;
 use alloy_rpc_types_engine::ExecutionData;
 pub use alloy_rpc_types_engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
@@ -59,11 +58,8 @@ where
         &self,
         payload: ExecutionData,
         txs: PayloadTxStream<Self::Block>,
-    ) -> Result<(SealedBlock<Self::Block>, Option<B256>), NewPayloadError> {
-        self.inner
-            .ensure_well_formed_payload_with_tx_stream(payload, txs)
-            .map(|(block, tx_root)| (block, Some(tx_root)))
-            .map_err(Into::into)
+    ) -> Result<SealedBlock<Self::Block>, NewPayloadError> {
+        self.inner.ensure_well_formed_payload_with_tx_stream(payload, txs).map_err(Into::into)
     }
 }
 

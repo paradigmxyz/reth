@@ -286,9 +286,7 @@ where
                             .for_each(|(idx, tx)| {
                                 let tx = tx.map(|tx| {
                                     let tx = WithTxEnv::new(tx);
-                                    if let Some(body_tx) = &body_tx {
-                                        let _ = body_tx.send((idx, tx.tx().clone()));
-                                    }
+                                    send_body_tx(body_tx.as_ref(), idx, &tx);
                                     let _ = prewarm_tx.send((idx, tx.clone()));
                                     tx
                                 });
@@ -342,9 +340,7 @@ where
 
                             for (idx, tx) in chunk {
                                 if let Ok(tx) = &tx {
-                                    if let Some(body_tx) = &body_tx {
-                                        let _ = body_tx.send((idx, tx.tx().clone()));
-                                    }
+                                    send_body_tx(body_tx.as_ref(), idx, tx);
                                     let _ = prewarm_tx.send((idx, tx.clone()));
                                 }
                                 let _ = execute_tx.send((idx, tx));
@@ -528,13 +524,28 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
         let tx = convert.convert(raw_tx);
         let tx = tx.map(|tx| WithTxEnv::new(tx));
         if let Ok(tx) = &tx {
-            if let Some(body_tx) = body_tx {
-                let _ = body_tx.send((idx, tx.tx().clone()));
-            }
+            send_body_tx(body_tx, idx, tx);
             let _ = prewarm_tx.send((idx, tx.clone()));
         }
         let _ = execute_tx.send((idx, tx));
         trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
+    }
+}
+
+/// Streams a decoded transaction to payload conversion, if it opted into the stream.
+///
+/// Send errors are ignored: a dropped receiver means conversion already finished or failed and
+/// falls back to decoding the payload itself.
+fn send_body_tx<TxEnv, InnerTx, Recovered>(
+    body_tx: Option<&mpsc::SyncSender<(usize, InnerTx)>>,
+    idx: usize,
+    tx: &WithTxEnv<TxEnv, Recovered>,
+) where
+    InnerTx: Clone,
+    Recovered: reth_evm::RecoveredTx<InnerTx>,
+{
+    if let Some(body_tx) = body_tx {
+        let _ = body_tx.send((idx, tx.tx().clone()));
     }
 }
 

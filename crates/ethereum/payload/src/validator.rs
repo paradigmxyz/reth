@@ -1,7 +1,7 @@
 //! Validates execution payload wrt Ethereum consensus rules
 
 use alloy_consensus::Block;
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::Bytes;
 use alloy_rpc_types_engine::{ExecutionData, ExecutionPayloadSidecar, PayloadError};
 use reth_chainspec::EthereumHardforks;
 use reth_payload_validator::{cancun, prague, shanghai};
@@ -49,7 +49,7 @@ impl<ChainSpec: EthereumHardforks> EthereumExecutionPayloadValidator<ChainSpec> 
         &self,
         payload: ExecutionData,
         txs: mpsc::Receiver<(usize, T)>,
-    ) -> Result<(SealedBlock<Block<T>>, B256), PayloadError> {
+    ) -> Result<SealedBlock<Block<T>>, PayloadError> {
         ensure_well_formed_payload_with_tx_stream(&self.chain_spec, payload, txs)
     }
 }
@@ -116,14 +116,11 @@ where
 /// If `txs` disconnects before all transactions arrive (e.g. a malformed transaction stopped the
 /// decoder, or execution was aborted), this falls back to decoding the retained raw transaction
 /// bytes, reproducing the errors of [`ensure_well_formed_payload`].
-///
-/// Returns the sealed block together with the transactions root computed from the raw payload
-/// bytes, so callers can skip re-encoding transactions for root validation.
 pub fn ensure_well_formed_payload_with_tx_stream<ChainSpec, T>(
     chain_spec: ChainSpec,
     payload: ExecutionData,
     txs: mpsc::Receiver<(usize, T)>,
-) -> Result<(SealedBlock<Block<T>>, B256), PayloadError>
+) -> Result<SealedBlock<Block<T>>, PayloadError>
 where
     ChainSpec: EthereumHardforks,
     T: SignedTransaction,
@@ -132,10 +129,9 @@ where
 
     let expected_hash = payload.block_hash();
 
-    // Build the block with raw transaction bytes; the transactions root in the header is
-    // computed directly from the raw bytes, so transactions are never re-encoded.
+    // Build the block with raw transaction bytes so the body can be filled from the stream. The
+    // raw bytes are retained for the disconnect fallback.
     let raw_block = payload.into_block_with_sidecar_raw(&sidecar)?;
-    let transactions_root = raw_block.header.transactions_root;
 
     // Ensure the hash included in the payload matches the block hash before waiting on any
     // transactions, so header validation overlaps with the execution-side decode.
@@ -147,11 +143,7 @@ where
     let Block { header, body: raw_body } = raw_block;
 
     let transactions = {
-        let _span = debug_span!(
-            target: "engine::tree::payload_validator",
-            "assemble_body_from_stream",
-        )
-        .entered();
+        let _span = debug_span!(target: "payload_builder", "assemble_body_from_stream").entered();
         let transaction_count = raw_body.transactions.len();
         let mut slots: Vec<Option<T>> = vec![None; transaction_count];
         let mut received = 0usize;
@@ -174,7 +166,7 @@ where
                     // aborted execution, or an engine early-return). Decode from the retained
                     // raw bytes to reproduce the non-streaming behavior.
                     debug!(
-                        target: "engine::tree::payload_validator",
+                        target: "payload_builder",
                         received,
                         transaction_count,
                         "payload tx stream disconnected, falling back to full decode"
@@ -198,7 +190,7 @@ where
 
     ensure_well_formed_fork_fields(&chain_spec, &sealed_block, &sidecar)?;
 
-    Ok((sealed_block, transactions_root))
+    Ok(sealed_block)
 }
 
 /// Validates the fork-specific fields of the block and sidecar (shanghai, cancun, prague).
@@ -244,7 +236,10 @@ fn decode_transactions<T: SignedTransaction>(raw: &[Bytes]) -> Result<Vec<T>, Pa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{BlockBody, SignableTransaction, TxLegacy};
+    use alloy_consensus::{
+        proofs::ordered_trie_root_encoded, BlockBody, SignableTransaction, TxLegacy,
+    };
+    use alloy_eips::eip2718::Encodable2718;
     use alloy_primitives::{Address, Signature, TxKind, B256, U256};
     use alloy_rpc_types_engine::{ExecutionPayloadSidecar, ExecutionPayloadV1};
     use reth_chainspec::MAINNET;
@@ -275,7 +270,6 @@ mod tests {
     }
 
     fn payload_with_txs(txs: &[TransactionSigned]) -> ExecutionData {
-        use alloy_eips::eip2718::Encodable2718;
         payload_with_raw_txs(txs.iter().map(|tx| tx.encoded_2718().into()).collect())
     }
 
@@ -293,10 +287,8 @@ mod tests {
         }
         drop(tx);
 
-        let (block, tx_root) =
-            ensure_well_formed_payload_with_tx_stream(&*MAINNET, payload, rx).unwrap();
+        let block = ensure_well_formed_payload_with_tx_stream(&*MAINNET, payload, rx).unwrap();
         assert_eq!(block, expected);
-        assert_eq!(tx_root, expected.transactions_root);
     }
 
     #[test]
@@ -312,7 +304,7 @@ mod tests {
         tx.send((0, txs[0].clone())).unwrap();
         drop(tx);
 
-        let (block, _) = ensure_well_formed_payload_with_tx_stream(&*MAINNET, payload, rx).unwrap();
+        let block = ensure_well_formed_payload_with_tx_stream(&*MAINNET, payload, rx).unwrap();
         assert_eq!(block, expected);
     }
 
@@ -332,6 +324,30 @@ mod tests {
         let err = ensure_well_formed_payload_with_tx_stream(&*MAINNET, payload, rx).unwrap_err();
         assert_eq!(format!("{err:?}"), format!("{expected_err:?}"));
         assert!(matches!(err, PayloadError::Decode(_)));
+    }
+
+    /// The header's transactions root is derived from the *raw* payload bytes, so it must never
+    /// be reused as the pre-execution check's calculated root: that check compares the raw bytes
+    /// against the re-encoded decoded body, which is what rejects non-canonical transaction RLP.
+    /// Passing the header value through would make the comparison compare a value to itself.
+    #[test]
+    fn header_tx_root_is_not_a_substitute_for_re_encoding() {
+        let tx = signed_tx(0);
+        let canonical = tx.encoded_2718();
+
+        // Re-encode the transaction's RLP payload length with a longer-than-minimal header. The
+        // bytes decode to the same transaction but are not what re-encoding it produces.
+        let mut non_canonical = canonical.clone();
+        non_canonical.extend_from_slice(&[0x00]);
+
+        let payload = payload_with_raw_txs(vec![non_canonical.clone().into()]);
+        let header_root =
+            payload.payload.into_v1().into_block_raw().unwrap().header.transactions_root;
+
+        // The header root always matches the raw bytes it was derived from, whatever they are,
+        // so on its own it proves nothing about the decoded body.
+        assert_eq!(header_root, ordered_trie_root_encoded(&[Bytes::from(non_canonical)]));
+        assert_ne!(header_root, ordered_trie_root_encoded(&[Bytes::from(canonical)]));
     }
 
     #[test]

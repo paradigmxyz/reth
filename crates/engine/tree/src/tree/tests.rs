@@ -23,7 +23,9 @@ use alloy_rpc_types_engine::{
 use assert_matches::assert_matches;
 use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
-use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
+use reth_engine_primitives::{
+    EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook, PayloadValidator,
+};
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{EthEngineTypes, EthPayloadAttributes};
 use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
@@ -3302,11 +3304,20 @@ fn test_payload_tx_stream_malformed_tx_reports_decode_error() {
         streaming_payload(&genesis, vec![Bytes::from_static(b"garbage")], genesis.gas_limit);
 
     let err = harness.validate_payload(payload).unwrap_err();
-    match err {
-        InsertPayloadError::Payload(reth_payload_primitives::NewPayloadError::Eth(
-            PayloadError::Decode(_),
-        )) => {}
-        other => panic!("expected decode error, got: {other:?}"),
+    match &err {
+        InsertPayloadError::Payload(payload_err) => {
+            assert!(
+                matches!(
+                    payload_err,
+                    reth_payload_primitives::NewPayloadError::Eth(PayloadError::Decode(_))
+                ),
+                "expected decode error, got: {payload_err:?}"
+            );
+            // A decode error is not a hash mismatch, so the engine reports the parent as
+            // `latestValidHash` — unchanged from the non-streaming path.
+            assert!(!payload_err.is_block_hash_mismatch());
+        }
+        other => panic!("expected payload error, got: {other:?}"),
     }
 }
 
@@ -3326,11 +3337,21 @@ fn test_payload_tx_stream_block_hash_takes_precedence() {
     let payload = ExecutionData { payload: payload.into(), sidecar };
 
     let err = harness.validate_payload(payload).unwrap_err();
-    match err {
-        InsertPayloadError::Payload(reth_payload_primitives::NewPayloadError::Eth(
-            PayloadError::BlockHash { .. },
-        )) => {}
-        other => panic!("expected block hash mismatch, got: {other:?}"),
+    match &err {
+        InsertPayloadError::Payload(payload_err) => {
+            assert!(
+                matches!(
+                    payload_err,
+                    reth_payload_primitives::NewPayloadError::Eth(PayloadError::BlockHash { .. })
+                ),
+                "expected block hash mismatch, got: {payload_err:?}"
+            );
+            // This is the point of the check-ordering flip: reporting the hash mismatch is what
+            // makes the engine answer `latestValidHash: null` per the engine API, where the
+            // non-streaming path's decode error would have reported the parent instead.
+            assert!(payload_err.is_block_hash_mismatch());
+        }
+        other => panic!("expected payload error, got: {other:?}"),
     }
 }
 
@@ -3369,12 +3390,22 @@ fn test_payload_tx_stream_aborted_execution_does_not_hang() {
 
     let payload = streaming_payload(&genesis, vec![streaming_raw_tx(0)], genesis.gas_limit);
 
-    // The crafted payload cannot pass consensus/execution. A block-level error proves the
-    // streamed transactions were assembled into a block (conversion terminated) rather than
-    // validation waiting on the tx stream forever or failing to decode.
+    // The streaming path must assemble the same block the non-streaming path would, whether the
+    // transactions arrived over the stream or the disconnect fallback re-decoded them. Comparing
+    // against the non-streaming conversion locks that equivalence; the error kind alone would
+    // pass even if the block came out wrong.
+    let expected = PayloadValidator::<EthEngineTypes>::convert_payload_to_block(
+        &EthereumEngineValidator::new(MAINNET.clone()),
+        payload.clone(),
+    )
+    .expect("payload converts via the non-streaming path");
+
+    // The crafted payload cannot pass consensus/execution. A block-level error carries the
+    // assembled block, proving conversion terminated rather than waiting on the tx stream
+    // forever or failing to decode.
     let err = harness.validate_payload(payload).unwrap_err();
-    assert!(
-        matches!(err, InsertPayloadError::Block(_)),
-        "expected post-conversion error, got: {err:?}"
-    );
+    match err {
+        InsertPayloadError::Block(err) => assert_eq!(err.block(), &expected),
+        other => panic!("expected post-conversion block error, got: {other:?}"),
+    }
 }
