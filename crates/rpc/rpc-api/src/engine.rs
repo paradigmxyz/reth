@@ -69,7 +69,7 @@ pub trait EngineApi<Engine: EngineTypes> {
     #[method(name = "newPayloadV4")]
     async fn new_payload_v4(
         &self,
-        payload: ExecutionPayloadV3,
+        payload: ExecutionPayloadInputV4,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
         execution_requests: RequestsOrHash,
@@ -478,4 +478,31 @@ pub trait EngineEthApi<TxReq: RpcObject, B: RpcObject, R: RpcObject, L: RpcObjec
     /// Returns the EIP-7928 block access list bytes for a block by number.
     #[method(name = "getBlockAccessListRaw")]
     async fn block_access_list_raw(&self, block: BlockId) -> RpcResult<Option<Bytes>>;
+}
+
+/// Input structure for `engine_newPayloadV4`.
+///
+/// A [`ExecutionPayloadV3`] that also captures the post-Amsterdam `blockAccessList` and
+/// `slotNumber` fields if a caller includes them. The engine API requires the provided set of
+/// parameters to strictly match the expected structure of the method's version, so a V4 payload
+/// carrying either field must be rejected with `-32602: Invalid params` instead of silently
+/// dropping the unknown fields during deserialization.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionPayloadInputV4 {
+    /// The V3 payload structure expected by `engine_newPayloadV4`.
+    #[serde(flatten)]
+    pub payload: ExecutionPayloadV3,
+    /// Post-Amsterdam (EIP-7928) field, invalid in V4 payloads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_access_list: Option<Bytes>,
+    /// Post-Amsterdam (EIP-7843) field, invalid in V4 payloads.
+    #[serde(default, with = "alloy_serde::quantity::opt", skip_serializing_if = "Option::is_none")]
+    pub slot_number: Option<u64>,
+}
+
+impl From<ExecutionPayloadV3> for ExecutionPayloadInputV4 {
+    fn from(payload: ExecutionPayloadV3) -> Self {
+        Self { payload, block_access_list: None, slot_number: None }
+    }
 }

@@ -22,11 +22,11 @@ use reth_engine_primitives::{ConsensusEngineHandle, EngineApiValidator, EngineTy
 use reth_network_api::{CellCustody, NetworkInfo};
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
-    validate_payload_timestamp, EngineApiMessageVersion, MessageValidationKind,
-    PayloadOrAttributes, PayloadTypes,
+    validate_payload_timestamp, EngineApiMessageVersion, EngineObjectValidationError,
+    MessageValidationKind, PayloadOrAttributes, PayloadTypes, VersionSpecificValidationError,
 };
 use reth_primitives_traits::{Block, BlockBody};
-use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
+use reth_rpc_api::{EngineApiServer, ExecutionPayloadInputV4, IntoEngineApiRpcModule};
 use reth_storage_api::{BalProvider, BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::Runtime;
 use reth_transaction_pool::TransactionPool;
@@ -1292,12 +1292,29 @@ where
     /// See also <https://github.com/ethereum/execution-apis/blob/03911ffc053b8b806123f1fc237184b0092a485a/src/engine/prague.md#engine_newpayloadv4>
     async fn new_payload_v4(
         &self,
-        payload: ExecutionPayloadV3,
+        payload: ExecutionPayloadInputV4,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
         requests: RequestsOrHash,
     ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV4");
+
+        // The V4 params must not carry post-Amsterdam payload fields. An empty byte string is
+        // treated as not provided, like a `null` value: fixtures serialize an absent block
+        // access list as `0x` for blocks whose header carries only the hash field.
+        if payload.block_access_list.as_ref().is_some_and(|bal| !bal.is_empty()) {
+            return Err(EngineApiError::from(EngineObjectValidationError::Payload(
+                VersionSpecificValidationError::BlockAccessListNotSupported,
+            ))
+            .into());
+        }
+        if payload.slot_number.is_some() {
+            return Err(EngineApiError::from(EngineObjectValidationError::Payload(
+                VersionSpecificValidationError::SlotNumberNotSupported,
+            ))
+            .into());
+        }
+        let payload = payload.payload;
 
         // Accept requests as a hash only if it is explicitly allowed
         if requests.is_hash() && !self.inner.accept_execution_requests_hash {

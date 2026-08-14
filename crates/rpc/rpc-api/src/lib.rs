@@ -44,7 +44,9 @@ pub mod servers {
         admin::AdminApiServer,
         anvil::AnvilApiServer,
         debug::DebugApiServer,
-        engine::{EngineApiServer, EngineEthApiServer, IntoEngineApiRpcModule},
+        engine::{
+            EngineApiServer, EngineEthApiServer, ExecutionPayloadInputV4, IntoEngineApiRpcModule,
+        },
         hardhat::HardhatApiServer,
         mev::{MevFullApiServer, MevSimApiServer},
         miner::MinerApiServer,
