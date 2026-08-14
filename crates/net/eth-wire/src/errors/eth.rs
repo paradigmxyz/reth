@@ -86,6 +86,7 @@ impl EthStreamError {
                         P2PStreamError::UnknownSubprotocolMessageId(_) |
                         P2PStreamError::EmptyProtocolMessage |
                         P2PStreamError::InvalidPingPongPayload(_) |
+                        P2PStreamError::TooManyPings |
                         P2PStreamError::UnknownDisconnectReason(_)
                 )
         )
