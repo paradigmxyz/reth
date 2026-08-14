@@ -3667,7 +3667,11 @@ impl Drop for PayloadBuildLease {
 /// is valid or not.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BlockStatus {
-    /// The block is valid and block extends canonical chain.
+    /// The block is valid: its parent state was available, so it was executed and inserted into
+    /// the tree.
+    ///
+    /// Note: this does not imply the block extends the canonical chain. Blocks on a fork are
+    /// executed and inserted the same way and report this status as well.
     Valid,
     /// The block may be valid and has an unknown missing ancestor.
     Disconnected {
