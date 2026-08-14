@@ -45,7 +45,10 @@ use alloy_primitives::{
     TxHash, B256,
 };
 use alloy_rlp::Encodable;
-use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
+use constants::{
+    SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST,
+    SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE,
+};
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
     BroadcastPoolTransactions, Cells, DedupPayload, EthNetworkPrimitives, EthVersion, GetCells,
@@ -1200,8 +1203,15 @@ where
             return
         }
         if let Some(peer) = self.peers.get_mut(&peer_id) {
+            let mut seen = B256Set::default();
+            let hashes = request
+                .0
+                .into_iter()
+                .filter(|hash| seen.insert(*hash))
+                .take(SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST)
+                .collect();
             let transactions = self.pool.get_pooled_transaction_elements(
-                request.0,
+                hashes,
                 GetPooledTransactionLimit::ResponseSizeSoftLimit(
                     self.transaction_fetcher.info.soft_limit_byte_size_pooled_transactions_response,
                 ),
@@ -2977,6 +2987,50 @@ mod tests {
                 panic!("error: {e:?}");
             }
         }
+    }
+
+    #[tokio::test]
+    async fn get_pooled_transactions_deduplicates_before_service_limit() {
+        let (mut transactions, _network) = new_tx_manager().await;
+        let peer_id = PeerId::new([1; 64]);
+        let (peer, _requests) = new_mock_session(peer_id, EthVersion::Eth68);
+        transactions.peers.insert(peer_id, peer);
+
+        let transaction = MockTransaction::eip1559();
+        let known_hash = *transaction.get_hash();
+        transactions.pool.add_transaction(TransactionOrigin::External, transaction).await.unwrap();
+
+        let mut duplicate_request =
+            vec![B256::ZERO; SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST];
+        duplicate_request.push(known_hash);
+        let (response, received) = oneshot::channel();
+        transactions.on_get_pooled_transactions(
+            peer_id,
+            GetPooledTransactions(duplicate_request),
+            response,
+        );
+
+        let PooledTransactions(served) = received.await.unwrap().unwrap();
+        assert_eq!(served.len(), 1);
+        assert_eq!(*served[0].tx_hash(), known_hash);
+
+        let mut limited_request = (0..SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST)
+            .map(|index| {
+                let mut hash = [0; 32];
+                hash[24..].copy_from_slice(&(index as u64).to_be_bytes());
+                B256::from(hash)
+            })
+            .collect::<Vec<_>>();
+        limited_request.push(known_hash);
+        let (response, received) = oneshot::channel();
+        transactions.on_get_pooled_transactions(
+            peer_id,
+            GetPooledTransactions(limited_request),
+            response,
+        );
+
+        let PooledTransactions(served) = received.await.unwrap().unwrap();
+        assert!(served.is_empty());
     }
 
     // Ensure that when the remote peer only returns part of the requested transactions, the
