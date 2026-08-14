@@ -1360,11 +1360,6 @@ where
             return Err(EngineApiError::UnexpectedRequestsHash.into());
         }
 
-        // Todo: Validate IL and populate `inclusion_list_satisfied` properly and test.
-        let inclusion_list_satisfied = inclusion_list_transactions.iter().all(|transaction| {
-            payload.payload_inner.payload_inner.payload_inner.transactions.contains(transaction)
-        });
-
         let payload = ExecutionData {
             payload: payload.into(),
             sidecar: ExecutionPayloadSidecar::v6(
@@ -1374,11 +1369,9 @@ where
             ),
         };
 
-        let mut response = self.new_payload_v6_metered(payload).await?;
-        if response.is_valid() {
-            response.inclusion_list_satisfied = Some(inclusion_list_satisfied);
-        }
-        Ok(response)
+        // TODO: perform structural validation of the inclusion list transactions and populate
+        // `inclusion_list_satisfied` for VALID payloads
+        Ok(self.new_payload_v6_metered(payload).await?)
     }
 
     /// Handler for `engine_forkchoiceUpdatedV1`
