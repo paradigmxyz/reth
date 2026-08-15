@@ -38,5 +38,5 @@ async fn build_inclusion_list_excludes_blob_transactions() {
     let _ = pool.add_transaction(TransactionOrigin::External, blob.transaction).await;
     let _ = pool.add_transaction(TransactionOrigin::External, non_blob.transaction).await;
 
-    assert_eq!(pool.build_inclusion_list(usize::MAX), vec![expected.into()]);
+    assert_eq!(pool.build_inclusion_list(usize::MAX), vec![Bytes::from(expected)]);
 }
