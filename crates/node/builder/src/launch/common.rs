@@ -1378,14 +1378,13 @@ where
 /// registered as periodic hooks: they are collected in the background instead of while a scrape
 /// is waiting for a response.
 pub fn metrics_hooks<N: NodeTypesWithDB>(provider_factory: &ProviderFactory<N>) -> Hooks {
-    const REPORT_INTERVAL: Duration = Duration::from_secs(5 * 60);
-
     Hooks::builder()
-        .with_periodic_hook(REPORT_INTERVAL, {
+        .with_periodic_interval(Duration::from_secs(5 * 60))
+        .with_periodic_hook({
             let db = provider_factory.db_ref().clone();
             move || db.report_metrics()
         })
-        .with_periodic_hook(REPORT_INTERVAL, {
+        .with_periodic_hook({
             let sfp = provider_factory.static_file_provider();
             move || {
                 if let Err(error) = sfp.report_metrics() {
@@ -1393,7 +1392,7 @@ pub fn metrics_hooks<N: NodeTypesWithDB>(provider_factory: &ProviderFactory<N>) 
                 }
             }
         })
-        .with_periodic_hook(REPORT_INTERVAL, {
+        .with_periodic_hook({
             let rocksdb = provider_factory.rocksdb_provider();
             move || rocksdb.report_metrics()
         })

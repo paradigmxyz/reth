@@ -8,10 +8,14 @@ impl<T: 'static + Fn() + Send + Sync> Hook for T {}
 /// A builder-like type to create a new [`Hooks`] instance.
 pub struct HooksBuilder {
     hooks: Vec<Box<dyn Hook<Output = ()>>>,
-    periodic_hooks: Vec<PeriodicHook>,
+    periodic_hooks: Vec<Box<dyn Hook<Output = ()>>>,
+    periodic_interval: Duration,
 }
 
 impl HooksBuilder {
+    /// Default interval at which periodic hooks are collected.
+    pub const DEFAULT_PERIODIC_INTERVAL: Duration = Duration::from_secs(5 * 60);
+
     /// Registers a [`Hook`] that runs on every scrape.
     ///
     /// Only suitable for cheap collection; anything that can take longer than a scrape timeout
@@ -36,16 +40,33 @@ impl HooksBuilder {
         self
     }
 
-    /// Registers a [`Hook`] that is collected by a background task on the given interval instead
-    /// of on the scrape path. See [`PeriodicHook`].
-    pub fn with_periodic_hook(mut self, interval: Duration, hook: impl Hook) -> Self {
-        self.periodic_hooks.push(PeriodicHook { interval, hook: Arc::new(hook) });
+    /// Registers a [`Hook`] that a background task collects on
+    /// [`periodic_interval`](Self::with_periodic_interval) instead of on the scrape path.
+    ///
+    /// Collection that walks a backing store (e.g. every static file jar) scales with the dataset
+    /// and can take seconds, which would stall the scrape for its entire duration. Because such
+    /// hooks only set gauges, collecting them out of band keeps the rendered values just as
+    /// accurate while making scrape latency independent of the dataset size.
+    ///
+    /// Periodic hooks are collected sequentially in registration order.
+    pub fn with_periodic_hook(mut self, hook: impl Hook) -> Self {
+        self.periodic_hooks.push(Box::new(hook));
+        self
+    }
+
+    /// Sets the interval at which the periodic hooks are collected.
+    pub const fn with_periodic_interval(mut self, interval: Duration) -> Self {
+        self.periodic_interval = interval;
         self
     }
 
     /// Builds the [`Hooks`] collection from the registered hooks.
     pub fn build(self) -> Hooks {
-        Hooks { inner: Arc::new(self.hooks), periodic: Arc::new(self.periodic_hooks) }
+        Hooks {
+            inner: Arc::new(self.hooks),
+            periodic: Arc::new(self.periodic_hooks),
+            periodic_interval: self.periodic_interval,
+        }
     }
 }
 
@@ -58,6 +79,7 @@ impl Default for HooksBuilder {
                 Box::new(collect_io_stats),
             ],
             periodic_hooks: Vec::new(),
+            periodic_interval: Self::DEFAULT_PERIODIC_INTERVAL,
         }
     }
 }
@@ -75,7 +97,8 @@ impl std::fmt::Debug for HooksBuilder {
 #[derive(Clone)]
 pub struct Hooks {
     inner: Arc<Vec<Box<dyn Hook<Output = ()>>>>,
-    periodic: Arc<Vec<PeriodicHook>>,
+    periodic: Arc<Vec<Box<dyn Hook<Output = ()>>>>,
+    periodic_interval: Duration,
 }
 
 impl Hooks {
@@ -89,8 +112,18 @@ impl Hooks {
         self.inner.iter()
     }
 
-    pub(crate) fn periodic(&self) -> impl Iterator<Item = &PeriodicHook> {
-        self.periodic.iter()
+    /// Runs all hooks registered with
+    /// [`with_periodic_hook`](HooksBuilder::with_periodic_hook), in registration order.
+    pub(crate) fn collect_periodic(&self) {
+        self.periodic.iter().for_each(|hook| hook());
+    }
+
+    pub(crate) fn has_periodic(&self) -> bool {
+        !self.periodic.is_empty()
+    }
+
+    pub(crate) const fn periodic_interval(&self) -> Duration {
+        self.periodic_interval
     }
 }
 
@@ -100,38 +133,8 @@ impl fmt::Debug for Hooks {
         f.debug_struct("Hooks")
             .field("inner", &format_args!("Arc<Vec<Box<dyn Hook>>>, len: {hooks_len}"))
             .field("periodic", &self.periodic.len())
+            .field("periodic_interval", &self.periodic_interval)
             .finish()
-    }
-}
-
-/// A [`Hook`] that is collected on a fixed interval by a background task rather than when metrics
-/// are scraped.
-///
-/// Collection that walks a backing store (e.g. every static file jar) scales with the dataset and
-/// can take seconds, which would stall the scrape for its entire duration. Because such hooks only
-/// set gauges, collecting them out of band keeps the rendered values just as accurate while making
-/// scrape latency independent of the dataset size.
-#[derive(Clone)]
-pub struct PeriodicHook {
-    interval: Duration,
-    hook: Arc<dyn Hook<Output = ()>>,
-}
-
-impl PeriodicHook {
-    /// The interval at which the hook is collected.
-    pub const fn interval(&self) -> Duration {
-        self.interval
-    }
-
-    /// Runs the hook.
-    pub fn collect(&self) {
-        (self.hook)()
-    }
-}
-
-impl fmt::Debug for PeriodicHook {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("PeriodicHook").field("interval", &self.interval).finish_non_exhaustive()
     }
 }
 
