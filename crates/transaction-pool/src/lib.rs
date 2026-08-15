@@ -610,9 +610,7 @@ where
 
     fn build_inclusion_list(&self, max_size: usize) -> Vec<Bytes> {
         let mut inclusion_list = Vec::new();
-        let mut best_transactions = self.best_transactions();
-
-        while let Some(pool_tx) = best_transactions.next() {
+        for pool_tx in self.best_transactions() {
             let tx = pool_tx.to_consensus().into_inner();
 
             // Inclusion lists cannot contain blob transactions because their sidecars are not
