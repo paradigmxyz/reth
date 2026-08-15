@@ -1,8 +1,9 @@
 use metrics_process::Collector;
+use parking_lot::Mutex;
 use reth_tasks::TaskExecutor;
 use std::{
     fmt,
-    sync::{Arc, Mutex, PoisonError},
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -167,7 +168,7 @@ impl BackgroundHooks {
             return false
         }
 
-        let mut last_collected = self.last_collected.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut last_collected = self.last_collected.lock();
         if last_collected.is_some_and(|last| last.elapsed() < self.interval) {
             return false
         }
