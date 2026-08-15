@@ -23,7 +23,7 @@ use reth_network_api::{CellCustody, NetworkInfo};
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, MessageValidationKind,
-    PayloadOrAttributes, PayloadTypes,
+    PayloadOrAttributes, PayloadTypes, MAX_INCLUSION_LIST_BYTES,
 };
 use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
@@ -475,6 +475,19 @@ where
         let res = Self::fork_choice_updated_v5(self, state, payload_attrs, custody_columns).await;
         self.inner.metrics.latency.fork_choice_updated_v5.record(start.elapsed());
         res
+    }
+
+    /// Builds an EIP-7805 inclusion list from the local transaction pool.
+    pub fn get_inclusion_list_v1(&self) -> EngineApiResult<Vec<Bytes>> {
+        Ok(self.inner.tx_pool.build_inclusion_list(MAX_INCLUSION_LIST_BYTES))
+    }
+
+    /// Metrics version of `get_inclusion_list_v1`.
+    pub fn get_inclusion_list_v1_metered(&self) -> EngineApiResult<Vec<Bytes>> {
+        let start = Instant::now();
+        let result = Self::get_inclusion_list_v1(self);
+        self.inner.metrics.latency.get_inclusion_list_v1.record(start.elapsed());
+        result
     }
 
     /// Helper function for retrieving the build payload by id.
@@ -1545,7 +1558,7 @@ where
     /// See also <https://github.com/ethereum/execution-apis/pull/609>.
     async fn get_inclusion_list_v1(&self) -> RpcResult<Vec<Bytes>> {
         trace!(target: "rpc::engine", "Serving engine_getInclusionListV1");
-        Ok(Vec::new())
+        Ok(self.get_inclusion_list_v1_metered()?)
     }
 
     /// Handler for `engine_getPayloadBodiesByHashV1`

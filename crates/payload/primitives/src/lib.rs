@@ -359,6 +359,9 @@ pub fn validate_slot_number_presence<T: EthereumHardforks>(
     Ok(())
 }
 
+/// Maximum RLP-encoded size of an EIP-7805 inclusion list.
+pub const MAX_INCLUSION_LIST_BYTES: usize = 8192;
+
 /// Validates the presence of the `withdrawals` field according to the payload timestamp.
 /// After Shanghai, withdrawals field must be [Some].
 /// Before Shanghai, withdrawals field must be [None];
