@@ -14,6 +14,7 @@ use alloy_rpc_types_engine::{
     ExecutionPayloadBodyV2, ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1,
     ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated,
     ForkchoiceUpdatedResponseV2, PayloadId, PayloadStatus, PayloadStatusV2, PraguePayloadFields,
+    MAX_BYTES_PER_INCLUSION_LIST,
 };
 use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
@@ -23,7 +24,7 @@ use reth_network_api::{CellCustody, NetworkInfo};
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, MessageValidationKind,
-    PayloadOrAttributes, PayloadTypes, MAX_INCLUSION_LIST_BYTES,
+    PayloadOrAttributes, PayloadTypes,
 };
 use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
@@ -479,7 +480,7 @@ where
 
     /// Builds an EIP-7805 inclusion list from the local transaction pool.
     pub fn get_inclusion_list_v1(&self) -> EngineApiResult<Vec<Bytes>> {
-        Ok(self.inner.tx_pool.build_inclusion_list(MAX_INCLUSION_LIST_BYTES))
+        Ok(self.inner.tx_pool.build_inclusion_list(MAX_BYTES_PER_INCLUSION_LIST as usize))
     }
 
     /// Metrics version of `get_inclusion_list_v1`.
