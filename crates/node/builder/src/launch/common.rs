@@ -87,10 +87,7 @@ use reth_stages::{
 use reth_static_file::{blocks_per_file_for_prune_distance, StaticFileProducer, StaticFileSegment};
 use reth_storage_overlay::OverlayManager;
 use reth_tasks::TaskExecutor;
-use reth_tracing::{
-    throttle,
-    tracing::{debug, error, info, warn},
-};
+use reth_tracing::tracing::{debug, error, info, warn};
 use reth_transaction_pool::TransactionPool;
 use std::{num::NonZeroUsize, sync::Arc, thread::available_parallelism, time::Duration};
 use tokio::sync::{
@@ -1376,25 +1373,29 @@ where
 }
 
 /// Returns the metrics hooks for the node.
+///
+/// The storage hooks walk their backing store, which scales with the dataset, so they are
+/// registered as periodic hooks: they are collected in the background instead of while a scrape
+/// is waiting for a response.
 pub fn metrics_hooks<N: NodeTypesWithDB>(provider_factory: &ProviderFactory<N>) -> Hooks {
+    const REPORT_INTERVAL: Duration = Duration::from_secs(5 * 60);
+
     Hooks::builder()
-        .with_hook({
+        .with_periodic_hook(REPORT_INTERVAL, {
             let db = provider_factory.db_ref().clone();
-            move || throttle!(Duration::from_secs(5 * 60), || db.report_metrics())
+            move || db.report_metrics()
         })
-        .with_hook({
+        .with_periodic_hook(REPORT_INTERVAL, {
             let sfp = provider_factory.static_file_provider();
             move || {
-                throttle!(Duration::from_secs(5 * 60), || {
-                    if let Err(error) = sfp.report_metrics() {
-                        error!(%error, "Failed to report metrics from static file provider");
-                    }
-                })
+                if let Err(error) = sfp.report_metrics() {
+                    error!(%error, "Failed to report metrics from static file provider");
+                }
             }
         })
-        .with_hook({
+        .with_periodic_hook(REPORT_INTERVAL, {
             let rocksdb = provider_factory.rocksdb_provider();
-            move || throttle!(Duration::from_secs(5 * 60), || rocksdb.report_metrics())
+            move || rocksdb.report_metrics()
         })
         .build()
 }
