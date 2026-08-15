@@ -2,7 +2,7 @@ use alloy_eips::Encodable2718;
 use alloy_primitives::Bytes;
 use reth_transaction_pool::{
     test_utils::{MockTransaction, MockTransactionFactory, TestPoolBuilder},
-    TransactionOrigin, TransactionPool,
+    PoolTransaction, TransactionOrigin, TransactionPool,
 };
 
 #[tokio::test(flavor = "multi_thread")]
