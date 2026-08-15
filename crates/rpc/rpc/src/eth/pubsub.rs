@@ -17,11 +17,12 @@ use reth_chain_state::CanonStateSubscriptions;
 use reth_network_api::NetworkInfo;
 use reth_rpc_convert::RpcHeader;
 use reth_rpc_eth_api::{
-    helpers::EthSubscriptions, pubsub::EthPubSubApiServer, RpcConvert, RpcLog, RpcNodeCore,
-    RpcTransaction,
+    helpers::{spec::estimate_highest_block, EthSubscriptions},
+    pubsub::EthPubSubApiServer,
+    RpcConvert, RpcLog, RpcNodeCore, RpcTransaction,
 };
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
-use reth_storage_api::BlockNumReader;
+use reth_storage_api::{BlockNumReader, StageCheckpointReader};
 use reth_tasks::Runtime;
 use reth_transaction_pool::{NewTransactionEvent, TransactionPool};
 use serde::Serialize;
@@ -313,11 +314,18 @@ where
                 .chain_info()
                 .map(|info| info.best_number)
                 .unwrap_or_default();
+            let checkpoints = self.eth_api.provider().get_all_checkpoints().unwrap_or_default();
+            let highest_block = estimate_highest_block(
+                current_block,
+                checkpoints
+                    .iter()
+                    .map(|(name, checkpoint)| (name.as_str(), checkpoint.block_number)),
+            );
             PubSubSyncStatus::Detailed(SyncStatusMetadata {
                 syncing: true,
                 starting_block: 0,
                 current_block,
-                highest_block: Some(current_block),
+                highest_block: Some(highest_block),
             })
         } else {
             PubSubSyncStatus::Simple(false)

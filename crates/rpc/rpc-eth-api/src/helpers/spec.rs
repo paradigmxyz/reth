@@ -9,6 +9,7 @@ use reth_network_api::NetworkInfo;
 use reth_prune_types::{PruneMode, PruneSegment};
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_types::{EthCapabilities, EthCapabilitiesHead, EthCapabilitiesResource};
+use reth_stages_types::StageId;
 use reth_storage_api::{
     BlockNumReader, PruneCheckpointReader, StageCheckpointReader, TransactionsProvider,
 };
@@ -98,22 +99,25 @@ pub trait EthApiSpec: RpcNodeCore + EthApiTypes {
     /// Returns the [`SyncStatus`] of the network
     fn sync_status(&self) -> RethResult<SyncStatus> {
         let status = if self.is_syncing() {
-            let current_block = U256::from(
-                self.provider().chain_info().map(|info| info.best_number).unwrap_or_default(),
-            );
+            let current_block =
+                self.provider().chain_info().map(|info| info.best_number).unwrap_or_default();
 
-            let stages = self
+            let stages: Vec<Stage> = self
                 .provider()
                 .get_all_checkpoints()
                 .unwrap_or_default()
                 .into_iter()
                 .map(|(name, checkpoint)| Stage { name, block: checkpoint.block_number })
                 .collect();
+            let highest_block = estimate_highest_block(
+                current_block,
+                stages.iter().map(|stage| (stage.name.as_str(), stage.block)),
+            );
 
             SyncStatus::Info(Box::new(SyncInfo {
                 starting_block: self.starting_block(),
-                current_block,
-                highest_block: current_block,
+                current_block: U256::from(current_block),
+                highest_block: U256::from(highest_block),
                 warp_chunks_amount: None,
                 warp_chunks_processed: None,
                 stages: Some(stages),
@@ -123,6 +127,23 @@ pub trait EthApiSpec: RpcNodeCore + EthApiTypes {
         };
         Ok(status)
     }
+}
+
+/// Estimates the highest known block from the validated headers stage checkpoint.
+///
+/// The checkpoint can briefly lag the canonical head while a header gap is being committed, so the
+/// returned height never falls below `current_block`.
+pub fn estimate_highest_block<S>(
+    current_block: u64,
+    stages: impl IntoIterator<Item = (S, u64)>,
+) -> u64
+where
+    S: AsRef<str>,
+{
+    stages
+        .into_iter()
+        .find_map(|(name, block)| (name.as_ref() == StageId::Headers.as_str()).then_some(block))
+        .map_or(current_block, |block| block.max(current_block))
 }
 
 /// Derives the effective block availability for a capability resource from the prune checkpoints of
@@ -219,6 +240,27 @@ mod tests {
                 .map(|(segment, checkpoint)| (*segment, *checkpoint))
                 .collect())
         }
+    }
+
+    #[test]
+    fn highest_block_uses_headers_stage_checkpoint() {
+        let stages = [(StageId::Bodies.as_str(), 20), (StageId::Headers.as_str(), 30)];
+
+        assert_eq!(estimate_highest_block(10, stages), 30);
+    }
+
+    #[test]
+    fn highest_block_does_not_fall_behind_current_block() {
+        let stages = [(StageId::Headers.as_str(), 10)];
+
+        assert_eq!(estimate_highest_block(20, stages), 20);
+    }
+
+    #[test]
+    fn highest_block_falls_back_to_current_block_without_headers_checkpoint() {
+        let stages = [(StageId::Bodies.as_str(), 30)];
+
+        assert_eq!(estimate_highest_block(20, stages), 20);
     }
 
     #[test]

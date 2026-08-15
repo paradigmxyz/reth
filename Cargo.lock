@@ -10134,6 +10134,7 @@ dependencies = [
  "reth-rpc-convert",
  "reth-rpc-eth-types",
  "reth-rpc-server-types",
+ "reth-stages-types",
  "reth-storage-api",
  "reth-tasks",
  "reth-transaction-pool",
