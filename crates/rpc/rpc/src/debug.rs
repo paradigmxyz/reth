@@ -6,7 +6,7 @@ use alloy_consensus::{
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_evm::{env::BlockEnvironment, Evm};
 use alloy_genesis::ChainConfig;
-use alloy_primitives::{hex::decode, uint, Address, Bytes, B256, U256, U64};
+use alloy_primitives::{hex::decode, keccak256, uint, Address, Bytes, B256, U256, U64};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types::BlockTransactionsKind;
 use alloy_rpc_types_debug::{AccountState, ExecutionWitness};
@@ -29,7 +29,7 @@ use reth_primitives_traits::{
     Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
 };
 use reth_revm::{db::State, witness::ExecutionWitnessRecord};
-use reth_rpc_api::{DebugApiServer, HashedStateDump};
+use reth_rpc_api::{DebugApiServer, HashedStateDump, HashedStorageEntry, HashedStorageRangeResult};
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
@@ -995,16 +995,171 @@ where
             .await
     }
 
+    /// Returns a page of `address`'s storage, as of the state the transaction at `tx_index` of
+    /// the given block runs on.
+    ///
+    /// The number of slots read is bounded by [`STORAGE_RANGE_MAX_RESULTS`], plus the slots the
+    /// replayed transactions touched.
+    pub async fn debug_storage_range_at(
+        &self,
+        block_id: BlockId,
+        tx_index: usize,
+        address: Address,
+        key_start: Bytes,
+        max_result: u64,
+    ) -> Result<HashedStorageRangeResult, Eth::Error> {
+        if key_start.len() > 32 {
+            return Err(EthApiError::InvalidParams(format!(
+                "key start must be at most 32 bytes, got {}",
+                key_start.len()
+            ))
+            .into())
+        }
+
+        let mut start_key = B256::ZERO;
+        start_key[..key_start.len()].copy_from_slice(&key_start);
+        let max_result = (max_result as usize).min(STORAGE_RANGE_MAX_RESULTS);
+
+        // This replays part of a block, so it is rate limited like the tracing calls.
+        let _permit = self
+            .acquire_trace_permit()
+            .await
+            .map_err(RethError::other)
+            .map_err(EthApiError::Internal)?;
+
+        let block = self
+            .eth_api()
+            .recovered_block(block_id)
+            .await?
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
+
+        let transaction_count = block.transaction_count();
+        if tx_index > transaction_count {
+            return Err(EthApiError::InvalidParams(format!(
+                "tx_index {tx_index} out of bounds for block with {transaction_count} transactions"
+            ))
+            .into())
+        }
+
+        let parent_hash = block.parent_hash();
+        let parent_state_root = self
+            .provider()
+            .header(parent_hash)
+            .map_err(Eth::Error::from_eth_err)?
+            .ok_or(EthApiError::HeaderNotFound(parent_hash.into()))?
+            .state_root();
+        let hashed_address = keccak256(address);
+
+        self.eth_api()
+            .spawn_with_state_at_block(parent_hash, move |eth_api, mut db| {
+                let mut executor = eth_api
+                    .evm_config()
+                    .executor_for_block(&mut db, block.sealed_block())
+                    .map_err(RethError::other)
+                    .map_err(Eth::Error::from_eth_err)?;
+                executor.apply_pre_execution_changes().map_err(Eth::Error::from_eth_err)?;
+
+                for tx in block.transactions_recovered().take(tx_index) {
+                    executor.execute_transaction(tx).map_err(Eth::Error::from_eth_err)?;
+                }
+                drop(executor);
+
+                // Slots the replay touched, with their preimages. Values shadow the persisted
+                // state, and are the account's entire storage if it was destroyed.
+                let (touched, wiped) = db
+                    .cache
+                    .accounts
+                    .get(&address)
+                    .and_then(|account| {
+                        account.account.as_ref().map(|plain_account| {
+                            let touched = plain_account
+                                .storage
+                                .iter()
+                                .map(|(slot, value)| {
+                                    let slot = B256::from(*slot);
+                                    (keccak256(slot), (slot, *value))
+                                })
+                                .collect::<BTreeMap<_, _>>();
+                            (touched, account.status.was_destroyed())
+                        })
+                    })
+                    .unwrap_or_default();
+
+                // Reading one entry past the page, plus room for the touched slots, is enough for
+                // the merge below to fill the page and find the key to resume from: each touched
+                // slot displaces at most one persisted entry.
+                let persisted = if wiped {
+                    Vec::new()
+                } else {
+                    let range = eth_api
+                        .provider()
+                        .state_range_provider(parent_state_root)
+                        .map_err(Eth::Error::from_eth_err)?
+                        .ok_or_else(|| {
+                            EthApiError::InvalidParams(format!(
+                                "state at block {} is no longer available",
+                                block.number().saturating_sub(1)
+                            ))
+                        })?;
+                    Self::storage_page_from(
+                        &range,
+                        hashed_address,
+                        start_key,
+                        max_result.saturating_add(1).saturating_add(touched.len()),
+                    )?
+                };
+
+                let mut slots = persisted
+                    .into_iter()
+                    .map(|(hashed_slot, value)| (hashed_slot, (None, value)))
+                    .collect::<BTreeMap<_, _>>();
+                for (hashed_slot, (slot, value)) in touched {
+                    if hashed_slot < start_key {
+                        continue
+                    }
+                    if value.is_zero() {
+                        slots.remove(&hashed_slot);
+                    } else {
+                        slots.insert(hashed_slot, (Some(slot), value));
+                    }
+                }
+
+                let mut result = HashedStorageRangeResult::default();
+                for (hashed_slot, (slot, value)) in slots {
+                    if result.storage.len() == max_result {
+                        result.next_key = Some(hashed_slot);
+                        break
+                    }
+                    result
+                        .storage
+                        .insert(hashed_slot, HashedStorageEntry { key: slot, value: value.into() });
+                }
+
+                Ok(result)
+            })
+            .await
+    }
+
     /// Reads at most `max_slots` storage slots of the given account, in hashed key order.
     fn storage_page(
         range: &StateRangeView,
         hashed_address: B256,
         max_slots: usize,
     ) -> Result<Vec<(B256, U256)>, Eth::Error> {
+        Self::storage_page_from(range, hashed_address, B256::ZERO, max_slots)
+    }
+
+    /// Same as [`Self::storage_page`], but starting at the given hashed storage key.
+    fn storage_page_from(
+        range: &StateRangeView,
+        hashed_address: B256,
+        start: B256,
+        max_slots: usize,
+    ) -> Result<Vec<(B256, U256)>, Eth::Error> {
         Ok(range
             .storage_range(
                 hashed_address,
-                B256::ZERO,
+                start,
                 B256::repeat_byte(0xff),
                 RangeLimits::items(max_slots),
             )
@@ -1018,6 +1173,11 @@ where
 ///
 /// Matches geth's `AccountRangeMaxResults`.
 const ACCOUNT_RANGE_MAX_RESULTS: usize = 256;
+
+/// Maximum number of storage slots a single `debug_storageRangeAt` call returns.
+///
+/// A capped page still reports where to resume via `nextKey`.
+const STORAGE_RANGE_MAX_RESULTS: usize = 4096;
 
 /// Maximum number of storage slots read across a single state dump.
 ///
@@ -1582,15 +1742,25 @@ where
         Self::debug_state_root_with_updates(self, hashed_state, block_id).await.map_err(Into::into)
     }
 
+    /// Handler for `debug_storageRangeAt`
     async fn debug_storage_range_at(
         &self,
-        _block_hash: B256,
-        _tx_idx: usize,
-        _contract_address: Address,
-        _key_start: B256,
-        _max_result: u64,
-    ) -> RpcResult<()> {
-        Ok(())
+        block_id: BlockId,
+        tx_idx: usize,
+        contract_address: Address,
+        key_start: Bytes,
+        max_result: u64,
+    ) -> RpcResult<HashedStorageRangeResult> {
+        Self::debug_storage_range_at(
+            self,
+            block_id,
+            tx_idx,
+            contract_address,
+            key_start,
+            max_result,
+        )
+        .await
+        .map_err(Into::into)
     }
 
     async fn debug_trace_bad_block(

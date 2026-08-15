@@ -1,14 +1,17 @@
+use crate::utils::eth_payload_attributes;
 use alloy_consensus::constants::EMPTY_ROOT_HASH;
-use alloy_eips::BlockId;
+use alloy_eips::{eip2718::Encodable2718, BlockId};
 use alloy_genesis::{Genesis, GenesisAccount};
-use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
+use alloy_primitives::{keccak256, Address, Bytes, TxKind, B256, U256};
 use alloy_provider::Provider;
+use alloy_rpc_types_eth::{TransactionInput, TransactionRequest};
 use eyre::{eyre, Result};
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
+use reth_e2e_test_utils::{setup, transaction::TransactionTestContext};
 use reth_node_builder::{NodeBuilder, NodeHandle};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::EthereumNode;
-use reth_rpc_api::HashedStateDump;
+use reth_rpc_api::{HashedStateDump, HashedStorageRangeResult};
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::Runtime;
 use std::{collections::BTreeMap, sync::Arc};
@@ -242,4 +245,135 @@ fn storage(slots: u64) -> BTreeMap<B256, B256> {
     (0..slots)
         .map(|slot| (B256::from(U256::from(slot)), B256::from(U256::from(slot + 1))))
         .collect()
+}
+
+/// Storage slots the storage-writing contract is allocated with in genesis.
+const SEEDED_SLOTS: u64 = 4;
+
+/// Writes `sstore(calldataload(0), calldataload(0x20))`.
+const STORAGE_WRITER_CODE: &[u8] = &[0x60, 0x20, 0x35, 0x60, 0x00, 0x35, 0x55, 0x00];
+
+/// Exercises `debug_storageRangeAt` across the transactions of a block that writes storage.
+#[tokio::test]
+async fn debug_storage_range_at_replays_block_transactions() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let contract = account_address(u64::MAX);
+    let mut genesis: Genesis =
+        serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
+    genesis.alloc.insert(
+        contract,
+        GenesisAccount::default()
+            .with_code(Some(Bytes::from_static(STORAGE_WRITER_CODE)))
+            .with_storage(Some(storage(SEEDED_SLOTS))),
+    );
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(genesis)
+            .cancun_activated()
+            .build(),
+    );
+
+    let (mut nodes, wallet) =
+        setup::<EthereumNode>(1, chain_spec.clone(), false, eth_payload_attributes).await?;
+    let mut node = nodes.pop().unwrap();
+    let signer = wallet.wallet_gen().swap_remove(0);
+    let chain_id = chain_spec.chain.id();
+
+    // Two transactions in one block, each writing a distinct slot.
+    let written = [
+        (B256::from(U256::from(0xaa)), B256::from(U256::from(0x11))),
+        (B256::from(U256::from(0xbb)), B256::from(U256::from(0x22))),
+    ];
+    for (nonce, (slot, value)) in written.iter().enumerate() {
+        let mut calldata = slot.to_vec();
+        calldata.extend_from_slice(value.as_slice());
+        let tx = TransactionRequest {
+            nonce: Some(nonce as u64),
+            value: Some(U256::ZERO),
+            to: Some(TxKind::Call(contract)),
+            gas: Some(100_000),
+            max_fee_per_gas: Some(1000e9 as u128),
+            max_priority_fee_per_gas: Some(20e9 as u128),
+            chain_id: Some(chain_id),
+            input: TransactionInput { input: None, data: Some(calldata.into()) },
+            ..Default::default()
+        };
+        let signed = TransactionTestContext::sign_tx(signer.clone(), tx).await;
+        node.rpc.inject_tx(signed.encoded_2718().into()).await.map_err(|err| eyre!("{err:?}"))?;
+    }
+
+    let payload = node.advance_block().await?;
+    let block = payload.block().hash();
+    assert_eq!(payload.block().body().transactions.len(), written.len());
+
+    let provider = node.inner.rpc_server_handle().eth_http_provider().unwrap();
+    let seeded = storage(SEEDED_SLOTS)
+        .into_iter()
+        .map(|(slot, value)| (keccak256(slot), value))
+        .collect::<BTreeMap<_, _>>();
+
+    // Before the first transaction only the genesis storage is visible, and without preimages.
+    let range = storage_range(&provider, block, 0, contract, Bytes::new(), 100).await?;
+    assert_eq!(range.next_key, None);
+    assert_eq!(range.storage.len(), seeded.len());
+    for (hashed_slot, entry) in &range.storage {
+        assert_eq!(entry.key, None, "reth has no storage key preimages");
+        assert_eq!(Some(&entry.value), seeded.get(hashed_slot));
+    }
+
+    // Replaying up to a transaction reveals the slots it wrote, with their preimages, since those
+    // are known from the replay itself.
+    for (index, (slot, value)) in written.iter().enumerate() {
+        let range = storage_range(&provider, block, index + 1, contract, Bytes::new(), 100).await?;
+
+        assert_eq!(range.storage.len(), seeded.len() + index + 1);
+        let entry = range
+            .storage
+            .get(&keccak256(slot))
+            .ok_or_else(|| eyre!("slot {slot} written by transaction {index} is missing"))?;
+        assert_eq!(entry.key, Some(*slot));
+        assert_eq!(entry.value, *value);
+
+        // The later transaction's slot isn't visible yet.
+        for (slot, _) in &written[index + 1..] {
+            assert!(!range.storage.contains_key(&keccak256(slot)));
+        }
+    }
+
+    // Paging walks the same entries one at a time.
+    let full = storage_range(&provider, block, written.len(), contract, Bytes::new(), 100).await?;
+    let mut paged = BTreeMap::new();
+    let mut start = Bytes::new();
+    loop {
+        let page = storage_range(&provider, block, written.len(), contract, start, 1).await?;
+        assert!(page.storage.len() <= 1);
+        paged.extend(page.storage);
+
+        let Some(next_key) = page.next_key else { break };
+        start = Bytes::from(next_key.0);
+    }
+    assert_eq!(paged, full.storage);
+
+    Ok(())
+}
+
+/// Calls `debug_storageRangeAt` on the given block and transaction index.
+async fn storage_range<P: Provider>(
+    provider: &P,
+    block: B256,
+    tx_index: usize,
+    address: Address,
+    key_start: Bytes,
+    max_result: u64,
+) -> Result<HashedStorageRangeResult> {
+    Ok(provider
+        .client()
+        .request(
+            "debug_storageRangeAt",
+            (BlockId::from(block), tx_index, address, key_start, max_result),
+        )
+        .await?)
 }

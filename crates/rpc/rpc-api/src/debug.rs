@@ -370,15 +370,19 @@ pub trait DebugApi<TxReq: RpcObject> {
     /// Returns the storage at the given block height and transaction index. The result can be
     /// paged by providing a `maxResult` to cap the number of storage slots returned as well as
     /// specifying the offset via `keyStart` (hash of storage key).
+    ///
+    /// The state is the one after executing the first `txIdx` transactions of the block, i.e. the
+    /// state the transaction at `txIdx` runs on, matching geth. Passing the block's transaction
+    /// count addresses the state after the entire block.
     #[method(name = "storageRangeAt")]
     async fn debug_storage_range_at(
         &self,
-        block_hash: B256,
+        block_id: BlockId,
         tx_idx: usize,
         contract_address: Address,
-        key_start: B256,
+        key_start: Bytes,
         max_result: u64,
-    ) -> RpcResult<()>;
+    ) -> RpcResult<HashedStorageRangeResult>;
 
     /// Returns the structured logs created during the execution of EVM against a block pulled
     /// from the pool of bad ones and returns them as a JSON object. For the second parameter see
@@ -413,4 +417,28 @@ pub struct HashedStateDump {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde_as(as = "Option<Base64>")]
     pub next: Option<Bytes>,
+}
+
+/// Result of `debug_storageRangeAt`: a page of one account's storage.
+///
+/// This mirrors geth's `StorageRangeResult`, which is already keyed by hashed storage key. The
+/// plain key is only known for slots the replayed transactions touched, and is `None` otherwise,
+/// just like geth reports slots whose preimage it is missing.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HashedStorageRangeResult {
+    /// The storage slots, keyed by `keccak256(slot)`.
+    pub storage: BTreeMap<B256, HashedStorageEntry>,
+    /// The hashed storage key to resume from, if this page is only partial.
+    pub next_key: Option<B256>,
+}
+
+/// A single entry of a [`HashedStorageRangeResult`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HashedStorageEntry {
+    /// The plain storage key, if known.
+    pub key: Option<B256>,
+    /// The value stored at the slot.
+    pub value: B256,
 }
