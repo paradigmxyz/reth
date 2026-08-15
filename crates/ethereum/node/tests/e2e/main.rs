@@ -11,6 +11,7 @@ mod prestate;
 mod rpc;
 mod selfdestruct;
 mod simulate;
+mod state_dump;
 mod utils;
 
 const fn main() {}

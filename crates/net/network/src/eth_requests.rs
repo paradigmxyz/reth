@@ -28,8 +28,8 @@ use reth_network_peers::PeerId;
 use reth_primitives_traits::Block;
 use reth_storage_api::{
     errors::provider::ProviderResult, BalProvider, BlockReader, BytecodeReader,
-    GetBlockAccessListLimit, HeaderProvider, RangeEnd, RangeResponse, StateProviderFactory,
-    StateRangeProviderFactory,
+    GetBlockAccessListLimit, HeaderProvider, RangeEnd, RangeLimits, RangeResponse,
+    StateProviderFactory, StateRangeProviderFactory,
 };
 use reth_transaction_pool::{blobstore::NoopBlobStore, BlobStore};
 use std::{
@@ -536,8 +536,11 @@ where
         let Some(state) = self.client.state_range_provider(req.root_hash)? else {
             return Ok(empty)
         };
-        let RangeResponse { items: accounts, end } =
-            state.account_range(req.starting_hash, req.limit_hash, response_bytes)?;
+        let RangeResponse { items: accounts, end } = state.account_range(
+            req.starting_hash,
+            req.limit_hash,
+            RangeLimits::bytes(response_bytes),
+        )?;
 
         let proof = if req.starting_hash == B256::ZERO && end == RangeEnd::Exhausted {
             Vec::new()
@@ -596,8 +599,12 @@ where
             } else {
                 (B256::ZERO, B256::repeat_byte(0xff))
             };
-            let Some(RangeResponse { items: account_slots, end }) =
-                state.storage_range(hashed_address, origin, limit, remaining_bytes)?
+            let Some(RangeResponse { items: account_slots, end }) = state.storage_range(
+                hashed_address,
+                origin,
+                limit,
+                RangeLimits::bytes(remaining_bytes),
+            )?
             else {
                 return Ok(empty)
             };

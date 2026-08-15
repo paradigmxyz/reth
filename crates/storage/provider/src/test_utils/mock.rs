@@ -2,7 +2,7 @@ use crate::{
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader, HeaderProvider,
-    PruneCheckpointReader, RangeEnd, RangeResponse, RangeResult, ReceiptProviderIdExt,
+    PruneCheckpointReader, RangeEnd, RangeLimits, RangeResponse, RangeResult, ReceiptProviderIdExt,
     StateProvider, StateProviderBox, StateProviderFactory, StateRangeProvider,
     StateRangeProviderFactory, StateRangeView, StateReader, StateRootProvider, StorageRangeResult,
     TransactionVariant, TransactionsProvider,
@@ -396,7 +396,7 @@ impl<T: NodePrimitives, ChainSpec> StateRangeProvider for MockEthProvider<T, Cha
         &self,
         _start: B256,
         _limit: B256,
-        _response_bytes: usize,
+        _limits: RangeLimits,
     ) -> RangeResult<(B256, Account)> {
         self.ensure_snap_state_reads_succeed()?;
         let (items, end) =
@@ -418,14 +418,14 @@ impl<T: NodePrimitives, ChainSpec> StateRangeProvider for MockEthProvider<T, Cha
         hashed_address: B256,
         start: B256,
         limit: B256,
-        response_bytes: usize,
+        limits: RangeLimits,
     ) -> StorageRangeResult {
         self.ensure_snap_state_reads_succeed()?;
         self.snap_storage_range_requests.lock().push((
             hashed_address,
             start,
             limit,
-            response_bytes,
+            limits.response_bytes,
         ));
         let outcome =
             self.snap_storage_ranges.lock().pop_front().ok_or(ProviderError::BestBlockNotFound)?;
