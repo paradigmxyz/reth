@@ -95,16 +95,18 @@ impl MetricServer {
         } = &self.config;
 
         let hooks_for_endpoint = hooks.clone();
+        let executor_for_hooks = task_executor.clone();
         self.start_endpoint(
             *listen_addr,
-            Arc::new(move || hooks_for_endpoint.iter().for_each(|hook| hook())),
+            Arc::new(move || {
+                hooks_for_endpoint.refresh_background(&executor_for_hooks);
+                hooks_for_endpoint.iter().for_each(|hook| hook());
+            }),
             task_executor.clone(),
             pprof_dump_dir.clone(),
         )
         .await
         .wrap_err_with(|| format!("Could not start Prometheus endpoint at {listen_addr}"))?;
-
-        Self::start_periodic_collection(hooks, task_executor);
 
         // Start push-gateway task if configured
         if let Some(url) = push_gateway_url {
@@ -189,37 +191,6 @@ impl MetricServer {
         Ok(())
     }
 
-    /// Spawns the background task that collects the periodic hooks, keeping them off the scrape
-    /// path.
-    ///
-    /// Collection runs on the blocking pool so a slow walk can neither starve the runtime nor delay
-    /// the response: scrapes only render the gauge values this task has already written.
-    fn start_periodic_collection(hooks: &Hooks, task_executor: &TaskExecutor) {
-        if !hooks.has_periodic() {
-            return
-        }
-
-        let hooks = hooks.clone();
-        let executor = task_executor.clone();
-        task_executor.spawn_with_graceful_shutdown_signal(async move |mut signal| {
-            let mut interval = tokio::time::interval(hooks.periodic_interval());
-            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            loop {
-                tokio::select! {
-                    _ = &mut signal => break,
-                    _ = interval.tick() => {
-                        let hooks = hooks.clone();
-                        if let Err(err) =
-                            executor.spawn_blocking(move || hooks.collect_periodic()).await
-                        {
-                            tracing::warn!(%err, "Failed to collect periodic metrics");
-                        }
-                    }
-                }
-            }
-        });
-    }
-
     /// Starts a background task to push metrics to a metrics gateway
     fn start_push_gateway_task(
         &self,
@@ -242,6 +213,7 @@ impl MetricServer {
                         break;
                     }
                     _ = tokio::time::sleep(interval) => {
+                        hooks.refresh_background(&executor);
                         let hooks = hooks.clone();
                         let metrics_handle = handle.handle().clone();
                         let metrics = match executor.spawn_blocking(move || {
@@ -522,7 +494,7 @@ mod tests {
     use socket2::{Domain, Socket, Type};
     use std::{
         net::{SocketAddr, TcpListener},
-        sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+        sync::atomic::{AtomicUsize, Ordering},
     };
 
     fn get_random_available_addr() -> SocketAddr {
@@ -593,28 +565,18 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_periodic_hooks_do_not_block_scrape() {
+    async fn test_background_hooks_do_not_block_collection() {
         install_prometheus_recorder();
 
-        let hook_runs = Arc::new(AtomicUsize::new(0));
-        let slow_hook_running = Arc::new(AtomicBool::new(false));
-
+        let collections = Arc::new(AtomicUsize::new(0));
         let hooks = Hooks::builder()
-            .with_periodic_interval(Duration::from_millis(50))
-            .with_periodic_hook({
-                let hook_runs = hook_runs.clone();
+            .with_background_interval(Duration::from_secs(60))
+            .with_background_hook({
+                let collections = collections.clone();
                 move || {
-                    let runs = hook_runs.fetch_add(1, Ordering::Relaxed) + 1;
-                    metrics::gauge!("test_periodic_hook_runs").set(runs as f64);
-                }
-            })
-            // registered second, so the hook above has already reported once by the time this one
-            // is in flight
-            .with_periodic_hook({
-                let slow_hook_running = slow_hook_running.clone();
-                move || {
-                    slow_hook_running.store(true, Ordering::Relaxed);
                     std::thread::sleep(Duration::from_secs(2));
+                    let collections = collections.fetch_add(1, Ordering::Relaxed) + 1;
+                    metrics::gauge!("test_background_hook_collections").set(collections as f64);
                 }
             })
             .build();
@@ -639,26 +601,27 @@ mod tests {
 
         MetricServer::new(config).serve().await.unwrap();
 
-        // wait until the slow hook is in flight, so the scrape below is guaranteed to overlap with
-        // background collection
-        while !slow_hook_running.load(Ordering::Relaxed) {
+        // the first scrape kicks off the background hook but must not wait for it
+        let url = format!("http://{listen_addr}");
+        let started = std::time::Instant::now();
+        let response =
+            Client::new().get(&url).timeout(Duration::from_millis(500)).send().await.unwrap();
+        assert!(response.status().is_success());
+        assert!(started.elapsed() < Duration::from_secs(1), "scrape waited for the hook");
+        assert_eq!(collections.load(Ordering::Relaxed), 0);
+
+        // once it completes, its values are rendered by the following scrape
+        while collections.load(Ordering::Relaxed) == 0 {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        assert!(hook_runs.load(Ordering::Relaxed) > 0);
+        let body = Client::new().get(&url).send().await.unwrap().text().await.unwrap();
+        assert!(
+            body.contains("test_background_hook_collections"),
+            "background hook metric missing: {body}"
+        );
 
-        let started = std::time::Instant::now();
-        let response = Client::new()
-            .get(format!("http://{listen_addr}"))
-            .timeout(Duration::from_millis(500))
-            .send()
-            .await
-            .unwrap();
-        assert!(response.status().is_success());
-        assert!(started.elapsed() < Duration::from_secs(1), "scrape waited for the periodic hook");
-
-        // periodic collection still ends up in the rendered output
-        let body = response.text().await.unwrap();
-        assert!(body.contains("test_periodic_hook_runs"), "periodic hook metric missing: {body}");
+        // and scrapes within the interval do not collect again
+        assert_eq!(collections.load(Ordering::Relaxed), 1);
 
         drop(runtime);
     }

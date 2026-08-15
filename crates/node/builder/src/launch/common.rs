@@ -1375,16 +1375,16 @@ where
 /// Returns the metrics hooks for the node.
 ///
 /// The storage hooks walk their backing store, which scales with the dataset, so they are
-/// registered as periodic hooks: they are collected in the background instead of while a scrape
-/// is waiting for a response.
+/// registered as background hooks: metrics collection still refreshes them at most every 5
+/// minutes, but renders the values of the previous refresh instead of waiting for the walk.
 pub fn metrics_hooks<N: NodeTypesWithDB>(provider_factory: &ProviderFactory<N>) -> Hooks {
     Hooks::builder()
-        .with_periodic_interval(Duration::from_secs(5 * 60))
-        .with_periodic_hook({
+        .with_background_interval(Duration::from_secs(5 * 60))
+        .with_background_hook({
             let db = provider_factory.db_ref().clone();
             move || db.report_metrics()
         })
-        .with_periodic_hook({
+        .with_background_hook({
             let sfp = provider_factory.static_file_provider();
             move || {
                 if let Err(error) = sfp.report_metrics() {
@@ -1392,7 +1392,7 @@ pub fn metrics_hooks<N: NodeTypesWithDB>(provider_factory: &ProviderFactory<N>) 
                 }
             }
         })
-        .with_periodic_hook({
+        .with_background_hook({
             let rocksdb = provider_factory.rocksdb_provider();
             move || rocksdb.report_metrics()
         })
