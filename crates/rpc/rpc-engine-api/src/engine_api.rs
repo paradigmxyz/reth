@@ -31,7 +31,7 @@ use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
 use reth_storage_api::{BalProvider, BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::Runtime;
-use reth_transaction_pool::{BestTransactions, TransactionPool};
+use reth_transaction_pool::{BestTransactions, PoolTransaction, TransactionPool};
 use std::{
     sync::Arc,
     time::{Instant, SystemTime},
@@ -485,7 +485,7 @@ where
         let mut inclusion_list = Vec::new();
 
         for pool_tx in self.inner.tx_pool.best_transactions().without_blobs().without_updates() {
-            let encoded: Bytes = pool_tx.to_consensus().encoded_2718().into();
+            let encoded: Bytes = pool_tx.transaction.consensus_ref().encoded_2718().into();
             let new_size = total_size + alloy_rlp::Encodable::length(&encoded);
             if new_size + alloy_rlp::length_of_length(new_size) >
                 MAX_BYTES_PER_INCLUSION_LIST as usize
@@ -1774,20 +1774,43 @@ mod tests {
     use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
     use reth_engine_primitives::{BeaconEngineMessage, OnForkChoiceUpdated};
     use reth_ethereum_engine_primitives::EthEngineTypes;
-    use reth_ethereum_primitives::Block;
+    use reth_ethereum_primitives::{Block, TransactionSigned};
     use reth_network_api::{
         noop::NoopNetwork, EthProtocolInfo, NetworkError, NetworkInfo, NetworkStatus,
     };
     use reth_node_ethereum::EthereumEngineValidator;
     use reth_payload_builder::test_utils::spawn_test_payload_service;
+    use reth_primitives_traits::SignedTransaction;
     use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStore, RawBal};
     use reth_tasks::Runtime;
     use reth_transaction_pool::{
+        blobstore::InMemoryBlobStore,
         noop::NoopTransactionPool,
-        test_utils::{MockTransaction, TestPool, TestPoolBuilder},
-        PoolTransaction, TransactionOrigin,
+        test_utils::{OkValidator, TransactionBuilder},
+        CoinbaseTipOrdering, EthPooledTransaction, Pool, PoolTransaction, TransactionOrigin,
     };
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+
+    type EthTestPool = Pool<
+        OkValidator<EthPooledTransaction>,
+        CoinbaseTipOrdering<EthPooledTransaction>,
+        InMemoryBlobStore,
+    >;
+
+    fn eth_test_pool() -> EthTestPool {
+        Pool::new(
+            OkValidator::default(),
+            CoinbaseTipOrdering::default(),
+            InMemoryBlobStore::default(),
+            Default::default(),
+        )
+    }
+
+    fn pooled_transaction(transaction: TransactionSigned) -> EthPooledTransaction {
+        let transaction = transaction.try_into_recovered().unwrap();
+        let encoded_length = transaction.encode_2718_len();
+        EthPooledTransaction::new(transaction, encoded_length)
+    }
 
     fn setup_engine_api() -> (
         EngineApiTestHandle,
@@ -1863,15 +1886,23 @@ mod tests {
 
     #[tokio::test]
     async fn get_inclusion_list_v1_stops_at_size_limit() {
-        let pool: TestPool = TestPoolBuilder::default().into();
-        let first = MockTransaction::legacy()
-            .with_gas_price(3_000_000_000u128)
-            .with_input(Bytes::from(vec![0; 4_200]));
-        let second = MockTransaction::legacy()
-            .with_gas_price(2_000_000_000u128)
-            .with_input(Bytes::from(vec![0; 4_200]));
-        let third = MockTransaction::legacy().with_gas_price(1_000_000_000u128);
-        let expected: Bytes = first.clone().into_consensus().encoded_2718().into();
+        let pool = eth_test_pool();
+        let first = pooled_transaction(
+            TransactionBuilder::default()
+                .max_fee_per_gas(3_000_000_000u128)
+                .input(vec![0; 4_200])
+                .into_legacy(),
+        );
+        let second = pooled_transaction(
+            TransactionBuilder::default()
+                .max_fee_per_gas(2_000_000_000u128)
+                .input(vec![0; 4_200])
+                .into_legacy(),
+        );
+        let third = pooled_transaction(
+            TransactionBuilder::default().max_fee_per_gas(1_000_000_000u128).into_legacy(),
+        );
+        let expected: Bytes = first.consensus_ref().encoded_2718().into();
 
         pool.add_transaction(TransactionOrigin::External, first).await.unwrap();
         pool.add_transaction(TransactionOrigin::External, second).await.unwrap();
@@ -1887,12 +1918,20 @@ mod tests {
 
     #[tokio::test]
     async fn get_inclusion_list_v1_excludes_blob_transactions() {
-        let pool: TestPool = TestPoolBuilder::default().into();
-        let blob = MockTransaction::eip4844()
-            .with_max_fee(1_000_000_000u128)
-            .with_blob_fee(1_000_000_000u128);
-        let non_blob = MockTransaction::eip1559().with_max_fee(1_000_000_000u128);
-        let expected: Bytes = non_blob.clone().into_consensus().encoded_2718().into();
+        let pool = eth_test_pool();
+        let blob = pooled_transaction(
+            TransactionBuilder::default()
+                .max_fee_per_gas(2_000_000_000u128)
+                .max_priority_fee_per_gas(1_000_000_000u128)
+                .into_eip4844(),
+        );
+        let non_blob = pooled_transaction(
+            TransactionBuilder::default()
+                .max_fee_per_gas(1_000_000_000u128)
+                .max_priority_fee_per_gas(1_000_000_000u128)
+                .into_eip1559(),
+        );
+        let expected: Bytes = non_blob.consensus_ref().encoded_2718().into();
 
         pool.add_transaction(TransactionOrigin::External, blob).await.unwrap();
         pool.add_transaction(TransactionOrigin::External, non_blob).await.unwrap();
