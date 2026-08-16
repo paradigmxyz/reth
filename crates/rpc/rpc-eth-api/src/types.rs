@@ -36,6 +36,9 @@ pub trait EthApiTypes: Send + Sync + Clone {
 /// Adapter for network specific block type.
 pub type RpcBlock<T> = Block<RpcTransaction<T>, RpcHeader<T>>;
 
+/// Adapter for the unsigned transaction returned by `eth_fillTransaction`.
+pub type RpcFilledTransaction = alloy_consensus::TypedTransaction;
+
 /// Adapter for network specific receipt type.
 pub type RpcReceipt<T> = <T as RpcTypes>::Receipt;
 

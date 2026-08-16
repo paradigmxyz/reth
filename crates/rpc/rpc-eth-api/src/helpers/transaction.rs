@@ -4,8 +4,8 @@
 use super::{EthApiSpec, EthSigner, LoadBlock, LoadFee, LoadReceipt, LoadState, SpawnBlocking};
 use crate::{
     helpers::{estimate::EstimateCall, spec::SignersForRpc},
-    FromEthApiError, FullEthApiTypes, IntoEthApiError, RpcNodeCore, RpcNodeCoreExt, RpcReceipt,
-    RpcTransaction,
+    FromEthApiError, FullEthApiTypes, IntoEthApiError, RpcFilledTransaction, RpcNodeCore,
+    RpcNodeCoreExt, RpcReceipt, RpcTransaction,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
@@ -19,14 +19,14 @@ use alloy_rpc_types_eth::{state::EvmOverrides, TransactionInfo};
 use futures::{Future, StreamExt};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_primitives_traits::{
-    BlockBody, Recovered, RecoveredBlock, SignedTransaction, TxTy, WithEncoded,
+    BlockBody, Recovered, RecoveredBlock, SignedTransaction, WithEncoded,
 };
 use reth_rpc_convert::{transaction::RpcConvert, RpcTxReq, TransactionConversionError};
 use reth_rpc_eth_types::{
     block::convert_transaction_receipt,
     utils::binary_search,
     EthApiError::{self, TransactionConfirmationTimeout},
-    FillTransaction, SignError, TransactionSource,
+    FillTransaction, SignError, SignTransaction, TransactionSource,
 };
 use reth_storage_api::{
     BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
@@ -540,7 +540,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     fn fill_transaction(
         &self,
         mut request: RpcTxReq<Self::NetworkTypes>,
-    ) -> impl Future<Output = Result<FillTransaction<TxTy<Self::Primitives>>, Self::Error>> + Send
+    ) -> impl Future<Output = Result<FillTransaction<RpcFilledTransaction>, Self::Error>> + Send
     where
         Self: EthApiSpec + LoadBlock + EstimateCall + LoadFee,
     {
@@ -601,11 +601,11 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 }
             }
 
-            let tx = self.converter().build_simulate_v1_transaction(request)?;
+            let tx = request.as_ref().clone().build_consensus_tx().map_err(|err| {
+                Self::Error::from_eth_err(TransactionConversionError::FromTxReq(err.error))
+            })?;
 
-            let raw = tx.encoded_2718().into();
-
-            Ok(FillTransaction { raw, tx })
+            Ok(FillTransaction { tx })
         }
     }
 
@@ -640,19 +640,23 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         }
     }
 
-    /// Signs a transaction request using the given account in request
-    /// Returns the EIP-2718 encoded signed transaction.
+    /// Signs a transaction request using the given account in the request.
     fn sign_transaction(
         &self,
         request: RpcTxReq<Self::NetworkTypes>,
-    ) -> impl Future<Output = Result<Bytes, Self::Error>> + Send {
+    ) -> impl Future<Output = Result<SignTransaction<RpcTransaction<Self::NetworkTypes>>, Self::Error>>
+           + Send {
         async move {
             let from = match request.as_ref().from() {
                 Some(from) => from,
                 None => return Err(SignError::NoAccount.into_eth_err()),
             };
 
-            Ok(self.sign_request(&from, request).await?.encoded_2718().into())
+            let transaction = self.sign_request(&from, request).await?;
+            let raw = transaction.encoded_2718().into();
+            let tx = self.converter().fill_pending(transaction.with_signer(from))?;
+
+            Ok(SignTransaction { raw, tx })
         }
     }
 
