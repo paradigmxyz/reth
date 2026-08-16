@@ -1364,9 +1364,9 @@ pub trait PoolTransaction:
 
     /// Returns the EIP-2718 encoded consensus transaction.
     ///
-    /// Implementations that wrap the consensus transaction can override this to avoid cloning it.
+    /// Implementations that synthesize the consensus representation should override this method.
     fn encoded_2718_consensus(&self) -> Bytes {
-        self.clone_into_consensus().encoded_2718().into()
+        self.consensus_ref().encoded_2718().into()
     }
 
     /// Returns a reference to the consensus transaction with the recovered sender.
@@ -1614,10 +1614,6 @@ impl PoolTransaction for EthPooledTransaction {
 
     fn clone_into_consensus(&self) -> Recovered<Self::Consensus> {
         self.transaction().clone()
-    }
-
-    fn encoded_2718_consensus(&self) -> Bytes {
-        self.transaction.encoded_2718().into()
     }
 
     fn consensus_ref(&self) -> Recovered<&Self::Consensus> {
@@ -1988,7 +1984,7 @@ mod tests {
     use alloy_primitives::Signature;
 
     #[test]
-    fn test_default_consensus_encoding() {
+    fn test_mock_consensus_encoding() {
         let transaction = MockTransaction::legacy();
 
         assert_eq!(
