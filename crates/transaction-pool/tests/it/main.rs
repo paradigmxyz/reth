@@ -5,8 +5,6 @@ mod blobs;
 #[cfg(feature = "test-utils")]
 mod evict;
 #[cfg(feature = "test-utils")]
-mod inclusion_list;
-#[cfg(feature = "test-utils")]
 mod listeners;
 #[cfg(feature = "test-utils")]
 mod pending;

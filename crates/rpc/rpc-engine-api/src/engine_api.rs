@@ -6,6 +6,7 @@ use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip4895::Withdrawals,
     eip7685::RequestsOrHash,
+    Encodable2718,
 };
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealable, B128, B256, U64};
 use alloy_rpc_types_engine::{
@@ -30,7 +31,7 @@ use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
 use reth_storage_api::{BalProvider, BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::Runtime;
-use reth_transaction_pool::TransactionPool;
+use reth_transaction_pool::{BestTransactions, TransactionPool};
 use std::{
     sync::Arc,
     time::{Instant, SystemTime},
@@ -480,7 +481,23 @@ where
 
     /// Builds an EIP-7805 inclusion list from the local transaction pool.
     pub fn get_inclusion_list_v1(&self) -> EngineApiResult<Vec<Bytes>> {
-        Ok(self.inner.tx_pool.build_inclusion_list(MAX_BYTES_PER_INCLUSION_LIST as usize))
+        let mut total_size = 0;
+        let mut inclusion_list = Vec::new();
+
+        for pool_tx in self.inner.tx_pool.best_transactions().without_blobs() {
+            let encoded: Bytes = pool_tx.to_consensus().encoded_2718().into();
+            let new_size = total_size + alloy_rlp::Encodable::length(&encoded);
+            if new_size + alloy_rlp::length_of_length(new_size) >
+                MAX_BYTES_PER_INCLUSION_LIST as usize
+            {
+                continue
+            }
+
+            total_size = new_size;
+            inclusion_list.push(encoded);
+        }
+
+        Ok(inclusion_list)
     }
 
     /// Metrics version of `get_inclusion_list_v1`.
@@ -1765,7 +1782,11 @@ mod tests {
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStore, RawBal};
     use reth_tasks::Runtime;
-    use reth_transaction_pool::noop::NoopTransactionPool;
+    use reth_transaction_pool::{
+        noop::NoopTransactionPool,
+        test_utils::{MockTransaction, TestPool, TestPoolBuilder},
+        PoolTransaction, TransactionOrigin,
+    };
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
     fn setup_engine_api() -> (
@@ -1778,6 +1799,18 @@ mod tests {
             ChainSpec,
         >,
     ) {
+        setup_engine_api_with_pool(NoopTransactionPool::default())
+    }
+
+    fn setup_engine_api_with_pool<Pool>(
+        tx_pool: Pool,
+    ) -> (
+        EngineApiTestHandle,
+        EngineApi<Arc<MockEthProvider>, EthEngineTypes, Pool, EthereumEngineValidator, ChainSpec>,
+    )
+    where
+        Pool: TransactionPool + 'static,
+    {
         let client = ClientVersionV1 {
             code: ClientCode::RH,
             name: "Reth".to_string(),
@@ -1795,7 +1828,7 @@ mod tests {
             chain_spec.clone(),
             ConsensusEngineHandle::new(to_engine),
             payload_store.into(),
-            NoopTransactionPool::default(),
+            tx_pool,
             task_executor,
             client,
             EngineCapabilities::default(),
@@ -1826,6 +1859,45 @@ mod tests {
 
         let res = EngineApiServer::get_inclusion_list_v1(&api).await.unwrap();
         assert!(res.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_inclusion_list_v1_enforces_size_limit() {
+        let pool: TestPool = TestPoolBuilder::default().into();
+        let first = MockTransaction::legacy()
+            .with_gas_price(2_000_000_000u128)
+            .with_input(Bytes::from(vec![0; 4_200]));
+        let second = MockTransaction::legacy()
+            .with_gas_price(1_000_000_000u128)
+            .with_input(Bytes::from(vec![0; 4_200]));
+        let expected: Bytes = first.clone().into_consensus().encoded_2718().into();
+
+        pool.add_transaction(TransactionOrigin::External, first).await.unwrap();
+        pool.add_transaction(TransactionOrigin::External, second).await.unwrap();
+        let (_, api) = setup_engine_api_with_pool(pool);
+
+        let res = EngineApiServer::get_inclusion_list_v1(&api).await.unwrap();
+        assert_eq!(res, vec![expected]);
+        assert!(
+            alloy_rlp::list_length::<Bytes, [u8]>(&res) <= MAX_BYTES_PER_INCLUSION_LIST as usize
+        );
+    }
+
+    #[tokio::test]
+    async fn get_inclusion_list_v1_excludes_blob_transactions() {
+        let pool: TestPool = TestPoolBuilder::default().into();
+        let blob = MockTransaction::eip4844()
+            .with_max_fee(1_000_000_000u128)
+            .with_blob_fee(1_000_000_000u128);
+        let non_blob = MockTransaction::eip1559().with_max_fee(1_000_000_000u128);
+        let expected: Bytes = non_blob.clone().into_consensus().encoded_2718().into();
+
+        pool.add_transaction(TransactionOrigin::External, blob).await.unwrap();
+        pool.add_transaction(TransactionOrigin::External, non_blob).await.unwrap();
+        let (_, api) = setup_engine_api_with_pool(pool);
+
+        let res = EngineApiServer::get_inclusion_list_v1(&api).await.unwrap();
+        assert_eq!(res, vec![expected]);
     }
 
     #[tokio::test]

@@ -306,9 +306,8 @@ use crate::{identifier::TransactionId, pool::PoolInner};
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip7594::BlobTransactionSidecarVariant,
-    Encodable2718, Typed2718,
 };
-use alloy_primitives::{map::AddressSet, Address, Bytes, TxHash, B128, B256, U256};
+use alloy_primitives::{map::AddressSet, Address, TxHash, B128, B256, U256};
 use aquamarine as _;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_eth_wire_types::HandleMempoolData;
@@ -606,26 +605,6 @@ where
         best_transactions_attributes: BestTransactionsAttributes,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
         self.pool.best_transactions_with_attributes(best_transactions_attributes)
-    }
-
-    fn build_inclusion_list(&self, max_size: usize) -> Vec<Bytes> {
-        let mut inclusion_list = Vec::new();
-        for pool_tx in self.best_transactions() {
-            let tx = pool_tx.to_consensus().into_inner();
-
-            // Inclusion lists cannot contain blob transactions because their sidecars are not
-            // available through the Engine API inclusion-list response.
-            if tx.is_eip4844() {
-                continue;
-            }
-
-            inclusion_list.push(tx.encoded_2718().into());
-            if alloy_rlp::list_length::<Bytes, [u8]>(&inclusion_list) > max_size {
-                inclusion_list.pop();
-            }
-        }
-
-        inclusion_list
     }
 
     fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
