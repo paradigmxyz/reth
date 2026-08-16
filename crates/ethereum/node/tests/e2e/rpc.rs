@@ -1,8 +1,10 @@
 use crate::utils::{eth_payload_attributes, eth_payload_attributes_amsterdam};
-use alloy_eips::{eip2718::Encodable2718, eip7910::EthConfig};
+use alloy_eips::{eip2718::Encodable2718, eip7910::EthConfig, BlockNumberOrTag};
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, Bytes, B256, U256};
-use alloy_provider::{network::EthereumWallet, Provider, ProviderBuilder, SendableTx};
+use alloy_provider::{
+    ext::DebugApi, network::EthereumWallet, Provider, ProviderBuilder, SendableTx,
+};
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
     BuilderBlockValidationRequestV6, SignedBidSubmissionV3, SignedBidSubmissionV4,
@@ -13,9 +15,11 @@ use alloy_rpc_types_engine::{
     ExecutionPayloadV3, PraguePayloadFields,
 };
 use alloy_rpc_types_eth::TransactionRequest;
+use alloy_rpc_types_trace::geth::{ChainBlockTraceResult, GethDebugTracingOptions};
+use jsonrpsee::core::client::{Subscription, SubscriptionClientT};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::{ChainSpecBuilder, EthChainSpec, MAINNET};
-use reth_e2e_test_utils::setup_engine;
+use reth_e2e_test_utils::{setup_engine, E2ETestSetupBuilder};
 use reth_network::{types::NatResolver, PeersInfo};
 use reth_node_builder::{NodeBuilder, NodeHandle};
 use reth_node_core::{
@@ -26,6 +30,7 @@ use reth_node_ethereum::EthereumNode;
 use reth_payload_primitives::BuiltPayload;
 use reth_primitives_traits::Block as _;
 use reth_rpc_api::servers::AdminApiServer;
+use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::Runtime;
 use std::{
     net::{IpAddr, Ipv4Addr},
@@ -132,6 +137,85 @@ async fn test_fee_history() -> eyre::Result<()> {
             prev_header = header;
         }
     }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_debug_trace_chain_subscription() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .cancun_activated()
+            .build(),
+    );
+    let (mut nodes, wallet) =
+        E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, eth_payload_attributes)
+            .with_node_config_modifier(|config| {
+                config.with_rpc(
+                    RpcServerArgs::default()
+                        .with_unused_ports()
+                        .with_http()
+                        .with_http_api(RpcModuleSelection::All)
+                        .with_ws()
+                        .with_ws_api(RpcModuleSelection::All),
+                )
+            })
+            .build()
+            .await?;
+    let mut node = nodes.pop().unwrap();
+    let provider = ProviderBuilder::new()
+        .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
+        .connect_http(node.rpc_url());
+
+    // Geth suppresses empty intermediate blocks but always emits the end block.
+    node.advance_block().await?;
+    let _ = GasWaster::deploy_builder(&provider, U256::from(5)).send().await?;
+    let _ = GasWaster::deploy_builder(&provider, U256::from(7)).send().await?;
+    node.advance_block().await?;
+    node.advance_block().await?;
+
+    let client = node.inner.rpc_server_handle().ws_client().await.unwrap();
+    let invalid: Result<Subscription<ChainBlockTraceResult>, _> = client
+        .subscribe(
+            "debug_subscribe",
+            jsonrpsee::rpc_params!["traceChain", "0x3", "0x3"],
+            "debug_unsubscribe",
+        )
+        .await;
+    assert!(invalid.is_err(), "equal endpoints must be rejected");
+
+    let mut subscription: Subscription<ChainBlockTraceResult> = client
+        .subscribe(
+            "debug_subscribe",
+            jsonrpsee::rpc_params![
+                "traceChain",
+                BlockNumberOrTag::Number(0),
+                BlockNumberOrTag::Number(3),
+                GethDebugTracingOptions::default()
+            ],
+            "debug_unsubscribe",
+        )
+        .await?;
+
+    let traced = subscription.next().await.unwrap()?;
+    assert_eq!(traced.block, U256::from(2));
+    let expected = provider
+        .debug_trace_block_by_number(
+            BlockNumberOrTag::Number(2),
+            GethDebugTracingOptions::default(),
+        )
+        .await?;
+    assert_eq!(expected.len(), 2, "both transactions must be traced");
+    assert_eq!(traced.traces, expected.into_iter().map(Some).collect::<Vec<_>>());
+
+    let terminal = subscription.next().await.unwrap()?;
+    assert_eq!(terminal.block, U256::from(3));
+    assert!(terminal.traces.is_empty());
+    subscription.unsubscribe().await?;
 
     Ok(())
 }
