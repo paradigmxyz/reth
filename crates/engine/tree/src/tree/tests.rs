@@ -709,7 +709,7 @@ fn persistence_handoff_waits_for_active_payload_jobs() {
 }
 
 #[test]
-fn pending_persisted_handoff_blocks_engine_messages_until_payload_build_finishes() {
+fn pending_persisted_handoff_keeps_engine_messages_responsive() {
     let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
     let mut test_harness = TestHarness::with_config(
         MAINNET.clone(),
@@ -732,34 +732,23 @@ fn pending_persisted_handoff_blocks_engine_messages_until_payload_build_finishes
         .unwrap();
     assert!(test_harness.tree.pending_persisted_handoff.is_some());
 
-    // Forkchoice updates received while the handoff is pending could start replacement payload
-    // builds and keep the final completion notification from reaching the tree. Queue a generic
-    // engine message to prove the gate leaves every message upstream until then.
+    // Engine messages remain processable while the handoff waits for the active payload build.
     test_harness.to_tree_tx.send(FromEngine::Event(FromOrchestrator::BackfillSyncStarted)).unwrap();
+    assert_matches!(
+        test_harness.tree.wait_for_event(),
+        super::LoopEvent::EngineMessage(FromEngine::Event(FromOrchestrator::BackfillSyncStarted))
+    );
+    assert!(test_harness.tree.pending_persisted_handoff.is_some());
+    assert!(test_harness.tree.state.tree_state.contains_hash(&persisted.hash));
 
-    let (started_tx, started_rx) = std::sync::mpsc::sync_channel(0);
-    let (event_tx, event_rx) = std::sync::mpsc::sync_channel(1);
-    std::thread::scope(|scope| {
-        let tree = &mut test_harness.tree;
-        scope.spawn(move || {
-            started_tx.send(()).unwrap();
-            event_tx
-                .send(matches!(tree.wait_for_event(), super::LoopEvent::PayloadBuildFinished))
-                .unwrap();
-        });
-
-        started_rx.recv().unwrap();
-        assert!(
-            event_rx.recv_timeout(Duration::from_millis(100)).is_err(),
-            "a pending handoff must prevent queued engine messages from being processed"
-        );
-
-        drop(payload_build);
-        assert_eq!(event_rx.recv_timeout(Duration::from_secs(1)), Ok(true));
-    });
-
+    // Once the final lease drops, its completion is prioritized over queued engine messages so the
+    // handoff gets the first opportunity to reclaim the overlay.
+    test_harness.to_tree_tx.send(FromEngine::Event(FromOrchestrator::BackfillSyncStarted)).unwrap();
+    drop(payload_build);
+    assert_matches!(test_harness.tree.wait_for_event(), super::LoopEvent::PayloadBuildFinished);
     test_harness.tree.on_payload_build_finished().unwrap();
     assert!(test_harness.tree.pending_persisted_handoff.is_none());
+    assert!(!test_harness.tree.state.tree_state.contains_hash(&persisted.hash));
     assert_matches!(
         test_harness.tree.wait_for_event(),
         super::LoopEvent::EngineMessage(FromEngine::Event(FromOrchestrator::BackfillSyncStarted))
@@ -900,7 +889,7 @@ fn process_payload_attributes_shares_sparse_trie_during_validation_fallback() {
             withdrawals: None,
             parent_beacon_block_root: None,
             slot_number: None,
-            target_gas_limit: None,
+            ..Default::default()
         },
         &head,
         state,
@@ -1682,7 +1671,7 @@ async fn test_fcu_with_canonical_ancestor_below_finalized_is_rejected() {
         withdrawals: None,
         parent_beacon_block_root: None,
         slot_number: None,
-        target_gas_limit: None,
+        ..Default::default()
     };
     for attrs in [Some(payload_attributes), None] {
         let err = test_harness
@@ -1716,7 +1705,7 @@ async fn test_fcu_with_canonical_ancestor_below_finalized_is_rejected() {
         withdrawals: None,
         parent_beacon_block_root: None,
         slot_number: None,
-        target_gas_limit: None,
+        ..Default::default()
     };
     let outcome = test_harness
         .tree
@@ -1759,7 +1748,7 @@ async fn test_fcu_with_canonical_ancestor_above_finalized_starts_payload_build()
         withdrawals: None,
         parent_beacon_block_root: None,
         slot_number: None,
-        target_gas_limit: None,
+        ..Default::default()
     };
     let outcome = test_harness
         .tree

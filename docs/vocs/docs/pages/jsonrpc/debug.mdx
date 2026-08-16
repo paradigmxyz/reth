@@ -53,13 +53,25 @@ Returns an array of recent bad blocks that the client has seen on the network.
 | ------ | ------------------------------------------------ |
 | RPC    | `{"method": "debug_getBadBlocks", "params": []}` |
 
-## `debug_traceChain`
+## `debug_subscribe`, `debug_unsubscribe`
 
-Returns the structured logs created during the execution of EVM between two blocks (excluding start) as a JSON object.
+Subscribes to structured logs created during EVM execution between two blocks. The start block is
+excluded and the end block is included. Pass `"traceChain"` as the subscription type and optionally
+provide tracing options.
 
-| Client | Method invocation                                                    |
-| ------ | -------------------------------------------------------------------- |
-| RPC    | `{"method": "debug_traceChain", "params": [start_block, end_block]}` |
+The subscription returns an ID and emits `debug_subscription` notifications containing the block
+number and its transaction traces. Empty intermediate blocks are omitted, but the end block is
+always emitted. Pass the subscription ID to `debug_unsubscribe` to stop receiving notifications.
+
+| Client | Method invocation                                                                                 |
+| ------ | ------------------------------------------------------------------------------------------------- |
+| RPC    | `{"method": "debug_subscribe", "params": ["traceChain", start_block, end_block, opts]}` |
+| RPC    | `{"method": "debug_unsubscribe", "params": [subscription_id]}`                            |
+
+:::note
+Subscriptions are only available over WebSocket and IPC transports, as HTTP does not support
+server-initiated messages.
+:::
 
 ## `debug_traceBlock`
 
