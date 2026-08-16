@@ -491,7 +491,7 @@ impl From<PayloadAttributesParis> for LegacyPayloadAttributes {
             withdrawals: None,
             parent_beacon_block_root: None,
             slot_number: None,
-            target_gas_limit: None,
+            ..Default::default()
         }
     }
 }
@@ -521,7 +521,7 @@ impl From<PayloadAttributesShanghai> for LegacyPayloadAttributes {
             withdrawals: Some(value.withdrawals),
             parent_beacon_block_root: None,
             slot_number: None,
-            target_gas_limit: None,
+            ..Default::default()
         }
     }
 }
@@ -551,7 +551,7 @@ impl From<PayloadAttributesCancun> for LegacyPayloadAttributes {
             withdrawals: Some(value.withdrawals),
             parent_beacon_block_root: Some(value.parent_beacon_block_root),
             slot_number: None,
-            target_gas_limit: None,
+            ..Default::default()
         }
     }
 }
@@ -576,6 +576,7 @@ impl TryFrom<LegacyPayloadAttributes> for PayloadAttributesCancun {
 }
 
 impl From<PayloadAttributesAmsterdam> for LegacyPayloadAttributes {
+    #[allow(clippy::needless_update)]
     fn from(value: PayloadAttributesAmsterdam) -> Self {
         Self {
             timestamp: value.timestamp,
@@ -585,6 +586,7 @@ impl From<PayloadAttributesAmsterdam> for LegacyPayloadAttributes {
             parent_beacon_block_root: Some(value.parent_beacon_block_root),
             slot_number: Some(value.slot_number),
             target_gas_limit: Some(value.target_gas_limit),
+            ..Default::default()
         }
     }
 }
