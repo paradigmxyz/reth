@@ -484,13 +484,13 @@ where
         let mut total_size = 0;
         let mut inclusion_list = Vec::new();
 
-        for pool_tx in self.inner.tx_pool.best_transactions().without_blobs() {
+        for pool_tx in self.inner.tx_pool.best_transactions().without_blobs().without_updates() {
             let encoded: Bytes = pool_tx.to_consensus().encoded_2718().into();
             let new_size = total_size + alloy_rlp::Encodable::length(&encoded);
             if new_size + alloy_rlp::length_of_length(new_size) >
                 MAX_BYTES_PER_INCLUSION_LIST as usize
             {
-                continue
+                break
             }
 
             total_size = new_size;
@@ -1862,18 +1862,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_inclusion_list_v1_enforces_size_limit() {
+    async fn get_inclusion_list_v1_stops_at_size_limit() {
         let pool: TestPool = TestPoolBuilder::default().into();
         let first = MockTransaction::legacy()
-            .with_gas_price(2_000_000_000u128)
+            .with_gas_price(3_000_000_000u128)
             .with_input(Bytes::from(vec![0; 4_200]));
         let second = MockTransaction::legacy()
-            .with_gas_price(1_000_000_000u128)
+            .with_gas_price(2_000_000_000u128)
             .with_input(Bytes::from(vec![0; 4_200]));
+        let third = MockTransaction::legacy().with_gas_price(1_000_000_000u128);
         let expected: Bytes = first.clone().into_consensus().encoded_2718().into();
 
         pool.add_transaction(TransactionOrigin::External, first).await.unwrap();
         pool.add_transaction(TransactionOrigin::External, second).await.unwrap();
+        pool.add_transaction(TransactionOrigin::External, third).await.unwrap();
         let (_, api) = setup_engine_api_with_pool(pool);
 
         let res = EngineApiServer::get_inclusion_list_v1(&api).await.unwrap();
