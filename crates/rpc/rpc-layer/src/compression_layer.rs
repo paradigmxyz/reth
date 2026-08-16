@@ -9,7 +9,7 @@ use tower_http::compression::{Compression, CompressionLayer as TowerCompressionL
 
 /// This layer is a wrapper around [`tower_http::compression::CompressionLayer`] that integrates
 /// with jsonrpsee's HTTP types. It automatically compresses responses based on the client's
-/// Accept-Encoding header.
+/// `Accept-Encoding` header.
 #[expect(missing_debug_implementations)]
 #[derive(Clone)]
 pub struct CompressionLayer {
@@ -22,6 +22,29 @@ impl CompressionLayer {
         Self {
             inner_layer: TowerCompressionLayer::new().gzip(true).br(true).deflate(true).zstd(true),
         }
+    }
+
+    /// Creates a compression layer allowing only the listed algorithms.
+    ///
+    /// The client's `Accept-Encoding` quality values determine selection among allowed algorithms;
+    /// ties use `tower_http`'s fixed **zstd > br > gzip > deflate** order. The order of `algos` is
+    /// ignored. Omitted quality values default to 1; if no allowed algorithm is acceptable, the
+    /// response is uncompressed.
+    pub fn with_algorithms(algos: &[impl AsRef<str>]) -> Self {
+        // Clear tower_http's enabled-by-default algorithms to make `algos` an allowlist.
+        let mut layer = TowerCompressionLayer::new().no_zstd().no_gzip().no_deflate().no_br();
+
+        for algo in algos {
+            match algo.as_ref() {
+                "zstd" => layer = layer.zstd(true),
+                "deflate" => layer = layer.deflate(true),
+                "gzip" => layer = layer.gzip(true),
+                "br" | "brotli" => layer = layer.br(true),
+                _ => {}
+            }
+        }
+
+        Self { inner_layer: layer }
     }
 }
 

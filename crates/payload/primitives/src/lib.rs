@@ -62,8 +62,10 @@ pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static
 /// * If V2, this ensures that the payload timestamp is pre-Cancun.
 /// * If V3, this ensures that the payload timestamp is within the Cancun timestamp.
 /// * If V4, this ensures that the payload timestamp is within the Prague timestamp.
-/// * If V5, this ensures that the payload timestamp is within the Osaka timestamp.
-/// * If V6, this ensures that the payload timestamp is within the Amsterdam timestamp.
+/// * If V5, this ensures that the payload timestamp is within the Osaka timestamp, and within the
+///   Bogota timestamp for `engine_forkchoiceUpdatedV5` payload attributes.
+/// * If V6, this ensures that the payload timestamp is within the Amsterdam timestamp, and within
+///   the Bogota timestamp for `engine_newPayloadV6` payloads.
 ///
 /// Additionally, it ensures that `engine_getPayloadV4` is not used for an Osaka payload and that
 /// staggered endpoint upgrades reject the next fork once a newer method version is required.
@@ -186,6 +188,51 @@ pub fn validate_payload_timestamp(
         return Err(EngineObjectValidationError::UnsupportedFork)
     }
 
+    let is_bogota = chain_spec.is_bogota_active_at_timestamp(timestamp);
+
+    // Staggered endpoint upgrades must reject Bogota payloads until the Bogota-specific method
+    // version is used.
+    //
+    // From the Engine API spec:
+    // <https://github.com/ethereum/execution-apis/blob/main/src/engine/bogota.md#update-the-methods-of-previous-forks>
+    //
+    // For `engine_newPayloadV5` and `engine_forkchoiceUpdatedV4`:
+    //
+    // 1. Client software MUST return -38005: Unsupported fork error if the timestamp of payload is
+    //    greater than or equal to the Bogota activation timestamp.
+    if is_bogota &&
+        matches!(
+            (version, kind),
+            (EngineApiMessageVersion::V4, MessageValidationKind::PayloadAttributes) |
+                (EngineApiMessageVersion::V5, MessageValidationKind::Payload)
+        )
+    {
+        return Err(EngineObjectValidationError::UnsupportedFork)
+    }
+
+    if !is_bogota &&
+        matches!(
+            (version, kind),
+            (EngineApiMessageVersion::V5, MessageValidationKind::PayloadAttributes) |
+                (EngineApiMessageVersion::V6, MessageValidationKind::Payload)
+        )
+    {
+        // From the Engine API spec:
+        // <https://github.com/ethereum/execution-apis/blob/main/src/engine/bogota.md>
+        //
+        // For `engine_newPayloadV6`:
+        //
+        // 1. Client software MUST return -38005: Unsupported fork error if the timestamp of the
+        //    payload does not fall within the time frame of the Bogota fork.
+        //
+        // For `engine_forkchoiceUpdatedV5`:
+        //
+        // 2. Client software MUST return -38005: Unsupported fork error if the payloadAttributes is
+        //    set and the payloadAttributes.timestamp does not fall within the time frame of the
+        //    Bogota fork.
+        return Err(EngineObjectValidationError::UnsupportedFork)
+    }
+
     Ok(())
 }
 
@@ -279,7 +326,10 @@ pub fn validate_slot_number_presence<T: EthereumHardforks>(
         }
 
         EngineApiMessageVersion::V5 => {
-            if message_validation_kind == MessageValidationKind::Payload {
+            if matches!(
+                message_validation_kind,
+                MessageValidationKind::Payload | MessageValidationKind::PayloadAttributes
+            ) {
                 if is_amsterdam_active && !has_slot_number {
                     return Err(message_validation_kind
                         .to_error(VersionSpecificValidationError::NoSlotNumberPostAmsterdam))
@@ -748,6 +798,94 @@ mod tests {
     }
 
     #[test]
+    fn validate_bogota_fork_timeframe() {
+        // Amsterdam active, Bogota not scheduled: the Bogota-specific methods must reject
+        let chain_spec = ChainSpecBuilder::mainnet().amsterdam_activated().build();
+
+        // `engine_newPayloadV6` requires a Bogota timestamp
+        let res = validate_payload_timestamp(
+            &chain_spec,
+            EngineApiMessageVersion::V6,
+            0,
+            MessageValidationKind::Payload,
+        );
+        assert_matches!(res, Err(EngineObjectValidationError::UnsupportedFork));
+
+        // `engine_forkchoiceUpdatedV5` requires Bogota payload attributes
+        let res = validate_payload_timestamp(
+            &chain_spec,
+            EngineApiMessageVersion::V5,
+            0,
+            MessageValidationKind::PayloadAttributes,
+        );
+        assert_matches!(res, Err(EngineObjectValidationError::UnsupportedFork));
+
+        // the Amsterdam methods remain valid pre-Bogota
+        let res = validate_payload_timestamp(
+            &chain_spec,
+            EngineApiMessageVersion::V5,
+            0,
+            MessageValidationKind::Payload,
+        );
+        assert_matches!(res, Ok(()));
+        let res = validate_payload_timestamp(
+            &chain_spec,
+            EngineApiMessageVersion::V4,
+            0,
+            MessageValidationKind::PayloadAttributes,
+        );
+        assert_matches!(res, Ok(()));
+    }
+
+    #[test]
+    fn validate_bogota_staggered_version_restrictions() {
+        let chain_spec = ChainSpecBuilder::mainnet().bogota_activated().build();
+
+        // `engine_newPayloadV5` must reject Bogota payloads
+        let res = validate_payload_timestamp(
+            &chain_spec,
+            EngineApiMessageVersion::V5,
+            0,
+            MessageValidationKind::Payload,
+        );
+        assert_matches!(res, Err(EngineObjectValidationError::UnsupportedFork));
+
+        // `engine_forkchoiceUpdatedV4` must reject Bogota payload attributes
+        let res = validate_payload_timestamp(
+            &chain_spec,
+            EngineApiMessageVersion::V4,
+            0,
+            MessageValidationKind::PayloadAttributes,
+        );
+        assert_matches!(res, Err(EngineObjectValidationError::UnsupportedFork));
+
+        // the Bogota-specific methods are accepted
+        let res = validate_payload_timestamp(
+            &chain_spec,
+            EngineApiMessageVersion::V6,
+            0,
+            MessageValidationKind::Payload,
+        );
+        assert_matches!(res, Ok(()));
+        let res = validate_payload_timestamp(
+            &chain_spec,
+            EngineApiMessageVersion::V5,
+            0,
+            MessageValidationKind::PayloadAttributes,
+        );
+        assert_matches!(res, Ok(()));
+
+        // Bogota defines no new getPayload version, `engine_getPayloadV6` remains valid
+        let res = validate_payload_timestamp(
+            &chain_spec,
+            EngineApiMessageVersion::V6,
+            0,
+            MessageValidationKind::GetPayload,
+        );
+        assert_matches!(res, Ok(()));
+    }
+
+    #[test]
     fn validate_amsterdam_slot_and_bal_presence() {
         let chain_spec = ChainSpecBuilder::mainnet().amsterdam_activated().build();
 
@@ -764,6 +902,15 @@ mod tests {
             &chain_spec,
             EngineApiMessageVersion::V5,
             MessageValidationKind::Payload,
+            0,
+            true,
+        );
+        assert_matches!(res, Ok(()));
+
+        let res = validate_slot_number_presence(
+            &chain_spec,
+            EngineApiMessageVersion::V5,
+            MessageValidationKind::PayloadAttributes,
             0,
             true,
         );
