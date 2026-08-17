@@ -294,7 +294,19 @@ where
         let hash = env.hash;
 
         if let Some(saved_cache) = saved_cache {
+            let validation_wait_start = Instant::now();
+            let is_valid = valid_block_rx.recv().is_ok();
+            let validation_wait = validation_wait_start.elapsed();
+            metrics.cache_validation_wait_duration.set(validation_wait.as_secs_f64());
+            if !is_valid {
+                let elapsed = start.elapsed();
+                metrics.cache_saving_duration.set(elapsed.as_secs_f64());
+                debug!(target: "engine::caching", parent_hash=?hash, ?validation_wait, elapsed=?elapsed, "Skipping execution cache update for invalid block");
+                return
+            }
+
             debug!(target: "engine::caching", parent_hash=?hash, "Updating execution cache");
+            let update_start = Instant::now();
             execution_cache.update_with_guard(|cached| {
                 // consumes the `SavedCache` held by the prewarming task, which releases its cache
                 // handle
@@ -311,21 +323,15 @@ where
                 }
 
                 new_cache.update_metrics(cache_state_metrics.as_ref());
-
-                if valid_block_rx.recv().is_ok() {
-                    // Replace the shared cache with the new one; the previous cache (if any) is
-                    // dropped.
-                    *cached = Some(new_cache);
-                } else {
-                    // Block was invalid; caches were already mutated by insert_state above,
-                    // so we must clear to prevent using polluted state
-                    *cached = None;
-                    debug!(target: "engine::caching", "cleared execution cache on invalid block");
-                }
+                // Replace the shared cache with the new one; the previous cache (if any) is
+                // dropped.
+                *cached = Some(new_cache);
             });
+            let update_elapsed = update_start.elapsed();
+            metrics.cache_update_duration.set(update_elapsed.as_secs_f64());
 
             let elapsed = start.elapsed();
-            debug!(target: "engine::caching", parent_hash=?hash, elapsed=?elapsed, "Updated execution cache");
+            debug!(target: "engine::caching", parent_hash=?hash, ?validation_wait, ?update_elapsed, elapsed=?elapsed, "Updated execution cache");
 
             metrics.cache_saving_duration.set(elapsed.as_secs_f64());
         }
@@ -827,6 +833,7 @@ fn multiproof_targets_from_withdrawals(withdrawals: &[Withdrawal]) -> MultiProof
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tree::ExecutionCache;
     use alloy_consensus::transaction::Recovered;
     use alloy_eip7928::{
         AccountChanges, BalanceChange, BlockAccessIndex, CodeChange, NonceChange, SlotChanges,
@@ -834,7 +841,7 @@ mod tests {
     };
     use alloy_primitives::{address, bytes};
     use reth_chainspec::ChainSpec;
-    use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
+    use reth_ethereum_primitives::{EthPrimitives, Receipt, TransactionSigned};
     use reth_evm::{execute::WithTxEnv, TxEnvFor};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_provider::test_utils::MockEthProvider;
@@ -878,6 +885,50 @@ mod tests {
         );
 
         assert!(terminate_execution.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn invalid_block_does_not_clear_execution_cache() {
+        let execution_cache = PayloadExecutionCache::default();
+        let parent_hash = B256::repeat_byte(0x11);
+        let saved_cache = SavedCache::new(parent_hash, ExecutionCache::new(1_000));
+        execution_cache.update_with_guard(|slot| *slot = Some(saved_cache.clone()));
+
+        let ctx = PrewarmContext {
+            env: ExecutionEnv::test_default(),
+            evm_config: EthEvmConfig::new(Arc::new(ChainSpec::default())),
+            saved_cache: Some(saved_cache),
+            provider: StateProviderBuilder::<EthPrimitives, _>::new(
+                MockEthProvider::default(),
+                parent_hash,
+                OverlayManager::default(),
+            ),
+            bal_prewarm_pool: None,
+            metrics: PrewarmMetrics::default(),
+            cache_metrics: None,
+            cache_state_metrics: None,
+            terminate_execution: Arc::new(AtomicBool::new(false)),
+            executed_tx_index: Arc::new(AtomicUsize::new(0)),
+            precompile_cache_disabled: false,
+            precompile_cache_map: PrecompileCacheMap::default(),
+            disable_bal_parallel_state_root: false,
+            disable_bal_batch_io: false,
+        };
+        let (task, actions_tx) =
+            PrewarmCacheTask::new(Runtime::test(), execution_cache.clone(), ctx);
+        actions_tx
+            .send(PrewarmTaskEvent::Terminate {
+                execution_outcome: Some(Arc::new(BlockExecutionOutput::<Receipt>::default())),
+                valid_block_rx: mpsc::channel().1,
+            })
+            .unwrap();
+
+        task.run::<WithTxEnv<TxEnvFor<EthEvmConfig>, Recovered<TransactionSigned>>>(
+            PrewarmMode::Skipped,
+            actions_tx,
+        );
+
+        assert!(execution_cache.get_cache_for(parent_hash).is_some());
     }
 
     #[test]
@@ -958,8 +1009,8 @@ pub enum PrewarmTaskEvent<R> {
         execution_outcome: Option<Arc<BlockExecutionOutput<R>>>,
         /// Receiver for the block validation result.
         ///
-        /// Cache saving is racing the state root validation. We optimistically construct the
-        /// updated cache but only save it once we know the block is valid.
+        /// Cache saving races state root validation and waits for this result before updating the
+        /// shared cache.
         valid_block_rx: mpsc::Receiver<()>,
     },
     /// Emitted by the worker-dispatch side once every dispatched transaction has finished or been
@@ -984,6 +1035,10 @@ pub struct PrewarmMetrics {
     pub(crate) execution_duration: Histogram,
     /// A histogram for prefetch targets per transaction prewarming
     pub(crate) prefetch_storage_targets: Histogram,
+    /// Time spent waiting for block validation before updating the execution cache.
+    pub(crate) cache_validation_wait_duration: Gauge,
+    /// Time spent updating the execution cache after block validation.
+    pub(crate) cache_update_duration: Gauge,
     /// A histogram of duration for cache saving
     pub(crate) cache_saving_duration: Gauge,
     /// Counter for transaction execution errors during prewarming
