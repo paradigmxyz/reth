@@ -2,6 +2,8 @@ use blake3::Hasher;
 use eyre::Result;
 use rayon::prelude::*;
 use reqwest::Client;
+use reth_config::config::Config;
+use reth_prune_types::PruneMode;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -171,6 +173,24 @@ pub enum ComponentSelection {
     None,
 }
 
+impl ComponentSelection {
+    /// Resolves a snapshot selection from a pruning mode at the given snapshot block.
+    pub(crate) const fn from_prune_mode(mode: Option<PruneMode>, snapshot_block: u64) -> Self {
+        match mode {
+            None => Self::All,
+            Some(PruneMode::Full) => Self::None,
+            Some(PruneMode::Distance(distance)) => Self::Distance(distance),
+            Some(PruneMode::Before(block)) => {
+                if snapshot_block >= block {
+                    Self::Since(block)
+                } else {
+                    Self::None
+                }
+            }
+        }
+    }
+}
+
 impl std::fmt::Display for ComponentSelection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -287,6 +307,77 @@ impl SnapshotManifest {
     /// Look up a component by type.
     pub fn component(&self, ty: SnapshotComponentType) -> Option<&ComponentManifest> {
         self.components.get(ty.key())
+    }
+
+    /// Resolves the history required by the configured pruning modes.
+    ///
+    /// Selections mirror what the pruner retains at each component's target block, floored to
+    /// `minimum_pruning_distance`. Relative modes become absolute selections when the snapshot is
+    /// ahead of the target so the downloaded archives still cover the target's retained history.
+    pub(crate) fn repair_history_selections(
+        &self,
+        config: &Config,
+        target_blocks: &BTreeMap<SnapshotComponentType, u64>,
+    ) -> Result<BTreeMap<SnapshotComponentType, ComponentSelection>> {
+        let segments = &config.prune.segments;
+        if !segments.receipts_log_filter.is_empty() {
+            eyre::bail!(
+                "--repair-history does not support `receipts_log_filter` pruning; \
+                 the retained receipts live in the database, not in static files"
+            );
+        }
+
+        let configured = [
+            (SnapshotComponentType::Transactions, segments.bodies_history),
+            (SnapshotComponentType::Receipts, segments.receipts),
+            (SnapshotComponentType::AccountChangesets, segments.account_history),
+            (SnapshotComponentType::StorageChangesets, segments.storage_history),
+        ];
+        let mut selections = BTreeMap::new();
+
+        for (ty, mode) in configured {
+            if self.component(ty).is_none() {
+                eyre::bail!(
+                    "Snapshot manifest does not contain required {} history",
+                    ty.display_name()
+                );
+            }
+
+            let minimum = match ty.minimal_selection() {
+                ComponentSelection::Distance(distance) => distance,
+                _ => 0,
+            }
+            .max(config.prune.minimum_pruning_distance);
+
+            let target_block = target_blocks
+                .get(&ty)
+                .copied()
+                .ok_or_else(|| eyre::eyre!("missing repair frontier for {}", ty.display_name()))?;
+            let relative_selection = |distance| {
+                if target_block == self.block {
+                    ComponentSelection::Distance(distance)
+                } else {
+                    ComponentSelection::Since(target_block.saturating_sub(distance))
+                }
+            };
+
+            let selection = match mode {
+                None => ComponentSelection::All,
+                Some(PruneMode::Full) => relative_selection(minimum),
+                Some(PruneMode::Distance(distance)) if distance >= minimum => {
+                    relative_selection(distance)
+                }
+                Some(PruneMode::Before(block)) if target_block.saturating_sub(block) >= minimum => {
+                    ComponentSelection::Since(block)
+                }
+                // A sub-minimum distance is a pruner configuration error and a closer
+                // Before cutoff has not activated: either way nothing has been pruned.
+                Some(PruneMode::Distance(_) | PruneMode::Before(_)) => ComponentSelection::All,
+            };
+            selections.insert(ty, selection);
+        }
+
+        Ok(selections)
     }
 
     /// Returns the total download size for the given set of component types.
@@ -971,7 +1062,41 @@ impl<R: Read> Read for HashingReader<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_prune_types::ReceiptsLogPruneConfig;
     use tempfile::tempdir;
+
+    fn history_manifest() -> SnapshotManifest {
+        let components = [
+            SnapshotComponentType::Transactions,
+            SnapshotComponentType::Receipts,
+            SnapshotComponentType::AccountChangesets,
+            SnapshotComponentType::StorageChangesets,
+        ]
+        .into_iter()
+        .map(|ty| {
+            (
+                ty.key().to_string(),
+                ComponentManifest::Single(SingleArchive {
+                    file: format!("{}.tar.zst", ty.key()),
+                    size: 1,
+                    decompressed_size: 0,
+                    blake3: None,
+                    output_files: vec![],
+                }),
+            )
+        })
+        .collect();
+
+        SnapshotManifest {
+            block: 20_000,
+            chain_id: 1,
+            storage_version: 2,
+            timestamp: 0,
+            base_url: Some("https://example.com".to_string()),
+            reth_version: None,
+            components,
+        }
+    }
 
     fn test_manifest() -> SnapshotManifest {
         let mut components = BTreeMap::new();
@@ -1025,6 +1150,132 @@ mod tests {
         assert_eq!(urls.len(), 3);
         assert_eq!(urls[0], "https://example.com/transactions-0-499999.tar.zst");
         assert_eq!(urls[2], "https://example.com/transactions-1000000-1499999.tar.zst");
+    }
+
+    fn repair_targets(block: u64) -> BTreeMap<SnapshotComponentType, u64> {
+        [
+            SnapshotComponentType::Transactions,
+            SnapshotComponentType::Receipts,
+            SnapshotComponentType::AccountChangesets,
+            SnapshotComponentType::StorageChangesets,
+        ]
+        .into_iter()
+        .map(|ty| (ty, block))
+        .collect()
+    }
+
+    #[test]
+    fn repair_history_uses_each_configured_prune_mode() {
+        let mut config = Config::default();
+        config.prune.segments.bodies_history = Some(PruneMode::Before(42));
+        config.prune.segments.receipts = Some(PruneMode::Distance(10));
+        config.prune.segments.account_history = Some(PruneMode::Full);
+        config.prune.segments.storage_history = Some(PruneMode::Before(20_001));
+
+        let selections =
+            history_manifest().repair_history_selections(&config, &repair_targets(20_000)).unwrap();
+        assert_eq!(
+            selections.get(&SnapshotComponentType::Transactions),
+            Some(&ComponentSelection::Since(42))
+        );
+        // Distance(10) is a pruner configuration error that prunes nothing.
+        assert_eq!(
+            selections.get(&SnapshotComponentType::Receipts),
+            Some(&ComponentSelection::All)
+        );
+        assert_eq!(
+            selections.get(&SnapshotComponentType::AccountChangesets),
+            Some(&ComponentSelection::Distance(10_064))
+        );
+        // A `Before` cutoff past the snapshot tip has not pruned anything yet.
+        assert_eq!(
+            selections.get(&SnapshotComponentType::StorageChangesets),
+            Some(&ComponentSelection::All)
+        );
+    }
+
+    #[test]
+    fn repair_history_keeps_all_history_for_inactive_before_cutoff() {
+        let mut config = Config::default();
+        // At snapshot 20_000, `Before(19_000)` leaves the cutoff inside the 10_064-block
+        // minimum window, so the pruner has not removed anything yet.
+        config.prune.segments.bodies_history = Some(PruneMode::Before(19_000));
+
+        let selections =
+            history_manifest().repair_history_selections(&config, &repair_targets(20_000)).unwrap();
+        assert_eq!(
+            selections.get(&SnapshotComponentType::Transactions),
+            Some(&ComponentSelection::All)
+        );
+    }
+
+    #[test]
+    fn repair_history_honors_configured_minimum_pruning_distance() {
+        let mut config = Config::default();
+        config.prune.minimum_pruning_distance = 50_000;
+        config.prune.segments.bodies_history = Some(PruneMode::Full);
+        config.prune.segments.receipts = Some(PruneMode::Distance(20_000));
+
+        let selections =
+            history_manifest().repair_history_selections(&config, &repair_targets(20_000)).unwrap();
+        assert_eq!(
+            selections.get(&SnapshotComponentType::Transactions),
+            Some(&ComponentSelection::Distance(50_000))
+        );
+        // The raised minimum turns Distance(20_000) into a configuration error
+        // that prunes nothing.
+        assert_eq!(
+            selections.get(&SnapshotComponentType::Receipts),
+            Some(&ComponentSelection::All)
+        );
+    }
+
+    #[test]
+    fn repair_history_uses_component_stage_frontiers() {
+        let mut config = Config::default();
+        config.prune.minimum_pruning_distance = 64;
+        config.prune.segments.bodies_history = Some(PruneMode::Full);
+        config.prune.segments.receipts = Some(PruneMode::Full);
+
+        let mut targets = repair_targets(15_000);
+        targets.insert(SnapshotComponentType::Transactions, 18_000);
+        targets.insert(SnapshotComponentType::Receipts, 12_000);
+
+        let selections = history_manifest().repair_history_selections(&config, &targets).unwrap();
+        assert_eq!(
+            selections.get(&SnapshotComponentType::Transactions),
+            Some(&ComponentSelection::Since(7_936))
+        );
+        assert_eq!(
+            selections.get(&SnapshotComponentType::Receipts),
+            Some(&ComponentSelection::Since(11_936))
+        );
+    }
+
+    #[test]
+    fn repair_history_rejects_receipts_log_filter() {
+        let mut config = Config::default();
+        config.prune.segments.receipts_log_filter = ReceiptsLogPruneConfig(BTreeMap::from([(
+            alloy_primitives::Address::ZERO,
+            PruneMode::Full,
+        )]));
+
+        let err = history_manifest()
+            .repair_history_selections(&config, &repair_targets(20_000))
+            .err()
+            .unwrap();
+        assert!(err.to_string().contains("receipts_log_filter"));
+    }
+
+    #[test]
+    fn repair_history_requires_every_history_component() {
+        let config = Config::default();
+        let mut manifest = history_manifest();
+        manifest.components.remove(SnapshotComponentType::Receipts.key());
+
+        let err =
+            manifest.repair_history_selections(&config, &repair_targets(20_000)).err().unwrap();
+        assert!(err.to_string().contains("Receipts"));
     }
 
     #[test]
