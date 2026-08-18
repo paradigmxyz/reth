@@ -10,10 +10,14 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+mod catch_up;
 mod download;
 mod error;
 mod store;
 
+pub use catch_up::{BlockAccessListCatchUp, BlockAccessListCatchUpOutcome};
 pub use download::{StateDownloadOutcome, StateDownloader};
 pub use error::SnapSyncError;
-pub use store::{AccountRangeProgress, SnapGeneration, SnapPhase, SnapStateStore};
+pub use store::{
+    AccountRangeProgress, BlockAccessListProgress, SnapGeneration, SnapPhase, SnapStateStore,
+};

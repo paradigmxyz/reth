@@ -14,6 +14,27 @@ pub enum SnapSyncError {
     /// Locally assembled request bounds or inputs are inconsistent.
     #[error("invalid snap request: {0}")]
     InvalidRequest(String),
+    /// A BAL was delivered out of durable block order.
+    #[error("snap BAL block {actual} does not advance expected block {expected}")]
+    UnexpectedBlock {
+        /// Persisted next block.
+        expected: u64,
+        /// Delivered block.
+        actual: u64,
+    },
+    /// The generation anchor or a requested BAL header left the canonical chain.
+    #[error("canonical header {block_number} is {actual:?}, expected {expected}")]
+    CanonicalHeaderMismatch {
+        /// Header number being checked.
+        block_number: u64,
+        /// Header hash authenticated by the generation or response.
+        expected: B256,
+        /// Current canonical hash, if the header still exists.
+        actual: Option<B256>,
+    },
+    /// A required canonical header has not been downloaded yet.
+    #[error("canonical snap header {0} is unavailable")]
+    MissingHeader(u64),
     /// The database uses plain canonical state, which hashed Snap keys cannot populate.
     #[error("snap sync requires the v2 hashed-state layout")]
     UnsupportedStorageLayout,

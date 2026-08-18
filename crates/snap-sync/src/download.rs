@@ -351,13 +351,13 @@ pub enum StateDownloadOutcome {
 }
 
 /// Prioritizes follow-ups while preserving the unavailable-peer set.
-fn request_options(excluded: &[PeerId]) -> SnapRequestOptions {
+pub(crate) fn request_options(excluded: &[PeerId]) -> SnapRequestOptions {
     let priority = if excluded.is_empty() { Priority::Normal } else { Priority::High };
     SnapRequestOptions::new(priority).with_excluded_peers(excluded.to_vec())
 }
 
 /// Keeps exclusions stable and duplicate-free across retries.
-fn push_peer(peers: &mut Vec<PeerId>, peer_id: PeerId) {
+pub(crate) fn push_peer(peers: &mut Vec<PeerId>, peer_id: PeerId) {
     if !peers.contains(&peer_id) {
         peers.push(peer_id);
     }

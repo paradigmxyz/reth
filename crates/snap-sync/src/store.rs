@@ -4,16 +4,27 @@
 //! preventing partial hashed tables from being mistaken for canonical state.
 
 use crate::{error::db_error, SnapSyncError};
-use alloy_primitives::{Bytes, B256};
+use alloy_eip7928::bal::DecodedBal;
+use alloy_primitives::{keccak256, Bytes, B256};
 use alloy_rlp::{Decodable, Encodable};
 use reth_db_api::{tables, transaction::DbTxMut};
+use reth_primitives_traits::AlloyBlockHeader;
 use reth_provider::DatabaseProviderFactory;
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    DBProvider, StageCheckpointReader, StageCheckpointWriter, StateWriter, StorageSettingsCache,
+    AccountExtReader, DBProvider, HeaderProvider, StageCheckpointReader, StageCheckpointWriter,
+    StateWriter, StorageSettingsCache,
 };
-use reth_trie_common::HashedPostState;
+use reth_trie_common::{
+    bal::{deployed_bytecode, hashed_storage_changes, BalAccountState},
+    HashedPostState, HashedStorage,
+};
 use revm::{bytecode::Bytecode, database::states::StateChangeset};
+
+// Existing stage tooling can inspect the generation without a Snap-specific table.
+const SNAP_SYNC_STAGE: StageId = StageId::Other("SnapSync");
+// Versioning prevents an incompatible restart marker from being reinterpreted.
+const SNAP_GENERATION_VERSION: u8 = 1;
 
 /// Owns durable state-generation writes for one provider factory.
 #[derive(Debug)]
@@ -100,6 +111,150 @@ impl<'a, F> SnapStateStore<'a, F> {
         Self::save_generation(&provider, next_generation)?;
         provider.commit().map_err(db_error)?;
         Ok(next_generation)
+    }
+
+    /// Applies one authenticated BAL and advances its block cursor in the same transaction.
+    pub fn commit_block_access_list(
+        &self,
+        generation: SnapGeneration,
+        block_number: u64,
+        block_hash: B256,
+        block_access_list: &DecodedBal,
+        progress: BlockAccessListProgress,
+    ) -> Result<SnapGeneration, SnapSyncError>
+    where
+        F: DatabaseProviderFactory,
+        F::ProviderRW: AccountExtReader
+            + DBProvider
+            + HeaderProvider
+            + StageCheckpointReader
+            + StageCheckpointWriter
+            + StateWriter
+            + StorageSettingsCache,
+    {
+        generation.validate()?;
+        generation.ensure_phase(SnapPhase::BlockAccessLists)?;
+        let mut next_generation =
+            generation.with_block_access_list_progress(block_number, progress)?;
+        let provider = self.factory.database_provider_rw().map_err(db_error)?;
+        if !provider.cached_storage_settings().use_hashed_state() {
+            return Err(SnapSyncError::UnsupportedStorageLayout)
+        }
+        if Self::load_generation(&provider)? != Some(generation) {
+            return Err(SnapSyncError::StaleGeneration)
+        }
+        Self::canonical_header_fields(&provider, generation.target_block, generation.target_hash)?;
+        let (state_root, commitment) =
+            Self::canonical_header_fields(&provider, block_number, block_hash)?;
+        let commitment = commitment.ok_or_else(|| {
+            SnapSyncError::InvalidRequest(format!(
+                "canonical header {block_number} has no block access list commitment"
+            ))
+        })?;
+        block_access_list
+            .ensure_hash(commitment)
+            .map_err(|error| SnapSyncError::InvalidRequest(error.to_string()))?;
+        if progress == BlockAccessListProgress::Complete {
+            next_generation.target_block = block_number;
+            next_generation.target_hash = block_hash;
+            next_generation.state_root = state_root;
+        }
+        Self::apply_block_access_list(&provider, block_access_list)?;
+        Self::save_generation(&provider, next_generation)?;
+        provider.commit().map_err(db_error)?;
+        Ok(next_generation)
+    }
+
+    // Enters trie generation when the snapshot pivot already matches the catch-up target.
+    pub(crate) fn complete_block_access_lists(
+        &self,
+        generation: SnapGeneration,
+    ) -> Result<SnapGeneration, SnapSyncError>
+    where
+        F: DatabaseProviderFactory,
+        F::ProviderRW: DBProvider
+            + HeaderProvider
+            + StageCheckpointReader
+            + StageCheckpointWriter
+            + StorageSettingsCache,
+    {
+        generation.validate()?;
+        generation.ensure_phase(SnapPhase::BlockAccessLists)?;
+        let next_generation = generation.with_completed_block_access_lists();
+        let provider = self.factory.database_provider_rw().map_err(db_error)?;
+        if !provider.cached_storage_settings().use_hashed_state() {
+            return Err(SnapSyncError::UnsupportedStorageLayout)
+        }
+        if Self::load_generation(&provider)? != Some(generation) {
+            return Err(SnapSyncError::StaleGeneration)
+        }
+        Self::canonical_header_fields(&provider, generation.target_block, generation.target_hash)?;
+        Self::save_generation(&provider, next_generation)?;
+        provider.commit().map_err(db_error)?;
+        Ok(next_generation)
+    }
+
+    // Reads parent accounts in one cursor pass before assembling hashed BAL deltas.
+    fn apply_block_access_list(
+        provider: &(impl AccountExtReader + StateWriter),
+        block_access_list: &DecodedBal,
+    ) -> Result<(), SnapSyncError> {
+        let accounts = provider
+            .basic_accounts(block_access_list.as_bal().iter().map(|changes| changes.address))
+            .map_err(db_error)?;
+        let mut state = HashedPostState::with_capacity(accounts.len());
+        let mut contracts = Vec::new();
+
+        for (changes, (_, existing)) in block_access_list.as_bal().iter().zip(accounts) {
+            let hashed_address = keccak256(changes.address);
+            let account_fields = BalAccountState::from_changes(changes);
+            if !account_fields.is_empty() {
+                let account = account_fields.merge_onto(existing.as_ref());
+                state.accounts.insert(hashed_address, (!account.is_empty()).then_some(account));
+            }
+            if !changes.storage_changes.is_empty() {
+                let mut storage = HashedStorage::new(false);
+                storage.storage.extend(hashed_storage_changes(changes));
+                state.storages.insert(hashed_address, storage);
+            }
+            if let Some((hash, code)) = deployed_bytecode(changes) {
+                contracts.push((hash, Bytecode::new_raw(code.clone())));
+            }
+        }
+
+        if !state.is_empty() {
+            provider.write_hashed_state(&state.into_sorted()).map_err(db_error)?;
+        }
+        if !contracts.is_empty() {
+            provider
+                .write_state_changes(StateChangeset { contracts, ..Default::default() })
+                .map_err(db_error)?;
+        }
+        Ok(())
+    }
+
+    // Canonical checks keep a reorged pivot or in-flight BAL outside the durable generation.
+    fn canonical_header_fields(
+        provider: &impl HeaderProvider,
+        block_number: u64,
+        expected: B256,
+    ) -> Result<(B256, Option<B256>), SnapSyncError> {
+        let Some(header) = provider.sealed_header(block_number).map_err(db_error)? else {
+            return Err(SnapSyncError::CanonicalHeaderMismatch {
+                block_number,
+                expected,
+                actual: None,
+            })
+        };
+        let actual = header.hash();
+        if actual != expected {
+            return Err(SnapSyncError::CanonicalHeaderMismatch {
+                block_number,
+                expected,
+                actual: Some(actual),
+            })
+        }
+        Ok((header.state_root(), header.block_access_list_hash()))
     }
 
     // Stage progress keeps restart data visible to existing database tooling.
@@ -207,6 +362,35 @@ impl SnapGeneration {
         Ok(self)
     }
 
+    // A per-block cursor makes BAL application idempotent across restarts.
+    fn with_block_access_list_progress(
+        mut self,
+        block_number: u64,
+        progress: BlockAccessListProgress,
+    ) -> Result<Self, SnapSyncError> {
+        if block_number != self.next_block {
+            return Err(SnapSyncError::UnexpectedBlock {
+                expected: self.next_block,
+                actual: block_number,
+            })
+        }
+        self.next_block = block_number.checked_add(1).ok_or_else(|| {
+            SnapSyncError::InvalidGeneration(
+                "BAL cursor exceeds the block number space".to_string(),
+            )
+        })?;
+        if progress == BlockAccessListProgress::Complete {
+            self.phase = SnapPhase::Trie;
+        }
+        Ok(self)
+    }
+
+    // No-op catch-up still needs an explicit durable phase transition.
+    const fn with_completed_block_access_lists(mut self) -> Self {
+        self.phase = SnapPhase::Trie;
+        self
+    }
+
     // Unknown marker schemas are safer to restart than reinterpret.
     fn validate(&self) -> Result<(), SnapSyncError> {
         if self.version != SNAP_GENERATION_VERSION {
@@ -215,7 +399,10 @@ impl SnapGeneration {
                 self.version
             )))
         }
-        if self.next_block < self.target_block.saturating_add(1) {
+        let first_bal = self.target_block.checked_add(1).ok_or_else(|| {
+            SnapSyncError::InvalidGeneration("target block has no BAL successor".to_string())
+        })?;
+        if self.next_block < first_bal {
             return Err(SnapSyncError::InvalidGeneration(
                 "BAL cursor precedes the target".to_string(),
             ))
@@ -233,6 +420,15 @@ pub enum AccountRangeProgress {
         next_account: B256,
     },
     /// Account, storage, and bytecode download is complete.
+    Complete,
+}
+
+/// Restart position after applying an authenticated block access list.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BlockAccessListProgress {
+    /// More canonical blocks remain before trie generation.
+    More,
+    /// The catch-up target was applied.
     Complete,
 }
 
@@ -268,9 +464,6 @@ impl Decodable for SnapPhase {
         }
     }
 }
-
-const SNAP_SYNC_STAGE: StageId = StageId::Other("SnapSync");
-const SNAP_GENERATION_VERSION: u8 = 1;
 
 #[cfg(test)]
 mod tests {

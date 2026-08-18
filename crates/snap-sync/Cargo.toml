@@ -23,9 +23,10 @@ reth-provider.workspace = true
 reth-stages-types.workspace = true
 reth-storage-api.workspace = true
 reth-tasks.workspace = true
-reth-trie-common.workspace = true
+reth-trie-common = { workspace = true, features = ["eip7928"] }
 
 # alloy
+alloy-eip7928.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 
@@ -36,9 +37,11 @@ revm.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+alloy-consensus.workspace = true
 reth-db-api = { workspace = true, features = ["test-utils"] }
 reth-downloaders = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-static-file-types.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }
 
 [features]
