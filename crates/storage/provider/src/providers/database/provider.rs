@@ -798,7 +798,19 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     .iter()
                     .map(|block| block.trie_data.get().sorted.trie_updates.as_ref())
                     .collect::<Vec<_>>();
-                let merged_trie = TrieUpdatesSorted::disjointed_merge_batch(&batch, &mask);
+                // A whole-trie deletion cannot be filtered node-by-node. Fall back to the
+                // ordinary merge in that case; persisting the overwritten nodes is redundant but
+                // correct because the masking suffix is still applied by the in-memory overlay.
+                let contains_storage_wipe = batch.iter().chain(&mask).any(|updates| {
+                    updates.storage_tries_ref().values().any(|storage| storage.is_deleted)
+                });
+                let merged_trie = if contains_storage_wipe {
+                    TrieUpdatesSorted::merge_batch(
+                        state_trie_blocks.iter().rev().map(|block| block.trie_updates()),
+                    )
+                } else {
+                    Arc::new(TrieUpdatesSorted::disjointed_merge_batch(&batch, &mask))
+                };
                 if !merged_trie.is_empty() {
                     self.write_trie_updates_sorted(&merged_trie)?;
                 }
@@ -4856,6 +4868,72 @@ mod tests {
             .unwrap();
         assert_eq!(masked_entries.len(), 1);
         assert_eq!(masked_entries[0].1.nibbles.0, masked_storage_node);
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn test_save_blocks_merges_storage_wipe_in_multi_block_batch() {
+        use reth_trie::{
+            updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
+            BranchNodeCompact, HashedPostStateSorted,
+        };
+
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let mut test_block_builder = TestBlockBuilder::eth().with_state();
+        let genesis = test_block_builder.get_executed_blocks(0..1).next().unwrap();
+        let mut blocks: Vec<_> = test_block_builder.get_executed_blocks(1..4).collect();
+        let address = B256::with_last_byte(1);
+        let storage_path = Nibbles::from_nibbles([0x1, 0x2]);
+
+        let provider_rw = factory.provider_rw().unwrap();
+        save_genesis(&provider_rw, &genesis).unwrap();
+        provider_rw
+            .write_trie_updates_sorted(&TrieUpdatesSorted::new(
+                vec![],
+                B256Map::from_iter([(
+                    address,
+                    StorageTrieUpdatesSorted {
+                        is_deleted: false,
+                        storage_nodes: vec![(storage_path, Some(BranchNodeCompact::default()))],
+                    },
+                )]),
+            ))
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        let wipe = TrieUpdatesSorted::new(
+            vec![],
+            B256Map::from_iter([(
+                address,
+                StorageTrieUpdatesSorted { is_deleted: true, storage_nodes: vec![] },
+            )]),
+        );
+        let wipe_block = &blocks[2];
+        blocks[2] = ExecutedBlock::new(
+            Arc::clone(&wipe_block.recovered_block),
+            Arc::clone(&wipe_block.execution_output),
+            ComputedTrieData::new(Arc::new(HashedPostStateSorted::default()), Arc::new(wipe)),
+        );
+
+        let provider_rw = factory.provider_rw().unwrap();
+        let input = SaveBlocksInput::new(blocks, 0, 0, 3, 3);
+        provider_rw.save_blocks(&input).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        let checkpoint = provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
+        assert_eq!(checkpoint.block_number, 3);
+        let storage_entries = provider
+            .tx_ref()
+            .cursor_dup_read::<tables::StoragesTrie>()
+            .unwrap()
+            .walk_dup(Some(address), None)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert!(storage_entries.is_empty());
     }
 
     #[cfg(feature = "partial-persistence")]
