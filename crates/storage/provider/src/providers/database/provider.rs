@@ -774,6 +774,10 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // This reduces cursor open/close overhead from N calls to 1.
             if save_mode.with_state() && !state_trie_blocks.is_empty() {
                 let start = Instant::now();
+                // `disjointed_merge_batch` cannot represent a storage wipe, so a batch containing
+                // one falls back to the wipe-aware merge and forgoes mask filtering. Skipping the
+                // filter only costs redundant writes: the masking suffix stays in memory and is
+                // persisted by a later call, which overwrites whatever is written here.
                 let can_filter_hashed_state =
                     state_trie_blocks.iter().chain(state_trie_masking_blocks).all(|block| {
                         block
@@ -4762,7 +4766,10 @@ mod tests {
         let checkpoint = provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
         assert_eq!(checkpoint.block_number, 3);
 
-        let mut storage_trie = provider.tx_ref().cursor_dup_read::<tables::StoragesTrie>().unwrap();
+        // Storage v2 shares the `StoragesTrie` table but encodes subkeys packed, so the entries
+        // have to be read back through the packed view.
+        let mut storage_trie =
+            provider.tx_ref().cursor_dup_read::<reth_trie_db::PackedStoragesTrie>().unwrap();
         let entries = storage_trie
             .walk_dup(Some(trie_address), None)
             .unwrap()
@@ -4778,6 +4785,101 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
         assert!(entries.is_empty());
+    }
+
+    /// A trie wipe without a matching hashed-state wipe is the shape the serial state root
+    /// produces, because `TrieUpdates::finalize` marks every destroyed account deleted while
+    /// `HashedPostState::from_bundle_state` never sets `wiped`.
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn test_save_blocks_applies_trie_wipe_with_masking_suffix() {
+        use reth_trie::{
+            updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
+            BranchNodeCompact, ComputedTrieData, HashedPostStateSorted,
+        };
+
+        fn branch(mask: u16) -> BranchNodeCompact {
+            BranchNodeCompact::new(mask, 0, 0, vec![], None)
+        }
+
+        fn trie_data(
+            trie_updates: TrieUpdatesSorted,
+        ) -> (Arc<HashedPostStateSorted>, Arc<TrieUpdatesSorted>) {
+            (Arc::new(HashedPostStateSorted::default()), Arc::new(trie_updates))
+        }
+
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let mut test_block_builder = TestBlockBuilder::eth().with_state();
+        let genesis_base = test_block_builder.get_executed_blocks(0..1).next().unwrap();
+        let block_bases = test_block_builder.get_executed_blocks(1..3).collect::<Vec<_>>();
+
+        let wiped_account = B256::with_last_byte(1);
+        let stale_node = Nibbles::from_nibbles([0x1]);
+        let fresh_node = Nibbles::from_nibbles([0x2]);
+
+        let storage_trie = |is_deleted, node, value| {
+            TrieUpdatesSorted::new(
+                vec![],
+                B256Map::from_iter([(
+                    wiped_account,
+                    StorageTrieUpdatesSorted {
+                        is_deleted,
+                        storage_nodes: vec![(node, Some(branch(value)))],
+                    },
+                )]),
+            )
+        };
+
+        let (hashed_state, trie_updates) = trie_data(storage_trie(false, stale_node, 0b1111));
+        let genesis = ExecutedBlock::new(
+            Arc::clone(&genesis_base.recovered_block),
+            Arc::clone(&genesis_base.execution_output),
+            ComputedTrieData::new(hashed_state, trie_updates),
+        );
+
+        let provider_rw = factory.provider_rw().unwrap();
+        save_genesis(&provider_rw, &genesis).unwrap();
+        provider_rw.commit().unwrap();
+
+        // Block 1 is persisted and wipes the storage trie. Block 2 is the masking suffix and
+        // rewrites the same node, which is exactly what the mask filter would drop.
+        let (hashed_state, trie_updates) = trie_data(storage_trie(true, fresh_node, 0b1010));
+        let batch_block = ExecutedBlock::new(
+            Arc::clone(&block_bases[0].recovered_block),
+            Arc::clone(&block_bases[0].execution_output),
+            ComputedTrieData::new(hashed_state, trie_updates),
+        );
+        let (hashed_state, trie_updates) = trie_data(storage_trie(false, fresh_node, 0b0101));
+        let masking_block = ExecutedBlock::new(
+            Arc::clone(&block_bases[1].recovered_block),
+            Arc::clone(&block_bases[1].execution_output),
+            ComputedTrieData::new(hashed_state, trie_updates),
+        );
+
+        let provider_rw = factory.provider_rw().unwrap();
+        let input = SaveBlocksInput::new(vec![batch_block, masking_block], 0, 0, 2, 1);
+        provider_rw.save_blocks(&input).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        let checkpoint = provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
+        assert_eq!(checkpoint.block_number, 2);
+        assert_eq!(checkpoint.finish_stage_checkpoint().unwrap().partial_state_trie, Some(1));
+
+        let mut storage_trie_cursor =
+            provider.tx_ref().cursor_dup_read::<reth_trie_db::PackedStoragesTrie>().unwrap();
+        let entries = storage_trie_cursor
+            .walk_dup(Some(wiped_account), None)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        // The wipe removed the genesis node, and the wiping block's own node survived the mask.
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].1.nibbles.0, fresh_node);
+        assert_eq!(entries[0].1.node, branch(0b1010));
     }
 
     #[cfg(feature = "partial-persistence")]
