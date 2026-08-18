@@ -476,6 +476,23 @@ where
             return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into())
         }
 
+        // Match eth_simulateV1 / eth_callMany budgets: tracing is heavier per tx.
+        let max_call_many = self.eth_api().max_simulate_blocks() as usize;
+        if bundles.len() > max_call_many {
+            return Err(EthApiError::InvalidParams(format!(
+                "bundle count {} exceeds limit {max_call_many}",
+                bundles.len(),
+            ))
+            .into())
+        }
+        let total_txs: usize = bundles.iter().map(|b| b.transactions.len()).sum();
+        if total_txs > max_call_many {
+            return Err(EthApiError::InvalidParams(format!(
+                "transaction count {total_txs} exceeds limit {max_call_many}",
+            ))
+            .into())
+        }
+
         let StateContext { transaction_index, block_number } = state_context.unwrap_or_default();
         let transaction_index = transaction_index.unwrap_or_default();
 
