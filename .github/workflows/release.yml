@@ -152,6 +152,24 @@ jobs:
           cp -R LICENSES ./artifacts/LICENSES
           cp README.md ./artifacts/README.md
 
+      # A released binary has to run on a clean machine. The macOS runners have
+      # Homebrew present, so a dependency that resolves against a Homebrew dylib
+      # links fine here and then fails at launch for everyone else. Catch that
+      # before the asset is packaged rather than after it is published.
+      - name: Verify macOS binary is self-contained
+        if: runner.os == 'macOS'
+        run: |
+          bin="./artifacts/${{ matrix.build.binary }}"
+          otool -L "$bin"
+          foreign="$(otool -L "$bin" | tail -n +2 | awk '{print $1}' \
+            | grep -Ev '^(/usr/lib/|/System/Library/)' || true)"
+          if [ -n "$foreign" ]; then
+            echo "::error::release binary links libraries that are not part of macOS:"
+            echo "$foreign"
+            exit 1
+          fi
+        shell: bash
+
       - name: Configure GPG and create artifacts
         env:
           GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
