@@ -1,5 +1,5 @@
-//! Downloads and verifies snap/2 account ranges against
-//! [EIP-8189](https://eips.ethereum.org/EIPS/eip-8189) pivot state roots.
+//! Downloads and authenticates Snap state ranges for
+//! [EIP-8189](https://eips.ethereum.org/EIPS/eip-8189) state bootstrap.
 //!
 //! Persistence and range selection are handled by the snap sync orchestrator.
 
@@ -20,13 +20,15 @@ use std::{
 use tracing::debug;
 
 mod request;
+mod storage;
+#[cfg(test)]
+mod test_utils;
 
 use request::{SnapVerifier, VerifyingRequest};
+pub use storage::*;
 
-/// Downloads and verifies one account range against its requested state root.
-///
-/// Invalid responses penalize their peer and retry at high priority. Proof verification runs on
-/// the blocking pool.
+/// Downloads one account range and authenticates it off the async worker.
+/// Invalid responses penalize their peer before a bounded retry.
 #[derive(Debug)]
 pub struct AccountRangeDownloader<C: SnapClient>(VerifyingRequest<C, AccountRangeVerifier>);
 
@@ -58,6 +60,38 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         self.get_mut().0.poll_verified(cx)
     }
+}
+
+/// The result of an authenticated account-range request.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AccountRangeOutcome {
+    /// The peer does not have the requested state root and was not penalized.
+    Unavailable {
+        /// The peer that answered.
+        peer_id: PeerId,
+    },
+    /// An account range authenticated against the requested state root.
+    Verified(VerifiedAccountRange),
+}
+
+/// A decoded account range authenticated against a state root.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VerifiedAccountRange {
+    /// Accounts in strictly increasing hashed-key order.
+    pub accounts: Vec<(B256, TrieAccount)>,
+    /// Whether another request is needed to complete the requested interval.
+    /// A conservative `true` may cause one empty follow-up request.
+    pub has_more: bool,
+}
+
+/// An account-range request whose origin exceeds its limit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("account range origin {origin} exceeds limit {limit}")]
+pub struct InvalidAccountRange {
+    // Requested inclusive origin.
+    origin: B256,
+    // Requested inclusive limit.
+    limit: B256,
 }
 
 #[derive(Clone, Debug)]
@@ -96,28 +130,6 @@ impl SnapVerifier for AccountRangeVerifier {
 
         verify_account_range(&self.request, response).map(AccountRangeOutcome::Verified)
     }
-}
-
-/// The result of an authenticated account-range request.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum AccountRangeOutcome {
-    /// The peer does not have the requested state root and was not penalized.
-    Unavailable {
-        /// The peer that answered.
-        peer_id: PeerId,
-    },
-    /// An account range authenticated against the requested state root.
-    Verified(VerifiedAccountRange),
-}
-
-/// A decoded account range authenticated against a state root.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct VerifiedAccountRange {
-    /// Accounts in strictly increasing hashed-key order.
-    pub accounts: Vec<(B256, TrieAccount)>,
-    /// Whether another request is needed to complete the requested interval.
-    /// A conservative `true` may cause one empty follow-up request.
-    pub has_more: bool,
 }
 
 // Authenticate the full response before trimming its optional boundary account.
@@ -164,110 +176,18 @@ fn verify_proof(
     })
 }
 
-/// An account-range request whose origin exceeds its limit.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("account range origin {origin} exceeds limit {limit}")]
-pub struct InvalidAccountRange {
-    origin: B256,
-    limit: B256,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::snap::test_utils::TestSnapClient;
     use alloy_primitives::{Bytes, KECCAK256_EMPTY, U256};
-    use futures::future::{ready, Ready};
-    use reth_eth_wire_types::snap::{
-        AccountData, ByteCodesMessage, GetBlockAccessListsMessage, GetByteCodesMessage,
-        GetStorageRangesMessage,
-    };
-    use reth_network_p2p::{
-        download::DownloadClient, error::PeerRequestResult, priority::Priority,
-    };
+    use reth_eth_wire_types::snap::{AccountData, ByteCodesMessage};
+    use reth_network_p2p::{error::PeerRequestResult, priority::Priority};
     use reth_network_peers::WithPeerId;
     use reth_trie_common::{proof::ProofRetainer, HashBuilder, Nibbles};
-    use std::{
-        collections::VecDeque,
-        sync::{Arc, Mutex},
-    };
+    use std::sync::Arc;
 
     const MAX_HASH: B256 = B256::new([0xff; B256::len_bytes()]);
-
-    #[derive(Debug)]
-    struct TestSnapClient {
-        responses: Mutex<VecDeque<PeerRequestResult<SnapResponse>>>,
-        reported: Mutex<Vec<PeerId>>,
-        priorities: Mutex<Vec<Priority>>,
-    }
-
-    impl TestSnapClient {
-        fn new(responses: impl IntoIterator<Item = PeerRequestResult<SnapResponse>>) -> Self {
-            Self {
-                responses: Mutex::new(responses.into_iter().collect()),
-                reported: Mutex::new(Vec::new()),
-                priorities: Mutex::new(Vec::new()),
-            }
-        }
-
-        fn next(&self, priority: Priority) -> Ready<PeerRequestResult<SnapResponse>> {
-            self.priorities.lock().unwrap().push(priority);
-            ready(self.responses.lock().unwrap().pop_front().expect("test response available"))
-        }
-    }
-
-    impl DownloadClient for TestSnapClient {
-        fn report_bad_message(&self, peer_id: PeerId) {
-            self.reported.lock().unwrap().push(peer_id);
-        }
-
-        fn num_connected_peers(&self) -> usize {
-            1
-        }
-    }
-
-    impl SnapClient for TestSnapClient {
-        type Output = Ready<PeerRequestResult<SnapResponse>>;
-
-        fn get_account_range_with_priority(
-            &self,
-            _request: GetAccountRangeMessage,
-            priority: Priority,
-        ) -> Self::Output {
-            self.next(priority)
-        }
-
-        fn get_storage_ranges(&self, _request: GetStorageRangesMessage) -> Self::Output {
-            ready(Err(RequestError::UnsupportedCapability))
-        }
-
-        fn get_storage_ranges_with_priority(
-            &self,
-            _request: GetStorageRangesMessage,
-            _priority: Priority,
-        ) -> Self::Output {
-            ready(Err(RequestError::UnsupportedCapability))
-        }
-
-        fn get_byte_codes(&self, _request: GetByteCodesMessage) -> Self::Output {
-            ready(Err(RequestError::UnsupportedCapability))
-        }
-
-        fn get_byte_codes_with_priority(
-            &self,
-            _request: GetByteCodesMessage,
-            _priority: Priority,
-        ) -> Self::Output {
-            ready(Err(RequestError::UnsupportedCapability))
-        }
-
-        fn get_block_access_lists_with_priority(
-            &self,
-            _request: GetBlockAccessListsMessage,
-            _priority: Priority,
-        ) -> Self::Output {
-            ready(Err(RequestError::UnsupportedCapability))
-        }
-    }
 
     fn key(value: u64) -> B256 {
         B256::left_padding_from(&value.to_be_bytes())
@@ -349,8 +269,8 @@ mod tests {
             outcome,
             AccountRangeOutcome::Verified(VerifiedAccountRange { accounts, has_more: false })
         );
-        assert!(client.reported.lock().unwrap().is_empty());
-        assert_eq!(*client.priorities.lock().unwrap(), [Priority::Normal]);
+        assert!(client.reported().is_empty());
+        assert_eq!(*client.priorities(), [Priority::Normal]);
     }
 
     #[tokio::test]
@@ -376,8 +296,8 @@ mod tests {
         let outcome = downloader(Arc::clone(&client), request(root_hash)).unwrap().await.unwrap();
 
         assert!(matches!(outcome, AccountRangeOutcome::Verified(_)));
-        assert_eq!(*client.reported.lock().unwrap(), [bad_peer]);
-        assert_eq!(*client.priorities.lock().unwrap(), [Priority::Normal, Priority::High]);
+        assert_eq!(*client.reported(), [bad_peer]);
+        assert_eq!(*client.priorities(), [Priority::Normal, Priority::High]);
     }
 
     #[tokio::test]
@@ -393,7 +313,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(outcome, AccountRangeOutcome::Unavailable { peer_id: peer });
-        assert!(client.reported.lock().unwrap().is_empty());
+        assert!(client.reported().is_empty());
     }
 
     #[test]
@@ -407,7 +327,7 @@ mod tests {
             downloader(Arc::clone(&client), request),
             Err(InvalidAccountRange { .. })
         ));
-        assert!(client.priorities.lock().unwrap().is_empty());
+        assert!(client.priorities().is_empty());
     }
 
     #[tokio::test]
@@ -436,7 +356,7 @@ mod tests {
                 has_more: false,
             })
         );
-        assert!(client.reported.lock().unwrap().is_empty());
+        assert!(client.reported().is_empty());
     }
 
     #[tokio::test]
@@ -462,7 +382,7 @@ mod tests {
         let error = downloader(Arc::clone(&client), request).unwrap().await.unwrap_err();
 
         assert_eq!(error, RequestError::BadResponse);
-        assert_eq!(client.reported.lock().unwrap().len(), attempts);
+        assert_eq!(client.reported().len(), attempts);
     }
 
     #[tokio::test]
@@ -491,7 +411,7 @@ mod tests {
                 has_more: false,
             })
         );
-        assert!(client.reported.lock().unwrap().is_empty());
+        assert!(client.reported().is_empty());
     }
 
     // The first account after the limit proves an empty interval.
@@ -519,7 +439,7 @@ mod tests {
                 has_more: false,
             })
         );
-        assert!(client.reported.lock().unwrap().is_empty());
+        assert!(client.reported().is_empty());
     }
 
     // A proof that continues past the limit completes the requested interval.
@@ -594,11 +514,8 @@ mod tests {
 
         downloader(Arc::clone(&client), request(root_hash)).unwrap().await.unwrap();
 
-        assert!(client.reported.lock().unwrap().is_empty());
-        assert_eq!(
-            *client.priorities.lock().unwrap(),
-            [Priority::Normal, Priority::High, Priority::High]
-        );
+        assert!(client.reported().is_empty());
+        assert_eq!(*client.priorities(), [Priority::Normal, Priority::High, Priority::High]);
     }
 
     #[tokio::test]
@@ -618,10 +535,7 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(error, RequestError::BadResponse);
-        assert_eq!(*client.reported.lock().unwrap(), peers);
-        assert_eq!(
-            *client.priorities.lock().unwrap(),
-            [Priority::Normal, Priority::High, Priority::High]
-        );
+        assert_eq!(*client.reported(), peers);
+        assert_eq!(*client.priorities(), [Priority::Normal, Priority::High, Priority::High]);
     }
 }

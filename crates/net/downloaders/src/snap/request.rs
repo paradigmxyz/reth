@@ -165,3 +165,55 @@ struct VerificationTask<O> {
     peer_id: PeerId,
     fut: tokio::task::JoinHandle<Result<O, RequestError>>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::snap::test_utils::TestSnapClient;
+    use alloy_primitives::B256;
+    use futures::future::poll_fn;
+    use reth_eth_wire_types::snap::{AccountRangeMessage, GetAccountRangeMessage};
+    use reth_network_peers::WithPeerId;
+    use std::sync::Arc;
+
+    #[derive(Clone, Debug)]
+    struct PanickingVerifier;
+
+    impl SnapVerifier for PanickingVerifier {
+        type Request = GetAccountRangeMessage;
+        type Output = ();
+
+        fn verify(
+            self,
+            _peer_id: PeerId,
+            _response: SnapResponse,
+        ) -> Result<Self::Output, RequestError> {
+            panic!("local verifier panic")
+        }
+    }
+
+    #[tokio::test]
+    async fn verifier_panic_is_internal_without_peer_penalty() {
+        let peer_id = PeerId::random();
+        let response = SnapResponse::AccountRange(AccountRangeMessage {
+            request_id: 1,
+            accounts: Vec::new(),
+            proof: Vec::new(),
+        });
+        let client = Arc::new(TestSnapClient::new([Ok(WithPeerId::new(peer_id, response))]));
+        let request = GetAccountRangeMessage {
+            request_id: 1,
+            root_hash: B256::ZERO,
+            starting_hash: B256::ZERO,
+            limit_hash: B256::ZERO,
+            response_bytes: 0,
+        };
+        let mut verifying =
+            VerifyingRequest::new(Arc::clone(&client), request, PanickingVerifier, Runtime::test());
+
+        let error = poll_fn(|cx| verifying.poll_verified(cx)).await.unwrap_err();
+
+        assert_eq!(error, RequestError::Internal);
+        assert!(client.reported().is_empty());
+    }
+}
