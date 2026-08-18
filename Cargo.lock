@@ -294,11 +294,11 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.38.0"
-source = "git+https://github.com/alloy-rs/evm?rev=8293b9a45fbfdf4316ae965d292bf0b8eda226f3#8293b9a45fbfdf4316ae965d292bf0b8eda226f3"
+source = "git+https://github.com/alloy-rs/evm?rev=065a125cde3a5c69990323aecab97ce4ed048237#065a125cde3a5c69990323aecab97ce4ed048237"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
- "alloy-hardforks 0.4.7",
+ "alloy-hardforks 0.4.8",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
@@ -306,7 +306,7 @@ dependencies = [
  "auto_impl",
  "derive_more",
  "revm",
- "thiserror 2.0.20",
+ "thiserror 2.0.18",
  "tracing",
 ]
 
@@ -7418,7 +7418,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -8137,7 +8137,7 @@ source = "git+https://github.com/paradigmxyz/reth-core?rev=1207f7ff0534f6a7fe4d9
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.119",
+ "syn 2.0.118",
 ]
 
 [[package]]
@@ -9887,7 +9887,7 @@ dependencies = [
  "revm-state",
  "secp256k1 0.30.0",
  "serde",
- "thiserror 2.0.20",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -10398,7 +10398,7 @@ dependencies = [
  "alloy-rpc-types-eth",
  "alloy-signer",
  "reth-primitives-traits",
- "thiserror 2.0.20",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -11065,7 +11065,7 @@ dependencies = [
  "revm-primitives",
  "revm-state",
  "serde",
- "thiserror 2.0.20",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -11120,7 +11120,7 @@ dependencies = [
  "revm",
  "serde",
  "serde_json",
- "thiserror 2.0.20",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -11177,7 +11177,7 @@ version = "42.0.0"
 source = "git+https://github.com/bluealloy/revm?rev=0cc8b8a0b38e88864352b218a145dcfd0a54692d#0cc8b8a0b38e88864352b218a145dcfd0a54692d"
 dependencies = [
  "alloy-eip7928",
- "bitflags 2.13.1",
+ "bitflags 2.13.0",
  "nonmax",
  "revm-bytecode",
  "revm-primitives",
@@ -11239,7 +11239,7 @@ version = "0.1.0"
 source = "git+https://github.com/paradigmxyz/revmc?branch=glamsterdam-devnet-8#ec97a3f8b5d9f8c0f8f1a61255acd0064f1303ff"
 dependencies = [
  "alloy-primitives",
- "bitflags 2.13.1",
+ "bitflags 2.13.0",
  "bitvec",
  "derive_more",
  "either",
