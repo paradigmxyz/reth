@@ -6,6 +6,7 @@
 //! [`OrderedTrieRootEncodedBuilder`] when possible. When the channel closes, the task returns the
 //! computed root.
 
+use alloy_consensus::ReceiptWithBloom;
 use alloy_eips::Encodable2718;
 use alloy_primitives::{map::HashMap, Bloom, B256};
 use crossbeam_channel::Receiver;
@@ -15,6 +16,8 @@ use tokio::sync::oneshot;
 use tracing::debug_span;
 
 const RECEIPT_ENCODE_BUF_INITIAL_CAPACITY: usize = 512;
+const PARALLEL_BLOOM_RECEIPT_THRESHOLD: usize = 1024;
+const MAX_PARALLEL_BLOOM_WORKERS: usize = 4;
 
 /// Receipt with index, ready to be sent to the background task for encoding and trie building.
 #[derive(Debug, Clone)]
@@ -33,6 +36,20 @@ impl<R> IndexedReceipt<R> {
     }
 }
 
+#[derive(Debug)]
+struct BloomedReceipt<R> {
+    index: usize,
+    receipt: R,
+    bloom: Bloom,
+}
+
+impl<R> BloomedReceipt<R> {
+    #[inline]
+    const fn new(index: usize, receipt: R, bloom: Bloom) -> Self {
+        Self { index, receipt, bloom }
+    }
+}
+
 /// Handle for running the receipt root computation in a background task.
 ///
 /// This struct holds the channels needed to receive receipts and send the result.
@@ -45,7 +62,7 @@ pub struct ReceiptRootTaskHandle<R> {
     result_tx: oneshot::Sender<(B256, Bloom)>,
 }
 
-impl<R: Receipt> ReceiptRootTaskHandle<R> {
+impl<R: Receipt + Send> ReceiptRootTaskHandle<R> {
     /// Creates a new handle from the receipt receiver and result sender channels.
     pub const fn new(
         receipt_rx: Receiver<IndexedReceipt<R>>,
@@ -69,7 +86,6 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
     ///   the trie keys according to RLP encoding rules.
     pub fn run(self, receipts_len: impl Into<Option<usize>>) {
         let receipts_len = receipts_len.into();
-
         let _span = debug_span!(
             target: "engine::tree::payload_processor",
             "receipt_root",
@@ -77,33 +93,100 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
         )
         .entered();
 
+        if let Some(len) = receipts_len {
+            let worker_count = parallel_bloom_worker_count(len);
+            if worker_count > 1 {
+                return self.run_parallel_bloom(len, worker_count);
+            }
+        }
+
+        self.run_serial_bloom(receipts_len);
+    }
+
+    fn run_serial_bloom(self, receipts_len: Option<usize>) {
+        let result = Self::finish_bloomed_receipts(
+            self.receipt_rx.into_iter().map(|indexed_receipt| {
+                let bloom = *indexed_receipt.receipt.with_bloom_ref().bloom_ref();
+                BloomedReceipt::new(indexed_receipt.index, indexed_receipt.receipt, bloom)
+            }),
+            receipts_len,
+        );
+
+        if let Some(result) = result {
+            let _ = self.result_tx.send(result);
+        }
+    }
+
+    fn run_parallel_bloom(self, receipts_len: usize, worker_count: usize) {
+        let Self { receipt_rx, result_tx } = self;
+        let (bloomed_tx, bloomed_rx) = crossbeam_channel::bounded(worker_count * 4);
+
+        let result = std::thread::scope(|scope| {
+            for _ in 0..worker_count {
+                let receipt_rx = receipt_rx.clone();
+                let bloomed_tx = bloomed_tx.clone();
+
+                scope.spawn(move || {
+                    for indexed_receipt in receipt_rx {
+                        let bloom = *indexed_receipt.receipt.with_bloom_ref().bloom_ref();
+                        if bloomed_tx
+                            .send(BloomedReceipt::new(
+                                indexed_receipt.index,
+                                indexed_receipt.receipt,
+                                bloom,
+                            ))
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                });
+            }
+
+            drop(receipt_rx);
+            drop(bloomed_tx);
+
+            Self::finish_bloomed_receipts(bloomed_rx, Some(receipts_len))
+        });
+
+        if let Some(result) = result {
+            let _ = result_tx.send(result);
+        }
+    }
+
+    fn finish_bloomed_receipts(
+        receipts: impl IntoIterator<Item = BloomedReceipt<R>>,
+        receipts_len: Option<usize>,
+    ) -> Option<(B256, Bloom)> {
         let mut builder = OrderedTrieRootEncodedBuilder::new();
         let mut aggregated_bloom = Bloom::ZERO;
         let mut encode_buf = Vec::with_capacity(RECEIPT_ENCODE_BUF_INITIAL_CAPACITY);
         let mut next = 0usize;
         let mut pending = HashMap::new();
 
-        let mut push = |receipt: R| {
-            let receipt_with_bloom = receipt.with_bloom_ref();
-
+        let mut push = |receipt: R, bloom: Bloom| {
             encode_buf.clear();
+            let receipt_with_bloom = ReceiptWithBloom::new(&receipt, bloom);
             receipt_with_bloom.encode_2718(&mut encode_buf);
 
-            aggregated_bloom |= *receipt_with_bloom.bloom_ref();
+            aggregated_bloom |= bloom;
             builder.push_next(&encode_buf);
         };
 
-        for indexed_receipt in self.receipt_rx {
+        for indexed_receipt in receipts {
             if indexed_receipt.index == next {
-                push(indexed_receipt.receipt);
+                push(indexed_receipt.receipt, indexed_receipt.bloom);
                 next += 1;
 
-                while let Some(receipt) = pending.remove(&next) {
-                    push(receipt);
+                while let Some((receipt, bloom)) = pending.remove(&next) {
+                    push(receipt, bloom);
                     next += 1;
                 }
             } else {
-                pending.insert(indexed_receipt.index, indexed_receipt.receipt);
+                pending.insert(
+                    indexed_receipt.index,
+                    (indexed_receipt.receipt, indexed_receipt.bloom),
+                );
             }
         }
 
@@ -114,7 +197,7 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
                 received = next,
                 "Receipt root task received incomplete receipts, execution likely aborted"
             );
-            return;
+            return None;
         }
 
         if !pending.is_empty() {
@@ -124,11 +207,21 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
                 pending = pending.len(),
                 "Receipt root task received gapped receipts"
             );
-            return;
+            return None;
         }
 
-        let _ = self.result_tx.send((builder.finalize(), aggregated_bloom));
+        Some((builder.finalize(), aggregated_bloom))
     }
+}
+
+fn parallel_bloom_worker_count(receipts_len: usize) -> usize {
+    if receipts_len < PARALLEL_BLOOM_RECEIPT_THRESHOLD {
+        return 1;
+    }
+
+    std::thread::available_parallelism()
+        .map(|available| available.get().saturating_sub(1).clamp(1, MAX_PARALLEL_BLOOM_WORKERS))
+        .unwrap_or(1)
 }
 
 #[cfg(test)]
@@ -289,5 +382,43 @@ mod tests {
         let (root, _bloom) = result_rx.await.unwrap();
 
         assert_eq!(root, expected_root);
+    }
+
+    #[tokio::test]
+    async fn test_receipt_root_task_parallel_bloom_out_of_order() {
+        let receipt = Receipt {
+            tx_type: TxType::Eip1559,
+            cumulative_gas_used: 21000,
+            success: true,
+            logs: vec![Log {
+                address: Address::ZERO,
+                data: alloy_primitives::LogData::new_unchecked(vec![B256::ZERO], Bytes::new()),
+            }],
+        };
+        let receipts: Vec<Receipt> = vec![receipt; PARALLEL_BLOOM_RECEIPT_THRESHOLD + 8];
+
+        let receipts_with_bloom: Vec<_> = receipts.iter().map(|r| r.with_bloom_ref()).collect();
+        let expected_root = calculate_receipt_root(&receipts_with_bloom);
+        let expected_bloom =
+            receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom_ref());
+
+        let (tx, rx) = bounded(receipts.len());
+        let (result_tx, result_rx) = oneshot::channel();
+        let receipts_len = receipts.len();
+
+        let handle = ReceiptRootTaskHandle::new(rx, result_tx);
+        let join_handle =
+            tokio::task::spawn_blocking(move || handle.run_parallel_bloom(receipts_len, 2));
+
+        for (i, receipt) in receipts.into_iter().enumerate().rev() {
+            tx.send(IndexedReceipt::new(i, receipt)).unwrap();
+        }
+        drop(tx);
+
+        join_handle.await.unwrap();
+        let (root, bloom) = result_rx.await.unwrap();
+
+        assert_eq!(root, expected_root);
+        assert_eq!(bloom, expected_bloom);
     }
 }
