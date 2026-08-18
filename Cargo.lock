@@ -10250,6 +10250,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-snap-sync"
+version = "2.5.0"
+dependencies = [
+ "alloy-primitives",
+ "alloy-rlp",
+ "reth-db-api",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-stages-types",
+ "reth-storage-api",
+ "reth-trie-common",
+ "revm",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "reth-stages"
 version = "2.5.0"
 dependencies = [

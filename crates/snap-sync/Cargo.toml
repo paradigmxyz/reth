@@ -1,0 +1,38 @@
+[package]
+name = "reth-snap-sync"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "snap/2 state synchronization"
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-db-api.workspace = true
+reth-provider.workspace = true
+reth-stages-types.workspace = true
+reth-storage-api.workspace = true
+reth-trie-common.workspace = true
+
+# alloy
+alloy-primitives.workspace = true
+alloy-rlp.workspace = true
+
+# revm
+revm.workspace = true
+
+# misc
+thiserror.workspace = true
+
+[dev-dependencies]
+reth-db-api = { workspace = true, features = ["test-utils"] }
+reth-primitives-traits.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
+
+[features]
+default = []
