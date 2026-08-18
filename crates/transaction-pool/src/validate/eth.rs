@@ -821,25 +821,30 @@ where
                     }
                 }
                 EthBlobTransactionSidecar::Present(sidecar) => {
+                    let Some(sidecar_data) = sidecar.sidecar() else {
+                        return Err(InvalidPoolTransactionError::Eip4844(
+                            Eip4844PoolTransactionError::MissingEip4844BlobSidecar,
+                        ))
+                    };
                     let now = Instant::now();
 
                     // EIP-7594 sidecar version handling
                     if self.eip7594 {
                         // Standard Ethereum behavior
                         if self.fork_tracker.is_osaka_activated() {
-                            if sidecar.is_eip4844() {
+                            if sidecar_data.is_eip4844() {
                                 return Err(InvalidPoolTransactionError::Eip4844(
                                     Eip4844PoolTransactionError::UnexpectedEip4844SidecarAfterOsaka,
                                 ))
                             }
-                        } else if sidecar.is_eip7594() && !self.allow_7594_sidecars() {
+                        } else if sidecar_data.is_eip7594() && !self.allow_7594_sidecars() {
                             return Err(InvalidPoolTransactionError::Eip4844(
                                 Eip4844PoolTransactionError::UnexpectedEip7594SidecarBeforeOsaka,
                             ))
                         }
                     } else {
                         // EIP-7594 disabled: always reject v1 sidecars, accept v0
-                        if sidecar.is_eip7594() {
+                        if sidecar_data.is_eip7594() {
                             return Err(InvalidPoolTransactionError::Eip4844(
                                 Eip4844PoolTransactionError::Eip7594SidecarDisallowed,
                             ))
@@ -847,7 +852,9 @@ where
                     }
 
                     // validate the blob
-                    if let Err(err) = transaction.validate_blob(&sidecar, self.kzg_settings.get()) {
+                    if let Err(err) =
+                        transaction.validate_blob(sidecar_data, self.kzg_settings.get())
+                    {
                         return Err(InvalidPoolTransactionError::Eip4844(
                             Eip4844PoolTransactionError::InvalidEip4844Blob(err),
                         ))

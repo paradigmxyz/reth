@@ -1580,8 +1580,10 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
             // because the blob sidecar is not included in this transaction variant, mark it as
             // missing
             blob_sidecar = EthBlobTransactionSidecar::Missing;
-            // TODO: Initialize this with the actual mask once sparse sidecars are supported.
-            blob_cell_availability = Some(BlobCellAvailability::full());
+            // A transaction without a sidecar has no locally available extended cells. The
+            // availability is populated when a complete EIP-7594 sidecar is stored or when sparse
+            // cells are merged later.
+            blob_cell_availability = Some(BlobCellAvailability::empty());
         }
 
         Self { transaction, cost, encoded_length, blob_sidecar, blob_cell_availability }
@@ -1629,7 +1631,8 @@ impl PoolTransaction for EthPooledTransaction {
                 let tx = TransactionSigned::from(tx);
                 let tx = Recovered::new_unchecked(tx, signer);
                 let mut pooled = Self::new(tx, encoded_length);
-                if let Some(availability) = pooled.blob_cell_availability.clone() {
+                if pooled.blob_cell_availability.is_some() {
+                    let availability = BlobCellAvailability::for_sidecar(&blob);
                     pooled.blob_sidecar = EthBlobTransactionSidecar::Present(
                         PooledBlobSidecar::new(blob, availability),
                     );
@@ -1837,7 +1840,7 @@ impl EthBlobTransactionSidecar {
     /// Returns the blob sidecar if it is present
     pub const fn maybe_sidecar(&self) -> Option<&BlobTransactionSidecarVariant> {
         match self {
-            Self::Present(sidecar) => Some(sidecar.sidecar()),
+            Self::Present(sidecar) => sidecar.sidecar(),
             _ => None,
         }
     }
@@ -2109,7 +2112,7 @@ mod tests {
         assert!(pooled_tx.blob_cell_availability.is_some());
         assert_eq!(
             pooled_tx.blob_cell_availability().map(BlobCellAvailability::get),
-            Some(BlobCellMask::from_bits(u128::MAX))
+            Some(BlobCellMask::from_bits(0))
         );
         let expected_cost =
             U256::from(100) + U256::from(10 * 1000) + U256::from(5 * DATA_GAS_PER_BLOB);

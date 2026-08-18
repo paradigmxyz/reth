@@ -98,8 +98,9 @@ impl PartialEq for InMemoryBlobStoreInner {
 
 impl BlobStore for InMemoryBlobStore {
     fn insert(&self, tx: B256, data: PooledBlobSidecar) -> Result<(), BlobStoreError> {
+        let data = data.into_sidecar().ok_or(BlobStoreError::IncompleteSidecar(tx))?;
         let mut store = self.inner.store.write();
-        self.inner.size_tracker.add_size(insert_size(&mut store, tx, data.into_sidecar()));
+        self.inner.size_tracker.add_size(insert_size(&mut store, tx, data));
         self.inner.size_tracker.update_len(store.len());
         Ok(())
     }
@@ -108,10 +109,18 @@ impl BlobStore for InMemoryBlobStore {
         if txs.is_empty() {
             return Ok(())
         }
+        let txs = txs
+            .into_iter()
+            .map(|(tx, data)| {
+                data.into_sidecar()
+                    .map(|data| (tx, data))
+                    .ok_or(BlobStoreError::IncompleteSidecar(tx))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let mut store = self.inner.store.write();
         let mut total_add = 0;
         for (tx, data) in txs {
-            let add = insert_size(&mut store, tx, data.into_sidecar());
+            let add = insert_size(&mut store, tx, data);
             total_add += add;
         }
         self.inner.size_tracker.add_size(total_add);
