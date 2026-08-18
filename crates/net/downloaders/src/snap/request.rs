@@ -33,6 +33,8 @@ pub(super) struct VerifyingRequest<C: SnapClient, V: SnapVerifier> {
     fut: C::Output,
     verification: Option<VerificationTask<V::Output>>,
     excluded_peers: Vec<PeerId>,
+    // Preserves peer fault attribution if retries exhaust the remaining peers.
+    last_verification_error: Option<RequestError>,
     retries: u8,
 }
 
@@ -59,6 +61,7 @@ where
             fut,
             verification: None,
             excluded_peers,
+            last_verification_error: None,
             retries: 0,
         }
     }
@@ -92,8 +95,11 @@ where
                         return Poll::Ready(Err(error))
                     }
                 }
-                Err(RequestError::UnsupportedCapability) if !self.excluded_peers.is_empty() => {
-                    return Poll::Ready(Err(RequestError::BadResponse))
+                Err(RequestError::UnsupportedCapability) => {
+                    return Poll::Ready(Err(self
+                        .last_verification_error
+                        .clone()
+                        .unwrap_or(RequestError::UnsupportedCapability)))
                 }
                 Err(error) => return Poll::Ready(Err(error)),
             }
@@ -127,6 +133,7 @@ where
             Ok(Err(error)) => {
                 debug!(target: "downloaders::snap", ?peer_id, %error, "Invalid snap response");
                 self.client.report_bad_message(peer_id);
+                self.last_verification_error = Some(error.clone());
                 if !self.excluded_peers.contains(&peer_id) {
                     self.excluded_peers.push(peer_id);
                 }
@@ -155,6 +162,7 @@ where
             .field("verifier", &self.verifier)
             .field("verifying", &self.verification.is_some())
             .field("excluded_peers", &self.excluded_peers)
+            .field("last_verification_error", &self.last_verification_error)
             .field("retries", &self.retries)
             .finish_non_exhaustive()
     }
@@ -261,5 +269,29 @@ mod tests {
 
         assert_eq!(error, RequestError::Internal);
         assert!(client.reported().is_empty());
+    }
+
+    #[tokio::test]
+    async fn caller_exclusions_do_not_turn_unavailability_into_bad_response() {
+        let client = Arc::new(TestSnapClient::new(std::iter::empty()));
+        let request = GetAccountRangeMessage {
+            request_id: 1,
+            root_hash: B256::ZERO,
+            starting_hash: B256::ZERO,
+            limit_hash: B256::ZERO,
+            response_bytes: 0,
+        };
+        let options = SnapRequestOptions::default().with_excluded_peers(vec![PeerId::random()]);
+        let mut verifying = VerifyingRequest::new_with_options(
+            client,
+            request,
+            PanickingVerifier,
+            Runtime::test(),
+            options,
+        );
+
+        let error = poll_fn(|cx| verifying.poll_verified(cx)).await.unwrap_err();
+
+        assert_eq!(error, RequestError::UnsupportedCapability);
     }
 }
