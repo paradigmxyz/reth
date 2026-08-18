@@ -248,19 +248,48 @@ impl<H: NippyJarHeader> NippyJar<H> {
     }
 
     /// Deletes from disk this [`NippyJar`] alongside every satellite file.
+    ///
+    /// The config file is removed first so an interrupted delete cannot leave a loadable
+    /// half-jar. Remaining satellites are removed next; any leftovers can be finished by
+    /// [`Self::cleanup_orphaned_files`].
     pub fn delete(self) -> Result<(), NippyJarError> {
-        // TODO(joshie): ensure consistency on unexpected shutdown
+        let path = self.path.clone();
 
-        for path in [
-            self.data_path().into(),
-            self.index_path(),
-            self.offsets_path(),
-            self.config_path(),
-            self.changeset_offsets_path(),
+        // Config is the load key — remove it before satellites so a crash mid-delete cannot
+        // leave a jar that still opens via [`Self::load`].
+        let config_path = self.config_path();
+        if config_path.exists() {
+            debug!(target: "nippy-jar", ?config_path, "Removing config file.");
+            reth_fs_util::remove_file(&config_path)?;
+        }
+
+        Self::remove_satellite_files(&path)
+    }
+
+    /// Removes leftover satellite files when the jar config is already gone.
+    ///
+    /// Used to finish an interrupted [`Self::delete`] (config removed, satellites still present).
+    /// No-op if the config file still exists.
+    pub fn cleanup_orphaned_files(path: &Path) -> Result<(), NippyJarError> {
+        let config_path = path.with_extension(CONFIG_FILE_EXTENSION);
+        if config_path.exists() {
+            return Ok(())
+        }
+
+        Self::remove_satellite_files(path)
+    }
+
+    /// Removes data/index/offsets/changeset-offset satellite files for `path`.
+    fn remove_satellite_files(path: &Path) -> Result<(), NippyJarError> {
+        for satellite in [
+            path.to_path_buf(),
+            path.with_extension(INDEX_FILE_EXTENSION),
+            path.with_extension(OFFSETS_FILE_EXTENSION),
+            path.with_extension(CHANGESET_OFFSETS_FILE_EXTENSION),
         ] {
-            if path.exists() {
-                debug!(target: "nippy-jar", ?path, "Removing file.");
-                reth_fs_util::remove_file(path)?;
+            if satellite.exists() {
+                debug!(target: "nippy-jar", path = ?satellite, "Removing file.");
+                reth_fs_util::remove_file(satellite)?;
             }
         }
 
@@ -1092,5 +1121,80 @@ mod tests {
 
         // runs the consistency check.
         let _ = NippyJarWriter::new(nippy).unwrap();
+    }
+
+    #[test]
+    fn test_delete_removes_all_jar_files() {
+        let (col1, col2) = test_data(Some(1));
+        let num_rows = col1.len() as u64;
+        let file_path = tempfile::NamedTempFile::new().unwrap();
+
+        let jar = NippyJar::new_without_header(2, file_path.path())
+            .freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows)
+            .unwrap();
+
+        let data = jar.data_path().to_path_buf();
+        let config = jar.config_path();
+        let offsets = jar.offsets_path();
+        let index = jar.index_path();
+
+        assert!(data.exists());
+        assert!(config.exists());
+        assert!(offsets.exists());
+
+        jar.delete().unwrap();
+
+        assert!(!data.exists());
+        assert!(!config.exists());
+        assert!(!offsets.exists());
+        assert!(!index.exists());
+    }
+
+    #[test]
+    fn test_cleanup_orphaned_files_after_interrupted_delete() {
+        let (col1, col2) = test_data(Some(2));
+        let num_rows = col1.len() as u64;
+        let file_path = tempfile::NamedTempFile::new().unwrap();
+
+        let jar = NippyJar::new_without_header(2, file_path.path())
+            .freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows)
+            .unwrap();
+
+        let path = jar.data_path().to_path_buf();
+        let config = jar.config_path();
+        let offsets = jar.offsets_path();
+
+        // Simulate crash after config was removed but satellites remain.
+        std::fs::remove_file(&config).unwrap();
+        assert!(!config.exists());
+        assert!(path.exists());
+        assert!(offsets.exists());
+        assert!(NippyJar::<()>::load(&path).is_err());
+
+        NippyJar::<()>::cleanup_orphaned_files(&path).unwrap();
+
+        assert!(!path.exists());
+        assert!(!offsets.exists());
+        assert!(!config.exists());
+    }
+
+    #[test]
+    fn test_cleanup_orphaned_files_noop_when_config_present() {
+        let (col1, col2) = test_data(Some(3));
+        let num_rows = col1.len() as u64;
+        let file_path = tempfile::NamedTempFile::new().unwrap();
+
+        let jar = NippyJar::new_without_header(2, file_path.path())
+            .freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows)
+            .unwrap();
+
+        let path = jar.data_path().to_path_buf();
+        let config = jar.config_path();
+
+        NippyJar::<()>::cleanup_orphaned_files(&path).unwrap();
+
+        assert!(path.exists());
+        assert!(config.exists());
+        assert!(NippyJar::<()>::load(&path).is_ok());
     }
 }
