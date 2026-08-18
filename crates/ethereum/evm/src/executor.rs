@@ -312,7 +312,7 @@ where
             result,
         );
         let tx_gas_used = outcome.tx_gas_used();
-        let regular_gas_used = outcome.regular_gas_spent();
+        let regular_gas_used = outcome.execution_gas_spent();
         let state_gas_used = outcome.state_gas_spent();
         self.block_regular_gas_used = self.block_regular_gas_used.saturating_add(regular_gas_used);
         self.block_state_gas_used = self.block_state_gas_used.saturating_add(state_gas_used);
