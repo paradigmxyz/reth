@@ -14,6 +14,7 @@ mod catch_up;
 mod download;
 mod error;
 mod store;
+mod trie;
 
 pub use catch_up::{BlockAccessListCatchUp, BlockAccessListCatchUpOutcome};
 pub use download::{StateDownloadOutcome, StateDownloader};
@@ -21,3 +22,4 @@ pub use error::SnapSyncError;
 pub use store::{
     AccountRangeProgress, BlockAccessListProgress, SnapGeneration, SnapPhase, SnapStateStore,
 };
+pub use trie::TrieGenerator;

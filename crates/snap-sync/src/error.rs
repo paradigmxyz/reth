@@ -35,6 +35,27 @@ pub enum SnapSyncError {
     /// A required canonical header has not been downloaded yet.
     #[error("canonical snap header {0} is unavailable")]
     MissingHeader(u64),
+    /// The generation root no longer matches its canonical target header.
+    #[error("canonical state root at block {block_number} is {actual}, expected {expected}")]
+    CanonicalStateRootMismatch {
+        /// Target header number.
+        block_number: u64,
+        /// Root retained by the durable generation.
+        expected: B256,
+        /// Root currently committed by the header.
+        actual: B256,
+    },
+    /// Trie generation has not durably reached its target checkpoint.
+    #[error("snap trie checkpoint is {actual:?}, expected {expected}")]
+    TrieIncomplete {
+        /// Target generation block.
+        expected: u64,
+        /// Current Merkle stage block, if present.
+        actual: Option<u64>,
+    },
+    /// Reth's Merkle stage rejected the downloaded state.
+    #[error("snap trie generation failed: {0}")]
+    Trie(String),
     /// The database uses plain canonical state, which hashed Snap keys cannot populate.
     #[error("snap sync requires the v2 hashed-state layout")]
     UnsupportedStorageLayout,

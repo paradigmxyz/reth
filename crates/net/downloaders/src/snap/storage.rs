@@ -20,6 +20,7 @@ use std::{
 };
 use tracing::debug;
 
+// Keeps storage requests inclusive through the full trie keyspace.
 const MAX_HASH: B256 = B256::new([0xff; B256::len_bytes()]);
 
 /// Downloads storage ranges authenticated by a verified account range.

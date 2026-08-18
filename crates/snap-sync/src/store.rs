@@ -90,9 +90,7 @@ impl<'a, F> SnapStateStore<'a, F> {
         if !provider.cached_storage_settings().use_hashed_state() {
             return Err(SnapSyncError::UnsupportedStorageLayout)
         }
-        if Self::load_generation(&provider)? != Some(generation) {
-            return Err(SnapSyncError::StaleGeneration)
-        }
+        self.ensure_generation(&provider, generation)?;
 
         if !state.is_empty() {
             provider.write_hashed_state(&state.into_sorted()).map_err(db_error)?;
@@ -140,9 +138,7 @@ impl<'a, F> SnapStateStore<'a, F> {
         if !provider.cached_storage_settings().use_hashed_state() {
             return Err(SnapSyncError::UnsupportedStorageLayout)
         }
-        if Self::load_generation(&provider)? != Some(generation) {
-            return Err(SnapSyncError::StaleGeneration)
-        }
+        self.ensure_generation(&provider, generation)?;
         Self::canonical_header_fields(&provider, generation.target_block, generation.target_hash)?;
         let (state_root, commitment) =
             Self::canonical_header_fields(&provider, block_number, block_hash)?;
@@ -185,13 +181,57 @@ impl<'a, F> SnapStateStore<'a, F> {
         if !provider.cached_storage_settings().use_hashed_state() {
             return Err(SnapSyncError::UnsupportedStorageLayout)
         }
-        if Self::load_generation(&provider)? != Some(generation) {
-            return Err(SnapSyncError::StaleGeneration)
-        }
+        self.ensure_generation(&provider, generation)?;
         Self::canonical_header_fields(&provider, generation.target_block, generation.target_hash)?;
         Self::save_generation(&provider, next_generation)?;
         provider.commit().map_err(db_error)?;
         Ok(next_generation)
+    }
+
+    // Clears the restart marker only after the canonical root and Merkle checkpoint agree.
+    pub(crate) fn finish_generation(&self, generation: SnapGeneration) -> Result<(), SnapSyncError>
+    where
+        F: DatabaseProviderFactory,
+        F::ProviderRW: DBProvider
+            + HeaderProvider
+            + StageCheckpointReader
+            + StageCheckpointWriter
+            + StorageSettingsCache,
+    {
+        generation.validate()?;
+        generation.ensure_phase(SnapPhase::Trie)?;
+        let provider = self.factory.database_provider_rw().map_err(db_error)?;
+        if !provider.cached_storage_settings().use_hashed_state() {
+            return Err(SnapSyncError::UnsupportedStorageLayout)
+        }
+        self.ensure_generation(&provider, generation)?;
+        let (state_root, _) = Self::canonical_header_fields(
+            &provider,
+            generation.target_block,
+            generation.target_hash,
+        )?;
+        if state_root != generation.state_root {
+            return Err(SnapSyncError::CanonicalStateRootMismatch {
+                block_number: generation.target_block,
+                expected: generation.state_root,
+                actual: state_root,
+            })
+        }
+        let checkpoint = provider
+            .get_stage_checkpoint(StageId::MerkleExecute)
+            .map_err(db_error)?
+            .map(|checkpoint| checkpoint.block_number);
+        if checkpoint != Some(generation.target_block) {
+            return Err(SnapSyncError::TrieIncomplete {
+                expected: generation.target_block,
+                actual: checkpoint,
+            })
+        }
+        provider
+            .save_stage_checkpoint(SNAP_SYNC_STAGE, StageCheckpoint::new(generation.target_block))
+            .map_err(db_error)?;
+        provider.save_stage_checkpoint_progress(SNAP_SYNC_STAGE, Vec::new()).map_err(db_error)?;
+        provider.commit().map_err(db_error)
     }
 
     // Reads parent accounts in one cursor pass before assembling hashed BAL deltas.
@@ -285,6 +325,19 @@ impl<'a, F> SnapStateStore<'a, F> {
             .map_err(|error| SnapSyncError::InvalidGeneration(error.to_string()))?;
         generation.validate()?;
         Ok(Some(generation))
+    }
+
+    // Checking through the active transaction prevents stale work from crossing generations.
+    pub(crate) fn ensure_generation(
+        &self,
+        provider: &impl StageCheckpointReader,
+        generation: SnapGeneration,
+    ) -> Result<(), SnapSyncError> {
+        if Self::load_generation(provider)? == Some(generation) {
+            Ok(())
+        } else {
+            Err(SnapSyncError::StaleGeneration)
+        }
     }
 }
 

@@ -201,6 +201,7 @@ mod tests {
     use reth_trie_common::{proof::ProofRetainer, HashBuilder, Nibbles};
     use std::sync::Arc;
 
+    // Keeps test ranges aligned with the production trie keyspace boundary.
     const MAX_HASH: B256 = B256::new([0xff; B256::len_bytes()]);
 
     fn key(value: u64) -> B256 {
