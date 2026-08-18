@@ -18,7 +18,7 @@ use std::{
 
 /// A Snap client that answers requests from a scripted response queue.
 #[derive(Debug)]
-pub(crate) struct TestSnapClient {
+pub struct TestSnapClient {
     responses: Mutex<VecDeque<PeerRequestResult<SnapResponse>>>,
     reported: Mutex<Vec<PeerId>>,
     priorities: Mutex<Vec<Priority>>,
@@ -27,9 +27,7 @@ pub(crate) struct TestSnapClient {
 
 impl TestSnapClient {
     /// Creates a client that returns `responses` in request order.
-    pub(crate) fn new(
-        responses: impl IntoIterator<Item = PeerRequestResult<SnapResponse>>,
-    ) -> Self {
+    pub fn new(responses: impl IntoIterator<Item = PeerRequestResult<SnapResponse>>) -> Self {
         Self {
             responses: Mutex::new(responses.into_iter().collect()),
             reported: Mutex::new(Vec::new()),
@@ -39,17 +37,17 @@ impl TestSnapClient {
     }
 
     /// Returns peers reported for invalid messages.
-    pub(crate) fn reported(&self) -> MutexGuard<'_, Vec<PeerId>> {
+    pub fn reported(&self) -> MutexGuard<'_, Vec<PeerId>> {
         self.reported.lock().unwrap()
     }
 
     /// Returns request priorities in submission order.
-    pub(crate) fn priorities(&self) -> MutexGuard<'_, Vec<Priority>> {
+    pub fn priorities(&self) -> MutexGuard<'_, Vec<Priority>> {
         self.priorities.lock().unwrap()
     }
 
     /// Returns peer exclusions in submission order.
-    pub(crate) fn exclusions(&self) -> MutexGuard<'_, Vec<Vec<PeerId>>> {
+    pub fn exclusions(&self) -> MutexGuard<'_, Vec<Vec<PeerId>>> {
         self.exclusions.lock().unwrap()
     }
 

@@ -10,8 +10,10 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+mod download;
 mod error;
 mod store;
 
+pub use download::{StateDownloadOutcome, StateDownloader};
 pub use error::SnapSyncError;
 pub use store::{AccountRangeProgress, SnapGeneration, SnapPhase, SnapStateStore};

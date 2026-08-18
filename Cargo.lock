@@ -10256,13 +10256,19 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "reth-db-api",
+ "reth-downloaders",
+ "reth-eth-wire-types",
+ "reth-network-p2p",
+ "reth-network-peers",
  "reth-primitives-traits",
  "reth-provider",
  "reth-stages-types",
  "reth-storage-api",
+ "reth-tasks",
  "reth-trie-common",
  "revm",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

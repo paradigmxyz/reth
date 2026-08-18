@@ -23,8 +23,8 @@ mod block_access_list;
 mod bytecode;
 mod request;
 mod storage;
-#[cfg(test)]
-mod test_utils;
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils;
 
 pub use block_access_list::*;
 pub use bytecode::*;

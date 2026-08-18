@@ -8,6 +8,12 @@ use alloy_primitives::B256;
 /// Error returned while assembling a Snap state generation.
 #[derive(Debug, thiserror::Error)]
 pub enum SnapSyncError {
+    /// No eligible peer can currently serve the requested Snap data.
+    #[error(transparent)]
+    Request(#[from] reth_network_p2p::error::RequestError),
+    /// Locally assembled request bounds or inputs are inconsistent.
+    #[error("invalid snap request: {0}")]
+    InvalidRequest(String),
     /// The database uses plain canonical state, which hashed Snap keys cannot populate.
     #[error("snap sync requires the v2 hashed-state layout")]
     UnsupportedStorageLayout,
