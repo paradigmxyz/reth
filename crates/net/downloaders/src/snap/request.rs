@@ -5,7 +5,8 @@
 
 use futures::FutureExt;
 use reth_eth_wire_types::snap::{
-    GetAccountRangeMessage, GetByteCodesMessage, GetStorageRangesMessage, SnapProtocolMessage,
+    GetAccountRangeMessage, GetBlockAccessListsMessage, GetByteCodesMessage,
+    GetStorageRangesMessage, SnapProtocolMessage,
 };
 use reth_network_p2p::{
     error::RequestError,
@@ -173,6 +174,12 @@ impl SnapRequest for GetStorageRangesMessage {
 impl SnapRequest for GetByteCodesMessage {
     fn send<C: SnapClient>(&self, client: &C, options: SnapRequestOptions) -> C::Output {
         client.request_snap(SnapProtocolMessage::GetByteCodes(self.clone()), options)
+    }
+}
+
+impl SnapRequest for GetBlockAccessListsMessage {
+    fn send<C: SnapClient>(&self, client: &C, options: SnapRequestOptions) -> C::Output {
+        client.request_snap(SnapProtocolMessage::GetBlockAccessLists(self.clone()), options)
     }
 }
 
