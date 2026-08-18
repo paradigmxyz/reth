@@ -709,7 +709,7 @@ revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "0cc8b8a0b
 revm-precompile = { git = "https://github.com/bluealloy/revm", rev = "0cc8b8a0b38e88864352b218a145dcfd0a54692d" }
 revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "0cc8b8a0b38e88864352b218a145dcfd0a54692d" }
 revm-state = { git = "https://github.com/bluealloy/revm", rev = "0cc8b8a0b38e88864352b218a145dcfd0a54692d" }
-alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "8293b9a45fbfdf4316ae965d292bf0b8eda226f3" }
+alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "065a125cde3a5c69990323aecab97ce4ed048237" }
 reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "1207f7ff0534f6a7fe4d9661ea20d070b67d9c8b" }
 reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "1207f7ff0534f6a7fe4d9661ea20d070b67d9c8b" }
 reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "1207f7ff0534f6a7fe4d9661ea20d070b67d9c8b" }
