@@ -8,6 +8,7 @@ use crate::{
     RpcTransaction,
 };
 use alloy_consensus::{
+    constants::EIP4844_TX_TYPE_ID,
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
     BlockHeader, Transaction,
 };
@@ -87,7 +88,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
         async move {
             let max_bytes = self.transactions_config().max_bytes;
-            if tx.len() > max_bytes {
+            // Blob transaction network encodings include the sidecar. The pool validator applies
+            // this limit to the executable transaction data after decoding instead.
+            let is_eip4844 = tx.first().copied() == Some(EIP4844_TX_TYPE_ID);
+            if tx.len() > max_bytes && !is_eip4844 {
                 let err =
                     InvalidPoolTransactionError::OversizedData { size: tx.len(), limit: max_bytes };
                 return Err(Self::Error::from_eth_err(EthApiError::PoolError(err.into())));

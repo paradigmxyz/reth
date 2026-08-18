@@ -1,4 +1,5 @@
 use crate::utils::{eth_payload_attributes, eth_payload_attributes_amsterdam};
+use alloy_consensus::constants::EIP4844_TX_TYPE_ID;
 use alloy_eips::{eip2718::Encodable2718, eip7910::EthConfig, BlockNumberOrTag};
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, Bytes, B256, U256};
@@ -16,7 +17,10 @@ use alloy_rpc_types_engine::{
 };
 use alloy_rpc_types_eth::{error::EthRpcErrorCode, TransactionRequest};
 use alloy_rpc_types_trace::geth::{ChainBlockTraceResult, GethDebugTracingOptions};
-use jsonrpsee::core::client::{ClientT, Subscription, SubscriptionClientT};
+use jsonrpsee::{
+    core::client::{ClientT, Subscription, SubscriptionClientT},
+    types::error::ErrorCode,
+};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::{ChainSpecBuilder, EthChainSpec, MAINNET};
 use reth_e2e_test_utils::{setup_engine, E2ETestSetupBuilder};
@@ -32,7 +36,7 @@ use reth_primitives_traits::Block as _;
 use reth_rpc_api::servers::AdminApiServer;
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::Runtime;
-use reth_transaction_pool::error::InvalidPoolTransactionError;
+use reth_transaction_pool::error::{InvalidPoolTransactionError, RawPoolTransactionError};
 use std::{
     net::{IpAddr, Ipv4Addr},
     sync::Arc,
@@ -600,6 +604,21 @@ async fn test_send_raw_transaction_rejects_oversized_bytes() -> eyre::Result<()>
         InvalidPoolTransactionError::OversizedData { size: raw_tx.len(), limit: MAX_BYTES };
     assert_eq!(err.code(), EthRpcErrorCode::InvalidInput.code());
     assert_eq!(err.message(), expected.to_string());
+
+    let mut raw_blob_tx = vec![0; MAX_BYTES + 1];
+    raw_blob_tx[0] = EIP4844_TX_TYPE_ID;
+    let err = client
+        .request::<B256, _>(
+            "eth_sendRawTransaction",
+            jsonrpsee::rpc_params![Bytes::from(raw_blob_tx)],
+        )
+        .await
+        .unwrap_err();
+    let jsonrpsee::core::client::Error::Call(err) = err else {
+        panic!("expected an invalid params error object, got {err:?}")
+    };
+    assert_eq!(err.code(), ErrorCode::InvalidParams.code());
+    assert_eq!(err.message(), RawPoolTransactionError::FailedToDecodeSignedTransaction.to_string());
 
     Ok(())
 }
