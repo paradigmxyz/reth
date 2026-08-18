@@ -36,6 +36,10 @@ pub use constants::*;
 mod account;
 pub use account::TrieAccount;
 
+/// EIP-7928 post-state interpretation.
+#[cfg(feature = "eip7928")]
+pub mod bal;
+
 /// V2 proof targets and chunking.
 pub mod target_v2;
 pub use target_v2::{
