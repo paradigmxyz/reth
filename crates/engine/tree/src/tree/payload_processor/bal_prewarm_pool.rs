@@ -1,3 +1,5 @@
+//! BAL read-set prewarming pool.
+
 use alloy_primitives::{Address, StorageKey};
 use reth_execution_cache::{CachedStateProvider, ExecutionCache, TxPoolPrewarmCacheSnapshot};
 use reth_provider::{
@@ -15,7 +17,7 @@ use tracing::trace;
 
 /// Builds a fresh `StateProviderBox` over the block's parent state. Type-erased so the pool is not
 /// generic over the provider factory; each worker builds its own per block.
-type BuildProviderFn = dyn Fn() -> ProviderResult<StateProviderBox> + Send + Sync;
+pub type BuildProviderFn = dyn Fn() -> ProviderResult<StateProviderBox> + Send + Sync;
 
 /// A single warm request: a whole account (basic account + its bytecode) or one storage slot.
 enum PrewarmTarget {
@@ -40,7 +42,7 @@ enum PrewarmMsg {
 
 /// Long-lived pool of blocking threads that warm the BAL read-set into the shared execution cache.
 #[derive(Debug)]
-pub(crate) struct BalPrewarmPool {
+pub struct BalPrewarmPool {
     /// One queue per worker. `BeginBlock`/`EndBlock` are broadcast to all; `Warm`s round-robin.
     workers: Vec<crossbeam_channel::Sender<PrewarmMsg>>,
     /// Round-robin cursor for distributing warm requests across workers.
@@ -51,7 +53,7 @@ pub(crate) struct BalPrewarmPool {
 impl BalPrewarmPool {
     /// Spawns `num_threads` long-lived blocking worker threads. Owned by the
     /// [`PayloadProcessor`](super::PayloadProcessor); the threads exit when the pool is dropped.
-    pub(crate) fn new(num_threads: usize) -> Arc<Self> {
+    pub fn new(num_threads: usize) -> Arc<Self> {
         let mut workers = Vec::with_capacity(num_threads);
         let mut handles = Vec::with_capacity(num_threads);
         for i in 0..num_threads {
@@ -70,7 +72,7 @@ impl BalPrewarmPool {
 
     /// Begins a block: hands every worker the provider builder and shared cache so each opens its
     /// own read txn over the parent state. Pair with [`end_block`](Self::end_block).
-    pub(crate) fn begin_block(
+    pub fn begin_block(
         &self,
         build: Arc<BuildProviderFn>,
         caches: ExecutionCache,
@@ -86,12 +88,12 @@ impl BalPrewarmPool {
     }
 
     /// Fire-and-forget: warm an account (basic account + bytecode) on some worker.
-    pub(crate) fn warm_account(&self, addr: Address) {
+    pub fn warm_account(&self, addr: Address) {
         self.send_warm(PrewarmTarget::Account(addr));
     }
 
     /// Fire-and-forget: warm one storage slot on some worker.
-    pub(crate) fn warm_storage(&self, addr: Address, slot: StorageKey) {
+    pub fn warm_storage(&self, addr: Address, slot: StorageKey) {
         self.send_warm(PrewarmTarget::Storage(addr, slot));
     }
 
@@ -99,7 +101,7 @@ impl BalPrewarmPool {
     /// requests queued ahead of this message.
     ///
     /// Blocks until all workers processed the end block message.
-    pub(crate) fn end_block(&self) {
+    pub fn end_block(&self) {
         let (tx, rx) = oneshot::channel();
         let tx = Arc::new(SendOnDrop { sender: Some(tx) });
 
@@ -137,7 +139,7 @@ impl BalPrewarmPool {
 /// time to finish is 312.5ms at QD=32 and 156.26ms at QD=64.
 ///
 /// This should explain why this particular value is picked.
-pub(crate) const DEFAULT_BAL_PREWARM_THREADS: usize = 128;
+pub const DEFAULT_BAL_PREWARM_THREADS: usize = 128;
 
 fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
     // The provider (and its MDBX read txn) held for the current block, between `BeginBlock` and
