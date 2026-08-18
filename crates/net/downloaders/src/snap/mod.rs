@@ -4,11 +4,10 @@
 //! Persistence and range selection are handled by the snap sync orchestrator.
 
 use alloy_primitives::B256;
-use futures::{Future, FutureExt};
+use futures::Future;
 use reth_eth_wire_types::snap::{AccountRangeMessage, GetAccountRangeMessage};
 use reth_network_p2p::{
-    error::{PeerRequestResult, RequestError},
-    priority::Priority,
+    error::RequestError,
     snap::client::{SnapClient, SnapResponse},
 };
 use reth_network_peers::PeerId;
@@ -16,25 +15,20 @@ use reth_tasks::Runtime;
 use reth_trie_common::{range_proof::verify_range_proof, TrieAccount, EMPTY_ROOT_HASH};
 use std::{
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll},
 };
 use tracing::debug;
 
-const MAX_RETRIES: u8 = 2;
+mod request;
+
+use request::{SnapVerifier, VerifyingRequest};
 
 /// Downloads and verifies one account range against its requested state root.
 ///
 /// Invalid responses penalize their peer and retry at high priority. Proof verification runs on
 /// the blocking pool.
 #[derive(Debug)]
-pub struct AccountRangeDownloader<C: SnapClient> {
-    client: C,
-    runtime: Runtime,
-    request: GetAccountRangeMessage,
-    fut: C::Output,
-    verification: Option<VerificationTask>,
-    retries: u8,
-}
+pub struct AccountRangeDownloader<C: SnapClient>(VerifyingRequest<C, AccountRangeVerifier>);
 
 impl<C: SnapClient> AccountRangeDownloader<C> {
     /// Creates a downloader using `runtime` for proof verification and submits the initial request.
@@ -50,51 +44,32 @@ impl<C: SnapClient> AccountRangeDownloader<C> {
                 limit: request.limit_hash,
             })
         }
-        let fut = client.get_account_range(request.clone());
-        Ok(Self { client, runtime, request, fut, verification: None, retries: 0 })
+        let verifier = AccountRangeVerifier { request: request.clone() };
+        Ok(Self(VerifyingRequest::new(client, request, verifier, runtime)))
     }
+}
 
-    // Raise retry priority so transient failures cannot leave range progress behind new work.
-    fn retry(&mut self) -> bool {
-        if self.retries >= MAX_RETRIES {
-            return false
-        }
-        self.retries += 1;
-        self.fut =
-            self.client.get_account_range_with_priority(self.request.clone(), Priority::High);
-        true
+impl<C> Future for AccountRangeDownloader<C>
+where
+    C: SnapClient + Unpin,
+{
+    type Output = Result<AccountRangeOutcome, RequestError>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.get_mut().0.poll_verified(cx)
     }
+}
 
-    // Verify peer-controlled proofs off the async worker while retaining peer attribution.
-    fn start_verification(
-        &mut self,
-        peer_id: PeerId,
-        response: SnapResponse,
-    ) -> Result<Option<AccountRangeOutcome>, RequestError> {
-        let response = self.account_range_response(response)?;
+#[derive(Clone, Debug)]
+struct AccountRangeVerifier {
+    request: GetAccountRangeMessage,
+}
 
-        if response.accounts.is_empty() && response.proof.is_empty() {
-            return if self.request.root_hash == EMPTY_ROOT_HASH {
-                Ok(Some(AccountRangeOutcome::Verified(VerifiedAccountRange {
-                    accounts: Vec::new(),
-                    has_more: false,
-                })))
-            } else {
-                Ok(Some(AccountRangeOutcome::Unavailable { peer_id }))
-            }
-        }
+impl SnapVerifier for AccountRangeVerifier {
+    type Request = GetAccountRangeMessage;
+    type Output = AccountRangeOutcome;
 
-        let request = self.request.clone();
-        let fut = self.runtime.spawn_blocking(move || verify_account_range(&request, response));
-        self.verification = Some(VerificationTask { peer_id, fut });
-        Ok(None)
-    }
-
-    // Bind replies to the expected request before trusting peer-supplied data.
-    fn account_range_response(
-        &self,
-        response: SnapResponse,
-    ) -> Result<AccountRangeMessage, RequestError> {
+    fn verify(self, peer_id: PeerId, response: SnapResponse) -> Result<Self::Output, RequestError> {
         let SnapResponse::AccountRange(response) = response else {
             debug!(target: "downloaders::snap", "Expected account range response");
             return Err(RequestError::BadResponse)
@@ -108,87 +83,18 @@ impl<C: SnapClient> AccountRangeDownloader<C> {
             );
             return Err(RequestError::BadResponse)
         }
-        Ok(response)
-    }
-
-    // Keep validation and retry accounting together so peers are penalized exactly once.
-    fn handle_response(
-        &mut self,
-        response: PeerRequestResult<SnapResponse>,
-    ) -> Result<Option<AccountRangeOutcome>, RequestError> {
-        match response {
-            Ok(response) => {
-                let (peer_id, response) = response.split();
-                match self.start_verification(peer_id, response) {
-                    Ok(outcome) => Ok(outcome),
-                    Err(error) => {
-                        debug!(target: "downloaders::snap", ?peer_id, %error, "Invalid account range response");
-                        self.client.report_bad_message(peer_id);
-                        self.retry().then_some(None).ok_or(error)
-                    }
-                }
-            }
-            // A wrong wire response is already penalized by the session.
-            Err(error) if error.is_retryable() || error == RequestError::BadResponse => {
-                debug!(target: "downloaders::snap", %error, "Account range request failed, retrying");
-                self.retry().then_some(None).ok_or(error)
-            }
-            Err(error) => Err(error),
-        }
-    }
-
-    // Preserve peer attribution until blocking verification finishes.
-    fn poll_verification(
-        &mut self,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<AccountRangeOutcome>, RequestError>> {
-        let verification = self.verification.as_mut().expect("verification task is present");
-        let result = ready!(verification.fut.poll_unpin(cx));
-        let peer_id = verification.peer_id;
-        self.verification = None;
-
-        match result {
-            Ok(Ok(range)) => Poll::Ready(Ok(Some(AccountRangeOutcome::Verified(range)))),
-            Ok(Err(error)) => {
-                debug!(target: "downloaders::snap", ?peer_id, %error, "Invalid account range response");
-                self.client.report_bad_message(peer_id);
-                Poll::Ready(self.retry().then_some(None).ok_or(error))
-            }
-            // A panic or runtime shutdown is local and must not be mistaken for a peer failure.
-            Err(error) => {
-                debug!(target: "downloaders::snap", %error, "Account range verification task failed");
-                Poll::Ready(Err(RequestError::Internal))
+        if response.accounts.is_empty() && response.proof.is_empty() {
+            return if self.request.root_hash == EMPTY_ROOT_HASH {
+                Ok(AccountRangeOutcome::Verified(VerifiedAccountRange {
+                    accounts: Vec::new(),
+                    has_more: false,
+                }))
+            } else {
+                Ok(AccountRangeOutcome::Unavailable { peer_id })
             }
         }
-    }
-}
 
-impl<C> Future for AccountRangeDownloader<C>
-where
-    C: SnapClient + Unpin + 'static,
-{
-    type Output = Result<AccountRangeOutcome, RequestError>;
-
-    // Finish an active verification before accepting another response.
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.get_mut();
-
-        loop {
-            if this.verification.is_some() {
-                match ready!(this.poll_verification(cx)) {
-                    Ok(Some(outcome)) => return Poll::Ready(Ok(outcome)),
-                    Ok(None) => {}
-                    Err(error) => return Poll::Ready(Err(error)),
-                }
-            }
-
-            let response = ready!(this.fut.poll_unpin(cx));
-            match this.handle_response(response) {
-                Ok(Some(outcome)) => return Poll::Ready(Ok(outcome)),
-                Ok(None) => {}
-                Err(error) => return Poll::Ready(Err(error)),
-            }
-        }
+        verify_account_range(&self.request, response).map(AccountRangeOutcome::Verified)
     }
 }
 
@@ -204,26 +110,13 @@ pub enum AccountRangeOutcome {
     Verified(VerifiedAccountRange),
 }
 
-// Couples blocking proof work with its responder so failures remain attributable.
-#[derive(Debug)]
-struct VerificationTask {
-    // Identifies the responder to penalize if verification rejects the range.
-    peer_id: PeerId,
-    // Carries the verified result back without blocking the async worker.
-    fut: tokio::task::JoinHandle<Result<VerifiedAccountRange, RequestError>>,
-}
-
 /// A decoded account range authenticated against a state root.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VerifiedAccountRange {
     /// Accounts in strictly increasing hashed-key order.
     pub accounts: Vec<(B256, TrieAccount)>,
     /// Whether another request is needed to complete the requested interval.
-    ///
-    /// Conservative in the safe direction. A right-side subtree the proof left unexpanded is only
-    /// known by its prefix, so the next key is bounded by that prefix zero-filled, which can fall
-    /// inside the requested interval when the real key does not. `false` therefore means the
-    /// interval is definitely covered, while `true` can cost one request that returns nothing new.
+    /// A conservative `true` may cause one empty follow-up request.
     pub has_more: bool,
 }
 
@@ -288,7 +181,9 @@ mod tests {
         AccountData, ByteCodesMessage, GetBlockAccessListsMessage, GetByteCodesMessage,
         GetStorageRangesMessage,
     };
-    use reth_network_p2p::download::DownloadClient;
+    use reth_network_p2p::{
+        download::DownloadClient, error::PeerRequestResult, priority::Priority,
+    };
     use reth_network_peers::WithPeerId;
     use reth_trie_common::{proof::ProofRetainer, HashBuilder, Nibbles};
     use std::{
@@ -557,7 +452,7 @@ mod tests {
                 .collect(),
             proof,
         };
-        let attempts = usize::from(MAX_RETRIES) + 1;
+        let attempts = usize::from(request::MAX_RETRIES) + 1;
         let client = Arc::new(TestSnapClient::new(
             std::iter::repeat_with(|| response(peer, message.clone())).take(attempts),
         ));
