@@ -372,7 +372,7 @@ where
         let mut tx_regular_gas_used = 0;
         let gas_output = builder.execute_transaction_with_result_closure(tx, |output| {
             let result = output.result();
-            tx_regular_gas_used = result.result.regular_gas_spent();
+            tx_regular_gas_used = result.result.execution_gas_spent();
             results.push(result.result.clone())
         })?;
 
