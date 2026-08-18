@@ -1200,11 +1200,13 @@ where
             return
         }
         if let Some(peer) = self.peers.get_mut(&peer_id) {
-            let transactions = self.pool.get_pooled_transaction_elements(
+            let version = peer.version();
+            let transactions = self.pool.get_pooled_transaction_elements_for_version(
                 request.0,
                 GetPooledTransactionLimit::ResponseSizeSoftLimit(
                     self.transaction_fetcher.info.soft_limit_byte_size_pooled_transactions_response,
                 ),
+                version,
             );
             trace!(target: "net::tx::propagation", sent_txs=?transactions.iter().map(|tx| tx.tx_hash()), "Sending requested transactions to peer");
 

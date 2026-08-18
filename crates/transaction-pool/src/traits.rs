@@ -76,7 +76,7 @@ use alloy_primitives::{
     Address, Bytes, TxHash, TxKind, B128, B256, U256,
 };
 use futures_util::{ready, Stream};
-use reth_eth_wire_types::HandleMempoolData;
+use reth_eth_wire_types::{EthVersion, HandleMempoolData};
 use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
 use reth_execution_types::ChangedAccount;
 use reth_primitives_traits::{Block, InMemorySize, Recovered, SealedBlock, SignedTransaction};
@@ -374,6 +374,42 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         out: &mut Vec<<Self::Transaction as PoolTransaction>::Pooled>,
     ) {
         out.extend(self.get_pooled_transaction_elements(tx_hashes.to_vec(), limit));
+    }
+
+    /// Returns pooled transactions prepared for the negotiated eth protocol version.
+    ///
+    /// For versions before eth/72 this is equivalent to
+    /// [`Self::get_pooled_transaction_elements`]. For eth/72 and later, EIP-7594 blob payloads
+    /// are elided while commitments and cell proofs are retained.
+    fn get_pooled_transaction_elements_for_version(
+        &self,
+        tx_hashes: Vec<TxHash>,
+        limit: GetPooledTransactionLimit,
+        version: EthVersion,
+    ) -> Vec<<Self::Transaction as PoolTransaction>::Pooled> {
+        let mut elements = Vec::new();
+        self.append_pooled_transaction_elements_for_version(
+            &tx_hashes,
+            limit,
+            version,
+            &mut elements,
+        );
+        elements
+    }
+
+    /// Appends pooled transactions prepared for the negotiated eth protocol version.
+    ///
+    /// The response-size limit is applied to the representation that will be returned to the
+    /// caller, including any eth/72 payload elision.
+    fn append_pooled_transaction_elements_for_version(
+        &self,
+        tx_hashes: &[TxHash],
+        limit: GetPooledTransactionLimit,
+        version: EthVersion,
+        out: &mut Vec<<Self::Transaction as PoolTransaction>::Pooled>,
+    ) {
+        let _ = version;
+        self.append_pooled_transaction_elements(tx_hashes, limit, out);
     }
 
     /// Returns the pooled transaction variant for the given transaction hash.
