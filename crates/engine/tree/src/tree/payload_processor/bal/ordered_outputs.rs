@@ -32,12 +32,13 @@ impl From<OrderedWorkerOutputError> for BalExecutionError {
 /// state and performs no canonical commit work.
 ///
 /// Behavior:
-/// - each yielded `Ok` output has the next transaction index
-/// - worker errors are forwarded unchanged
-/// - closed channels before `total` outputs yield `Err`
+/// - each yielded item has the next transaction index, `Ok` and indexed execution errors
+///   alike: an execution error is a per-transaction result, deferred to its slot so the
+///   consumer observes it in block order and can recover and keep consuming
+/// - non-indexed worker errors are forwarded immediately and exhaust the iterator
+/// - closed channels before `total` outputs yield `Err` and exhaust the iterator
 /// - out-of-bounds and duplicate indices panic because they violate the internal worker/dispatcher
 ///   index invariant
-/// - after the first error, the iterator is exhausted
 pub(super) fn ordered_worker_outputs<R>(
     result_rx: &Receiver<Result<BalWorkerOutput<R>, BalWorkerError>>,
     total: usize,
@@ -47,7 +48,7 @@ pub(super) fn ordered_worker_outputs<R>(
 
 struct OrderedWorkerOutputs<'a, R> {
     result_rx: &'a Receiver<Result<BalWorkerOutput<R>, BalWorkerError>>,
-    pending: Vec<Option<BalWorkerOutput<R>>>,
+    pending: Vec<Option<Result<BalWorkerOutput<R>, BalWorkerError>>>,
     next: usize,
     total: usize,
     failed: bool,
@@ -77,16 +78,21 @@ impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
         }
 
         loop {
-            if let Some(output) = self.pending[self.next].take() {
+            if let Some(slot) = self.pending[self.next].take() {
                 self.next += 1;
-                return Some(Ok(output));
+                return Some(slot.map_err(Into::into));
             }
 
-            let output = match self.result_rx.recv() {
-                Ok(Ok(output)) => output,
+            let (index, slot) = match self.result_rx.recv() {
+                Ok(Ok(output)) => (output.index, Ok(output)),
                 Ok(Err(err)) => {
-                    self.failed = true;
-                    return Some(Err(err.into()));
+                    // An indexed execution error is a per-transaction result and takes
+                    // its transaction slot; anything else is fatal to the whole block.
+                    let BalWorkerError::Execution { index, .. } = &err else {
+                        self.failed = true;
+                        return Some(Err(err.into()));
+                    };
+                    (*index, Err(err))
                 }
                 Err(_) => {
                     self.failed = true;
@@ -94,7 +100,6 @@ impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
                 }
             };
 
-            let index = output.index;
             assert!(
                 index < self.total,
                 "BAL worker returned out-of-bounds transaction index {index}; total={}",
@@ -105,7 +110,7 @@ impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
                 "BAL worker returned duplicate transaction index {index}",
             );
 
-            self.pending[index] = Some(output);
+            self.pending[index] = Some(slot);
         }
     }
 }
@@ -157,6 +162,44 @@ mod tests {
         let mut outputs = ordered_worker_outputs::<u64>(&rx, 1);
 
         expect_err_contains(outputs.next().expect("first item"), "worker failed");
+        assert!(outputs.next().is_none());
+    }
+
+    #[test]
+    fn defers_indexed_execution_errors_to_their_slot() {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        tx.send(Err(BalWorkerError::Execution {
+            index: 1,
+            tx_gas_limit: 42,
+            source: alloy_evm::block::BlockExecutionError::msg("bal miss"),
+        }))
+        .unwrap();
+        tx.send(Ok(output(0, 0))).unwrap();
+        drop(tx);
+
+        let mut outputs = ordered_worker_outputs(&rx, 2);
+
+        assert_eq!(outputs.next().expect("first item").expect("first output").result, 0);
+        expect_err_contains(outputs.next().expect("second item"), "bal miss");
+        assert!(outputs.next().is_none());
+    }
+
+    #[test]
+    fn continues_past_indexed_execution_errors() {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        tx.send(Err(BalWorkerError::Execution {
+            index: 0,
+            tx_gas_limit: 42,
+            source: alloy_evm::block::BlockExecutionError::msg("bal miss"),
+        }))
+        .unwrap();
+        tx.send(Ok(output(1, 10))).unwrap();
+        drop(tx);
+
+        let mut outputs = ordered_worker_outputs(&rx, 2);
+
+        expect_err_contains(outputs.next().expect("first item"), "bal miss");
+        assert_eq!(outputs.next().expect("second item").expect("second output").result, 10);
         assert!(outputs.next().is_none());
     }
 
