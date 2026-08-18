@@ -9,7 +9,7 @@ use futures::Future;
 use reth_eth_wire_types::snap::{GetStorageRangesMessage, StorageData};
 use reth_network_p2p::{
     error::RequestError,
-    snap::client::{SnapClient, SnapResponse},
+    snap::client::{SnapClient, SnapRequestOptions, SnapResponse},
 };
 use reth_network_peers::PeerId;
 use reth_tasks::Runtime;
@@ -33,6 +33,17 @@ impl<C: SnapClient> StorageRangeDownloader<C> {
         request: GetStorageRangesMessage,
         accounts: &[(B256, TrieAccount)],
         runtime: Runtime,
+    ) -> Result<Self, InvalidStorageRangeRequest> {
+        Self::new_with_options(client, request, accounts, runtime, Default::default())
+    }
+
+    /// Allows a coordinator to skip peers that already reported this storage unavailable.
+    pub fn new_with_options(
+        client: C,
+        request: GetStorageRangesMessage,
+        accounts: &[(B256, TrieAccount)],
+        runtime: Runtime,
+        options: SnapRequestOptions,
     ) -> Result<Self, InvalidStorageRangeRequest> {
         let origin = request.starting_hash.unwrap_or(B256::ZERO);
         let limit = request.limit_hash.unwrap_or(MAX_HASH);
@@ -64,7 +75,7 @@ impl<C: SnapClient> StorageRangeDownloader<C> {
         }
 
         let verifier = StorageRangeVerifier { request: request.clone(), storage_roots };
-        Ok(Self(VerifyingRequest::new(client, request, verifier, runtime)))
+        Ok(Self(VerifyingRequest::new_with_options(client, request, verifier, runtime, options)))
     }
 }
 

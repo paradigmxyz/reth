@@ -41,9 +41,16 @@ where
     C: SnapClient,
     V: SnapVerifier,
 {
-    /// Submits `request` at normal priority and verifies its response with `verifier`.
-    pub(super) fn new(client: C, request: V::Request, verifier: V, runtime: Runtime) -> Self {
-        let fut = request.send(&client, SnapRequestOptions::default());
+    /// Preserves caller peer exclusions across verification retries.
+    pub(super) fn new_with_options(
+        client: C,
+        request: V::Request,
+        verifier: V,
+        runtime: Runtime,
+        options: SnapRequestOptions,
+    ) -> Self {
+        let excluded_peers = options.excluded_peers.clone();
+        let fut = request.send(&client, options);
         Self {
             client,
             runtime,
@@ -51,7 +58,7 @@ where
             verifier,
             fut,
             verification: None,
-            excluded_peers: Vec::new(),
+            excluded_peers,
             retries: 0,
         }
     }
@@ -242,8 +249,13 @@ mod tests {
             limit_hash: B256::ZERO,
             response_bytes: 0,
         };
-        let mut verifying =
-            VerifyingRequest::new(Arc::clone(&client), request, PanickingVerifier, Runtime::test());
+        let mut verifying = VerifyingRequest::new_with_options(
+            Arc::clone(&client),
+            request,
+            PanickingVerifier,
+            Runtime::test(),
+            SnapRequestOptions::default(),
+        );
 
         let error = poll_fn(|cx| verifying.poll_verified(cx)).await.unwrap_err();
 

@@ -9,7 +9,7 @@ use futures::Future;
 use reth_eth_wire_types::snap::GetByteCodesMessage;
 use reth_network_p2p::{
     error::RequestError,
-    snap::client::{SnapClient, SnapResponse},
+    snap::client::{SnapClient, SnapRequestOptions, SnapResponse},
 };
 use reth_network_peers::PeerId;
 use reth_tasks::Runtime;
@@ -30,11 +30,21 @@ impl<C: SnapClient> BytecodeDownloader<C> {
         request: GetByteCodesMessage,
         runtime: Runtime,
     ) -> Result<Self, EmptyBytecodeRequest> {
+        Self::new_with_options(client, request, runtime, Default::default())
+    }
+
+    /// Allows a coordinator to skip peers that omitted every outstanding code.
+    pub fn new_with_options(
+        client: C,
+        request: GetByteCodesMessage,
+        runtime: Runtime,
+        options: SnapRequestOptions,
+    ) -> Result<Self, EmptyBytecodeRequest> {
         if request.hashes.is_empty() {
             return Err(EmptyBytecodeRequest)
         }
         let verifier = BytecodeVerifier { request: request.clone() };
-        Ok(Self(VerifyingRequest::new(client, request, verifier, runtime)))
+        Ok(Self(VerifyingRequest::new_with_options(client, request, verifier, runtime, options)))
     }
 }
 

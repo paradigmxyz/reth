@@ -8,7 +8,7 @@ use futures::Future;
 use reth_eth_wire_types::snap::{AccountRangeMessage, GetAccountRangeMessage};
 use reth_network_p2p::{
     error::RequestError,
-    snap::client::{SnapClient, SnapResponse},
+    snap::client::{SnapClient, SnapRequestOptions, SnapResponse},
 };
 use reth_network_peers::PeerId;
 use reth_tasks::Runtime;
@@ -44,6 +44,16 @@ impl<C: SnapClient> AccountRangeDownloader<C> {
         request: GetAccountRangeMessage,
         runtime: Runtime,
     ) -> Result<Self, InvalidAccountRange> {
+        Self::new_with_options(client, request, runtime, Default::default())
+    }
+
+    /// Allows a coordinator to skip peers that already reported this range unavailable.
+    pub fn new_with_options(
+        client: C,
+        request: GetAccountRangeMessage,
+        runtime: Runtime,
+        options: SnapRequestOptions,
+    ) -> Result<Self, InvalidAccountRange> {
         if request.starting_hash > request.limit_hash {
             return Err(InvalidAccountRange {
                 origin: request.starting_hash,
@@ -51,7 +61,7 @@ impl<C: SnapClient> AccountRangeDownloader<C> {
             })
         }
         let verifier = AccountRangeVerifier { request: request.clone() };
-        Ok(Self(VerifyingRequest::new(client, request, verifier, runtime)))
+        Ok(Self(VerifyingRequest::new_with_options(client, request, verifier, runtime, options)))
     }
 }
 
@@ -303,6 +313,41 @@ mod tests {
         assert_eq!(*client.reported(), [bad_peer]);
         assert_eq!(*client.priorities(), [Priority::Normal, Priority::High]);
         assert_eq!(*client.exclusions(), [vec![], vec![bad_peer]]);
+    }
+
+    #[tokio::test]
+    async fn caller_exclusions_survive_verification_retry() {
+        let accounts = vec![(key(1), account(7))];
+        let root_hash = root(&accounts);
+        let excluded = PeerId::random();
+        let bad_peer = PeerId::random();
+        let bad = Ok(WithPeerId::new(
+            bad_peer,
+            SnapResponse::ByteCodes(ByteCodesMessage { request_id: 1, codes: Vec::new() }),
+        ));
+        let good = response(
+            PeerId::random(),
+            AccountRangeMessage {
+                request_id: 1,
+                accounts: vec![AccountData::from_trie_account(accounts[0].0, &accounts[0].1)],
+                proof: Vec::new(),
+            },
+        );
+        let client = Arc::new(TestSnapClient::new([bad, good]));
+        let options = SnapRequestOptions::default().with_excluded_peers(vec![excluded]);
+
+        let outcome = AccountRangeDownloader::new_with_options(
+            Arc::clone(&client),
+            request(root_hash),
+            Runtime::test(),
+            options,
+        )
+        .unwrap()
+        .await
+        .unwrap();
+
+        assert!(matches!(outcome, AccountRangeOutcome::Verified(_)));
+        assert_eq!(*client.exclusions(), [vec![excluded], vec![excluded, bad_peer]]);
     }
 
     #[tokio::test]
