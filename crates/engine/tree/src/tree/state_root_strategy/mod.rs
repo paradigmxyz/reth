@@ -106,6 +106,90 @@ use tracing::{debug, debug_span, instrument, warn, Span};
 /// Handle to a [`HashedPostState`] computed on a background thread.
 pub type LazyHashedPostState = reth_tasks::LazyHandle<Arc<HashedPostState>>;
 
+/// Input passed to a custom state-root computation handler after block execution.
+#[derive(Debug, Clone)]
+pub struct CustomStateRootInput<'a, N: NodePrimitives> {
+    /// The executed block.
+    pub block: &'a RecoveredBlock<N::Block>,
+    /// The block's parent header.
+    pub parent_block: &'a SealedHeader<N::BlockHeader>,
+    /// The execution output.
+    pub output: &'a BlockExecutionOutput<N::Receipt>,
+    /// Lazily computed hashed post-state.
+    pub hashed_state: &'a LazyHashedPostState,
+}
+
+/// A custom state-root computation handler.
+pub type CustomStateRoot<N> = Arc<
+    dyn Fn(CustomStateRootInput<'_, N>) -> ProviderResult<(B256, TrieUpdates)>
+        + Send
+        + Sync
+        + 'static,
+>;
+
+/// Adapts a custom post-execution callback to the state-root strategy interface.
+pub struct CustomStateRootStrategy<N: NodePrimitives> {
+    callback: CustomStateRoot<N>,
+}
+
+impl<N: NodePrimitives> CustomStateRootStrategy<N> {
+    /// Creates a custom callback-backed state-root strategy.
+    pub const fn new(callback: CustomStateRoot<N>) -> Self {
+        Self { callback }
+    }
+}
+
+impl<N: NodePrimitives> fmt::Debug for CustomStateRootStrategy<N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CustomStateRootStrategy").finish_non_exhaustive()
+    }
+}
+
+struct CustomStateRootJob<N: NodePrimitives> {
+    callback: CustomStateRoot<N>,
+    parent_block: SealedHeader<N::BlockHeader>,
+}
+
+impl<N: NodePrimitives> StateRootJob<N> for CustomStateRootJob<N> {
+    fn name(&self) -> &'static str {
+        "custom"
+    }
+
+    fn finish(
+        &mut self,
+        block: &RecoveredBlock<N::Block>,
+        output: Arc<BlockExecutionOutput<N::Receipt>>,
+        hashed_state: &LazyHashedPostState,
+    ) -> ProviderResult<StateRootJobOutcome> {
+        let (state_root, trie_updates) = (self.callback)(CustomStateRootInput {
+            block,
+            parent_block: &self.parent_block,
+            output: &output,
+            hashed_state,
+        })?;
+        Ok(StateRootJobOutcome::new(state_root, Arc::new(trie_updates)))
+    }
+}
+
+impl<N, P, Evm> StateRootStrategy<N, P, Evm> for CustomStateRootStrategy<N>
+where
+    N: NodePrimitives,
+    Evm: ConfigureEvm<Primitives = N>,
+{
+    fn prepare(
+        &self,
+        ctx: StateRootJobContext<'_, N, P, Evm>,
+    ) -> ProviderResult<PreparedStateRootJob<N>> {
+        Ok(PreparedStateRootJob::new(
+            Box::new(CustomStateRootJob {
+                callback: Arc::clone(&self.callback),
+                parent_block: ctx.parent_header.clone(),
+            }),
+            None,
+        ))
+    }
+}
+
 /// Strategy used by engine-tree validation to prepare per-block state-root work.
 pub trait StateRootStrategy<N, P, Evm>: Send + Sync
 where

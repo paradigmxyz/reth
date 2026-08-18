@@ -369,6 +369,16 @@ where
         self
     }
 
+    /// Sets a custom post-execution state-root computation handler.
+    pub fn with_custom_state_root(
+        self,
+        custom_state_root: crate::tree::state_root_strategy::CustomStateRoot<N>,
+    ) -> Self {
+        self.with_state_root_strategy(Arc::new(
+            crate::tree::state_root_strategy::CustomStateRootStrategy::new(custom_state_root),
+        ))
+    }
+
     /// Installs the txpool source and starts the persistent cache-prewarming worker.
     pub fn with_txpool_prewarming(
         mut self,

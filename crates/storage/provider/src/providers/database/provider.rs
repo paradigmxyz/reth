@@ -172,6 +172,8 @@ enum SaveBlocksMode {
     /// Full mode: write block structure + receipts + state + trie.
     /// Used by engine/production code.
     Full,
+    /// External state mode: write block structure + receipts + bytecodes, but not state or trie.
+    ExternalState,
     /// Blocks only: write block structure (headers, txs, senders, indices).
     /// Receipts/state/trie are skipped - they may come later via separate calls.
     /// Used by `insert_block`.
@@ -182,6 +184,16 @@ impl SaveBlocksMode {
     /// Returns `true` if this is [`SaveBlocksMode::Full`].
     const fn with_state(self) -> bool {
         matches!(self, Self::Full)
+    }
+
+    /// Returns `true` if receipts should be persisted.
+    const fn with_receipts(self) -> bool {
+        !matches!(self, Self::BlocksOnly)
+    }
+
+    /// Returns `true` if this mode advances the canonical persistence frontier.
+    const fn advances_frontier(self) -> bool {
+        !matches!(self, Self::BlocksOnly)
     }
 }
 
@@ -542,7 +554,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         Ok(StaticFileWriteCtx {
             write_senders: EitherWriterDestination::senders(self).is_static_file() &&
                 self.prune_modes.sender_recovery.is_none_or(|m| !m.is_full()),
-            write_receipts: save_mode.with_state() &&
+            write_receipts: save_mode.with_receipts() &&
                 EitherWriter::receipts_destination(self).is_static_file(),
             write_account_changesets: save_mode.with_state() &&
                 EitherWriterDestination::account_changesets(self).is_static_file(),
@@ -603,7 +615,14 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             input.state_trie_masking_blocks(),
             (input.new_partial_state_trie() < input.new_db_tip())
                 .then_some(input.new_partial_state_trie()),
-            SaveBlocksMode::Full,
+            if crate::providers::FLAT_STATE_READS
+                .get()
+                .is_some_and(|reads| reads.owns_state_persistence)
+            {
+                SaveBlocksMode::ExternalState
+            } else {
+                SaveBlocksMode::Full
+            },
         )
     }
 
@@ -745,7 +764,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 self.insert_block_mdbx_only(recovered_block, tx_nums[i])?;
                 timings.insert_block += start.elapsed();
 
-                if save_mode.with_state() {
+                if save_mode.with_receipts() {
                     let execution_output = block.execution_outcome();
                     let sf_ctx =
                         sf_ctx.expect("static file context exists when blocks are persisted");
@@ -761,6 +780,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                         },
                         OriginalValuesKnown::No,
                         StateWriteConfig {
+                            write_plain_state: save_mode.with_state(),
                             write_receipts: !sf_ctx.write_receipts,
                             write_account_changesets: !sf_ctx.write_account_changesets,
                             write_storage_changesets: !sf_ctx.write_storage_changesets,
@@ -819,7 +839,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             if !blocks.is_empty() {
                 self.update_pipeline_stages(last_block_number, false)?;
             }
-            if save_mode.with_state() {
+            if save_mode.advances_frontier() {
                 let checkpoint = match partial_state_trie {
                     Some(partial_state_trie) => StageCheckpoint::new(last_block_number)
                         .with_finish_stage_checkpoint(FinishCheckpoint {
@@ -2556,7 +2576,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     ) -> ProviderResult<()> {
         let execution_outcome = execution_outcome.into();
 
-        if self.cached_storage_settings().use_hashed_state() &&
+        if config.write_plain_state &&
+            self.cached_storage_settings().use_hashed_state() &&
             !config.write_receipts &&
             !config.write_account_changesets &&
             !config.write_storage_changesets
@@ -2571,11 +2592,16 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         }
 
         let first_block = execution_outcome.first_block();
-        let (plain_state, reverts) =
-            execution_outcome.state().to_plain_state_and_reverts(is_value_known);
-
-        self.write_state_reverts(reverts, first_block, config)?;
-        self.write_state_changes(plain_state)?;
+        if config.write_plain_state {
+            let (plain_state, reverts) =
+                execution_outcome.state().to_plain_state_and_reverts(is_value_known);
+            self.write_state_reverts(reverts, first_block, config)?;
+            self.write_state_changes(plain_state)?;
+        } else {
+            self.write_bytecodes(
+                execution_outcome.state().contracts.iter().map(|(h, b)| (*h, Bytecode(b.clone()))),
+            )?;
+        }
 
         if !config.write_receipts {
             return Ok(());
@@ -4860,6 +4886,59 @@ mod tests {
 
     #[cfg(feature = "partial-persistence")]
     #[test]
+    fn external_state_mode_persists_receipts_without_duplicate_state() {
+        let factory = create_test_provider_factory();
+        let mut builder = TestBlockBuilder::eth().with_state();
+        let genesis = builder.get_executed_blocks(0..1).next().unwrap();
+        let blocks: Vec<_> = builder.get_executed_blocks(1..3).collect();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        save_genesis(&provider_rw, &genesis).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        macro_rules! state_entries {
+            ($provider:expr) => {{
+                let tx = $provider.tx_ref();
+                (
+                    tx.entries::<tables::PlainAccountState>().unwrap(),
+                    tx.entries::<tables::PlainStorageState>().unwrap(),
+                    tx.entries::<tables::AccountChangeSets>().unwrap(),
+                    tx.entries::<tables::StorageChangeSets>().unwrap(),
+                    tx.entries::<tables::HashedAccounts>().unwrap(),
+                    tx.entries::<tables::HashedStorages>().unwrap(),
+                    tx.entries::<tables::AccountsTrie>().unwrap(),
+                    tx.entries::<tables::StoragesTrie>().unwrap(),
+                )
+            }};
+        }
+        let before = state_entries!(provider);
+        drop(provider);
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .save_blocks_inner(&blocks, &blocks, &[], None, SaveBlocksMode::ExternalState)
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        assert_eq!(state_entries!(provider), before);
+        assert!(provider.block_hash(2).unwrap().is_some());
+        assert_eq!(
+            provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap().block_number,
+            2
+        );
+        provider.static_file_provider().commit().unwrap();
+        assert_eq!(
+            factory
+                .static_file_provider()
+                .get_highest_static_file_block(StaticFileSegment::Receipts),
+            Some(2)
+        );
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
     fn test_save_blocks_partial_cycles_do_not_duplicate_static_file_writes() {
         let factory = create_test_provider_factory();
         let mut test_block_builder = TestBlockBuilder::eth().with_state();
@@ -5225,6 +5304,7 @@ mod tests {
                 &execution_outcome,
                 OriginalValuesKnown::Yes,
                 StateWriteConfig {
+                    write_plain_state: true,
                     write_receipts: false,
                     write_account_changesets: true,
                     write_storage_changesets: true,
@@ -5432,6 +5512,7 @@ mod tests {
                 &execution_outcome,
                 OriginalValuesKnown::Yes,
                 StateWriteConfig {
+                    write_plain_state: true,
                     write_receipts: false,
                     write_account_changesets: true,
                     write_storage_changesets: true,
@@ -5838,6 +5919,7 @@ mod tests {
                 &execution_outcome,
                 OriginalValuesKnown::Yes,
                 StateWriteConfig {
+                    write_plain_state: true,
                     write_receipts: false,
                     write_account_changesets: true,
                     write_storage_changesets: true,
