@@ -298,6 +298,26 @@ mod tests {
         assert!(matches!(outcome, AccountRangeOutcome::Verified(_)));
         assert_eq!(*client.reported(), [bad_peer]);
         assert_eq!(*client.priorities(), [Priority::Normal, Priority::High]);
+        assert_eq!(*client.exclusions(), [vec![], vec![bad_peer]]);
+    }
+
+    #[tokio::test]
+    async fn exhausting_peers_after_rejection_preserves_bad_response() {
+        let peer_id = PeerId::random();
+        let invalid = Ok(WithPeerId::new(
+            peer_id,
+            SnapResponse::ByteCodes(ByteCodesMessage { request_id: 1, codes: Vec::new() }),
+        ));
+        let client = Arc::new(TestSnapClient::new([invalid]));
+
+        let error = downloader(Arc::clone(&client), request(B256::repeat_byte(0x11)))
+            .unwrap()
+            .await
+            .unwrap_err();
+
+        assert_eq!(error, RequestError::BadResponse);
+        assert_eq!(*client.reported(), [peer_id]);
+        assert_eq!(*client.exclusions(), [vec![], vec![peer_id]]);
     }
 
     #[tokio::test]

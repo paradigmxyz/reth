@@ -3,15 +3,12 @@
 //! One response queue covers every request kind so cross-request retry behavior stays observable.
 
 use futures::future::{ready, Ready};
-use reth_eth_wire_types::snap::{
-    GetAccountRangeMessage, GetBlockAccessListsMessage, GetByteCodesMessage,
-    GetStorageRangesMessage,
-};
+use reth_eth_wire_types::snap::SnapProtocolMessage;
 use reth_network_p2p::{
     download::DownloadClient,
     error::{PeerRequestResult, RequestError},
     priority::Priority,
-    snap::client::{SnapClient, SnapResponse},
+    snap::client::{SnapClient, SnapRequestOptions, SnapResponse},
 };
 use reth_network_peers::PeerId;
 use std::{
@@ -25,6 +22,7 @@ pub(crate) struct TestSnapClient {
     responses: Mutex<VecDeque<PeerRequestResult<SnapResponse>>>,
     reported: Mutex<Vec<PeerId>>,
     priorities: Mutex<Vec<Priority>>,
+    exclusions: Mutex<Vec<Vec<PeerId>>>,
 }
 
 impl TestSnapClient {
@@ -36,6 +34,7 @@ impl TestSnapClient {
             responses: Mutex::new(responses.into_iter().collect()),
             reported: Mutex::new(Vec::new()),
             priorities: Mutex::new(Vec::new()),
+            exclusions: Mutex::new(Vec::new()),
         }
     }
 
@@ -49,9 +48,15 @@ impl TestSnapClient {
         self.priorities.lock().unwrap()
     }
 
+    /// Returns peer exclusions in submission order.
+    pub(crate) fn exclusions(&self) -> MutexGuard<'_, Vec<Vec<PeerId>>> {
+        self.exclusions.lock().unwrap()
+    }
+
     // An exhausted script behaves like a network without the requested capability.
-    fn next(&self, priority: Priority) -> Ready<PeerRequestResult<SnapResponse>> {
-        self.priorities.lock().unwrap().push(priority);
+    fn next(&self, options: SnapRequestOptions) -> Ready<PeerRequestResult<SnapResponse>> {
+        self.priorities.lock().unwrap().push(options.priority);
+        self.exclusions.lock().unwrap().push(options.excluded_peers);
         ready(
             self.responses
                 .lock()
@@ -75,43 +80,11 @@ impl DownloadClient for TestSnapClient {
 impl SnapClient for TestSnapClient {
     type Output = Ready<PeerRequestResult<SnapResponse>>;
 
-    fn get_account_range_with_priority(
+    fn request_snap(
         &self,
-        _request: GetAccountRangeMessage,
-        priority: Priority,
+        _request: SnapProtocolMessage,
+        options: SnapRequestOptions,
     ) -> Self::Output {
-        self.next(priority)
-    }
-
-    fn get_storage_ranges(&self, request: GetStorageRangesMessage) -> Self::Output {
-        self.get_storage_ranges_with_priority(request, Priority::Normal)
-    }
-
-    fn get_storage_ranges_with_priority(
-        &self,
-        _request: GetStorageRangesMessage,
-        priority: Priority,
-    ) -> Self::Output {
-        self.next(priority)
-    }
-
-    fn get_byte_codes(&self, _request: GetByteCodesMessage) -> Self::Output {
-        ready(Err(RequestError::UnsupportedCapability))
-    }
-
-    fn get_byte_codes_with_priority(
-        &self,
-        _request: GetByteCodesMessage,
-        _priority: Priority,
-    ) -> Self::Output {
-        ready(Err(RequestError::UnsupportedCapability))
-    }
-
-    fn get_block_access_lists_with_priority(
-        &self,
-        _request: GetBlockAccessListsMessage,
-        _priority: Priority,
-    ) -> Self::Output {
-        ready(Err(RequestError::UnsupportedCapability))
+        self.next(options)
     }
 }

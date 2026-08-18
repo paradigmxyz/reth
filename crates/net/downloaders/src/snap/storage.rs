@@ -552,6 +552,7 @@ mod tests {
         assert!(matches!(outcome, StorageRangeOutcome::Verified(_)));
         assert_eq!(*client.reported(), [bad_peer]);
         assert_eq!(*client.priorities(), [Priority::Normal, Priority::High]);
+        assert_eq!(*client.exclusions(), [vec![], vec![bad_peer]]);
     }
 
     #[tokio::test]
