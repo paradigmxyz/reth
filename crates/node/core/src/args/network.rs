@@ -403,10 +403,7 @@ pub struct NetworkArgs {
 
     /// Transaction serve policy
     ///
-    /// Determines which peers `GetPooledTransactions` requests are served for. Peers that are
-    /// not served receive an empty response. Only peers passed to `--trusted-peers` count as
-    /// trusted; peers added at runtime with `admin_addPeer` do not. Pair with
-    /// `--tx-propagation-policy trusted` to avoid announcing transactions that will not be served.
+    /// Determines which peers `GetPooledTransactions` requests are served for.
     #[arg(long = "tx-serve-policy", default_value_t = DefaultNetworkArgs::get_global().tx_serve_policy)]
     pub tx_serve_policy: TransactionServePolicy,
 
