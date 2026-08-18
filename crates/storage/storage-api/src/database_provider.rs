@@ -11,13 +11,22 @@ use reth_db_api::{
 use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderResult;
 
-/// Database provider.
-pub trait DBProvider: Sized {
+/// Provides shared access to a database transaction.
+#[auto_impl::auto_impl(&)]
+pub trait DbTxProvider {
     /// Underlying database transaction held by the provider.
     type Tx: DbTx;
 
+    /// Returns the underlying database transaction.
+    fn tx(&self) -> &Self::Tx;
+}
+
+/// Database provider.
+pub trait DBProvider: DbTxProvider + Sized {
     /// Returns a reference to the underlying transaction.
-    fn tx_ref(&self) -> &Self::Tx;
+    fn tx_ref(&self) -> &Self::Tx {
+        self.tx()
+    }
 
     /// Returns a mutable reference to the underlying transaction.
     fn tx_mut(&mut self) -> &mut Self::Tx;

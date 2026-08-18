@@ -1,7 +1,8 @@
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::{
     ForkchoiceUpdateError, INVALID_FORK_CHOICE_STATE_ERROR, INVALID_FORK_CHOICE_STATE_ERROR_MSG,
-    INVALID_PAYLOAD_ATTRIBUTES_ERROR, INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG,
+    INVALID_PAYLOAD_ATTRIBUTES_ERROR, INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG, TOO_DEEP_REORG_ERROR,
+    TOO_DEEP_REORG_ERROR_MSG,
 };
 use jsonrpsee_types::error::{
     INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE, INVALID_PARAMS_MSG, SERVER_ERROR_MSG,
@@ -139,6 +140,7 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 )
             }
             EngineApiError::InvalidBodiesRange { .. } |
+            EngineApiError::NewPayload(BeaconOnNewPayloadError::InvalidParams(_)) |
             EngineApiError::EngineObjectValidationError(
                 EngineObjectValidationError::Payload(_) |
                 EngineObjectValidationError::InvalidParams(_),
@@ -192,6 +194,13 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                         jsonrpsee_types::error::ErrorObject::owned(
                             INVALID_FORK_CHOICE_STATE_ERROR,
                             INVALID_FORK_CHOICE_STATE_ERROR_MSG,
+                            None::<()>,
+                        )
+                    }
+                    ForkchoiceUpdateError::TooDeepReorg => {
+                        jsonrpsee_types::error::ErrorObject::owned(
+                            TOO_DEEP_REORG_ERROR,
+                            TOO_DEEP_REORG_ERROR_MSG,
                             None::<()>,
                         )
                     }
@@ -280,9 +289,27 @@ mod tests {
         );
 
         ensure_engine_rpc_error(
+            -38006,
+            "Too deep reorg",
+            EngineApiError::ForkChoiceUpdate(BeaconForkChoiceUpdateError::ForkchoiceUpdateError(
+                ForkchoiceUpdateError::TooDeepReorg,
+            )),
+        );
+
+        ensure_engine_rpc_error(
             UNKNOWN_PAYLOAD_CODE,
             "Unknown payload",
             EngineApiError::UnknownPayload,
+        );
+
+        // Malformed payload params, e.g. undecodable block access list bytes, are rejected with
+        // an invalid params error instead of an `INVALID` payload status.
+        ensure_engine_rpc_error(
+            INVALID_PARAMS_CODE,
+            INVALID_PARAMS_MSG,
+            EngineApiError::NewPayload(BeaconOnNewPayloadError::InvalidParams(
+                "undecodable block access list".into(),
+            )),
         );
 
         // Per the Shanghai Engine API spec, FCU V2 must return -38003 when the wrong

@@ -61,7 +61,7 @@ use crate::tree::{
     TreeConfig,
 };
 use alloy_primitives::B256;
-use crossbeam_channel::Receiver as CrossbeamReceiver;
+use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use reth_chain_state::{ExecutedBlock, PreservedSparseTrie};
 use reth_errors::ProviderResult;
 use reth_evm::{ConfigureEvm, OnStateHook};
@@ -69,17 +69,17 @@ use reth_primitives_traits::{
     AlloyBlockHeader, FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedHeader,
 };
 use reth_provider::{
-    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockReader,
-    DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider, ProviderError,
-    StateProviderFactory, StateReader, StateRootProvider,
+    BlockExecutionOutput, BlockNumReader, DatabaseProviderFactory, DatabaseProviderROFactory,
+    HashedPostStateProvider, ProviderError, PruneCheckpointReader, StageCheckpointReader,
+    StateRootProvider, StorageSettingsCache, TryIntoHistoricalStateProvider,
 };
-use reth_storage_overlay::OverlayManager;
+use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_tasks::utils::increase_thread_priority;
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
     HashedPostState,
 };
-use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
+use reth_trie_parallel::proof_task::{ProofResultMessage, ProofTaskCtx, ProofWorkerHandle};
 pub use reth_trie_parallel::{
     error::StateRootTaskError,
     state_root_task::{
@@ -539,13 +539,16 @@ impl DefaultStateRootStrategy {
         } = options;
         let (updates_tx, from_multi_proof) = crossbeam_channel::unbounded();
         let (cancel_guard, cancel_rx) = StateRootTaskCancelGuard::channel();
+        let (proof_result_tx, proof_result_rx) =
+            crossbeam_channel::unbounded::<ProofResultMessage>();
 
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
         #[cfg(feature = "trie-debug")]
         let task_ctx = task_ctx.with_proof_jitter(config.proof_jitter());
         let halve_workers = transaction_count
             .is_some_and(|count| count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD);
-        let proof_handle = ProofWorkerHandle::new(executor, task_ctx, halve_workers);
+        let proof_handle =
+            ProofWorkerHandle::new(executor, task_ctx, halve_workers, proof_result_tx.clone());
 
         let (state_root_tx, state_root_rx) = mpsc::channel();
         let (hashed_state_tx, hashed_state_rx) = mpsc::channel();
@@ -555,6 +558,8 @@ impl DefaultStateRootStrategy {
             executor,
             overlay_manager,
             proof_handle,
+            proof_result_tx,
+            proof_result_rx,
             state_root_tx,
             hashed_state_tx,
             from_multi_proof,
@@ -587,6 +592,8 @@ impl DefaultStateRootStrategy {
         executor: &reth_tasks::Runtime,
         overlay_manager: &OverlayManager<N>,
         proof_worker_handle: ProofWorkerHandle,
+        proof_result_tx: CrossbeamSender<ProofResultMessage>,
+        proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, StateRootTaskError>>,
         hashed_state_tx: mpsc::Sender<Arc<HashedPostState>>,
         from_multi_proof: CrossbeamReceiver<StateRootMessage>,
@@ -666,6 +673,8 @@ impl DefaultStateRootStrategy {
                 cancel_rx,
                 hashed_state_tx,
                 proof_worker_handle,
+                proof_result_tx,
+                proof_result_rx,
                 trie_metrics.clone(),
                 sparse_state_trie,
                 parent_state_root,
@@ -810,16 +819,15 @@ fn published_sparse_trie_anchor_hash<N: NodePrimitives>(
 impl<N, P, Evm> StateRootStrategy<N, P, Evm> for DefaultStateRootStrategy
 where
     N: NodePrimitives,
-    P: DatabaseProviderFactory
-        + BlockReader<Header = N::BlockHeader>
-        + StateProviderFactory
-        + StateReader
-        + Clone
+    P: DatabaseProviderFactory + Clone + 'static,
+    P::Provider: BlockNumReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + TryIntoHistoricalStateProvider
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
         + Clone
-        + Send
-        + Sync
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
@@ -982,7 +990,13 @@ struct SynchronousStateRootJob<N: NodePrimitives, P> {
 impl<N, P> StateRootJob<N> for SynchronousStateRootJob<N, P>
 where
     N: NodePrimitives,
-    P: BlockReader + StateProviderFactory + StateReader + Clone + Send + Sync + 'static,
+    P: DatabaseProviderFactory + Clone + 'static,
+    P::Provider: BlockNumReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + TryIntoHistoricalStateProvider
+        + 'static,
 {
     fn name(&self) -> &'static str {
         "synchronous"
@@ -1015,12 +1029,15 @@ struct SparseTrieStateRootJob<N: NodePrimitives, P> {
 impl<N, P> SparseTrieStateRootJob<N, P>
 where
     N: NodePrimitives,
-    P: StateProviderFactory + Clone + Send + Sync + 'static,
-    P: BlockReader + StateReader,
+    P: DatabaseProviderFactory + Clone + 'static,
+    P::Provider: BlockNumReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + TryIntoHistoricalStateProvider
+        + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
         + Clone
-        + Send
-        + Sync
         + 'static,
 {
     fn serial_fallback(
@@ -1032,7 +1049,7 @@ where
         let (fallback_tx, fallback_rx) = mpsc::channel();
         executor.spawn_blocking_named("serial-root", move || {
             let result = (|| {
-                let hashed_state = Arc::new(provider.hashed_post_state(&output.state));
+                let hashed_state = Arc::new(provider.hashed_post_state(&output.state)?);
                 let (root, updates) =
                     provider.state_root_with_updates(hashed_state.as_ref().clone())?;
                 Ok((root, updates, hashed_state))
@@ -1052,7 +1069,7 @@ where
         output: &BlockExecutionOutput<N::Receipt>,
     ) -> ProviderResult<StateRootJobOutcome> {
         let provider = self.provider_builder.clone().build()?;
-        let hashed_state = Arc::new(provider.hashed_post_state(&output.state));
+        let hashed_state = Arc::new(provider.hashed_post_state(&output.state)?);
         let (state_root, trie_updates) =
             provider.state_root_with_updates(hashed_state.as_ref().clone())?;
         self.metrics.state_root_task_fallback_success_total.increment(1);
@@ -1122,11 +1139,15 @@ where
 impl<N, P> StateRootJob<N> for SparseTrieStateRootJob<N, P>
 where
     N: NodePrimitives,
-    P: BlockReader + StateProviderFactory + StateReader + Clone + Send + Sync + 'static,
+    P: DatabaseProviderFactory + Clone + 'static,
+    P::Provider: BlockNumReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + TryIntoHistoricalStateProvider
+        + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
         + Clone
-        + Send
-        + Sync
         + 'static,
 {
     fn name(&self) -> &'static str {
@@ -1223,14 +1244,20 @@ fn compare_trie_updates_with_serial<N, P>(
 ) -> bool
 where
     N: NodePrimitives,
-    P: BlockReader + StateProviderFactory + StateReader + Clone,
+    P: DatabaseProviderFactory,
+    P::Provider: BlockNumReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + TryIntoHistoricalStateProvider
+        + 'static,
     OverlayStateProviderFactory<P, N>:
         DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>,
 {
     debug!(target: "engine::tree::state_root_strategy", "Comparing trie updates with serial computation");
 
     match state_provider_builder.build().and_then(|provider| {
-        let hashed_state = provider.hashed_post_state(&output.state);
+        let hashed_state = provider.hashed_post_state(&output.state)?;
         provider.state_root_with_updates(hashed_state)
     }) {
         Ok((serial_root, serial_trie_updates)) => {
@@ -1324,11 +1351,10 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{
-        providers::{BlockchainProvider, OverlayStateProviderFactory},
-        test_utils::create_test_provider_factory_with_chain_spec,
+        providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
         HashingWriter,
     };
-    use reth_storage_overlay::OverlayManager;
+    use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
     use reth_testing_utils::generators;
     use reth_trie::test_utils::state_root;
     use revm::state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot, TransactionId};

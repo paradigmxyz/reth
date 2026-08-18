@@ -445,7 +445,7 @@ where
             // drain all requests
             while let Poll::Ready(Some(cmd)) = this.command_rx.poll_next_unpin(cx) {
                 match cmd {
-                    PayloadServiceCommand::BuildNewPayload(mut input, job_span, tx) => {
+                    PayloadServiceCommand::BuildNewPayload(input, job_span, tx) => {
                         let id = input.payload_id();
                         let mut res = Ok(id);
                         let parent = input.parent_hash;
@@ -455,7 +455,10 @@ where
                         } else {
                             let start = Instant::now();
                             let attributes = input.attributes.clone();
-                            let leases = input.resources.take_leases();
+                            // Keep a service-owned reference for generic payload jobs. Builders
+                            // that move work into detached tasks can retain their own references
+                            // from `resources` until those tasks exit.
+                            let leases = input.resources.clone_leases();
                             let job_result = {
                                 let _entered = job_span.enter();
                                 this.generator.new_payload_job(*input, id)
@@ -581,7 +584,7 @@ pub struct PayloadBuilderResources {
     execution_cache: Option<SavedCache>,
     /// Optional handle to a background state-root task.
     state_root_handle: Option<PayloadStateRootHandle>,
-    /// Lifecycle leases retained by the service while the payload job is active.
+    /// Lifecycle leases retained by the service or by detached payload build tasks.
     leases: Vec<PayloadBuilderLease>,
 }
 
@@ -594,7 +597,7 @@ impl PayloadBuilderResources {
         Self { execution_cache, state_root_handle, leases: Vec::new() }
     }
 
-    /// Adds a lease that remains active for the lifetime of the payload job.
+    /// Adds a lease for this payload build.
     pub fn with_lease(mut self, lease: PayloadBuilderLease) -> Self {
         self.leases.push(lease);
         self
@@ -620,21 +623,27 @@ impl PayloadBuilderResources {
         self.state_root_handle.take()
     }
 
-    /// Takes the lifecycle leases that the service must retain for this job.
-    fn take_leases(&mut self) -> Vec<PayloadBuilderLease> {
+    /// Takes lifecycle leases for a payload job that owns detached work.
+    pub fn take_leases(&mut self) -> Vec<PayloadBuilderLease> {
         std::mem::take(&mut self.leases)
+    }
+
+    /// Clones lifecycle leases for the payload builder service to retain.
+    fn clone_leases(&self) -> Vec<PayloadBuilderLease> {
+        self.leases.clone()
     }
 }
 
-/// Keeps a loaned resource active for the lifetime of a payload job.
+/// Keeps a loaned resource active until the last lease clone is dropped.
+#[derive(Clone)]
 pub struct PayloadBuilderLease {
-    _lease: Box<dyn Send>,
+    _lease: Arc<dyn Send + Sync>,
 }
 
 impl PayloadBuilderLease {
-    /// Wraps a lease that releases its resource when dropped.
-    pub fn new(lease: impl Send + 'static) -> Self {
-        Self { _lease: Box::new(lease) }
+    /// Wraps a lease that releases its resource when the last clone is dropped.
+    pub fn new(lease: impl Send + Sync + 'static) -> Self {
+        Self { _lease: Arc::new(lease) }
     }
 }
 
@@ -684,7 +693,7 @@ mod tests {
                     withdrawals: None,
                     parent_beacon_block_root: None,
                     slot_number: None,
-                    target_gas_limit: None,
+                    ..Default::default()
                 },
                 parent_hash: B256::ZERO,
                 resources: PayloadBuilderResources::default().with_lease(lease),

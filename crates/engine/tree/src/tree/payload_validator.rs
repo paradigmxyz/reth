@@ -106,7 +106,7 @@ use crate::tree::{
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
-use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};
+use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash_with_buf, BlockAccessList};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::{
@@ -146,16 +146,16 @@ use reth_primitives_traits::{
     RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
-    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
-    ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider,
-    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderBox,
-    StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
+    BlockExecutionOutput, BlockReader, ChangeSetReader, DatabaseProviderFactory,
+    DatabaseProviderROFactory, ProviderError, PruneCheckpointReader, StageCheckpointReader,
+    StateProvider, StateProviderBox, StateProviderFactory, StateReader, StorageChangeSetReader,
+    StorageSettingsCache, TryIntoHistoricalStateProvider,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
-use reth_storage_overlay::OverlayManager;
+use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
-    LazyTrieData,
+    HashedPostState, KeccakKeyHasher, LazyTrieData,
 };
 use std::{
     sync::{
@@ -168,10 +168,9 @@ use tracing::{debug, debug_span, error, info, instrument, trace, warn, Level, Sp
 
 pub use crate::tree::types::ValidationOutcome;
 
-/// Multiplier over the parent's gas limit beyond which a block's claimed gas usage cannot be
-/// legitimate. Gas limit can change by at most 1/1024 per block, so anything over this is rejected
-/// without entering execution.
-const MAX_EXPECTED_GAS_USAGE_MULTIPLIER: u64 = 2;
+/// Multiplier over the parent's gas limit beyond which a payload must pass pre-execution
+/// validation.
+const MAX_EXPECTED_GAS_LIMIT_MULTIPLIER: u64 = 2;
 
 /// Worker name for deferred trie data preparation.
 const DEFERRED_TRIE_WORKER_NAME: &str = "deferred-trie";
@@ -296,6 +295,8 @@ where
     /// None if txpool prewarming is disabled.
     #[debug(skip)]
     txpool_prewarm: Option<txpool_prewarm::Handle<Evm::Primitives, P, Evm>>,
+    /// Scratch buffer reused for BAL hash encoding across validated blocks.
+    bal_hash_buf: Vec<u8>,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
@@ -307,22 +308,17 @@ where
                           + PruneCheckpointReader
                           + ChangeSetReader
                           + StorageChangeSetReader
-                          + BlockNumReader
-                          + StorageSettingsCache,
+                          + StorageSettingsCache
+                          + TryIntoHistoricalStateProvider
+                          + 'static,
         > + BlockReader<Header = N::BlockHeader>
         + ChangeSetReader
-        + BlockNumReader
         + StateProviderFactory
         + StateReader
-        + HashedPostStateProvider
         + Clone
-        + Send
-        + Sync
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
         + Clone
-        + Send
-        + Sync
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
@@ -360,6 +356,7 @@ where
             overlay_manager,
             state_root_strategy: Arc::new(DefaultStateRootStrategy::default()),
             txpool_prewarm: None,
+            bal_hash_buf: Vec::new(),
         }
     }
 
@@ -535,9 +532,11 @@ where
             };
         }
 
-        // If the gas usage is suspiciously high (multiple times higher than parent's gas limit), be
-        // cautious and block on pre-execution checks of the block.
-        if input.gas_used() > parent_block.gas_limit() * MAX_EXPECTED_GAS_USAGE_MULTIPLIER {
+        // If the gas limit is multiple times higher than the parent's, be cautious and block on
+        // pre-execution checks of the block.
+        if input.gas_limit() >
+            parent_block.gas_limit().saturating_mul(MAX_EXPECTED_GAS_LIMIT_MULTIPLIER)
+        {
             // Call `.get()` to await the pre-execution checks and exit early if they fail.
             if validated_block.get().is_err() {
                 return Err(validated_block
@@ -566,10 +565,11 @@ where
             .in_scope(|| self.evm_env_for(&input))
             .map_err(NewPayloadError::other)?;
 
-        // Extract the decoded BAL, if valid and available.
+        // Extract the decoded BAL, if present. Undecodable block access list bytes are malformed
+        // request params, not an invalid block.
         let decoded_bal = ensure_ok!(input
             .try_decoded_access_list()
-            .map_err(|err| ConsensusError::BlockAccessListInvalid(err.to_string())))
+            .map_err(ConsensusError::BlockAccessListDecode))
         .map(Arc::new);
 
         if let Some(decoded_bal) = decoded_bal.as_deref() {
@@ -750,7 +750,6 @@ where
         // block conversion and receipt root computation. This is a pure CPU-bound task
         // (keccak256 hashing of all changed addresses and storage slots).
         let hashed_state_output = output.clone();
-        let hashed_state_provider = self.provider.clone();
         let mut hashed_state_rx = state_root_job.take_hashed_state_rx();
         let mut hashed_state: LazyHashedPostState =
             self.runtime.spawn_blocking_named("hash-post-state", move || {
@@ -762,7 +761,9 @@ where
                 if let Some(Ok(state)) = hashed_state_rx.as_mut().map(|rx| rx.recv()) {
                     state
                 } else {
-                    Arc::new(hashed_state_provider.hashed_post_state(&hashed_state_output.state))
+                    Arc::new(HashedPostState::from_bundle_state::<KeccakKeyHasher>(
+                        hashed_state_output.state.state(),
+                    ))
                 }
             });
 
@@ -1306,7 +1307,7 @@ where
     /// The `hashed_state` handle wraps the background hashed post state computation.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     fn validate_post_execution<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
-        &self,
+        &mut self,
         block: &RecoveredBlock<N::Block>,
         parent_block: &SealedHeader<N::BlockHeader>,
         output: &BlockExecutionOutput<N::Receipt>,
@@ -1325,8 +1326,9 @@ where
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
                 .entered();
-        let block_access_list_hash =
-            built_bal.as_ref().map(|bal| compute_block_access_list_hash(bal));
+        let block_access_list_hash = built_bal
+            .as_ref()
+            .map(|bal| compute_block_access_list_hash_with_buf(bal, &mut self.bal_hash_buf));
 
         if let Err(err) = self.consensus.validate_block_post_execution(
             block,
@@ -1396,33 +1398,22 @@ where
 
     /// Creates a `StateProviderBuilder` for the given parent hash.
     ///
-    /// This method checks if the parent is in the tree state (in-memory) or persisted to disk,
-    /// and creates the appropriate provider builder.
+    /// Returns `None` when the parent is neither in memory nor persisted.
     fn state_provider_builder(
         &self,
         hash: B256,
         state: &EngineApiTreeState<N>,
     ) -> ProviderResult<Option<StateProviderBuilder<N, P>>> {
-        if let Some((historical, blocks)) = state.tree_state.blocks_by_hash(hash) {
-            debug!(target: "engine::tree::payload_validator", %hash, %historical, "found canonical state for block in memory, creating provider builder");
-            // the block leads back to the canonical chain
-            return Ok(Some(StateProviderBuilder::new(
-                self.provider.clone(),
-                historical,
-                Some(blocks),
-            )))
+        if !state.tree_state.contains_hash(&hash) && self.provider.header(hash)?.is_none() {
+            debug!(target: "engine::tree::payload_validator", %hash, "no canonical state found for block");
+            return Ok(None)
         }
 
-        // Check if the block is persisted
-        if let Some(header) = self.provider.header(hash)? {
-            debug!(target: "engine::tree::payload_validator", %hash, number = %header.number(), "found canonical state for block in database, creating provider builder");
-            // For persisted blocks, we create a builder that will fetch state directly from the
-            // database
-            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)))
-        }
-
-        debug!(target: "engine::tree::payload_validator", %hash, "no canonical state found for block");
-        Ok(None)
+        Ok(Some(StateProviderBuilder::new(
+            self.provider.clone(),
+            hash,
+            state.tree_state.overlay_manager.clone(),
+        )))
     }
 
     /// Called when an invalid block is encountered during validation.
@@ -1793,20 +1784,17 @@ where
                           + PruneCheckpointReader
                           + ChangeSetReader
                           + StorageChangeSetReader
-                          + BlockNumReader
-                          + StorageSettingsCache,
+                          + StorageSettingsCache
+                          + TryIntoHistoricalStateProvider
+                          + 'static,
         > + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader
         + ChangeSetReader
-        + BlockNumReader
-        + HashedPostStateProvider
         + Clone
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
         + Clone
-        + Send
-        + Sync
         + 'static,
     N: NodePrimitives,
     V: PayloadValidator<Types, Block = N::Block> + Clone,

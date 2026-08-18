@@ -20,7 +20,7 @@ use reth_primitives_traits::Account;
 #[cfg(feature = "rayon")]
 use rayon::prelude::{FromParallelIterator, IntoParallelIterator, ParallelIterator};
 
-use revm::database::{AccountStatus, BundleAccount};
+use revm::database::BundleAccount;
 
 /// In-memory hashed state that stores account and storage changes with keccak256-hashed keys in
 /// hash maps.
@@ -55,7 +55,6 @@ impl HashedPostState {
                 let hashed_address = KH::hash_key(address);
                 let hashed_account = account.info.as_ref().map(Into::into);
                 let hashed_storage = HashedStorage::from_iter(
-                    false,
                     account
                         .storage
                         .iter()
@@ -442,17 +441,14 @@ impl HashedStorage {
     }
 
     /// Create new hashed storage from iterator.
-    pub fn from_iter(wiped: bool, iter: impl IntoIterator<Item = (B256, U256)>) -> Self {
-        Self { wiped, storage: HashMap::from_iter(iter) }
+    #[expect(clippy::should_implement_trait)]
+    pub fn from_iter(iter: impl IntoIterator<Item = (B256, U256)>) -> Self {
+        Self { wiped: false, storage: HashMap::from_iter(iter) }
     }
 
-    /// Create new hashed storage from account status and plain storage.
-    pub fn from_plain_storage<'a>(
-        status: AccountStatus,
-        storage: impl IntoIterator<Item = (&'a U256, &'a U256)>,
-    ) -> Self {
+    /// Create new hashed storage from plain storage.
+    pub fn from_plain_storage<'a>(storage: impl IntoIterator<Item = (&'a U256, &'a U256)>) -> Self {
         Self::from_iter(
-            status.was_destroyed(),
             storage.into_iter().map(|(key, value)| (keccak256(B256::from(*key)), *value)),
         )
     }
@@ -999,7 +995,7 @@ mod tests {
     use crate::KeccakKeyHasher;
     use alloy_primitives::Bytes;
     use revm::{
-        database::{states::StorageSlot, StorageWithOriginalValues},
+        database::{states::StorageSlot, AccountStatus, StorageWithOriginalValues},
         state::{AccountInfo, Bytecode},
     };
 
@@ -1024,17 +1020,17 @@ mod tests {
         let original_slot_value = U256::from(123);
         let mut hashed_state = HashedPostState::default().with_storages([(
             hashed_address,
-            HashedStorage::from_iter(
-                false,
-                [(hashed_slot, original_slot_value), (hashed_slot2, original_slot_value)],
-            ),
+            HashedStorage::from_iter([
+                (hashed_slot, original_slot_value),
+                (hashed_slot2, original_slot_value),
+            ]),
         )]);
 
         // Update single slot value
         let updated_slot_value = U256::from(321);
         let extension = HashedPostState::default().with_storages([(
             hashed_address,
-            HashedStorage::from_iter(false, [(hashed_slot, updated_slot_value)]),
+            HashedStorage::from_iter([(hashed_slot, updated_slot_value)]),
         )]);
         hashed_state.extend(extension);
 
@@ -1061,7 +1057,7 @@ mod tests {
         // Reinitialize single slot value
         hashed_state.extend(HashedPostState::default().with_storages([(
             hashed_address,
-            HashedStorage::from_iter(false, [(hashed_slot, original_slot_value)]),
+            HashedStorage::from_iter([(hashed_slot, original_slot_value)]),
         )]));
         let account_storage = hashed_state.storages.get(&hashed_address);
         assert_eq!(
@@ -1074,7 +1070,7 @@ mod tests {
         // Reinitialize single slot value
         hashed_state.extend(HashedPostState::default().with_storages([(
             hashed_address,
-            HashedStorage::from_iter(false, [(hashed_slot2, updated_slot_value)]),
+            HashedStorage::from_iter([(hashed_slot2, updated_slot_value)]),
         )]));
         let account_storage = hashed_state.storages.get(&hashed_address);
         assert_eq!(
@@ -1923,7 +1919,7 @@ mod tests {
         let slot2 = B256::random();
         let slot3 = B256::random();
 
-        let mut storage = HashedStorage::from_iter(false, [(slot1, U256::from(100))]);
+        let mut storage = HashedStorage::from_iter([(slot1, U256::from(100))]);
 
         let sorted = HashedStorageSorted {
             storage_slots: vec![(slot2, U256::from(200)), (slot3, U256::ZERO)],
@@ -1945,7 +1941,7 @@ mod tests {
         let slot1 = B256::random();
         let slot2 = B256::random();
 
-        let mut storage = HashedStorage::from_iter(false, [(slot1, U256::from(100))]);
+        let mut storage = HashedStorage::from_iter([(slot1, U256::from(100))]);
 
         let sorted =
             HashedStorageSorted { storage_slots: vec![(slot2, U256::from(200))], wiped: true };

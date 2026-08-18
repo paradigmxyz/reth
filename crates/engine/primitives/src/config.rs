@@ -196,9 +196,8 @@ pub struct TreeConfig {
     share_sparse_trie_with_payload_builder: bool,
     /// Whether to suppress persistence cycles while building a payload.
     ///
-    /// When enabled, persistence is deferred from the moment an FCU with payload attributes
-    /// arrives until the next FCU without attributes. This avoids persistence I/O competing
-    /// with block building on latency-sensitive chains.
+    /// When enabled, persistence is deferred while a payload job is active. This avoids
+    /// persistence I/O competing with block building on latency-sensitive chains.
     suppress_persistence_during_build: bool,
     /// Whether to disable BAL (Block Access List, EIP-7928) based parallel execution.
     /// When disabled, uses the sequential execution path even when a BAL is available.

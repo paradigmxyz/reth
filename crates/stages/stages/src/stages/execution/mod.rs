@@ -1,5 +1,6 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD;
 use alloy_consensus::BlockHeader;
+use alloy_eip7928::bal::Bal;
 use alloy_primitives::BlockNumber;
 use num_traits::Zero;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
@@ -12,9 +13,10 @@ use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockHashReader, BlockReader, DBProvider, EitherWriter, ExecutionOutcome, HeaderProvider,
-    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriteConfig, StateWriter,
-    StaticFileProviderFactory, StatsReader, StoragePath, StorageSettingsCache, TransactionVariant,
+    BlockHashReader, BlockReader, DBProvider, EitherWriter, ExecutionOutcome,
+    HashedPostStateProvider, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
+    ProviderError, StateWriteConfig, StateWriter, StaticFileProviderFactory, StatsReader,
+    StoragePath, StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
@@ -23,8 +25,6 @@ use reth_stages_api::{
     UnwindInput, UnwindOutput,
 };
 use reth_static_file_types::StaticFileSegment;
-use reth_trie::{hashed_cursor::zero_destroyed_account_storage, KeccakKeyHasher};
-use reth_trie_db::DatabaseHashedCursorFactory;
 use std::{
     cmp::{max, Ordering},
     collections::BTreeMap,
@@ -334,6 +334,8 @@ where
 
         let mut blocks = Vec::new();
         let mut results = Vec::new();
+        // Reused across blocks for BAL hash encoding.
+        let mut bal_buf = Vec::new();
         for block_number in start_block..=max_block {
             // Fetch the block
             let fetch_block_start = Instant::now();
@@ -360,8 +362,19 @@ where
                 })
             })?;
 
+            let built_bal = executor.take_bal().map(Bal::from);
+            if let Some(bal) = &built_bal &&
+                let Err(err) = bal.validate_gas_limit(block.header().gas_limit())
+            {
+                return Err(StageError::Block {
+                    block: Box::new(block.block_with_parent()),
+                    error: BlockErrorKind::Validation(err.into()),
+                })
+            }
+            let bal_hash = built_bal.as_ref().map(|bal| bal.compute_hash_with_buf(&mut bal_buf));
+
             if let Err(err) =
-                self.consensus.validate_block_post_execution(&block, &result, None, None)
+                self.consensus.validate_block_post_execution(&block, &result, None, bal_hash)
             {
                 return Err(StageError::Block {
                     block: Box::new(block.block_with_parent()),
@@ -498,12 +511,8 @@ where
         provider.write_state(&state, OriginalValuesKnown::Yes, StateWriteConfig::default())?;
 
         if provider.cached_storage_settings().use_hashed_state() {
-            let mut hashed_state = state.hash_state_slow::<KeccakKeyHasher>();
-            zero_destroyed_account_storage(
-                &DatabaseHashedCursorFactory::new(provider.tx_ref()),
-                state.bundle.state(),
-                &mut hashed_state,
-            )?;
+            let hashed_state =
+                LatestStateProviderRef::new(provider).hashed_post_state(&state.bundle)?;
             provider.write_hashed_state(&hashed_state.into_sorted())?;
         }
 
@@ -777,7 +786,6 @@ mod tests {
     use reth_revm::revm::database::{AccountStatus, BundleAccount};
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators;
-    use reth_trie::HashedPostState;
     use std::collections::BTreeMap;
 
     fn stage() -> ExecutionStage<EthEvmConfig> {
@@ -806,22 +814,21 @@ mod tests {
         let provider = factory.database_provider_rw().unwrap();
         let address = Address::repeat_byte(0x11);
         let hashed_address = keccak256(address);
-        let retained_slot = B256::repeat_byte(0x22);
-        let deleted_slot = B256::repeat_byte(0x33);
-        let retained_value = U256::from(1);
+        let first_slot = B256::repeat_byte(0x22);
+        let second_slot = B256::repeat_byte(0x33);
 
         provider
             .tx_ref()
             .put::<tables::HashedStorages>(
                 hashed_address,
-                StorageEntry { key: retained_slot, value: U256::from(2) },
+                StorageEntry { key: first_slot, value: U256::from(2) },
             )
             .unwrap();
         provider
             .tx_ref()
             .put::<tables::HashedStorages>(
                 hashed_address,
-                StorageEntry { key: deleted_slot, value: U256::from(3) },
+                StorageEntry { key: second_slot, value: U256::from(3) },
             )
             .unwrap();
 
@@ -830,31 +837,18 @@ mod tests {
             address,
             BundleAccount::new(
                 Some(Default::default()),
-                Some(Default::default()),
+                None,
                 Default::default(),
-                AccountStatus::DestroyedChanged,
+                AccountStatus::Destroyed,
             ),
         );
 
-        let mut hashed_state = HashedPostState::default();
-        hashed_state
-            .storages
-            .entry(hashed_address)
-            .or_default()
-            .storage
-            .insert(retained_slot, retained_value);
-
-        zero_destroyed_account_storage(
-            &DatabaseHashedCursorFactory::new(provider.tx_ref()),
-            state.bundle.state(),
-            &mut hashed_state,
-        )
-        .unwrap();
+        let hashed_state = provider.latest().hashed_post_state(&state.bundle).unwrap();
 
         let storage = &hashed_state.storages[&hashed_address];
         assert!(!storage.wiped);
-        assert_eq!(storage.storage[&retained_slot], retained_value);
-        assert_eq!(storage.storage[&deleted_slot], U256::ZERO);
+        assert_eq!(storage.storage[&first_slot], U256::ZERO);
+        assert_eq!(storage.storage[&second_slot], U256::ZERO);
         assert!(state.bundle.reverts.is_empty());
     }
 

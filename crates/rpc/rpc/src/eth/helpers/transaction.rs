@@ -51,6 +51,7 @@ where
                     Eip4844PoolTransactionError::MissingEip4844BlobSidecar,
                 )));
             };
+            let sidecar = sidecar.into_sidecar();
 
             let sidecar = match sidecar {
                 BlobTransactionSidecarVariant::Eip4844(sidecar) => {
@@ -131,7 +132,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::eth::helpers::types::EthRpcConverter;
+    use crate::eth::helpers::{signer::DevSigner, types::EthRpcConverter};
     use alloy_consensus::{
         BlobTransactionSidecar, Block, Header, SidecarBuilder, SimpleCoder, Transaction,
     };
@@ -286,6 +287,35 @@ mod tests {
                 if duration == Duration::from_millis(1)
         ));
         assert_eq!(eth_api.pool().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn send_transaction_preserves_provided_gas_limit() {
+        let signers = DevSigner::random_signers(1);
+        let address = signers[0].accounts()[0];
+        let accounts = AddressMap::from_iter([(
+            address,
+            ExtendedAccount::new(0, U256::from(10_000_000_000_000_000_000u64)),
+        )]);
+        let eth_api = mock_eth_api(accounts);
+        eth_api.signers().write().extend(signers);
+
+        let provided_gas_limit = 90_000;
+        let tx_req = TransactionRequest {
+            from: Some(address),
+            to: Some(address.into()),
+            gas: Some(provided_gas_limit),
+            gas_price: Some(1_000_000_000),
+            ..Default::default()
+        };
+
+        let hash = eth_api
+            .send_transaction_request(tx_req)
+            .await
+            .expect("send_transaction should succeed");
+        let pooled = eth_api.pool().get(&hash).expect("transaction should be in the pool");
+
+        assert_eq!(pooled.transaction.gas_limit(), provided_gas_limit);
     }
 
     #[tokio::test]

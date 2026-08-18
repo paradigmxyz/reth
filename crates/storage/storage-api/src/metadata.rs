@@ -33,6 +33,11 @@ pub trait MetadataWriter: Send {
     /// Write a metadata value
     fn write_metadata(&self, key: &str, value: Vec<u8>) -> ProviderResult<()>;
 
+    /// Delete a metadata value.
+    fn delete_metadata(&self, _key: &str) -> ProviderResult<()> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
     /// Write storage settings for this node
     ///
     /// Be sure to update provider factory cache with

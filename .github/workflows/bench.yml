@@ -665,6 +665,8 @@ jobs:
             const runPairsNote = `, run-pairs: \`${runPairs}\`${runOrder ? ` (${runOrder})` : ''}`;
             const otlpEnabled = '${{ steps.args.outputs.otlp }}' !== 'false';
             const otlpNote = !otlpEnabled ? ', otlp: `disabled`' : '';
+            const metricsEnabled = '${{ steps.args.outputs.metrics }}' === 'true';
+            const metricsNote = metricsEnabled ? ', metrics: `enabled`' : '';
             const waitTimeVal = '${{ steps.args.outputs.wait-time }}';
             const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
             const blockTimeVal = '${{ steps.args.outputs.block-time }}';
@@ -674,7 +676,7 @@ jobs:
             const featureArgsVal = '${{ steps.args.outputs.feature-args }}';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
             const blocksDesc = bigBlocks ? `${blocks} big blocks, ${warmup} warmup blocks` : `${blocks} blocks, ${warmup} warmup blocks`;
-            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${modeNote}${samplyNote}${tracingChromeNote}${slackNote}${reorgNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${waitTimeNote}${blockTimeNote}${baselineArgsNote}${featureArgsNote}`;
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${modeNote}${samplyNote}${tracingChromeNote}${slackNote}${reorgNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${metricsNote}${waitTimeNote}${blockTimeNote}${baselineArgsNote}${featureArgsNote}`;
 
             const { data: comment } = await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -718,6 +720,8 @@ jobs:
             const runPairsNote = `, run-pairs: \`${runPairs}\`${runOrder ? ` (${runOrder})` : ''}`;
             const otlpEnabled = '${{ steps.args.outputs.otlp }}' !== 'false';
             const otlpNote = !otlpEnabled ? ', otlp: `disabled`' : '';
+            const metricsEnabled = '${{ steps.args.outputs.metrics }}' === 'true';
+            const metricsNote = metricsEnabled ? ', metrics: `enabled`' : '';
             const waitTimeVal = '${{ steps.args.outputs.wait-time }}';
             const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
             const blockTimeVal = '${{ steps.args.outputs.block-time }}';
@@ -727,7 +731,7 @@ jobs:
             const featureArgsVal = '${{ steps.args.outputs.feature-args }}';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
             const blocksDesc = bigBlocks ? `${blocks} big blocks, ${warmup} warmup blocks` : `${blocks} blocks, ${warmup} warmup blocks`;
-            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${modeNote}${samplyNote}${tracingChromeNote}${slackNote}${reorgNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${waitTimeNote}${blockTimeNote}${baselineArgsNote}${featureArgsNote}`;
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${modeNote}${samplyNote}${tracingChromeNote}${slackNote}${reorgNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${metricsNote}${waitTimeNote}${blockTimeNote}${baselineArgsNote}${featureArgsNote}`;
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
             const numRunners = parseInt(process.env.BENCH_RUNNERS) || 1;
@@ -896,6 +900,8 @@ jobs:
             const runPairsNote = `, run-pairs: \`${runPairs}\`${runOrder ? ` (${runOrder})` : ''}`;
             const otlpEnabled = (process.env.BENCH_OTLP || 'false') !== 'false';
             const otlpNote = !otlpEnabled ? ', otlp: `disabled`' : '';
+            const metricsEnabled = process.env.BENCH_METRICS === 'true';
+            const metricsNote = metricsEnabled ? ', metrics: `enabled`' : '';
             const waitTimeVal = process.env.BENCH_WAIT_TIME || '';
             const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
             const blockTimeVal = process.env.BENCH_BLOCK_TIME || '';
@@ -905,7 +911,7 @@ jobs:
             const featureArgsVal = process.env.BENCH_FEATURE_ARGS || '';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
             const blocksDesc = bigBlocks ? `${blocks} big blocks, ${warmup} warmup blocks` : `${blocks} blocks, ${warmup} warmup blocks`;
-            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${modeNote}${samplyNote}${tracingChromeNote}${slackNote}${reorgNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${waitTimeNote}${blockTimeNote}${baselineArgsNote}${featureArgsNote}`;
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${modeNote}${samplyNote}${tracingChromeNote}${slackNote}${reorgNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${metricsNote}${waitTimeNote}${blockTimeNote}${baselineArgsNote}${featureArgsNote}`;
             core.exportVariable('BENCH_CONFIG', config);
 
             const pr = process.env.BENCH_PR;
@@ -929,9 +935,9 @@ jobs:
 
       - uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444 # v1
       - uses: dtolnay/rust-toolchain@stable
-      - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         continue-on-error: true
-      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
 
       - name: Mask OTLP endpoints
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0

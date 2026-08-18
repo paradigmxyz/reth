@@ -9,7 +9,10 @@ use alloy_consensus::transaction::Recovered;
 use alloy_primitives::{Address, B256};
 use reth_evm::{ConfigureEvm, EvmEnvFor};
 use reth_primitives_traits::{NodePrimitives, TxTy};
-use reth_provider::{BlockReader, StateProviderFactory, StateReader};
+use reth_provider::{
+    BlockNumReader, DatabaseProviderFactory, PruneCheckpointReader, StageCheckpointReader,
+    StorageSettingsCache, TryIntoHistoricalStateProvider,
+};
 use std::{fmt::Debug, sync::Arc};
 
 /// Coordinates a long-lived worker and the latest completed immutable snapshot.
@@ -34,7 +37,13 @@ where
 impl<N, P, Evm> Handle<N, P, Evm>
 where
     N: NodePrimitives,
-    P: BlockReader + StateProviderFactory + StateReader + Clone + Send + Sync + 'static,
+    P: DatabaseProviderFactory + 'static,
+    P::Provider: BlockNumReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + TryIntoHistoricalStateProvider
+        + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Spawns the long-lived worker, which owns its mutable read cache and starts a fresh one for
