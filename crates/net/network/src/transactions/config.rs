@@ -295,11 +295,6 @@ impl TransactionServePolicy {
             Self::None => false,
         }
     }
-
-    /// Returns true if the serve policy serves requests from any peer.
-    pub const fn allows_all(&self) -> bool {
-        matches!(self, Self::All)
-    }
 }
 
 impl FromStr for TransactionServePolicy {
@@ -447,5 +442,56 @@ mod tests {
         assert!(TransactionPropagationMode::from_str("max:").is_err());
         assert!(TransactionPropagationMode::from_str("max").is_err());
         assert!(TransactionPropagationMode::from_str("").is_err());
+    }
+
+    #[test]
+    fn test_transaction_serve_policy_from_str() {
+        assert_eq!(TransactionServePolicy::from_str("all").unwrap(), TransactionServePolicy::All);
+        assert_eq!(TransactionServePolicy::from_str("All").unwrap(), TransactionServePolicy::All);
+        assert_eq!(
+            TransactionServePolicy::from_str("trusted").unwrap(),
+            TransactionServePolicy::Trusted
+        );
+        assert_eq!(
+            TransactionServePolicy::from_str("Trusted").unwrap(),
+            TransactionServePolicy::Trusted
+        );
+        assert_eq!(TransactionServePolicy::from_str("none").unwrap(), TransactionServePolicy::None);
+        assert_eq!(TransactionServePolicy::from_str("None").unwrap(), TransactionServePolicy::None);
+
+        assert!(TransactionServePolicy::from_str("invalid").is_err());
+        assert!(TransactionServePolicy::from_str("").is_err());
+    }
+
+    /// The CLI renders the default with `Display` and parses it back with `FromStr`, so the two
+    /// must agree for every variant.
+    #[test]
+    fn test_transaction_serve_policy_display_roundtrip() {
+        for policy in [
+            TransactionServePolicy::All,
+            TransactionServePolicy::Trusted,
+            TransactionServePolicy::None,
+        ] {
+            assert_eq!(TransactionServePolicy::from_str(&policy.to_string()).unwrap(), policy);
+        }
+    }
+
+    #[test]
+    fn test_transaction_serve_policy_allows() {
+        for kind in [PeerKind::Basic, PeerKind::Static, PeerKind::Trusted] {
+            assert!(TransactionServePolicy::All.allows(kind));
+            assert!(!TransactionServePolicy::None.allows(kind));
+        }
+
+        assert!(TransactionServePolicy::Trusted.allows(PeerKind::Trusted));
+        assert!(!TransactionServePolicy::Trusted.allows(PeerKind::Basic));
+        // peers added at runtime via `admin_addPeer` are `Static`, and are not served
+        assert!(!TransactionServePolicy::Trusted.allows(PeerKind::Static));
+    }
+
+    #[test]
+    fn test_transaction_serve_policy_default_is_all() {
+        assert_eq!(TransactionServePolicy::default(), TransactionServePolicy::All);
+        assert_eq!(TransactionsManagerConfig::default().serve_policy, TransactionServePolicy::All);
     }
 }

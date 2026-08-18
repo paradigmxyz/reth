@@ -1199,6 +1199,32 @@ mod tests {
     }
 
     #[test]
+    fn parse_tx_serve_policy_args() {
+        let args = CommandParser::<NetworkArgs>::parse_from(["reth"]).args;
+        assert_eq!(args.tx_serve_policy, TransactionServePolicy::All);
+        assert_eq!(args.transactions_manager_config().serve_policy, TransactionServePolicy::All);
+
+        for (flag, expected) in [
+            ("all", TransactionServePolicy::All),
+            ("trusted", TransactionServePolicy::Trusted),
+            ("none", TransactionServePolicy::None),
+        ] {
+            let args =
+                CommandParser::<NetworkArgs>::parse_from(["reth", "--tx-serve-policy", flag]).args;
+            assert_eq!(args.tx_serve_policy, expected);
+            // the flag has to reach the `TransactionsManager`, not just the args struct
+            assert_eq!(args.transactions_manager_config().serve_policy, expected);
+        }
+
+        assert!(CommandParser::<NetworkArgs>::try_parse_from([
+            "reth",
+            "--tx-serve-policy",
+            "invalid"
+        ])
+        .is_err());
+    }
+
+    #[test]
     fn parse_nat_args() {
         let args = CommandParser::<NetworkArgs>::parse_from(["reth", "--nat", "none"]).args;
         assert_eq!(args.nat, NatResolver::None);

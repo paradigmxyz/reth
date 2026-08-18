@@ -263,6 +263,111 @@ async fn test_tx_serve_policy_trusted_only() {
     assert_eq!(*served[0].hash(), outcome.hash);
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn test_tx_serve_policy_all_serves_untrusted() {
+    reth_tracing::init_test_tracing();
+
+    let provider = MockEthProvider::default().with_genesis_block();
+
+    let tx_manager_config = TransactionsManagerConfig {
+        serve_policy: TransactionServePolicy::All,
+        ..Default::default()
+    };
+
+    let net = Testnet::create_with(2, provider.clone()).await;
+    let net = net.with_eth_pool_config(tx_manager_config);
+
+    let handle = net.spawn();
+    handle.connect_peers().await;
+
+    // peer0 serves requests, peer1 makes them
+    let peer_0_handle = &handle.peers()[0];
+    let peer_1_handle = &handle.peers()[1];
+
+    let peer_0_id = *peer_0_handle.peer_id();
+    let peer_1_txs = peer_1_handle.transactions().unwrap();
+
+    let mut tx_gen = TransactionGenerator::new(rand::rng());
+    let tx = tx_gen.gen_eip1559_pooled();
+
+    // ensure the sender has balance
+    let sender = tx.sender();
+    provider.add_account(sender, ExtendedAccount::new(0, U256::from(100_000_000)));
+
+    // insert the tx into peer0's pool, so it has something to serve
+    let outcome = peer_0_handle.pool().unwrap().add_external_transaction(tx).await.unwrap();
+
+    // peer1 is a basic peer, but the default policy serves every peer. This is the control for
+    // `test_tx_serve_policy_trusted_only`: it pins that the empty response there comes from the
+    // policy, not from an unrelated failure to serve.
+    let served = poll_pooled_transactions(peer_1_txs, peer_0_id, outcome.hash, |txs| {
+        (!txs.is_empty()).then_some(txs)
+    })
+    .await
+    .expect("untrusted peer should be served under the `All` policy");
+    assert_eq!(served.len(), 1);
+    assert_eq!(*served[0].hash(), outcome.hash);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_tx_serve_policy_none() {
+    reth_tracing::init_test_tracing();
+
+    let provider = MockEthProvider::default().with_genesis_block();
+
+    let tx_manager_config = TransactionsManagerConfig {
+        serve_policy: TransactionServePolicy::None,
+        ..Default::default()
+    };
+
+    let net = Testnet::create_with(2, provider.clone()).await;
+    let net = net.with_eth_pool_config(tx_manager_config);
+
+    let handle = net.spawn();
+    handle.connect_peers().await;
+
+    // peer0 serves requests, peer1 makes them
+    let peer_0_handle = &handle.peers()[0];
+    let peer_1_handle = &handle.peers()[1];
+
+    let peer_0_id = *peer_0_handle.peer_id();
+    let peer_1_txs = peer_1_handle.transactions().unwrap();
+
+    let mut tx_gen = TransactionGenerator::new(rand::rng());
+    let tx = tx_gen.gen_eip1559_pooled();
+
+    // ensure the sender has balance
+    let sender = tx.sender();
+    provider.add_account(sender, ExtendedAccount::new(0, U256::from(100_000_000)));
+
+    // insert the tx into peer0's pool, so it has something to serve
+    let outcome = peer_0_handle.pool().unwrap().add_external_transaction(tx).await.unwrap();
+
+    // a reply at all means peer0's `TransactionsManager` handled the request, and the tx is in its
+    // pool, so an empty response can only come from the policy
+    let refused = poll_pooled_transactions(peer_1_txs, peer_0_id, outcome.hash, Some)
+        .await
+        .expect("peer0 should answer the request");
+    assert!(refused.is_empty(), "untrusted peer should receive an empty response");
+
+    let mut event_stream_0 = NetworkEventStream::new(peer_0_handle.network().event_listener());
+    let mut event_stream_1 = NetworkEventStream::new(peer_1_handle.network().event_listener());
+
+    // disconnect peer1 from peer0
+    peer_0_handle.network().remove_peer(*peer_1_handle.peer_id(), PeerKind::Static);
+    join!(event_stream_0.next_session_closed(), event_stream_1.next_session_closed());
+
+    // re register peer1 as trusted
+    peer_0_handle.network().add_trusted_peer(*peer_1_handle.peer_id(), peer_1_handle.local_addr());
+    join!(event_stream_0.next_session_established(), event_stream_1.next_session_established());
+
+    // `None` does not exempt trusted peers
+    let refused = poll_pooled_transactions(peer_1_txs, peer_0_id, outcome.hash, Some)
+        .await
+        .expect("peer0 should answer the request");
+    assert!(refused.is_empty(), "trusted peer should receive an empty response under `None`");
+}
+
 /// Repeatedly sends a `GetPooledTransactions` request for `hash` until `accept` returns a value,
 /// or the timeout elapses.
 ///
