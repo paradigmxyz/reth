@@ -24,17 +24,19 @@ use crate::{
 };
 use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::Sealable;
+use alloy_rlp::RlpList;
 use futures::{stream::Fuse, SinkExt, StreamExt};
 use metrics::{Counter, Gauge};
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError},
-    message::{EthBroadcastMessage, MessageError},
-    Capabilities, DisconnectP2P, DisconnectReason, EthMessage, EthSnapMessage, NetworkPrimitives,
-    NewBlockPayload,
+    message::{EthBroadcastMessage, MessageError, TX_MEMORY_BUDGET_MULTIPLIER},
+    Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives, NewBlockPayload,
+    ProtocolMessage,
 };
 use reth_eth_wire_types::{
-    message::RequestPair, snap::SnapProtocolMessage, NewPooledTransactionHashes,
-    RawCapabilityMessage,
+    message::{EthMessageID, RequestPair},
+    snap::{SnapProtocolMessage, SnapVersion},
+    NewPooledTransactionHashes, RawCapabilityMessage,
 };
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_api::{PeerRequest, RequestMessage};
@@ -425,6 +427,124 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             }
             EthMessage::Other(bytes) => self.try_emit_broadcast(PeerMessage::Other(bytes)).into(),
         }
+    }
+
+    /// Decodes an authenticated ETH capability frame after session-level admission can inspect it.
+    fn on_incoming_raw_message(
+        &mut self,
+        raw: RawCapabilityMessage,
+    ) -> OnIncomingMessageOutcome<N> {
+        let version = self.conn.version();
+        if raw.id < EthMessageID::message_count(version) as usize {
+            let Ok(message_id) = EthMessageID::try_from(raw.id) else {
+                return self.on_incoming_message(EthMessage::Other(raw))
+            };
+            if matches!(
+                message_id,
+                EthMessageID::BlockHeaders |
+                    EthMessageID::BlockBodies |
+                    EthMessageID::PooledTransactions |
+                    EthMessageID::NodeData |
+                    EthMessageID::Receipts |
+                    EthMessageID::BlockAccessLists |
+                    EthMessageID::Cells
+            ) {
+                match self.admit_eth_response(message_id, &raw.payload) {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        self.on_bad_message();
+                        return OnIncomingMessageOutcome::Ok
+                    }
+                    Err(error) => {
+                        return OnIncomingMessageOutcome::BadMessage {
+                            error: EthStreamError::InvalidMessage(error),
+                            message: EthMessage::Other(raw),
+                        }
+                    }
+                }
+            }
+            let mut payload = raw.payload.as_ref();
+            let message = ProtocolMessage::decode_payload_with_tx_memory_budget(
+                version,
+                message_id,
+                &mut payload,
+                self.conn.max_message_size() * TX_MEMORY_BUDGET_MULTIPLIER,
+            )
+            .map(|message| message.message)
+            .map_err(EthStreamError::InvalidMessage);
+            return match message {
+                Ok(message) if !matches!(message, EthMessage::Status(_)) => {
+                    self.on_incoming_message(message)
+                }
+                Ok(_) => OnIncomingMessageOutcome::BadMessage {
+                    error: EthStreamError::EthHandshakeError(
+                        EthHandshakeError::StatusNotInHandshake,
+                    ),
+                    message: EthMessage::Other(raw),
+                },
+                Err(error) => {
+                    OnIncomingMessageOutcome::BadMessage { error, message: EthMessage::Other(raw) }
+                }
+            }
+        }
+
+        if !self.conn.supports_snap() {
+            return self.on_incoming_message(EthMessage::Other(raw))
+        }
+        let snap_id = raw.id - EthMessageID::message_count(version) as usize;
+        let Ok(snap_id) = u8::try_from(snap_id) else {
+            return OnIncomingMessageOutcome::BadMessage {
+                error: EthStreamError::UnsupportedMessage { message_id: u8::MAX },
+                message: EthMessage::Other(raw),
+            }
+        };
+        let mut frame = Vec::with_capacity(raw.payload.len() + 1);
+        frame.push(snap_id);
+        frame.extend_from_slice(&raw.payload);
+        match SnapProtocolMessage::decode_versioned(SnapVersion::V2, &frame) {
+            Ok(message) => self.on_incoming_snap_message(message),
+            Err(error) => OnIncomingMessageOutcome::BadMessage {
+                error: EthStreamError::InvalidMessage(MessageError::Other(error.to_string())),
+                message: EthMessage::Other(raw),
+            },
+        }
+    }
+
+    /// Checks a response against the request that is still in flight without decoding its entries.
+    fn admit_eth_response(
+        &self,
+        message_id: EthMessageID,
+        payload: &[u8],
+    ) -> Result<bool, MessageError> {
+        let mut encoded = payload;
+        let mut fields = RlpList::decode(&mut encoded)?;
+        if !encoded.is_empty() {
+            return Err(alloy_rlp::Error::UnexpectedLength.into())
+        }
+        let request_id: u64 = fields.next()?.ok_or(alloy_rlp::Error::UnexpectedLength)?;
+        let Some(inflight) = self.inflight_requests.get(&request_id) else { return Ok(false) };
+        let RequestState::Waiting(request) = &inflight.request else { return Ok(false) };
+        let Some((expected, limit)) = request.eth_response_bound() else { return Ok(false) };
+        if message_id != expected {
+            return Ok(false)
+        }
+
+        if message_id == EthMessageID::Receipts && self.conn.version() >= EthVersion::Eth70 {
+            fields.next::<bool>()?.ok_or(alloy_rlp::Error::UnexpectedLength)?;
+        }
+        if message_id == EthMessageID::Cells {
+            let mut hashes = RlpList::decode(
+                &mut fields.next_raw()?.ok_or(alloy_rlp::Error::UnexpectedLength)?,
+            )?;
+            let mut cells = RlpList::decode(
+                &mut fields.next_raw()?.ok_or(alloy_rlp::Error::UnexpectedLength)?,
+            )?;
+            fields.next_raw()?.ok_or(alloy_rlp::Error::UnexpectedLength)?;
+            return Ok(!hashes.has_more_than(limit)? && !cells.has_more_than(limit)?)
+        }
+        let mut result =
+            RlpList::decode(&mut fields.next_raw()?.ok_or(alloy_rlp::Error::UnexpectedLength)?)?;
+        Ok(!result.has_more_than(limit)?)
     }
 
     /// Handles an inbound `snap/2` message.
@@ -936,14 +1056,7 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                     Poll::Ready(Some(res)) => {
                         match res {
                             Ok(msg) => {
-                                let outcome = match msg {
-                                    EthSnapMessage::Eth(msg) => {
-                                        trace!(target: "net::session", msg_id=?msg.message_id(), remote_peer_id=?this.remote_peer_id, "received eth message");
-                                        // decode and handle message
-                                        this.on_incoming_message(msg)
-                                    }
-                                    EthSnapMessage::Snap(msg) => this.on_incoming_snap_message(msg),
-                                };
+                                let outcome = this.on_incoming_raw_message(msg);
                                 match outcome {
                                     OnIncomingMessageOutcome::Ok => {
                                         // handled successfully
@@ -1321,7 +1434,8 @@ mod tests {
     use super::*;
     use crate::session::{handle::PendingSessionEvent, start_pending_incoming_session};
     use alloy_eips::eip2124::ForkFilter;
-    use alloy_primitives::B256;
+    use alloy_primitives::{Bytes, B256};
+    use alloy_rlp::{Encodable, Header};
     use futures::task::noop_waker;
     use reth_chainspec::MAINNET;
     use reth_ecies::stream::ECIESStream;
@@ -1558,6 +1672,19 @@ mod tests {
         );
         let id = *session.inflight_requests.keys().next().expect("eth request tracked");
         (id, rx)
+    }
+
+    fn raw_response(
+        message_id: EthMessageID,
+        request_id: u64,
+        result: &[u8],
+    ) -> RawCapabilityMessage {
+        let mut payload = Vec::with_capacity(request_id.length() + result.len() + 9);
+        Header { list: true, payload_length: request_id.length() + result.len() }
+            .encode(&mut payload);
+        request_id.encode(&mut payload);
+        payload.extend_from_slice(result);
+        RawCapabilityMessage::eth(message_id, Bytes::from(payload).into())
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1905,6 +2032,87 @@ mod tests {
         assert_eq!(rx.await.unwrap().unwrap_err(), RequestError::BadResponse);
         assert!(matches!(
             futures::FutureExt::now_or_never(builder.active_session_rx.next()).flatten(),
+            Some(ActiveSessionMessage::BadMessage { .. })
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn raw_wrong_type_eth_response_is_rejected_before_payload_decode() {
+        let mut builder = SessionBuilder::default();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+        let fut = builder.with_client_stream(local_addr, async move |client_stream| {
+            let _client_stream = client_stream;
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        });
+        tokio::task::spawn(fut);
+        let (incoming, _) = listener.accept().await.unwrap();
+        let mut session = builder.connect_incoming(incoming).await;
+
+        let (id, _rx) = dispatch_block_bodies_request(&mut session);
+
+        // `0x80` is not the BlockHeaders result list. The response kind is wrong, so admission
+        // rejects it after only reading its outer request id and never reaches typed decoding.
+        let outcome =
+            session.on_incoming_raw_message(raw_response(EthMessageID::BlockHeaders, id, &[0x80]));
+        assert!(matches!(outcome, OnIncomingMessageOutcome::Ok));
+        assert!(session.inflight_requests.contains_key(&id));
+        assert!(matches!(
+            builder.active_session_rx.next().await,
+            Some(ActiveSessionMessage::BadMessage { .. })
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn raw_unknown_eth_response_is_rejected_before_payload_decode() {
+        let mut builder = SessionBuilder::default();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+        let fut = builder.with_client_stream(local_addr, async move |client_stream| {
+            let _client_stream = client_stream;
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        });
+        tokio::task::spawn(fut);
+        let (incoming, _) = listener.accept().await.unwrap();
+        let mut session = builder.connect_incoming(incoming).await;
+
+        // `0x80` would not type-decode as a BlockBodies result. No outgoing request owns this
+        // id, so the session rejects the frame after the request-id field alone.
+        let outcome =
+            session.on_incoming_raw_message(raw_response(EthMessageID::BlockBodies, 999, &[0x80]));
+        assert!(matches!(outcome, OnIncomingMessageOutcome::Ok));
+        assert!(session.inflight_requests.is_empty());
+        assert!(matches!(
+            builder.active_session_rx.next().await,
+            Some(ActiveSessionMessage::BadMessage { .. })
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn raw_eth_response_exceeding_requested_count_is_rejected() {
+        let mut builder = SessionBuilder::default();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+        let fut = builder.with_client_stream(local_addr, async move |client_stream| {
+            let _client_stream = client_stream;
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        });
+        tokio::task::spawn(fut);
+        let (incoming, _) = listener.accept().await.unwrap();
+        let mut session = builder.connect_incoming(incoming).await;
+
+        // The request contains no hashes, hence permits zero bodies. The result is an RLP list
+        // with one empty body; admission counts its raw entries without materializing a body.
+        let (id, _rx) = dispatch_block_bodies_request(&mut session);
+        let outcome = session.on_incoming_raw_message(raw_response(
+            EthMessageID::BlockBodies,
+            id,
+            &[0xc1, alloy_rlp::EMPTY_LIST_CODE],
+        ));
+        assert!(matches!(outcome, OnIncomingMessageOutcome::Ok));
+        assert!(session.inflight_requests.contains_key(&id));
+        assert!(matches!(
+            builder.active_session_rx.next().await,
             Some(ActiveSessionMessage::BadMessage { .. })
         ));
     }
