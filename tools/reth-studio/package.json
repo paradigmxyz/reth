@@ -1,0 +1,32 @@
+{
+  "name": "reth-studio",
+  "version": "1.0.0",
+  "description": "Interactive Execution Inspector, ExEx (Execution Extension) Pipeline Simulator & Benchmark Dashboard for Paradigm Reth.",
+  "main": "src/index.js",
+  "type": "module",
+  "bin": {
+    "reth-studio-cli": "./bin/reth-studio-cli.js"
+  },
+  "scripts": {
+    "start": "node src/server/app.js",
+    "cli": "node bin/reth-studio-cli.js",
+    "test": "node tests/run-all.js"
+  },
+  "keywords": [
+    "reth",
+    "paradigm",
+    "rust-ethereum",
+    "exex",
+    "execution-extensions",
+    "mdbx",
+    "evm-performance"
+  ],
+  "author": "Paradigm Reth Community",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "ethers": "^6.13.5",
+    "express": "^4.21.2"
+  }
+}
