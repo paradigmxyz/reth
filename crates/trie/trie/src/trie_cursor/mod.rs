@@ -88,6 +88,16 @@ pub trait TrieStorageCursor: TrieCursor {
     /// After calling this method, the subsequent operation MUST be a [`TrieCursor::seek`] or
     /// [`TrieCursor::seek_exact`] call.
     fn set_hashed_address(&mut self, hashed_address: B256);
+
+    /// Returns the persisted root hash for the current storage trie if the cursor can prove that no
+    /// in-memory overlay changes affect it.
+    ///
+    /// Cursors backed only by canonical storage can use the root hash cached in the persisted root
+    /// branch. Overlay cursors must return `None` whenever the current storage trie has in-memory
+    /// updates or was wiped, forcing callers to recompute the root through normal trie traversal.
+    fn root_hash_if_unchanged(&mut self) -> Result<Option<B256>, DatabaseError> {
+        Ok(None)
+    }
 }
 
 /// Iterator wrapper for `TrieCursor` types
