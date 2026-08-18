@@ -34,7 +34,7 @@ use reth_node_core::{
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
 use reth_rpc::{
     eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer},
-    AdminApi,
+    AdminApi, EthTransactionsConfig,
 };
 use reth_rpc_api::{eth::helpers::EthTransactions, IntoEngineApiRpcModule};
 use reth_rpc_builder::{
@@ -1119,6 +1119,7 @@ where
         let ctx = EthApiCtx {
             components: &node,
             config: eth_config,
+            transactions_config: EthTransactionsConfig::new(config.txpool.max_tx_input_bytes),
             cache,
             engine_handle: beacon_engine_handle.clone(),
         };
@@ -1289,6 +1290,8 @@ pub struct EthApiCtx<'a, N: FullNodeTypes> {
     pub components: &'a N,
     /// Eth API configuration
     pub config: EthConfig,
+    /// Transaction-related RPC configuration.
+    pub transactions_config: EthTransactionsConfig,
     /// Cache for eth state
     pub cache: EthStateCache<PrimitivesTy<N::Types>>,
     /// Handle to the beacon consensus engine
@@ -1314,6 +1317,7 @@ impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: Hardforks + EthereumH
             .max_blocking_io_requests(self.config.max_blocking_io_requests)
             .pending_block_kind(self.config.pending_block_kind)
             .raw_tx_forwarder(self.config.raw_tx_forwarder)
+            .transactions_config(self.transactions_config)
             .evm_memory_limit(self.config.rpc_evm_memory_limit)
             .force_blob_sidecar_upcasting(self.config.force_blob_sidecar_upcasting)
     }
