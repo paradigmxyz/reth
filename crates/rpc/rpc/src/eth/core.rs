@@ -824,6 +824,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_call_many_rejects_oversized_transaction_flood() {
+        use reth_rpc_server_types::constants::DEFAULT_MAX_SIMULATE_BLOCKS;
+
+        let eth_api = build_test_eth_api(NoopProvider::default());
+        let bundles = vec![Bundle {
+            transactions: vec![
+                TransactionRequest::default();
+                DEFAULT_MAX_SIMULATE_BLOCKS as usize + 1
+            ],
+            block_override: None,
+        }];
+
+        let response = <EthApi<_, _> as EthApiServer<_, _, _, _, _, _>>::call_many(
+            &eth_api, bundles, None, None,
+        )
+        .await;
+
+        let err = response.expect_err("call_many should reject oversized transaction floods");
+        let message = err.message().to_ascii_lowercase();
+        assert!(
+            message.contains("transaction count") && message.contains("exceeds limit"),
+            "unexpected error: {message}"
+        );
+        assert_eq!(err.code(), INVALID_PARAMS_CODE);
+    }
+
+    #[tokio::test]
     /// Requesting no block should result in a default response
     async fn test_fee_history_no_block_requested() {
         let block_count = 10;
