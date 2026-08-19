@@ -774,14 +774,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // This reduces cursor open/close overhead from N calls to 1.
             if save_mode.with_state() && !state_trie_blocks.is_empty() {
                 let start = Instant::now();
-                let batch = state_trie_blocks
-                    .iter()
-                    .map(|block| block.trie_data.get().sorted.hashed_state.as_ref())
-                    .collect::<Vec<_>>();
-                let mask = state_trie_masking_blocks
-                    .iter()
-                    .map(|block| block.trie_data.get().sorted.hashed_state.as_ref())
-                    .collect::<Vec<_>>();
+                let batch = ExecutedBlock::hashed_state_refs(state_trie_blocks);
+                let mask = ExecutedBlock::hashed_state_refs(state_trie_masking_blocks);
                 let merged_hashed_state =
                     HashedPostStateSorted::disjointed_merge_batch(&batch, &mask);
                 if !merged_hashed_state.is_empty() {
@@ -790,14 +784,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 timings.write_hashed_state += start.elapsed();
 
                 let start = Instant::now();
-                let batch = state_trie_blocks
-                    .iter()
-                    .map(|block| block.trie_data.get().sorted.trie_updates.as_ref())
-                    .collect::<Vec<_>>();
-                let mask = state_trie_masking_blocks
-                    .iter()
-                    .map(|block| block.trie_data.get().sorted.trie_updates.as_ref())
-                    .collect::<Vec<_>>();
+                let batch = ExecutedBlock::trie_updates_refs(state_trie_blocks);
+                let mask = ExecutedBlock::trie_updates_refs(state_trie_masking_blocks);
                 let merged_trie = TrieUpdatesSorted::disjointed_merge_batch(&batch, &mask);
                 if !merged_trie.is_empty() {
                     self.write_trie_updates_sorted(&merged_trie)?;
