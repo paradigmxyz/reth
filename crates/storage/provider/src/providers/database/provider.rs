@@ -1,6 +1,7 @@
 use super::SaveBlocksInput;
 use crate::{
     changesets_utils::StorageRevertsIter,
+    prepare_history_shard_writes_parallel,
     providers::{
         database::{chain::ChainStorage, metrics, DatabaseProviderMetrics},
         rocksdb::{PendingRocksDBBatches, RocksDBProvider, RocksDBWriteCtx},
@@ -3871,13 +3872,17 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
 
         // Use pre-computed transitions for history indices since static file
         // writes aren't visible until commit.
-        // Note: For MDBX we use insert_*_history_index. For RocksDB we use
-        // append_*_history_shard which handles read-merge-write internally.
+        // RocksDB: committed last-shard reads finish before the write batch is created.
         let storage_settings = self.cached_storage_settings();
         if storage_settings.storage_v2 {
+            let rocksdb = self.rocksdb_provider();
+            let prepared = prepare_history_shard_writes_parallel::<tables::AccountsHistory, _>(
+                account_transitions,
+                |key| rocksdb.get::<tables::AccountsHistory>(key),
+            )?;
             self.with_rocksdb_batch(|mut batch| {
-                for (address, blocks) in account_transitions {
-                    batch.append_account_history_shard(address, blocks)?;
+                for (key, shard) in prepared.into_writes() {
+                    batch.put::<tables::AccountsHistory>(key, &shard)?;
                 }
                 Ok(((), Some(batch.into_inner())))
             })?;
@@ -3885,9 +3890,14 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
             self.insert_account_history_index(account_transitions)?;
         }
         if storage_settings.storage_v2 {
+            let rocksdb = self.rocksdb_provider();
+            let prepared = prepare_history_shard_writes_parallel::<tables::StoragesHistory, _>(
+                storage_transitions,
+                |key| rocksdb.get::<tables::StoragesHistory>(key),
+            )?;
             self.with_rocksdb_batch(|mut batch| {
-                for ((address, key), blocks) in storage_transitions {
-                    batch.append_storage_history_shard(address, key, blocks)?;
+                for (key, shard) in prepared.into_writes() {
+                    batch.put::<tables::StoragesHistory>(key, &shard)?;
                 }
                 Ok(((), Some(batch.into_inner())))
             })?;

@@ -1,5 +1,8 @@
 use super::{collect_history_indices, collect_storage_history_indices};
-use crate::{stages::utils::load_storage_history, StageCheckpoint, StageId};
+use crate::{
+    stages::utils::{load_storage_history_append, prepare_storage_history_writes},
+    StageCheckpoint, StageId,
+};
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db_api::{
     models::{storage_sharded_key::StorageShardedKey, AddressStorageKey, BlockNumberAddress},
@@ -140,12 +143,23 @@ where
 
         info!(target: "sync::stages::index_storage_history::exec", "Loading indices into database");
 
-        provider.with_rocksdb_batch_auto_commit(|rocksdb_batch| {
-            let mut writer = EitherWriter::new_storages_history(provider, rocksdb_batch)?;
-            load_storage_history(collector, first_sync, &mut writer)
-                .map_err(|e| reth_provider::ProviderError::other(Box::new(e)))?;
-            Ok(((), writer.into_raw_rocksdb_batch()))
-        })?;
+        if first_sync {
+            provider.with_rocksdb_batch_auto_commit(|rocksdb_batch| {
+                let mut writer = EitherWriter::new_storages_history(provider, rocksdb_batch)?;
+                load_storage_history_append(collector, &mut writer)
+                    .map_err(|e| reth_provider::ProviderError::other(Box::new(e)))?;
+                Ok(((), writer.into_raw_rocksdb_batch()))
+            })?;
+        } else {
+            let prepared = prepare_storage_history_writes(collector, provider, use_rocksdb)?;
+            provider.with_rocksdb_batch_auto_commit(|rocksdb_batch| {
+                let mut writer = EitherWriter::new_storages_history(provider, rocksdb_batch)?;
+                for (key, value) in prepared.into_writes() {
+                    writer.upsert_storage_history(key, &value)?;
+                }
+                Ok(((), writer.into_raw_rocksdb_batch()))
+            })?;
+        }
 
         if use_rocksdb {
             provider.commit_pending_rocksdb_batches()?;
@@ -330,6 +344,55 @@ mod tests {
         // verify initial state
         let table = cast(db.table::<tables::StoragesHistory>().unwrap());
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![1, 2, 3])]));
+    }
+
+    #[tokio::test]
+    async fn insert_index_many_distinct_slots_incremental() {
+        let db = TestStageDB::default();
+        const KEYS: u8 = 32;
+
+        db.commit(|tx| {
+            for block in 0..=MAX_BLOCK {
+                tx.put::<tables::BlockBodyIndices>(
+                    block,
+                    StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
+                )?;
+            }
+            for i in 1..=KEYS {
+                let address = Address::repeat_byte(i);
+                let slot = B256::repeat_byte(i);
+                tx.put::<tables::StoragesHistory>(
+                    StorageShardedKey::new(address, slot, u64::MAX),
+                    list(&[1, 2, 3]),
+                )?;
+                for block in 0..=MAX_BLOCK {
+                    tx.put::<tables::StorageChangeSets>(
+                        BlockNumberAddress((block, address)),
+                        storage(slot),
+                    )?;
+                }
+            }
+            Ok(())
+        })
+        .unwrap();
+
+        run(&db, 5, Some(3));
+
+        let table = db.table::<tables::StoragesHistory>().unwrap();
+        assert_eq!(table.len(), KEYS as usize);
+        for i in 1..=KEYS {
+            let address = Address::repeat_byte(i);
+            let slot = B256::repeat_byte(i);
+            let shard = table
+                .iter()
+                .find(|(key, _)| {
+                    key.address == address &&
+                        key.sharded_key.key == slot &&
+                        key.sharded_key.highest_block_number == u64::MAX
+                })
+                .map(|(_, list)| list.iter().collect::<Vec<_>>());
+            assert_eq!(shard, Some(vec![1, 2, 3, 4, 5]), "slot {address}/{slot}");
+        }
     }
 
     #[tokio::test]
