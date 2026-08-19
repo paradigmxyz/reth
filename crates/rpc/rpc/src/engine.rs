@@ -1,7 +1,7 @@
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::{Address, Bytes, B256, U256, U64};
 use alloy_rpc_types_eth::{
-    state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, SyncStatus,
+    state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, Index, SyncStatus,
 };
 use alloy_serde::JsonStorageKey;
 use jsonrpsee::core::RpcResult as Result;
@@ -120,6 +120,30 @@ where
         block_id: BlockId,
     ) -> Result<Option<Vec<RpcReceipt<Eth::NetworkTypes>>>> {
         self.eth.block_receipts(block_id).instrument(engine_span!()).await
+    }
+
+    /// Handler for: `eth_getRawTransactionByBlockHashAndIndex`
+    async fn raw_transaction_by_block_hash_and_index(
+        &self,
+        hash: B256,
+        index: Index,
+    ) -> Result<Option<Bytes>> {
+        self.eth
+            .raw_transaction_by_block_hash_and_index(hash, index)
+            .instrument(engine_span!())
+            .await
+    }
+
+    /// Handler for: `eth_getRawTransactionByBlockNumberAndIndex`
+    async fn raw_transaction_by_block_number_and_index(
+        &self,
+        number: BlockNumberOrTag,
+        index: Index,
+    ) -> Result<Option<Bytes>> {
+        self.eth
+            .raw_transaction_by_block_number_and_index(number, index)
+            .instrument(engine_span!())
+            .await
     }
 
     /// Handler for: `eth_sendRawTransaction`

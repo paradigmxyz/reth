@@ -774,14 +774,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // This reduces cursor open/close overhead from N calls to 1.
             if save_mode.with_state() && !state_trie_blocks.is_empty() {
                 let start = Instant::now();
-                let batch = state_trie_blocks
-                    .iter()
-                    .map(|block| block.trie_data.get().sorted.hashed_state.as_ref())
-                    .collect::<Vec<_>>();
-                let mask = state_trie_masking_blocks
-                    .iter()
-                    .map(|block| block.trie_data.get().sorted.hashed_state.as_ref())
-                    .collect::<Vec<_>>();
+                let batch = ExecutedBlock::hashed_state_refs(state_trie_blocks);
+                let mask = ExecutedBlock::hashed_state_refs(state_trie_masking_blocks);
                 let merged_hashed_state =
                     HashedPostStateSorted::disjointed_merge_batch(&batch, &mask);
                 if !merged_hashed_state.is_empty() {
@@ -790,24 +784,17 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 timings.write_hashed_state += start.elapsed();
 
                 let start = Instant::now();
-                let batch = state_trie_blocks
-                    .iter()
-                    .map(|block| block.trie_data.get().sorted.trie_updates.as_ref())
-                    .collect::<Vec<_>>();
-                let mask = state_trie_masking_blocks
-                    .iter()
-                    .map(|block| block.trie_data.get().sorted.trie_updates.as_ref())
-                    .collect::<Vec<_>>();
-                // Sparse-trie streaming produces node updates, but serial state-root computation,
-                // including the fallback, can emit a whole-storage-trie wipe for a destroyed
-                // account. Disjoint merging cannot represent that marker, so use the ordered
-                // merge; writes hidden by the masking suffix are redundant but remain correct
-                // under the in-memory overlay.
+                let batch = ExecutedBlock::trie_updates_refs(state_trie_blocks);
+                let mask = ExecutedBlock::trie_updates_refs(state_trie_masking_blocks);
+                // Sparse-trie streaming emits node updates, while the serial state-root path,
+                // including fallback, can emit a whole storage-trie wipe. `disjointed_merge_batch`
+                // rejects wipes, so use the ordered merge. Persisting updates shadowed by the
+                // masking suffix is redundant but safe: the in-memory overlay still takes
+                // precedence.
                 //
-                // A revm release with bluealloy/revm#3863 will keep post-Cancun selfdestructs from
-                // reaching trie construction as wipes. Wipes remain valid `save_blocks` input,
-                // including when processing pre-Cancun historical data, so persistence cannot
-                // rely on that revm behavior.
+                // A revm release with bluealloy/revm#3863 clears post-Cancun selfdestructs in
+                // place. Wipes remain valid `save_blocks` input when processing
+                // pre-Cancun historical data.
                 let contains_storage_wipe = batch.iter().chain(&mask).any(|updates| {
                     updates.storage_tries_ref().values().any(|storage| storage.is_deleted)
                 });
