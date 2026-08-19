@@ -798,9 +798,11 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     .iter()
                     .map(|block| block.trie_data.get().sorted.trie_updates.as_ref())
                     .collect::<Vec<_>>();
-                // A whole-trie deletion cannot be filtered node-by-node. Fall back to the
-                // ordinary merge in that case; persisting the overwritten nodes is redundant but
-                // correct because the masking suffix is still applied by the in-memory overlay.
+                // Sparse-trie streaming produces node updates, but serial state-root computation,
+                // including the fallback, can emit a whole-storage-trie wipe for a destroyed
+                // account. Disjoint merging cannot represent that marker, so use the ordered
+                // merge; writes hidden by the masking suffix are redundant but remain correct
+                // under the in-memory overlay.
                 let contains_storage_wipe = batch.iter().chain(&mask).any(|updates| {
                     updates.storage_tries_ref().values().any(|storage| storage.is_deleted)
                 });
@@ -4934,6 +4936,57 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
         assert!(storage_entries.is_empty());
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn test_save_blocks_batches_transient_storage_wipe() {
+        use alloy_primitives::map::B256Set;
+        use reth_trie::{updates::TrieUpdates, HashBuilder, HashedPostStateSorted};
+
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let mut test_block_builder = TestBlockBuilder::eth().with_state();
+        let genesis = test_block_builder.get_executed_blocks(0..1).next().unwrap();
+        let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..4).collect();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        save_genesis(&provider_rw, &genesis).unwrap();
+        provider_rw.commit().unwrap();
+
+        // A contract created and self-destructed in the same transaction leaves an empty whole-
+        // storage wipe in the trie updates, even though the account never reaches persisted state.
+        let ephemeral_account = B256::with_last_byte(0x57);
+        let hashed_state = HashedPostStateSorted::default();
+        let mut trie_updates = TrieUpdates::default();
+        trie_updates.finalize(
+            HashBuilder::default(),
+            Default::default(),
+            B256Set::from_iter([ephemeral_account]),
+        );
+        let trie_updates = trie_updates.into_sorted();
+        assert!(trie_updates.storage_tries_ref()[&ephemeral_account].is_deleted);
+        let selfdestruct_block = ExecutedBlock::new(
+            Arc::clone(&blocks[2].recovered_block),
+            Arc::clone(&blocks[2].execution_output),
+            ComputedTrieData::new(Arc::new(hashed_state), Arc::new(trie_updates)),
+        );
+
+        let provider_rw = factory.provider_rw().unwrap();
+        let input = SaveBlocksInput::new(
+            vec![blocks[0].clone(), blocks[1].clone(), selfdestruct_block],
+            0,
+            0,
+            3,
+            3,
+        );
+        provider_rw.save_blocks(&input).unwrap();
+        provider_rw.commit().unwrap();
+
+        let checkpoint =
+            factory.provider().unwrap().get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
+        assert_eq!(checkpoint.block_number, 3);
     }
 
     #[cfg(feature = "partial-persistence")]
