@@ -451,15 +451,69 @@ where
 /// incorrectly treating `(Address::ZERO, B256::ZERO)` as "no previous key".
 ///
 /// Does not read existing last shards.
-pub(crate) fn load_storage_history<N, CURSOR>(
-    collector: Collector<StorageShardedKey, BlockNumberList>,
+pub(crate) fn load_storage_history_append<N, CURSOR>(
+    mut collector: Collector<StorageShardedKey, BlockNumberList>,
     writer: &mut EitherWriter<'_, CURSOR, N>,
 ) -> Result<(), StageError>
 where
     N: NodePrimitives,
-    CURSOR: DbCursorRW<tables::StoragesHistory> + DbCursorRO<tables::StoragesHistory>,
+    CURSOR: DbCursorRW<reth_db_api::tables::StoragesHistory>
+        + DbCursorRO<reth_db_api::tables::StoragesHistory>,
 {
-    load_storage_history_append(collector, writer)
+    let mut current_key: Option<(Address, B256)> = None;
+    // Accumulator for block numbers where the current (address, storage_key) changed.
+    let mut current_list = Vec::<u64>::new();
+
+    let total_entries = collector.len();
+    let interval = (total_entries / 10).max(1);
+
+    for (index, element) in collector.iter()?.enumerate() {
+        let (k, v) = element?;
+        let sharded_key = StorageShardedKey::decode_owned(k)?;
+        let new_list = BlockNumberList::decompress_owned(v)?;
+
+        if index > 0 && index.is_multiple_of(interval) && total_entries > 10 {
+            info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");
+        }
+
+        let partial_key = (sharded_key.address, sharded_key.sharded_key.key);
+
+        // When (address, storage_key) changes, flush the previous key's shards and start fresh.
+        if current_key != Some(partial_key) {
+            // Flush all remaining shards for the previous key (uses u64::MAX for last shard).
+            if let Some((prev_addr, prev_storage_key)) = current_key {
+                flush_storage_history_shards(
+                    prev_addr,
+                    prev_storage_key,
+                    &mut current_list,
+                    true,
+                    writer,
+                )?;
+            }
+
+            current_key = Some(partial_key);
+            current_list.clear();
+        }
+
+        // Append new block numbers to the accumulator.
+        current_list.extend(new_list.iter());
+
+        // Flush complete shards, keeping the last (partial) shard buffered.
+        flush_storage_history_shards_partial(
+            partial_key.0,
+            partial_key.1,
+            &mut current_list,
+            true,
+            writer,
+        )?;
+    }
+
+    // Flush the final key's remaining shard.
+    if let Some((addr, storage_key)) = current_key {
+        flush_storage_history_shards(addr, storage_key, &mut current_list, true, writer)?;
+    }
+
+    Ok(())
 }
 
 /// Grouped new indices plus committed last shards for incremental storage-history writes.
@@ -529,72 +583,6 @@ where
         }
 
         flush_storage_history_shards(address, storage_key, &mut current_list, false, writer)?;
-    }
-
-    Ok(())
-}
-
-/// First-sync / append-only loader. Does not read existing last shards.
-fn load_storage_history_append<N, CURSOR>(
-    mut collector: Collector<StorageShardedKey, BlockNumberList>,
-    writer: &mut EitherWriter<'_, CURSOR, N>,
-) -> Result<(), StageError>
-where
-    N: NodePrimitives,
-    CURSOR: DbCursorRW<reth_db_api::tables::StoragesHistory>
-        + DbCursorRO<reth_db_api::tables::StoragesHistory>,
-{
-    let mut current_key: Option<(Address, B256)> = None;
-    // Accumulator for block numbers where the current (address, storage_key) changed.
-    let mut current_list = Vec::<u64>::new();
-
-    let total_entries = collector.len();
-    let interval = (total_entries / 10).max(1);
-
-    for (index, element) in collector.iter()?.enumerate() {
-        let (k, v) = element?;
-        let sharded_key = StorageShardedKey::decode_owned(k)?;
-        let new_list = BlockNumberList::decompress_owned(v)?;
-
-        if index > 0 && index.is_multiple_of(interval) && total_entries > 10 {
-            info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");
-        }
-
-        let partial_key = (sharded_key.address, sharded_key.sharded_key.key);
-
-        // When (address, storage_key) changes, flush the previous key's shards and start fresh.
-        if current_key != Some(partial_key) {
-            // Flush all remaining shards for the previous key (uses u64::MAX for last shard).
-            if let Some((prev_addr, prev_storage_key)) = current_key {
-                flush_storage_history_shards(
-                    prev_addr,
-                    prev_storage_key,
-                    &mut current_list,
-                    true,
-                    writer,
-                )?;
-            }
-
-            current_key = Some(partial_key);
-            current_list.clear();
-        }
-
-        // Append new block numbers to the accumulator.
-        current_list.extend(new_list.iter());
-
-        // Flush complete shards, keeping the last (partial) shard buffered.
-        flush_storage_history_shards_partial(
-            partial_key.0,
-            partial_key.1,
-            &mut current_list,
-            true,
-            writer,
-        )?;
-    }
-
-    // Flush the final key's remaining shard.
-    if let Some((addr, storage_key)) = current_key {
-        flush_storage_history_shards(addr, storage_key, &mut current_list, true, writer)?;
     }
 
     Ok(())
