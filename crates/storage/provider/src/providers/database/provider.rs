@@ -314,10 +314,10 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         &'a self,
         mut block_number: BlockNumber,
     ) -> ProviderResult<Box<dyn StateProvider + 'a>> {
-        if block_number == self.best_block_number().unwrap_or_default() &&
-            block_number == self.last_block_number().unwrap_or_default()
+        if block_number == self.best_block_number().unwrap_or_default()
+            && block_number == self.last_block_number().unwrap_or_default()
         {
-            return Ok(Box::new(LatestStateProviderRef::new(self)))
+            return Ok(Box::new(LatestStateProviderRef::new(self)));
         }
 
         // +1 as the changeset that we want is the one that was applied after this block.
@@ -540,22 +540,22 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     ) -> ProviderResult<StaticFileWriteCtx> {
         let tip = self.last_block_number()?.max(last_block);
         Ok(StaticFileWriteCtx {
-            write_senders: EitherWriterDestination::senders(self).is_static_file() &&
-                self.prune_modes.sender_recovery.is_none_or(|m| !m.is_full()),
-            write_receipts: save_mode.with_state() &&
-                EitherWriter::receipts_destination(self).is_static_file(),
-            write_account_changesets: save_mode.with_state() &&
-                EitherWriterDestination::account_changesets(self).is_static_file(),
-            write_storage_changesets: save_mode.with_state() &&
-                EitherWriterDestination::storage_changesets(self).is_static_file(),
+            write_senders: EitherWriterDestination::senders(self).is_static_file()
+                && self.prune_modes.sender_recovery.is_none_or(|m| !m.is_full()),
+            write_receipts: save_mode.with_state()
+                && EitherWriter::receipts_destination(self).is_static_file(),
+            write_account_changesets: save_mode.with_state()
+                && EitherWriterDestination::account_changesets(self).is_static_file(),
+            write_storage_changesets: save_mode.with_state()
+                && EitherWriterDestination::storage_changesets(self).is_static_file(),
             tip,
             receipts_prune_mode: self.prune_modes.receipts,
             // Receipts are prunable if no receipts exist in SF yet and within pruning distance
             receipts_prunable: self
                 .static_file_provider
                 .get_highest_static_file_tx(StaticFileSegment::Receipts)
-                .is_none() &&
-                PruneMode::Distance(self.minimum_pruning_distance)
+                .is_none()
+                && PruneMode::Distance(self.minimum_pruning_distance)
                     .should_prune(first_block, tip),
         })
     }
@@ -594,7 +594,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 input.prev_partial_state_trie(),
                 db_tip,
                 partial_state_trie,
-            ))))
+            ))));
         }
 
         self.save_blocks_inner(
@@ -704,9 +704,9 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             let mdbx_start = Instant::now();
 
             // Collect all transaction hashes across all blocks, sort them, and write in batch
-            if !blocks.is_empty() &&
-                !self.cached_storage_settings().storage_v2 &&
-                self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full())
+            if !blocks.is_empty()
+                && !self.cached_storage_settings().storage_v2
+                && self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full())
             {
                 let start = Instant::now();
                 let total_tx_count: usize =
@@ -790,15 +790,27 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 timings.write_hashed_state += start.elapsed();
 
                 let start = Instant::now();
-                let batch = state_trie_blocks
-                    .iter()
-                    .map(|block| block.trie_data.get().sorted.trie_updates.as_ref())
-                    .collect::<Vec<_>>();
-                let mask = state_trie_masking_blocks
-                    .iter()
-                    .map(|block| block.trie_data.get().sorted.trie_updates.as_ref())
-                    .collect::<Vec<_>>();
-                let merged_trie = TrieUpdatesSorted::disjointed_merge_batch(&batch, &mask);
+                let batch = ExecutedBlock::trie_updates_refs(state_trie_blocks);
+                let mask = ExecutedBlock::trie_updates_refs(state_trie_masking_blocks);
+                // Sparse-trie streaming emits node updates, while the serial state-root path,
+                // including fallback, can emit a whole storage-trie wipe. `disjointed_merge_batch`
+                // rejects wipes, so use the ordered merge. Persisting updates shadowed by the
+                // masking suffix is redundant but safe: the in-memory overlay still takes
+                // precedence.
+                //
+                // With a revm release containing bluealloy/revm#3863, post-Cancun selfdestructs
+                // will no longer result in `storage.is_deleted` in serial trie updates. The flag
+                // remains valid `save_blocks` input when processing pre-Cancun historical data.
+                let contains_storage_wipe = batch.iter().chain(&mask).any(|updates| {
+                    updates.storage_tries_ref().values().any(|storage| storage.is_deleted)
+                });
+                let merged_trie = if contains_storage_wipe {
+                    TrieUpdatesSorted::merge_batch(
+                        state_trie_blocks.iter().rev().map(|block| block.trie_updates()),
+                    )
+                } else {
+                    Arc::new(TrieUpdatesSorted::disjointed_merge_batch(&batch, &mask))
+                };
                 if !merged_trie.is_empty() {
                     self.write_trie_updates_sorted(&merged_trie)?;
                 }
@@ -806,8 +818,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             }
 
             // Full mode: update history indices
-            if save_mode.with_state() &&
-                let Some(first_number) = first_number
+            if save_mode.with_state()
+                && let Some(first_number) = first_number
             {
                 let start = Instant::now();
                 self.update_history_indices(first_number..=last_block_number)?;
@@ -868,8 +880,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         block: &RecoveredBlock<BlockTy<N>>,
         first_tx_num: TxNumber,
     ) -> ProviderResult<StoredBlockBodyIndices> {
-        if self.prune_modes.sender_recovery.is_none_or(|m| !m.is_full()) &&
-            EitherWriterDestination::senders(self).is_database()
+        if self.prune_modes.sender_recovery.is_none_or(|m| !m.is_full())
+            && EitherWriterDestination::senders(self).is_database()
         {
             let start = Instant::now();
             let tx_nums_iter = std::iter::successors(Some(first_tx_num), |n| Some(n + 1));
@@ -1084,7 +1096,7 @@ where
     while let Some((sharded_key, list)) = item {
         // If the shard does not belong to the key, break.
         if !shard_belongs_to_key(&sharded_key) {
-            break
+            break;
         }
 
         // Always delete the current shard from the database first
@@ -1099,18 +1111,18 @@ where
         // Keep it deleted (don't return anything for reinsertion)
         if first >= block_number {
             item = cursor.prev()?;
-            continue
+            continue;
         }
         // Case 2: This is a boundary shard (spans across the unwinding point)
         // The shard contains some blocks below and some at/above the unwinding point
         else if block_number <= sharded_key.as_ref().highest_block_number {
             // Return only the block numbers that are below the unwinding point
             // These will be reinserted to preserve the historical data
-            return Ok(list.iter().take_while(|i| *i < block_number).collect::<Vec<_>>())
+            return Ok(list.iter().take_while(|i| *i < block_number).collect::<Vec<_>>());
         }
         // Case 3: Entire shard is below the unwinding point
         // Return all block numbers for reinsertion (preserve entire shard)
-        return Ok(list.iter().collect::<Vec<_>>())
+        return Ok(list.iter().collect::<Vec<_>>());
     }
 
     // No shards found or all processed
@@ -1189,7 +1201,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         let Some(block_number) = self.convert_hash_or_number(id)? else { return Ok(None) };
         let earliest_available = self.static_file_provider.earliest_history_height();
         if block_number < earliest_available {
-            return Err(ProviderError::BlockExpired { requested: block_number, earliest_available })
+            return Err(ProviderError::BlockExpired { requested: block_number, earliest_available });
         }
         let Some(header) = header_by_number(block_number)? else { return Ok(None) };
 
@@ -1259,7 +1271,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         F: FnMut(H, BodyTy<N>, Range<TxNumber>) -> ProviderResult<R>,
     {
         if range.is_empty() {
-            return Ok(Vec::new())
+            return Ok(Vec::new());
         }
 
         let len = range.end().saturating_sub(*range.start()) as usize + 1;
@@ -1594,8 +1606,8 @@ impl<TX: DbTx + 'static, N: NodeTypes> AccountExtReader for DatabaseProvider<TX,
             .static_file_provider
             .get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
 
-        if let Some(highest) = highest_static_block &&
-            self.cached_storage_settings().storage_v2
+        if let Some(highest) = highest_static_block
+            && self.cached_storage_settings().storage_v2
         {
             let start = *range.start();
             let static_end = (*range.end()).min(highest);
@@ -1812,7 +1824,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderSyncGapProvider
             }
             Ordering::Less => {
                 // There's either missing or corrupted files.
-                return Err(ProviderError::HeaderNotFound(next_static_file_block_num.into()))
+                return Err(ProviderError::HeaderNotFound(next_static_file_block_num.into()));
             }
             Ordering::Equal => {}
         }
@@ -1928,7 +1940,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
         if let Some(number) = self.convert_hash_or_number(id)? {
             let earliest_available = self.static_file_provider.earliest_history_height();
             if number < earliest_available {
-                return Err(ProviderError::BlockExpired { requested: number, earliest_available })
+                return Err(ProviderError::BlockExpired { requested: number, earliest_available });
             }
 
             let Some(header) = self.header_by_number(number)? else { return Ok(None) };
@@ -1938,7 +1950,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
             // If they exist but are not indexed, we don't have enough
             // information to return the block anyways, so we return `None`.
             let Some(transactions) = self.transactions_by_block(number.into())? else {
-                return Ok(None)
+                return Ok(None);
             };
 
             let body = self
@@ -1948,7 +1960,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
                 .pop()
                 .ok_or(ProviderError::InvalidStorageOutput)?;
 
-            return Ok(Some(Self::Block::new(header, body)))
+            return Ok(Some(Self::Block::new(header, body)));
         }
 
         Ok(None)
@@ -2108,10 +2120,10 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         &self,
         tx_hash: TxHash,
     ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
-        if let Some(transaction_id) = self.transaction_id(tx_hash)? &&
-            let Some(transaction) = self.transaction_by_id_unhashed(transaction_id)? &&
-            let Some(block_number) = self.block_by_transaction_id(transaction_id)? &&
-            let Some(sealed_header) = self.sealed_header(block_number)?
+        if let Some(transaction_id) = self.transaction_id(tx_hash)?
+            && let Some(transaction) = self.transaction_by_id_unhashed(transaction_id)?
+            && let Some(block_number) = self.block_by_transaction_id(transaction_id)?
+            && let Some(sealed_header) = self.sealed_header(block_number)?
         {
             let (header, block_hash) = sealed_header.split();
             if let Some(block_body) = self.block_body_indices(block_number)? {
@@ -2131,7 +2143,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
                     timestamp: header.timestamp(),
                 };
 
-                return Ok(Some((transaction, meta)))
+                return Ok(Some((transaction, meta)));
             }
         }
 
@@ -2142,15 +2154,15 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         &self,
         id: BlockHashOrNumber,
     ) -> ProviderResult<Option<Vec<Self::Transaction>>> {
-        if let Some(block_number) = self.convert_hash_or_number(id)? &&
-            let Some(body) = self.block_body_indices(block_number)?
+        if let Some(block_number) = self.convert_hash_or_number(id)?
+            && let Some(body) = self.block_body_indices(block_number)?
         {
             let tx_range = body.tx_num_range();
             return if tx_range.is_empty() {
                 Ok(Some(Vec::new()))
             } else {
                 self.transactions_by_tx_range(tx_range).map(Some)
-            }
+            };
         }
         Ok(None)
     }
@@ -2225,8 +2237,8 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
         &self,
         block: BlockHashOrNumber,
     ) -> ProviderResult<Option<Vec<Self::Receipt>>> {
-        if let Some(number) = self.convert_hash_or_number(block)? &&
-            let Some(body) = self.block_body_indices(number)?
+        if let Some(number) = self.convert_hash_or_number(block)?
+            && let Some(body) = self.block_body_indices(number)?
         {
             let tx_range = body.tx_num_range();
             return if tx_range.is_empty() {
@@ -2235,11 +2247,11 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
                 let receipts = self.receipts_by_tx_range(tx_range)?;
 
                 if receipts.len() != body.tx_count as usize {
-                    return Ok(None)
+                    return Ok(None);
                 }
 
                 Ok(Some(receipts))
-            }
+            };
         }
         Ok(None)
     }
@@ -2556,10 +2568,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     ) -> ProviderResult<()> {
         let execution_outcome = execution_outcome.into();
 
-        if self.cached_storage_settings().use_hashed_state() &&
-            !config.write_receipts &&
-            !config.write_account_changesets &&
-            !config.write_storage_changesets
+        if self.cached_storage_settings().use_hashed_state()
+            && !config.write_receipts
+            && !config.write_account_changesets
+            && !config.write_storage_changesets
         {
             // In storage v2 with all outputs directed to static files, plain state and changesets
             // are written elsewhere. Only bytecodes need MDBX writes, so skip the expensive
@@ -2614,11 +2626,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         // Database, OR if receipts_in_static_files is enabled but no receipts exist in static
         // files yet. Once receipts exist in static files, we must continue writing to maintain
         // continuity and have no gaps.
-        let prunable_receipts = (EitherWriter::receipts_destination(self).is_database() ||
-            self.static_file_provider()
+        let prunable_receipts = (EitherWriter::receipts_destination(self).is_database()
+            || self
+                .static_file_provider()
                 .get_highest_static_file_tx(StaticFileSegment::Receipts)
-                .is_none()) &&
-            PruneMode::Distance(self.minimum_pruning_distance).should_prune(first_block, tip);
+                .is_none())
+            && PruneMode::Distance(self.minimum_pruning_distance).should_prune(first_block, tip);
 
         // Prepare set of addresses which logs should not be pruned.
         let mut allowed_addresses: AddressSet = AddressSet::default();
@@ -2635,12 +2648,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             receipts_writer.increment_block(block_number)?;
 
             // Skip writing receipts if pruning configuration requires us to.
-            if prunable_receipts &&
-                self.prune_modes
+            if prunable_receipts
+                && self
+                    .prune_modes
                     .receipts
                     .is_some_and(|mode| mode.should_prune(block_number, tip))
             {
-                continue
+                continue;
             }
 
             // If there are new addresses to retain after this block number, track them
@@ -2652,11 +2666,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 let receipt_idx = first_tx_index + idx as u64;
                 // Skip writing receipt if log filter is active and it does not have any logs to
                 // retain
-                if prunable_receipts &&
-                    has_contract_log_filter &&
-                    !receipt.logs().iter().any(|log| allowed_addresses.contains(&log.address))
+                if prunable_receipts
+                    && has_contract_log_filter
+                    && !receipt.logs().iter().any(|log| allowed_addresses.contains(&log.address))
                 {
-                    continue
+                    continue;
                 }
 
                 receipts_writer.append_receipt(receipt_idx, receipt)?;
@@ -2787,8 +2801,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 for entry in storage {
                     tracing::trace!(?address, ?entry.key, "Updating plain state storage");
                     if let Some(db_entry) =
-                        storages_cursor.seek_by_key_subkey(address, entry.key)? &&
-                        db_entry.key == entry.key
+                        storages_cursor.seek_by_key_subkey(address, entry.key)?
+                        && db_entry.key == entry.key
                     {
                         storages_cursor.delete_current()?;
                     }
@@ -2834,8 +2848,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 let entry = StorageEntry { key: *hashed_slot, value: *value };
 
                 if let Some(db_entry) =
-                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
-                    db_entry.key == entry.key
+                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)?
+                    && db_entry.key == entry.key
                 {
                     hashed_storage_cursor.delete_current()?;
                 }
@@ -3018,7 +3032,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let range = block + 1..=self.last_block_number()?;
 
         if range.is_empty() {
-            return Ok(ExecutionOutcome::default())
+            return Ok(ExecutionOutcome::default());
         }
         let start_block_number = *range.start();
 
@@ -3034,8 +3048,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let storage_range = BlockNumberAddress::range(range.clone());
         let storage_changeset = if let Some(highest_block) = self
             .static_file_provider
-            .get_highest_static_file_block(StaticFileSegment::StorageChangeSets) &&
-            self.cached_storage_settings().storage_v2
+            .get_highest_static_file_block(StaticFileSegment::StorageChangeSets)
+            && self.cached_storage_settings().storage_v2
         {
             let changesets = self.storage_changesets_range(block + 1..=highest_block)?;
             let mut changeset_writer =
@@ -3050,8 +3064,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let highest_changeset_block = self
             .static_file_provider
             .get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
-        let account_changeset = if let Some(highest_block) = highest_changeset_block &&
-            self.cached_storage_settings().storage_v2
+        let account_changeset = if let Some(highest_block) = highest_changeset_block
+            && self.cached_storage_settings().storage_v2
         {
             // TODO: add a `take` method that removes and returns the items instead of doing this
             let changesets = self.account_changesets_range(block + 1..highest_block + 1)?;
@@ -3258,7 +3272,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
     #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn write_trie_updates_sorted(&self, trie_updates: &TrieUpdatesSorted) -> ProviderResult<usize> {
         if trie_updates.is_empty() {
-            return Ok(0)
+            return Ok(0);
         }
 
         // Track the number of inserted entries.
@@ -3516,8 +3530,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
                     StorageShardedKey::last(address, storage_key),
                     rem_index,
                     |storage_sharded_key| {
-                        storage_sharded_key.address == address &&
-                            storage_sharded_key.sharded_key.key == storage_key
+                        storage_sharded_key.address == address
+                            && storage_sharded_key.sharded_key.key == storage_key
                     },
                 )?;
 
@@ -3817,7 +3831,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
     ) -> ProviderResult<()> {
         if blocks.is_empty() {
             debug!(target: "providers::db", "Attempted to append empty block range");
-            return Ok(())
+            return Ok(());
         }
 
         // Blocks are not empty, so no need to handle the case of `blocks.first()` being
@@ -4860,6 +4874,123 @@ mod tests {
 
     #[cfg(feature = "partial-persistence")]
     #[test]
+    fn test_save_blocks_merges_storage_wipe_in_multi_block_batch() {
+        use reth_trie::{
+            updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
+            BranchNodeCompact, HashedPostStateSorted,
+        };
+
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let mut test_block_builder = TestBlockBuilder::eth().with_state();
+        let genesis = test_block_builder.get_executed_blocks(0..1).next().unwrap();
+        let mut blocks: Vec<_> = test_block_builder.get_executed_blocks(1..4).collect();
+        let address = B256::with_last_byte(1);
+        let storage_path = Nibbles::from_nibbles([0x1, 0x2]);
+
+        let provider_rw = factory.provider_rw().unwrap();
+        save_genesis(&provider_rw, &genesis).unwrap();
+        provider_rw
+            .write_trie_updates_sorted(&TrieUpdatesSorted::new(
+                vec![],
+                B256Map::from_iter([(
+                    address,
+                    StorageTrieUpdatesSorted {
+                        is_deleted: false,
+                        storage_nodes: vec![(storage_path, Some(BranchNodeCompact::default()))],
+                    },
+                )]),
+            ))
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        let wipe = TrieUpdatesSorted::new(
+            vec![],
+            B256Map::from_iter([(
+                address,
+                StorageTrieUpdatesSorted { is_deleted: true, storage_nodes: vec![] },
+            )]),
+        );
+        let wipe_block = &blocks[2];
+        blocks[2] = ExecutedBlock::new(
+            Arc::clone(&wipe_block.recovered_block),
+            Arc::clone(&wipe_block.execution_output),
+            ComputedTrieData::new(Arc::new(HashedPostStateSorted::default()), Arc::new(wipe)),
+        );
+
+        let provider_rw = factory.provider_rw().unwrap();
+        let input = SaveBlocksInput::new(blocks, 0, 0, 3, 3);
+        provider_rw.save_blocks(&input).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        let checkpoint = provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
+        assert_eq!(checkpoint.block_number, 3);
+        let storage_entries = provider
+            .tx_ref()
+            .cursor_dup_read::<tables::StoragesTrie>()
+            .unwrap()
+            .walk_dup(Some(address), None)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert!(storage_entries.is_empty());
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn test_save_blocks_batches_transient_storage_wipe() {
+        use alloy_primitives::map::B256Set;
+        use reth_trie::{updates::TrieUpdates, HashBuilder, HashedPostStateSorted};
+
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let mut test_block_builder = TestBlockBuilder::eth().with_state();
+        let genesis = test_block_builder.get_executed_blocks(0..1).next().unwrap();
+        let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..4).collect();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        save_genesis(&provider_rw, &genesis).unwrap();
+        provider_rw.commit().unwrap();
+
+        // A contract created and self-destructed in the same transaction leaves an empty whole-
+        // storage wipe in the trie updates, even though the account never reaches persisted state.
+        let ephemeral_account = B256::with_last_byte(0x57);
+        let hashed_state = HashedPostStateSorted::default();
+        let mut trie_updates = TrieUpdates::default();
+        trie_updates.finalize(
+            HashBuilder::default(),
+            Default::default(),
+            B256Set::from_iter([ephemeral_account]),
+        );
+        let trie_updates = trie_updates.into_sorted();
+        assert!(trie_updates.storage_tries_ref()[&ephemeral_account].is_deleted);
+        let selfdestruct_block = ExecutedBlock::new(
+            Arc::clone(&blocks[2].recovered_block),
+            Arc::clone(&blocks[2].execution_output),
+            ComputedTrieData::new(Arc::new(hashed_state), Arc::new(trie_updates)),
+        );
+
+        let provider_rw = factory.provider_rw().unwrap();
+        let input = SaveBlocksInput::new(
+            vec![blocks[0].clone(), blocks[1].clone(), selfdestruct_block],
+            0,
+            0,
+            3,
+            3,
+        );
+        provider_rw.save_blocks(&input).unwrap();
+        provider_rw.commit().unwrap();
+
+        let checkpoint =
+            factory.provider().unwrap().get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
+        assert_eq!(checkpoint.block_number, 3);
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
     fn test_save_blocks_partial_cycles_do_not_duplicate_static_file_writes() {
         let factory = create_test_provider_factory();
         let mut test_block_builder = TestBlockBuilder::eth().with_state();
@@ -5540,8 +5671,8 @@ mod tests {
                     ..Default::default()
                 };
 
-                let storage: HashMap<U256, (U256, U256), FbBuildHasher<32>> = (1..=
-                    slots_per_account as u64)
+                let storage: HashMap<U256, (U256, U256), FbBuildHasher<32>> = (1
+                    ..=slots_per_account as u64)
                     .map(|s| {
                         (
                             U256::from(s + acct_idx as u64 * 100),
