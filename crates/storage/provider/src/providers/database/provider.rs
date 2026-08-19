@@ -803,6 +803,11 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 // account. Disjoint merging cannot represent that marker, so use the ordered
                 // merge; writes hidden by the masking suffix are redundant but remain correct
                 // under the in-memory overlay.
+                //
+                // A revm release with bluealloy/revm#3863 will keep post-Cancun selfdestructs from
+                // reaching trie construction as wipes. Wipes remain valid `save_blocks` input,
+                // including when processing pre-Cancun historical data, so persistence cannot
+                // rely on that revm behavior.
                 let contains_storage_wipe = batch.iter().chain(&mask).any(|updates| {
                     updates.storage_tries_ref().values().any(|storage| storage.is_deleted)
                 });
