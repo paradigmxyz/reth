@@ -1,26 +1,42 @@
 use alloc::sync::Arc;
-use core::sync::atomic::AtomicBool;
+use core::sync::atomic::{AtomicBool, Ordering};
 
-/// A marker that can be used to cancel execution.
+/// Cancels execution on drop and supports cooperative finalization.
 ///
 /// If dropped, it will set the `cancelled` flag to true.
 ///
 /// This is most useful when a payload job needs to be cancelled.
 #[derive(Default, Clone, Debug)]
-pub struct CancelOnDrop(Arc<AtomicBool>);
+pub struct CancelOnDrop(Arc<ControlState>);
+
+#[derive(Default, Debug)]
+struct ControlState {
+    cancelled: AtomicBool,
+    finalization_requested: AtomicBool,
+}
 
 // === impl CancelOnDrop ===
 
 impl CancelOnDrop {
     /// Returns true if the job was cancelled.
     pub fn is_cancelled(&self) -> bool {
-        self.0.load(core::sync::atomic::Ordering::Relaxed)
+        self.0.cancelled.load(Ordering::Relaxed)
+    }
+
+    /// Requests that the current work be finalized without cancelling it.
+    pub fn request_finalization(&self) {
+        self.0.finalization_requested.store(true, Ordering::Relaxed);
+    }
+
+    /// Returns true if finalization was requested.
+    pub fn is_finalization_requested(&self) -> bool {
+        self.0.finalization_requested.load(Ordering::Relaxed)
     }
 }
 
 impl Drop for CancelOnDrop {
     fn drop(&mut self) {
-        self.0.store(true, core::sync::atomic::Ordering::Relaxed);
+        self.0.cancelled.store(true, Ordering::Relaxed);
     }
 }
 
@@ -143,5 +159,20 @@ mod tests {
         assert!(cancel.is_cancelled());
         assert!(clone2.is_cancelled());
         assert!(clone3.is_cancelled());
+    }
+
+    #[test]
+    fn test_cancel_on_drop_finalization_request() {
+        let cancel = CancelOnDrop::default();
+        let clone = cancel.clone();
+
+        cancel.request_finalization();
+
+        assert!(clone.is_finalization_requested());
+        assert!(!clone.is_cancelled());
+
+        drop(cancel);
+
+        assert!(clone.is_cancelled());
     }
 }
