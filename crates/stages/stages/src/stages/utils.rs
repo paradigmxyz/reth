@@ -246,11 +246,7 @@ fn group_history_indices<T: ShardedHistoryTable>(
         let new_list = BlockNumberList::decompress_owned(v)?;
 
         if index > 0 && index.is_multiple_of(interval) && total_entries > 10 {
-            info!(
-                target: "sync::stages::index_history",
-                progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0),
-                "Grouping indices"
-            );
+            info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Grouping indices");
         }
 
         grouped.entry(T::partial_key(&key)).or_default().extend(new_list.iter());
@@ -306,6 +302,31 @@ where
 {
     let grouped = group_history_indices::<tables::StoragesHistory>(collector)?;
     prepare_grouped_history_writes(grouped, provider, use_rocksdb)
+}
+
+/// Puts prepared history shards, logging the same `"Writing indices"` progress as the old
+/// combined get+put loader.
+pub(crate) fn write_prepared_history_shards<T, E>(
+    prepared: PreparedHistoryShardWrites<T>,
+    mut write: impl FnMut(T::Key, &BlockNumberList) -> Result<(), E>,
+) -> Result<(), E>
+where
+    T: ShardedHistoryTable,
+{
+    let per_key = prepared.into_per_key();
+    let total_keys = per_key.len();
+    let interval = (total_keys / 10).max(1);
+
+    for (index, shards) in per_key.into_iter().enumerate() {
+        if index > 0 && index.is_multiple_of(interval) && total_keys > 10 {
+            info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (index as f64 / total_keys as f64) * 100.0), "Writing indices");
+        }
+        for (key, value) in shards {
+            write(key, &value)?;
+        }
+    }
+
+    Ok(())
 }
 
 /// Append-only `first_sync` loader for account history.

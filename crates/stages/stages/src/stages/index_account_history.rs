@@ -1,6 +1,7 @@
 use super::collect_account_history_indices;
 use crate::stages::utils::{
     collect_history_indices, load_account_history_append, prepare_account_history_writes,
+    write_prepared_history_shards,
 };
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db_api::{models::ShardedKey, tables, transaction::DbTxMut, Tables};
@@ -148,9 +149,9 @@ where
             let prepared = prepare_account_history_writes(collector, provider, use_rocksdb)?;
             provider.with_rocksdb_batch_auto_commit(|rocksdb_batch| {
                 let mut writer = EitherWriter::new_accounts_history(provider, rocksdb_batch)?;
-                for (key, value) in prepared.into_writes() {
-                    writer.upsert_account_history(key, &value)?;
-                }
+                write_prepared_history_shards(prepared, |key, value| {
+                    writer.upsert_account_history(key, value)
+                })?;
                 Ok(((), writer.into_raw_rocksdb_batch()))
             })?;
         }

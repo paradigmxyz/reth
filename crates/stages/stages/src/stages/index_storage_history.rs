@@ -1,6 +1,8 @@
 use super::{collect_history_indices, collect_storage_history_indices};
 use crate::{
-    stages::utils::{load_storage_history_append, prepare_storage_history_writes},
+    stages::utils::{
+        load_storage_history_append, prepare_storage_history_writes, write_prepared_history_shards,
+    },
     StageCheckpoint, StageId,
 };
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
@@ -154,9 +156,9 @@ where
             let prepared = prepare_storage_history_writes(collector, provider, use_rocksdb)?;
             provider.with_rocksdb_batch_auto_commit(|rocksdb_batch| {
                 let mut writer = EitherWriter::new_storages_history(provider, rocksdb_batch)?;
-                for (key, value) in prepared.into_writes() {
-                    writer.upsert_storage_history(key, &value)?;
-                }
+                write_prepared_history_shards(prepared, |key, value| {
+                    writer.upsert_storage_history(key, value)
+                })?;
                 Ok(((), writer.into_raw_rocksdb_batch()))
             })?;
         }
