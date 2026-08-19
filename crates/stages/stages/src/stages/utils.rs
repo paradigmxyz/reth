@@ -451,7 +451,7 @@ where
 /// incorrectly treating `(Address::ZERO, B256::ZERO)` as "no previous key".
 ///
 /// Does not read existing last shards.
-pub(crate) fn load_storage_history_append<N, CURSOR>(
+pub(crate) fn load_storage_history<N, CURSOR>(
     mut collector: Collector<StorageShardedKey, BlockNumberList>,
     writer: &mut EitherWriter<'_, CURSOR, N>,
 ) -> Result<(), StageError>

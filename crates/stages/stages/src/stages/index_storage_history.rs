@@ -1,7 +1,7 @@
 use super::{collect_history_indices, collect_storage_history_indices};
 use crate::{
     stages::utils::{
-        load_storage_history_append, prepare_incremental_storage_history,
+        load_storage_history, prepare_incremental_storage_history,
         write_incremental_storage_history,
     },
     StageCheckpoint, StageId,
@@ -149,7 +149,7 @@ where
         if first_sync {
             provider.with_rocksdb_batch_auto_commit(|rocksdb_batch| {
                 let mut writer = EitherWriter::new_storages_history(provider, rocksdb_batch)?;
-                load_storage_history_append(collector, &mut writer)
+                load_storage_history(collector, &mut writer)
                     .map_err(|e| reth_provider::ProviderError::other(Box::new(e)))?;
                 Ok(((), writer.into_raw_rocksdb_batch()))
             })?;
