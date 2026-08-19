@@ -16,7 +16,7 @@ use alloy_rpc_types_engine::{
     ForkchoiceUpdatedResponseV2, PayloadId, PayloadStatus, PayloadStatusV2,
 };
 use alloy_rpc_types_eth::{
-    state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, SyncStatus,
+    state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, Index, SyncStatus,
 };
 use alloy_serde::JsonStorageKey;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc, RpcModule};
@@ -429,6 +429,22 @@ pub trait EngineEthApi<TxReq: RpcObject, B: RpcObject, R: RpcObject, L: RpcObjec
     /// Returns all transaction receipts for a given block.
     #[method(name = "getBlockReceipts")]
     async fn block_receipts(&self, block_id: BlockId) -> RpcResult<Option<Vec<R>>>;
+
+    /// Returns the EIP-2718 encoded transaction by block hash and transaction index position.
+    #[method(name = "getRawTransactionByBlockHashAndIndex")]
+    async fn raw_transaction_by_block_hash_and_index(
+        &self,
+        hash: B256,
+        index: Index,
+    ) -> RpcResult<Option<Bytes>>;
+
+    /// Returns the EIP-2718 encoded transaction by block number and transaction index position.
+    #[method(name = "getRawTransactionByBlockNumberAndIndex")]
+    async fn raw_transaction_by_block_number_and_index(
+        &self,
+        number: BlockNumberOrTag,
+        index: Index,
+    ) -> RpcResult<Option<Bytes>>;
 
     /// Sends signed transaction, returning its hash.
     #[method(name = "sendRawTransaction")]
