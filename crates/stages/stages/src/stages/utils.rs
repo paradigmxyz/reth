@@ -1,5 +1,6 @@
 //! Utils for `stages`.
 use alloy_primitives::{map::AddressMap, Address, BlockNumber, TxNumber, B256};
+use rayon::prelude::*;
 use reth_config::config::EtlConfig;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -8,6 +9,7 @@ use reth_db_api::{
         AccountBeforeTx, AddressStorageKey, BlockNumberAddress, ShardedKey,
     },
     table::{Decode, Decompress, Table},
+    tables,
     transaction::DbTx,
     BlockNumberList,
 };
@@ -15,12 +17,16 @@ use reth_etl::Collector;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::StaticFileProvider, to_range, BlockReader, DBProvider, EitherWriter, ProviderError,
-    StaticFileProviderFactory,
+    RocksDBProviderFactory, StaticFileProviderFactory,
 };
 use reth_stages_api::StageError;
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{ChangeSetReader, StorageChangeSetReader};
-use std::{collections::HashMap, hash::Hash, ops::RangeBounds};
+use std::{
+    collections::{BTreeMap, HashMap},
+    hash::Hash,
+    ops::RangeBounds,
+};
 use tracing::info;
 
 /// Number of blocks before pushing indices from cache to [`Collector`]
@@ -433,20 +439,104 @@ where
     })
 }
 
-/// Loads storage history indices into the database via `EitherWriter`.
+/// Loads storage history indices into the database via `EitherWriter` on first sync.
 ///
 /// Works with [`EitherWriter`] to support both MDBX and `RocksDB` backends.
 ///
-/// ## Process
 /// Iterates over elements, grouping indices by their (address, `storage_key`) pairs. It flushes
 /// indices to disk when reaching a shard's max length (`NUM_OF_INDICES_IN_SHARD`) or when the
 /// (address, `storage_key`) pair changes, ensuring the last previous shard is stored.
 ///
 /// Uses `Option<(Address, B256)>` instead of default values as the sentinel to avoid
 /// incorrectly treating `(Address::ZERO, B256::ZERO)` as "no previous key".
+///
+/// Does not read existing last shards.
 pub(crate) fn load_storage_history<N, CURSOR>(
+    collector: Collector<StorageShardedKey, BlockNumberList>,
+    writer: &mut EitherWriter<'_, CURSOR, N>,
+) -> Result<(), StageError>
+where
+    N: NodePrimitives,
+    CURSOR: DbCursorRW<tables::StoragesHistory> + DbCursorRO<tables::StoragesHistory>,
+{
+    load_storage_history_append(collector, writer)
+}
+
+/// Grouped new indices plus committed last shards for incremental storage-history writes.
+type IncrementalStorageHistory =
+    (BTreeMap<(Address, B256), Vec<u64>>, HashMap<(Address, B256), Option<BlockNumberList>>);
+
+/// Groups collector entries by (address, `storage_key`) and prefetches last shards from committed
+/// state.
+///
+/// Last-shard reads must happen **before** a `RocksDB` write batch is opened. Parallel
+/// `provider.get` against an outstanding batch deadlocks for more than one unique slot.
+pub(crate) fn prepare_incremental_storage_history<P>(
+    collector: Collector<StorageShardedKey, BlockNumberList>,
+    provider: &P,
+    use_rocksdb: bool,
+) -> Result<IncrementalStorageHistory, StageError>
+where
+    P: DBProvider + RocksDBProviderFactory,
+{
+    let grouped = group_storage_history_indices(collector)?;
+    let keys: Vec<_> = grouped.keys().copied().collect();
+    let last_shards = if use_rocksdb {
+        let rocksdb = provider.rocksdb_provider();
+        prefetch_last_storage_history_shards(keys, |(address, storage_key)| {
+            rocksdb
+                .get::<tables::StoragesHistory>(StorageShardedKey::last(address, storage_key))
+                .map_err(Into::into)
+        })?
+    } else {
+        let mut last_shards = HashMap::with_capacity(keys.len());
+        for (address, storage_key) in keys {
+            last_shards.insert(
+                (address, storage_key),
+                provider.tx_ref().get::<tables::StoragesHistory>(StorageShardedKey::last(
+                    address,
+                    storage_key,
+                ))?,
+            );
+        }
+        last_shards
+    };
+    Ok((grouped, last_shards))
+}
+
+/// Serial shard merge + put for incremental storage history.
+pub(crate) fn write_incremental_storage_history<N, CURSOR>(
+    grouped: BTreeMap<(Address, B256), Vec<u64>>,
+    last_shards: HashMap<(Address, B256), Option<BlockNumberList>>,
+    writer: &mut EitherWriter<'_, CURSOR, N>,
+) -> Result<(), StageError>
+where
+    N: NodePrimitives,
+    CURSOR: DbCursorRW<tables::StoragesHistory> + DbCursorRO<tables::StoragesHistory>,
+{
+    let total_keys = grouped.len();
+    let write_interval = (total_keys / 10).max(1);
+    for (index, ((address, storage_key), mut current_list)) in grouped.into_iter().enumerate() {
+        if index > 0 && index.is_multiple_of(write_interval) && total_keys > 10 {
+            info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (index as f64 / total_keys as f64) * 100.0), "Writing indices");
+        }
+
+        if let Some(last_shard) = last_shards.get(&(address, storage_key)).and_then(Option::as_ref)
+        {
+            let mut merged: Vec<u64> = last_shard.iter().collect();
+            merged.extend(current_list);
+            current_list = merged;
+        }
+
+        flush_storage_history_shards(address, storage_key, &mut current_list, false, writer)?;
+    }
+
+    Ok(())
+}
+
+/// First-sync / append-only loader. Does not read existing last shards.
+fn load_storage_history_append<N, CURSOR>(
     mut collector: Collector<StorageShardedKey, BlockNumberList>,
-    append_only: bool,
     writer: &mut EitherWriter<'_, CURSOR, N>,
 ) -> Result<(), StageError>
 where
@@ -480,22 +570,13 @@ where
                     prev_addr,
                     prev_storage_key,
                     &mut current_list,
-                    append_only,
+                    true,
                     writer,
                 )?;
             }
 
             current_key = Some(partial_key);
             current_list.clear();
-
-            // On incremental sync, merge with the existing last shard from the database.
-            // The last shard is stored with key (address, storage_key, u64::MAX) so we can find it.
-            if !append_only &&
-                let Some(last_shard) =
-                    writer.get_last_storage_history_shard(partial_key.0, partial_key.1)?
-            {
-                current_list.extend(last_shard.iter());
-            }
         }
 
         // Append new block numbers to the accumulator.
@@ -506,17 +587,59 @@ where
             partial_key.0,
             partial_key.1,
             &mut current_list,
-            append_only,
+            true,
             writer,
         )?;
     }
 
     // Flush the final key's remaining shard.
     if let Some((addr, storage_key)) = current_key {
-        flush_storage_history_shards(addr, storage_key, &mut current_list, append_only, writer)?;
+        flush_storage_history_shards(addr, storage_key, &mut current_list, true, writer)?;
     }
 
     Ok(())
+}
+
+/// Groups ETL collector entries by (address, `storage_key`) for incremental shard writes.
+fn group_storage_history_indices(
+    mut collector: Collector<StorageShardedKey, BlockNumberList>,
+) -> Result<BTreeMap<(Address, B256), Vec<u64>>, StageError> {
+    let mut grouped: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
+    let total_entries = collector.len();
+    let interval = (total_entries / 10).max(1);
+
+    for (index, element) in collector.iter()?.enumerate() {
+        let (k, v) = element?;
+        let sharded_key = StorageShardedKey::decode_owned(k)?;
+        let new_list = BlockNumberList::decompress_owned(v)?;
+
+        grouped
+            .entry((sharded_key.address, sharded_key.sharded_key.key))
+            .or_default()
+            .extend(new_list.iter());
+
+        if index > 0 && index.is_multiple_of(interval) && total_entries > 10 {
+            info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");
+        }
+    }
+
+    Ok(grouped)
+}
+
+/// Prefetches last shards for `keys` via `get_last`, using rayon so distinct-slot reads are
+/// not serial.
+///
+/// `get_last` must be safe to call from multiple threads (committed `provider.get` /
+/// equivalent, not a write-batch cursor).
+fn prefetch_last_storage_history_shards<K, F>(
+    keys: impl IntoParallelIterator<Item = K>,
+    get_last: F,
+) -> Result<HashMap<K, Option<BlockNumberList>>, StageError>
+where
+    K: Copy + Eq + Hash + Send,
+    F: Fn(K) -> Result<Option<BlockNumberList>, StageError> + Sync,
+{
+    keys.into_par_iter().map(|key| get_last(key).map(|shard| (key, shard))).collect()
 }
 
 /// Flushes complete shards for storage history, keeping the trailing partial shard buffered.
@@ -619,4 +742,67 @@ where
 
     list.clear();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        sync::atomic::{AtomicUsize, Ordering},
+        thread,
+        time::Duration,
+    };
+
+    #[test]
+    fn prefetch_last_storage_history_shards_returns_getter_values() {
+        let keys = [
+            (Address::repeat_byte(1), B256::repeat_byte(1)),
+            (Address::repeat_byte(2), B256::repeat_byte(2)),
+        ];
+        let existing = BlockNumberList::new_pre_sorted([7, 8, 9]);
+
+        let shards = prefetch_last_storage_history_shards(keys, |(address, _)| {
+            if address == Address::repeat_byte(1) {
+                Ok(Some(existing.clone()))
+            } else {
+                Ok(None)
+            }
+        })
+        .unwrap();
+
+        assert_eq!(shards.len(), 2);
+        assert_eq!(
+            shards
+                .get(&keys[0])
+                .and_then(Option::as_ref)
+                .map(|list| list.iter().collect::<Vec<_>>()),
+            Some(vec![7, 8, 9])
+        );
+        assert_eq!(shards.get(&keys[1]).cloned().flatten(), None);
+    }
+
+    #[test]
+    fn prefetch_last_storage_history_shards_reads_in_parallel() {
+        let inflight = AtomicUsize::new(0);
+        let max_inflight = AtomicUsize::new(0);
+        let keys: Vec<_> =
+            (0u8..32).map(|i| (Address::repeat_byte(i), B256::repeat_byte(i))).collect();
+
+        let shards = prefetch_last_storage_history_shards(keys.clone(), |_| {
+            let now = inflight.fetch_add(1, Ordering::SeqCst) + 1;
+            max_inflight.fetch_max(now, Ordering::SeqCst);
+            thread::sleep(Duration::from_millis(15));
+            inflight.fetch_sub(1, Ordering::SeqCst);
+            Ok(None)
+        })
+        .unwrap();
+
+        assert_eq!(shards.len(), keys.len());
+        if rayon::current_num_threads() > 1 {
+            assert!(
+                max_inflight.load(Ordering::SeqCst) > 1,
+                "distinct-slot last-shard reads should not be serial"
+            );
+        }
+    }
 }

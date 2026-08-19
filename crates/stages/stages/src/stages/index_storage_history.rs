@@ -1,5 +1,11 @@
 use super::{collect_history_indices, collect_storage_history_indices};
-use crate::{stages::utils::load_storage_history, StageCheckpoint, StageId};
+use crate::{
+    stages::utils::{
+        load_storage_history, prepare_incremental_storage_history,
+        write_incremental_storage_history,
+    },
+    StageCheckpoint, StageId,
+};
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db_api::{
     models::{storage_sharded_key::StorageShardedKey, AddressStorageKey, BlockNumberAddress},
@@ -140,12 +146,26 @@ where
 
         info!(target: "sync::stages::index_storage_history::exec", "Loading indices into database");
 
-        provider.with_rocksdb_batch_auto_commit(|rocksdb_batch| {
-            let mut writer = EitherWriter::new_storages_history(provider, rocksdb_batch)?;
-            load_storage_history(collector, first_sync, &mut writer)
-                .map_err(|e| reth_provider::ProviderError::other(Box::new(e)))?;
-            Ok(((), writer.into_raw_rocksdb_batch()))
-        })?;
+        if first_sync {
+            provider.with_rocksdb_batch_auto_commit(|rocksdb_batch| {
+                let mut writer = EitherWriter::new_storages_history(provider, rocksdb_batch)?;
+                load_storage_history(collector, &mut writer)
+                    .map_err(|e| reth_provider::ProviderError::other(Box::new(e)))?;
+                Ok(((), writer.into_raw_rocksdb_batch()))
+            })?;
+        } else {
+            // Prefetch last shards from committed state before opening the write batch. Parallel
+            // RocksDB gets against an outstanding batch deadlock when there is more than one
+            // unique slot (same ordering as live `write_storage_history` / #25282).
+            let (grouped, last_shards) =
+                prepare_incremental_storage_history(collector, provider, use_rocksdb)?;
+            provider.with_rocksdb_batch_auto_commit(|rocksdb_batch| {
+                let mut writer = EitherWriter::new_storages_history(provider, rocksdb_batch)?;
+                write_incremental_storage_history(grouped, last_shards, &mut writer)
+                    .map_err(|e| reth_provider::ProviderError::other(Box::new(e)))?;
+                Ok(((), writer.into_raw_rocksdb_batch()))
+            })?;
+        }
 
         if use_rocksdb {
             provider.commit_pending_rocksdb_batches()?;
@@ -330,6 +350,43 @@ mod tests {
         // verify initial state
         let table = cast(db.table::<tables::StoragesHistory>().unwrap());
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![1, 2, 3])]));
+    }
+
+    #[tokio::test]
+    async fn insert_index_many_distinct_slots_incremental() {
+        let db = TestStageDB::default();
+        const SLOT_COUNT: u64 = 64;
+
+        db.commit(|tx| {
+            for block in 0..=5 {
+                tx.put::<tables::BlockBodyIndices>(
+                    block,
+                    StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
+                )?;
+                for slot_idx in 1..=SLOT_COUNT {
+                    tx.put::<tables::StorageChangeSets>(
+                        block_number_address(block),
+                        storage(B256::from(U256::from(slot_idx))),
+                    )?;
+                }
+            }
+            Ok(())
+        })
+        .unwrap();
+
+        run(&db, 3, None);
+        run(&db, 5, Some(3));
+
+        let table = cast(db.table::<tables::StoragesHistory>().unwrap());
+        assert_eq!(table.len(), SLOT_COUNT as usize);
+        for slot_idx in 1..=SLOT_COUNT {
+            let key = StorageShardedKey::new(ADDRESS, B256::from(U256::from(slot_idx)), u64::MAX);
+            assert_eq!(
+                table.get(&key),
+                Some(&vec![0, 1, 2, 3, 4, 5]),
+                "slot {slot_idx} should merge first_sync and incremental indices"
+            );
+        }
     }
 
     #[tokio::test]
