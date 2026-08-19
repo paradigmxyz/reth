@@ -20,11 +20,11 @@ use parking_lot::RwLock;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineEvent;
 use reth_errors::RethError;
-use reth_evm::{block::BlockExecutor, execute::Executor, ConfigureEvm, EvmEnvFor};
+use reth_evm::{block::BlockExecutor, execute::Executor, ConfigureEvm, EvmEnvFor, OnStateHook};
 use reth_primitives_traits::{
     Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
 };
-use reth_revm::{db::State, witness::ExecutionWitnessRecord};
+use reth_revm::witness::{AccessedState, ExecutionWitnessRecord};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
@@ -612,23 +612,27 @@ where
         let block_number = block.header().number();
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
-                let block_executor = eth_api.evm_config().executor(&mut db);
+                let mut block_executor = eth_api.evm_config().executor(&mut db);
 
-                let mut witness = None;
+                // Per-transaction journal states see accesses that the post-execution cache
+                // cannot: storage reads against accounts created in the same transaction and
+                // accounts that end execution non-existing. Record them so their key preimages
+                // and proof targets make it into the witness.
+                let recorder = WitnessAccessRecorder::default();
                 let _ = block_executor
-                    .execute_with_state_closure(&block, |statedb: &State<_>| {
-                        witness =
-                            Some(ExecutionWitnessRecord::new(statedb).into_execution_witness(
-                                &statedb.database.database.0,
-                                eth_api.provider(),
-                                block_number,
-                                mode,
-                            ));
-                    })
+                    .execute_one_with_state_hook(&block, recorder.clone())
                     .map_err(|err| EthApiError::Internal(err.into()))?;
+                let statedb = block_executor.into_state();
+                let accessed = recorder.into_accessed();
 
-                Ok(witness
-                    .expect("state closure is called after successful execution")
+                Ok(ExecutionWitnessRecord::new(&statedb)
+                    .with_accessed(&accessed)
+                    .into_execution_witness(
+                        &statedb.database.database.0,
+                        eth_api.provider(),
+                        block_number,
+                        mode,
+                    )
                     .map_err(EthApiError::from)?)
             })
             .await
@@ -1537,5 +1541,29 @@ mod tests {
         assert!(!storage.wiped);
         assert_eq!(storage.storage[&hashed_old_slot], U256::ZERO);
         assert_eq!(storage.storage[&hashed_new_slot], new_value);
+    }
+}
+
+/// Records every account and storage slot observed in per-transaction journal states, so
+/// witness generation can emit key preimages and proof targets for accesses that never reach
+/// the post-execution cache (see [`AccessedState`]).
+#[derive(Clone, Debug, Default)]
+struct WitnessAccessRecorder(Arc<parking_lot::Mutex<AccessedState>>);
+
+impl WitnessAccessRecorder {
+    fn into_accessed(self) -> AccessedState {
+        Arc::try_unwrap(self.0).map(|m| m.into_inner()).unwrap_or_default()
+    }
+}
+
+impl OnStateHook for WitnessAccessRecorder {
+    fn on_state(&mut self, state: revm::state::EvmState) {
+        let mut accessed = self.0.lock();
+        for (address, account) in &state {
+            let slots = accessed.entry(*address).or_default();
+            for (slot, storage_slot) in &account.storage {
+                slots.insert(B256::new(slot.to_be_bytes()), storage_slot.present_value());
+            }
+        }
     }
 }
