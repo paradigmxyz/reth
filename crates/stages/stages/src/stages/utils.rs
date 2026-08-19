@@ -304,8 +304,7 @@ where
     prepare_grouped_history_writes(grouped, provider, use_rocksdb)
 }
 
-/// Puts prepared history shards, logging the same `"Writing indices"` progress as the old
-/// combined get+put loader.
+/// Serially puts prepared history shards, logging `"Writing indices"` progress every 10% of keys.
 pub(crate) fn write_prepared_history_shards<T, E>(
     prepared: PreparedHistoryShardWrites<T>,
     mut write: impl FnMut(T::Key, &BlockNumberList) -> Result<(), E>,
