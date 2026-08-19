@@ -792,9 +792,9 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 // masking suffix is redundant but safe: the in-memory overlay still takes
                 // precedence.
                 //
-                // A revm release with bluealloy/revm#3863 clears post-Cancun selfdestructs in
-                // place. Wipes remain valid `save_blocks` input when processing
-                // pre-Cancun historical data.
+                // With a revm release containing bluealloy/revm#3863, post-Cancun selfdestructs
+                // will no longer result in `storage.is_deleted` in serial trie updates. The flag
+                // remains valid `save_blocks` input when processing pre-Cancun historical data.
                 let contains_storage_wipe = batch.iter().chain(&mask).any(|updates| {
                     updates.storage_tries_ref().values().any(|storage| storage.is_deleted)
                 });
