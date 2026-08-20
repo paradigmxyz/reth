@@ -456,7 +456,10 @@ pub struct DownloadCommand<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCommand<C> {
     /// Runs the download command in single-archive or manifest mode.
-    pub async fn execute<N>(self) -> Result<()> {
+    ///
+    /// Returns the loaded manifest after a successful modular download, or [`None`] when running
+    /// in snapshot-listing or legacy single-archive mode.
+    pub async fn execute<N>(self) -> Result<Option<SnapshotManifest>> {
         let chain = self.env.chain.chain();
         let chain_id = chain.id();
 
@@ -464,7 +467,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         if self.list {
             let entries = fetch_snapshot_api_entries(chain_id).await?;
             print_snapshot_listing(&entries, chain_id);
-            return Ok(());
+            return Ok(None);
         }
 
         let data_dir = self.env.datadir.clone().resolve_datadir(chain);
@@ -498,14 +501,14 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             .await?;
             info!(target: "reth::cli", "Snapshot downloaded and extracted successfully");
 
-            return Ok(());
+            return Ok(None);
         }
 
         let ResolvedDownload { manifest, selections, preset, planned } =
             self.resolve_download(chain_id).await?;
         if self.print_plan_json {
             DownloadPlan::from_planned(&manifest, &planned).write_json(std::io::stdout().lock())?;
-            return Ok(())
+            return Ok(Some(manifest))
         }
 
         let target_dir = data_dir.data_dir();
@@ -537,7 +540,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 
         self.finalize_modular_download(&selections, &manifest, preset, target_dir, &data_dir.db())?;
 
-        Ok(())
+        Ok(Some(manifest))
     }
 
     /// Resolves the exact modular archive plan without downloading or modifying the data dir.
@@ -1089,6 +1092,7 @@ mod tests {
             base_url: Some("https://example.com".to_string()),
             reth_version: None,
             components,
+            extensions: BTreeMap::new(),
         }
     }
 

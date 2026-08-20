@@ -52,6 +52,9 @@ pub struct SnapshotManifest {
     pub reth_version: Option<String>,
     /// Available snapshot components.
     pub components: BTreeMap<String, ComponentManifest>,
+    /// Additional top-level fields supplied by downstream snapshot formats.
+    #[serde(flatten)]
+    pub extensions: BTreeMap<String, serde_json::Value>,
 }
 
 /// Manifest entry for a single snapshot component.
@@ -728,6 +731,7 @@ pub fn generate_manifest(
         base_url: base_url.map(str::to_owned),
         reth_version: Some(reth_node_core::version::version_metadata().short_version.to_string()),
         components,
+        extensions: BTreeMap::new(),
     })
 }
 
@@ -1015,7 +1019,25 @@ mod tests {
             base_url: Some("https://example.com".to_string()),
             reth_version: None,
             components,
+            extensions: BTreeMap::new(),
         }
+    }
+
+    #[test]
+    fn preserves_manifest_extensions() {
+        let value = serde_json::json!({
+            "block": 1,
+            "chain_id": 1,
+            "storage_version": 2,
+            "timestamp": 0,
+            "components": {},
+            "consensus": { "archive": "consensus.tar.zst" }
+        });
+
+        let manifest: SnapshotManifest = serde_json::from_value(value.clone()).unwrap();
+
+        assert_eq!(manifest.extensions.get("consensus"), value.get("consensus"));
+        assert_eq!(serde_json::to_value(manifest).unwrap(), value);
     }
 
     #[test]
@@ -1067,6 +1089,7 @@ mod tests {
             base_url: Some("https://example.com".to_string()),
             reth_version: None,
             components,
+            extensions: BTreeMap::new(),
         };
 
         let urls = m.archive_urls_for_distance(SnapshotComponentType::RocksdbIndices, Some(10));
@@ -1126,6 +1149,7 @@ mod tests {
             base_url: Some("https://example.com".to_string()),
             reth_version: None,
             components,
+            extensions: BTreeMap::new(),
         }
     }
 
@@ -1218,6 +1242,7 @@ mod tests {
             base_url: Some("https://example.com".to_string()),
             reth_version: None,
             components,
+            extensions: BTreeMap::new(),
         };
         let urls = m.archive_urls(SnapshotComponentType::StorageChangesets);
         assert_eq!(urls.len(), 49);
@@ -1299,6 +1324,7 @@ mod tests {
             base_url: Some("https://example.com".to_string()),
             reth_version: None,
             components,
+            extensions: BTreeMap::new(),
         };
 
         assert_eq!(manifest.output_size_for_distance(SnapshotComponentType::State, None), 1_000);
@@ -1360,6 +1386,7 @@ mod tests {
             base_url: Some("https://example.com".to_string()),
             reth_version: None,
             components,
+            extensions: BTreeMap::new(),
         };
 
         let state = m.snapshot_archives_for_distance(SnapshotComponentType::State, None);
@@ -1477,6 +1504,7 @@ mod tests {
             base_url: Some("https://example.com/mainnet".to_string()),
             reth_version: None,
             components,
+            extensions: BTreeMap::new(),
         };
 
         let urls = m.archive_urls(SnapshotComponentType::Headers);
@@ -1560,6 +1588,7 @@ mod tests {
             base_url: Some("https://example.com/mainnet".to_string()),
             reth_version: None,
             components,
+            extensions: BTreeMap::new(),
         };
 
         let ComponentManifest::Chunked(chunked) =
