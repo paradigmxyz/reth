@@ -695,3 +695,8 @@ vergen-git2 = "10.0.1"
 
 # networking
 ipnet = "2.11"
+
+[patch.crates-io]
+# FOCIL payload attributes are under active devnet development in the sibling Alloy worktree.
+alloy-rpc-types-engine = { path = "../alloy-focil-devnet-0/crates/rpc-types-engine" }
+alloy-rpc-types-beacon = { path = "../alloy-focil-devnet-0/crates/rpc-types-beacon" }

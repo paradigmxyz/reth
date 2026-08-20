@@ -42,6 +42,18 @@ use tracing::{debug, trace, warn};
 /// The Engine API response sender.
 pub type EngineApiSender<Ok> = oneshot::Sender<EngineApiResult<Ok>>;
 
+/// EIP-7805 bounds the RLP list of transactions supplied by an inclusion-list committee.
+fn validate_inclusion_list_size(transactions: &[Bytes]) -> EngineApiResult<()> {
+    if alloy_rlp::list_length::<Bytes, [u8]>(transactions) > MAX_BYTES_PER_INCLUSION_LIST as usize {
+        return Err(EngineApiError::NewPayload(
+            reth_engine_primitives::BeaconOnNewPayloadError::InvalidParams(
+                "inclusion list exceeds 8 KiB".into(),
+            ),
+        ))
+    }
+    Ok(())
+}
+
 /// The upper limit for payload bodies request.
 const MAX_PAYLOAD_BODIES_LIMIT: u64 = 1024;
 
@@ -300,7 +312,10 @@ where
     pub async fn new_payload_v6(
         &self,
         payload: PayloadT::ExecutionData,
+        inclusion_list_transactions: Vec<Bytes>,
     ) -> EngineApiResult<PayloadStatusV2> {
+        validate_inclusion_list_size(&inclusion_list_transactions)?;
+        let block_hash = payload.block_hash();
         let payload_or_attrs = PayloadOrAttributes::<
             '_,
             PayloadT::ExecutionData,
@@ -310,16 +325,31 @@ where
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V6, payload_or_attrs)?;
 
-        Ok(self.inner.beacon_consensus.new_payload(payload).await?.into())
+        let payload_status = self
+            .inner
+            .beacon_consensus
+            .new_payload_with_inclusion_list(payload, inclusion_list_transactions)
+            .await?;
+        let inclusion_list_satisfied = if payload_status.is_valid() {
+            self.inner
+                .beacon_consensus
+                .inclusion_list_status(block_hash)
+                .await
+                .map_err(|error| EngineApiError::Internal(Box::new(error)))?
+        } else {
+            None
+        };
+        Ok(PayloadStatusV2::new(payload_status, inclusion_list_satisfied))
     }
 
     /// Metrics version of `new_payload_v6`.
     pub async fn new_payload_v6_metered(
         &self,
         payload: PayloadT::ExecutionData,
+        inclusion_list_transactions: Vec<Bytes>,
     ) -> EngineApiResult<PayloadStatusV2> {
         let start = Instant::now();
-        let result = Self::new_payload_v6(self, payload).await;
+        let result = Self::new_payload_v6(self, payload, inclusion_list_transactions).await;
         self.inner.metrics.latency.new_payload_v6.record(start.elapsed());
         result
     }
@@ -1400,9 +1430,7 @@ where
             ),
         };
 
-        // TODO: perform structural validation of the inclusion list transactions and populate
-        // `inclusion_list_satisfied` for VALID payloads
-        Ok(self.new_payload_v6_metered(payload).await?)
+        Ok(self.new_payload_v6_metered(payload, inclusion_list_transactions).await?)
     }
 
     /// Handler for `engine_forkchoiceUpdatedV1`

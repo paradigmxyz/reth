@@ -5,9 +5,15 @@ use crate::{
     persistence::PersistenceHandle,
     tree::{error::InsertPayloadError, payload_validator::TreeCtx},
 };
-use alloy_consensus::BlockHeader;
-use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS, BlockNumHash, NumHash};
-use alloy_primitives::{map::B256Map, B256};
+use alloy_consensus::{BlockHeader, Transaction};
+use alloy_eips::{
+    eip1898::BlockWithParent, eip2718::Decodable2718, merge::EPOCH_SLOTS, BlockNumHash, NumHash,
+    Typed2718,
+};
+use alloy_primitives::{
+    map::{B256Map, B256Set},
+    Bytes, B256, U256,
+};
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
@@ -26,7 +32,8 @@ use reth_evm::ConfigureEvm;
 use reth_payload_builder::{BuildNewPayload, PayloadBuilderHandle, PayloadBuilderLease};
 use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadAttributes, PayloadTypes};
 use reth_primitives_traits::{
-    FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
+    BlockBody as _, FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock,
+    SealedHeader, SignedTransaction,
 };
 use reth_provider::{
     BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockNumReader, BlockReader,
@@ -173,6 +180,42 @@ where
     }
 }
 
+/// Performs the post-state eligibility portion of the EIP-7805 inclusion-list check.
+///
+/// Full transaction execution validation remains a follow-up; this check intentionally does not
+/// make an invalid payload invalid, it only reports its inclusion-list status.
+fn inclusion_list_satisfied<N: NodePrimitives>(
+    block: &RecoveredBlock<N::Block>,
+    state: &StateProviderBox,
+    transactions: &[Bytes],
+) -> ProviderResult<bool> {
+    let included = block
+        .body()
+        .transactions_iter()
+        .map(SignedTransaction::recalculate_hash)
+        .collect::<B256Set>();
+    let available_gas = block.gas_limit().saturating_sub(block.gas_used());
+
+    for encoded in transactions {
+        let Ok(transaction) = N::SignedTx::decode_2718_exact(encoded) else { continue };
+        if included.contains(&transaction.recalculate_hash()) ||
+            transaction.gas_limit() > available_gas
+        {
+            continue
+        }
+        let Ok(sender) = transaction.try_recover() else { continue };
+        let account = state.basic_account(&sender)?.unwrap_or_default();
+        let max_gas_cost = U256::from(transaction.gas_limit())
+            .checked_mul(U256::from(transaction.max_fee_per_gas()))
+            .unwrap_or(U256::MAX);
+        let max_cost = max_gas_cost.checked_add(transaction.value()).unwrap_or(U256::MAX);
+        if account.nonce == transaction.nonce() && account.balance >= max_cost {
+            return Ok(false)
+        }
+    }
+    Ok(true)
+}
+
 /// Tracks the state of the engine api internals.
 ///
 /// This type is not shareable.
@@ -189,6 +232,10 @@ pub struct EngineApiTreeState<N: NodePrimitives> {
     /// Tracks the header of invalid payloads that were rejected by the engine because they're
     /// invalid.
     invalid_headers: InvalidHeaderCache,
+    /// Inclusion lists supplied to `engine_newPayloadV6`, keyed by payload hash.
+    inclusion_lists: B256Map<Vec<Bytes>>,
+    /// Cached post-state compliance results.
+    inclusion_list_results: B256Map<bool>,
 }
 
 impl<N: NodePrimitives> EngineApiTreeState<N> {
@@ -209,6 +256,8 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
             tree_state: TreeState::new(canonical_block, engine_kind, overlay_manager),
             pending_sparse_trie_prune: false,
             forkchoice_state_tracker: ForkchoiceStateTracker::default(),
+            inclusion_lists: B256Map::default(),
+            inclusion_list_results: B256Map::default(),
         }
     }
 
@@ -1820,11 +1869,25 @@ where
                                     warn!(target: "engine::tree", ?state, elapsed=?start.elapsed(), "Failed to deliver forkchoiceUpdated response, receiver dropped (request cancelled): {err:?}");
                                 }
                             }
-                            BeaconEngineMessage::NewPayload { payload, tx } => {
+                            BeaconEngineMessage::NewPayload {
+                                payload,
+                                inclusion_list_transactions,
+                                tx,
+                            } => {
                                 let start = Instant::now();
                                 let gas_used = payload.gas_used();
                                 let num_hash = payload.num_hash();
+                                if let Some(transactions) = inclusion_list_transactions {
+                                    self.state.inclusion_list_results.remove(&payload.block_hash());
+                                    self.state
+                                        .inclusion_lists
+                                        .insert(payload.block_hash(), transactions);
+                                }
                                 let mut output = self.on_new_payload(payload);
+                                if output.as_ref().is_ok_and(|out| out.outcome.is_invalid()) {
+                                    self.state.inclusion_lists.remove(&num_hash.hash);
+                                    self.state.inclusion_list_results.remove(&num_hash.hash);
+                                }
                                 self.metrics.engine.new_payload.update_response_metrics(
                                     start,
                                     &mut self.metrics.engine.forkchoice_updated.latest_finish_at,
@@ -1848,6 +1911,13 @@ where
 
                                 // handle the event if any
                                 self.on_maybe_tree_event(maybe_event)?;
+                            }
+                            BeaconEngineMessage::InclusionListStatus { block_hash, tx } => {
+                                let result =
+                                    self.inclusion_list_status(block_hash).map_err(Into::into);
+                                if tx.send(result).is_err() {
+                                    warn!(target: "engine::tree", %block_hash, "Failed to deliver inclusion-list status");
+                                }
                             }
                             BeaconEngineMessage::RethNewPayload {
                                 payload,
@@ -3468,6 +3538,34 @@ where
         // This ensures that the safe block is consistent with the head block, i.e. the safe
         // block is an ancestor of the head block.
         self.update_safe_block(state.safe_block_hash)
+    }
+
+    /// Returns the cached EIP-7805 result, computing it against the payload post-state if needed.
+    fn inclusion_list_status(&mut self, block_hash: B256) -> ProviderResult<Option<bool>> {
+        if let Some(result) = self.state.inclusion_list_results.get(&block_hash) {
+            return Ok(Some(*result))
+        }
+        let Some(transactions) = self.state.inclusion_lists.get(&block_hash).cloned() else {
+            return Ok(Some(true))
+        };
+        let block = if let Some(block) = self.state.tree_state.executed_block_by_hash(block_hash) {
+            block.recovered_block().clone()
+        } else {
+            let Some(block) = self
+                .provider
+                .sealed_block_with_senders(block_hash.into(), TransactionVariant::WithHash)?
+            else {
+                return Ok(None)
+            };
+            block
+        };
+        let Some(provider_builder) = self.state_provider_builder(block_hash)? else {
+            return Ok(None)
+        };
+        let state = provider_builder.build()?;
+        let result = inclusion_list_satisfied::<N>(&block, &state, &transactions)?;
+        self.state.inclusion_list_results.insert(block_hash, result);
+        Ok(Some(result))
     }
 
     /// Validates the payload attributes with respect to the header and fork choice state.
