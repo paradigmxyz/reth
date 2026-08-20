@@ -1428,7 +1428,9 @@ where
             sidecar: ExecutionPayloadSidecar::v6(
                 CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
                 PraguePayloadFields { requests: execution_requests },
-                BogotaPayloadFields { inclusion_list_transactions },
+                BogotaPayloadFields {
+                    inclusion_list_transactions: inclusion_list_transactions.clone(),
+                },
             ),
         };
 
