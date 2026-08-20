@@ -1605,12 +1605,16 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     highest_tx,
                     highest_block,
                 ),
+            // AccountChangeSets is change/block-based (table key = BlockNumber), not tx-based.
+            // Passing `highest_tx` (always None for this segment) into `ensure_invariants` skipped
+            // gap detection and short-circuited to Ok(None) whenever any MDBX rows existed, so SF
+            // tips ahead of the Execution checkpoint were never pruned.
             StaticFileSegment::AccountChangeSets => self
-                .ensure_invariants::<_, tables::AccountChangeSets>(
+                .ensure_changeset_invariants_by_block::<_, tables::AccountChangeSets, _>(
                     provider,
                     segment,
-                    highest_tx,
                     highest_block,
+                    |key| *key,
                 ),
             StaticFileSegment::StorageChangeSets => self
                 .ensure_changeset_invariants_by_block::<_, tables::StorageChangeSets, _>(
@@ -3063,11 +3067,20 @@ where
 mod tests {
     use std::collections::BTreeMap;
 
+    use alloy_primitives::Address;
     use reth_chain_state::EthPrimitives;
     use reth_db::test_utils::create_test_static_files_dir;
+    use reth_db_api::{models::AccountBeforeTx, tables, transaction::DbTxMut};
+    use reth_stages_types::PipelineTarget;
     use reth_static_file_types::{SegmentRangeInclusive, StaticFileSegment};
+    use reth_storage_api::{
+        DBProvider, DatabaseProviderFactory, StorageSettings, StorageSettingsCache,
+    };
 
-    use crate::{providers::StaticFileProvider, StaticFileProviderBuilder};
+    use crate::{
+        providers::StaticFileProvider, test_utils::create_test_provider_factory,
+        StaticFileProviderBuilder, StaticFileProviderFactory, StaticFileWriter,
+    };
 
     #[test]
     fn test_find_fixed_range_with_block_index() -> eyre::Result<()> {
@@ -3184,6 +3197,54 @@ mod tests {
         assert_eq!(
             sf_rw.find_fixed_range_with_block_index(segment, Some(&mixed_size_index), 550),
             SegmentRangeInclusive::new(550, 649)
+        );
+
+        Ok(())
+    }
+
+    /// AccountChangeSets must use block-based invariant checks. A gap between the SF tip and the
+    /// first MDBX key must request an unwind; the old tx-based path skipped this when `highest_tx`
+    /// was None (always true for change-based segments).
+    #[test]
+    fn test_account_changesets_detects_db_gap() -> eyre::Result<()> {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        // SF tip at block 10
+        {
+            let sf_provider = factory.static_file_provider();
+            let mut writer =
+                sf_provider.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+            for block_num in 0..=10 {
+                let changeset = vec![AccountBeforeTx { address: Address::random(), info: None }];
+                writer.append_account_changeset(changeset, block_num).unwrap();
+            }
+            writer.commit().unwrap();
+        }
+
+        // MDBX starts at block 100 → discontinuous with SF tip 10
+        {
+            let provider = factory.database_provider_rw().unwrap();
+            provider.tx_ref().put::<tables::AccountChangeSets>(
+                100,
+                AccountBeforeTx { address: Address::random(), info: None },
+            )?;
+            // Leave Execution checkpoint at 0 so empty Receipts SF does not request unwind.
+            provider.commit().unwrap();
+        }
+
+        let provider = factory.database_provider_ro().unwrap();
+        let sf = provider.static_file_provider();
+        assert_eq!(
+            sf.get_highest_static_file_block(StaticFileSegment::AccountChangeSets),
+            Some(10)
+        );
+
+        let unwind = sf.check_consistency(&provider)?;
+        assert_eq!(
+            unwind,
+            Some(PipelineTarget::Unwind(10)),
+            "gap between SF tip and MDBX AccountChangeSets must unwind to SF tip"
         );
 
         Ok(())
