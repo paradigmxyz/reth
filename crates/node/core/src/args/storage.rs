@@ -1,5 +1,6 @@
 //! clap [Args](clap::Args) for storage configuration
 
+use alloy_eips::merge::EPOCH_SLOTS;
 use clap::Args;
 use std::sync::OnceLock;
 
@@ -12,6 +13,7 @@ static STORAGE_DEFAULTS: OnceLock<DefaultStorageValues> = OnceLock::new();
 #[derive(Debug, Clone)]
 pub struct DefaultStorageValues {
     v2: bool,
+    historical_state_root_warning_threshold: u64,
 }
 
 impl DefaultStorageValues {
@@ -30,11 +32,17 @@ impl DefaultStorageValues {
         self.v2 = v;
         self
     }
+
+    /// Set the historical state root warning threshold.
+    pub const fn with_historical_state_root_warning_threshold(mut self, threshold: u64) -> Self {
+        self.historical_state_root_warning_threshold = threshold;
+        self
+    }
 }
 
 impl Default for DefaultStorageValues {
     fn default() -> Self {
-        Self { v2: true }
+        Self { v2: true, historical_state_root_warning_threshold: EPOCH_SLOTS }
     }
 }
 
@@ -59,12 +67,25 @@ pub struct StorageArgs {
         default_missing_value = "true",
     )]
     pub v2: bool,
+
+    /// Number of blocks into the past after which historical state root calculation emits an OOM
+    /// warning.
+    #[arg(
+        long = "storage.historical-state-root-warning-threshold",
+        value_name = "BLOCKS",
+        default_value_t = DefaultStorageValues::get_global().historical_state_root_warning_threshold,
+    )]
+    pub historical_state_root_warning_threshold: u64,
 }
 
 impl Default for StorageArgs {
     fn default() -> Self {
         let defaults = DefaultStorageValues::get_global();
-        Self { v2: defaults.v2 }
+        Self {
+            v2: defaults.v2,
+            historical_state_root_warning_threshold: defaults
+                .historical_state_root_warning_threshold,
+        }
     }
 }
 
@@ -84,6 +105,7 @@ mod tests {
     fn test_default_storage_args() {
         let args = CommandParser::<StorageArgs>::parse_from(["reth"]).args;
         assert!(args.v2);
+        assert_eq!(args.historical_state_root_warning_threshold, EPOCH_SLOTS);
     }
 
     #[test]
@@ -102,5 +124,16 @@ mod tests {
     fn test_storage_v2_explicit_false() {
         let args = CommandParser::<StorageArgs>::parse_from(["reth", "--storage.v2=false"]).args;
         assert!(!args.v2);
+    }
+
+    #[test]
+    fn test_historical_state_root_warning_threshold() {
+        let args = CommandParser::<StorageArgs>::parse_from([
+            "reth",
+            "--storage.historical-state-root-warning-threshold",
+            "128",
+        ])
+        .args;
+        assert_eq!(args.historical_state_root_warning_threshold, 128);
     }
 }

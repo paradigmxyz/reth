@@ -95,6 +95,9 @@ impl EngineNodeLauncher {
         // Create the overlay manager that will be shared across the provider and engine.
         let overlay_manager = OverlayManager::<N::Primitives>::new(
             ctx.task_executor.state_trie_overlay_worker_pool(),
+        )
+        .with_historical_state_root_warning_threshold(
+            config.storage.historical_state_root_warning_threshold,
         );
         let disabled_stages = N::disabled_stages();
 

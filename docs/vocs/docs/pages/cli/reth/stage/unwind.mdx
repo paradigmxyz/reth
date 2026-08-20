@@ -136,6 +136,11 @@ Storage:
           [default: true]
           [possible values: true, false]
 
+      --storage.historical-state-root-warning-threshold <BLOCKS>
+          Number of blocks into the past after which historical state root calculation emits an OOM warning
+
+          [default: 32]
+
       --offline
           If this is enabled, then all stages except headers, bodies, and sender recovery will be unwound
 

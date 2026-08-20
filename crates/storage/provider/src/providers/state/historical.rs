@@ -2,7 +2,6 @@ use crate::{
     AccountReader, BlockHashReader, ChangeSetReader, EitherReader, HashedPostStateProvider,
     ProviderError, RocksDBProviderFactory, StateProvider, StateRootProvider,
 };
-use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
@@ -281,7 +280,9 @@ where
         Provider:
             BlockHashReader + PruneCheckpointReader + StageCheckpointReader + StorageSettingsCache,
     {
-        if self.check_distance_against_limit(EPOCH_SLOTS)? {
+        if self.check_distance_against_limit(
+            self.overlay_manager.historical_state_root_warning_threshold(),
+        )? {
             tracing::warn!(
                 target: "providers::historical_sp",
                 target = self.block_number,

@@ -8,7 +8,7 @@ use crate::{
     changeset_cache::compute_block_trie_updates, database_state_frontiers, ChangesetCache,
     OverlayBuilder,
 };
-use alloy_eips::BlockNumHash;
+use alloy_eips::{merge::EPOCH_SLOTS, BlockNumHash};
 use alloy_primitives::{BlockNumber, B256};
 use parking_lot::Mutex;
 use reth_chain_state::{ExecutedBlock, PreservedSparseTrie};
@@ -49,6 +49,7 @@ pub struct OverlayManager<N: NodePrimitives = EthPrimitives> {
     preserved_sparse_trie: Arc<Mutex<Option<PreservedSparseTrie>>>,
     #[cfg(feature = "rayon")]
     worker_pool: Option<Arc<WorkerPool>>,
+    historical_state_root_warning_threshold: u64,
     metrics: StateTrieOverlayMetrics,
 }
 
@@ -73,6 +74,7 @@ impl<N: NodePrimitives> Default for OverlayManager<N> {
             preserved_sparse_trie: Default::default(),
             #[cfg(feature = "rayon")]
             worker_pool: None,
+            historical_state_root_warning_threshold: EPOCH_SLOTS,
             metrics: Default::default(),
         }
     }
@@ -97,8 +99,22 @@ impl<N: NodePrimitives> OverlayManager<N> {
             changeset_cache: Default::default(),
             preserved_sparse_trie: Default::default(),
             worker_pool: Some(worker_pool),
+            historical_state_root_warning_threshold: EPOCH_SLOTS,
             metrics: Default::default(),
         }
+    }
+
+    /// Sets the distance from the tip after which historical state root calculation emits an OOM
+    /// warning.
+    pub const fn with_historical_state_root_warning_threshold(mut self, threshold: u64) -> Self {
+        self.historical_state_root_warning_threshold = threshold;
+        self
+    }
+
+    /// Returns the distance from the tip after which historical state root calculation emits an
+    /// OOM warning.
+    pub const fn historical_state_root_warning_threshold(&self) -> u64 {
+        self.historical_state_root_warning_threshold
     }
 
     /// Creates an overlay builder for `parent_hash`.
