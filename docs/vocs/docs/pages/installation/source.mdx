@@ -37,6 +37,10 @@ operating system:
 
 These are needed to build bindings for Reth's database.
 
+Building with the experimental EVM JIT (`--features jit`, enabled in the official release
+binaries and Docker images) additionally requires LLVM 22 with `llvm-config` available on
+`PATH`. The default build does not include the JIT and does not need LLVM 22.
+
 The Minimum Supported Rust Version (MSRV) of this project is 1.88.0. If you already have a version of Rust installed,
 you can check your version by running `rustc --version`. To update your version of Rust, run `rustup update`.
 

@@ -89,13 +89,15 @@ default = [
     "otlp-logs",
     "reth-revm/portable",
     "js-tracer",
-    "jit",
     "keccak-cache-global",
     "asm-keccak",
     "gmp",
     "min-trace-logs",
 ]
 
+# Experimental revmc JIT (runtime opt-in via --jit). Not a default feature
+# because it statically links LLVM 22 and requires llvm-config at build time;
+# release artifacts enable it via the FEATURES build variable.
 jit = [
     "reth-ethereum-cli/jit",
     "reth-node-ethereum/jit",

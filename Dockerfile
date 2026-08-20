@@ -27,8 +27,9 @@ ENV BUILD_PROFILE=$BUILD_PROFILE
 ARG RUSTFLAGS=""
 ENV RUSTFLAGS="$RUSTFLAGS"
 
-# Extra Cargo features
-ARG FEATURES=""
+# Extra Cargo features. jit is not a default feature; enable it here so
+# images built from this Dockerfile match the published release binaries.
+ARG FEATURES="jit"
 ENV FEATURES=$FEATURES
 
 # Builds dependencies
