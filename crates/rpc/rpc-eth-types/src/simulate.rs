@@ -216,7 +216,7 @@ where
         if gap > 1 {
             for i in 1..gap {
                 let filler_number = prev_number + i;
-                let filler_time = prev_timestamp + timestamp_increment;
+                let filler_time = next_timestamp(prev_timestamp, timestamp_increment)?;
                 out.push(SimBlock {
                     block_overrides: Some(BlockOverrides {
                         number: Some(U256::from(filler_number)),
@@ -241,7 +241,7 @@ where
             }
             t
         } else {
-            let t = prev_timestamp + timestamp_increment;
+            let t = next_timestamp(prev_timestamp, timestamp_increment)?;
             overrides.time = Some(t);
             t
         };
@@ -251,6 +251,16 @@ where
     }
 
     Ok(out)
+}
+
+/// Returns `prev + increment`, erroring instead of overflowing.
+///
+/// A wrapped timestamp would be lower than its parent's, which is the ordering this function
+/// exists to enforce.
+fn next_timestamp(prev: u64, increment: u64) -> Result<u64, EthApiError> {
+    prev.checked_add(increment).ok_or_else(|| {
+        EthApiError::other(EthSimulateError::BlockTimestampInvalid { got: prev, parent: prev })
+    })
 }
 
 /// Applies precompile move overrides from state overrides to the EVM's precompiles map.
@@ -752,6 +762,46 @@ mod tests {
         let parent = parent_at(10, 100);
         let err = sanitize_chain(vec![block_with_number(10)], &parent, Chain::mainnet().id(), 256)
             .unwrap_err();
+        assert!(matches!(err, EthApiError::Other(_)));
+    }
+
+    #[test]
+    fn sanitize_chain_rejects_timestamp_overflow() {
+        // A block may set any timestamp above its parent's, including `u64::MAX`. The following
+        // block then defaults to `prev + increment`, which must not wrap.
+        let parent = parent_at(0, 0);
+        let blocks: Vec<SimBlock<TransactionRequest>> = vec![
+            SimBlock {
+                block_overrides: Some(BlockOverrides {
+                    time: Some(u64::MAX),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            SimBlock::default(),
+        ];
+
+        let err = sanitize_chain(blocks, &parent, Chain::mainnet().id(), 256).unwrap_err();
+        assert!(matches!(err, EthApiError::Other(_)));
+    }
+
+    #[test]
+    fn sanitize_chain_rejects_filler_timestamp_overflow() {
+        // Same, but the wrap would happen while generating filler blocks for a number gap.
+        let parent = parent_at(0, 0);
+        let blocks = vec![
+            SimBlock {
+                block_overrides: Some(BlockOverrides {
+                    number: Some(U256::from(1)),
+                    time: Some(u64::MAX),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            block_with_number(4),
+        ];
+
+        let err = sanitize_chain(blocks, &parent, Chain::mainnet().id(), 256).unwrap_err();
         assert!(matches!(err, EthApiError::Other(_)));
     }
 
