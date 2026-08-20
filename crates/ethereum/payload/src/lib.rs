@@ -288,15 +288,9 @@ where
             continue
         }
 
-        // Check the common interrupt flag first so the hot path only performs one atomic load.
-        if cancel.is_interrupted() {
-            if cancel.is_cancelled() {
-                return Ok(BuildOutcome::Cancelled)
-            }
-
-            // A payload was requested before this build completed. Stop adding transactions and
-            // seal the work accumulated so far.
-            break
+        // check if the job was cancelled, if so we can exit early
+        if cancel.is_cancelled() {
+            return Ok(BuildOutcome::Cancelled)
         }
 
         // convert tx to a signed transaction
