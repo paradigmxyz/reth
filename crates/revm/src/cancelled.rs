@@ -1,8 +1,11 @@
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
+/// Payload building is still in progress.
 const RUNNING: u8 = 0;
+/// Payload building should stop accepting transactions and seal the accumulated work.
 const FINALIZATION_REQUESTED: u8 = 1;
+/// Payload building should stop and discard the accumulated work.
 const CANCELLED: u8 = 2;
 
 /// Cancels execution on drop and supports cooperative finalization.
