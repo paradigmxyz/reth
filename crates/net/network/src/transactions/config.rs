@@ -38,6 +38,9 @@ pub struct TransactionsManagerConfig {
     /// Which peers we accept incoming transactions or announcements from.
     #[cfg_attr(feature = "serde", serde(default))]
     pub ingress_policy: TransactionIngressPolicy,
+    /// Which peers we serve `GetPooledTransactions` requests for.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub serve_policy: TransactionServePolicy,
     /// Memory limit (in bytes) for the channel that carries
     /// `NetworkTransactionEvent`s from the `NetworkManager` to the `TransactionsManager`.
     ///
@@ -64,6 +67,7 @@ impl Default for TransactionsManagerConfig {
             max_pending_pool_imports: DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
             propagation_mode: TransactionPropagationMode::default(),
             ingress_policy: TransactionIngressPolicy::default(),
+            serve_policy: TransactionServePolicy::default(),
             tx_channel_memory_limit_bytes: DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
         }
     }
@@ -262,6 +266,50 @@ impl FromStr for TransactionIngressPolicy {
     }
 }
 
+/// Determines which peers we serve `GetPooledTransactions` requests for.
+///
+/// Requests from peers disallowed by this policy are answered with an empty response, which the
+/// protocol permits: a `PooledTransactions` response may omit any or all of the requested hashes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Display)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum TransactionServePolicy {
+    /// Serve requests from any peer.
+    #[default]
+    All,
+    /// Serve requests only from trusted peers.
+    ///
+    /// Only peers configured as trusted, e.g. via `--trusted-peers`, qualify. Peers added at
+    /// runtime with `admin_addPeer` are [`PeerKind::Static`] and are answered with an empty
+    /// response.
+    Trusted,
+    /// Answer every request with an empty response.
+    None,
+}
+
+impl TransactionServePolicy {
+    /// Returns true if the serve policy allows the provided peer kind.
+    pub const fn allows(&self, peer_kind: PeerKind) -> bool {
+        match self {
+            Self::All => true,
+            Self::Trusted => peer_kind.is_trusted(),
+            Self::None => false,
+        }
+    }
+}
+
+impl FromStr for TransactionServePolicy {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "All" | "all" => Ok(Self::All),
+            "Trusted" | "trusted" => Ok(Self::Trusted),
+            "None" | "none" => Ok(Self::None),
+            _ => Err(format!("Invalid transaction serve policy: {s}")),
+        }
+    }
+}
+
 /// Defines the outcome of evaluating a transaction against an `AnnouncementFilteringPolicy`.
 ///
 /// Dictates how the `TransactionManager` should proceed on an announced transaction.
@@ -394,5 +442,56 @@ mod tests {
         assert!(TransactionPropagationMode::from_str("max:").is_err());
         assert!(TransactionPropagationMode::from_str("max").is_err());
         assert!(TransactionPropagationMode::from_str("").is_err());
+    }
+
+    #[test]
+    fn test_transaction_serve_policy_from_str() {
+        assert_eq!(TransactionServePolicy::from_str("all").unwrap(), TransactionServePolicy::All);
+        assert_eq!(TransactionServePolicy::from_str("All").unwrap(), TransactionServePolicy::All);
+        assert_eq!(
+            TransactionServePolicy::from_str("trusted").unwrap(),
+            TransactionServePolicy::Trusted
+        );
+        assert_eq!(
+            TransactionServePolicy::from_str("Trusted").unwrap(),
+            TransactionServePolicy::Trusted
+        );
+        assert_eq!(TransactionServePolicy::from_str("none").unwrap(), TransactionServePolicy::None);
+        assert_eq!(TransactionServePolicy::from_str("None").unwrap(), TransactionServePolicy::None);
+
+        assert!(TransactionServePolicy::from_str("invalid").is_err());
+        assert!(TransactionServePolicy::from_str("").is_err());
+    }
+
+    /// The CLI renders the default with `Display` and parses it back with `FromStr`, so the two
+    /// must agree for every variant.
+    #[test]
+    fn test_transaction_serve_policy_display_roundtrip() {
+        for policy in [
+            TransactionServePolicy::All,
+            TransactionServePolicy::Trusted,
+            TransactionServePolicy::None,
+        ] {
+            assert_eq!(TransactionServePolicy::from_str(&policy.to_string()).unwrap(), policy);
+        }
+    }
+
+    #[test]
+    fn test_transaction_serve_policy_allows() {
+        for kind in [PeerKind::Basic, PeerKind::Static, PeerKind::Trusted] {
+            assert!(TransactionServePolicy::All.allows(kind));
+            assert!(!TransactionServePolicy::None.allows(kind));
+        }
+
+        assert!(TransactionServePolicy::Trusted.allows(PeerKind::Trusted));
+        assert!(!TransactionServePolicy::Trusted.allows(PeerKind::Basic));
+        // peers added at runtime via `admin_addPeer` are `Static`, and are not served
+        assert!(!TransactionServePolicy::Trusted.allows(PeerKind::Static));
+    }
+
+    #[test]
+    fn test_transaction_serve_policy_default_is_all() {
+        assert_eq!(TransactionServePolicy::default(), TransactionServePolicy::All);
+        assert_eq!(TransactionsManagerConfig::default().serve_policy, TransactionServePolicy::All);
     }
 }
