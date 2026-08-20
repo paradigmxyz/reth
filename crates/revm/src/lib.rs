@@ -15,6 +15,9 @@ extern crate alloc;
 /// Database adapters for payload building.
 pub mod cached;
 
+/// Helpers for warming block-hash caches during payload building.
+pub mod block_hash_cache;
+
 /// A marker that can be used to cancel execution.
 pub mod cancelled;
 
