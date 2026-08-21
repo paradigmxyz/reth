@@ -829,3 +829,148 @@ fn test_balance_increment_not_duplicated() {
         );
     }
 }
+
+#[test]
+fn eip_7702_witness_includes_journal_only_storage_reads() {
+    // The delegate code SLOADs an uninitialized slot of the authority account. The read
+    // happens while the authority is journal-resident (created by the authorization in the
+    // same transaction), so it never reaches the executor cache and the witness must take
+    // the preimage and proof target from the recorded journal states instead.
+    // See <https://github.com/paradigmxyz/reth/issues/26763>.
+    use alloy_consensus::TxEip7702;
+    use alloy_eips::eip7702::Authorization;
+    use alloy_primitives::Address;
+    use reth_primitives_traits::crypto::secp256k1::sign_message;
+    use reth_revm::witness::{AccessedState, ExecutionWitnessRecord};
+    use reth_storage_api::noop::NoopProvider;
+    use reth_trie_common::ExecutionWitnessMode;
+    use std::sync::{Arc as StdArc, Mutex};
+
+    #[derive(Clone, Default)]
+    struct Recorder(StdArc<Mutex<AccessedState>>);
+
+    impl revm::OnStateHook for Recorder {
+        fn on_state(&mut self, state: revm::state::EvmState) {
+            let mut accessed = self.0.lock().unwrap();
+            for (address, account) in &state {
+                let slots = accessed.entry(*address).or_default();
+                for (slot, storage_slot) in &account.storage {
+                    slots.insert(B256::new(slot.to_be_bytes()), storage_slot.present_value());
+                }
+            }
+        }
+    }
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::from(&*MAINNET)
+            .shanghai_activated()
+            .with_fork(EthereumHardfork::Prague, ForkCondition::Timestamp(0))
+            .build(),
+    );
+
+    let mut db = CacheDB::new(EmptyDB::default());
+
+    let sender_key_pair = generators::generate_key(&mut generators::rng());
+    let sender_address = public_key_to_address(sender_key_pair.public_key());
+    db.insert_account_info(
+        sender_address,
+        AccountInfo { nonce: 0, balance: U256::from(ETH_TO_WEI), ..Default::default() },
+    );
+
+    // PUSH1 0x2b SLOAD POP STOP
+    let delegate_address = Address::with_last_byte(0xde);
+    let delegate_code = Bytes::from_static(&[0x60, 0x2b, 0x54, 0x50, 0x00]);
+    db.insert_account_info(
+        delegate_address,
+        AccountInfo {
+            nonce: 1,
+            balance: U256::ZERO,
+            code_hash: keccak256(&delegate_code),
+            code: Some(Bytecode::new_raw(delegate_code)),
+            ..Default::default()
+        },
+    );
+
+    // Fresh authority: does not exist pre-block; the authorization creates it in-tx.
+    let authority_key_pair = generators::generate_key(&mut generators::rng());
+    let authority_address = public_key_to_address(authority_key_pair.public_key());
+
+    let authorization = Authorization {
+        chain_id: U256::from(chain_spec.chain.id()),
+        address: delegate_address,
+        nonce: 0,
+    };
+    let auth_signature = sign_message(
+        B256::from_slice(&authority_key_pair.secret_bytes()[..]),
+        authorization.signature_hash(),
+    )
+    .unwrap();
+    let signed_authorization = authorization.into_signed(auth_signature);
+
+    let mut header = chain_spec.genesis_header().clone();
+    header.gas_limit = 1_500_000;
+    header.excess_blob_gas = Some(0);
+    header.blob_gas_used = Some(0);
+    header.parent_beacon_block_root = Some(B256::ZERO);
+
+    let tx = sign_tx_with_key_pair(
+        sender_key_pair,
+        Transaction::Eip7702(TxEip7702 {
+            chain_id: chain_spec.chain.id(),
+            nonce: 0,
+            gas_limit: 200_000,
+            max_fee_per_gas: header.base_fee_per_gas.unwrap().into(),
+            max_priority_fee_per_gas: 0,
+            to: authority_address,
+            authorization_list: vec![signed_authorization],
+            ..Default::default()
+        }),
+    );
+
+    let provider = EthEvmConfig::new(chain_spec.clone());
+    let mut executor = provider.batch_executor(db);
+    let recorder = Recorder::default();
+    let BlockExecutionResult { receipts, .. } = executor
+        .execute_one_with_state_hook(
+            &Block { header, body: BlockBody { transactions: vec![tx], ..Default::default() } }
+                .try_into_recovered()
+                .unwrap(),
+            recorder.clone(),
+        )
+        .unwrap();
+    assert!(receipts.first().unwrap().success);
+
+    let state = executor.into_state();
+    let slot_preimage = B256::from(U256::from(0x2b));
+
+    // The post-execution cache alone loses the read: this is the gap the recorded journal
+    // states close.
+    let cached_authority =
+        state.cache.accounts.get(&authority_address).unwrap().account.as_ref().unwrap();
+    assert!(!cached_authority.storage.contains_key(&U256::from(0x2b)));
+
+    let provider = NoopProvider::eth(chain_spec);
+    let without_accessed = ExecutionWitnessRecord::new(&state)
+        .into_execution_witness(&provider, &provider, 1, ExecutionWitnessMode::Legacy)
+        .unwrap();
+    assert!(
+        !without_accessed.keys.iter().any(|k| k.as_ref() == slot_preimage.as_slice()),
+        "without journal accesses the slot preimage cannot be known"
+    );
+
+    let accessed = StdArc::try_unwrap(recorder.0).unwrap().into_inner().unwrap();
+    assert_eq!(
+        accessed.get(&authority_address).and_then(|s| s.get(&slot_preimage)),
+        Some(&U256::ZERO)
+    );
+
+    let witness = ExecutionWitnessRecord::new(&state)
+        .with_accessed(&accessed)
+        .into_execution_witness(&provider, &provider, 1, ExecutionWitnessMode::Legacy)
+        .unwrap();
+    assert!(
+        witness.keys.iter().any(|k| k.as_ref() == slot_preimage.as_slice()),
+        "slot preimage recovered from journal states must be in keys"
+    );
+    assert!(witness.keys.iter().any(|k| k.as_ref() == authority_address.as_slice()));
+}

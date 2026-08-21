@@ -35,6 +35,9 @@ revmc = { workspace = true, features = ["alloy-evm"], optional = true }
 [dev-dependencies]
 reth-testing-utils.workspace = true
 reth-evm = { workspace = true, features = ["test-utils"] }
+reth-revm = { workspace = true, features = ["std", "witness"] }
+reth-storage-api = { workspace = true, features = ["std"] }
+reth-trie-common = { workspace = true, features = ["std"] }
 secp256k1.workspace = true
 alloy-genesis.workspace = true
 
