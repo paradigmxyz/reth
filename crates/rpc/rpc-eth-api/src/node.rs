@@ -9,7 +9,7 @@ use reth_primitives_traits::{BlockTy, HeaderTy, ReceiptTy, TxTy};
 use reth_rpc_eth_types::EthStateCache;
 use reth_storage_api::{
     BalProvider, BlockReader, BlockReaderIdExt, PruneCheckpointReader, StageCheckpointReader,
-    StateProviderFactory,
+    StateProviderFactory, StateRangeProviderFactory,
 };
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
@@ -40,6 +40,7 @@ pub trait RpcNodeCore: Clone + Send + Sync + Unpin + 'static {
         + StageCheckpointReader
         + PruneCheckpointReader
         + BalProvider
+        + StateRangeProviderFactory
         + Send
         + Sync
         + Clone
@@ -135,6 +136,7 @@ where
         + StageCheckpointReader
         + PruneCheckpointReader
         + BalProvider
+        + StateRangeProviderFactory
         + Send
         + Sync
         + Unpin

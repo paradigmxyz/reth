@@ -2,7 +2,7 @@ use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_genesis::ChainConfig;
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, Bytes, B256, U64};
-use alloy_rpc_types_debug::ExecutionWitness;
+use alloy_rpc_types_debug::{AccountState, ExecutionWitness};
 use alloy_rpc_types_eth::{Account, AccountInfo, Bundle, Index, StateContext};
 use alloy_rpc_types_trace::geth::{
     ChainBlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
@@ -10,6 +10,9 @@ use alloy_rpc_types_trace::geth::{
 };
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_trie_common::{updates::TrieUpdates, ExecutionWitnessMode, HashedPostState};
+use serde::{Deserialize, Serialize};
+use serde_with::{base64::Base64, serde_as};
+use std::collections::BTreeMap;
 
 /// Debug rpc interface.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "debug"))]
@@ -200,18 +203,20 @@ pub trait DebugApi<TxReq: RpcObject> {
     /// Enumerates all accounts at a given block with paging capability. `maxResults` are returned
     /// in the page and the items have keys that come after the `start` key (hashed address).
     ///
-    /// If incompletes is false, then accounts for which the key preimage (i.e: the address) doesn't
-    /// exist in db are skipped. NB: geth by default does not store preimages.
+    /// Reth stores no address preimages, so every returned account is what geth calls
+    /// "incomplete": keyed by hashed address, with the `address` field unset. The `incompletes`
+    /// argument is therefore accepted but ignored, since honoring `incompletes = false` would
+    /// filter out every account.
     #[method(name = "accountRange")]
     async fn debug_account_range(
         &self,
-        block_number: BlockNumberOrTag,
+        block_id: BlockId,
         start: Bytes,
         max_results: u64,
         nocode: bool,
         nostorage: bool,
         incompletes: bool,
-    ) -> RpcResult<()>;
+    ) -> RpcResult<HashedStateDump>;
 
     /// Flattens the entire key-value database into a single level, removing all unused slots and
     /// merging all keys.
@@ -251,8 +256,11 @@ pub trait DebugApi<TxReq: RpcObject> {
 
     /// Retrieves the state that corresponds to the block number and returns a list of accounts
     /// (including storage and code).
+    ///
+    /// Like geth, this is capped at a single page of accounts; use
+    /// [`debug_accountRange`](Self::debug_account_range) to page through the entire state.
     #[method(name = "dumpBlock")]
-    async fn debug_dump_block(&self, number: BlockId) -> RpcResult<()>;
+    async fn debug_dump_block(&self, number: BlockId) -> RpcResult<HashedStateDump>;
 
     /// Forces garbage collection.
     #[method(name = "freeOSMemory")]
@@ -362,15 +370,19 @@ pub trait DebugApi<TxReq: RpcObject> {
     /// Returns the storage at the given block height and transaction index. The result can be
     /// paged by providing a `maxResult` to cap the number of storage slots returned as well as
     /// specifying the offset via `keyStart` (hash of storage key).
+    ///
+    /// The state is the one after executing the first `txIdx` transactions of the block, i.e. the
+    /// state the transaction at `txIdx` runs on, matching geth. Passing the block's transaction
+    /// count addresses the state after the entire block.
     #[method(name = "storageRangeAt")]
     async fn debug_storage_range_at(
         &self,
-        block_hash: B256,
+        block_id: BlockId,
         tx_idx: usize,
         contract_address: Address,
-        key_start: B256,
+        key_start: Bytes,
         max_result: u64,
-    ) -> RpcResult<()>;
+    ) -> RpcResult<HashedStorageRangeResult>;
 
     /// Returns the structured logs created during the execution of EVM against a block pulled
     /// from the pool of bad ones and returns them as a JSON object. For the second parameter see
@@ -381,4 +393,52 @@ pub trait DebugApi<TxReq: RpcObject> {
         block_hash: B256,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<Vec<TraceResult>>;
+}
+
+/// Result of `debug_accountRange` and `debug_dumpBlock`: a partial dump of the state trie.
+///
+/// This mirrors geth's `state.Dump`, except that accounts are keyed by their hashed address:
+/// reth stores no address preimages, so the plain address of a dumped account is unknown. This is
+/// the same output geth produces for accounts whose preimage it is missing, which is the default
+/// for a geth node that runs without `--cache.preimages`.
+#[serde_as]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HashedStateDump {
+    /// The state root of the dumped state.
+    pub root: B256,
+    /// The dumped accounts, keyed by `keccak256(address)`.
+    ///
+    /// Storage slots of an account are keyed by `keccak256(slot)` for the same reason.
+    pub accounts: BTreeMap<B256, AccountState>,
+    /// The hashed address to resume the dump from, if this dump is only partial.
+    ///
+    /// Base64-encoded, matching geth's encoding of the same field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde_as(as = "Option<Base64>")]
+    pub next: Option<Bytes>,
+}
+
+/// Result of `debug_storageRangeAt`: a page of one account's storage.
+///
+/// This mirrors geth's `StorageRangeResult`, which is already keyed by hashed storage key. The
+/// plain key is only known for slots the replayed transactions touched, and is `None` otherwise,
+/// just like geth reports slots whose preimage it is missing.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HashedStorageRangeResult {
+    /// The storage slots, keyed by `keccak256(slot)`.
+    pub storage: BTreeMap<B256, HashedStorageEntry>,
+    /// The hashed storage key to resume from, if this page is only partial.
+    pub next_key: Option<B256>,
+}
+
+/// A single entry of a [`HashedStorageRangeResult`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HashedStorageEntry {
+    /// The plain storage key, if known.
+    pub key: Option<B256>,
+    /// The value stored at the slot.
+    pub value: B256,
 }

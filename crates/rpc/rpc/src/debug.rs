@@ -1,11 +1,15 @@
-use alloy_consensus::{constants::KECCAK_EMPTY, transaction::TxHashRef, BlockHeader};
+use alloy_consensus::{
+    constants::{EMPTY_ROOT_HASH, KECCAK_EMPTY},
+    transaction::TxHashRef,
+    BlockHeader,
+};
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_evm::{env::BlockEnvironment, Evm};
 use alloy_genesis::ChainConfig;
-use alloy_primitives::{hex::decode, uint, Address, Bytes, B256, U256, U64};
+use alloy_primitives::{hex::decode, keccak256, uint, Address, Bytes, B256, U256, U64};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types::BlockTransactionsKind;
-use alloy_rpc_types_debug::ExecutionWitness;
+use alloy_rpc_types_debug::{AccountState, ExecutionWitness};
 use alloy_rpc_types_eth::{
     state::EvmOverrides, Account, AccountInfo, BlockError, Bundle, Index, StateContext,
 };
@@ -25,7 +29,7 @@ use reth_primitives_traits::{
     Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
 };
 use reth_revm::{db::State, witness::ExecutionWitnessRecord};
-use reth_rpc_api::DebugApiServer;
+use reth_rpc_api::{DebugApiServer, HashedStateDump, HashedStorageEntry, HashedStorageRangeResult};
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
@@ -34,8 +38,9 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
-    BlockIdReader, BlockReaderIdExt, HashedPostStateProvider, HeaderProvider, ProviderBlock,
-    ReceiptProviderIdExt, StateProviderFactory, StateRootProvider, StorageRootProvider,
+    BlockIdReader, BlockReaderIdExt, BytecodeReader, HashedPostStateProvider, HeaderProvider,
+    ProviderBlock, RangeLimits, RangeResponse, ReceiptProviderIdExt, StateProviderFactory,
+    StateRangeProviderFactory, StateRangeView, StateRootProvider, StorageRootProvider,
     TransactionVariant,
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
@@ -47,7 +52,10 @@ use reth_trie_common::{
 use revm::{database::states::bundle_state::BundleRetention, Database, DatabaseCommit};
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
 use serde::{Deserialize, Serialize};
-use std::{collections::VecDeque, sync::Arc};
+use std::{
+    collections::{BTreeMap, VecDeque},
+    sync::Arc,
+};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 use tokio_stream::StreamExt;
 
@@ -831,6 +839,352 @@ where
     }
 }
 
+impl<Eth> DebugApi<Eth>
+where
+    Eth: TraceExt,
+{
+    /// Dumps a single page of the state at the given block, starting at the hashed address
+    /// `start`.
+    ///
+    /// This backs both `debug_accountRange` and `debug_dumpBlock`. The amount of state read per
+    /// call is bounded by [`ACCOUNT_RANGE_MAX_RESULTS`] accounts and
+    /// [`ACCOUNT_RANGE_MAX_STORAGE_SLOTS`] storage slots.
+    pub async fn debug_state_dump(
+        &self,
+        block_id: BlockId,
+        start: Bytes,
+        max_results: u64,
+        nocode: bool,
+        nostorage: bool,
+    ) -> Result<HashedStateDump, Eth::Error> {
+        if start.len() > 32 {
+            return Err(EthApiError::InvalidParams(format!(
+                "start key must be at most 32 bytes, got {}",
+                start.len()
+            ))
+            .into())
+        }
+
+        // geth takes a trie path prefix here, which addresses the hashed address it is a prefix of.
+        let mut start_key = B256::ZERO;
+        start_key[..start.len()].copy_from_slice(&start);
+
+        let max_results = match max_results as usize {
+            0 => ACCOUNT_RANGE_MAX_RESULTS,
+            n => n.min(ACCOUNT_RANGE_MAX_RESULTS),
+        };
+
+        // Dumping walks the state and recomputes storage roots, so it is rate limited alongside
+        // tracing and proof requests.
+        let _permit = self
+            .acquire_trace_permit()
+            .await
+            .map_err(RethError::other)
+            .map_err(EthApiError::Internal)?;
+
+        let header = self
+            .provider()
+            .sealed_header_by_id(block_id)
+            .map_err(Eth::Error::from_eth_err)?
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
+
+        self.eth_api()
+            .spawn_blocking_io(move |this| {
+                let state_root = header.state_root();
+                let range = this
+                    .provider()
+                    .state_range_provider(state_root)
+                    .map_err(Eth::Error::from_eth_err)?
+                    .ok_or_else(|| {
+                        EthApiError::InvalidParams(format!(
+                            "state at block {} is not available for dumping",
+                            header.number()
+                        ))
+                    })?;
+                let state = this
+                    .provider()
+                    .state_by_block_hash(header.hash())
+                    .map_err(Eth::Error::from_eth_err)?;
+
+                // Read one account past the page to learn where a follow-up call should resume.
+                let RangeResponse { items: mut accounts, .. } = range
+                    .account_range(
+                        start_key,
+                        B256::repeat_byte(0xff),
+                        RangeLimits::items(max_results.saturating_add(1)),
+                    )
+                    .map_err(Eth::Error::from_eth_err)?;
+                let mut next =
+                    (accounts.len() > max_results).then(|| accounts.pop().expect("checked len").0);
+
+                let mut dump =
+                    HashedStateDump { root: state_root, accounts: BTreeMap::new(), next: None };
+                let mut slot_budget = ACCOUNT_RANGE_MAX_STORAGE_SLOTS;
+
+                for (hashed_address, account) in accounts {
+                    let mut storage = None;
+                    let has_storage = if nostorage {
+                        !Self::storage_page(&range, hashed_address, 1)?.is_empty()
+                    } else {
+                        // One slot over budget is enough to tell that this account doesn't fit.
+                        let slots = Self::storage_page(
+                            &range,
+                            hashed_address,
+                            slot_budget.saturating_add(1),
+                        )?;
+
+                        if slots.len() > slot_budget {
+                            if dump.accounts.is_empty() {
+                                return Err(EthApiError::InvalidParams(format!(
+                                    "account {hashed_address} has more than \
+                                     {ACCOUNT_RANGE_MAX_STORAGE_SLOTS} storage slots, retry with \
+                                     nostorage"
+                                ))
+                                .into())
+                            }
+                            // Accounts are dumped whole: end the page before this one instead of
+                            // returning a partial account.
+                            next = Some(hashed_address);
+                            break
+                        }
+
+                        slot_budget -= slots.len();
+                        let has_storage = !slots.is_empty();
+                        storage = Some(slots.into_iter().collect::<BTreeMap<_, _>>());
+                        has_storage
+                    };
+
+                    // Computing a storage root walks the account's entire storage trie, so it is
+                    // only done for accounts that actually have storage.
+                    let storage_root = if has_storage {
+                        range
+                            .storage_root_by_hash(hashed_address)
+                            .map_err(Eth::Error::from_eth_err)?
+                    } else {
+                        EMPTY_ROOT_HASH
+                    };
+
+                    let code = match account.bytecode_hash {
+                        Some(code_hash) if !nocode => state
+                            .bytecode_by_hash(&code_hash)
+                            .map_err(Eth::Error::from_eth_err)?
+                            .map(|code| code.original_bytes()),
+                        _ => None,
+                    };
+
+                    dump.accounts.insert(
+                        hashed_address,
+                        AccountState {
+                            balance: account.balance,
+                            nonce: account.nonce,
+                            root: storage_root,
+                            code_hash: account.get_bytecode_hash(),
+                            code,
+                            storage,
+                            // Reth stores no address preimages.
+                            address: None,
+                            address_hash: Some(hashed_address),
+                        },
+                    );
+                }
+
+                dump.next = next.map(|hashed_address| Bytes::from(hashed_address.0));
+
+                Ok(dump)
+            })
+            .await
+    }
+
+    /// Returns a page of `address`'s storage, as of the state the transaction at `tx_index` of
+    /// the given block runs on.
+    ///
+    /// The number of slots read is bounded by [`STORAGE_RANGE_MAX_RESULTS`], plus the slots the
+    /// replayed transactions touched.
+    pub async fn debug_storage_range_at(
+        &self,
+        block_id: BlockId,
+        tx_index: usize,
+        address: Address,
+        key_start: Bytes,
+        max_result: u64,
+    ) -> Result<HashedStorageRangeResult, Eth::Error> {
+        if key_start.len() > 32 {
+            return Err(EthApiError::InvalidParams(format!(
+                "key start must be at most 32 bytes, got {}",
+                key_start.len()
+            ))
+            .into())
+        }
+
+        let mut start_key = B256::ZERO;
+        start_key[..key_start.len()].copy_from_slice(&key_start);
+        let max_result = (max_result as usize).min(STORAGE_RANGE_MAX_RESULTS);
+
+        // This replays part of a block, so it is rate limited like the tracing calls.
+        let _permit = self
+            .acquire_trace_permit()
+            .await
+            .map_err(RethError::other)
+            .map_err(EthApiError::Internal)?;
+
+        let block = self
+            .eth_api()
+            .recovered_block(block_id)
+            .await?
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
+
+        let transaction_count = block.transaction_count();
+        if tx_index > transaction_count {
+            return Err(EthApiError::InvalidParams(format!(
+                "tx_index {tx_index} out of bounds for block with {transaction_count} transactions"
+            ))
+            .into())
+        }
+
+        let parent_hash = block.parent_hash();
+        let parent_state_root = self
+            .provider()
+            .header(parent_hash)
+            .map_err(Eth::Error::from_eth_err)?
+            .ok_or(EthApiError::HeaderNotFound(parent_hash.into()))?
+            .state_root();
+        let hashed_address = keccak256(address);
+
+        self.eth_api()
+            .spawn_with_state_at_block(parent_hash, move |eth_api, mut db| {
+                let mut executor = eth_api
+                    .evm_config()
+                    .executor_for_block(&mut db, block.sealed_block())
+                    .map_err(RethError::other)
+                    .map_err(Eth::Error::from_eth_err)?;
+                executor.apply_pre_execution_changes().map_err(Eth::Error::from_eth_err)?;
+
+                for tx in block.transactions_recovered().take(tx_index) {
+                    executor.execute_transaction(tx).map_err(Eth::Error::from_eth_err)?;
+                }
+                drop(executor);
+
+                // Slots the replay touched, with their preimages. Values shadow the persisted
+                // state, and are the account's entire storage if it was destroyed.
+                let (touched, wiped) = db
+                    .cache
+                    .accounts
+                    .get(&address)
+                    .and_then(|account| {
+                        account.account.as_ref().map(|plain_account| {
+                            let touched = plain_account
+                                .storage
+                                .iter()
+                                .map(|(slot, value)| {
+                                    let slot = B256::from(*slot);
+                                    (keccak256(slot), (slot, *value))
+                                })
+                                .collect::<BTreeMap<_, _>>();
+                            (touched, account.status.was_destroyed())
+                        })
+                    })
+                    .unwrap_or_default();
+
+                // Reading one entry past the page, plus room for the touched slots, is enough for
+                // the merge below to fill the page and find the key to resume from: each touched
+                // slot displaces at most one persisted entry.
+                let persisted = if wiped {
+                    Vec::new()
+                } else {
+                    let range = eth_api
+                        .provider()
+                        .state_range_provider(parent_state_root)
+                        .map_err(Eth::Error::from_eth_err)?
+                        .ok_or_else(|| {
+                            EthApiError::InvalidParams(format!(
+                                "state at block {} is no longer available",
+                                block.number().saturating_sub(1)
+                            ))
+                        })?;
+                    Self::storage_page_from(
+                        &range,
+                        hashed_address,
+                        start_key,
+                        max_result.saturating_add(1).saturating_add(touched.len()),
+                    )?
+                };
+
+                let mut slots = persisted
+                    .into_iter()
+                    .map(|(hashed_slot, value)| (hashed_slot, (None, value)))
+                    .collect::<BTreeMap<_, _>>();
+                for (hashed_slot, (slot, value)) in touched {
+                    if hashed_slot < start_key {
+                        continue
+                    }
+                    if value.is_zero() {
+                        slots.remove(&hashed_slot);
+                    } else {
+                        slots.insert(hashed_slot, (Some(slot), value));
+                    }
+                }
+
+                let mut result = HashedStorageRangeResult::default();
+                for (hashed_slot, (slot, value)) in slots {
+                    if result.storage.len() == max_result {
+                        result.next_key = Some(hashed_slot);
+                        break
+                    }
+                    result
+                        .storage
+                        .insert(hashed_slot, HashedStorageEntry { key: slot, value: value.into() });
+                }
+
+                Ok(result)
+            })
+            .await
+    }
+
+    /// Reads at most `max_slots` storage slots of the given account, in hashed key order.
+    fn storage_page(
+        range: &StateRangeView,
+        hashed_address: B256,
+        max_slots: usize,
+    ) -> Result<Vec<(B256, U256)>, Eth::Error> {
+        Self::storage_page_from(range, hashed_address, B256::ZERO, max_slots)
+    }
+
+    /// Same as [`Self::storage_page`], but starting at the given hashed storage key.
+    fn storage_page_from(
+        range: &StateRangeView,
+        hashed_address: B256,
+        start: B256,
+        max_slots: usize,
+    ) -> Result<Vec<(B256, U256)>, Eth::Error> {
+        Ok(range
+            .storage_range(
+                hashed_address,
+                start,
+                B256::repeat_byte(0xff),
+                RangeLimits::items(max_slots),
+            )
+            .map_err(Eth::Error::from_eth_err)?
+            .map(|response| response.items)
+            .unwrap_or_default())
+    }
+}
+
+/// Maximum number of accounts a single state dump returns.
+///
+/// Matches geth's `AccountRangeMaxResults`.
+const ACCOUNT_RANGE_MAX_RESULTS: usize = 256;
+
+/// Maximum number of storage slots a single `debug_storageRangeAt` call returns.
+///
+/// A capped page still reports where to resume via `nextKey`.
+const STORAGE_RANGE_MAX_RESULTS: usize = 4096;
+
+/// Maximum number of storage slots read across a single state dump.
+///
+/// Accounts are dumped whole, so a dump ends before the first account that doesn't fit in the
+/// remaining budget and points at it via `next`.
+const ACCOUNT_RANGE_MAX_STORAGE_SLOTS: usize = 16_384;
+
 #[async_trait]
 impl<Eth> DebugApiServer<RpcTxReq<Eth::NetworkTypes>> for DebugApi<Eth>
 where
@@ -1199,16 +1553,22 @@ where
         Self::debug_account_info_at(self, block_id, tx_index, address).await.map_err(Into::into)
     }
 
+    /// Handler for `debug_accountRange`
+    ///
+    /// `incompletes` is ignored: reth has no address preimages, so every dumped account is keyed
+    /// by its hashed address.
     async fn debug_account_range(
         &self,
-        _block_number: BlockNumberOrTag,
-        _start: Bytes,
-        _max_results: u64,
-        _nocode: bool,
-        _nostorage: bool,
+        block_id: BlockId,
+        start: Bytes,
+        max_results: u64,
+        nocode: bool,
+        nostorage: bool,
         _incompletes: bool,
-    ) -> RpcResult<()> {
-        Ok(())
+    ) -> RpcResult<HashedStateDump> {
+        Self::debug_state_dump(self, block_id, start, max_results, nocode, nostorage)
+            .await
+            .map_err(Into::into)
     }
 
     async fn debug_chaindb_compact(&self) -> RpcResult<()> {
@@ -1273,8 +1633,20 @@ where
         self.debug_code_by_hash(code_hash, None).await.map_err(Into::into)
     }
 
-    async fn debug_dump_block(&self, _number: BlockId) -> RpcResult<()> {
-        Ok(())
+    /// Handler for `debug_dumpBlock`
+    ///
+    /// Like geth, this returns at most a single page of accounts.
+    async fn debug_dump_block(&self, number: BlockId) -> RpcResult<HashedStateDump> {
+        Self::debug_state_dump(
+            self,
+            number,
+            Bytes::new(),
+            ACCOUNT_RANGE_MAX_RESULTS as u64,
+            false,
+            false,
+        )
+        .await
+        .map_err(Into::into)
     }
 
     async fn debug_free_os_memory(&self) -> RpcResult<()> {
@@ -1370,15 +1742,25 @@ where
         Self::debug_state_root_with_updates(self, hashed_state, block_id).await.map_err(Into::into)
     }
 
+    /// Handler for `debug_storageRangeAt`
     async fn debug_storage_range_at(
         &self,
-        _block_hash: B256,
-        _tx_idx: usize,
-        _contract_address: Address,
-        _key_start: B256,
-        _max_result: u64,
-    ) -> RpcResult<()> {
-        Ok(())
+        block_id: BlockId,
+        tx_idx: usize,
+        contract_address: Address,
+        key_start: Bytes,
+        max_result: u64,
+    ) -> RpcResult<HashedStorageRangeResult> {
+        Self::debug_storage_range_at(
+            self,
+            block_id,
+            tx_idx,
+            contract_address,
+            key_start,
+            max_result,
+        )
+        .await
+        .map_err(Into::into)
     }
 
     async fn debug_trace_bad_block(

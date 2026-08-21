@@ -31,9 +31,9 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, NodePrimitivesProvider, RangeEnd, RangeResponse, RangeResult,
-    StateRangeProvider, StateRangeProviderFactory, StateRangeView, StorageChangeSetReader,
-    StorageRangeResult, TryIntoHistoricalStateProvider,
+    BlockBodyIndicesProvider, NodePrimitivesProvider, RangeEnd, RangeLimits, RangeResponse,
+    RangeResult, StateRangeProvider, StateRangeProviderFactory, StateRangeView,
+    StorageChangeSetReader, StorageRangeResult, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_storage_overlay::{
@@ -270,8 +270,12 @@ impl<N: ProviderNodeTypes> StateRangeProvider for HistoricalStateRangeView<N> {
         &self,
         start: B256,
         limit: B256,
-        response_bytes: usize,
+        limits: RangeLimits,
     ) -> RangeResult<(B256, Account)> {
+        if limits.max_items == 0 {
+            return Ok(RangeResponse { items: Vec::new(), end: RangeEnd::ItemLimit })
+        }
+
         let mut cursor = self.provider.hashed_account_cursor().map_err(ProviderError::Database)?;
 
         let mut accounts = Vec::new();
@@ -288,7 +292,11 @@ impl<N: ProviderNodeTypes> StateRangeProvider for HistoricalStateRangeView<N> {
                 end = RangeEnd::HashLimit;
                 break
             }
-            if total_bytes > response_bytes {
+            if accounts.len() >= limits.max_items {
+                end = RangeEnd::ItemLimit;
+                break
+            }
+            if total_bytes > limits.response_bytes {
                 end = RangeEnd::ByteLimit;
                 break
             }
@@ -316,7 +324,7 @@ impl<N: ProviderNodeTypes> StateRangeProvider for HistoricalStateRangeView<N> {
         hashed_address: B256,
         start: B256,
         limit: B256,
-        response_bytes: usize,
+        limits: RangeLimits,
     ) -> StorageRangeResult {
         // Distinguish an absent account from one with no storage, so callers don't silently
         // omit it and shift later accounts' positions.
@@ -325,6 +333,10 @@ impl<N: ProviderNodeTypes> StateRangeProvider for HistoricalStateRangeView<N> {
         let found = account_cursor.seek(hashed_address).map_err(ProviderError::Database)?;
         if found.map(|(hash, _)| hash) != Some(hashed_address) {
             return Ok(None)
+        }
+
+        if limits.max_items == 0 {
+            return Ok(Some(RangeResponse { items: Vec::new(), end: RangeEnd::ItemLimit }))
         }
 
         let mut cursor =
@@ -344,7 +356,11 @@ impl<N: ProviderNodeTypes> StateRangeProvider for HistoricalStateRangeView<N> {
                 end = RangeEnd::HashLimit;
                 break
             }
-            if total_bytes > response_bytes {
+            if slots.len() >= limits.max_items {
+                end = RangeEnd::ItemLimit;
+                break
+            }
+            if total_bytes > limits.response_bytes {
                 end = RangeEnd::ByteLimit;
                 break
             }
@@ -1040,10 +1056,10 @@ mod tests {
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
         BlockReaderIdExt, BlockSource, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-        HashingWriter, HeaderProvider, RangeEnd, ReceiptProvider, ReceiptProviderIdExt,
-        StageCheckpointWriter, StateProviderFactory, StateRangeProvider, StateRangeProviderFactory,
-        StateRootProvider, StateWriteConfig, StateWriter, StorageRootProvider, TransactionVariant,
-        TransactionsProvider,
+        HashingWriter, HeaderProvider, RangeEnd, RangeLimits, ReceiptProvider,
+        ReceiptProviderIdExt, StageCheckpointWriter, StateProviderFactory, StateRangeProvider,
+        StateRangeProviderFactory, StateRootProvider, StateWriteConfig, StateWriter,
+        StorageRootProvider, TransactionVariant, TransactionsProvider,
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
@@ -2880,13 +2896,14 @@ mod tests {
         expected.sort_by_key(|(hash, _)| *hash);
         let state = provider.state_range_provider(EMPTY_ROOT_HASH)?.unwrap();
 
-        let all = state.account_range(B256::ZERO, B256::repeat_byte(0xff), 10_000)?;
+        let all =
+            state.account_range(B256::ZERO, B256::repeat_byte(0xff), RangeLimits::bytes(10_000))?;
         assert_eq!(all.end, RangeEnd::Exhausted);
         assert_eq!(all.items, expected);
 
         // The limit exactly matches the second account's hash, so the range ends there rather
         // than by exhausting the trie.
-        let bounded = state.account_range(B256::ZERO, expected[1].0, 10_000)?;
+        let bounded = state.account_range(B256::ZERO, expected[1].0, RangeLimits::bytes(10_000))?;
         assert_eq!(bounded.end, RangeEnd::HashLimit);
         assert_eq!(bounded.items, expected[..2]);
 
@@ -2908,9 +2925,60 @@ mod tests {
         let state = provider.state_range_provider(EMPTY_ROOT_HASH)?.unwrap();
 
         // Budget only fits a single account.
-        let partial = state.account_range(B256::ZERO, B256::repeat_byte(0xff), 150)?;
+        let partial =
+            state.account_range(B256::ZERO, B256::repeat_byte(0xff), RangeLimits::bytes(150))?;
         assert_eq!(partial.end, RangeEnd::ByteLimit);
         assert_eq!(partial.items.len(), 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn state_range_provider_ranges_respect_max_items() -> eyre::Result<()> {
+        let factory = test_provider_factory_with_genesis()?;
+        let provider_rw = factory.provider_rw()?;
+
+        let accounts: Vec<_> = (0..5u64).map(random_account).collect();
+        provider_rw.insert_account_for_hashing(
+            accounts.iter().map(|(address, account)| (*address, Some(*account))),
+        )?;
+        let (address, _) = accounts[0];
+        let hashed_address = keccak256(address);
+        provider_rw.insert_storage_for_hashing([(
+            address,
+            (0..4u64)
+                .map(|slot| StorageEntry {
+                    key: B256::from(U256::from(slot)),
+                    value: U256::from(slot + 1),
+                })
+                .collect::<Vec<_>>(),
+        )])?;
+        provider_rw.commit()?;
+
+        let provider = BlockchainProvider::new(factory)?;
+        let state = provider.state_range_provider(EMPTY_ROOT_HASH)?.unwrap();
+
+        let capped =
+            state.account_range(B256::ZERO, B256::repeat_byte(0xff), RangeLimits::items(2))?;
+        assert_eq!(capped.end, RangeEnd::ItemLimit);
+        assert_eq!(capped.items.len(), 2);
+
+        let slots = state
+            .storage_range(
+                hashed_address,
+                B256::ZERO,
+                B256::repeat_byte(0xff),
+                RangeLimits::items(3),
+            )?
+            .unwrap();
+        assert_eq!(slots.end, RangeEnd::ItemLimit);
+        assert_eq!(slots.items.len(), 3);
+
+        // A zero cap reads nothing, rather than the one entry ranges otherwise always return.
+        let none =
+            state.account_range(B256::ZERO, B256::repeat_byte(0xff), RangeLimits::items(0))?;
+        assert_eq!(none.end, RangeEnd::ItemLimit);
+        assert!(none.items.is_empty());
 
         Ok(())
     }
@@ -2937,7 +3005,12 @@ mod tests {
         assert_eq!(state.storage_root_by_hash(hashed_address)?, expected_root);
 
         let returned = state
-            .storage_range(hashed_address, B256::ZERO, B256::repeat_byte(0xff), 10_000)?
+            .storage_range(
+                hashed_address,
+                B256::ZERO,
+                B256::repeat_byte(0xff),
+                RangeLimits::bytes(10_000),
+            )?
             .unwrap();
         assert_eq!(returned.end, RangeEnd::Exhausted);
         let mut expected: Vec<_> =
@@ -2946,14 +3019,20 @@ mod tests {
         assert_eq!(returned.items, expected);
 
         // `start == limit == ZERO` means the first real slot's hash already reaches the limit.
-        let empty_window =
-            state.storage_range(hashed_address, B256::ZERO, B256::ZERO, 10_000)?.unwrap();
+        let empty_window = state
+            .storage_range(hashed_address, B256::ZERO, B256::ZERO, RangeLimits::bytes(10_000))?
+            .unwrap();
         assert_eq!(empty_window.end, RangeEnd::HashLimit);
         assert_eq!(empty_window.items, expected[..1]);
 
         // An account absent from the trie is distinguished from one with no storage.
         assert!(state
-            .storage_range(B256::repeat_byte(0xee), B256::ZERO, B256::repeat_byte(0xff), 10_000)?
+            .storage_range(
+                B256::repeat_byte(0xee),
+                B256::ZERO,
+                B256::repeat_byte(0xff),
+                RangeLimits::bytes(10_000)
+            )?
             .is_none());
 
         Ok(())
@@ -3097,7 +3176,8 @@ mod tests {
 
         let state =
             provider.state_range_provider(unique_root)?.expect("in-memory root must resolve");
-        let range = state.account_range(B256::ZERO, B256::repeat_byte(0xff), 10_000)?;
+        let range =
+            state.account_range(B256::ZERO, B256::repeat_byte(0xff), RangeLimits::bytes(10_000))?;
         assert_eq!(range.items, vec![(hashed_address, account)]);
 
         Ok(())
@@ -3178,7 +3258,8 @@ mod tests {
         // so the noise account must not leak into the result.
         let state =
             provider.state_range_provider(unique_root)?.expect("in-memory root must resolve");
-        let range = state.account_range(B256::ZERO, B256::repeat_byte(0xff), 10_000)?;
+        let range =
+            state.account_range(B256::ZERO, B256::repeat_byte(0xff), RangeLimits::bytes(10_000))?;
         assert_eq!(range.items, vec![(target_hashed, target_account)]);
 
         Ok(())
@@ -3268,11 +3349,17 @@ mod tests {
         let provider = BlockchainProvider::new(factory)?;
         let state =
             provider.state_range_provider(anchor_root)?.expect("retained root must resolve");
-        let range = state.account_range(B256::ZERO, B256::repeat_byte(0xff), 10_000)?;
+        let range =
+            state.account_range(B256::ZERO, B256::repeat_byte(0xff), RangeLimits::bytes(10_000))?;
         assert_eq!(range.items, vec![(hashed_address, account_a)]);
 
         let storage_range = state
-            .storage_range(hashed_address, B256::ZERO, B256::repeat_byte(0xff), 10_000)?
+            .storage_range(
+                hashed_address,
+                B256::ZERO,
+                B256::repeat_byte(0xff),
+                RangeLimits::bytes(10_000),
+            )?
             .expect("account must have storage");
         assert_eq!(storage_range.items, vec![(hashed_slot, value_a)]);
 

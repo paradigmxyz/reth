@@ -71,12 +71,12 @@ pub trait StorageRootProvider {
 /// requests. Hash-native throughout, unlike [`StorageRootProvider`].
 #[auto_impl::auto_impl(&, Box, Arc)]
 pub trait StateRangeProvider {
-    /// Returns accounts (hash, account) in `[start, limit]`, bounded by `response_bytes`.
+    /// Returns accounts (hash, account) in `[start, limit]`, bounded by `limits`.
     fn account_range(
         &self,
         start: B256,
         limit: B256,
-        response_bytes: usize,
+        limits: RangeLimits,
     ) -> RangeResult<(B256, Account)>;
 
     /// Returns the storage root for `hashed_address` without needing its address preimage.
@@ -91,7 +91,7 @@ pub trait StateRangeProvider {
         hashed_address: B256,
         start: B256,
         limit: B256,
-        response_bytes: usize,
+        limits: RangeLimits,
     ) -> StorageRangeResult;
 
     /// Returns an account-trie boundary proof for the already-hashed `keys`.
@@ -121,6 +121,30 @@ pub struct RangeResponse<T> {
     pub end: RangeEnd,
 }
 
+/// Caps on how much a [`StateRangeProvider`] range query reads.
+///
+/// Both caps are enforced, whichever is hit first: `max_items` bounds the number of entries the
+/// cursor walks, `response_bytes` bounds their cumulative encoded size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RangeLimits {
+    /// Maximum number of items to return.
+    pub max_items: usize,
+    /// Maximum cumulative size of the returned items, in bytes.
+    pub response_bytes: usize,
+}
+
+impl RangeLimits {
+    /// Returns limits that only bound the response size.
+    pub const fn bytes(response_bytes: usize) -> Self {
+        Self { max_items: usize::MAX, response_bytes }
+    }
+
+    /// Returns limits that only bound the number of returned items.
+    pub const fn items(max_items: usize) -> Self {
+        Self { max_items, response_bytes: usize::MAX }
+    }
+}
+
 /// Why a range query stopped before the caller-requested `limit`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RangeEnd {
@@ -128,8 +152,10 @@ pub enum RangeEnd {
     Exhausted,
     /// The last returned item's key reached or passed the requested `limit`.
     HashLimit,
-    /// `response_bytes` was exceeded before `limit` was reached.
+    /// [`RangeLimits::response_bytes`] was exceeded before `limit` was reached.
     ByteLimit,
+    /// [`RangeLimits::max_items`] was reached before `limit` was.
+    ItemLimit,
 }
 
 /// Result of a [`StateRangeProvider`] range query.
