@@ -20,6 +20,8 @@ pub mod cancelled;
 
 /// Contains glue code for integrating reth database into revm's [Database].
 pub mod database;
+/// Database adapter for discovering storage reads without blocking on them.
+pub mod speculative;
 
 pub use revm::{database as db, inspector};
 
