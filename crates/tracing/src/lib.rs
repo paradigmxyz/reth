@@ -67,12 +67,6 @@ pub use log_handle::{
 pub use test_tracer::TestTracer;
 
 #[cfg(feature = "std")]
-#[doc(hidden)]
-pub mod __private {
-    pub use super::throttle::*;
-}
-
-#[cfg(feature = "std")]
 mod formatter;
 #[cfg(feature = "std")]
 mod layers;
@@ -80,8 +74,6 @@ mod layers;
 pub mod log_handle;
 #[cfg(feature = "std")]
 mod test_tracer;
-#[cfg(feature = "std")]
-mod throttle;
 
 #[cfg(feature = "std")]
 use tracing::level_filters::LevelFilter;
