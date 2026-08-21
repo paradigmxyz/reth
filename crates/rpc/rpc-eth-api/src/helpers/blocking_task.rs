@@ -164,6 +164,9 @@ pub trait SpawnBlocking: EthApiTypes + Clone + Send + Sync + 'static {
         let (tx, rx) = oneshot::channel();
         let this = self.clone();
         self.io_task_spawner().spawn_blocking_task(async move {
+            if tx.is_closed() {
+                return
+            }
             let res = f(this);
             let _ = tx.send(res);
         });
@@ -184,11 +187,18 @@ pub trait SpawnBlocking: EthApiTypes + Clone + Send + Sync + 'static {
         F: FnOnce(Self) -> Fut + Send + 'static,
         R: Send + 'static,
     {
-        let (tx, rx) = oneshot::channel();
+        let (mut tx, rx) = oneshot::channel();
         let this = self.clone();
         self.io_task_spawner().spawn_blocking_task(async move {
-            let res = f(this).await;
-            let _ = tx.send(res);
+            let fut = f(this);
+            tokio::pin!(fut);
+            let res = tokio::select! {
+                res = &mut fut => Some(res),
+                _ = tx.closed() => None,
+            };
+            if let Some(res) = res {
+                let _ = tx.send(res);
+            }
         });
 
         async move { rx.await.map_err(|_| EthApiError::InternalEthError)? }
