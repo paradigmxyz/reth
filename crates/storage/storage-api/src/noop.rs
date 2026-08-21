@@ -5,11 +5,12 @@ pub use crate::bal::NoopBalStore;
 use crate::{
     AccountReader, BalProvider, BalStoreHandle, BlockBodyIndicesProvider, BlockHashReader,
     BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader,
-    ChangeSetReader, HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider,
-    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader,
-    StateProofProvider, StateProvider, StateProviderBox, StateProviderFactory,
-    StateRangeProviderFactory, StateRangeView, StateReader, StateRootProvider, StorageRootProvider,
-    TransactionVariant, TransactionsProvider, TryIntoHistoricalStateProvider,
+    ChangeSetReader, HashedPostStateProvider, HeaderProvider, IntoLatestStateProvider,
+    NodePrimitivesProvider, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
+    StageCheckpointReader, StateProofProvider, StateProvider, StateProviderBox,
+    StateProviderFactory, StateRangeProviderFactory, StateRangeView, StateReader,
+    StateRootProvider, StorageRootProvider, TransactionVariant, TransactionsProvider,
+    TryIntoHistoricalStateProvider,
 };
 
 #[cfg(feature = "db-api")]
@@ -637,6 +638,12 @@ impl<C: Send + Sync + 'static, N: NodePrimitives> TryIntoHistoricalStateProvider
         block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox> {
         self.history_by_block_number(block_number)
+    }
+}
+
+impl<C: Send + Sync + 'static, N: NodePrimitives> IntoLatestStateProvider for NoopProvider<C, N> {
+    fn into_latest(self) -> StateProviderBox {
+        Box::new(self)
     }
 }
 

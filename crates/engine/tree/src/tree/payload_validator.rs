@@ -103,7 +103,7 @@ use crate::tree::{
     txpool_prewarm,
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
-    PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
+    PayloadHandle, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash_with_buf, BlockAccessList};
@@ -147,9 +147,9 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     BlockExecutionOutput, BlockReader, ChangeSetReader, DatabaseProviderFactory,
-    DatabaseProviderROFactory, ProviderError, PruneCheckpointReader, StageCheckpointReader,
-    StateProvider, StateProviderBox, StateProviderFactory, StateReader, StorageChangeSetReader,
-    StorageSettingsCache, TryIntoHistoricalStateProvider,
+    DatabaseProviderROFactory, IntoLatestStateProvider, ProviderError, PruneCheckpointReader,
+    StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
+    StorageChangeSetReader, StorageSettingsCache, TryIntoHistoricalStateProvider,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
@@ -309,6 +309,7 @@ where
                           + ChangeSetReader
                           + StorageChangeSetReader
                           + StorageSettingsCache
+                          + IntoLatestStateProvider
                           + TryIntoHistoricalStateProvider
                           + 'static,
         > + BlockReader<Header = N::BlockHeader>
@@ -549,8 +550,7 @@ where
         trace!(target: "engine::tree::payload_validator", "Fetching block state provider");
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "state_provider").entered();
-        let Some(provider_builder) =
-            ensure_ok!(self.state_provider_builder(parent_hash, ctx.state()))
+        let Some(overlay_factory) = ensure_ok!(self.overlay_factory(parent_hash, ctx.state()))
         else {
             // this is pre-validated in the tree
             return Err(InsertBlockError::new(
@@ -595,11 +595,6 @@ where
         // Get an iterator over the transactions in the payload
         let txs = self.tx_iterator_for(&input)?;
 
-        // Create overlay factory for state-root tasks that need multiproofs.
-        let provider_factory = self.provider.clone();
-        let overlay_builder = ctx.state().tree_state.overlay_manager.overlay_builder(parent_hash);
-        let overlay_factory = OverlayStateProviderFactory::new(provider_factory, overlay_builder);
-
         let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
 
         // Prepare the state-root job before execution so it can provide streaming hooks.
@@ -609,8 +604,7 @@ where
                 &self.overlay_manager,
                 &env,
                 &parent_block,
-                provider_builder.clone(),
-                overlay_factory,
+                overlay_factory.clone(),
                 &self.config,
                 parallel_bal_execution,
                 ctx.state_mut(),
@@ -635,7 +629,7 @@ where
         let mut handle = ensure_ok!(self.spawn_payload_processor(
             env.clone(),
             txs,
-            provider_builder.clone(),
+            overlay_factory.clone(),
             hint_stream,
             hashed_update_stream,
             parallel_bal_execution,
@@ -671,7 +665,7 @@ where
         // The second parameter `instrument_state_provider` controls whether we should
         // instrument the state provider with metrics.
         let make_state_provider = |fill_on_miss: bool| -> ProviderResult<StateProviderBox> {
-            let provider = provider_builder.build()?;
+            let provider = overlay_factory.state_provider()?;
             let mut provider = if let Some((caches, cache_metrics)) = &execution_cache {
                 let fill_mode = if fill_on_miss {
                     CacheFillMode::FillOnMiss
@@ -810,7 +804,7 @@ where
                 || hashed_state.get(),
                 &block,
                 &parent_block,
-                || provider_builder.build(),
+                || overlay_factory.state_provider(),
             )
         });
 
@@ -846,7 +840,7 @@ where
                     || hashed_state.get(),
                     &block,
                     &parent_block,
-                    || provider_builder.build(),
+                    || overlay_factory.state_provider(),
                 )
             });
         }
@@ -1369,7 +1363,7 @@ where
         &self,
         env: ExecutionEnv<Evm>,
         txs: T,
-        provider_builder: StateProviderBuilder<N, P>,
+        overlay_factory: OverlayStateProviderFactory<P, N>,
         hint_stream: Option<StateRootHintStream>,
         hashed_update_stream: Option<StateRootUpdateStream>,
         parallel_bal_execution: bool,
@@ -1385,7 +1379,7 @@ where
         let handle = self.payload_processor.spawn_with_state_root_streams(
             env,
             txs,
-            provider_builder,
+            overlay_factory,
             hint_stream,
             hashed_update_stream,
             parallel_bal_execution,
@@ -1396,23 +1390,22 @@ where
         Ok(handle)
     }
 
-    /// Creates a `StateProviderBuilder` for the given parent hash.
+    /// Creates an [`OverlayStateProviderFactory`] for the given parent hash.
     ///
     /// Returns `None` when the parent is neither in memory nor persisted.
-    fn state_provider_builder(
+    fn overlay_factory(
         &self,
         hash: B256,
         state: &EngineApiTreeState<N>,
-    ) -> ProviderResult<Option<StateProviderBuilder<N, P>>> {
+    ) -> ProviderResult<Option<OverlayStateProviderFactory<P, N>>> {
         if !state.tree_state.contains_hash(&hash) && self.provider.header(hash)?.is_none() {
             debug!(target: "engine::tree::payload_validator", %hash, "no canonical state found for block");
             return Ok(None)
         }
 
-        Ok(Some(StateProviderBuilder::new(
+        Ok(Some(OverlayStateProviderFactory::new(
             self.provider.clone(),
-            hash,
-            state.tree_state.overlay_manager.clone(),
+            state.tree_state.overlay_manager.overlay_builder(hash),
         )))
     }
 
@@ -1441,8 +1434,8 @@ where
         timestamp: u64,
         state: &mut EngineApiTreeState<N>,
     ) -> Option<PayloadStateRootHandle> {
-        let provider_builder = match self.state_provider_builder(parent_hash, state) {
-            Ok(Some(provider_builder)) => provider_builder,
+        let overlay_factory = match self.overlay_factory(parent_hash, state) {
+            Ok(Some(overlay_factory)) => overlay_factory,
             Ok(None) => return None,
             Err(err) => {
                 warn!(
@@ -1454,10 +1447,6 @@ where
                 return None
             }
         };
-        let overlay_factory = OverlayStateProviderFactory::new(
-            self.provider.clone(),
-            state.tree_state.overlay_manager.overlay_builder(parent_hash),
-        );
 
         match self.state_root_strategy.prepare_payload_builder(PayloadStateRootJobContext::new(
             &self.runtime,
@@ -1466,7 +1455,6 @@ where
             parent_header,
             timestamp,
             state,
-            provider_builder,
             overlay_factory,
             &self.config,
         )) {
@@ -1785,6 +1773,7 @@ where
                           + ChangeSetReader
                           + StorageChangeSetReader
                           + StorageSettingsCache
+                          + IntoLatestStateProvider
                           + TryIntoHistoricalStateProvider
                           + 'static,
         > + BlockReader<Header = N::BlockHeader>
@@ -1884,8 +1873,8 @@ where
             }
         };
 
-        let provider_builder = match self.state_provider_builder(parent.hash(), state) {
-            Ok(Some(provider_builder)) => provider_builder,
+        let overlay_factory = match self.overlay_factory(parent.hash(), state) {
+            Ok(Some(overlay_factory)) => overlay_factory,
             Ok(None) => return,
             Err(err) => {
                 trace!(
@@ -1897,7 +1886,7 @@ where
                 return
             }
         };
-        txpool_prewarm.start(parent.hash(), evm_env, provider_builder)
+        txpool_prewarm.start(parent.hash(), evm_env, overlay_factory)
     }
 
     fn payload_builder_resources(
