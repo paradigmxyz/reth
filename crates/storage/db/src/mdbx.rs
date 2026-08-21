@@ -6,6 +6,7 @@ use reth_tracing::tracing::{info, warn};
 use std::path::Path;
 
 pub use crate::implementation::mdbx::*;
+#[doc(no_inline)]
 pub use reth_libmdbx::*;
 
 /// Tables that have been removed from the schema but may still exist on disk from previous
