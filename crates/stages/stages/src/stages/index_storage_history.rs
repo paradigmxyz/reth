@@ -153,7 +153,12 @@ where
                 Ok(((), writer.into_raw_rocksdb_batch()))
             })?;
         } else {
-            let prepared = prepare_storage_history_writes(collector, provider, use_rocksdb)?;
+            let prepared = prepare_storage_history_writes(
+                collector,
+                provider,
+                use_rocksdb,
+                &self.etl_config,
+            )?;
             provider.with_rocksdb_batch_auto_commit(|rocksdb_batch| {
                 let mut writer = EitherWriter::new_storages_history(provider, rocksdb_batch)?;
                 write_prepared_history_shards(prepared, |key, value| {
