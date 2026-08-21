@@ -216,7 +216,13 @@ where
         if gap > 1 {
             for i in 1..gap {
                 let filler_number = prev_number + i;
-                let filler_time = next_timestamp(prev_timestamp, timestamp_increment)?;
+                let filler_time =
+                    prev_timestamp.checked_add(timestamp_increment).ok_or_else(|| {
+                        EthApiError::other(EthSimulateError::BlockTimestampInvalid {
+                            got: prev_timestamp,
+                            parent: prev_timestamp,
+                        })
+                    })?;
                 out.push(SimBlock {
                     block_overrides: Some(BlockOverrides {
                         number: Some(U256::from(filler_number)),
@@ -241,7 +247,12 @@ where
             }
             t
         } else {
-            let t = next_timestamp(prev_timestamp, timestamp_increment)?;
+            let t = prev_timestamp.checked_add(timestamp_increment).ok_or_else(|| {
+                EthApiError::other(EthSimulateError::BlockTimestampInvalid {
+                    got: prev_timestamp,
+                    parent: prev_timestamp,
+                })
+            })?;
             overrides.time = Some(t);
             t
         };
@@ -251,16 +262,6 @@ where
     }
 
     Ok(out)
-}
-
-/// Returns `prev + increment`, erroring instead of overflowing.
-///
-/// A wrapped timestamp would be lower than its parent's, which is the ordering this function
-/// exists to enforce.
-fn next_timestamp(prev: u64, increment: u64) -> Result<u64, EthApiError> {
-    prev.checked_add(increment).ok_or_else(|| {
-        EthApiError::other(EthSimulateError::BlockTimestampInvalid { got: prev, parent: prev })
-    })
 }
 
 /// Applies precompile move overrides from state overrides to the EVM's precompiles map.
