@@ -491,8 +491,20 @@ impl StateRootSink for SparseTrieStateRootSink {
     }
 }
 
-/// Converts [`EvmState`] to [`HashedPostState`] by keccak256-hashing addresses and storage slots.
+/// Converts [`EvmState`] to [`HashedPostState`] using Ethereum empty-account handling.
 pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
+    evm_state_to_hashed_post_state_with_created_empty_accounts(update, false)
+}
+
+/// Converts [`EvmState`] to [`HashedPostState`] by keccak256-hashing addresses and storage slots.
+///
+/// When `allow_create_empty_account` is `true`, an explicitly created empty account is preserved
+/// as `Some(Account::default())`. This is intended for custom EVMs whose state transition permits
+/// such accounts. Ethereum leaves this disabled and prunes empty accounts per EIP-161.
+pub fn evm_state_to_hashed_post_state_with_created_empty_accounts(
+    update: EvmState,
+    allow_create_empty_account: bool,
+) -> HashedPostState {
     let mut hashed_state = HashedPostState::with_capacity(update.len());
 
     for (address, account) in update {
@@ -501,8 +513,14 @@ pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
             trace!(target: "trie::parallel::sparse", ?address, ?hashed_address, "Adding account to state update");
 
             let destroyed = account.is_selfdestructed();
-            if account.info != account.original_info() {
-                let info = if destroyed { None } else { Some(account.info.into()) };
+            let created_empty = account.is_created() && account.is_empty();
+            let preserve_created_empty = allow_create_empty_account && created_empty;
+            if account.info != account.original_info() || preserve_created_empty {
+                let info = if destroyed || (account.is_empty() && !preserve_created_empty) {
+                    None
+                } else {
+                    Some(account.info.into())
+                };
                 hashed_state.accounts.insert(hashed_address, info);
             }
 
@@ -574,6 +592,53 @@ mod tests {
         let hashed_address = keccak256(address);
 
         assert_eq!(hashed_state.accounts.get(&hashed_address), Some(&None));
+        assert!(!hashed_state.storages.contains_key(&hashed_address));
+    }
+
+    #[test]
+    fn created_empty_account_is_pruned_by_default() {
+        let mut state = EvmState::default();
+        state.insert(Address::ZERO, Account::default().with_touched_mark().with_created_mark());
+
+        let hashed_state = evm_state_to_hashed_post_state(state);
+
+        assert!(hashed_state.accounts.is_empty());
+    }
+
+    #[test]
+    fn created_empty_account_can_be_preserved() {
+        let mut state = EvmState::default();
+        state.insert(Address::ZERO, Account::default().with_touched_mark().with_created_mark());
+
+        let hashed_state = evm_state_to_hashed_post_state_with_created_empty_accounts(state, true);
+
+        assert!(matches!(hashed_state.accounts.get(&keccak256(Address::ZERO)), Some(Some(_))));
+    }
+
+    #[test]
+    fn emptied_existing_account_is_deleted_when_created_empty_accounts_are_allowed() {
+        let mut account = Account::default().with_touched_mark();
+        account.original_info_mut().nonce = 1;
+        let mut state = EvmState::default();
+        state.insert(Address::ZERO, account);
+
+        let hashed_state = evm_state_to_hashed_post_state_with_created_empty_accounts(state, true);
+
+        assert!(matches!(hashed_state.accounts.get(&keccak256(Address::ZERO)), Some(None)));
+    }
+
+    #[test]
+    fn selfdestruct_takes_precedence_over_preserved_creation() {
+        let mut state = EvmState::default();
+        state.insert(
+            Address::ZERO,
+            Account::default().with_touched_mark().with_created_mark().with_selfdestruct_mark(),
+        );
+
+        let hashed_state = evm_state_to_hashed_post_state_with_created_empty_accounts(state, true);
+        let hashed_address = keccak256(Address::ZERO);
+
+        assert!(matches!(hashed_state.accounts.get(&hashed_address), Some(None)));
         assert!(!hashed_state.storages.contains_key(&hashed_address));
     }
 
