@@ -1196,7 +1196,7 @@ where
         let indices_bitarray = B128::from(u128::from_le_bytes(indices_bitarray.into()));
         let current_timestamp =
             SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_secs();
-        if !self.inner.chain_spec.is_amsterdam_active_at_timestamp(current_timestamp) {
+        if !self.inner.chain_spec.is_osaka_active_at_timestamp(current_timestamp) {
             return Err(EngineApiError::EngineObjectValidationError(
                 reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
             ));
@@ -2256,7 +2256,7 @@ mod tests {
     #[tokio::test]
     async fn get_blobs_v4_returns_null_when_syncing() {
         let chain_spec: Arc<ChainSpec> =
-            Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build());
+            Arc::new(ChainSpecBuilder::mainnet().osaka_activated().build());
         let provider = Arc::new(MockEthProvider::default());
         let payload_store = spawn_test_payload_service::<EthEngineTypes>();
         let (to_engine, _engine_rx) = unbounded_channel::<BeaconEngineMessage<EthEngineTypes>>();
