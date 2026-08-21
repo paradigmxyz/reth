@@ -78,16 +78,6 @@ pub struct PreparedHistoryShardWrites<T: ShardedHistoryTable> {
 }
 
 impl<T: ShardedHistoryTable> PreparedHistoryShardWrites<T> {
-    /// Prepared writes grouped by logical key.
-    pub fn per_key(&self) -> &[Vec<(T::Key, BlockNumberList)>] {
-        &self.per_key
-    }
-
-    /// Consumes the plan into per-key shard lists.
-    pub fn into_per_key(self) -> Vec<Vec<(T::Key, BlockNumberList)>> {
-        self.per_key
-    }
-
     /// Flattened iterator of physical `(key, shard)` puts.
     pub fn into_writes(self) -> impl Iterator<Item = (T::Key, BlockNumberList)> {
         self.per_key.into_iter().flatten()
@@ -106,9 +96,23 @@ where
     T: ShardedHistoryTable,
     F: Fn(T::Key) -> ProviderResult<Option<BlockNumberList>> + Send + Sync,
 {
+    prepare_history_shard_writes_parallel_vec(grouped.into_iter().collect(), get_last)
+}
+
+/// Prepares history shard writes from an owned vector, reading last shards in parallel.
+///
+/// `get_last` must read **committed** state only. Do not call this while a `RocksDB` write batch is
+/// open. `grouped` must be strictly ordered by logical key so every key occurs exactly once.
+pub fn prepare_history_shard_writes_parallel_vec<T, F>(
+    grouped: Vec<(T::PartialKey, Vec<BlockNumber>)>,
+    get_last: F,
+) -> ProviderResult<PreparedHistoryShardWrites<T>>
+where
+    T: ShardedHistoryTable,
+    F: Fn(T::Key) -> ProviderResult<Option<BlockNumberList>> + Send + Sync,
+{
+    validate_grouped_keys::<T>(&grouped)?;
     let per_key = grouped
-        .into_iter()
-        .collect::<Vec<_>>()
         .into_par_iter()
         .with_min_len(1)
         .map(|(partial_key, indices)| prepare_one::<T, _>(partial_key, indices, &get_last))
@@ -122,18 +126,54 @@ where
 /// Use this for MDBX: a `DbTx` is not safe for concurrent `get`s.
 pub fn prepare_history_shard_writes_serial<T, F>(
     grouped: BTreeMap<T::PartialKey, Vec<BlockNumber>>,
+    get_last: F,
+) -> ProviderResult<PreparedHistoryShardWrites<T>>
+where
+    T: ShardedHistoryTable,
+    F: FnMut(T::Key) -> ProviderResult<Option<BlockNumberList>>,
+{
+    prepare_history_shard_writes_serial_vec(grouped.into_iter().collect(), get_last)
+}
+
+/// Prepares history shard writes from an owned vector, reading last shards serially.
+///
+/// Use this for MDBX: a `DbTx` is not safe for concurrent `get`s. `grouped` must be strictly
+/// ordered by logical key so every key occurs exactly once.
+pub fn prepare_history_shard_writes_serial_vec<T, F>(
+    grouped: Vec<(T::PartialKey, Vec<BlockNumber>)>,
     mut get_last: F,
 ) -> ProviderResult<PreparedHistoryShardWrites<T>>
 where
     T: ShardedHistoryTable,
     F: FnMut(T::Key) -> ProviderResult<Option<BlockNumberList>>,
 {
+    validate_grouped_keys::<T>(&grouped)?;
     let mut per_key = Vec::with_capacity(grouped.len());
     for (partial_key, indices) in grouped {
         per_key.push(prepare_one::<T, _>(partial_key, indices, &mut get_last)?);
     }
     Ok(PreparedHistoryShardWrites { per_key })
 }
+
+fn validate_grouped_keys<T: ShardedHistoryTable>(
+    grouped: &[(T::PartialKey, Vec<BlockNumber>)],
+) -> ProviderResult<()> {
+    if grouped.windows(2).any(|window| window[0].0 >= window[1].0) {
+        return Err(ProviderError::other(InvalidGroupedHistoryKeys))
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+struct InvalidGroupedHistoryKeys;
+
+impl core::fmt::Display for InvalidGroupedHistoryKeys {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("history shard preparation keys must be strictly ordered and unique")
+    }
+}
+
+impl std::error::Error for InvalidGroupedHistoryKeys {}
 
 /// Merges `indices` onto the committed last shard and rechunks at [`NUM_OF_INDICES_IN_SHARD`].
 ///
@@ -353,26 +393,71 @@ mod tests {
     }
 
     #[test]
+    fn prepare_vector_parallel_matches_serial() {
+        let addr_a = address!("0x00000000000000000000000000000000000000aa");
+        let addr_b = address!("0x00000000000000000000000000000000000000bb");
+        let existing = HashMap::from([
+            (ShardedKey::new(addr_a, u64::MAX), list(&[1, 2])),
+            (ShardedKey::new(addr_b, u64::MAX), list(&[10])),
+        ]);
+        let grouped = vec![(addr_a, vec![3, 4]), (addr_b, vec![11])];
+
+        let serial = prepare_history_shard_writes_serial_vec::<tables::AccountsHistory, _>(
+            grouped.clone(),
+            account_map_getter(existing.clone()),
+        )
+        .unwrap();
+        let parallel = prepare_history_shard_writes_parallel_vec::<tables::AccountsHistory, _>(
+            grouped,
+            account_map_getter(existing),
+        )
+        .unwrap();
+
+        let serial_writes: Vec<_> =
+            serial.into_writes().map(|(key, value)| (key, blocks(&value))).collect();
+        let parallel_writes: Vec<_> =
+            parallel.into_writes().map(|(key, value)| (key, blocks(&value))).collect();
+        assert_eq!(serial_writes, parallel_writes);
+    }
+
+    #[test]
+    fn prepare_vector_rejects_duplicate_keys() {
+        let address = address!("0x00000000000000000000000000000000000000aa");
+        let grouped = vec![(address, vec![1]), (address, vec![2])];
+
+        let error = prepare_history_shard_writes_serial_vec::<tables::AccountsHistory, _>(
+            grouped,
+            account_map_getter(HashMap::new()),
+        )
+        .unwrap_err();
+
+        assert!(error.is_other::<InvalidGroupedHistoryKeys>());
+    }
+
+    #[test]
     fn prepare_parallel_overlaps_gets_on_dedicated_pool() {
         let pool = rayon::ThreadPoolBuilder::new().num_threads(4).build().unwrap();
         let inflight = AtomicUsize::new(0);
         let max_inflight = AtomicUsize::new(0);
 
-        let grouped: BTreeMap<_, _> =
+        let grouped: Vec<_> =
             (1u8..=8).map(|i| (Address::repeat_byte(i), vec![u64::from(i)])).collect();
 
         let prepared = pool
             .install(|| {
-                prepare_history_shard_writes_parallel::<tables::AccountsHistory, _>(grouped, |_| {
-                    let current = inflight.fetch_add(1, Ordering::SeqCst) + 1;
-                    max_inflight.fetch_max(current, Ordering::SeqCst);
-                    thread::sleep(Duration::from_millis(50));
-                    inflight.fetch_sub(1, Ordering::SeqCst);
-                    Ok(None)
-                })
+                prepare_history_shard_writes_parallel_vec::<tables::AccountsHistory, _>(
+                    grouped,
+                    |_| {
+                        let current = inflight.fetch_add(1, Ordering::SeqCst) + 1;
+                        max_inflight.fetch_max(current, Ordering::SeqCst);
+                        thread::sleep(Duration::from_millis(50));
+                        inflight.fetch_sub(1, Ordering::SeqCst);
+                        Ok(None)
+                    },
+                )
             })
             .unwrap();
-        assert_eq!(prepared.per_key().len(), 8);
+        assert_eq!(prepared.into_writes().count(), 8);
 
         assert!(
             max_inflight.load(Ordering::SeqCst) >= 2,

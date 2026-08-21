@@ -40,7 +40,8 @@ pub use either_writer::*;
 
 pub mod history_shards;
 pub use history_shards::{
-    prepare_history_shard_writes_parallel, prepare_history_shard_writes_serial,
+    prepare_history_shard_writes_parallel, prepare_history_shard_writes_parallel_vec,
+    prepare_history_shard_writes_serial, prepare_history_shard_writes_serial_vec,
     PreparedHistoryShardWrites, ShardedHistoryTable,
 };
 

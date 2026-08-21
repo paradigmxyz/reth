@@ -862,7 +862,7 @@ impl RocksDBProvider {
 
     /// Creates a new batch with auto-commit enabled.
     ///
-    /// When the batch size exceeds the threshold (4 GiB), the batch is automatically
+    /// When the batch size exceeds the threshold (512 MiB), the batch is automatically
     /// committed and reset. This prevents OOM during large bulk writes while maintaining
     /// crash-safety via the consistency check on startup.
     pub fn batch_with_auto_commit(&self) -> RocksDBBatch<'_> {
@@ -1529,10 +1529,8 @@ impl RocksDBProvider {
             prepare_history_shard_writes_parallel::<T, _>(grouped, |key| self.get::<T>(key))?;
 
         let mut batch = self.batch();
-        for shards in prepared.into_per_key() {
-            for (key, shard) in shards {
-                batch.put::<T>(key, &shard)?;
-            }
+        for (key, shard) in prepared.into_writes() {
+            batch.put::<T>(key, &shard)?;
         }
         ctx.pending_batches.lock().push(batch.into_inner());
         Ok(())
