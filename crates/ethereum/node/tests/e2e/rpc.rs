@@ -1,4 +1,5 @@
 use crate::utils::{eth_payload_attributes, eth_payload_attributes_amsterdam};
+use alloy_consensus::constants::EIP4844_TX_TYPE_ID;
 use alloy_eips::{eip2718::Encodable2718, eip7910::EthConfig, BlockNumberOrTag};
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, Bytes, B256, U256};
@@ -14,9 +15,12 @@ use alloy_rpc_types_engine::{
     BlobsBundleV1, CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar,
     ExecutionPayloadV3, PraguePayloadFields,
 };
-use alloy_rpc_types_eth::TransactionRequest;
+use alloy_rpc_types_eth::{error::EthRpcErrorCode, TransactionRequest};
 use alloy_rpc_types_trace::geth::{ChainBlockTraceResult, GethDebugTracingOptions};
-use jsonrpsee::core::client::{Subscription, SubscriptionClientT};
+use jsonrpsee::{
+    core::client::{ClientT, Subscription, SubscriptionClientT},
+    types::error::ErrorCode,
+};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::{ChainSpecBuilder, EthChainSpec, MAINNET};
 use reth_e2e_test_utils::{setup_engine, E2ETestSetupBuilder};
@@ -32,6 +36,7 @@ use reth_primitives_traits::Block as _;
 use reth_rpc_api::servers::AdminApiServer;
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::Runtime;
+use reth_transaction_pool::error::{InvalidPoolTransactionError, RawPoolTransactionError};
 use std::{
     net::{IpAddr, Ipv4Addr},
     sync::Arc,
@@ -560,6 +565,60 @@ async fn test_eth_config() -> eyre::Result<()> {
     assert_eq!(config.last.unwrap().activation_time, osaka_timestamp);
     assert_eq!(config.current.activation_time, prague_timestamp);
     assert_eq!(config.next.unwrap().activation_time, osaka_timestamp);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_send_raw_transaction_rejects_oversized_bytes() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    const MAX_BYTES: usize = 4;
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .cancun_activated()
+            .build(),
+    );
+    let (mut nodes, _) =
+        E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, eth_payload_attributes)
+            .with_node_config_modifier(|mut config| {
+                config.txpool.max_tx_input_bytes = MAX_BYTES;
+                config
+            })
+            .build()
+            .await?;
+    let node = nodes.pop().unwrap();
+    let client = node.rpc_client().unwrap();
+
+    let raw_tx = Bytes::from(vec![0; MAX_BYTES + 1]);
+    let err = client
+        .request::<B256, _>("eth_sendRawTransaction", jsonrpsee::rpc_params![raw_tx.clone()])
+        .await
+        .unwrap_err();
+    let jsonrpsee::core::client::Error::Call(err) = err else {
+        panic!("expected an invalid input error object, got {err:?}")
+    };
+    let expected =
+        InvalidPoolTransactionError::OversizedData { size: raw_tx.len(), limit: MAX_BYTES };
+    assert_eq!(err.code(), EthRpcErrorCode::InvalidInput.code());
+    assert_eq!(err.message(), expected.to_string());
+
+    let mut raw_blob_tx = vec![0; MAX_BYTES + 1];
+    raw_blob_tx[0] = EIP4844_TX_TYPE_ID;
+    let err = client
+        .request::<B256, _>(
+            "eth_sendRawTransaction",
+            jsonrpsee::rpc_params![Bytes::from(raw_blob_tx)],
+        )
+        .await
+        .unwrap_err();
+    let jsonrpsee::core::client::Error::Call(err) = err else {
+        panic!("expected an invalid params error object, got {err:?}")
+    };
+    assert_eq!(err.code(), ErrorCode::InvalidParams.code());
+    assert_eq!(err.message(), RawPoolTransactionError::FailedToDecodeSignedTransaction.to_string());
 
     Ok(())
 }

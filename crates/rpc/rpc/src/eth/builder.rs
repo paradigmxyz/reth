@@ -7,7 +7,9 @@ use reth_chainspec::ChainSpecProvider;
 use reth_primitives_traits::HeaderTy;
 use reth_rpc_convert::{RpcConvert, RpcConverter};
 use reth_rpc_eth_api::{
-    helpers::pending_block::PendingEnvBuilder, node::RpcNodeCoreAdapter, RpcNodeCore,
+    helpers::{pending_block::PendingEnvBuilder, EthTransactionsConfig},
+    node::RpcNodeCoreAdapter,
+    RpcNodeCore,
 };
 use reth_rpc_eth_types::{
     builder::config::PendingBlockKind, fee_history::fee_history_cache_new_blocks_task,
@@ -46,6 +48,7 @@ pub struct EthApiBuilder<N: RpcNodeCore, Rpc, NextEnv = ()> {
     max_blocking_io_requests: usize,
     pending_block_kind: PendingBlockKind,
     raw_tx_forwarder: ForwardConfig,
+    transactions_config: EthTransactionsConfig,
     send_raw_transaction_sync_timeout: Duration,
     evm_memory_limit: u64,
     force_blob_sidecar_upcasting: bool,
@@ -100,6 +103,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
+            transactions_config,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
             force_blob_sidecar_upcasting,
@@ -124,6 +128,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
+            transactions_config,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
             force_blob_sidecar_upcasting,
@@ -159,6 +164,7 @@ where
             max_blocking_io_requests: DEFAULT_MAX_BLOCKING_IO_REQUEST,
             pending_block_kind: PendingBlockKind::Full,
             raw_tx_forwarder: ForwardConfig::default(),
+            transactions_config: EthTransactionsConfig::default(),
             send_raw_transaction_sync_timeout: Duration::from_secs(30),
             evm_memory_limit: (1 << 32) - 1,
             force_blob_sidecar_upcasting: false,
@@ -201,6 +207,7 @@ where
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
+            transactions_config,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
             force_blob_sidecar_upcasting,
@@ -225,6 +232,7 @@ where
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
+            transactions_config,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
             force_blob_sidecar_upcasting,
@@ -256,6 +264,7 @@ where
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
+            transactions_config,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
             force_blob_sidecar_upcasting,
@@ -280,6 +289,7 @@ where
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
+            transactions_config,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
             force_blob_sidecar_upcasting,
@@ -384,6 +394,12 @@ where
         self
     }
 
+    /// Sets the transaction-related RPC configuration.
+    pub const fn transactions_config(mut self, config: EthTransactionsConfig) -> Self {
+        self.transactions_config = config;
+        self
+    }
+
     /// Returns the gas cap.
     pub const fn get_gas_cap(&self) -> &GasCap {
         &self.gas_cap
@@ -437,6 +453,11 @@ where
     /// Returns a reference to the raw tx forwarder config.
     pub const fn get_raw_tx_forwarder(&self) -> &ForwardConfig {
         &self.raw_tx_forwarder
+    }
+
+    /// Returns the transaction-related RPC configuration.
+    pub const fn get_transactions_config(&self) -> &EthTransactionsConfig {
+        &self.transactions_config
     }
 
     /// Returns a mutable reference to the fee history cache config.
@@ -528,6 +549,7 @@ where
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
+            transactions_config,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
             force_blob_sidecar_upcasting,
@@ -581,6 +603,7 @@ where
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder.forwarder_client(),
+            transactions_config,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
             force_blob_sidecar_upcasting,
