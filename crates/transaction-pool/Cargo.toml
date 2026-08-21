@@ -133,3 +133,8 @@ arbitrary = [
 name = "saturated_pool"
 harness = false
 required-features = ["test-utils"]
+
+[[bench]]
+name = "best_transactions"
+harness = false
+required-features = ["test-utils"]
