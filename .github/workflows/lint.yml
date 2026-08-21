@@ -33,6 +33,7 @@ jobs:
       - run: .github/scripts/install_llvm.sh ubuntu
       - uses: dtolnay/rust-toolchain@clippy
         with:
+          toolchain: nightly-2026-08-17
           components: clippy
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -61,6 +62,7 @@ jobs:
       - run: .github/scripts/install_llvm.sh ubuntu
       - uses: dtolnay/rust-toolchain@nightly
         with:
+          toolchain: nightly-2026-08-17
           components: clippy
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -182,6 +184,8 @@ jobs:
       - uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444 # v1
       - run: .github/scripts/install_llvm.sh ubuntu
       - uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-08-17
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -205,6 +209,7 @@ jobs:
       - uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444 # v1
       - uses: dtolnay/rust-toolchain@nightly
         with:
+          toolchain: nightly-2026-08-17
           components: rustfmt
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - name: Run fmt
@@ -223,6 +228,8 @@ jobs:
       - uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444 # v1
       - run: .github/scripts/install_llvm.sh ubuntu
       - uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-08-17
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -245,6 +252,8 @@ jobs:
       - uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444 # v1
       - run: .github/scripts/install_llvm.sh ubuntu
       - uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-08-17
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
