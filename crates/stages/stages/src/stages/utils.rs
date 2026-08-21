@@ -8,23 +8,51 @@ use reth_db_api::{
         AccountBeforeTx, AddressStorageKey, BlockNumberAddress, ShardedKey,
     },
     table::{Decode, Decompress, Table},
+    tables,
     transaction::DbTx,
     BlockNumberList,
 };
 use reth_etl::Collector;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    providers::StaticFileProvider, to_range, BlockReader, DBProvider, EitherWriter, ProviderError,
-    StaticFileProviderFactory,
+    prepare_history_shard_writes_parallel_vec, prepare_history_shard_writes_serial_vec,
+    providers::StaticFileProvider, to_range, BlockReader, DBProvider, EitherWriter,
+    PreparedHistoryShardWrites, ProviderError, ProviderResult, RocksDBProviderFactory,
+    ShardedHistoryTable, StaticFileProviderFactory,
 };
 use reth_stages_api::StageError;
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{ChangeSetReader, StorageChangeSetReader};
-use std::{collections::HashMap, hash::Hash, ops::RangeBounds};
+use std::{collections::HashMap, hash::Hash, mem, ops::RangeBounds};
 use tracing::info;
 
 /// Number of blocks before pushing indices from cache to [`Collector`]
 const DEFAULT_CACHE_THRESHOLD: u64 = 100_000;
+/// Maximum number of logical keys held in a history collection cache.
+const HISTORY_CACHE_KEY_LIMIT: usize = 500_000;
+/// Maximum number of block numbers held in a history collection cache.
+const HISTORY_CACHE_INDEX_LIMIT: usize = 8_000_000;
+/// Maximum number of complete logical keys prepared in one batch.
+const HISTORY_PREPARATION_KEY_LIMIT: usize = 65_536;
+/// Maximum estimated decoded input size prepared in one batch.
+const HISTORY_PREPARATION_BYTE_LIMIT: usize = 256 * 1024 * 1024;
+
+#[derive(Clone, Copy, Debug)]
+struct HistoryPreparationLimits {
+    max_keys: usize,
+    max_bytes: usize,
+}
+
+const HISTORY_PREPARATION_LIMITS: HistoryPreparationLimits = HistoryPreparationLimits {
+    max_keys: HISTORY_PREPARATION_KEY_LIMIT,
+    max_bytes: HISTORY_PREPARATION_BYTE_LIMIT,
+};
+
+const fn history_cache_limit_reached(keys: usize, indices: usize, blocks: u64) -> bool {
+    keys >= HISTORY_CACHE_KEY_LIMIT ||
+        indices >= HISTORY_CACHE_INDEX_LIMIT ||
+        blocks >= DEFAULT_CACHE_THRESHOLD
+}
 
 /// Collects all history (`H`) indices for a range of changesets (`CS`) and stores them in a
 /// [`Collector`].
@@ -74,25 +102,31 @@ where
     let total_changesets = provider.tx_ref().entries::<CS>()?;
     let interval = (total_changesets / 1000).max(1);
 
-    let mut flush_counter = 0;
-    let mut current_block_number = u64::MAX;
+    let mut cached_blocks = 0;
+    let mut cached_indices = 0;
+    let mut current_block_number = None;
     for (idx, entry) in changeset_cursor.walk_range(range)?.enumerate() {
         let (block_number, key) = partial_key_factory(entry?);
-        cache.entry(key).or_default().push(block_number);
 
         if idx > 0 && idx.is_multiple_of(interval) && total_changesets > 1000 {
             info!(target: "sync::stages::index_history", progress = %format!("{:.4}%", (idx as f64 / total_changesets as f64) * 100.0), "Collecting indices");
         }
 
-        // Make sure we only flush the cache every DEFAULT_CACHE_THRESHOLD blocks.
-        if current_block_number != block_number {
-            current_block_number = block_number;
-            flush_counter += 1;
-            if flush_counter > DEFAULT_CACHE_THRESHOLD {
+        // Check limits before the first row of a new block so a flush never splits one block.
+        if current_block_number != Some(block_number) {
+            if current_block_number.is_some() &&
+                history_cache_limit_reached(cache.len(), cached_indices, cached_blocks)
+            {
                 collect(&mut cache)?;
-                flush_counter = 0;
+                cached_blocks = 0;
+                cached_indices = 0;
             }
+            current_block_number = Some(block_number);
+            cached_blocks += 1;
         }
+
+        cache.entry(key).or_default().push(block_number);
+        cached_indices += 1;
     }
     collect(&mut cache)?;
 
@@ -141,28 +175,34 @@ where
 
     let walker = static_file_provider.walk_account_changeset_range(range);
 
-    let mut flush_counter = 0;
-    let mut current_block_number = u64::MAX;
+    let mut cached_blocks = 0;
+    let mut cached_indices = 0;
+    let mut current_block_number = None;
 
     for changeset_result in walker {
         let (block_number, AccountBeforeTx { address, .. }) = changeset_result?;
+
+        // Check limits before the first row of a new block so a flush never splits one block.
+        if current_block_number != Some(block_number) {
+            if let Some(completed_block) = current_block_number &&
+                history_cache_limit_reached(cache.len(), cached_indices, cached_blocks)
+            {
+                info!(
+                    target: "sync::stages::index_history",
+                    processed_blocks = completed_block.saturating_sub(start_block) + 1,
+                    current_block = completed_block,
+                    "Collecting indices"
+                );
+                collect_indices(cache.drain(), &mut insert_fn)?;
+                cached_blocks = 0;
+                cached_indices = 0;
+            }
+            current_block_number = Some(block_number);
+            cached_blocks += 1;
+        }
+
         cache.entry(address).or_default().push(block_number);
-
-        if block_number != current_block_number {
-            current_block_number = block_number;
-            flush_counter += 1;
-        }
-
-        if flush_counter > DEFAULT_CACHE_THRESHOLD {
-            info!(
-                target: "sync::stages::index_history",
-                processed_blocks = current_block_number.saturating_sub(start_block) + 1,
-                current_block = current_block_number,
-                "Collecting indices"
-            );
-            collect_indices(cache.drain(), &mut insert_fn)?;
-            flush_counter = 0;
-        }
+        cached_indices += 1;
     }
     collect_indices(cache.into_iter(), insert_fn)?;
 
@@ -196,28 +236,34 @@ where
 
     let walker = static_file_provider.walk_storage_changeset_range(range);
 
-    let mut flush_counter = 0;
-    let mut current_block_number = u64::MAX;
+    let mut cached_blocks = 0;
+    let mut cached_indices = 0;
+    let mut current_block_number = None;
 
     for changeset_result in walker {
         let (BlockNumberAddress((block_number, address)), storage) = changeset_result?;
+
+        // Check limits before the first row of a new block so a flush never splits one block.
+        if current_block_number != Some(block_number) {
+            if let Some(completed_block) = current_block_number &&
+                history_cache_limit_reached(cache.len(), cached_indices, cached_blocks)
+            {
+                info!(
+                    target: "sync::stages::index_history",
+                    processed_blocks = completed_block.saturating_sub(start_block) + 1,
+                    current_block = completed_block,
+                    "Collecting indices"
+                );
+                collect_indices(cache.drain(), &mut insert_fn)?;
+                cached_blocks = 0;
+                cached_indices = 0;
+            }
+            current_block_number = Some(block_number);
+            cached_blocks += 1;
+        }
+
         cache.entry(AddressStorageKey((address, storage.key))).or_default().push(block_number);
-
-        if block_number != current_block_number {
-            current_block_number = block_number;
-            flush_counter += 1;
-        }
-
-        if flush_counter > DEFAULT_CACHE_THRESHOLD {
-            info!(
-                target: "sync::stages::index_history",
-                processed_blocks = current_block_number.saturating_sub(start_block) + 1,
-                current_block = current_block_number,
-                "Collecting indices"
-            );
-            collect_indices(cache.drain(), &mut insert_fn)?;
-            flush_counter = 0;
-        }
+        cached_indices += 1;
     }
 
     collect_indices(cache.into_iter(), insert_fn)?;
@@ -225,26 +271,240 @@ where
     Ok(collector)
 }
 
-/// Loads account history indices into the database via `EitherWriter`.
+fn emit_grouped_history_key<T, F>(
+    key: T::PartialKey,
+    indices: Vec<BlockNumber>,
+    grouped: &mut Vec<(T::PartialKey, Vec<BlockNumber>)>,
+    grouped_bytes: &mut usize,
+    limits: HistoryPreparationLimits,
+    emit: &mut F,
+) -> Result<(), StageError>
+where
+    T: ShardedHistoryTable,
+    F: FnMut(Vec<(T::PartialKey, Vec<BlockNumber>)>) -> Result<(), StageError>,
+{
+    debug_assert!(
+        indices.windows(2).all(|window| window[0] < window[1]),
+        "indices must be strictly increasing: {indices:?}"
+    );
+
+    let group_bytes = history_group_bytes::<T>(&indices);
+    let next_key_exceeds_limit = grouped.len() >= limits.max_keys;
+    let next_key_exceeds_bytes = group_bytes > limits.max_bytes.saturating_sub(*grouped_bytes);
+
+    if !grouped.is_empty() && (next_key_exceeds_limit || next_key_exceeds_bytes) {
+        emit(mem::take(grouped))?;
+        *grouped_bytes = 0;
+    }
+
+    *grouped_bytes = (*grouped_bytes).saturating_add(group_bytes);
+    grouped.push((key, indices));
+    Ok(())
+}
+
+const fn history_group_bytes<T: ShardedHistoryTable>(indices: &Vec<BlockNumber>) -> usize {
+    mem::size_of::<(T::PartialKey, Vec<BlockNumber>)>()
+        .saturating_add(indices.capacity().saturating_mul(mem::size_of::<BlockNumber>()))
+}
+
+/// Streams sorted ETL rows into bounded batches of complete logical keys.
+fn for_each_grouped_history_chunk<T, F>(
+    mut collector: Collector<T::Key, BlockNumberList>,
+    limits: HistoryPreparationLimits,
+    mut emit: F,
+) -> Result<(), StageError>
+where
+    T: ShardedHistoryTable,
+    F: FnMut(Vec<(T::PartialKey, Vec<BlockNumber>)>) -> Result<(), StageError>,
+{
+    let mut grouped = Vec::new();
+    let mut grouped_bytes = 0;
+    let mut current_key = None;
+    let mut current_indices = Vec::new();
+    let total_entries = collector.len();
+    let interval = (total_entries / 10).max(1);
+
+    for (index, element) in collector.iter()?.enumerate() {
+        let (k, v) = element?;
+        let key = T::Key::decode_owned(k)?;
+
+        if index > 0 && index.is_multiple_of(interval) && total_entries > 10 {
+            info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Grouping indices");
+        }
+
+        let partial_key = T::partial_key(&key);
+        if current_key != Some(partial_key) &&
+            let Some(previous_key) = current_key.replace(partial_key)
+        {
+            emit_grouped_history_key::<T, _>(
+                previous_key,
+                mem::take(&mut current_indices),
+                &mut grouped,
+                &mut grouped_bytes,
+                limits,
+                &mut emit,
+            )?;
+        }
+
+        if !grouped.is_empty() &&
+            (grouped.len() >= limits.max_keys || grouped_bytes >= limits.max_bytes)
+        {
+            emit(mem::take(&mut grouped))?;
+            grouped_bytes = 0;
+        }
+
+        let new_list = BlockNumberList::decompress_owned(v)?;
+        let projected_len =
+            current_indices.len().saturating_add(new_list.len().try_into().unwrap_or(usize::MAX));
+        let projected_capacity = current_indices.capacity().max(projected_len);
+        let projected_bytes = mem::size_of::<(T::PartialKey, Vec<BlockNumber>)>()
+            .saturating_add(projected_capacity.saturating_mul(mem::size_of::<BlockNumber>()));
+        if !grouped.is_empty() && projected_bytes > limits.max_bytes.saturating_sub(grouped_bytes) {
+            emit(mem::take(&mut grouped))?;
+            grouped_bytes = 0;
+        }
+        current_indices.extend(new_list.iter());
+
+        if !grouped.is_empty() &&
+            history_group_bytes::<T>(&current_indices) >
+                limits.max_bytes.saturating_sub(grouped_bytes)
+        {
+            emit(mem::take(&mut grouped))?;
+            grouped_bytes = 0;
+        }
+    }
+
+    if let Some(key) = current_key {
+        emit_grouped_history_key::<T, _>(
+            key,
+            current_indices,
+            &mut grouped,
+            &mut grouped_bytes,
+            limits,
+            &mut emit,
+        )?;
+    }
+    if !grouped.is_empty() {
+        emit(grouped)?;
+    }
+
+    Ok(())
+}
+
+fn prepare_grouped_history_writes<T, Provider>(
+    grouped: Vec<(T::PartialKey, Vec<BlockNumber>)>,
+    provider: &Provider,
+    use_rocksdb: bool,
+) -> Result<PreparedHistoryShardWrites<T>, StageError>
+where
+    T: ShardedHistoryTable,
+    Provider: DBProvider + RocksDBProviderFactory,
+{
+    if use_rocksdb {
+        let rocksdb = provider.rocksdb_provider();
+        Ok(prepare_history_shard_writes_parallel_vec::<T, _>(grouped, |key| rocksdb.get::<T>(key))?)
+    } else {
+        Ok(prepare_history_shard_writes_serial_vec::<T, _>(grouped, |key| {
+            provider.tx_ref().get::<T>(key).map_err(Into::into)
+        })?)
+    }
+}
+
+fn prepare_history_writes<T, Provider>(
+    collector: Collector<T::Key, BlockNumberList>,
+    provider: &Provider,
+    use_rocksdb: bool,
+    etl_config: &EtlConfig,
+) -> Result<Collector<T::Key, BlockNumberList>, StageError>
+where
+    T: ShardedHistoryTable,
+    Provider: DBProvider + RocksDBProviderFactory,
+{
+    let mut prepared = Collector::new(etl_config.file_size, etl_config.dir.clone());
+    for_each_grouped_history_chunk::<T, _>(collector, HISTORY_PREPARATION_LIMITS, |grouped| {
+        let writes = prepare_grouped_history_writes::<T, _>(grouped, provider, use_rocksdb)?;
+        for (key, value) in writes.into_writes() {
+            prepared.insert(key, value)?;
+        }
+        Ok(())
+    })?;
+    Ok(prepared)
+}
+
+/// Spools prepared account-history shards after merging each key's committed last shard.
 ///
-/// Works with [`EitherWriter`] to support both MDBX and `RocksDB` backends.
+/// Call this **before** opening a `RocksDB` write batch.
+pub(crate) fn prepare_account_history_writes<Provider>(
+    collector: Collector<ShardedKey<Address>, BlockNumberList>,
+    provider: &Provider,
+    use_rocksdb: bool,
+    etl_config: &EtlConfig,
+) -> Result<Collector<ShardedKey<Address>, BlockNumberList>, StageError>
+where
+    Provider: DBProvider + RocksDBProviderFactory,
+{
+    prepare_history_writes::<tables::AccountsHistory, _>(
+        collector,
+        provider,
+        use_rocksdb,
+        etl_config,
+    )
+}
+
+/// Spools prepared storage-history shards after merging each key's committed last shard.
 ///
-/// ## Process
-/// Iterates over elements, grouping indices by their address. It flushes indices to disk
-/// when reaching a shard's max length (`NUM_OF_INDICES_IN_SHARD`) or when the address changes,
-/// ensuring the last previous address shard is stored.
+/// Call this **before** opening a `RocksDB` write batch.
+pub(crate) fn prepare_storage_history_writes<Provider>(
+    collector: Collector<StorageShardedKey, BlockNumberList>,
+    provider: &Provider,
+    use_rocksdb: bool,
+    etl_config: &EtlConfig,
+) -> Result<Collector<StorageShardedKey, BlockNumberList>, StageError>
+where
+    Provider: DBProvider + RocksDBProviderFactory,
+{
+    prepare_history_writes::<tables::StoragesHistory, _>(
+        collector,
+        provider,
+        use_rocksdb,
+        etl_config,
+    )
+}
+
+/// Streams prepared history shards into serial puts, logging progress every 10%.
+pub(crate) fn write_prepared_history_shards<T>(
+    mut prepared: Collector<T::Key, BlockNumberList>,
+    mut write: impl FnMut(T::Key, &BlockNumberList) -> ProviderResult<()>,
+) -> ProviderResult<()>
+where
+    T: ShardedHistoryTable,
+{
+    let total_writes = prepared.len();
+    let interval = (total_writes / 10).max(1);
+
+    for (index, element) in prepared.iter().map_err(ProviderError::other)?.enumerate() {
+        if index > 0 && index.is_multiple_of(interval) && total_writes > 10 {
+            info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (index as f64 / total_writes as f64) * 100.0), "Writing indices");
+        }
+        let (key, value) = element.map_err(ProviderError::other)?;
+        let key = T::Key::decode_owned(key)?;
+        let value = BlockNumberList::decompress_owned(value)?;
+        write(key, &value)?;
+    }
+
+    Ok(())
+}
+
+/// Append-only empty-table loader for account history.
 ///
-/// Uses `Option<Address>` instead of `Address::default()` as the sentinel to avoid
-/// incorrectly treating `Address::ZERO` as "no previous address".
-pub(crate) fn load_account_history<N, CURSOR>(
+/// Streams the collector into `append_*` and never reads last shards.
+pub(crate) fn load_account_history_append<N, CURSOR>(
     mut collector: Collector<ShardedKey<Address>, BlockNumberList>,
-    append_only: bool,
     writer: &mut EitherWriter<'_, CURSOR, N>,
 ) -> Result<(), StageError>
 where
     N: NodePrimitives,
-    CURSOR: DbCursorRW<reth_db_api::tables::AccountsHistory>
-        + DbCursorRO<reth_db_api::tables::AccountsHistory>,
+    CURSOR: DbCursorRW<tables::AccountsHistory> + DbCursorRO<tables::AccountsHistory>,
 {
     let mut current_address: Option<Address> = None;
     // Accumulator for block numbers where the current address changed.
@@ -268,31 +528,23 @@ where
         if current_address != Some(address) {
             // Flush all remaining shards for the previous address (uses u64::MAX for last shard).
             if let Some(prev_addr) = current_address {
-                flush_account_history_shards(prev_addr, &mut current_list, append_only, writer)?;
+                flush_account_history_shards(prev_addr, &mut current_list, writer)?;
             }
 
             current_address = Some(address);
             current_list.clear();
-
-            // On incremental sync, merge with the existing last shard from the database.
-            // The last shard is stored with key (address, u64::MAX) so we can find it.
-            if !append_only &&
-                let Some(last_shard) = writer.get_last_account_history_shard(address)?
-            {
-                current_list.extend(last_shard.iter());
-            }
         }
 
         // Append new block numbers to the accumulator.
         current_list.extend(new_list.iter());
 
         // Flush complete shards, keeping the last (partial) shard buffered.
-        flush_account_history_shards_partial(address, &mut current_list, append_only, writer)?;
+        flush_account_history_shards_partial(address, &mut current_list, writer)?;
     }
 
     // Flush the final address's remaining shard.
     if let Some(addr) = current_address {
-        flush_account_history_shards(addr, &mut current_list, append_only, writer)?;
+        flush_account_history_shards(addr, &mut current_list, writer)?;
     }
 
     Ok(())
@@ -306,13 +558,11 @@ where
 fn flush_account_history_shards_partial<N, CURSOR>(
     address: Address,
     list: &mut Vec<u64>,
-    append_only: bool,
     writer: &mut EitherWriter<'_, CURSOR, N>,
 ) -> Result<(), StageError>
 where
     N: NodePrimitives,
-    CURSOR: DbCursorRW<reth_db_api::tables::AccountsHistory>
-        + DbCursorRO<reth_db_api::tables::AccountsHistory>,
+    CURSOR: DbCursorRW<tables::AccountsHistory> + DbCursorRO<tables::AccountsHistory>,
 {
     // Nothing to flush if we haven't filled a complete shard yet.
     if list.len() <= NUM_OF_INDICES_IN_SHARD {
@@ -342,12 +592,7 @@ where
         let highest = *chunk.last().expect("chunk is non-empty");
         let key = ShardedKey::new(address, highest);
         let value = BlockNumberList::new_pre_sorted(chunk.iter().copied());
-
-        if append_only {
-            writer.append_account_history(key, &value)?;
-        } else {
-            writer.upsert_account_history(key, &value)?;
-        }
+        writer.append_account_history(key, &value)?;
     }
 
     // Keep the remaining indices for the next iteration.
@@ -362,13 +607,11 @@ where
 fn flush_account_history_shards<N, CURSOR>(
     address: Address,
     list: &mut Vec<u64>,
-    append_only: bool,
     writer: &mut EitherWriter<'_, CURSOR, N>,
 ) -> Result<(), StageError>
 where
     N: NodePrimitives,
-    CURSOR: DbCursorRW<reth_db_api::tables::AccountsHistory>
-        + DbCursorRO<reth_db_api::tables::AccountsHistory>,
+    CURSOR: DbCursorRW<tables::AccountsHistory> + DbCursorRO<tables::AccountsHistory>,
 {
     if list.is_empty() {
         return Ok(());
@@ -385,12 +628,7 @@ where
 
         let key = ShardedKey::new(address, highest);
         let value = BlockNumberList::new_pre_sorted(chunk.iter().copied());
-
-        if append_only {
-            writer.append_account_history(key, &value)?;
-        } else {
-            writer.upsert_account_history(key, &value)?;
-        }
+        writer.append_account_history(key, &value)?;
     }
 
     list.clear();
@@ -433,26 +671,16 @@ where
     })
 }
 
-/// Loads storage history indices into the database via `EitherWriter`.
+/// Append-only empty-table loader for storage history.
 ///
-/// Works with [`EitherWriter`] to support both MDBX and `RocksDB` backends.
-///
-/// ## Process
-/// Iterates over elements, grouping indices by their (address, `storage_key`) pairs. It flushes
-/// indices to disk when reaching a shard's max length (`NUM_OF_INDICES_IN_SHARD`) or when the
-/// (address, `storage_key`) pair changes, ensuring the last previous shard is stored.
-///
-/// Uses `Option<(Address, B256)>` instead of default values as the sentinel to avoid
-/// incorrectly treating `(Address::ZERO, B256::ZERO)` as "no previous key".
-pub(crate) fn load_storage_history<N, CURSOR>(
+/// Streams the collector into `append_*` and never reads last shards.
+pub(crate) fn load_storage_history_append<N, CURSOR>(
     mut collector: Collector<StorageShardedKey, BlockNumberList>,
-    append_only: bool,
     writer: &mut EitherWriter<'_, CURSOR, N>,
 ) -> Result<(), StageError>
 where
     N: NodePrimitives,
-    CURSOR: DbCursorRW<reth_db_api::tables::StoragesHistory>
-        + DbCursorRO<reth_db_api::tables::StoragesHistory>,
+    CURSOR: DbCursorRW<tables::StoragesHistory> + DbCursorRO<tables::StoragesHistory>,
 {
     let mut current_key: Option<(Address, B256)> = None;
     // Accumulator for block numbers where the current (address, storage_key) changed.
@@ -480,22 +708,12 @@ where
                     prev_addr,
                     prev_storage_key,
                     &mut current_list,
-                    append_only,
                     writer,
                 )?;
             }
 
             current_key = Some(partial_key);
             current_list.clear();
-
-            // On incremental sync, merge with the existing last shard from the database.
-            // The last shard is stored with key (address, storage_key, u64::MAX) so we can find it.
-            if !append_only &&
-                let Some(last_shard) =
-                    writer.get_last_storage_history_shard(partial_key.0, partial_key.1)?
-            {
-                current_list.extend(last_shard.iter());
-            }
         }
 
         // Append new block numbers to the accumulator.
@@ -506,14 +724,13 @@ where
             partial_key.0,
             partial_key.1,
             &mut current_list,
-            append_only,
             writer,
         )?;
     }
 
     // Flush the final key's remaining shard.
     if let Some((addr, storage_key)) = current_key {
-        flush_storage_history_shards(addr, storage_key, &mut current_list, append_only, writer)?;
+        flush_storage_history_shards(addr, storage_key, &mut current_list, writer)?;
     }
 
     Ok(())
@@ -528,13 +745,11 @@ fn flush_storage_history_shards_partial<N, CURSOR>(
     address: Address,
     storage_key: B256,
     list: &mut Vec<u64>,
-    append_only: bool,
     writer: &mut EitherWriter<'_, CURSOR, N>,
 ) -> Result<(), StageError>
 where
     N: NodePrimitives,
-    CURSOR: DbCursorRW<reth_db_api::tables::StoragesHistory>
-        + DbCursorRO<reth_db_api::tables::StoragesHistory>,
+    CURSOR: DbCursorRW<tables::StoragesHistory> + DbCursorRO<tables::StoragesHistory>,
 {
     // Nothing to flush if we haven't filled a complete shard yet.
     if list.len() <= NUM_OF_INDICES_IN_SHARD {
@@ -564,12 +779,7 @@ where
         let highest = *chunk.last().expect("chunk is non-empty");
         let key = StorageShardedKey::new(address, storage_key, highest);
         let value = BlockNumberList::new_pre_sorted(chunk.iter().copied());
-
-        if append_only {
-            writer.append_storage_history(key, &value)?;
-        } else {
-            writer.upsert_storage_history(key, &value)?;
-        }
+        writer.append_storage_history(key, &value)?;
     }
 
     // Keep the remaining indices for the next iteration.
@@ -586,13 +796,11 @@ fn flush_storage_history_shards<N, CURSOR>(
     address: Address,
     storage_key: B256,
     list: &mut Vec<u64>,
-    append_only: bool,
     writer: &mut EitherWriter<'_, CURSOR, N>,
 ) -> Result<(), StageError>
 where
     N: NodePrimitives,
-    CURSOR: DbCursorRW<reth_db_api::tables::StoragesHistory>
-        + DbCursorRO<reth_db_api::tables::StoragesHistory>,
+    CURSOR: DbCursorRW<tables::StoragesHistory> + DbCursorRO<tables::StoragesHistory>,
 {
     if list.is_empty() {
         return Ok(());
@@ -609,14 +817,99 @@ where
 
         let key = StorageShardedKey::new(address, storage_key, highest);
         let value = BlockNumberList::new_pre_sorted(chunk.iter().copied());
-
-        if append_only {
-            writer.append_storage_history(key, &value)?;
-        } else {
-            writer.upsert_storage_history(key, &value)?;
-        }
+        writer.append_storage_history(key, &value)?;
     }
 
     list.clear();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{address, b256};
+
+    fn list(indices: &[u64]) -> BlockNumberList {
+        BlockNumberList::new(indices.iter().copied()).unwrap()
+    }
+
+    fn grouped_account_chunks(
+        collector: Collector<ShardedKey<Address>, BlockNumberList>,
+        limits: HistoryPreparationLimits,
+    ) -> Vec<Vec<(Address, Vec<BlockNumber>)>> {
+        let mut chunks = Vec::new();
+        for_each_grouped_history_chunk::<tables::AccountsHistory, _>(collector, limits, |chunk| {
+            chunks.push(chunk);
+            Ok(())
+        })
+        .unwrap();
+        chunks
+    }
+
+    #[test]
+    fn grouping_coalesces_one_logical_key_across_etl_files() {
+        let address = address!("0x0000000000000000000000000000000000000001");
+        // Every entry exceeds this tiny buffer, forcing it into a separate ETL file.
+        let mut collector = Collector::new(1, None);
+        collector.insert(ShardedKey::new(address, 2), list(&[1, 2])).unwrap();
+        collector.insert(ShardedKey::new(address, 4), list(&[3, 4])).unwrap();
+
+        let chunks = grouped_account_chunks(
+            collector,
+            HistoryPreparationLimits { max_keys: 10, max_bytes: usize::MAX },
+        );
+        assert_eq!(chunks, vec![vec![(address, vec![1, 2, 3, 4])]]);
+    }
+
+    #[test]
+    fn storage_grouping_coalesces_one_logical_key_across_etl_files() {
+        let address = address!("0x0000000000000000000000000000000000000001");
+        let slot = b256!("0x0000000000000000000000000000000000000000000000000000000000000002");
+        let mut collector = Collector::new(1, None);
+        collector.insert(StorageShardedKey::new(address, slot, 2), list(&[1, 2])).unwrap();
+        collector.insert(StorageShardedKey::new(address, slot, 4), list(&[3, 4])).unwrap();
+
+        let mut chunks = Vec::new();
+        for_each_grouped_history_chunk::<tables::StoragesHistory, _>(
+            collector,
+            HistoryPreparationLimits { max_keys: 10, max_bytes: usize::MAX },
+            |chunk| {
+                chunks.push(chunk);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(chunks, vec![vec![((address, slot), vec![1, 2, 3, 4])]]);
+    }
+
+    #[test]
+    fn grouping_never_splits_a_key_at_key_limit() {
+        let mut collector = Collector::new(1, None);
+        for byte in 1u8..=5 {
+            let address = Address::repeat_byte(byte);
+            collector.insert(ShardedKey::new(address, u64::MAX), list(&[u64::from(byte)])).unwrap();
+        }
+
+        let chunks = grouped_account_chunks(
+            collector,
+            HistoryPreparationLimits { max_keys: 2, max_bytes: usize::MAX },
+        );
+        assert_eq!(chunks.iter().map(Vec::len).collect::<Vec<_>>(), vec![2, 2, 1]);
+        assert!(chunks.into_iter().flatten().all(|(_, indices)| indices.len() == 1));
+    }
+
+    #[test]
+    fn grouping_processes_an_over_budget_key_alone() {
+        let mut collector = Collector::new(1, None);
+        for byte in 1u8..=2 {
+            let address = Address::repeat_byte(byte);
+            collector.insert(ShardedKey::new(address, u64::MAX), list(&[u64::from(byte)])).unwrap();
+        }
+
+        let chunks = grouped_account_chunks(
+            collector,
+            HistoryPreparationLimits { max_keys: usize::MAX, max_bytes: 1 },
+        );
+        assert_eq!(chunks.iter().map(Vec::len).collect::<Vec<_>>(), vec![1, 1]);
+    }
 }
