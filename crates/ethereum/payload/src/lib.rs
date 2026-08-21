@@ -515,10 +515,8 @@ where
                     {
                         continue
                     }
-                    Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
-                        ..
-                    })) |
                     Err(BlockExecutionError::Validation(
+                        BlockValidationError::InvalidTx { .. } |
                         BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
                             ..
                         },
