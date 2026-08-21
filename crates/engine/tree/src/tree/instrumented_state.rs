@@ -9,8 +9,9 @@ use reth_provider::{
     StateProvider, StateRootProvider, StorageRootProvider,
 };
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    updates::{StorageTrieUpdatesSorted, TrieUpdates},
+    AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
+    StorageProof, TrieInput,
 };
 use std::{
     sync::{
@@ -263,6 +264,15 @@ impl<S: StorageRootProvider> StorageRootProvider for InstrumentedStateProvider<S
         self.state_provider.storage_root(address, hashed_storage)
     }
 
+    fn storage_root_from_nodes(
+        &self,
+        address: Address,
+        hashed_storage: HashedStorage,
+        nodes: &StorageTrieUpdatesSorted,
+    ) -> ProviderResult<B256> {
+        self.state_provider.storage_root_from_nodes(address, hashed_storage, nodes)
+    }
+
     fn storage_proof(
         &self,
         address: Address,
@@ -272,6 +282,16 @@ impl<S: StorageRootProvider> StorageRootProvider for InstrumentedStateProvider<S
         self.state_provider.storage_proof(address, slot, hashed_storage)
     }
 
+    fn storage_proof_from_nodes(
+        &self,
+        address: Address,
+        slot: B256,
+        hashed_storage: HashedStorage,
+        nodes: &StorageTrieUpdatesSorted,
+    ) -> ProviderResult<StorageProof> {
+        self.state_provider.storage_proof_from_nodes(address, slot, hashed_storage, nodes)
+    }
+
     fn storage_multiproof(
         &self,
         address: Address,
@@ -279,6 +299,16 @@ impl<S: StorageRootProvider> StorageRootProvider for InstrumentedStateProvider<S
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof> {
         self.state_provider.storage_multiproof(address, slots, hashed_storage)
+    }
+
+    fn storage_multiproof_from_nodes(
+        &self,
+        address: Address,
+        slots: &[B256],
+        hashed_storage: HashedStorage,
+        nodes: &StorageTrieUpdatesSorted,
+    ) -> ProviderResult<StorageMultiProof> {
+        self.state_provider.storage_multiproof_from_nodes(address, slots, hashed_storage, nodes)
     }
 }
 
