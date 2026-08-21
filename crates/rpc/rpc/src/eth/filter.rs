@@ -42,10 +42,10 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{
-    sync::{mpsc::Receiver, oneshot, Mutex},
+    sync::{mpsc::Receiver, Mutex},
     time::MissedTickBehavior,
 };
-use tracing::{debug, error, trace};
+use tracing::{debug, error, trace, warn};
 
 impl<Eth> EngineEthFilter<RpcLog<Eth::NetworkTypes>> for EthFilter<Eth>
 where
@@ -658,39 +658,95 @@ where
             return Err(EthFilterError::QueryExceedsMaxBlocks(max_blocks_per_filter))
         }
 
-        let (tx, rx) = oneshot::channel();
-        let this = self.clone();
-        self.task_spawner.spawn_blocking_task(async move {
-            let res =
-                this.get_logs_in_block_range_inner(&filter, from_block, to_block, limits).await;
-            let _ = tx.send(res);
-        });
+        let filter = Arc::new(filter);
+        let mut all_logs = Vec::new();
 
-        rx.await.map_err(|_| EthFilterError::InternalError)?
+        let chain_tip = self.provider().best_block_number()?;
+
+        // the bloom scan is synchronous, so it is offloaded
+        let matching_headers = {
+            let this = self.clone();
+            let filter = filter.clone();
+            offload(&self.task_spawner, move || {
+                this.scan_matching_headers(&filter, from_block, to_block)
+            })
+            .await?
+        };
+
+        // initialize the appropriate range mode based on collected headers
+        let mut range_mode = RangeMode::new(
+            self.clone(),
+            matching_headers,
+            from_block,
+            to_block,
+            self.max_headers_range,
+            chain_tip,
+        );
+
+        // iterate through the range mode to get receipts and blocks
+        while let Some(ReceiptBlockResult { receipts, recovered_block, header }) =
+            range_mode.next().await?
+        {
+            let num_hash = header.num_hash();
+            // Repeated once per matching block, and resolving tx hashes reads the db when the
+            // block is not in hand, so this is offloaded rather than run on the reactor.
+            let this = self.clone();
+            let filter = filter.clone();
+            all_logs = offload(&self.task_spawner, move || {
+                append_matching_block_logs(
+                    &mut all_logs,
+                    this.eth_api.converter(),
+                    recovered_block
+                        .map(ProviderOrBlock::Block)
+                        .unwrap_or_else(|| ProviderOrBlock::Provider(this.provider())),
+                    &filter,
+                    &header,
+                    &receipts,
+                    false,
+                )?;
+                Ok(all_logs)
+            })
+            .await?;
+
+            // size check but only if range is multiple blocks, so we always return all
+            // logs of a single block
+            let is_multi_block_range = from_block != to_block;
+            if let Some(max_logs_per_response) = limits.max_logs_per_response &&
+                is_multi_block_range &&
+                all_logs.len() > max_logs_per_response
+            {
+                let retry_to_block =
+                    if num_hash.number == from_block { from_block } else { num_hash.number - 1 };
+
+                debug!(
+                    target: "rpc::eth::filter",
+                    logs_found = all_logs.len(),
+                    max_logs_per_response,
+                    from_block,
+                    to_block = retry_to_block,
+                    "Query exceeded max logs per response limit"
+                );
+                return Err(EthFilterError::QueryExceedsMaxResults {
+                    max_logs: max_logs_per_response,
+                    from_block,
+                    to_block: retry_to_block,
+                });
+            }
+        }
+
+        Ok(all_logs)
     }
 
-    /// Returns all logs in the given _inclusive_ range that match the filter
+    /// Returns every header in the given _inclusive_ range whose bloom matches the filter.
     ///
-    /// Note: This function uses a mix of blocking db operations for fetching indices and header
-    /// ranges and utilizes the rpc cache for optimistically fetching receipts and blocks.
-    /// This function is considered blocking and should thus be spawned on a blocking task.
-    ///
-    /// Returns an error if:
-    ///  - underlying database error
-    async fn get_logs_in_block_range_inner(
-        self: Arc<Self>,
+    /// Fully synchronous; intended to be offloaded to the blocking pool.
+    fn scan_matching_headers(
+        &self,
         filter: &Filter,
         from_block: u64,
         to_block: u64,
-        limits: QueryLimits,
-    ) -> Result<Vec<RpcLog<Eth::NetworkTypes>>, EthFilterError> {
-        let mut all_logs = Vec::new();
+    ) -> Result<Vec<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>, EthFilterError> {
         let mut matching_headers = Vec::new();
-
-        // get current chain tip to determine processing mode
-        let chain_tip = self.provider().best_block_number()?;
-
-        // first collect all headers that match the bloom filter for cached mode decision
         for (from, to) in
             BlockRangeInclusiveIter::new(from_block..=to_block, self.max_headers_range)
         {
@@ -720,60 +776,7 @@ where
             }
         }
 
-        // initialize the appropriate range mode based on collected headers
-        let mut range_mode = RangeMode::new(
-            self.clone(),
-            matching_headers,
-            from_block,
-            to_block,
-            self.max_headers_range,
-            chain_tip,
-        );
-
-        // iterate through the range mode to get receipts and blocks
-        while let Some(ReceiptBlockResult { receipts, recovered_block, header }) =
-            range_mode.next().await?
-        {
-            let num_hash = header.num_hash();
-            append_matching_block_logs(
-                &mut all_logs,
-                self.eth_api.converter(),
-                recovered_block
-                    .map(ProviderOrBlock::Block)
-                    .unwrap_or_else(|| ProviderOrBlock::Provider(self.provider())),
-                filter,
-                &header,
-                &receipts,
-                false,
-            )?;
-
-            // size check but only if range is multiple blocks, so we always return all
-            // logs of a single block
-            let is_multi_block_range = from_block != to_block;
-            if let Some(max_logs_per_response) = limits.max_logs_per_response &&
-                is_multi_block_range &&
-                all_logs.len() > max_logs_per_response
-            {
-                let retry_to_block =
-                    if num_hash.number == from_block { from_block } else { num_hash.number - 1 };
-
-                debug!(
-                    target: "rpc::eth::filter",
-                    logs_found = all_logs.len(),
-                    max_logs_per_response,
-                    from_block,
-                    to_block = retry_to_block,
-                    "Query exceeded max logs per response limit"
-                );
-                return Err(EthFilterError::QueryExceedsMaxResults {
-                    max_logs: max_logs_per_response,
-                    from_block,
-                    to_block: retry_to_block,
-                });
-            }
-        }
-
-        Ok(all_logs)
+        Ok(matching_headers)
     }
 }
 
@@ -1172,6 +1175,34 @@ impl<
     }
 }
 
+/// Runs `f` on the blocking pool.
+///
+/// `f` must be self-contained: a task that holds a blocking thread must never wait for another
+/// task, or the pool can deadlock with every thread parked on work that needs a thread.
+fn offload<F, R>(
+    spawner: &Runtime,
+    f: F,
+) -> impl Future<Output = Result<R, EthFilterError>> + Send + 'static
+where
+    F: FnOnce() -> Result<R, EthFilterError> + Send + 'static,
+    R: Send + 'static,
+{
+    // `Runtime::spawn_blocking` does not propagate the span the way `spawn_blocking_task` does.
+    let span = tracing::Span::current();
+    let handle = spawner.spawn_blocking(move || {
+        let _entered = span.enter();
+        f()
+    });
+
+    async move {
+        handle.await.map_err(|error| {
+            // a panic in the closure, or runtime shutdown while it was queued
+            warn!(target: "rpc::eth::filter", ?error, "Offloaded task did not complete");
+            EthFilterError::InternalError
+        })?
+    }
+}
+
 /// Type alias for parallel receipt fetching task futures used in `RangeBlockMode`
 type ReceiptFetchFuture<P> =
     Pin<Box<dyn Future<Output = Result<Vec<ReceiptBlockResult<P>>, EthFilterError>> + Send>>;
@@ -1278,8 +1309,14 @@ impl<
             let receipts = match maybe_receipts {
                 Some(receipts) => receipts,
                 None => {
-                    // Not cached - fetch directly from provider
-                    match self.filter_inner.provider().receipts_by_block(header.hash().into())? {
+                    // not cached - the provider read is synchronous, so it is offloaded
+                    let this = self.filter_inner.clone();
+                    let hash = header.hash();
+                    match offload(&self.filter_inner.task_spawner, move || {
+                        Ok(this.provider().receipts_by_block(hash.into())?)
+                    })
+                    .await?
+                    {
                         Some(receipts) => Arc::new(receipts),
                         None => continue, // No receipts found
                     }
@@ -1318,8 +1355,9 @@ impl<
         // Spawn each chunk as a separate task directly into the FuturesOrdered stream
         for chunk_headers in header_chunks {
             let filter_inner = self.filter_inner.clone();
-            let chunk_task = Box::pin(async move {
-                let chunk_task = tokio::task::spawn_blocking(move || {
+            self.pending_tasks.push_back(Box::pin(offload(
+                &self.filter_inner.task_spawner,
+                move || {
                     let mut chunk_results = Vec::with_capacity(chunk_headers.len());
 
                     for header in chunk_headers {
@@ -1343,20 +1381,8 @@ impl<
                     }
 
                     Ok(chunk_results)
-                });
-
-                // Await the blocking task and handle the result
-                match chunk_task.await {
-                    Ok(Ok(chunk_results)) => Ok(chunk_results),
-                    Ok(Err(e)) => Err(e),
-                    Err(join_err) => {
-                        trace!(target: "rpc::eth::filter", error = ?join_err, "Task join error");
-                        Err(EthFilterError::InternalError)
-                    }
-                }
-            });
-
-            self.pending_tasks.push_back(chunk_task);
+                },
+            )));
         }
     }
 }

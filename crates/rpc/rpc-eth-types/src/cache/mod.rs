@@ -371,6 +371,22 @@ impl<Provider> EthStateCacheService<Provider, Runtime>
 where
     Provider: BlockReader + BalProvider + Clone + Unpin + 'static,
 {
+    /// Waits for a rate-limit permit on the async runtime, then runs the read on the blocking
+    /// pool.
+    ///
+    /// This avoids holding a blocking thread while queued on the limiter.
+    fn spawn_rate_limited(&self, f: impl FnOnce() + Send + 'static) {
+        let executor = self.action_task_spawner.clone();
+        let rate_limiter = self.rate_limiter.clone();
+        self.action_task_spawner.spawn_task(async move {
+            let permit = rate_limiter.acquire_owned().await;
+            executor.spawn_blocking(move || {
+                let _permit = permit;
+                f();
+            });
+        });
+    }
+
     /// Indexes all transactions in a block by transaction hash.
     fn index_block_transactions(&mut self, block: &RecoveredBlock<Provider::Block>) {
         let block_hash = block.hash();
@@ -535,12 +551,9 @@ where
                             if this.full_block_cache.queue(block_hash, response_tx) {
                                 let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
-                                let rate_limiter = this.rate_limiter.clone();
                                 let mut action_sender =
                                     ActionSender::new(CacheKind::Block, block_hash, action_tx);
-                                this.action_task_spawner.spawn_blocking_task(async move {
-                                    // Acquire permit
-                                    let _permit = rate_limiter.acquire().await;
+                                this.spawn_rate_limited(move || {
                                     // Only look in the database to prevent situations where we
                                     // looking up the tree is blocking
                                     let block_sender = provider
@@ -564,12 +577,9 @@ where
                             if this.receipts_cache.queue(block_hash, response_tx) {
                                 let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
-                                let rate_limiter = this.rate_limiter.clone();
                                 let mut action_sender =
                                     ActionSender::new(CacheKind::Receipt, block_hash, action_tx);
-                                this.action_task_spawner.spawn_blocking_task(async move {
-                                    // Acquire permit
-                                    let _permit = rate_limiter.acquire().await;
+                                this.spawn_rate_limited(move || {
                                     let res = provider
                                         .receipts_by_block(block_hash.into())
                                         .map(|maybe_receipts| maybe_receipts.map(Arc::new));
@@ -596,12 +606,9 @@ where
                             if this.headers_cache.queue(block_hash, response_tx) {
                                 let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
-                                let rate_limiter = this.rate_limiter.clone();
                                 let mut action_sender =
                                     ActionSender::new(CacheKind::Header, block_hash, action_tx);
-                                this.action_task_spawner.spawn_blocking_task(async move {
-                                    // Acquire permit
-                                    let _permit = rate_limiter.acquire().await;
+                                this.spawn_rate_limited(move || {
                                     let header = provider.header(block_hash).and_then(|header| {
                                         header.ok_or_else(|| {
                                             ProviderError::HeaderNotFound(block_hash.into())
@@ -620,11 +627,9 @@ where
                             if this.bal_cache.queue(block_hash, response_tx) {
                                 let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
-                                let rate_limiter = this.rate_limiter.clone();
                                 let mut action_sender =
                                     ActionSender::new(CacheKind::Bal, block_hash, action_tx);
-                                this.action_task_spawner.spawn_blocking_task(async move {
-                                    let _permit = rate_limiter.acquire().await;
+                                this.spawn_rate_limited(move || {
                                     let res = provider.get_bal_by_hash(block_hash).and_then(
                                         |maybe_bal| {
                                             maybe_bal.map(CachedRevmBal::try_from_raw).transpose()

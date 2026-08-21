@@ -439,10 +439,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             let block_id = block_number.unwrap_or_default();
             let (evm_env, at) = self.evm_env_at(block_id).await?;
 
-            self.spawn_blocking_io_fut(async move |this| {
-                this.create_access_list_with(evm_env, at, request, state_override).await
-            })
-            .await
+            self.create_access_list_with(evm_env, at, request, state_override).await
         }
     }
 
@@ -609,9 +606,7 @@ pub trait Call:
         F: FnOnce(Self, StateCacheDb) -> Result<R, Self::Error> + Send + 'static,
         R: Send + 'static,
     {
-        let at = at.into();
-        self.spawn_blocking_io_fut(async move |this| {
-            let state = this.state_at_block_id(at).await?;
+        self.spawn_with_state(Some(at.into()), move |this, state| {
             let db = State::builder()
                 .with_database(StateProviderDatabase::new(StateProviderTraitObjWrapper(state)))
                 .build();
