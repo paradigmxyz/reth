@@ -1,4 +1,4 @@
-use std::{future::Future, sync::Arc};
+use std::sync::Arc;
 
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
@@ -61,26 +61,29 @@ where
     Provider: BlockReaderIdExt + ChangeSetReader + StateProviderFactory + 'static,
     EvmConfig: Send + Sync + 'static,
 {
-    /// Executes the future on a new blocking task.
-    async fn on_blocking_task<C, F, R>(&self, c: C) -> EthResult<R>
+    /// Executes the closure on a new blocking task.
+    ///
+    /// `c` must be self-contained and must not depend on other queued work.
+    async fn on_blocking_task<C, R>(&self, c: C) -> EthResult<R>
     where
-        C: FnOnce(Self) -> F,
-        F: Future<Output = EthResult<R>> + Send + 'static,
+        C: FnOnce(Self) -> EthResult<R> + Send + 'static,
         R: Send + 'static,
     {
         let (tx, rx) = oneshot::channel();
         let this = self.clone();
-        let f = c(this);
         self.inner.task_spawner.spawn_blocking_task(async move {
-            let res = f.await;
-            let _ = tx.send(res);
+            // the caller is already gone, so the result has nowhere to go
+            if tx.is_closed() {
+                return
+            }
+            let _ = tx.send(c(this));
         });
         rx.await.map_err(|_| EthApiError::InternalEthError)?
     }
 
     /// Returns a map of addresses to changed account balanced for a particular block.
     pub async fn balance_changes_in_block(&self, block_id: BlockId) -> EthResult<AddressMap<U256>> {
-        self.on_blocking_task(async move |this| this.try_balance_changes_in_block(block_id)).await
+        self.on_blocking_task(move |this| this.try_balance_changes_in_block(block_id)).await
     }
 
     fn try_balance_changes_in_block(&self, block_id: BlockId) -> EthResult<AddressMap<U256>> {
@@ -138,7 +141,7 @@ where
             .acquire_owned()
             .await
             .map_err(|_| EthApiError::InternalEthError)?;
-        self.on_blocking_task(async move |this| {
+        self.on_blocking_task(move |this| {
             let _permit = permit;
             this.try_block_execution_outcome(block_id, block_count)
         })
