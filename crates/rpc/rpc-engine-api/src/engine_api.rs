@@ -314,8 +314,9 @@ where
     pub async fn new_payload_v6(
         &self,
         payload: PayloadT::ExecutionData,
-        inclusion_list_transactions: Vec<Bytes>,
     ) -> EngineApiResult<PayloadStatusV2> {
+        let inclusion_list_transactions =
+            payload.inclusion_list_transactions().unwrap_or_default().to_vec();
         validate_inclusion_list_size(&inclusion_list_transactions)?;
         let block_hash = payload.block_hash();
         let payload_or_attrs = PayloadOrAttributes::<
@@ -348,10 +349,9 @@ where
     pub async fn new_payload_v6_metered(
         &self,
         payload: PayloadT::ExecutionData,
-        inclusion_list_transactions: Vec<Bytes>,
     ) -> EngineApiResult<PayloadStatusV2> {
         let start = Instant::now();
-        let result = Self::new_payload_v6(self, payload, inclusion_list_transactions).await;
+        let result = Self::new_payload_v6(self, payload).await;
         self.inner.metrics.latency.new_payload_v6.record(start.elapsed());
         result
     }
@@ -1434,7 +1434,7 @@ where
             ),
         };
 
-        Ok(self.new_payload_v6_metered(payload, inclusion_list_transactions).await?)
+        Ok(self.new_payload_v6_metered(payload).await?)
     }
 
     /// Handler for `engine_forkchoiceUpdatedV1`
