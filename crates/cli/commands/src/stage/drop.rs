@@ -94,10 +94,13 @@ impl<C: ChainSpecParser> Command<C> {
                         writer.prune_transaction_senders(to_delete, 0)?;
                     }
                     StaticFileSegment::AccountChangeSets => {
-                        writer.prune_account_changesets(highest_block)?;
+                        // The argument is the last block to KEEP, so passing the segment's
+                        // own tip is a no-op. Keep only the genesis changesets.
+                        writer.prune_account_changesets(0)?;
                     }
                     StaticFileSegment::StorageChangeSets => {
-                        writer.prune_storage_changesets(highest_block)?;
+                        // See `AccountChangeSets` above.
+                        writer.prune_storage_changesets(0)?;
                     }
                 }
             }
