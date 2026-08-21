@@ -8,7 +8,6 @@ use crate::{
 use alloy_consensus::{BlockHeader, Transaction};
 use alloy_eips::{
     eip1898::BlockWithParent, eip2718::Decodable2718, merge::EPOCH_SLOTS, BlockNumHash, NumHash,
-    Typed2718,
 };
 use alloy_primitives::{
     map::{B256Map, B256Set},
