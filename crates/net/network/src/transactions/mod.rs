@@ -1200,12 +1200,14 @@ where
             return
         }
         if let Some(peer) = self.peers.get_mut(&peer_id) {
-            let transactions = self.pool.get_pooled_transaction_elements(
-                request.0,
-                GetPooledTransactionLimit::ResponseSizeSoftLimit(
-                    self.transaction_fetcher.info.soft_limit_byte_size_pooled_transactions_response,
-                ),
-            );
+            let response_size_limit =
+                self.transaction_fetcher.info.soft_limit_byte_size_pooled_transactions_response;
+            let limit = if peer.version() >= EthVersion::Eth72 {
+                GetPooledTransactionLimit::Eth72ResponseSizeSoftLimit(response_size_limit)
+            } else {
+                GetPooledTransactionLimit::ResponseSizeSoftLimit(response_size_limit)
+            };
+            let transactions = self.pool.get_pooled_transaction_elements(request.0, limit);
             trace!(target: "net::tx::propagation", sent_txs=?transactions.iter().map(|tx| tx.tx_hash()), "Sending requested transactions to peer");
 
             // we sent a response at which point we assume that the peer is aware of the
@@ -1808,13 +1810,18 @@ impl PropagationMode {
 #[derive(Debug, Clone)]
 struct PropagateTransaction {
     is_broadcastable_in_full: bool,
-    /// Size advertised in `NewPooledTransactionHashes` metadata and used for full broadcast
-    /// soft-limit accounting.
+    /// Size advertised to pre-eth/72 peers in `NewPooledTransactionHashes` metadata and used for
+    /// full broadcast soft-limit accounting.
     ///
     /// This is the network encoded transaction size. For pool-backed blob transactions, this is
     /// the pool's cached encoded length, which includes the sidecar returned by
     /// `PooledTransactions`.
     propagation_size: usize,
+    /// Size advertised to eth/72 peers in `NewPooledTransactionHashes` metadata.
+    ///
+    /// Type-3 transactions omit blob payloads in eth/72 `PooledTransactions` responses, so this
+    /// must match that blob-elided representation rather than [`Self::propagation_size`].
+    eth72_propagation_size: usize,
     transaction: LazyEncodedTransaction,
 }
 
@@ -1831,6 +1838,7 @@ impl PropagateTransaction {
         Self {
             is_broadcastable_in_full,
             propagation_size,
+            eth72_propagation_size: propagation_size,
             transaction: LazyEncoded::new(transaction),
         }
     }
@@ -1843,9 +1851,11 @@ impl PropagateTransaction {
     fn pool_tx<P: PoolTransaction>(tx: Arc<ValidPoolTransaction<P>>) -> Self {
         let is_broadcastable_in_full = tx.transaction.consensus_ref().is_broadcastable_in_full();
         let propagation_size = tx.encoded_length();
+        let eth72_propagation_size = tx.transaction.eth72_encoded_length();
         Self {
             is_broadcastable_in_full,
             propagation_size,
+            eth72_propagation_size,
             transaction: LazyEncoded::new(PropagatePooledTransactionEncoder::new(tx)),
         }
     }
@@ -1857,6 +1867,11 @@ impl PropagateTransaction {
     /// Returns the network encoded size used for propagation limits and hash metadata.
     const fn propagation_size(&self) -> usize {
         self.propagation_size
+    }
+
+    /// Returns the size advertised to an eth/72 peer.
+    const fn eth72_propagation_size(&self) -> usize {
+        self.eth72_propagation_size
     }
 
     fn tx_type(&self) -> u8 {
@@ -2084,7 +2099,7 @@ impl PooledTransactionsHashesBuilder {
             }
             Self::Eth72(msg) => {
                 msg.hashes.push(*pooled_tx.hash());
-                msg.sizes.push(pooled_tx.encoded_length());
+                msg.sizes.push(pooled_tx.transaction.eth72_encoded_length());
                 msg.types.push(pooled_tx.transaction.ty());
             }
         }
@@ -2125,7 +2140,7 @@ impl PooledTransactionsHashesBuilder {
             }
             Self::Eth72(msg) => {
                 msg.hashes.push(*tx.tx_hash());
-                msg.sizes.push(tx.propagation_size());
+                msg.sizes.push(tx.eth72_propagation_size());
                 msg.types.push(tx.tx_type());
             }
         }
@@ -3206,6 +3221,29 @@ mod tests {
         let tx = PropagateTransaction::new(tx);
 
         assert_eq!(tx.propagation_size(), expected_size);
+        assert_eq!(tx.eth72_propagation_size(), expected_size);
+    }
+
+    #[test]
+    fn test_eth72_hash_announcement_uses_blob_elided_size() {
+        let mut tx_gen = TransactionGenerator::new(rand::rng());
+        let mut tx = tx_gen.gen_eip4844_pooled();
+        tx.encoded_length = 100;
+        tx.eth72_encoded_length = 10;
+
+        let tx = valid_eth_pool_transaction(tx);
+        let mut builder = PooledTransactionsHashesBuilder::new(EthVersion::Eth72);
+        builder.push_pooled(tx.clone());
+
+        let PooledTransactionsHashesBuilder::Eth72(message) = builder else { unreachable!() };
+        assert_eq!(message.sizes, vec![10]);
+
+        let tx = PropagateTransaction::pool_tx(tx);
+        let mut builder = PooledTransactionsHashesBuilder::new(EthVersion::Eth72);
+        builder.push(&tx);
+
+        let PooledTransactionsHashesBuilder::Eth72(message) = builder else { unreachable!() };
+        assert_eq!(message.sizes, vec![10]);
     }
 
     #[test]

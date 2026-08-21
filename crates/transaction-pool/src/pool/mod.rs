@@ -416,7 +416,11 @@ where
         let transactions = self.get_all_propagatable(tx_hashes);
         let mut size = 0;
         for transaction in transactions {
-            let encoded_len = transaction.encoded_length();
+            let encoded_len = if limit.is_eth72() {
+                transaction.transaction.eth72_encoded_length()
+            } else {
+                transaction.encoded_length()
+            };
             let Some(pooled) = self.to_pooled_transaction(transaction) else {
                 continue;
             };
