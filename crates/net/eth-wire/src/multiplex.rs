@@ -767,6 +767,37 @@ impl<St, Primary> RlpxSatelliteStream<St, Primary> {
     }
 }
 
+impl<St, Primary> RlpxSatelliteStream<St, Primary>
+where
+    St: Sink<Bytes, Error = io::Error> + Unpin,
+{
+    /// Drains any buffered satellite output into the underlying connection.
+    ///
+    /// Both the stream and sink poll paths call this so a message already queued in the
+    /// out buffer is always handed to the connection before a new one is accepted,
+    /// keeping delivery order first come first served across the primary and satellite
+    /// protocols instead of letting one side bypass the other.
+    ///
+    /// Returns `Ok(true)` once the buffer is empty and the connection accepted every
+    /// message, `Ok(false)` if the connection applied backpressure before the buffer was
+    /// fully drained.
+    fn drain_out_buffer(&mut self, cx: &mut Context<'_>) -> Result<bool, P2PStreamError> {
+        loop {
+            match self.inner.conn.poll_ready_unpin(cx) {
+                Poll::Ready(Ok(())) => {
+                    let Some(msg) = self.inner.out_buffer.pop_front() else { return Ok(true) };
+                    self.inner.conn.start_send_unpin(msg)?;
+                }
+                Poll::Ready(Err(err)) => {
+                    self.inner.conn.start_disconnect(DisconnectReason::DisconnectRequested)?;
+                    return Err(err)
+                }
+                Poll::Pending => return Ok(false),
+            }
+        }
+    }
+}
+
 impl<St, Primary, PrimaryErr> Stream for RlpxSatelliteStream<St, Primary>
 where
     St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
@@ -785,32 +816,10 @@ where
                 return Poll::Ready(Some(msg))
             }
 
-            let mut conn_ready = true;
-            loop {
-                match this.inner.conn.poll_ready_unpin(cx) {
-                    Poll::Ready(Ok(())) => {
-                        if let Some(msg) = this.inner.out_buffer.pop_front() {
-                            if let Err(err) = this.inner.conn.start_send_unpin(msg) {
-                                return Poll::Ready(Some(Err(err.into())))
-                            }
-                        } else {
-                            break
-                        }
-                    }
-                    Poll::Ready(Err(err)) => {
-                        if let Err(disconnect_err) =
-                            this.inner.conn.start_disconnect(DisconnectReason::DisconnectRequested)
-                        {
-                            return Poll::Ready(Some(Err(disconnect_err.into())))
-                        }
-                        return Poll::Ready(Some(Err(err.into())))
-                    }
-                    Poll::Pending => {
-                        conn_ready = false;
-                        break
-                    }
-                }
-            }
+            let mut conn_ready = match this.drain_out_buffer(cx) {
+                Ok(ready) => ready,
+                Err(err) => return Poll::Ready(Some(Err(err.into()))),
+            };
             // The connection only buffers frames on `start_send`; `poll_flush` performs the
             // actual writes and flushes the transport once for the batch handed to it above.
             // This also resumes a flush that returned pending on an earlier pass; a no-op if
@@ -899,8 +908,12 @@ where
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let this = self.get_mut();
-        if let Err(err) = ready!(this.inner.conn.poll_ready_unpin(cx)) {
-            return Poll::Ready(Err(err.into()))
+        // Drain any satellite output queued ahead of this send first, so a primary send
+        // can never bypass messages that arrived earlier.
+        match this.drain_out_buffer(cx) {
+            Ok(true) => {}
+            Ok(false) => return Poll::Pending,
+            Err(err) => return Poll::Ready(Err(err.into())),
         }
         if let Err(err) = ready!(this.primary.st.poll_ready_unpin(cx)) {
             return Poll::Ready(Err(err))
@@ -1488,6 +1501,76 @@ mod tests {
         assert!(st.inner.out_buffer.bytes > st.inner.out_buffer.max_bytes);
         assert!(st.inner.out_buffer.bytes <= st.inner.out_buffer.max_bytes + MESSAGE_BYTES);
         assert!(st.inner.out_buffer.messages.len() < MESSAGE_COUNT);
+    }
+
+    #[derive(Debug, Default)]
+    struct ReadySinkPrimary {
+        sent: Vec<Bytes>,
+    }
+
+    impl Stream for ReadySinkPrimary {
+        type Item = Result<(), P2PStreamError>;
+
+        fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            Poll::Pending
+        }
+    }
+
+    impl Sink<Bytes> for ReadySinkPrimary {
+        type Error = P2PStreamError;
+
+        fn poll_ready(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn start_send(self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {
+            self.get_mut().sent.push(item);
+            Ok(())
+        }
+
+        fn poll_flush(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_close(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    /// Regression test for the satellite output buffer being starved when only the `Sink` side
+    /// of a satellite stream is polled, for example after splitting it with `StreamExt::split`.
+    /// `Sink::poll_ready` must drain `out_buffer` itself instead of relying on `Stream::poll_next`
+    /// to have run first.
+    #[tokio::test]
+    async fn satellite_mux_sink_drains_out_buffer_before_primary_ready() {
+        let (hello, _) = test_hello();
+        let shared_capabilities =
+            SharedCapabilities::try_new(hello.protocols.clone(), hello.message().capabilities)
+                .unwrap();
+        let conn = P2PStream::new(StalledTransport, shared_capabilities);
+        let eth = conn.shared_capabilities().eth().unwrap().clone();
+
+        let mut st = RlpxProtocolMultiplexer::new(conn)
+            .into_satellite_stream(eth.capability().as_ref(), |_proxy| ReadySinkPrimary::default())
+            .unwrap();
+
+        st.inner.out_buffer.push_back(Bytes::from_static(&[0x01]));
+        assert!(!st.inner.out_buffer.is_empty());
+
+        let mut cx = Context::from_waker(noop_waker_ref());
+        // Poll only the `Sink` side, the `Stream` side is never polled here.
+        assert!(Pin::new(&mut st).poll_ready(&mut cx).is_ready());
+
+        assert!(st.inner.out_buffer.is_empty());
     }
 
     #[tokio::test]
