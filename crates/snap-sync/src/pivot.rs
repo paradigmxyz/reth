@@ -88,24 +88,25 @@ impl SnapPivotPolicy {
         Ok(Some(SnapGeneration::new(block_number, header.hash(), header.state_root())))
     }
 
-    /// Returns whether an interrupted generation can still be finished under `head`.
+    /// Returns whether an interrupted generation is still worth finishing under `head`.
     ///
     /// A generation that has downloaded its full state only needs its trie rebuilt, so it stays
-    /// resumable however far the head has moved on.
-    pub fn is_resumable(
+    /// worth finishing however far the head has moved on. Whether its anchor is still canonical is
+    /// reported separately by [`is_canonical_anchor`](Self::is_canonical_anchor), because an
+    /// orphaned anchor can be recovered instead of abandoned.
+    pub const fn is_finishable(&self, generation: SnapGeneration, head: u64) -> bool {
+        matches!(generation.phase, SnapPhase::Trie) ||
+            self.is_catchable(generation.target_block, head)
+    }
+
+    /// Returns whether the block a generation is anchored to is still canonical.
+    pub fn is_canonical_anchor(
         &self,
         provider: &impl HeaderProvider,
         generation: SnapGeneration,
-        head: u64,
     ) -> Result<bool, SnapSyncError> {
-        let Some(header) = provider.sealed_header(generation.target_block).map_err(db_error)?
-        else {
-            return Ok(false)
-        };
-        if header.hash() != generation.target_hash {
-            return Ok(false)
-        }
-        Ok(generation.phase == SnapPhase::Trie || self.is_catchable(generation.target_block, head))
+        let header = provider.sealed_header(generation.target_block).map_err(db_error)?;
+        Ok(header.is_some_and(|header| header.hash() == generation.target_hash))
     }
 }
 
@@ -204,33 +205,32 @@ mod tests {
     }
 
     #[test]
-    fn generation_outside_the_bal_window_is_not_resumable() {
+    fn generation_outside_the_bal_window_is_not_finishable() {
         let headers = chain(Some(0));
         let anchor = headers[1].clone();
         let provider = provider_with(headers);
         let generation = SnapGeneration::new(1, anchor.hash_slow(), anchor.state_root);
         let policy = policy();
 
-        assert!(policy.is_resumable(&provider, generation, 9).unwrap());
-        assert!(!policy.is_resumable(&provider, generation, 10).unwrap());
+        assert!(policy.is_canonical_anchor(&provider, generation).unwrap());
+        assert!(policy.is_finishable(generation, 9));
+        assert!(!policy.is_finishable(generation, 10));
     }
 
     #[test]
-    fn downloaded_state_resumes_outside_the_bal_window() {
-        let headers = chain(Some(0));
-        let anchor = headers[1].clone();
-        let provider = provider_with(headers);
+    fn downloaded_state_finishes_outside_the_bal_window() {
+        let anchor = chain(Some(0))[1].clone();
         let mut generation = SnapGeneration::new(1, anchor.hash_slow(), anchor.state_root);
         generation.phase = SnapPhase::Trie;
 
-        assert!(policy().is_resumable(&provider, generation, 1_000).unwrap());
+        assert!(policy().is_finishable(generation, 1_000));
     }
 
     #[test]
-    fn reorged_anchor_is_not_resumable() {
+    fn reorged_anchor_is_not_canonical() {
         let provider = provider_with(chain(Some(0)));
         let generation = SnapGeneration::new(1, B256::repeat_byte(0xff), B256::ZERO);
 
-        assert!(!policy().is_resumable(&provider, generation, 2).unwrap());
+        assert!(!policy().is_canonical_anchor(&provider, generation).unwrap());
     }
 }

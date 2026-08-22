@@ -5,13 +5,15 @@
 //! the trie. Phases that run out of peers wait for the node to report progress instead of spinning.
 
 use crate::{
-    error::db_error, BlockAccessListCatchUp, BlockAccessListCatchUpOutcome, RangeBudget,
-    SnapGeneration, SnapPhase, SnapPivotPolicy, SnapStateStore, SnapSyncError,
-    StateDownloadOutcome, StateDownloader, TrieGenerator,
+    error::db_error, BlockAccessListCatchUp, BlockAccessListCatchUpOutcome, PivotReorgRecovery,
+    RangeBudget, ReorgLimits, ReorgRecoveryOutcome, SnapGeneration, SnapPhase, SnapPivotPolicy,
+    SnapStateStore, SnapSyncError, StateDownloadOutcome, StateDownloader, TrieGenerator,
 };
+use alloy_primitives::Sealable;
 use core::future::Future;
 use reth_db_api::transaction::DbTxMut;
-use reth_network_p2p::snap::client::SnapClient;
+use reth_network_p2p::{headers::client::HeadersClient, snap::client::SnapClient};
+use reth_primitives_traits::BlockHeader;
 use reth_provider::DatabaseProviderFactory;
 use reth_storage_api::{
     AccountExtReader, ChangeSetReader, DBProvider, HeaderProvider, StageCheckpointReader,
@@ -26,9 +28,11 @@ const DEFAULT_RANGE_BUDGET: RangeBudget = RangeBudget::new(64);
 
 /// Drives a Snap state bootstrap to a validated state root.
 #[derive(Debug)]
-pub struct SnapSyncSession<'a, C, F, X> {
+pub struct SnapSyncSession<'a, C, H, F, X> {
     // A reference avoids requiring network clients to implement Clone.
     client: &'a C,
+    // Walks orphaned chains back to their common ancestor during recovery.
+    headers: &'a H,
     // Every phase observes the same provider factory.
     factory: &'a F,
     // Generation transitions stay durable through the store.
@@ -41,19 +45,29 @@ pub struct SnapSyncSession<'a, C, F, X> {
     policy: SnapPivotPolicy,
     // Account ranges committed between pivot re-anchoring checks.
     budget: RangeBudget,
+    // Bounds beyond which an orphaned generation is restarted instead of recovered.
+    reorg_limits: ReorgLimits,
 }
 
-impl<'a, C, F, X> SnapSyncSession<'a, C, F, X> {
+impl<'a, C, H, F, X> SnapSyncSession<'a, C, H, F, X> {
     /// Creates a session without starting network or database work.
-    pub const fn new(client: &'a C, factory: &'a F, context: X, runtime: Runtime) -> Self {
+    pub const fn new(
+        client: &'a C,
+        headers: &'a H,
+        factory: &'a F,
+        context: X,
+        runtime: Runtime,
+    ) -> Self {
         Self {
             client,
+            headers,
             factory,
             store: SnapStateStore::new(factory),
             context,
             runtime,
             policy: SnapPivotPolicy::new(),
             budget: DEFAULT_RANGE_BUDGET,
+            reorg_limits: ReorgLimits::new(),
         }
     }
 
@@ -69,6 +83,12 @@ impl<'a, C, F, X> SnapSyncSession<'a, C, F, X> {
         self
     }
 
+    /// Sets the bounds beyond which an orphaned generation is restarted instead of recovered.
+    pub const fn with_reorg_limits(mut self, limits: ReorgLimits) -> Self {
+        self.reorg_limits = limits;
+        self
+    }
+
     /// Runs until the state is validated or the context reports no further progress.
     ///
     /// A pivot that leaves the canonical chain, or falls behind the block access list history
@@ -77,6 +97,7 @@ impl<'a, C, F, X> SnapSyncSession<'a, C, F, X> {
     pub async fn run(&mut self) -> Result<SnapSyncOutcome, SnapSyncError>
     where
         C: SnapClient,
+        H: HeadersClient<Header: BlockHeader + Sealable>,
         F: DatabaseProviderFactory<Provider: HeaderProvider + StageCheckpointReader>
             + Clone
             + Send
@@ -86,12 +107,27 @@ impl<'a, C, F, X> SnapSyncSession<'a, C, F, X> {
     {
         loop {
             let head = self.context.canonical_head()?;
-            let Some(generation) = self.resolve_generation(head)? else {
-                debug!(target: "snap::session", head, "No eligible snap pivot");
-                if !self.context.wait_for_progress(head).await {
-                    return Ok(SnapSyncOutcome::Stalled { generation: None })
+            let generation = match self.resolve_generation(head)? {
+                Resolved::Ready(generation) => generation,
+                Resolved::Orphaned(generation) => match self.recover(generation).await? {
+                    ReorgRecoveryOutcome::Recovered { generation } => generation,
+                    ReorgRecoveryOutcome::Unrecoverable => match self.start_generation(head)? {
+                        Some(generation) => generation,
+                        None => {
+                            if !self.context.wait_for_progress(head).await {
+                                return Ok(SnapSyncOutcome::Stalled { generation: None })
+                            }
+                            continue
+                        }
+                    },
+                },
+                Resolved::Wait => {
+                    debug!(target: "snap::session", head, "No eligible snap pivot");
+                    if !self.context.wait_for_progress(head).await {
+                        return Ok(SnapSyncOutcome::Stalled { generation: None })
+                    }
+                    continue
                 }
-                continue
             };
 
             match self.drive(generation, head).await {
@@ -121,19 +157,32 @@ impl<'a, C, F, X> SnapSyncSession<'a, C, F, X> {
     }
 
     // Resumes a usable generation, otherwise starts a clean one on the current canonical pivot.
-    fn resolve_generation(&self, head: u64) -> Result<Option<SnapGeneration>, SnapSyncError>
+    fn resolve_generation(&self, head: u64) -> Result<Resolved, SnapSyncError>
     where
         F: DatabaseProviderFactory<Provider: HeaderProvider + StageCheckpointReader>,
         F::ProviderRW: SnapSyncProvider,
     {
-        let interrupted = self.store.interrupted_generation()?;
+        if let Some(generation) = self.store.interrupted_generation()? &&
+            self.policy.is_finishable(generation, head)
+        {
+            let provider = self.factory.database_provider_ro().map_err(db_error)?;
+            return Ok(if self.policy.is_canonical_anchor(&provider, generation)? {
+                Resolved::Ready(generation)
+            } else {
+                Resolved::Orphaned(generation)
+            })
+        }
+        Ok(self.start_generation(head)?.map_or(Resolved::Wait, Resolved::Ready))
+    }
+
+    // Begins a clean generation on the canonical pivot, discarding any state left behind.
+    fn start_generation(&self, head: u64) -> Result<Option<SnapGeneration>, SnapSyncError>
+    where
+        F: DatabaseProviderFactory<Provider: HeaderProvider + StageCheckpointReader>,
+        F::ProviderRW: SnapSyncProvider,
+    {
         let pivot = {
             let provider = self.factory.database_provider_ro().map_err(db_error)?;
-            if let Some(generation) = interrupted &&
-                self.policy.is_resumable(&provider, generation, head)?
-            {
-                return Ok(Some(generation))
-            }
             self.policy.select(&provider, head)?
         };
         let Some(pivot) = pivot else { return Ok(None) };
@@ -145,6 +194,28 @@ impl<'a, C, F, X> SnapSyncSession<'a, C, F, X> {
         );
         self.store.begin_generation(pivot)?;
         Ok(Some(pivot))
+    }
+
+    // Reconciles an orphaned generation with the canonical chain, per EIP-8189.
+    async fn recover(
+        &self,
+        generation: SnapGeneration,
+    ) -> Result<ReorgRecoveryOutcome, SnapSyncError>
+    where
+        C: SnapClient,
+        H: HeadersClient<Header: BlockHeader + Sealable>,
+        F: DatabaseProviderFactory<Provider: HeaderProvider>,
+        F::ProviderRW: SnapSyncProvider,
+    {
+        info!(
+            target: "snap::session",
+            target_block = generation.target_block,
+            "Recovering snap pivot across a reorg"
+        );
+        PivotReorgRecovery::new(self.client, self.headers, self.factory, self.runtime.clone())
+            .with_limits(self.reorg_limits)
+            .run(generation)
+            .await
     }
 
     // Advances one generation through its remaining phases, waiting whenever peers run out.
@@ -334,6 +405,16 @@ impl<T> SnapSyncProvider for T where
 {
 }
 
+// Distinguishes a generation that can continue from one that must first be reconciled.
+enum Resolved {
+    // Ready to be driven.
+    Ready(SnapGeneration),
+    // Anchored on a block the canonical chain no longer contains.
+    Orphaned(SnapGeneration),
+    // No generation can start until the chain or peers progress.
+    Wait,
+}
+
 // Keeps phase sequencing independent of the session's public outcome type.
 enum SessionStep {
     // The generation's trie was rebuilt and accepted.
@@ -359,13 +440,23 @@ mod tests {
     use super::*;
     use crate::AccountRangeProgress;
     use alloy_consensus::Header;
-    use alloy_primitives::{B256, KECCAK256_EMPTY, U256};
+    use alloy_eip7928::{
+        bal::{Bal, DecodedBal},
+        AccountChanges, BalanceChange, BlockAccessIndex,
+    };
+    use alloy_primitives::{Address, Bytes, B256, KECCAK256_EMPTY, U256};
     use reth_db_api::{tables, transaction::DbTx};
     use reth_downloaders::snap::test_utils::TestSnapClient;
-    use reth_eth_wire_types::snap::{AccountData, AccountRangeMessage};
-    use reth_network_p2p::{error::PeerRequestResult, snap::client::SnapResponse};
+    use reth_eth_wire_types::{
+        snap::{AccountData, AccountRangeMessage, BlockAccessListsMessage},
+        BlockAccessLists,
+    };
+    use reth_ethereum_primitives::BlockBody;
+    use reth_network_p2p::{
+        error::PeerRequestResult, snap::client::SnapResponse, test_utils::TestFullBlockClient,
+    };
     use reth_network_peers::{PeerId, WithPeerId};
-    use reth_primitives_traits::Account;
+    use reth_primitives_traits::{Account, SealedHeader};
     use reth_provider::{
         test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
         ProviderFactory, StaticFileProviderFactory, StaticFileWriter,
@@ -404,10 +495,10 @@ mod tests {
         factory: &ProviderFactory<MockNodeTypesWithDB>,
         roots: impl IntoIterator<Item = B256>,
         block_access_lists: bool,
-    ) -> Vec<B256> {
+    ) -> Vec<Header> {
         let static_files = factory.static_file_provider();
         let mut writer = static_files.latest_writer(StaticFileSegment::Headers).unwrap();
-        let mut hashes = Vec::new();
+        let mut headers = Vec::new();
         let mut parent = B256::ZERO;
         for (number, state_root) in roots.into_iter().enumerate() {
             let header = Header {
@@ -418,15 +509,14 @@ mod tests {
                     .then(|| B256::with_last_byte(number as u8)),
                 ..Default::default()
             };
-            let hash = header.hash_slow();
-            writer.append_header(&header, &hash).unwrap();
-            parent = hash;
-            hashes.push(hash);
+            parent = header.hash_slow();
+            writer.append_header(&header, &parent).unwrap();
+            headers.push(header);
         }
         writer.commit().unwrap();
         drop(writer);
         drop(static_files);
-        hashes
+        headers
     }
 
     fn account_range(accounts: Vec<(B256, TrieAccount)>) -> PeerRequestResult<SnapResponse> {
@@ -450,19 +540,21 @@ mod tests {
         let account_hash = B256::repeat_byte(0x11);
         let account = account();
         let root = state_root(account_hash, &account);
-        let hashes = chain(&factory, [B256::ZERO, root], true);
+        let blocks = chain(&factory, [B256::ZERO, root], true);
         let client = TestSnapClient::new([account_range(vec![(account_hash, account)])]);
+        let headers = TestFullBlockClient::default();
         let context = TestContext::new(2, []);
 
-        let outcome = SnapSyncSession::new(&client, &factory, context.clone(), Runtime::test())
-            .with_policy(policy())
-            .run()
-            .await
-            .unwrap();
+        let outcome =
+            SnapSyncSession::new(&client, &headers, &factory, context.clone(), Runtime::test())
+                .with_policy(policy())
+                .run()
+                .await
+                .unwrap();
 
         let SnapSyncOutcome::Complete { generation } = outcome else { panic!("completed session") };
         assert_eq!(generation.target_block, 1);
-        assert_eq!(generation.target_hash, hashes[1]);
+        assert_eq!(generation.target_hash, blocks[1].hash_slow());
         assert_eq!(generation.state_root, root);
         assert!(context.waits().is_empty());
         let store = SnapStateStore::new(&factory);
@@ -482,9 +574,9 @@ mod tests {
     async fn generation_outside_the_bal_window_restarts_on_a_fresh_pivot() {
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
-        let hashes = chain(&factory, [B256::ZERO; 4], true);
+        let blocks = chain(&factory, [B256::ZERO; 4], true);
         let store = SnapStateStore::new(&factory);
-        let stale = SnapGeneration::new(0, hashes[0], B256::ZERO);
+        let stale = SnapGeneration::new(0, blocks[0].hash_slow(), B256::ZERO);
         store.begin_generation(stale).unwrap();
         let account_hash = B256::repeat_byte(0x11);
         store
@@ -497,18 +589,20 @@ mod tests {
             )
             .unwrap();
         let client = TestSnapClient::new(std::iter::empty());
+        let headers = TestFullBlockClient::default();
         let context = TestContext::new(3, []);
 
-        let outcome = SnapSyncSession::new(&client, &factory, context.clone(), Runtime::test())
-            .with_policy(SnapPivotPolicy { history: 1, ..policy() })
-            .run()
-            .await
-            .unwrap();
+        let outcome =
+            SnapSyncSession::new(&client, &headers, &factory, context.clone(), Runtime::test())
+                .with_policy(SnapPivotPolicy { history: 1, ..policy() })
+                .run()
+                .await
+                .unwrap();
 
         let SnapSyncOutcome::Stalled { generation } = outcome else { panic!("stalled session") };
         let generation = generation.expect("restarted generation");
         assert_eq!(generation.target_block, 2);
-        assert_eq!(generation.target_hash, hashes[2]);
+        assert_eq!(generation.target_hash, blocks[2].hash_slow());
         assert_eq!(store.interrupted_generation().unwrap(), Some(generation));
         assert_eq!(context.waits(), [3]);
         // Restarting clears the abandoned generation's partial state.
@@ -520,9 +614,9 @@ mod tests {
     async fn resumable_generation_keeps_its_downloaded_state() {
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
-        let hashes = chain(&factory, [B256::ZERO; 4], true);
+        let blocks = chain(&factory, [B256::ZERO; 4], true);
         let store = SnapStateStore::new(&factory);
-        let interrupted = SnapGeneration::new(2, hashes[2], B256::ZERO);
+        let interrupted = SnapGeneration::new(2, blocks[2].hash_slow(), B256::ZERO);
         store.begin_generation(interrupted).unwrap();
         let account_hash = B256::repeat_byte(0x11);
         let interrupted = store
@@ -535,13 +629,15 @@ mod tests {
             )
             .unwrap();
         let client = TestSnapClient::new(std::iter::empty());
+        let headers = TestFullBlockClient::default();
         let context = TestContext::new(3, []);
 
-        let outcome = SnapSyncSession::new(&client, &factory, context.clone(), Runtime::test())
-            .with_policy(policy())
-            .run()
-            .await
-            .unwrap();
+        let outcome =
+            SnapSyncSession::new(&client, &headers, &factory, context.clone(), Runtime::test())
+                .with_policy(policy())
+                .run()
+                .await
+                .unwrap();
 
         assert_eq!(outcome, SnapSyncOutcome::Stalled { generation: Some(interrupted) });
         assert_eq!(store.interrupted_generation().unwrap(), Some(interrupted));
@@ -555,18 +651,75 @@ mod tests {
         factory.set_storage_settings_cache(StorageSettings::v2());
         chain(&factory, [B256::ZERO; 4], false);
         let client = TestSnapClient::new(std::iter::empty());
+        let headers = TestFullBlockClient::default();
         let context = TestContext::new(3, [3]);
 
-        let outcome = SnapSyncSession::new(&client, &factory, context.clone(), Runtime::test())
-            .with_policy(policy())
-            .run()
-            .await
-            .unwrap();
+        let outcome =
+            SnapSyncSession::new(&client, &headers, &factory, context.clone(), Runtime::test())
+                .with_policy(policy())
+                .run()
+                .await
+                .unwrap();
 
         assert_eq!(outcome, SnapSyncOutcome::Stalled { generation: None });
         // One wait per unproductive head, and no request while no pivot is eligible.
         assert_eq!(context.waits(), [3, 3]);
         assert!(client.priorities().is_empty());
+    }
+
+    #[tokio::test]
+    async fn orphaned_generation_is_recovered_instead_of_restarted() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let blocks = chain(&factory, [B256::ZERO; 4], true);
+        let (block_access_list, raw) = orphan_block_access_list();
+        // Shares the canonical parent of block 2, so the generation's anchor is a real fork.
+        let orphan = Header {
+            number: 2,
+            parent_hash: blocks[1].hash_slow(),
+            state_root: B256::repeat_byte(0xee),
+            block_access_list_hash: Some(block_access_list.hash()),
+            ..Default::default()
+        };
+        let headers = TestFullBlockClient::default();
+        for header in [blocks[0].clone(), blocks[1].clone(), orphan.clone()] {
+            headers.insert(SealedHeader::seal_slow(header), BlockBody::default());
+        }
+
+        let store = SnapStateStore::new(&factory);
+        let generation = SnapGeneration::new(2, orphan.hash_slow(), orphan.state_root);
+        store.begin_generation(generation).unwrap();
+        let client = TestSnapClient::new([Ok(WithPeerId::new(
+            PeerId::random(),
+            SnapResponse::BlockAccessLists(BlockAccessListsMessage {
+                request_id: 1,
+                block_access_lists: BlockAccessLists(vec![Some(raw)]),
+            }),
+        ))]);
+        let context = TestContext::new(3, []);
+
+        let outcome =
+            SnapSyncSession::new(&client, &headers, &factory, context.clone(), Runtime::test())
+                .with_policy(policy())
+                .run()
+                .await
+                .unwrap();
+
+        let SnapSyncOutcome::Stalled { generation } = outcome else { panic!("stalled session") };
+        let generation = generation.expect("recovered generation");
+        assert_eq!(generation.target_block, 1);
+        assert_eq!(generation.target_hash, blocks[1].hash_slow());
+        assert_eq!(generation.state_root, blocks[1].state_root);
+        assert_eq!(generation.next_block, 2);
+        assert_eq!(store.interrupted_generation().unwrap(), Some(generation));
+    }
+
+    // A single mutation is enough to exercise recovery; nothing was downloaded to restore.
+    fn orphan_block_access_list() -> (DecodedBal, Bytes) {
+        let changes = AccountChanges::new(Address::repeat_byte(1))
+            .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::from(1)));
+        let raw = Bytes::from(alloy_rlp::encode(Bal::new(vec![changes])));
+        (DecodedBal::from_rlp_bytes(raw.clone()).unwrap(), raw)
     }
 
     // Scripted head progression shared with the test that inspects it.
