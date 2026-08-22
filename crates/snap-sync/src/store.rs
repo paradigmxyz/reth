@@ -465,6 +465,30 @@ where
         let provider = self.factory.database_provider_ro().map_err(db_error)?;
         Self::load_generation(&provider)
     }
+
+    /// Returns the block a completed generation left as the state frontier.
+    ///
+    /// `None` while a generation is still being assembled, or when the node was never snap
+    /// synced.
+    pub fn completed_block(&self) -> Result<Option<u64>, SnapSyncError> {
+        let provider = self.factory.database_provider_ro().map_err(db_error)?;
+        Self::completed_block_in(&provider)
+    }
+}
+
+impl<F> SnapStateStore<'_, F> {
+    // An accepted generation leaves its block behind with no resumable progress.
+    pub(crate) fn completed_block_in(
+        provider: &impl StageCheckpointReader,
+    ) -> Result<Option<u64>, SnapSyncError> {
+        if Self::load_generation(provider)?.is_some() {
+            return Ok(None)
+        }
+        Ok(provider
+            .get_stage_checkpoint(SNAP_SYNC_STAGE)
+            .map_err(db_error)?
+            .map(|checkpoint| checkpoint.block_number))
+    }
 }
 
 /// Durable identity and restart position of a Snap state generation.

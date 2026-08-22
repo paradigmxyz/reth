@@ -56,6 +56,14 @@ pub enum SnapSyncError {
     /// Reth's Merkle stage rejected the downloaded state.
     #[error("snap trie generation failed: {0}")]
     Trie(String),
+    /// The pipeline was handed a generation whose state was never accepted.
+    #[error("snap state is not complete at block {expected}, completed block is {actual:?}")]
+    IncompleteState {
+        /// Block the handoff was asked to publish.
+        expected: u64,
+        /// Block a completed generation left behind, if any.
+        actual: Option<u64>,
+    },
     /// The database uses plain canonical state, which hashed Snap keys cannot populate.
     #[error("snap sync requires the v2 hashed-state layout")]
     UnsupportedStorageLayout,
