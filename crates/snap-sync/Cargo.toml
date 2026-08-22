@@ -36,6 +36,7 @@ revm.workspace = true
 
 # misc
 thiserror.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 alloy-consensus.workspace = true

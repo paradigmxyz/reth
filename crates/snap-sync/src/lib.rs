@@ -14,6 +14,7 @@ mod catch_up;
 mod download;
 mod error;
 mod pivot;
+mod session;
 mod store;
 mod trie;
 
@@ -21,6 +22,7 @@ pub use catch_up::{BlockAccessListCatchUp, BlockAccessListCatchUpOutcome};
 pub use download::{RangeBudget, StateDownloadOutcome, StateDownloader};
 pub use error::SnapSyncError;
 pub use pivot::{SnapPivotPolicy, BAL_HISTORY_BLOCKS};
+pub use session::{SnapSyncContext, SnapSyncOutcome, SnapSyncProvider, SnapSyncSession};
 pub use store::{
     AccountRangeProgress, BlockAccessListProgress, SnapGeneration, SnapPhase, SnapStateStore,
 };

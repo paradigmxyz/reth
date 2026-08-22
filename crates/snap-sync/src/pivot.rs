@@ -28,15 +28,20 @@ pub struct SnapPivotPolicy {
 
 impl Default for SnapPivotPolicy {
     fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SnapPivotPolicy {
+    /// Creates the default policy in a const context.
+    pub const fn new() -> Self {
         Self {
             head_distance: DEFAULT_HEAD_DISTANCE,
             advance_after: DEFAULT_ADVANCE_AFTER,
             history: BAL_HISTORY_BLOCKS,
         }
     }
-}
 
-impl SnapPivotPolicy {
     /// Returns the block a pivot anchored under `head` targets.
     ///
     /// # Examples
