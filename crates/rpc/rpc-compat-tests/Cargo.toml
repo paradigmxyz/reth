@@ -1,0 +1,68 @@
+[package]
+name = "reth-rpc-compat-tests"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Rust-native execution-apis RPC compatibility test runner for Reth"
+
+[lints]
+workspace = true
+
+[features]
+default = ["embedded"]
+embedded = [
+    "dep:alloy-genesis",
+    "dep:alloy-rpc-types-engine",
+    "dep:futures-util",
+    "dep:reth-chainspec",
+    "dep:reth-e2e-test-utils",
+    "dep:reth-node-api",
+    "dep:reth-node-core",
+    "dep:reth-node-ethereum",
+    "dep:reth-rpc-api",
+    "dep:reth-tracing",
+]
+
+[dependencies]
+# reth
+reth-e2e-test-utils = { workspace = true, optional = true }
+reth-rpc-api = { workspace = true, features = ["client"], optional = true }
+reth-chainspec = { workspace = true, optional = true }
+reth-node-ethereum = { workspace = true, optional = true }
+reth-node-core = { workspace = true, optional = true }
+reth-tracing = { workspace = true, optional = true }
+
+# ethereum
+alloy-rpc-types-engine = { workspace = true, optional = true }
+alloy-genesis = { workspace = true, optional = true }
+
+# async
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+futures-util = { workspace = true, optional = true }
+reqwest.workspace = true
+
+# misc
+eyre.workspace = true
+clap = { workspace = true, features = ["derive"] }
+flate2.workspace = true
+jsonschema.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+serde_yaml.workspace = true
+sha2.workspace = true
+similar.workspace = true
+tar.workspace = true
+tempfile.workspace = true
+toml.workspace = true
+tracing.workspace = true
+walkdir.workspace = true
+
+# required for the Action trait
+reth-node-api = { workspace = true, optional = true }
+
+[[bin]]
+name = "reth-rpc-compat"
+path = "src/main.rs"
