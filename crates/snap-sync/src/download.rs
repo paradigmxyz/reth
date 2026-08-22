@@ -54,10 +54,12 @@ impl<'a, C, F> StateDownloader<'a, C, F> {
         Self { client, store: SnapStateStore::new(factory), runtime, request_id: 0 }
     }
 
-    /// Resumes account state download until it completes or every eligible peer is unavailable.
+    /// Resumes account state download until `budget` is spent, the state completes, or every
+    /// eligible peer is unavailable.
     pub async fn run(
         &mut self,
         mut generation: SnapGeneration,
+        budget: RangeBudget,
     ) -> Result<StateDownloadOutcome, SnapSyncError>
     where
         C: SnapClient,
@@ -75,7 +77,12 @@ impl<'a, C, F> StateDownloader<'a, C, F> {
             })
         }
 
+        let mut remaining = budget.ranges();
         loop {
+            let Some(next_remaining) = remaining.checked_sub(1) else {
+                return Ok(StateDownloadOutcome::Paused { generation })
+            };
+            remaining = next_remaining;
             let Some(range) = self.download_account_range(generation).await? else {
                 return Ok(StateDownloadOutcome::Unavailable { generation })
             };
@@ -348,6 +355,41 @@ pub enum StateDownloadOutcome {
         /// Last fully committed generation position.
         generation: SnapGeneration,
     },
+    /// The range budget was spent while account ranges remained.
+    Paused {
+        /// Last fully committed generation position.
+        generation: SnapGeneration,
+    },
+}
+
+/// Number of account ranges a single download attempt commits before yielding.
+///
+/// A bounded budget lets a caller re-anchor the pivot between ranges instead of waiting for a
+/// full-state download that can outlive the served BAL history.
+///
+/// # Examples
+///
+/// ```
+/// use reth_snap_sync::RangeBudget;
+///
+/// assert_eq!(RangeBudget::new(4).ranges(), 4);
+/// ```
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RangeBudget(usize);
+
+impl RangeBudget {
+    /// Downloads until the state completes or peers stop serving it.
+    pub const UNBOUNDED: Self = Self(usize::MAX);
+
+    /// Returns control after `ranges` committed account ranges.
+    pub const fn new(ranges: usize) -> Self {
+        Self(ranges)
+    }
+
+    /// Returns the number of account ranges left in the budget.
+    pub const fn ranges(self) -> usize {
+        self.0
+    }
 }
 
 /// Prioritizes follow-ups while preserving the unavailable-peer set.
@@ -390,10 +432,31 @@ mod tests {
     use reth_network_peers::WithPeerId;
     use reth_provider::test_utils::create_test_provider_factory;
     use reth_storage_api::StorageSettings;
-    use reth_trie_common::{HashBuilder, Nibbles};
+    use reth_trie_common::{proof::ProofRetainer, HashBuilder, Nibbles};
 
     fn response(peer_id: PeerId, response: SnapResponse) -> PeerRequestResult<SnapResponse> {
         Ok(WithPeerId::new(peer_id, response))
+    }
+
+    fn empty_account(nonce: u64) -> TrieAccount {
+        TrieAccount {
+            nonce,
+            balance: U256::from(1),
+            storage_root: EMPTY_ROOT_HASH,
+            code_hash: KECCAK256_EMPTY,
+        }
+    }
+
+    fn root_and_proof(accounts: &[(B256, TrieAccount)], targets: &[B256]) -> (B256, Vec<Bytes>) {
+        let targets = targets.iter().copied().map(Nibbles::unpack).collect();
+        let mut builder = HashBuilder::default().with_proof_retainer(ProofRetainer::new(targets));
+        for (hash, account) in accounts {
+            builder.add_leaf(Nibbles::unpack(*hash), &alloy_rlp::encode(account));
+        }
+        let root = builder.root();
+        let proof =
+            builder.take_proof_nodes().into_nodes_sorted().into_iter().map(|(_, node)| node);
+        (root, proof.collect())
     }
 
     fn trie_root(entries: impl IntoIterator<Item = (B256, Vec<u8>)>) -> B256 {
@@ -419,8 +482,10 @@ mod tests {
             }),
         )]);
 
-        let outcome =
-            StateDownloader::new(&client, &factory, Runtime::test()).run(generation).await.unwrap();
+        let outcome = StateDownloader::new(&client, &factory, Runtime::test())
+            .run(generation, RangeBudget::UNBOUNDED)
+            .await
+            .unwrap();
 
         let StateDownloadOutcome::Complete { generation } = outcome else {
             panic!("completed state download")
@@ -455,8 +520,10 @@ mod tests {
             ),
         ]);
 
-        let outcome =
-            StateDownloader::new(&client, &factory, Runtime::test()).run(generation).await.unwrap();
+        let outcome = StateDownloader::new(&client, &factory, Runtime::test())
+            .run(generation, RangeBudget::UNBOUNDED)
+            .await
+            .unwrap();
 
         assert_eq!(outcome, StateDownloadOutcome::Unavailable { generation });
         assert_eq!(*client.exclusions(), [vec![], vec![first], vec![first, second]]);
@@ -503,8 +570,10 @@ mod tests {
             ),
         ]);
 
-        let outcome =
-            StateDownloader::new(&client, &factory, Runtime::test()).run(generation).await.unwrap();
+        let outcome = StateDownloader::new(&client, &factory, Runtime::test())
+            .run(generation, RangeBudget::UNBOUNDED)
+            .await
+            .unwrap();
 
         assert!(matches!(outcome, StateDownloadOutcome::Complete { .. }));
         let provider = factory.database_provider_ro().unwrap();
@@ -526,6 +595,38 @@ mod tests {
             cursor.seek_by_key_subkey(account_hash, slot_hash).unwrap().unwrap().value,
             slot_value
         );
+    }
+
+    #[tokio::test]
+    async fn spent_budget_pauses_before_the_next_range() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let first = (B256::repeat_byte(0x11), empty_account(1));
+        let second = (B256::repeat_byte(0x22), empty_account(2));
+        let (state_root, proof) = root_and_proof(&[first, second], &[first.0]);
+        let generation = SnapGeneration::new(10, B256::repeat_byte(1), state_root);
+        SnapStateStore::new(&factory).begin_generation(generation).unwrap();
+        let client = TestSnapClient::new([response(
+            PeerId::random(),
+            SnapResponse::AccountRange(AccountRangeMessage {
+                request_id: 1,
+                accounts: vec![AccountData::from_trie_account(first.0, &first.1)],
+                proof,
+            }),
+        )]);
+
+        let outcome = StateDownloader::new(&client, &factory, Runtime::test())
+            .run(generation, RangeBudget::new(1))
+            .await
+            .unwrap();
+
+        let StateDownloadOutcome::Paused { generation } = outcome else {
+            panic!("paused state download")
+        };
+        assert_eq!(generation.phase, SnapPhase::Accounts);
+        assert_eq!(generation.next_account, next_hash(first.0).unwrap());
+        // Only the first range was requested, so the peer never saw a continuation.
+        assert_eq!(client.priorities().len(), 1);
     }
 
     #[test]
