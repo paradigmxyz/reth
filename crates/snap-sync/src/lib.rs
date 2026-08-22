@@ -11,6 +11,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 mod catch_up;
+mod context;
 mod download;
 mod error;
 mod pivot;
@@ -19,6 +20,7 @@ mod store;
 mod trie;
 
 pub use catch_up::{BlockAccessListCatchUp, BlockAccessListCatchUpOutcome};
+pub use context::NodeSnapContext;
 pub use download::{RangeBudget, StateDownloadOutcome, StateDownloader};
 pub use error::SnapSyncError;
 pub use pivot::{SnapPivotPolicy, BAL_HISTORY_BLOCKS};

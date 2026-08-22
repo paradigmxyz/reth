@@ -36,6 +36,7 @@ revm.workspace = true
 
 # misc
 thiserror.workspace = true
+tokio = { workspace = true, features = ["time"] }
 tracing.workspace = true
 
 [dev-dependencies]
