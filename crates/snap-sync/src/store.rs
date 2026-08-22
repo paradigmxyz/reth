@@ -95,17 +95,48 @@ impl<'a, F> SnapStateStore<'a, F> {
         if !state.is_empty() {
             provider.write_hashed_state(&state.into_sorted()).map_err(db_error)?;
         }
-        let contracts = bytecodes
-            .into_iter()
-            .filter(|(_, code)| !code.is_empty())
-            .map(|(hash, code)| (hash, Bytecode::new_raw(code)))
-            .collect::<Vec<_>>();
-        if !contracts.is_empty() {
-            provider
-                .write_state_changes(StateChangeset { contracts, ..Default::default() })
-                .map_err(db_error)?;
-        }
+        Self::write_bytecodes(&provider, bytecodes)?;
 
+        Self::save_generation(&provider, next_generation)?;
+        provider.commit().map_err(db_error)?;
+        Ok(next_generation)
+    }
+
+    /// Moves a generation back to a canonical ancestor, committing the state restored there.
+    ///
+    /// `state` and `bytecodes` carry the entries a reorg invalidated, already re-fetched at the
+    /// ancestor's root. Deleted accounts and wiped storage in `state` remove what the orphaned
+    /// fork wrote.
+    pub fn commit_reanchor(
+        &self,
+        generation: SnapGeneration,
+        block_number: u64,
+        block_hash: B256,
+        state: HashedPostState,
+        bytecodes: Vec<(B256, Bytes)>,
+    ) -> Result<SnapGeneration, SnapSyncError>
+    where
+        F: DatabaseProviderFactory,
+        F::ProviderRW: DBProvider
+            + HeaderProvider
+            + StageCheckpointReader
+            + StageCheckpointWriter
+            + StateWriter
+            + StorageSettingsCache,
+    {
+        generation.validate()?;
+        let provider = self.factory.database_provider_rw().map_err(db_error)?;
+        if !provider.cached_storage_settings().use_hashed_state() {
+            return Err(SnapSyncError::UnsupportedStorageLayout)
+        }
+        self.ensure_generation(&provider, generation)?;
+        let (state_root, _) = Self::canonical_header_fields(&provider, block_number, block_hash)?;
+        let next_generation = generation.reanchored(block_number, block_hash, state_root)?;
+
+        if !state.is_empty() {
+            provider.write_hashed_state(&state.into_sorted()).map_err(db_error)?;
+        }
+        Self::write_bytecodes(&provider, bytecodes)?;
         Self::save_generation(&provider, next_generation)?;
         provider.commit().map_err(db_error)?;
         Ok(next_generation)
@@ -338,6 +369,24 @@ impl<'a, F> SnapStateStore<'a, F> {
         Ok(())
     }
 
+    // Contract code is content addressed, so re-writing a known hash is harmless.
+    fn write_bytecodes(
+        provider: &impl StateWriter,
+        bytecodes: Vec<(B256, Bytes)>,
+    ) -> Result<(), SnapSyncError> {
+        let contracts = bytecodes
+            .into_iter()
+            .filter(|(_, code)| !code.is_empty())
+            .map(|(hash, code)| (hash, Bytecode::new_raw(code)))
+            .collect::<Vec<_>>();
+        if contracts.is_empty() {
+            return Ok(())
+        }
+        provider
+            .write_state_changes(StateChangeset { contracts, ..Default::default() })
+            .map_err(db_error)
+    }
+
     // Canonical checks keep a reorged pivot or in-flight BAL outside the durable generation.
     fn canonical_header_fields(
         provider: &impl HeaderProvider,
@@ -508,6 +557,30 @@ impl SnapGeneration {
         Ok(self)
     }
 
+    // A recovered generation restarts from the common ancestor of the orphaned and canonical
+    // chains, so its downloaded prefix is caught up again from there.
+    fn reanchored(
+        mut self,
+        block_number: u64,
+        block_hash: B256,
+        state_root: B256,
+    ) -> Result<Self, SnapSyncError> {
+        if block_number >= self.target_block {
+            return Err(SnapSyncError::InvalidRequest(format!(
+                "reanchor block {block_number} does not precede anchor {}",
+                self.target_block
+            )))
+        }
+        self.next_block = block_number.saturating_add(1);
+        self.target_block = block_number;
+        self.target_hash = block_hash;
+        self.state_root = state_root;
+        if self.phase == SnapPhase::Trie {
+            self.phase = SnapPhase::BlockAccessLists;
+        }
+        Ok(self)
+    }
+
     // No-op catch-up still needs an explicit durable phase transition.
     const fn with_completed_block_access_lists(mut self) -> Self {
         self.phase = SnapPhase::Trie;
@@ -623,10 +696,15 @@ impl BlockAccessListCommit {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::Header;
     use alloy_primitives::U256;
     use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
     use reth_primitives_traits::Account;
-    use reth_provider::test_utils::create_test_provider_factory;
+    use reth_provider::{
+        test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
+        ProviderFactory, StaticFileProviderFactory, StaticFileWriter,
+    };
+    use reth_static_file_types::StaticFileSegment;
     use reth_storage_api::StorageSettings;
 
     fn generation() -> SnapGeneration {
@@ -635,6 +713,97 @@ mod tests {
 
     fn account(nonce: u64) -> Account {
         Account { nonce, balance: U256::from(nonce), bytecode_hash: None }
+    }
+
+    // Returns the written headers, whose roots and hashes anchor a generation.
+    fn chain(factory: &ProviderFactory<MockNodeTypesWithDB>, count: u64) -> Vec<Header> {
+        let static_files = factory.static_file_provider();
+        let mut writer = static_files.latest_writer(StaticFileSegment::Headers).unwrap();
+        let mut headers = Vec::new();
+        let mut parent = B256::ZERO;
+        for number in 0..count {
+            let header = Header {
+                number,
+                parent_hash: parent,
+                state_root: B256::with_last_byte(number as u8),
+                ..Default::default()
+            };
+            parent = header.hash_slow();
+            writer.append_header(&header, &parent).unwrap();
+            headers.push(header);
+        }
+        writer.commit().unwrap();
+        drop(writer);
+        drop(static_files);
+        headers
+    }
+
+    #[test]
+    fn reanchoring_restores_state_and_moves_the_generation_back() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let headers = chain(&factory, 3);
+        let store = SnapStateStore::new(&factory);
+        let generation = SnapGeneration::new(2, headers[2].hash_slow(), headers[2].state_root);
+        store.begin_generation(generation).unwrap();
+        let orphaned = B256::repeat_byte(0x11);
+        let restored = B256::repeat_byte(0x22);
+        let generation = store
+            .commit_account_range(
+                generation,
+                HashedPostState::default().with_accounts([(orphaned, Some(account(1)))]),
+                Vec::new(),
+                AccountRangeProgress::More { next_account: restored },
+            )
+            .unwrap();
+
+        let updated = store
+            .commit_reanchor(
+                generation,
+                1,
+                headers[1].hash_slow(),
+                HashedPostState::default()
+                    .with_accounts([(orphaned, None), (restored, Some(account(5)))]),
+                Vec::new(),
+            )
+            .unwrap();
+
+        assert_eq!(updated.target_block, 1);
+        assert_eq!(updated.target_hash, headers[1].hash_slow());
+        assert_eq!(updated.state_root, headers[1].state_root);
+        assert_eq!(updated.next_block, 2);
+        assert_eq!(updated.next_account, generation.next_account);
+        assert_eq!(updated.phase, SnapPhase::Accounts);
+        assert_eq!(store.interrupted_generation().unwrap(), Some(updated));
+        let provider = factory.database_provider_ro().unwrap();
+        assert_eq!(provider.tx_ref().get::<tables::HashedAccounts>(orphaned).unwrap(), None);
+        assert_eq!(
+            provider.tx_ref().get::<tables::HashedAccounts>(restored).unwrap().unwrap().nonce,
+            5
+        );
+    }
+
+    #[test]
+    fn reanchoring_must_move_the_generation_backwards() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let headers = chain(&factory, 3);
+        let store = SnapStateStore::new(&factory);
+        let generation = SnapGeneration::new(1, headers[1].hash_slow(), headers[1].state_root);
+        store.begin_generation(generation).unwrap();
+
+        let error = store
+            .commit_reanchor(
+                generation,
+                2,
+                headers[2].hash_slow(),
+                HashedPostState::default(),
+                Vec::new(),
+            )
+            .unwrap_err();
+
+        assert!(matches!(error, SnapSyncError::InvalidRequest(_)));
+        assert_eq!(store.interrupted_generation().unwrap(), Some(generation));
     }
 
     #[test]
