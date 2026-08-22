@@ -10251,7 +10251,7 @@ dependencies = [
 
 [[package]]
 name = "reth-snap-sync"
-version = "2.5.0"
+version = "2.5.1"
 dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
