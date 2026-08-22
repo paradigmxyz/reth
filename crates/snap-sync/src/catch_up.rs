@@ -51,7 +51,7 @@ impl<'a, C, F> BlockAccessListCatchUp<'a, C, F> {
     /// Applies the canonical BAL prefix or returns when every eligible peer lacks the next BAL.
     pub async fn run(
         &mut self,
-        mut generation: SnapGeneration,
+        generation: SnapGeneration,
         target_block: u64,
     ) -> Result<BlockAccessListCatchUpOutcome, SnapSyncError>
     where
@@ -66,9 +66,66 @@ impl<'a, C, F> BlockAccessListCatchUp<'a, C, F> {
             + StateWriter
             + StorageSettingsCache,
     {
-        if generation.phase != SnapPhase::BlockAccessLists {
+        match self.run_inner(generation, target_block, CatchUpMode::FullState).await? {
+            CatchUpAttempt::Complete(generation) => {
+                Ok(BlockAccessListCatchUpOutcome::Complete { generation })
+            }
+            CatchUpAttempt::Unavailable(generation) => {
+                Ok(BlockAccessListCatchUpOutcome::Unavailable { generation })
+            }
+        }
+    }
+
+    /// Moves a partial account prefix without touching its pending suffix.
+    pub async fn advance_pivot(
+        &mut self,
+        generation: SnapGeneration,
+        target_block: u64,
+    ) -> Result<BlockAccessListCatchUpOutcome, SnapSyncError>
+    where
+        C: SnapClient,
+        F: DatabaseProviderFactory,
+        F::Provider: HeaderProvider,
+        F::ProviderRW: AccountExtReader
+            + DBProvider
+            + HeaderProvider
+            + StageCheckpointReader
+            + StageCheckpointWriter
+            + StateWriter
+            + StorageSettingsCache,
+    {
+        match self.run_inner(generation, target_block, CatchUpMode::PartialPivot).await? {
+            CatchUpAttempt::Complete(generation) => {
+                Ok(BlockAccessListCatchUpOutcome::Complete { generation })
+            }
+            CatchUpAttempt::Unavailable(generation) => {
+                Ok(BlockAccessListCatchUpOutcome::Unavailable { generation })
+            }
+        }
+    }
+
+    // Shares bounded BAL retrieval while preserving each generation phase's write scope.
+    async fn run_inner(
+        &mut self,
+        mut generation: SnapGeneration,
+        target_block: u64,
+        mode: CatchUpMode,
+    ) -> Result<CatchUpAttempt, SnapSyncError>
+    where
+        C: SnapClient,
+        F: DatabaseProviderFactory,
+        F::Provider: HeaderProvider,
+        F::ProviderRW: AccountExtReader
+            + DBProvider
+            + HeaderProvider
+            + StageCheckpointReader
+            + StageCheckpointWriter
+            + StateWriter
+            + StorageSettingsCache,
+    {
+        if generation.phase != mode.phase() {
             return Err(SnapSyncError::UnexpectedPhase {
-                expected: SnapPhase::BlockAccessLists,
+                expected: mode.phase(),
                 actual: generation.phase,
             })
         }
@@ -81,8 +138,10 @@ impl<'a, C, F> BlockAccessListCatchUp<'a, C, F> {
             )))
         }
         if target_block == applied_through {
-            generation = self.store.complete_block_access_lists(generation)?;
-            return Ok(BlockAccessListCatchUpOutcome::Complete { generation })
+            if mode == CatchUpMode::FullState {
+                generation = self.store.complete_block_access_lists(generation)?;
+            }
+            return Ok(CatchUpAttempt::Complete(generation))
         }
 
         let mut excluded = Vec::new();
@@ -106,7 +165,7 @@ impl<'a, C, F> BlockAccessListCatchUp<'a, C, F> {
                     push_peer(&mut excluded, peer_id)
                 }
                 Err(RequestError::UnsupportedCapability) => {
-                    return Ok(BlockAccessListCatchUpOutcome::Unavailable { generation })
+                    return Ok(CatchUpAttempt::Unavailable(generation))
                 }
                 Err(error) => return Err(error.into()),
                 Ok(BlockAccessListOutcome::Verified(verified)) => {
@@ -115,20 +174,33 @@ impl<'a, C, F> BlockAccessListCatchUp<'a, C, F> {
                         headers.iter().zip(verified.block_access_lists)
                     {
                         let Some(block_access_list) = block_access_list else { break };
-                        let progress = if header.number() == target_block {
-                            BlockAccessListProgress::Complete
-                        } else {
-                            BlockAccessListProgress::More
+                        let complete = header.number() == target_block;
+                        generation = match mode {
+                            CatchUpMode::FullState => {
+                                let progress = if complete {
+                                    BlockAccessListProgress::Complete
+                                } else {
+                                    BlockAccessListProgress::More
+                                };
+                                self.store.commit_block_access_list(
+                                    generation,
+                                    header.number(),
+                                    header.hash(),
+                                    &block_access_list,
+                                    progress,
+                                )?
+                            }
+                            CatchUpMode::PartialPivot => {
+                                self.store.commit_pivot_block_access_list(
+                                    generation,
+                                    header.number(),
+                                    header.hash(),
+                                    &block_access_list,
+                                )?
+                            }
                         };
-                        generation = self.store.commit_block_access_list(
-                            generation,
-                            header.number(),
-                            header.hash(),
-                            &block_access_list,
-                            progress,
-                        )?;
-                        if generation.phase == SnapPhase::Trie {
-                            return Ok(BlockAccessListCatchUpOutcome::Complete { generation })
+                        if complete {
+                            return Ok(CatchUpAttempt::Complete(generation))
                         }
                     }
                     if let Some(peer_id) = unavailable {
@@ -205,7 +277,7 @@ impl<'a, C, F> BlockAccessListCatchUp<'a, C, F> {
 /// Terminal result of one BAL catch-up attempt.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BlockAccessListCatchUpOutcome {
-    /// Every block through the target was applied and the generation entered trie rebuild.
+    /// Every block through the target was applied.
     Complete {
         /// Updated durable generation.
         generation: SnapGeneration,
@@ -215,6 +287,33 @@ pub enum BlockAccessListCatchUpOutcome {
         /// Last fully applied durable generation position.
         generation: SnapGeneration,
     },
+}
+
+// Distinguishes full-state catch-up from partial-prefix pivot advancement.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CatchUpMode {
+    // Completes downloaded state.
+    FullState,
+    // Advances only the downloaded prefix.
+    PartialPivot,
+}
+
+impl CatchUpMode {
+    // Each mode is valid only while its corresponding generation phase is active.
+    const fn phase(self) -> SnapPhase {
+        match self {
+            Self::FullState => SnapPhase::BlockAccessLists,
+            Self::PartialPivot => SnapPhase::Accounts,
+        }
+    }
+}
+
+// Keeps the shared retrieval loop independent of its public outcome type.
+enum CatchUpAttempt {
+    // Reached the requested block.
+    Complete(SnapGeneration),
+    // Stopped before an unavailable block.
+    Unavailable(SnapGeneration),
 }
 
 #[cfg(test)]
@@ -362,6 +461,80 @@ mod tests {
                 .original_bytes(),
             code
         );
+    }
+
+    #[tokio::test]
+    async fn pivot_advancement_updates_only_downloaded_prefix() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let first = Address::repeat_byte(0x11);
+        let second = Address::repeat_byte(0x22);
+        let mut addresses = [(keccak256(first), first), (keccak256(second), second)];
+        addresses.sort_unstable_by_key(|(hash, _)| *hash);
+        let [(low_hash, low_address), (high_hash, high_address)] = addresses;
+        let index = BlockAccessIndex::new(1);
+        let mut changes = vec![
+            AccountChanges::new(low_address)
+                .with_balance_change(BalanceChange::new(index, U256::from(9))),
+            AccountChanges::new(high_address)
+                .with_balance_change(BalanceChange::new(index, U256::from(10))),
+        ];
+        changes.sort_unstable_by_key(|changes| changes.address);
+        let raw = Bytes::from(alloy_rlp::encode(Bal::new(changes)));
+        let bal = DecodedBal::from_rlp_bytes(raw.clone()).unwrap();
+        let header0 = Header { state_root: B256::repeat_byte(1), ..Default::default() };
+        let hash0 = header0.hash_slow();
+        let header1 = Header {
+            number: 1,
+            parent_hash: hash0,
+            state_root: B256::repeat_byte(2),
+            block_access_list_hash: Some(bal.hash()),
+            ..Default::default()
+        };
+        let hash1 = header1.hash_slow();
+        let static_files = factory.static_file_provider();
+        let mut writer = static_files.latest_writer(StaticFileSegment::Headers).unwrap();
+        writer.append_header(&header0, &hash0).unwrap();
+        writer.append_header(&header1, &hash1).unwrap();
+        writer.commit().unwrap();
+        drop(writer);
+        drop(static_files);
+
+        let store = SnapStateStore::new(&factory);
+        let generation = SnapGeneration::new(0, hash0, header0.state_root);
+        store.begin_generation(generation).unwrap();
+        let generation = store
+            .commit_account_range(
+                generation,
+                HashedPostState::default().with_accounts([(
+                    low_hash,
+                    Some(Account { balance: U256::from(1), ..Default::default() }),
+                )]),
+                Vec::new(),
+                AccountRangeProgress::More { next_account: high_hash },
+            )
+            .unwrap();
+        let client = TestSnapClient::new([response(PeerId::random(), 1, vec![Some(raw)])]);
+
+        let outcome = BlockAccessListCatchUp::new(&client, &factory, Runtime::test())
+            .advance_pivot(generation, 1)
+            .await
+            .unwrap();
+
+        let BlockAccessListCatchUpOutcome::Complete { generation } = outcome else {
+            panic!("completed pivot advancement")
+        };
+        assert_eq!(generation.phase, SnapPhase::Accounts);
+        assert_eq!(generation.target_block, 1);
+        assert_eq!(generation.target_hash, hash1);
+        assert_eq!(generation.state_root, header1.state_root);
+        assert_eq!(generation.next_account, high_hash);
+        let provider = factory.database_provider_ro().unwrap();
+        assert_eq!(
+            provider.tx_ref().get::<tables::HashedAccounts>(low_hash).unwrap().unwrap().balance,
+            U256::from(9)
+        );
+        assert!(provider.tx_ref().get::<tables::HashedAccounts>(high_hash).unwrap().is_none());
     }
 
     #[tokio::test]

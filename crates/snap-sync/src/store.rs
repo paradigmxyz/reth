@@ -24,7 +24,7 @@ use revm::{bytecode::Bytecode, database::states::StateChangeset};
 // Existing stage tooling can inspect the generation without a Snap-specific table.
 const SNAP_SYNC_STAGE: StageId = StageId::Other("SnapSync");
 // Versioning prevents an incompatible restart marker from being reinterpreted.
-const SNAP_GENERATION_VERSION: u8 = 1;
+const SNAP_GENERATION_VERSION: u8 = 2;
 
 /// Owns durable state-generation writes for one provider factory.
 #[derive(Debug)]
@@ -130,35 +130,40 @@ impl<'a, F> SnapStateStore<'a, F> {
             + StateWriter
             + StorageSettingsCache,
     {
-        generation.validate()?;
-        generation.ensure_phase(SnapPhase::BlockAccessLists)?;
-        let mut next_generation =
-            generation.with_block_access_list_progress(block_number, progress)?;
-        let provider = self.factory.database_provider_rw().map_err(db_error)?;
-        if !provider.cached_storage_settings().use_hashed_state() {
-            return Err(SnapSyncError::UnsupportedStorageLayout)
-        }
-        self.ensure_generation(&provider, generation)?;
-        Self::canonical_header_fields(&provider, generation.target_block, generation.target_hash)?;
-        let (state_root, commitment) =
-            Self::canonical_header_fields(&provider, block_number, block_hash)?;
-        let commitment = commitment.ok_or_else(|| {
-            SnapSyncError::InvalidRequest(format!(
-                "canonical header {block_number} has no block access list commitment"
-            ))
-        })?;
-        block_access_list
-            .ensure_hash(commitment)
-            .map_err(|error| SnapSyncError::InvalidRequest(error.to_string()))?;
-        if progress == BlockAccessListProgress::Complete {
-            next_generation.target_block = block_number;
-            next_generation.target_hash = block_hash;
-            next_generation.state_root = state_root;
-        }
-        Self::apply_block_access_list(&provider, block_access_list)?;
-        Self::save_generation(&provider, next_generation)?;
-        provider.commit().map_err(db_error)?;
-        Ok(next_generation)
+        self.commit_verified_block_access_list(
+            generation,
+            block_number,
+            block_hash,
+            block_access_list,
+            BlockAccessListCommit::CatchUp(progress),
+        )
+    }
+
+    // Advances a partial account prefix without writing state at or beyond its restart cursor.
+    pub(crate) fn commit_pivot_block_access_list(
+        &self,
+        generation: SnapGeneration,
+        block_number: u64,
+        block_hash: B256,
+        block_access_list: &DecodedBal,
+    ) -> Result<SnapGeneration, SnapSyncError>
+    where
+        F: DatabaseProviderFactory,
+        F::ProviderRW: AccountExtReader
+            + DBProvider
+            + HeaderProvider
+            + StageCheckpointReader
+            + StageCheckpointWriter
+            + StateWriter
+            + StorageSettingsCache,
+    {
+        self.commit_verified_block_access_list(
+            generation,
+            block_number,
+            block_hash,
+            block_access_list,
+            BlockAccessListCommit::Pivot,
+        )
     }
 
     // Enters trie generation when the snapshot pivot already matches the catch-up target.
@@ -234,19 +239,79 @@ impl<'a, F> SnapStateStore<'a, F> {
         provider.commit().map_err(db_error)
     }
 
+    // Verifies and applies one BAL under the active generation transaction.
+    fn commit_verified_block_access_list(
+        &self,
+        generation: SnapGeneration,
+        block_number: u64,
+        block_hash: B256,
+        block_access_list: &DecodedBal,
+        commit: BlockAccessListCommit,
+    ) -> Result<SnapGeneration, SnapSyncError>
+    where
+        F: DatabaseProviderFactory,
+        F::ProviderRW: AccountExtReader
+            + DBProvider
+            + HeaderProvider
+            + StageCheckpointReader
+            + StageCheckpointWriter
+            + StateWriter
+            + StorageSettingsCache,
+    {
+        generation.validate()?;
+        generation.ensure_phase(commit.phase())?;
+        let provider = self.factory.database_provider_rw().map_err(db_error)?;
+        if !provider.cached_storage_settings().use_hashed_state() {
+            return Err(SnapSyncError::UnsupportedStorageLayout)
+        }
+        self.ensure_generation(&provider, generation)?;
+        Self::canonical_header_fields(&provider, generation.target_block, generation.target_hash)?;
+        let (state_root, commitment) =
+            Self::canonical_header_fields(&provider, block_number, block_hash)?;
+        let commitment = commitment.ok_or_else(|| {
+            SnapSyncError::InvalidRequest(format!(
+                "canonical header {block_number} has no block access list commitment"
+            ))
+        })?;
+        block_access_list
+            .ensure_hash(commitment)
+            .map_err(|error| SnapSyncError::InvalidRequest(error.to_string()))?;
+        let next_generation = generation.with_applied_block_access_list(
+            block_number,
+            block_hash,
+            state_root,
+            commit.completes_generation(),
+        )?;
+        let account_limit = commit.account_limit(generation.next_account);
+        Self::apply_block_access_list(&provider, block_access_list, account_limit)?;
+        Self::save_generation(&provider, next_generation)?;
+        provider.commit().map_err(db_error)?;
+        Ok(next_generation)
+    }
+
     // Reads parent accounts in one cursor pass before assembling hashed BAL deltas.
     fn apply_block_access_list(
         provider: &(impl AccountExtReader + StateWriter),
         block_access_list: &DecodedBal,
+        account_limit: Option<B256>,
     ) -> Result<(), SnapSyncError> {
+        let changes = block_access_list
+            .as_bal()
+            .iter()
+            .filter_map(|changes| {
+                let hashed_address = keccak256(changes.address);
+                account_limit
+                    .is_none_or(|limit| hashed_address < limit)
+                    .then_some((changes, hashed_address))
+            })
+            .collect::<Vec<_>>();
         let accounts = provider
-            .basic_accounts(block_access_list.as_bal().iter().map(|changes| changes.address))
+            .basic_accounts(changes.iter().map(|(changes, _)| changes.address))
             .map_err(db_error)?;
         let mut state = HashedPostState::with_capacity(accounts.len());
         let mut contracts = Vec::new();
 
-        for (changes, (_, existing)) in block_access_list.as_bal().iter().zip(accounts) {
-            let hashed_address = keccak256(changes.address);
+        for ((changes, hashed_address), (_, existing)) in changes.into_iter().zip(accounts) {
             let account_fields = BalAccountState::from_changes(changes);
             if !account_fields.is_empty() {
                 let account = account_fields.merge_onto(existing.as_ref());
@@ -415,11 +480,13 @@ impl SnapGeneration {
         Ok(self)
     }
 
-    // A per-block cursor makes BAL application idempotent across restarts.
-    fn with_block_access_list_progress(
+    // Re-anchoring every applied block makes its canonicality checkable after a restart.
+    fn with_applied_block_access_list(
         mut self,
         block_number: u64,
-        progress: BlockAccessListProgress,
+        block_hash: B256,
+        state_root: B256,
+        complete: bool,
     ) -> Result<Self, SnapSyncError> {
         if block_number != self.next_block {
             return Err(SnapSyncError::UnexpectedBlock {
@@ -432,7 +499,10 @@ impl SnapGeneration {
                 "BAL cursor exceeds the block number space".to_string(),
             )
         })?;
-        if progress == BlockAccessListProgress::Complete {
+        self.target_block = block_number;
+        self.target_hash = block_hash;
+        self.state_root = state_root;
+        if complete {
             self.phase = SnapPhase::Trie;
         }
         Ok(self)
@@ -455,9 +525,9 @@ impl SnapGeneration {
         let first_bal = self.target_block.checked_add(1).ok_or_else(|| {
             SnapSyncError::InvalidGeneration("target block has no BAL successor".to_string())
         })?;
-        if self.next_block < first_bal {
+        if self.next_block != first_bal {
             return Err(SnapSyncError::InvalidGeneration(
-                "BAL cursor precedes the target".to_string(),
+                "BAL cursor does not follow the target".to_string(),
             ))
         }
         Ok(())
@@ -514,6 +584,38 @@ impl Decodable for SnapPhase {
             1 => Ok(Self::BlockAccessLists),
             2 => Ok(Self::Trie),
             _ => Err(alloy_rlp::Error::Custom("unknown snap generation phase")),
+        }
+    }
+}
+
+// Selects whether a BAL advances a partial pivot or the complete downloaded state.
+#[derive(Clone, Copy, Debug)]
+enum BlockAccessListCommit {
+    // Applies changes to the complete downloaded state.
+    CatchUp(BlockAccessListProgress),
+    // Applies changes only below the partial account cursor.
+    Pivot,
+}
+
+impl BlockAccessListCommit {
+    // Partial pivots remain in account download while full state enters BAL catch-up.
+    const fn phase(self) -> SnapPhase {
+        match self {
+            Self::CatchUp(_) => SnapPhase::BlockAccessLists,
+            Self::Pivot => SnapPhase::Accounts,
+        }
+    }
+
+    // Only the final full-state BAL transitions into trie generation.
+    const fn completes_generation(self) -> bool {
+        matches!(self, Self::CatchUp(BlockAccessListProgress::Complete))
+    }
+
+    // Partial pivots may update only hashes strictly below the persisted account origin.
+    const fn account_limit(self, next_account: B256) -> Option<B256> {
+        match self {
+            Self::CatchUp(_) => None,
+            Self::Pivot => Some(next_account),
         }
     }
 }
