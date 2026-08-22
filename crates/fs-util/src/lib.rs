@@ -316,7 +316,7 @@ pub fn write_json_file<T: Serialize>(path: &Path, obj: &T) -> Result<()> {
 
 /// Writes atomically to file.
 ///
-/// 1. Creates a temporary file with a `.tmp` extension in the same file directory.
+/// 1. Creates a temporary file by appending a `.tmp` suffix in the same file directory.
 /// 2. Writes content with `write_fn`.
 /// 3. Fsyncs the temp file to disk.
 /// 4. Renames the temp file to the target path.
@@ -330,8 +330,11 @@ where
     F: FnOnce(&mut File) -> std::result::Result<(), E>,
     E: Into<Box<dyn core::error::Error + Send + Sync>>,
 {
+    // The suffix is appended rather than replacing the extension: `set_extension` maps every
+    // sibling sharing a stem onto one temp path, and maps a `.tmp` destination onto itself, which
+    // makes the write overwrite its own target instead of a temporary.
     let mut tmp_path = file_path.to_path_buf();
-    tmp_path.set_extension("tmp");
+    tmp_path.as_mut_os_string().push(".tmp");
 
     // Write to the temporary file
     let mut file =
@@ -367,4 +370,54 @@ where
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A destination that already ends in `.tmp` must not be written in place, otherwise the
+    /// target is truncated before `write_fn` runs and a failing write destroys existing content.
+    #[test]
+    fn atomic_write_file_preserves_dot_tmp_target_on_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("notification.tmp");
+        write(&path, b"original").unwrap();
+
+        let err = atomic_write_file(&path, |_| Err(io::Error::other("write failed"))).unwrap_err();
+        assert!(matches!(err, FsPathError::Write { .. }));
+
+        assert_eq!(read(&path).unwrap(), b"original");
+    }
+
+    /// The temp path is the destination plus a `.tmp` suffix, so siblings sharing a stem (as in
+    /// nippy-jar's `.conf`/`.idx`/`.off`) never contend for one temp path.
+    #[test]
+    fn atomic_write_file_appends_temp_suffix_to_full_file_name() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let temp_path_for = |name: &str| {
+            let err = atomic_write_file(&dir.path().join(name), |_| {
+                Err(io::Error::other("write failed"))
+            })
+            .unwrap_err();
+            let FsPathError::Write { path, .. } = err else { panic!("unexpected error: {err:?}") };
+            path
+        };
+
+        assert_eq!(temp_path_for("segment.conf"), dir.path().join("segment.conf.tmp"));
+        assert_ne!(temp_path_for("segment.idx"), temp_path_for("segment.conf"));
+    }
+
+    #[test]
+    fn atomic_write_file_replaces_existing_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        write(&path, b"stale").unwrap();
+
+        atomic_write_file(&path, |file| file.write_all(b"fresh")).unwrap();
+
+        assert_eq!(read(&path).unwrap(), b"fresh");
+        assert_eq!(read_dir(dir.path()).unwrap().count(), 1, "temp file must not linger");
+    }
 }
