@@ -34,7 +34,7 @@ pub use storage::*;
 /// Downloads one account range and authenticates it off the async worker.
 /// Invalid responses penalize their peer before a bounded retry.
 #[derive(Debug)]
-pub struct AccountRangeDownloader<C: SnapClient>(VerifyingRequest<C, AccountRangeVerifier>);
+pub struct AccountRangeDownloader<C: SnapClient>(VerifyingRequest<C, GetAccountRangeMessage>);
 
 impl<C: SnapClient> AccountRangeDownloader<C> {
     /// Creates a downloader using `runtime` for proof verification and submits the initial request.
@@ -60,7 +60,7 @@ impl<C: SnapClient> AccountRangeDownloader<C> {
                 limit: request.limit_hash,
             })
         }
-        let verifier = AccountRangeVerifier { request: request.clone() };
+        let verifier = request.clone();
         Ok(Self(VerifyingRequest::new_with_options(client, request, verifier, runtime, options)))
     }
 }
@@ -108,31 +108,59 @@ pub struct InvalidAccountRange {
     limit: B256,
 }
 
-#[derive(Clone, Debug)]
-struct AccountRangeVerifier {
-    request: GetAccountRangeMessage,
-}
-
-impl SnapVerifier for AccountRangeVerifier {
-    type Request = GetAccountRangeMessage;
+impl SnapVerifier for GetAccountRangeMessage {
+    type Request = Self;
     type Output = AccountRangeOutcome;
 
     fn verify(self, peer_id: PeerId, response: SnapResponse) -> Result<Self::Output, RequestError> {
+        self.verify_response(peer_id, response)
+    }
+}
+
+// Keeps account response authentication beside its foreign wire request type.
+trait AccountRangeRequestVerifier {
+    // Checks the response envelope before authenticating its account payload.
+    fn verify_response(
+        &self,
+        peer_id: PeerId,
+        response: SnapResponse,
+    ) -> Result<AccountRangeOutcome, RequestError>;
+
+    // Authenticates the full response before trimming its optional boundary account.
+    fn verify_account_range(
+        &self,
+        response: AccountRangeMessage,
+    ) -> Result<VerifiedAccountRange, RequestError>;
+
+    // Re-encodes accounts so the proof authenticates their canonical trie values.
+    fn verify_proof(
+        &self,
+        accounts: &[(B256, TrieAccount)],
+        proof: &[alloy_primitives::Bytes],
+    ) -> Result<Option<B256>, RequestError>;
+}
+
+impl AccountRangeRequestVerifier for GetAccountRangeMessage {
+    fn verify_response(
+        &self,
+        peer_id: PeerId,
+        response: SnapResponse,
+    ) -> Result<AccountRangeOutcome, RequestError> {
         let SnapResponse::AccountRange(response) = response else {
             debug!(target: "downloaders::snap", "Expected account range response");
             return Err(RequestError::BadResponse)
         };
-        if response.request_id != self.request.request_id {
+        if response.request_id != self.request_id {
             debug!(
                 target: "downloaders::snap",
-                expected = self.request.request_id,
+                expected = self.request_id,
                 got = response.request_id,
                 "Account range response id mismatch"
             );
             return Err(RequestError::BadResponse)
         }
         if response.accounts.is_empty() && response.proof.is_empty() {
-            return if self.request.root_hash == EMPTY_ROOT_HASH {
+            return if self.root_hash == EMPTY_ROOT_HASH {
                 Ok(AccountRangeOutcome::Verified(VerifiedAccountRange {
                     accounts: Vec::new(),
                     has_more: false,
@@ -142,52 +170,50 @@ impl SnapVerifier for AccountRangeVerifier {
             }
         }
 
-        verify_account_range(&self.request, response).map(AccountRangeOutcome::Verified)
-    }
-}
-
-// Authenticate the full response before trimming its optional boundary account.
-fn verify_account_range(
-    request: &GetAccountRangeMessage,
-    response: AccountRangeMessage,
-) -> Result<VerifiedAccountRange, RequestError> {
-    // Allow only the single out-of-range account needed as a boundary witness.
-    if response.accounts.iter().filter(|data| data.hash > request.limit_hash).nth(1).is_some() {
-        debug!(target: "downloaders::snap", "Account range runs past the requested limit");
-        return Err(RequestError::BadResponse)
+        self.verify_account_range(response).map(AccountRangeOutcome::Verified)
     }
 
-    // Decode first so malformed account values are attributed to the responder.
-    let mut accounts = response
-        .accounts
-        .into_iter()
-        .map(|data| {
-            data.into_trie_entry().map_err(|error| {
-                debug!(target: "downloaders::snap", %error, "Invalid account data");
-                RequestError::BadResponse
+    fn verify_account_range(
+        &self,
+        response: AccountRangeMessage,
+    ) -> Result<VerifiedAccountRange, RequestError> {
+        // Allow only the single out-of-range account needed as a boundary witness.
+        if response.accounts.iter().filter(|data| data.hash > self.limit_hash).nth(1).is_some() {
+            debug!(target: "downloaders::snap", "Account range runs past the requested limit");
+            return Err(RequestError::BadResponse)
+        }
+
+        // Decode first so malformed account values are attributed to the responder.
+        let mut accounts = response
+            .accounts
+            .into_iter()
+            .map(|data| {
+                data.into_trie_entry().map_err(|error| {
+                    debug!(target: "downloaders::snap", %error, "Invalid account data");
+                    RequestError::BadResponse
+                })
             })
+            .collect::<Result<Vec<_>, _>>()?;
+        let next = self.verify_proof(&accounts, &response.proof)?;
+
+        // Authenticate the boundary account before removing it from the requested range.
+        accounts.truncate(accounts.partition_point(|(hash, _)| *hash <= self.limit_hash));
+        let has_more = next.is_some_and(|next| next <= self.limit_hash);
+
+        Ok(VerifiedAccountRange { accounts, has_more })
+    }
+
+    fn verify_proof(
+        &self,
+        accounts: &[(B256, TrieAccount)],
+        proof: &[alloy_primitives::Bytes],
+    ) -> Result<Option<B256>, RequestError> {
+        let leaves = accounts.iter().map(|(hash, account)| (*hash, alloy_rlp::encode(account)));
+        verify_range_proof(self.root_hash, self.starting_hash, leaves, proof).map_err(|error| {
+            debug!(target: "downloaders::snap", %error, "Invalid account range proof");
+            RequestError::BadResponse
         })
-        .collect::<Result<Vec<_>, _>>()?;
-    let next = verify_proof(request, &accounts, &response.proof)?;
-
-    // Authenticate the boundary account before removing it from the requested range.
-    accounts.truncate(accounts.partition_point(|(hash, _)| *hash <= request.limit_hash));
-    let has_more = next.is_some_and(|next| next <= request.limit_hash);
-
-    Ok(VerifiedAccountRange { accounts, has_more })
-}
-
-// Re-encode decoded accounts so the proof authenticates their canonical trie values.
-fn verify_proof(
-    request: &GetAccountRangeMessage,
-    accounts: &[(B256, TrieAccount)],
-    proof: &[alloy_primitives::Bytes],
-) -> Result<Option<B256>, RequestError> {
-    let leaves = accounts.iter().map(|(hash, account)| (*hash, alloy_rlp::encode(account)));
-    verify_range_proof(request.root_hash, request.starting_hash, leaves, proof).map_err(|error| {
-        debug!(target: "downloaders::snap", %error, "Invalid account range proof");
-        RequestError::BadResponse
-    })
+    }
 }
 
 #[cfg(test)]
