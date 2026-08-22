@@ -21,7 +21,7 @@ mod trie;
 
 pub use catch_up::{BlockAccessListCatchUp, BlockAccessListCatchUpOutcome};
 pub use context::NodeSnapContext;
-pub use download::{RangeBudget, StateDownloadOutcome, StateDownloader};
+pub use download::{DownloadedAccounts, RangeBudget, StateDownloadOutcome, StateDownloader};
 pub use error::SnapSyncError;
 pub use pivot::SnapPivotPolicy;
 pub use session::{SnapSyncContext, SnapSyncOutcome, SnapSyncProvider, SnapSyncSession};
