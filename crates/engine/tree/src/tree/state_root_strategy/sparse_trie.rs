@@ -271,7 +271,10 @@ where
         // marker means they died without finishing the stream.
         while !self.finished_state_updates {
             let mut t = Instant::now();
+            // Cancellation goes first so it wins over queued work; the cancel channel is never
+            // ready while the consumer is alive, so this costs nothing in normal operation.
             crossbeam_channel::select_biased! {
+                recv(self.cancel_rx) -> _ => return Err(StateRootTaskError::Canceled),
                 recv(self.updates) -> message => {
                     let wake = Instant::now();
                     total_idle_time += wake.duration_since(idle_start);
@@ -300,7 +303,6 @@ where
                     };
                     self.on_proof_results(result, &mut t)?;
                 },
-                recv(self.cancel_rx) -> _ => return Err(StateRootTaskError::Canceled),
             }
 
             done = self.make_progress()?;
@@ -314,6 +316,7 @@ where
         while !done {
             let mut t = Instant::now();
             crossbeam_channel::select_biased! {
+                recv(self.cancel_rx) -> _ => return Err(StateRootTaskError::Canceled),
                 recv(self.proof_result_rx) -> message => {
                     let wake = Instant::now();
                     total_idle_time += wake.duration_since(idle_start);
@@ -327,7 +330,6 @@ where
                     };
                     self.on_proof_results(result, &mut t)?;
                 },
-                recv(self.cancel_rx) -> _ => return Err(StateRootTaskError::Canceled),
             }
 
             done = self.make_progress()?;
@@ -1415,6 +1417,79 @@ mod tests {
 
         let error = task.run().expect_err("canceled task must return an error");
         assert!(matches!(error, StateRootTaskError::Canceled));
+
+        drop(updates_tx);
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
+    }
+
+    #[test]
+    fn run_cancels_before_draining_queued_updates() {
+        let runtime = reth_tasks::Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
+        let overlay_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayManager::<reth_chain_state::EthPrimitives>::default()
+                .overlay_builder(anchor_hash),
+        );
+        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
+        let proof_worker_handle = ProofWorkerHandle::new(
+            &runtime,
+            ProofTaskCtx::new(overlay_factory),
+            false,
+            proof_result_tx.clone(),
+        );
+
+        let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+        let trie = SparseStateTrie::default()
+            .with_accounts_trie(default_trie.clone())
+            .with_default_storage_trie(default_trie)
+            .with_updates(true);
+
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
+        let mut task = SparseTrieCacheTask::new_with_trie(
+            &runtime,
+            updates_rx,
+            cancel_rx,
+            std::sync::mpsc::channel().0,
+            proof_worker_handle,
+            proof_result_tx,
+            proof_result_rx,
+            SparseTrieTaskMetrics::default(),
+            trie,
+            B256::from([0x55; 32]),
+            TrieNodeEpoch::UNMODIFIED,
+            1,
+        );
+
+        const QUEUED: usize = 64;
+        for i in 0..QUEUED {
+            let mut hashed_state = HashedPostState::default();
+            hashed_state.accounts.insert(
+                keccak256(U256::from(i).to_be_bytes::<32>()),
+                Some(Account { balance: U256::from(i + 1), nonce: 1, bytecode_hash: None }),
+            );
+            updates_tx.send(StateRootMessage::HashedStateUpdate(hashed_state)).unwrap();
+        }
+
+        let wait_start = std::time::Instant::now();
+        while task.updates.len() < QUEUED {
+            assert!(
+                wait_start.elapsed() < std::time::Duration::from_secs(1),
+                "hashing task did not queue the test messages"
+            );
+            std::thread::yield_now();
+        }
+
+        // The consumer abandons the computation while updates are still queued: cancellation
+        // must win instead of the task draining (and dispatching proofs for) the queue first.
+        drop(cancel_guard);
+
+        let error = task.run().expect_err("canceled task must return an error");
+        assert!(matches!(error, StateRootTaskError::Canceled));
+        assert_eq!(task.updates.len(), QUEUED, "cancellation must not drain queued updates");
 
         drop(updates_tx);
         drop(task);

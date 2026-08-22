@@ -381,6 +381,7 @@ where
             cache_metrics: self.cache_metrics.clone(),
             cache_state_metrics: self.cache_state_metrics.clone(),
             terminate_execution: Arc::new(AtomicBool::new(false)),
+            cancelled: Arc::new(AtomicBool::new(false)),
             executed_tx_index: Arc::clone(&executed_tx_index),
             precompile_cache_disabled: self.precompile_cache_disabled,
             precompile_cache_map: self.precompile_cache_map.clone(),
