@@ -562,6 +562,44 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         Ok(())
     }
 
+    /// Writes account and storage changesets while materializing each block's plain reverts once.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    fn write_changesets(
+        account_writer: &mut StaticFileProviderRWRefMut<'_, N>,
+        storage_writer: &mut StaticFileProviderRWRefMut<'_, N>,
+        blocks: &[ExecutedBlock<N>],
+    ) -> ProviderResult<()> {
+        for block in blocks {
+            let block_number = block.recovered_block().number();
+            let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
+
+            let account_changeset: Vec<_> = reverts
+                .accounts
+                .into_iter()
+                .flatten()
+                .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) })
+                .collect();
+            account_writer.append_account_changeset(account_changeset, block_number)?;
+
+            let storage_changeset: Vec<_> = reverts
+                .storage
+                .into_iter()
+                .flatten()
+                .flat_map(|revert| {
+                    revert.storage_revert.into_iter().map(move |(key, revert_to_slot)| {
+                        StorageBeforeTx {
+                            address: revert.address,
+                            key: B256::from(key.to_be_bytes()),
+                            value: revert_to_slot.to_previous_value(),
+                        }
+                    })
+                })
+                .collect();
+            storage_writer.append_storage_changeset(storage_changeset, block_number)?;
+        }
+        Ok(())
+    }
+
     /// Writes to a static file segment using the provided closure.
     ///
     /// The closure receives a mutable reference to the segment writer. After the closure completes,
@@ -605,6 +643,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let mut r_receipts = None;
         let mut r_account_changesets = None;
         let mut r_storage_changesets = None;
+        let mut r_changesets = None;
 
         // Propagate tracing context into rayon-spawned threads so that per-segment
         // write spans appear as children of write_blocks_data in traces.
@@ -649,7 +688,24 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 });
             }
 
-            if ctx.write_account_changesets {
+            if ctx.write_account_changesets && ctx.write_storage_changesets {
+                s.spawn(|_| {
+                    let _guard = span.enter();
+                    r_changesets = Some((|| {
+                        let mut account_writer = self.get_writer(
+                            first_block_number,
+                            StaticFileSegment::AccountChangeSets,
+                        )?;
+                        let mut storage_writer = self.get_writer(
+                            first_block_number,
+                            StaticFileSegment::StorageChangeSets,
+                        )?;
+                        Self::write_changesets(&mut account_writer, &mut storage_writer, blocks)?;
+                        account_writer.sync_all()?;
+                        storage_writer.sync_all()
+                    })());
+                });
+            } else if ctx.write_account_changesets {
                 s.spawn(|_| {
                     let _guard = span.enter();
                     r_account_changesets = Some(self.write_segment(
@@ -680,11 +736,12 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         if ctx.write_receipts {
             r_receipts.ok_or(StaticFileWriterError::ThreadPanic("receipts"))??;
         }
-        if ctx.write_account_changesets {
+        if ctx.write_account_changesets && ctx.write_storage_changesets {
+            r_changesets.ok_or(StaticFileWriterError::ThreadPanic("changesets"))??;
+        } else if ctx.write_account_changesets {
             r_account_changesets
                 .ok_or(StaticFileWriterError::ThreadPanic("account_changesets"))??;
-        }
-        if ctx.write_storage_changesets {
+        } else if ctx.write_storage_changesets {
             r_storage_changesets
                 .ok_or(StaticFileWriterError::ThreadPanic("storage_changesets"))??;
         }
