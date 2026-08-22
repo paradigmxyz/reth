@@ -23,7 +23,7 @@ pub use catch_up::{BlockAccessListCatchUp, BlockAccessListCatchUpOutcome};
 pub use context::NodeSnapContext;
 pub use download::{RangeBudget, StateDownloadOutcome, StateDownloader};
 pub use error::SnapSyncError;
-pub use pivot::{SnapPivotPolicy, BAL_HISTORY_BLOCKS};
+pub use pivot::SnapPivotPolicy;
 pub use session::{SnapSyncContext, SnapSyncOutcome, SnapSyncProvider, SnapSyncSession};
 pub use store::{
     AccountRangeProgress, BlockAccessListProgress, SnapGeneration, SnapPhase, SnapStateStore,

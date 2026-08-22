@@ -4,16 +4,14 @@
 //! while its catch-up range still fits inside that window.
 
 use crate::{error::db_error, SnapGeneration, SnapPhase, SnapSyncError};
+use alloy_eip7928::BAL_RETENTION_PERIOD_SLOTS;
 use reth_primitives_traits::AlloyBlockHeader;
 use reth_storage_api::HeaderProvider;
 
-/// Blocks of block access list history EIP-8189 peers are expected to serve.
-pub const BAL_HISTORY_BLOCKS: u64 = 512;
-
-// Anchoring behind the head keeps a pivot clear of the reorg-prone tip.
-const DEFAULT_HEAD_DISTANCE: u64 = 32;
-// Re-anchoring at half the served history leaves room for one full catch-up.
-const DEFAULT_ADVANCE_AFTER: u64 = BAL_HISTORY_BLOCKS / 2;
+// EIP-8189 anchors the pivot at HEAD-64, clear of the reorg-prone tip.
+const DEFAULT_HEAD_DISTANCE: u64 = 64;
+// Re-anchoring at twice that distance moves the pivot forward by EIP-8189's typical K=64 blocks.
+const DEFAULT_ADVANCE_AFTER: u64 = DEFAULT_HEAD_DISTANCE * 2;
 
 /// Distance and history bounds that decide where a generation is anchored.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -22,7 +20,10 @@ pub struct SnapPivotPolicy {
     pub head_distance: u64,
     /// Pivot lag that triggers re-anchoring while account ranges are still downloading.
     pub advance_after: u64,
-    /// Blocks of block access list history peers are expected to serve.
+    /// Blocks of block access list history a peer is assumed to still serve.
+    ///
+    /// Applying that many lists is cheaper than downloading the state again, so the default is the
+    /// full EIP-7928 retention period rather than a shorter catch-up bound.
     pub history: u64,
 }
 
@@ -38,7 +39,7 @@ impl SnapPivotPolicy {
         Self {
             head_distance: DEFAULT_HEAD_DISTANCE,
             advance_after: DEFAULT_ADVANCE_AFTER,
-            history: BAL_HISTORY_BLOCKS,
+            history: BAL_RETENTION_PERIOD_SLOTS,
         }
     }
 
@@ -50,7 +51,7 @@ impl SnapPivotPolicy {
     /// use reth_snap_sync::SnapPivotPolicy;
     ///
     /// let policy = SnapPivotPolicy::default();
-    /// assert_eq!(policy.pivot_block(1_000), Some(968));
+    /// assert_eq!(policy.pivot_block(1_000), Some(936));
     /// assert_eq!(policy.pivot_block(4), None);
     /// ```
     pub const fn pivot_block(&self, head: u64) -> Option<u64> {
