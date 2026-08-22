@@ -1,26 +1,53 @@
 use alloc::sync::Arc;
-use core::sync::atomic::AtomicBool;
+use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
-/// A marker that can be used to cancel execution.
+/// Payload building is still in progress.
+const RUNNING: u8 = 0;
+/// Payload building should stop accepting transactions and seal the accumulated work.
+const FINALIZATION_REQUESTED: u8 = 1;
+/// Payload building should stop and discard the accumulated work.
+const CANCELLED: u8 = 2;
+
+/// Cancels execution on drop and supports cooperative finalization.
 ///
 /// If dropped, it will set the `cancelled` flag to true.
 ///
 /// This is most useful when a payload job needs to be cancelled.
 #[derive(Default, Clone, Debug)]
-pub struct CancelOnDrop(Arc<AtomicBool>);
+pub struct CancelOnDrop(Arc<AtomicU8>);
 
 // === impl CancelOnDrop ===
 
 impl CancelOnDrop {
+    /// Returns true if the current work should be interrupted.
+    pub fn is_interrupted(&self) -> bool {
+        self.0.load(Ordering::Relaxed) != RUNNING
+    }
+
     /// Returns true if the job was cancelled.
     pub fn is_cancelled(&self) -> bool {
-        self.0.load(core::sync::atomic::Ordering::Relaxed)
+        self.0.load(Ordering::Relaxed) == CANCELLED
+    }
+
+    /// Requests that the current work be finalized without cancelling it.
+    pub fn request_finalization(&self) {
+        let _ = self.0.compare_exchange(
+            RUNNING,
+            FINALIZATION_REQUESTED,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        );
+    }
+
+    /// Returns true if finalization was requested.
+    pub fn is_finalization_requested(&self) -> bool {
+        self.0.load(Ordering::Relaxed) == FINALIZATION_REQUESTED
     }
 }
 
 impl Drop for CancelOnDrop {
     fn drop(&mut self) {
-        self.0.store(true, core::sync::atomic::Ordering::Relaxed);
+        self.0.store(CANCELLED, Ordering::Relaxed);
     }
 }
 
@@ -55,6 +82,7 @@ mod tests {
     #[test]
     fn test_default_cancelled() {
         let c = CancelOnDrop::default();
+        assert!(!c.is_interrupted());
         assert!(!c.is_cancelled());
     }
 
@@ -122,6 +150,7 @@ mod tests {
         drop(cancel);
 
         // The cloned instance should now see the cancelled flag as true
+        assert!(cloned_cancel.is_interrupted());
         assert!(cloned_cancel.is_cancelled());
     }
 
@@ -140,8 +169,31 @@ mod tests {
         // Drop one clone - this should cancel all instances
         drop(clone1);
 
+        assert!(cancel.is_interrupted());
         assert!(cancel.is_cancelled());
         assert!(clone2.is_cancelled());
         assert!(clone3.is_cancelled());
+    }
+
+    #[test]
+    fn test_cancel_on_drop_finalization_request() {
+        let cancel = CancelOnDrop::default();
+        let clone = cancel.clone();
+
+        cancel.request_finalization();
+
+        assert!(clone.is_interrupted());
+        assert!(clone.is_finalization_requested());
+        assert!(!clone.is_cancelled());
+
+        drop(cancel);
+
+        assert!(clone.is_cancelled());
+        assert!(!clone.is_finalization_requested());
+
+        clone.request_finalization();
+
+        assert!(clone.is_cancelled());
+        assert!(!clone.is_finalization_requested());
     }
 }

@@ -876,12 +876,42 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         self.trie_data().sorted.hashed_state
     }
 
+    /// Returns a reference to the hashed state result of the execution outcome.
+    ///
+    /// May wait for trie data if the deferred task hasn't completed.
+    #[inline]
+    pub fn hashed_state_ref(&self) -> &HashedPostStateSorted {
+        &self.trie_data.get().sorted.hashed_state
+    }
+
+    /// Returns references to the hashed state results of the executed blocks.
+    ///
+    /// May wait for trie data if any deferred task hasn't completed.
+    pub fn hashed_state_refs(blocks: &[Self]) -> Vec<&HashedPostStateSorted> {
+        blocks.iter().map(Self::hashed_state_ref).collect()
+    }
+
     /// Returns the trie updates resulting from the execution outcome.
     ///
     /// May wait for trie data if the deferred task hasn't completed.
     #[inline]
     pub fn trie_updates(&self) -> Arc<TrieUpdatesSorted> {
         self.trie_data().sorted.trie_updates
+    }
+
+    /// Returns a reference to the trie updates resulting from the execution outcome.
+    ///
+    /// May wait for trie data if the deferred task hasn't completed.
+    #[inline]
+    pub fn trie_updates_ref(&self) -> &TrieUpdatesSorted {
+        &self.trie_data.get().sorted.trie_updates
+    }
+
+    /// Returns references to the trie updates of the executed blocks.
+    ///
+    /// May wait for trie data if any deferred task hasn't completed.
+    pub fn trie_updates_refs(blocks: &[Self]) -> Vec<&TrieUpdatesSorted> {
+        blocks.iter().map(Self::trie_updates_ref).collect()
     }
 
     /// Returns a [`BlockNumber`] of the block.
