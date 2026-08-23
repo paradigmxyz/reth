@@ -1,0 +1,98 @@
+{
+  "branch_order": "immediate_sibling_first",
+  "cases": [
+    {
+      "case_id": "empty_receipts",
+      "fixtures": [
+        {
+          "path": "empty_receipts/fixture.json",
+          "sha256": "0x182b12b72c3cbe83a7c84bfb349c7b085b9916f1e6169472d9820de31d4d04fe"
+        }
+      ]
+    },
+    {
+      "case_id": "singleton_baseline",
+      "fixtures": [
+        {
+          "path": "singleton_baseline/fixture.json",
+          "sha256": "0x24659c1023667969131cab2cc0510463d4be105c6047970fcd4ad5a09b01bfff"
+        }
+      ]
+    },
+    {
+      "case_id": "two_receipts",
+      "fixtures": [
+        {
+          "path": "two_receipts/fixture.json",
+          "sha256": "0x4514069fa2892900c450c5ba97c97c07fe0ce46f65b39d09c28f824c4b18579a"
+        }
+      ]
+    },
+    {
+      "case_id": "two_logs",
+      "fixtures": [
+        {
+          "path": "two_logs/fixture.json",
+          "sha256": "0xb712591a4dc7634a2662b07b4ae68fa777540a4ecfe44a119ab71b162763ccf2"
+        }
+      ]
+    },
+    {
+      "case_id": "ordering_mutation",
+      "fixtures": [
+        {
+          "path": "ordering_mutation/fixture_original.json",
+          "sha256": "0xb712591a4dc7634a2662b07b4ae68fa777540a4ecfe44a119ab71b162763ccf2"
+        },
+        {
+          "path": "ordering_mutation/fixture_swapped.json",
+          "sha256": "0xe0119b759d0eaa1bb73426721d5d35fa92731a90a7651eb337e0d93e17df0df2"
+        }
+      ]
+    },
+    {
+      "case_id": "progressive_boundary",
+      "fixtures": [
+        {
+          "path": "progressive_boundary/fixture_5.json",
+          "sha256": "0x1546ed5982a3e03c0d077468dd6f5bee29f1a8fb70705368f31d9a86c7a79531"
+        },
+        {
+          "path": "progressive_boundary/fixture_6.json",
+          "sha256": "0xeb20da8b70eff3af1098daa559553eec795f038bd487556596b457c211c3dddb"
+        }
+      ]
+    },
+    {
+      "case_id": "value_mutation",
+      "fixtures": [
+        {
+          "path": "value_mutation/fixture_original.json",
+          "sha256": "0x24659c1023667969131cab2cc0510463d4be105c6047970fcd4ad5a09b01bfff"
+        },
+        {
+          "path": "value_mutation/fixture_mutated.json",
+          "sha256": "0x147b34d81858612a3c56963e36170760ab2b29a8b5cb89d59cded61998fb10d5"
+        }
+      ]
+    }
+  ],
+  "dependency_revisions": {
+    "ethereum_ssz": "258380e245c0b1281efbe10923894321eba99738",
+    "remerkleable_reference": "2f0baeef0082d4278acaef7d822deb7009d7db7e",
+    "tree_hash": "03d9fa474586c125f306dd7a00cf46284575a01f"
+  },
+  "format_version": "pureth_receipt_proof_vectors_v0",
+  "object_kind": "receipts",
+  "producer": {
+    "crate": "pureth-root-production",
+    "version": "0.1.0"
+  },
+  "proof_format": "merkle_branch_v0",
+  "root_context": "deterministic_test_data",
+  "root_type": "ReceiptsSSZ",
+  "schema_digest": "0xffc41ae4abb3e6f04594d5658814b7d0446f1dabcc347982e7a37ef23ee0dace",
+  "schema_id": "pureth-receipt-v0",
+  "ssz_semantics": "project-local pureth-receipt-v0 with EIP-7916 progressive receipt/log/data collections",
+  "status": "validated"
+}
