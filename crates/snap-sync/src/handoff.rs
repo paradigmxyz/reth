@@ -109,6 +109,49 @@ impl<'a, F> SnapPipelineHandoff<'a, F> {
     {
         self.store.completed_block()
     }
+
+    /// Checks that a rewind stops at or above the published state.
+    ///
+    /// Nothing below that block can be re-executed: the change sets a rewind replays were never
+    /// downloaded, so a node that rewinds through it has no state to fall back on and has to snap
+    /// sync again. Geth takes the same position on its own pivot, stopping the rewind rather than
+    /// walking towards genesis: *"If pivot block is reached, return the genesis block as the new
+    /// chain head. Theoretically there must be a persistent state before or at the pivot block,
+    /// prevent endless rewinding towards the genesis just in case."*
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SnapSyncError::BelowStateFloor`] when `target` is below the published block. The
+    /// caller should treat that as needing a fresh snap sync, not as a recoverable unwind.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use reth_snap_sync::{SnapPipelineHandoff, SnapSyncError};
+    ///
+    /// # fn example<F>(factory: &F) -> Result<(), SnapSyncError>
+    /// # where
+    /// #     F: reth_provider::DatabaseProviderFactory<
+    /// #         Provider: reth_storage_api::StageCheckpointReader,
+    /// #     >,
+    /// # {
+    /// let handoff = SnapPipelineHandoff::new(factory);
+    /// if let Err(SnapSyncError::BelowStateFloor { floor, .. }) = handoff.ensure_rewind_target(10) {
+    ///     println!("resync required, snap state starts at {floor}");
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn ensure_rewind_target(&self, target: u64) -> Result<(), SnapSyncError>
+    where
+        F: DatabaseProviderFactory<Provider: StageCheckpointReader>,
+    {
+        let Some(floor) = self.published_block()? else { return Ok(()) };
+        if target < floor {
+            return Err(SnapSyncError::BelowStateFloor { target, floor })
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -202,6 +245,29 @@ mod tests {
             assert_eq!(checkpoint.block_number, Some(pivot));
             assert_eq!(checkpoint.prune_mode, PruneMode::Before(pivot + 1));
         }
+    }
+
+    #[test]
+    fn rewind_stops_at_the_published_state() {
+        let (factory, pivot) = snap_synced_factory();
+        let handoff = SnapPipelineHandoff::new(&factory);
+        handoff.commit(pivot).unwrap();
+
+        assert!(handoff.ensure_rewind_target(pivot + 1).is_ok());
+        assert!(handoff.ensure_rewind_target(pivot).is_ok());
+        let error = handoff.ensure_rewind_target(pivot - 1).unwrap_err();
+
+        assert!(matches!(
+            error,
+            SnapSyncError::BelowStateFloor { target, floor } if target == pivot - 1 && floor == pivot
+        ));
+    }
+
+    #[test]
+    fn a_node_that_never_snap_synced_has_no_floor() {
+        let factory = create_test_provider_factory();
+
+        assert!(SnapPipelineHandoff::new(&factory).ensure_rewind_target(0).is_ok());
     }
 
     #[test]

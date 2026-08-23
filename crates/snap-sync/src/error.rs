@@ -64,6 +64,14 @@ pub enum SnapSyncError {
         /// Block a completed generation left behind, if any.
         actual: Option<u64>,
     },
+    /// A rewind would drop the node below the state a snap sync published.
+    #[error("cannot rewind to block {target}, snap state starts at block {floor}")]
+    BelowStateFloor {
+        /// Block the rewind was aiming at.
+        target: u64,
+        /// Block the published snap state starts from.
+        floor: u64,
+    },
     /// The database uses plain canonical state, which hashed Snap keys cannot populate.
     #[error("snap sync requires the v2 hashed-state layout")]
     UnsupportedStorageLayout,
