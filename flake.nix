@@ -51,6 +51,7 @@
         nativeBuildInputs = [
           pkgs.pkg-config
           pkgs.libgit2
+          pkgs.m4
           pkgs.perl
         ];
 

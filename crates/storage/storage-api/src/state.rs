@@ -11,7 +11,7 @@ use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::Bytecode;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::HashedPostState;
-use revm_database::BundleState;
+use revm::database::BundleState;
 
 /// This just receives state, or [`ExecutionOutcome`], from the provider
 #[auto_impl::auto_impl(&, Arc, Box)]
@@ -97,8 +97,12 @@ impl<T: AccountReader + BytecodeReader> AccountInfoReader for T {}
 /// Trait that provides the hashed state from various sources.
 #[auto_impl(&, Arc, Box)]
 pub trait HashedPostStateProvider {
-    /// Returns the `HashedPostState` of the provided [`BundleState`].
-    fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState;
+    /// Returns the [`HashedPostState`] of the provided [`BundleState`], materializing zero-valued
+    /// updates for parent storage of accounts that were destroyed but remain in the post-state.
+    ///
+    /// Providers backed by an exact parent-state view also materialize terminally destroyed
+    /// accounts so the result can be persisted without storage wipe markers.
+    fn hashed_post_state(&self, bundle_state: &BundleState) -> ProviderResult<HashedPostState>;
 }
 
 /// Trait for reading bytecode associated with a given code hash.

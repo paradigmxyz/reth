@@ -1,6 +1,8 @@
 use super::ExecutedBlock;
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use alloy_primitives::{
+    keccak256, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256, U256,
+};
 use reth_errors::ProviderResult;
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives};
 use reth_storage_api::{
@@ -11,7 +13,7 @@ use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, TrieInput,
 };
-use revm_database::BundleState;
+use revm::database::BundleState;
 use std::{borrow::Cow, sync::OnceLock};
 
 /// A state provider that stores references to in-memory blocks along with their state as well as a
@@ -53,8 +55,8 @@ impl<'a, N: NodePrimitives> MemoryOverlayStateProviderRef<'a, N> {
             // Iterate from oldest to newest
             for block in self.in_memory.iter().rev() {
                 let data = block.trie_data();
-                input.nodes.extend_from_sorted(&data.trie_updates);
-                input.state.extend_from_sorted(&data.hashed_state);
+                input.nodes.extend_from_sorted(&data.sorted.trie_updates);
+                input.state.extend_from_sorted(&data.sorted.hashed_state);
             }
             input
         })
@@ -209,8 +211,26 @@ impl<N: NodePrimitives> StateProofProvider for MemoryOverlayStateProviderRef<'_,
 }
 
 impl<N: NodePrimitives> HashedPostStateProvider for MemoryOverlayStateProviderRef<'_, N> {
-    fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
-        self.historical.hashed_post_state(bundle_state)
+    fn hashed_post_state(&self, bundle_state: &BundleState) -> ProviderResult<HashedPostState> {
+        let mut hashed_state = self.historical.hashed_post_state(bundle_state)?;
+
+        for (address, account) in bundle_state.state() {
+            // Accounts created in this bundle cannot have parent storage to zero.
+            if !account.was_destroyed() || account.original_info.is_none() {
+                continue
+            }
+
+            let hashed_address = keccak256(address);
+            let Some(parent_storage) = self.trie_input().state.storages.get(&hashed_address) else {
+                continue
+            };
+            let storage = &mut hashed_state.storages.entry(hashed_address).or_default().storage;
+            for hashed_slot in parent_storage.storage.keys() {
+                storage.entry(*hashed_slot).or_insert(U256::ZERO);
+            }
+        }
+
+        Ok(hashed_state)
     }
 }
 
@@ -284,3 +304,29 @@ impl<N: NodePrimitives> MemoryOverlayStateProvider<N> {
 
 // Delegates all provider impls to [`MemoryOverlayStateProviderRef`]
 reth_storage_api::macros::delegate_provider_impls!(MemoryOverlayStateProvider<N> where [N: NodePrimitives]);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_ethereum_primitives::EthPrimitives;
+    use reth_storage_api::noop::NoopProvider;
+    use revm::database::{AccountStatus, BundleAccount};
+
+    #[test]
+    fn created_and_destroyed_account_skips_in_memory_trie_aggregation() {
+        let address = Address::with_last_byte(1);
+        let provider = MemoryOverlayStateProviderRef::<EthPrimitives>::new(
+            Box::new(NoopProvider::default()),
+            Vec::new(),
+        );
+        let mut bundle_state = BundleState::default();
+        bundle_state.state.insert(
+            address,
+            BundleAccount::new(None, None, Default::default(), AccountStatus::Destroyed),
+        );
+
+        provider.hashed_post_state(&bundle_state).unwrap();
+
+        assert!(provider.trie_input.get().is_none());
+    }
+}

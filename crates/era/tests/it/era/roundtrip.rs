@@ -21,6 +21,7 @@ use reth_era::{
         },
     },
 };
+use reth_ethereum_primitives::TransactionSigned;
 use std::io::Cursor;
 
 use crate::{EraTestDownloader, HOODI, MAINNET};
@@ -121,6 +122,16 @@ async fn test_era_file_roundtrip(
         assert_eq!(
             original_block_data, recompressed_block_data,
             "Block {block_idx} should be identical after re-compression cycle"
+        );
+
+        // The embedded execution block must decode on real data (post-merge slots yield `Some`,
+        // pre-merge slots `None`) and be identical across the re-compression cycle.
+        let original_exec = original_block.decode_execution_block::<TransactionSigned>()?;
+        let recompressed_exec = recompressed_block.decode_execution_block::<TransactionSigned>()?;
+
+        assert_eq!(
+            original_exec, recompressed_exec,
+            "Block {block_idx} execution block should be identical after re-compression cycle"
         );
     }
 

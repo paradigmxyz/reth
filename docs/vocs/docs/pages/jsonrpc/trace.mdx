@@ -294,21 +294,24 @@ Traces a call to `eth_sendRawTransaction` without making the call, returning the
 
 ### Example
 
+The example below can be reproduced with `reth node --dev --http --http.api eth,trace`. The signed EIP-1559 transaction is from the first prefunded dev account, and the explicit `0x0` block parameter pins the trace state to genesis.
+
 ```js
-// > {"jsonrpc":"2.0","id":1,"method":"trace_rawTransaction","params":["0xd46e8dd67c5d32be8d46e8dd67c5d32be8058bb8eb970870f072445675058bb8eb970870f072445675",["trace"]]}
+// > {"jsonrpc":"2.0","id":1,"method":"trace_rawTransaction","params":["0x02f86e82053980843b9aca008502540be400830186a094000000000000000000000000000000000000dead8080c080a0db09ddf33a2ded1d2f9255abf3d1e7cab03df637fa204c7f777aaa518a375237a01e7948bacb7bb5e12292f7f4c44464deb001ab5f85d486d7738cd6b634193ec8",["trace"],"0x0"]}
 {
-    "id": 1,
     "jsonrpc": "2.0",
+    "id": 1,
     "result": {
         "output": "0x",
         "stateDiff": null,
         "trace": [{
+            "type": "call",
             "action": {
+                "from": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
                 "callType": "call",
-                "from": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
-                "to": "0x6295ee1b4f6dd65047762f924ecd367c17eabf8f",
-                "gas": "0x186a0",
+                "gas": "0x13498",
                 "input": "0x",
+                "to": "0x000000000000000000000000000000000000dead",
                 "value": "0x0"
             },
             "result": {
@@ -316,8 +319,7 @@ Traces a call to `eth_sendRawTransaction` without making the call, returning the
                 "output": "0x"
             },
             "subtraces": 0,
-            "traceAddress": [],
-            "type": "call"
+            "traceAddress": []
         }],
         "vmTrace": null
     }

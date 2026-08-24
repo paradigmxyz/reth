@@ -4,8 +4,7 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Sealable, TxHash};
 use alloy_rpc_types_eth::{
-    BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, Log,
-    PendingTransactionFilterKind,
+    Filter, FilterBlockOption, FilterChanges, FilterId, PendingTransactionFilterKind,
 };
 use async_trait::async_trait;
 use futures::{
@@ -20,7 +19,7 @@ use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadReceipt},
     EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcConvert,
-    RpcNodeCoreExt, RpcTransaction,
+    RpcLog, RpcNodeCoreExt, RpcTransaction,
 };
 use reth_rpc_eth_types::{
     logs_utils::{self, append_matching_block_logs, ProviderOrBlock},
@@ -48,7 +47,7 @@ use tokio::{
 };
 use tracing::{debug, error, trace};
 
-impl<Eth> EngineEthFilter for EthFilter<Eth>
+impl<Eth> EngineEthFilter<RpcLog<Eth::NetworkTypes>> for EthFilter<Eth>
 where
     Eth: FullEthApiTypes
         + RpcNodeCoreExt<Provider: BlockIdReader>
@@ -61,7 +60,7 @@ where
         &self,
         filter: Filter,
         limits: QueryLimits,
-    ) -> impl Future<Output = RpcResult<Vec<Log>>> + Send {
+    ) -> impl Future<Output = RpcResult<Vec<RpcLog<Eth::NetworkTypes>>>> + Send {
         trace!(target: "rpc::eth", "Serving eth_getLogs");
         self.logs_for_filter(filter, limits).map_err(|e| e.into())
     }
@@ -221,7 +220,10 @@ where
     pub async fn filter_changes(
         &self,
         id: FilterId,
-    ) -> Result<FilterChanges<RpcTransaction<Eth::NetworkTypes>>, EthFilterError> {
+    ) -> Result<
+        FilterChanges<RpcTransaction<Eth::NetworkTypes>, RpcLog<Eth::NetworkTypes>>,
+        EthFilterError,
+    > {
         let info = self.provider().chain_info()?;
         let best_number = info.best_number;
 
@@ -247,7 +249,14 @@ where
         };
 
         match kind {
-            FilterKind::PendingTransaction(filter) => Ok(filter.drain().await),
+            FilterKind::PendingTransaction(filter) => Ok(match filter.drain().await {
+                FilterChanges::Empty => FilterChanges::Empty,
+                FilterChanges::Hashes(hashes) => FilterChanges::Hashes(hashes),
+                FilterChanges::Transactions(transactions) => {
+                    FilterChanges::Transactions(transactions)
+                }
+                FilterChanges::Logs(_) => unreachable!("pending transaction filter returned logs"),
+            }),
             FilterKind::Block => {
                 // Note: we need to fetch the block hashes from inclusive range
                 // [start_block..best_block]
@@ -302,7 +311,10 @@ where
     /// Returns an error if no matching log filter exists.
     ///
     /// Handler for `eth_getFilterLogs`
-    pub async fn filter_logs(&self, id: FilterId) -> Result<Vec<Log>, EthFilterError> {
+    pub async fn filter_logs(
+        &self,
+        id: FilterId,
+    ) -> Result<Vec<RpcLog<Eth::NetworkTypes>>, EthFilterError> {
         let filter = {
             let mut filters = self.inner.active_filters.inner.lock().await;
             let filter =
@@ -324,13 +336,14 @@ where
         &self,
         filter: Filter,
         limits: QueryLimits,
-    ) -> Result<Vec<Log>, EthFilterError> {
+    ) -> Result<Vec<RpcLog<Eth::NetworkTypes>>, EthFilterError> {
         self.inner.clone().logs_for_filter(filter, limits).await
     }
 }
 
 #[async_trait]
-impl<Eth> EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>> for EthFilter<Eth>
+impl<Eth> EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>, RpcLog<Eth::NetworkTypes>>
+    for EthFilter<Eth>
 where
     Eth: FullEthApiTypes + RpcNodeCoreExt + LoadReceipt + EthBlocks + 'static,
 {
@@ -381,7 +394,8 @@ where
     async fn filter_changes(
         &self,
         id: FilterId,
-    ) -> RpcResult<FilterChanges<RpcTransaction<Eth::NetworkTypes>>> {
+    ) -> RpcResult<FilterChanges<RpcTransaction<Eth::NetworkTypes>, RpcLog<Eth::NetworkTypes>>>
+    {
         trace!(target: "rpc::eth", "Serving eth_getFilterChanges");
         Ok(Self::filter_changes(self, id).await?)
     }
@@ -391,7 +405,7 @@ where
     /// Returns an error if no matching log filter exists.
     ///
     /// Handler for `eth_getFilterLogs`
-    async fn filter_logs(&self, id: FilterId) -> RpcResult<Vec<Log>> {
+    async fn filter_logs(&self, id: FilterId) -> RpcResult<Vec<RpcLog<Eth::NetworkTypes>>> {
         trace!(target: "rpc::eth", "Serving eth_getFilterLogs");
         Ok(Self::filter_logs(self, id).await?)
     }
@@ -411,7 +425,7 @@ where
     /// Returns logs matching given filter object.
     ///
     /// Handler for `eth_getLogs`
-    async fn logs(&self, filter: Filter) -> RpcResult<Vec<Log>> {
+    async fn logs(&self, filter: Filter) -> RpcResult<Vec<RpcLog<Eth::NetworkTypes>>> {
         trace!(target: "rpc::eth", "Serving eth_getLogs");
         Ok(self.logs_for_filter(filter, self.inner.query_limits).await?)
     }
@@ -468,7 +482,7 @@ where
         self: Arc<Self>,
         filter: Filter,
         limits: QueryLimits,
-    ) -> Result<Vec<Log>, EthFilterError> {
+    ) -> Result<Vec<RpcLog<Eth::NetworkTypes>>, EthFilterError> {
         match filter.block_option {
             FilterBlockOption::AtBlockHash(block_hash) => {
                 // First try to get cached block and receipts, as it's likely they're already cached
@@ -478,38 +492,38 @@ where
                     return Err(ProviderError::HeaderNotFound(block_hash.into()).into())
                 };
 
-                // Read number and timestamp from cached block or provider header
-                let (block_number, block_timestamp) = if let Some(block) = &maybe_block {
-                    (block.header().number(), block.header().timestamp())
+                let header = if let Some(block) = &maybe_block {
+                    block.clone_sealed_header()
                 } else {
                     let header = self
                         .provider()
                         .header_by_hash_or_number(block_hash.into())?
                         .ok_or_else(|| ProviderError::HeaderNotFound(block_hash.into()))?;
-                    (header.number(), header.timestamp())
+                    SealedHeader::new(header, block_hash)
                 };
 
                 // Check if the block has been pruned (EIP-4444)
                 let earliest_block = self.provider().earliest_block_number()?;
-                if block_number < earliest_block {
-                    return Err(EthApiError::PrunedHistoryUnavailable.into());
+                if header.number() < earliest_block {
+                    return Err(EthApiError::PrunedHistoryUnavailable {
+                        requested: header.number(),
+                        earliest_available: earliest_block,
+                    }
+                    .into());
                 }
-
-                let block_num_hash = BlockNumHash::new(block_number, block_hash);
 
                 let mut all_logs = Vec::new();
                 append_matching_block_logs(
                     &mut all_logs,
+                    self.eth_api.converter(),
                     maybe_block
                         .map(ProviderOrBlock::Block)
                         .unwrap_or_else(|| ProviderOrBlock::Provider(self.provider())),
                     &filter,
-                    block_num_hash,
+                    &header,
                     &receipts,
                     false,
-                    block_timestamp,
                 )?;
-
                 Ok(all_logs)
             }
             FilterBlockOption::Range { from_block, to_block } => {
@@ -533,18 +547,17 @@ where
                         if pending_block.block.number() > info.best_number {
                             // only consider the pending block if it is ahead of the chain
                             let mut all_logs = Vec::new();
-                            let timestamp = pending_block.block.timestamp();
-                            let block_num_hash = pending_block.block.num_hash();
+                            let header = pending_block.block.clone_sealed_header();
                             append_matching_block_logs(
                                 &mut all_logs,
+                                self.eth_api.converter(),
                                 ProviderOrBlock::<Eth::Provider>::Block(pending_block.block),
                                 &filter,
-                                block_num_hash,
+                                &header,
                                 &pending_block.receipts,
                                 false, // removed = false for pending blocks
-                                timestamp,
                             )?;
-                            return Ok(all_logs);
+                            return Ok(all_logs)
                         }
                     }
                 }
@@ -583,7 +596,11 @@ where
                 // Check if the requested range overlaps with pruned history (EIP-4444)
                 let earliest_block = self.provider().earliest_block_number()?;
                 if from_block_number < earliest_block {
-                    return Err(EthApiError::PrunedHistoryUnavailable.into());
+                    return Err(EthApiError::PrunedHistoryUnavailable {
+                        requested: from_block_number,
+                        earliest_available: earliest_block,
+                    }
+                    .into());
                 }
 
                 self.get_logs_in_block_range(filter, from_block_number, to_block_number, limits)
@@ -627,7 +644,7 @@ where
         from_block: u64,
         to_block: u64,
         limits: QueryLimits,
-    ) -> Result<Vec<Log>, EthFilterError> {
+    ) -> Result<Vec<RpcLog<Eth::NetworkTypes>>, EthFilterError> {
         trace!(target: "rpc::eth::filter", from=from_block, to=to_block, ?filter, "finding logs in range");
 
         // perform boundary checks first
@@ -641,12 +658,20 @@ where
             return Err(EthFilterError::QueryExceedsMaxBlocks(max_blocks_per_filter))
         }
 
-        let (tx, rx) = oneshot::channel();
+        let (mut tx, rx) = oneshot::channel();
         let this = self.clone();
         self.task_spawner.spawn_blocking_task(async move {
-            let res =
-                this.get_logs_in_block_range_inner(&filter, from_block, to_block, limits).await;
-            let _ = tx.send(res);
+            let fut = this.get_logs_in_block_range_inner(&filter, from_block, to_block, limits);
+            tokio::pin!(fut);
+            let res = tokio::select! {
+                // Range scans perform blocking reads before their first yield.
+                biased;
+                _ = tx.closed() => None,
+                res = &mut fut => Some(res),
+            };
+            if let Some(res) = res {
+                let _ = tx.send(res);
+            }
         });
 
         rx.await.map_err(|_| EthFilterError::InternalError)?
@@ -666,7 +691,7 @@ where
         from_block: u64,
         to_block: u64,
         limits: QueryLimits,
-    ) -> Result<Vec<Log>, EthFilterError> {
+    ) -> Result<Vec<RpcLog<Eth::NetworkTypes>>, EthFilterError> {
         let mut all_logs = Vec::new();
         let mut matching_headers = Vec::new();
 
@@ -720,14 +745,14 @@ where
             let num_hash = header.num_hash();
             append_matching_block_logs(
                 &mut all_logs,
+                self.eth_api.converter(),
                 recovered_block
                     .map(ProviderOrBlock::Block)
                     .unwrap_or_else(|| ProviderOrBlock::Provider(self.provider())),
                 filter,
-                num_hash,
+                &header,
                 &receipts,
                 false,
-                header.timestamp(),
             )?;
 
             // size check but only if range is multiple blocks, so we always return all

@@ -32,6 +32,11 @@ impl RawCapabilityMessage {
     pub const fn eth(id: EthMessageID, payload: Bytes) -> Self {
         Self::new(id.to_u8() as usize, payload)
     }
+
+    /// Encodes this message (`id` followed by its payload) to bytes.
+    pub fn encoded(&self) -> Bytes {
+        alloy_rlp::encode(self).into()
+    }
 }
 
 impl Encodable for RawCapabilityMessage {
@@ -123,11 +128,6 @@ impl Capability {
     /// Returns the [`EthVersion::Eth72`] capability.
     pub const fn eth_72() -> Self {
         Self::eth(EthVersion::Eth72)
-    }
-
-    /// Returns the `snap/1` capability.
-    pub const fn snap_1() -> Self {
-        Self::snap(SnapVersion::V1)
     }
 
     /// Returns the `snap/2` capability.

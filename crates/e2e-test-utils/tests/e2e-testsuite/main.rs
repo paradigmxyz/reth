@@ -8,9 +8,9 @@ use reth_e2e_test_utils::{
     test_rlp_utils::{generate_test_blocks, write_blocks_to_rlp},
     testsuite::{
         actions::{
-            Action, AssertChainTip, AssertMineBlock, CaptureBlock, CaptureBlockOnNode,
-            CompareNodeChainTips, CreateFork, MakeCanonical, ProduceBlocks, ReorgTo,
-            SelectActiveNode, UpdateBlockInfo,
+            Action, AssertChainTip, AssertMineBlock, BlockReference, CaptureBlock,
+            CaptureBlockOnNode, CompareNodeChainTips, CreateFork, FinalizeBlock, MakeCanonical,
+            ProduceBlocks, ReorgTo, SelectActiveNode, UpdateBlockInfo,
         },
         setup::{NetworkSetup, Setup},
         Environment, TestBuilder,
@@ -161,7 +161,7 @@ async fn test_testsuite_assert_mine_block() -> Result<()> {
                 withdrawals: None,
                 parent_beacon_block_root: None,
                 slot_number: None,
-                target_gas_limit: None,
+                ..Default::default()
             },
         ));
 
@@ -250,9 +250,19 @@ async fn test_testsuite_reorg_with_tagging() -> Result<()> {
 
     let test = TestBuilder::new()
         .with_setup(setup)
-        .with_action(ProduceBlocks::<EthEngineTypes>::new(3)) // produce blocks 1, 2, 3
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(1)) // produce block 1
+        .with_action(CaptureBlock::new("fork_base"))
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(2)) // produce blocks 2, 3
+        .with_action(CaptureBlock::new("main_tip"))
         .with_action(MakeCanonical::new()) // make main chain tip canonical
-        .with_action(CreateFork::<EthEngineTypes>::new(1, 2)) // fork from block 1, produce blocks 2', 3'
+        // block production finalizes the produced blocks, so re-establish finality at the fork
+        // base: building below the finalized block is rejected as a too deep reorg
+        .with_action(
+            FinalizeBlock::<EthEngineTypes>::new(BlockReference::Tag("fork_base".to_string()))
+                .with_head(BlockReference::Tag("main_tip".to_string())),
+        )
+        // fork from block 1, produce blocks 2', 3'
+        .with_action(CreateFork::<EthEngineTypes>::new_from_tag("fork_base", 2))
         .with_action(CaptureBlock::new("fork_tip")) // tag fork tip
         .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("fork_tip")); // reorg to fork tip
 

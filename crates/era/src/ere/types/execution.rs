@@ -17,7 +17,7 @@ use crate::{
     },
     e2s::{error::E2sError, types::Entry},
 };
-use alloy_consensus::{Block, BlockBody, Eip658Value, Header, TxType};
+use alloy_consensus::{Block, BlockBody, Eip658Value, Header, Receipt, ReceiptEnvelope, TxType};
 use alloy_primitives::{Log, B256, U256};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use sha2::{Digest, Sha256};
@@ -260,6 +260,16 @@ pub struct SlimReceipt {
     pub logs: Vec<Log>,
 }
 
+impl From<SlimReceipt> for ReceiptEnvelope {
+    /// Restores the bloom that the slim form omits, recomputing it from the logs.
+    fn from(receipt: SlimReceipt) -> Self {
+        let SlimReceipt { tx_type, status, cumulative_gas_used, logs } = receipt;
+        let receipt = Receipt { status, cumulative_gas_used, logs };
+
+        Self::from_typed(tx_type, receipt.with_bloom())
+    }
+}
+
 /// Proof type discriminant used inside the Proof entry's RLP envelope.
 ///
 /// Maps to specific Portal Network proof objects.
@@ -484,7 +494,7 @@ impl Accumulator {
         // Binary Merkle tree bottom-up (capacity is always a power of two)
         while leaves.len() > 1 {
             let mut next_level = Vec::with_capacity(leaves.len() / 2);
-            for pair in leaves.chunks_exact(2) {
+            for pair in leaves.as_chunks::<2>().0 {
                 let mut data = [0u8; 64];
                 data[..32].copy_from_slice(&pair[0]);
                 data[32..].copy_from_slice(&pair[1]);

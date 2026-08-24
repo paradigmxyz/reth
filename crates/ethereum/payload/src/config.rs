@@ -16,6 +16,8 @@ pub struct EthereumBuilderConfig {
     pub max_blobs_per_block: Option<u64>,
     /// Extra data for built blocks.
     pub extra_data: Bytes,
+    /// Whether payload builds should skip state-root computation.
+    pub skip_state_root: bool,
 }
 
 impl Default for EthereumBuilderConfig {
@@ -32,6 +34,7 @@ impl EthereumBuilderConfig {
             await_payload_on_missing: true,
             max_blobs_per_block: None,
             extra_data: Bytes::new(),
+            skip_state_root: false,
         }
     }
 
@@ -57,6 +60,12 @@ impl EthereumBuilderConfig {
     /// Set the extra data for built blocks.
     pub fn with_extra_data(mut self, extra_data: Bytes) -> Self {
         self.extra_data = extra_data;
+        self
+    }
+
+    /// Configures whether payload builds should skip state-root computation.
+    pub const fn with_skip_state_root(mut self, skip_state_root: bool) -> Self {
+        self.skip_state_root = skip_state_root;
         self
     }
 }

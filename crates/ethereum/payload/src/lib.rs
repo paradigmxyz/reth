@@ -8,7 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use alloy_consensus::Transaction;
+use alloy_consensus::{BlockHeader, Transaction};
 use alloy_primitives::{Bytes, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::PayloadAttributes as EthPayloadAttributes;
@@ -161,12 +161,13 @@ where
     let BuildArguments {
         mut cached_reads,
         execution_cache,
-        trie_handle,
+        mut state_root_handle,
         config,
         cancel,
         best_payload,
     } = args;
     let PayloadConfig { parent_header, attributes, payload_id, .. } = config;
+    let skip_state_root = builder_config.skip_state_root;
 
     let mut state_provider = client.state_by_block_hash(parent_header.hash())?;
     if let Some(execution_cache) = execution_cache {
@@ -220,10 +221,9 @@ where
     ));
     let mut total_fees = U256::ZERO;
 
-    // If we have a sparse trie handle, wire a state hook that streams per-tx state diffs
-    // to the background trie pipeline for incremental state root computation.
-    if let Some(ref handle) = trie_handle {
-        builder.evm_mut().db_mut().set_state_hook(Some(Box::new(handle.state_hook())));
+    // If we have a state-root task, wire a state hook that streams per-tx state diffs.
+    if let Some(task) = state_root_handle.as_mut() {
+        builder.evm_mut().db_mut().set_state_hook(Some(Box::new(task.take_state_hook())));
     }
 
     builder.apply_pre_execution_changes().map_err(|err| {
@@ -448,27 +448,35 @@ where
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
-    let BlockBuilderOutcome { execution_result, block, block_access_list, .. } = if let Some(
-        mut handle,
-    ) = trie_handle
+    let BlockBuilderOutcome { execution_result, block, block_access_list, .. } = if skip_state_root
     {
-        // Drop the state hook, which drops the StateHookSender and triggers
-        // FinishedStateUpdates via its Drop impl, signaling the trie task to finalize.
+        debug!(
+            target: "payload_builder",
+            id = %payload_id,
+            state_root = ?parent_header.state_root(),
+            "skipping payload state-root computation"
+        );
+        builder.finish(
+            state_provider.as_ref(),
+            Some((parent_header.state_root(), Default::default())),
+        )?
+    } else if let Some(mut task) = state_root_handle {
+        // Drop the state hook, which signals the state-root task to finalize.
         builder.evm_mut().db_mut().set_state_hook(None);
 
-        // The sparse trie has been computing incrementally alongside tx execution.
+        // The state-root task has been computing incrementally alongside tx execution.
         // This recv() waits for the final root hash — most work is already done.
         // Fall back to sync state root if the trie pipeline fails.
-        match handle.state_root() {
+        match task.state_root() {
             Ok(outcome) => {
-                debug!(target: "payload_builder", id=%payload_id, state_root=?outcome.state_root, "received state root from sparse trie");
+                debug!(target: "payload_builder", id=%payload_id, state_root=?outcome.state_root, job = task.name(), "received state root from state-root job");
                 builder.finish(
                     state_provider.as_ref(),
                     Some((outcome.state_root, Arc::unwrap_or_clone(outcome.trie_updates))),
                 )?
             }
             Err(err) => {
-                warn!(target: "payload_builder", id=%payload_id, %err, "sparse trie failed, falling back to sync state root");
+                warn!(target: "payload_builder", id=%payload_id, %err, "state-root job failed, falling back to sync state root");
                 builder.finish(state_provider.as_ref(), None)?
             }
         }

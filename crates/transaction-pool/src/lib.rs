@@ -510,11 +510,8 @@ where
         if transactions.is_empty() {
             return Vec::new()
         }
-        let validated = self
-            .pool
-            .validator()
-            .validate_transactions(transactions.into_iter().map(|tx| (origin, tx)))
-            .await;
+        let validated =
+            self.pool.validator().validate_transactions_with_origin(origin, transactions).await;
         self.pool.add_transactions(origin, validated)
     }
 
@@ -823,6 +820,13 @@ where
         indices_bitarray: B128,
     ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError> {
         self.pool.blob_store().get_by_versioned_hashes_v4(versioned_hashes, indices_bitarray)
+    }
+
+    fn has_blobs_for_versioned_hashes(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<bool>, BlobStoreError> {
+        self.pool.blob_store().has_versioned_hashes(versioned_hashes)
     }
 
     fn blob_store(&self) -> Box<dyn BlobStore> {

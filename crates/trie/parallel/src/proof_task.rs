@@ -30,7 +30,7 @@
 //! ```
 
 use crate::{
-    root::ParallelStateRootError,
+    error::StateRootTaskError,
     value_encoder::{AsyncAccountValueEncoder, ValueEncoderStats},
 };
 use alloy_primitives::{
@@ -170,6 +170,7 @@ impl ProofWorkerHandle {
         runtime: &Runtime,
         task_ctx: ProofTaskCtx<Factory>,
         halve_workers: bool,
+        proof_result_tx: ProofResultSender,
     ) -> Self
     where
         Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -180,7 +181,6 @@ impl ProofWorkerHandle {
     {
         let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
         let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
-
         let cached_storage_roots = Arc::<DashMap<_, _>>::default();
 
         let divisor = if halve_workers { 2 } else { 1 };
@@ -206,6 +206,7 @@ impl ProofWorkerHandle {
         let storage_task_ctx = task_ctx.clone();
         let storage_avail = storage_availability.clone();
         let storage_roots = cached_storage_roots.clone();
+        let storage_result_tx = proof_result_tx.clone();
         let storage_parent_span = tracing::Span::current();
         runtime.spawn_blocking_named("storage-workers", move || {
             let worker_id = AtomicUsize::new(0);
@@ -237,6 +238,13 @@ impl ProofWorkerHandle {
                         ?error,
                         "Storage worker failed"
                     );
+                    let _ = storage_result_tx.send(ProofResultMessage {
+                        result: Err(StateRootTaskError::ProofWorker(format!(
+                            "storage worker {worker_id}: {error}"
+                        ))),
+                        elapsed: Duration::ZERO,
+                        state: Default::default(),
+                    });
                 }
             });
         });
@@ -244,6 +252,7 @@ impl ProofWorkerHandle {
         let account_rt = runtime.clone();
         let account_tx = storage_work_tx.clone();
         let account_avail = account_availability.clone();
+        let account_result_tx = proof_result_tx;
         let account_parent_span = tracing::Span::current();
         runtime.spawn_blocking_named("account-workers", move || {
             let worker_id = AtomicUsize::new(0);
@@ -276,6 +285,13 @@ impl ProofWorkerHandle {
                         ?error,
                         "Account worker failed"
                     );
+                    let _ = account_result_tx.send(ProofResultMessage {
+                        result: Err(StateRootTaskError::ProofWorker(format!(
+                            "account worker {worker_id}: {error}"
+                        ))),
+                        elapsed: Duration::ZERO,
+                        state: Default::default(),
+                    });
                 }
             });
         });
@@ -362,7 +378,7 @@ impl ProofWorkerHandle {
                     input.into_proof_result_sender();
 
                 let _ = result_tx.send(ProofResultMessage {
-                    result: Err(ParallelStateRootError::Provider(error.clone())),
+                    result: Err(StateRootTaskError::ProofDispatch(error.clone())),
                     elapsed: start.elapsed(),
                     state,
                 });
@@ -430,11 +446,11 @@ where
         TC: TrieStorageCursor,
         HC: HashedStorageCursor<Value = U256>,
     {
-        let StorageProofInput { hashed_address, mut targets } = input;
+        let StorageProofInput { hashed_address, mut targets, needs_root } = input;
 
         let span = debug_span!(
             target: "trie::proof_task",
-            "V2 Storage proof calculation",
+            "Storage proof calculation",
             n = %targets.len(),
         );
         let _span_guard = span.enter();
@@ -442,14 +458,25 @@ where
         let proof_start = Instant::now();
 
         // If targets is empty it means the caller only wants the root node.
-        let proof = if targets.is_empty() {
+        let (proof, root) = if targets.is_empty() {
             let root_node = calculator.storage_root_node(hashed_address)?;
-            vec![root_node]
+            let root = calculator.compute_root_hash(core::slice::from_ref(&root_node))?;
+            (vec![root_node], root)
         } else {
-            calculator.storage_proof(hashed_address, &mut targets)?
-        };
+            // A partial proof cannot provide the storage root. Calculate it separately without
+            // changing the target's parent context, then reset the storage cursors by starting the
+            // targeted proof.
+            let root = if needs_root && targets.iter().all(|target| target.parent.is_known()) {
+                let root_node = calculator.storage_root_node(hashed_address)?;
+                calculator.compute_root_hash(core::slice::from_ref(&root_node))?
+            } else {
+                None
+            };
 
-        let root = calculator.compute_root_hash(&proof)?;
+            let proof = calculator.storage_proof(hashed_address, &mut targets)?;
+            let root = if root.is_some() { root } else { calculator.compute_root_hash(&proof)? };
+            (proof, root)
+        };
 
         trace!(
             target: "trie::proof_task",
@@ -464,10 +491,11 @@ where
     }
 }
 
-/// Channel used by worker threads to deliver `ProofResultMessage` items back to
+/// Channel used by worker threads to deliver proof results back to
 /// `SparseTrieCacheTask`.
 ///
-/// Workers use this sender to deliver proof results directly to `SparseTrieCacheTask`.
+/// Workers use this sender to deliver proof results or terminal initialization errors directly to
+/// `SparseTrieCacheTask`.
 pub type ProofResultSender = CrossbeamSender<ProofResultMessage>;
 
 /// Message containing a completed proof result with metadata for direct delivery to
@@ -478,7 +506,7 @@ pub type ProofResultSender = CrossbeamSender<ProofResultMessage>;
 #[derive(Debug)]
 pub struct ProofResultMessage {
     /// The proof calculation result
-    pub result: Result<DecodedMultiProofV2, ParallelStateRootError>,
+    pub result: Result<DecodedMultiProofV2, StateRootTaskError>,
     /// Time taken for the entire proof calculation (from dispatch to completion)
     pub elapsed: Duration,
     /// Original state update that triggered this proof
@@ -963,7 +991,7 @@ where
         v2_account_calculator: &mut V2AccountProofCalculator<'a, Provider>,
         v2_storage_calculator: Rc<RefCell<V2StorageProofCalculator<'a, Provider>>>,
         targets: MultiProofTargetsV2,
-    ) -> Result<(DecodedMultiProofV2, ValueEncoderStats), ParallelStateRootError>
+    ) -> Result<(DecodedMultiProofV2, ValueEncoderStats), StateRootTaskError>
     where
         Provider: TrieCursorFactory + HashedCursorFactory + 'a,
     {
@@ -971,7 +999,7 @@ where
 
         let span = debug_span!(
             target: "trie::proof_task",
-            "Account V2 multiproof calculation",
+            "Account multiproof calculation",
             account_targets = account_targets.len(),
             storage_targets = storage_targets.values().map(|t| t.len()).sum::<usize>(),
         );
@@ -1062,8 +1090,8 @@ where
 fn dispatch_v2_storage_proofs(
     storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
     account_targets: &[ProofV2Target],
-    mut storage_targets: B256Map<Vec<ProofV2Target>>,
-) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
+    storage_targets: B256Map<Vec<ProofV2Target>>,
+) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, StateRootTaskError> {
     if storage_targets.is_empty() {
         return Ok(B256Map::default())
     }
@@ -1071,18 +1099,8 @@ fn dispatch_v2_storage_proofs(
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(storage_targets.len(), Default::default());
 
-    // Collect hashed addresses from account targets that need their storage roots computed
+    // Collect hashed addresses from account targets that need their storage roots computed.
     let account_target_addresses: B256Set = account_targets.iter().map(|t| t.key()).collect();
-
-    // For storage targets with associated account proofs, ensure the first target has
-    // min_len(0) so the root node is returned for storage root computation
-    for (hashed_address, targets) in &mut storage_targets {
-        if account_target_addresses.contains(hashed_address) &&
-            let Some(first) = targets.first_mut()
-        {
-            *first = first.with_min_len(0);
-        }
-    }
 
     // Sort storage targets by address for optimal dispatch order.
     // Since trie walk processes accounts in lexicographical order, dispatching in the same order
@@ -1094,12 +1112,13 @@ fn dispatch_v2_storage_proofs(
     for (hashed_address, targets) in sorted_storage_targets {
         // Create channel for receiving StorageProofResultMessage
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
-        let input = StorageProofInput::new(hashed_address, targets);
+        let needs_root = account_target_addresses.contains(&hashed_address);
+        let input = StorageProofInput::new(hashed_address, targets, needs_root);
 
         storage_work_tx
             .send(StorageWorkerJob::StorageProof { input, proof_result_sender: result_tx })
             .map_err(|_| {
-                ParallelStateRootError::Other(format!(
+                StateRootTaskError::Other(format!(
                     "Failed to queue storage proof for {hashed_address:?}: storage worker pool unavailable",
                 ))
             })?;
@@ -1117,12 +1136,14 @@ pub struct StorageProofInput {
     pub hashed_address: B256,
     /// The set of proof targets
     pub targets: Vec<ProofV2Target>,
+    /// Whether the account proof needs the storage root for leaf encoding.
+    pub needs_root: bool,
 }
 
 impl StorageProofInput {
     /// Creates a new [`StorageProofInput`] with the given hashed address and target slots.
-    pub const fn new(hashed_address: B256, targets: Vec<ProofV2Target>) -> Self {
-        Self { hashed_address, targets }
+    pub const fn new(hashed_address: B256, targets: Vec<ProofV2Target>, needs_root: bool) -> Self {
+        Self { hashed_address, targets, needs_root }
     }
 }
 
@@ -1169,18 +1190,18 @@ mod tests {
         let chain_spec = Arc::new(ChainSpec::default());
         let anchor_hash = chain_spec.genesis_hash();
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
-        let changeset_cache = reth_trie_db::ChangesetCache::new();
-        let factory = reth_provider::providers::OverlayStateProviderFactory::new(
+        let factory = reth_storage_overlay::OverlayStateProviderFactory::new(
             provider_factory,
-            reth_provider::providers::OverlayBuilder::<reth_ethereum_primitives::EthPrimitives>::new(
-                anchor_hash,
-                changeset_cache,
-            ),
+            reth_storage_overlay::OverlayManager::<
+                reth_ethereum_primitives::EthPrimitives,
+            >::default()
+            .overlay_builder(anchor_hash),
         );
         let ctx = test_ctx(factory);
 
         let runtime = reth_tasks::Runtime::test();
-        let proof_handle = ProofWorkerHandle::new(&runtime, ctx, false);
+        let (proof_result_tx, _) = unbounded();
+        let proof_handle = ProofWorkerHandle::new(&runtime, ctx, false, proof_result_tx);
 
         // Verify handle can be cloned
         let _cloned_handle = proof_handle.clone();

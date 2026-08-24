@@ -40,6 +40,15 @@ fn is_unimplemented(err: jsonrpsee::core::client::Error) -> bool {
     }
 }
 
+fn is_invalid_params(err: &jsonrpsee::core::client::Error) -> bool {
+    match err {
+        jsonrpsee::core::client::Error::Call(error_obj) => {
+            error_obj.code() == ErrorCode::InvalidParams.code()
+        }
+        _ => false,
+    }
+}
+
 async fn test_rpc_call_ok<R>(client: &HttpClient, method_name: &str, params: ArrayParams)
 where
     R: DeserializeOwned,
@@ -63,6 +72,14 @@ where
         // Panic if an unexpected successful response is received
         panic!("Expected error response, got successful response: {resp:?}");
     };
+}
+
+async fn assert_empty_raw_transaction_sync_error(client: &HttpClient, params: ArrayParams) {
+    let err = client
+        .request::<Value, _>("eth_sendRawTransactionSync", params)
+        .await
+        .expect_err("empty raw transaction should fail after RPC parameter decoding");
+    assert!(err.to_string().contains("empty transaction data"), "{err:?}");
 }
 
 /// Represents a builder for creating JSON-RPC requests.
@@ -117,21 +134,24 @@ async fn test_filter_calls<C>(client: &C)
 where
     C: ClientT + SubscriptionClientT + Sync,
 {
-    EthFilterApiClient::<Transaction>::new_filter(client, Filter::default()).await.unwrap();
-    EthFilterApiClient::<Transaction>::new_pending_transaction_filter(client, None).await.unwrap();
-    EthFilterApiClient::<Transaction>::new_pending_transaction_filter(
+    EthFilterApiClient::<Transaction, Log>::new_filter(client, Filter::default()).await.unwrap();
+    EthFilterApiClient::<Transaction, Log>::new_pending_transaction_filter(client, None)
+        .await
+        .unwrap();
+    EthFilterApiClient::<Transaction, Log>::new_pending_transaction_filter(
         client,
         Some(PendingTransactionFilterKind::Full),
     )
     .await
     .unwrap();
-    let id = EthFilterApiClient::<Transaction>::new_block_filter(client).await.unwrap();
-    EthFilterApiClient::<Transaction>::filter_changes(client, id.clone()).await.unwrap();
-    EthFilterApiClient::<Transaction>::logs(client, Filter::default()).await.unwrap();
-    let id =
-        EthFilterApiClient::<Transaction>::new_filter(client, Filter::default()).await.unwrap();
-    EthFilterApiClient::<Transaction>::filter_logs(client, id.clone()).await.unwrap();
-    EthFilterApiClient::<Transaction>::uninstall_filter(client, id).await.unwrap();
+    let id = EthFilterApiClient::<Transaction, Log>::new_block_filter(client).await.unwrap();
+    EthFilterApiClient::<Transaction, Log>::filter_changes(client, id.clone()).await.unwrap();
+    EthFilterApiClient::<Transaction, Log>::logs(client, Filter::default()).await.unwrap();
+    let id = EthFilterApiClient::<Transaction, Log>::new_filter(client, Filter::default())
+        .await
+        .unwrap();
+    EthFilterApiClient::<Transaction, Log>::filter_logs(client, id.clone()).await.unwrap();
+    EthFilterApiClient::<Transaction, Log>::uninstall_filter(client, id).await.unwrap();
 }
 
 async fn test_basic_admin_calls<C>(client: &C)
@@ -373,6 +393,18 @@ where
     )
     .await
     .unwrap();
+    let proofs = EthApiClient::<
+        TransactionRequest,
+        Transaction,
+        Block,
+        Receipt,
+        Header,
+        TransactionSigned,
+    >::get_multi_proof(client, vec![(address, vec![B256::ZERO])], None)
+    .await
+    .unwrap();
+    assert_eq!(proofs.len(), 1);
+    assert_eq!(proofs[0].address, address);
 
     // Unimplemented
     assert!(
@@ -449,6 +481,7 @@ where
     DebugApiClient::<TransactionRequest>::raw_transaction(client, B256::default()).await.unwrap();
     DebugApiClient::<TransactionRequest>::raw_receipts(client, block_id).await.unwrap_err();
     DebugApiClient::<TransactionRequest>::bad_blocks(client).await.unwrap();
+    DebugApiClient::<TransactionRequest>::debug_clear_txpool(client).await.unwrap();
     DebugApiClient::<TransactionRequest>::debug_account_at(
         client,
         block_id,
@@ -465,6 +498,28 @@ where
     )
     .await
     .unwrap_err();
+
+    for block_id in [
+        BlockId::number(0),
+        BlockId::latest(),
+        BlockId::hash(B256::ZERO),
+        BlockId::hash_canonical(B256::ZERO),
+    ] {
+        let err =
+            DebugApiClient::<TransactionRequest>::debug_execution_witness(client, block_id, None)
+                .await
+                .unwrap_err();
+        assert!(!is_invalid_params(&err));
+    }
+
+    let err = DebugApiClient::<TransactionRequest>::debug_execution_witness_by_block_hash(
+        client,
+        B256::ZERO,
+        Some(Default::default()),
+    )
+    .await
+    .unwrap_err();
+    assert!(!is_invalid_params(&err));
 }
 
 async fn test_basic_net_calls<C>(client: &C)
@@ -669,6 +724,28 @@ async fn test_call_eth_functions_http() {
     let handle = launch_http(vec![RethRpcModule::Eth]).await;
     let client = handle.http_client().unwrap();
     test_basic_eth_calls(&client).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_send_raw_transaction_sync_accepts_optional_timeout_arg() {
+    reth_tracing::init_test_tracing();
+
+    let handle = launch_http(vec![RethRpcModule::Eth]).await;
+    let client = handle.http_client().unwrap();
+
+    let mut one_arg = ArrayParams::new();
+    one_arg.insert(Bytes::default()).unwrap();
+    assert_empty_raw_transaction_sync_error(&client, one_arg).await;
+
+    let mut null_timeout = ArrayParams::new();
+    null_timeout.insert(Bytes::default()).unwrap();
+    null_timeout.insert(Value::Null).unwrap();
+    assert_empty_raw_transaction_sync_error(&client, null_timeout).await;
+
+    let mut two_args = ArrayParams::new();
+    two_args.insert(Bytes::default()).unwrap();
+    two_args.insert(1u64).unwrap();
+    assert_empty_raw_transaction_sync_error(&client, two_args).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

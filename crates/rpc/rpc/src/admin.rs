@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use alloy_genesis::ChainConfig;
+use alloy_primitives::keccak256;
 use alloy_rpc_types_admin::{
     EthInfo, EthPeerInfo, EthProtocolInfo, NodeInfo, PeerInfo, PeerNetworkInfo, PeerProtocolInfo,
     Ports, ProtocolInfo,
@@ -14,7 +15,6 @@ use reth_network_types::PeerKind;
 use reth_rpc_api::AdminApiServer;
 use reth_rpc_server_types::ToRpcResult;
 use reth_transaction_pool::TransactionPool;
-use revm_primitives::keccak256;
 
 /// `admin` API implementation.
 ///

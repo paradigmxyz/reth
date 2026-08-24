@@ -2,7 +2,7 @@
 
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
-    eip7594::{BlobTransactionSidecarVariant, Cell},
+    eip7594::{BlobCellMask, BlobTransactionSidecarVariant, Cell},
 };
 use alloy_primitives::{TxHash, B128, B256};
 pub use converter::BlobSidecarConverter;
@@ -11,8 +11,9 @@ pub use mem::InMemoryBlobStore;
 pub use noop::NoopBlobStore;
 use std::{
     fmt,
+    ops::Deref,
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
 };
@@ -24,6 +25,98 @@ mod mem;
 mod noop;
 mod tracker;
 
+/// Blob cell availability stored for a transaction.
+///
+/// Bit `i` corresponds to cell index `i`. The two words are stored least-significant first: index
+/// `0` contains cells `0..64` and index `1` contains cells `64..128`.
+#[derive(Debug, Clone)]
+pub struct BlobCellAvailability(Arc<[AtomicU64; 2]>);
+
+impl BlobCellAvailability {
+    const LOW_WORD: usize = 0;
+    const HIGH_WORD: usize = 1;
+
+    /// Returns full availability for all blob cells.
+    pub fn full() -> Self {
+        Self(Arc::new([AtomicU64::new(u64::MAX), AtomicU64::new(u64::MAX)]))
+    }
+
+    /// Returns a snapshot of the available cells.
+    ///
+    /// The two words are loaded independently. Future writers must only add availability bits so
+    /// that a concurrent snapshot can understate availability but never overstate it.
+    pub fn get(&self) -> BlobCellMask {
+        let low = self.0[Self::LOW_WORD].load(Ordering::Relaxed) as u128;
+        let high = self.0[Self::HIGH_WORD].load(Ordering::Relaxed) as u128;
+        BlobCellMask::from_bits((high << 64) | low)
+    }
+
+    /// Returns true if all blob cells are available.
+    pub fn is_full(&self) -> bool {
+        self.get().bits() == u128::MAX
+    }
+}
+
+impl PartialEq for BlobCellAvailability {
+    fn eq(&self, other: &Self) -> bool {
+        self.get() == other.get()
+    }
+}
+
+impl Eq for BlobCellAvailability {}
+
+/// A blob sidecar paired with its shared cell availability.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PooledBlobSidecar {
+    sidecar: BlobTransactionSidecarVariant,
+    availability: BlobCellAvailability,
+}
+
+impl PooledBlobSidecar {
+    /// Creates a sidecar with the given shared cell availability.
+    pub const fn new(
+        sidecar: BlobTransactionSidecarVariant,
+        availability: BlobCellAvailability,
+    ) -> Self {
+        Self { sidecar, availability }
+    }
+
+    /// Returns the wrapped sidecar.
+    pub const fn sidecar(&self) -> &BlobTransactionSidecarVariant {
+        &self.sidecar
+    }
+
+    /// Returns whether this is an EIP-7594 sidecar.
+    pub const fn is_eip7594(&self) -> bool {
+        self.sidecar.is_eip7594()
+    }
+
+    /// Returns the shared cell availability.
+    pub const fn availability(&self) -> &BlobCellAvailability {
+        &self.availability
+    }
+
+    /// Consumes the wrapper and returns the sidecar.
+    pub fn into_sidecar(self) -> BlobTransactionSidecarVariant {
+        self.sidecar
+    }
+}
+
+impl Deref for PooledBlobSidecar {
+    type Target = BlobTransactionSidecarVariant;
+
+    fn deref(&self) -> &Self::Target {
+        &self.sidecar
+    }
+}
+
+impl From<BlobTransactionSidecarVariant> for PooledBlobSidecar {
+    fn from(sidecar: BlobTransactionSidecarVariant) -> Self {
+        // TODO: Initialize this with the actual mask once sparse sidecars are supported.
+        Self::new(sidecar, BlobCellAvailability::full())
+    }
+}
+
 /// A blob store that can be used to store blob data of EIP4844 transactions.
 ///
 /// This type is responsible for keeping track of blob data until it is no longer needed (after
@@ -32,13 +125,10 @@ mod tracker;
 /// Note: this is Clone because it is expected to be wrapped in an Arc.
 pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     /// Inserts the blob sidecar into the store
-    fn insert(&self, tx: B256, data: BlobTransactionSidecarVariant) -> Result<(), BlobStoreError>;
+    fn insert(&self, tx: B256, data: PooledBlobSidecar) -> Result<(), BlobStoreError>;
 
     /// Inserts multiple blob sidecars into the store
-    fn insert_all(
-        &self,
-        txs: Vec<(B256, BlobTransactionSidecarVariant)>,
-    ) -> Result<(), BlobStoreError>;
+    fn insert_all(&self, txs: Vec<(B256, PooledBlobSidecar)>) -> Result<(), BlobStoreError>;
 
     /// Deletes the blob sidecar from the store
     fn delete(&self, tx: B256) -> Result<(), BlobStoreError>;
@@ -120,6 +210,11 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
         indices_bitarray: B128,
     ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError>;
 
+    /// Return whether each requested blob versioned hash is available.
+    ///
+    /// The response is always the same length and order as the request.
+    fn has_versioned_hashes(&self, versioned_hashes: &[B256]) -> Result<Vec<bool>, BlobStoreError>;
+
     /// Returns all requested cells for all blobs belonging to the transaction.
     ///
     /// The `indices_bitarray` is applied independently to every blob in the tx.
@@ -182,7 +277,7 @@ impl BlobStoreSize {
 
     #[inline]
     pub(crate) fn sub_size(&self, sub: usize) {
-        let _ = self.data_size.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+        let _ = self.data_size.try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
             Some(current.saturating_sub(sub))
         });
     }
@@ -199,7 +294,7 @@ impl BlobStoreSize {
 
     #[inline]
     pub(crate) fn sub_len(&self, sub: usize) {
-        let _ = self.num_blobs.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+        let _ = self.num_blobs.try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
             Some(current.saturating_sub(sub))
         });
     }
@@ -234,9 +329,33 @@ pub struct BlobStoreCleanupStat {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_eips::{eip4844::BlobTransactionSidecar, eip7594::BlobTransactionSidecarEip7594};
 
     #[expect(dead_code)]
     struct DynStore {
         store: Box<dyn BlobStore>,
+    }
+
+    #[test]
+    fn pooled_blob_sidecar_defaults_to_full_availability() {
+        let sidecars = [
+            BlobTransactionSidecarVariant::Eip4844(BlobTransactionSidecar::default()),
+            BlobTransactionSidecarVariant::Eip7594(BlobTransactionSidecarEip7594::default()),
+        ];
+
+        for sidecar in sidecars {
+            assert!(PooledBlobSidecar::from(sidecar).availability().is_full());
+        }
+    }
+
+    #[test]
+    fn blob_cell_availability_uses_cell_index_bit_order() {
+        let availability =
+            BlobCellAvailability(Arc::new([AtomicU64::new(1), AtomicU64::new(1 << 1)]));
+
+        let mask = availability.get();
+        assert!(mask.contains(0));
+        assert!(mask.contains(65));
+        assert_eq!(mask.count(), 2);
     }
 }

@@ -85,8 +85,13 @@ pub enum EthApiError {
     /// requested that has been pruned according to the node's data retention policy.
     ///
     /// See also <https://eips.ethereum.org/EIPS/eip-4444>
-    #[error("pruned history unavailable")]
-    PrunedHistoryUnavailable,
+    #[error("pruned history unavailable: requested {requested}, earliest available {earliest_available}")]
+    PrunedHistoryUnavailable {
+        /// The requested block number
+        requested: u64,
+        /// The earliest block number that is still available
+        earliest_available: u64,
+    },
     /// Receipts not found for block hash/number/tag
     #[error("receipts not found")]
     ReceiptsNotFound(BlockId),
@@ -135,6 +140,15 @@ pub enum EthApiError {
     /// Thrown when a requested transaction is not found
     #[error("transaction not found")]
     TransactionNotFound,
+    /// Thrown when a transaction requested by a tracing method is not found
+    #[error("transaction not found")]
+    TracingTransactionNotFound,
+    /// Thrown when a block requested by a tracing method is not found
+    #[error("block not found")]
+    TracingBlockNotFound(BlockId),
+    /// Thrown when a tracing method is called for the genesis block
+    #[error("genesis is not traceable")]
+    GenesisNotTraceable,
     /// Some feature is unsupported
     #[error("unsupported")]
     Unsupported(&'static str),
@@ -302,6 +316,22 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::UnknownBlockOrTxIndex | EthApiError::TransactionNotFound => {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
             }
+            EthApiError::TracingTransactionNotFound | EthApiError::GenesisNotTraceable => {
+                rpc_error_with_code(
+                    jsonrpsee_types::error::CALL_EXECUTION_FAILED_CODE,
+                    error.to_string(),
+                )
+            }
+            EthApiError::TracingBlockNotFound(id) => {
+                let id = match id {
+                    BlockId::Hash(hash) => hash.block_hash.to_string(),
+                    BlockId::Number(number) => number.to_string(),
+                };
+                rpc_error_with_code(
+                    jsonrpsee_types::error::CALL_EXECUTION_FAILED_CODE,
+                    format!("block {id} not found"),
+                )
+            }
             EthApiError::HeaderNotFound(id) | EthApiError::ReceiptsNotFound(id) => {
                 rpc_error_with_code(
                     EthRpcErrorCode::ResourceNotFound.code(),
@@ -331,7 +361,9 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 internal_rpc_err(err.to_string())
             }
             err @ EthApiError::TransactionInputError(_) => invalid_params_rpc_err(err.to_string()),
-            EthApiError::PrunedHistoryUnavailable => rpc_error_with_code(4444, error.to_string()),
+            EthApiError::PrunedHistoryUnavailable { .. } => {
+                rpc_error_with_code(4444, error.to_string())
+            }
             EthApiError::Other(err) => err.to_rpc_error(),
             EthApiError::MuxTracerError(msg) => internal_rpc_err(msg.to_string()),
             EthApiError::BatchTxRecvError(err) => internal_rpc_err(err.to_string()),
@@ -515,7 +547,9 @@ impl From<reth_errors::ProviderError> for EthApiError {
             ProviderError::BlockNumberForTransactionIndexNotFound => Self::UnknownBlockOrTxIndex,
             ProviderError::FinalizedBlockNotFound => Self::HeaderNotFound(BlockId::finalized()),
             ProviderError::SafeBlockNotFound => Self::HeaderNotFound(BlockId::safe()),
-            ProviderError::BlockExpired { .. } => Self::PrunedHistoryUnavailable,
+            ProviderError::BlockExpired { requested, earliest_available } => {
+                Self::PrunedHistoryUnavailable { requested, earliest_available }
+            }
             err => Self::Internal(err.into()),
         }
     }
@@ -1145,13 +1179,33 @@ pub enum SignError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::b256;
     use alloy_sol_types::{Revert, SolError};
-    use revm::primitives::b256;
 
     #[test]
     fn timed_out_error() {
         let err = EthApiError::ExecutionTimedOut(Duration::from_secs(10));
         assert_eq!(err.to_string(), "execution aborted (timeout = 10s)");
+    }
+
+    #[test]
+    fn tracing_lookup_errors_use_call_execution_failed_code() {
+        let cases = [
+            (EthApiError::TracingTransactionNotFound, "transaction not found"),
+            (
+                EthApiError::TracingBlockNotFound(BlockId::hash(b256!(
+                    "0x0000000000000000000000000000000000000000000000000000000000000001"
+                ))),
+                "block 0x0000000000000000000000000000000000000000000000000000000000000001 not found",
+            ),
+            (EthApiError::GenesisNotTraceable, "genesis is not traceable"),
+        ];
+
+        for (error, message) in cases {
+            let error: jsonrpsee_types::error::ErrorObject<'static> = error.into();
+            assert_eq!(error.code(), -32000);
+            assert_eq!(error.message(), message);
+        }
     }
 
     #[test]
@@ -1186,6 +1240,24 @@ mod tests {
         let err: jsonrpsee_types::error::ErrorObject<'static> =
             EthApiError::HeaderNotFound(BlockId::finalized()).into();
         assert_eq!(err.message(), "block not found: finalized");
+    }
+
+    #[test]
+    fn pruned_history_error_reports_available_range() {
+        let err: EthApiError =
+            reth_errors::ProviderError::BlockExpired { requested: 5, earliest_available: 100 }
+                .into();
+        assert!(matches!(
+            err,
+            EthApiError::PrunedHistoryUnavailable { requested: 5, earliest_available: 100 }
+        ));
+
+        let err: jsonrpsee_types::error::ErrorObject<'static> = err.into();
+        assert_eq!(err.code(), 4444);
+        assert_eq!(
+            err.message(),
+            "pruned history unavailable: requested 5, earliest available 100"
+        );
     }
 
     #[test]

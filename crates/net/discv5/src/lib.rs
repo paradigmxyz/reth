@@ -471,7 +471,15 @@ pub fn build_local_enr(
 ) -> (Enr<SecretKey>, NodeRecord, Option<&'static [u8]>, IpMode) {
     let mut builder = discv5::enr::Enr::builder();
 
-    let Config { discv5_config, fork, tcp_socket, advertised_ip, other_enr_kv_pairs, .. } = config;
+    let Config {
+        discv5_config,
+        fork,
+        tcp_socket,
+        advertised_ipv4,
+        advertised_ipv6,
+        other_enr_kv_pairs,
+        ..
+    } = config;
 
     let socket = {
         let v4 = crate::config::ipv4(&discv5_config.listen_config);
@@ -480,7 +488,7 @@ pub fn build_local_enr(
         // Prefer an explicit advertised IP for ENR IP fields. Listen sockets still supply UDP
         // ports and determine which address-family fields are emitted.
         if let Some(addr) = v4 {
-            if let Some(IpAddr::V4(ip)) = advertised_ip {
+            if let Some(ip) = advertised_ipv4 {
                 builder.ip4(*ip);
             } else if *addr.ip() != Ipv4Addr::UNSPECIFIED {
                 builder.ip4(*addr.ip());
@@ -488,7 +496,7 @@ pub fn build_local_enr(
             builder.udp4(addr.port());
         }
         if let Some(addr) = v6 {
-            if let Some(IpAddr::V6(ip)) = advertised_ip {
+            if let Some(ip) = advertised_ipv6 {
                 builder.ip6(*ip);
             } else if *addr.ip() != Ipv6Addr::UNSPECIFIED {
                 builder.ip6(*addr.ip());

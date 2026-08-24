@@ -51,7 +51,7 @@ use std::{sync::Arc, time::Duration};
 /// There are subtle differences between when transacting [`RpcTxReq`]:
 ///
 /// The endpoints `eth_call` and `eth_estimateGas` and `eth_createAccessList` should always
-/// __disable__ the base fee check in the [`CfgEnv`](revm::context::CfgEnv).
+/// __disable__ the base fee check in the EVM environment.
 ///
 /// The behaviour for tracing endpoints is not consistent across clients.
 /// Geth also disables the basefee check for tracing: <https://github.com/ethereum/go-ethereum/blob/bc0b87ca196f92e5af49bd33cc190ef0ec32b197/eth/tracers/api.go#L955-L955>
@@ -121,12 +121,18 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     fn send_raw_transaction_sync(
         &self,
         tx: Bytes,
+        timeout_ms: Option<u64>,
     ) -> impl Future<Output = Result<RpcReceipt<Self::NetworkTypes>, Self::Error>> + Send
     where
         Self: LoadReceipt + 'static,
     {
         let this = self.clone();
-        let timeout_duration = self.send_raw_transaction_sync_timeout();
+        let configured_timeout = self.send_raw_transaction_sync_timeout();
+        let timeout_duration = timeout_ms
+            .filter(|timeout_ms| *timeout_ms > 0)
+            .map(Duration::from_millis)
+            .map(|timeout| timeout.min(configured_timeout))
+            .unwrap_or(configured_timeout);
         async move {
             let mut stream = this.provider().canonical_state_stream();
             let hash = EthTransactions::send_raw_transaction(&this, tx).await?;
@@ -265,9 +271,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     {
         async move {
             match self.load_transaction_and_receipt(hash).await? {
-                Some((tx, meta, receipt, all_receipts)) => {
-                    self.build_transaction_receipt(tx, meta, receipt, all_receipts).await.map(Some)
-                }
+                Some((tx, meta, receipt, all_receipts, block)) => self
+                    .build_transaction_receipt(tx, meta, receipt, all_receipts, block)
+                    .await
+                    .map(Some),
                 None => Ok(None),
             }
         }
@@ -287,6 +294,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 TransactionMeta,
                 ProviderReceipt<Self::Provider>,
                 Option<Arc<Vec<ProviderReceipt<Self::Provider>>>>,
+                Option<Arc<RecoveredBlock<ProviderBlock<Self::Provider>>>>,
             )>,
             Self::Error,
         >,
@@ -304,7 +312,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 if let Some(all_receipts) = cached.receipts.clone() &&
                     let Some(receipt) = all_receipts.get(cached.tx_index).cloned()
                 {
-                    return Ok(Some((tx, meta, receipt, Some(all_receipts))));
+                    return Ok(Some((tx, meta, receipt, Some(all_receipts), Some(cached.block))));
                 }
 
                 // Block still cached but receipts evicted — fetch via cache since
@@ -317,7 +325,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     .map_err(Self::Error::from_eth_err)? &&
                     let Some(receipt) = receipts.get(cached.tx_index).cloned()
                 {
-                    return Ok(Some((tx, meta, receipt, Some(receipts))));
+                    return Ok(Some((tx, meta, receipt, Some(receipts), Some(cached.block))));
                 }
             }
 
@@ -335,7 +343,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
 
                 let receipt = provider.receipt_by_hash(hash).map_err(Self::Error::from_eth_err)?;
 
-                Ok(receipt.map(|receipt| (tx, meta, receipt, None)))
+                Ok(receipt.map(|receipt| (tx, meta, receipt, None, None)))
             })
             .await
         }
@@ -501,11 +509,12 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             let chain_id = self.chain_id();
             request.as_mut().set_chain_id(chain_id.to());
 
-            let estimated_gas = self
-                .estimate_gas_at(request.clone(), BlockId::pending(), EvmOverrides::default())
-                .await?;
-            let gas_limit = estimated_gas;
-            request.as_mut().set_gas_limit(gas_limit.to());
+            if request.as_ref().gas_limit().is_none() {
+                let estimated_gas = self
+                    .estimate_gas_at(request.clone(), BlockId::pending(), EvmOverrides::default())
+                    .await?;
+                request.as_mut().set_gas_limit(estimated_gas.to());
+            }
 
             let transaction = self.sign_request(&from, request).await?.with_signer(from);
 

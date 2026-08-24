@@ -2,13 +2,12 @@
 
 use alloy_primitives::{
     map::{DefaultHashBuilder, FbBuildHasher},
-    Bytes,
+    Address, Bytes,
 };
 use moka::policy::EvictionPolicy;
 use reth_evm::precompiles::{DynPrecompile, Precompile, PrecompileInput};
 use reth_primitives_traits::dashmap::DashMap;
 use revm::precompile::{PrecompileId, PrecompileOutput, PrecompileResult};
-use revm_primitives::Address;
 use std::{hash::Hash, sync::Arc};
 use tracing::error;
 
@@ -256,8 +255,8 @@ mod tests {
     use revm::{
         context::TxEnv,
         precompile::{PrecompileOutput, PrecompileStatus},
+        primitives::hardfork::SpecId,
     };
-    use revm_primitives::hardfork::SpecId;
 
     #[test]
     fn test_precompile_cache_basic() {
@@ -266,6 +265,7 @@ mod tests {
                 status: PrecompileStatus::Success,
                 gas_used: 0,
                 state_gas_used: 0,
+                state_gas_spilled: 0,
                 reservoir: 0,
                 gas_refunded: 0,
                 bytes: Bytes::default(),
@@ -280,6 +280,7 @@ mod tests {
             status: PrecompileStatus::Success,
             gas_used: 50,
             state_gas_used: 0,
+            state_gas_spilled: 0,
             reservoir: 0,
             gas_refunded: 0,
             bytes: alloy_primitives::Bytes::copy_from_slice(b"cached_result"),
@@ -314,6 +315,7 @@ mod tests {
                     status: PrecompileStatus::Success,
                     gas_used: 5000,
                     state_gas_used: 0,
+                    state_gas_spilled: 0,
                     reservoir: 0,
                     gas_refunded: 0,
                     bytes: alloy_primitives::Bytes::copy_from_slice(b"output_from_precompile_1"),
@@ -331,6 +333,7 @@ mod tests {
                     status: PrecompileStatus::Success,
                     gas_used: 7000,
                     state_gas_used: 0,
+                    state_gas_spilled: 0,
                     reservoir: 0,
                     gas_refunded: 0,
                     bytes: alloy_primitives::Bytes::copy_from_slice(b"output_from_precompile_2"),

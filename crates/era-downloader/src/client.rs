@@ -85,11 +85,15 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
                 .file_name_to_number(file_name)
                 .ok_or_eyre("Cannot parse number from file name")?;
 
+            // Download to a temp path and rename in only on success, so an interrupted download
+            // never leaves a partial file that later looks complete.
+            let tmp_path = path.with_extension("tmp");
+
             let mut tries = 1..3;
             let mut actual_checksum: eyre::Result<_>;
             loop {
                 actual_checksum = async {
-                    let mut file = File::create(&path).await?;
+                    let mut file = File::create(&tmp_path).await?;
                     let mut stream = client.get(url.clone()).await?;
                     let mut hasher = Sha256::new();
 
@@ -111,7 +115,12 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
                 self.assert_checksum(number, actual_checksum?)
                     .await
                     .map_err(|e| eyre!("{e} for {file_name} at {}", path.display()))?;
+            } else {
+                // No checksum to validate against; surface a failed download before renaming.
+                actual_checksum?;
             }
+
+            fs::rename(&tmp_path, &path).await?;
         }
 
         Ok(path.into_boxed_path())
@@ -124,6 +133,7 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
         if let Ok(mut dir) = fs::read_dir(&self.folder).await {
             while let Ok(Some(entry)) = dir.next_entry().await {
                 if let Some(name) = entry.file_name().to_str() &&
+                    self.is_matching_era_file(name) &&
                     let Some(number) = self.file_name_to_number(name) &&
                     (max.is_none() || matches!(max, Some(max) if number > max))
                 {
@@ -142,6 +152,7 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
         if let Ok(mut dir) = fs::read_dir(&self.folder).await {
             while let Ok(Some(entry)) = dir.next_entry().await {
                 if let Some(name) = entry.file_name().to_str() &&
+                    self.is_matching_era_file(name) &&
                     let Some(number) = self.file_name_to_number(name) &&
                     (number < index || number >= last)
                 {
@@ -324,6 +335,14 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
 
     fn file_name_to_number(&self, file_name: &str) -> Option<usize> {
         file_name.split('-').nth(1).and_then(|v| usize::from_str(v).ok())
+    }
+
+    /// Whether `file_name` is a downloaded ERA file of this client's configured type.
+    ///
+    /// Excludes partial (`*.tmp`) and sidecar files that share the `<network>-<number>-...` stem,
+    /// so they don't influence resume or cleanup.
+    fn is_matching_era_file(&self, file_name: &str) -> bool {
+        EraFileType::from_filename(file_name) == Some(self.era_type)
     }
 }
 

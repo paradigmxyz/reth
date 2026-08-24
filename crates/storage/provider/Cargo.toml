@@ -20,6 +20,7 @@ reth-primitives-traits = { workspace = true, features = ["reth-codec", "secp256k
 reth-errors.workspace = true
 reth-storage-errors.workspace = true
 reth-storage-api = { workspace = true, features = ["std", "db-api"] }
+reth-storage-overlay.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-db-api.workspace = true
 reth-prune-types.workspace = true
@@ -41,8 +42,7 @@ alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
-revm-database.workspace = true
-revm-state = { workspace = true, optional = true }
+revm.workspace = true
 
 # tracing
 tracing.workspace = true
@@ -79,9 +79,6 @@ reth-ethereum-engine-primitives.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-tracing.workspace = true
 
-revm-database-interface.workspace = true
-revm-state.workspace = true
-
 tempfile.workspace = true
 assert_matches.workspace = true
 rand.workspace = true
@@ -91,6 +88,10 @@ tokio-stream = { workspace = true, features = ["sync"] }
 
 [features]
 jemalloc = ["rocksdb/jemalloc"]
+partial-persistence = [
+    "reth-stages-types/partial-persistence",
+    "reth-storage-overlay/partial-persistence",
+]
 test-utils = [
     "reth-db/test-utils",
     "reth-nippy-jar/test-utils",
@@ -105,7 +106,6 @@ test-utils = [
     "reth-trie-db/test-utils",
     "reth-prune-types/test-utils",
     "reth-stages-types/test-utils",
-    "revm-state",
     "reth-tasks/test-utils",
     "dep:tokio",
 ]

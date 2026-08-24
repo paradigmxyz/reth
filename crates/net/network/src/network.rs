@@ -9,8 +9,8 @@ use parking_lot::Mutex;
 use reth_discv4::{Discv4, NatResolver};
 use reth_discv5::Discv5;
 use reth_eth_wire::{
-    BlockRangeUpdate, DisconnectReason, EthNetworkPrimitives, NetworkPrimitives,
-    NewPooledTransactionHashes, SharedTransactions,
+    BlockRangeUpdate, BroadcastPoolTransactions, DisconnectReason, EthNetworkPrimitives,
+    NetworkPrimitives, NewPooledTransactionHashes, SharedTransactions,
 };
 use reth_ethereum_forks::Head;
 use reth_network_api::{
@@ -137,6 +137,15 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
             peer_id,
             msg: SharedTransactions(msg),
         })
+    }
+
+    /// Send cached full pool transactions to the peer.
+    pub(crate) fn send_broadcast_pool_transactions(
+        &self,
+        peer_id: PeerId,
+        msg: BroadcastPoolTransactions,
+    ) {
+        self.send_message(NetworkHandleMessage::SendBroadcastPoolTransactions { peer_id, msg })
     }
 
     /// Send eth message to the peer.
@@ -567,6 +576,13 @@ pub(crate) enum NetworkHandleMessage<N: NetworkPrimitives = EthNetworkPrimitives
         peer_id: PeerId,
         /// The shared transactions to send.
         msg: SharedTransactions<N::BroadcastedTransaction>,
+    },
+    /// Sends cached full pool transactions to the given peer.
+    SendBroadcastPoolTransactions {
+        /// The ID of the peer to which the transactions are sent.
+        peer_id: PeerId,
+        /// The cached pool transactions to send.
+        msg: BroadcastPoolTransactions,
     },
     /// Sends a list of transaction hashes to the given peer.
     SendPooledTransactionHashes {

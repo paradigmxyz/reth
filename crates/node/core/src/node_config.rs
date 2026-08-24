@@ -15,6 +15,7 @@ use eyre::eyre;
 use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
 use reth_config::config::PruneConfig;
 use reth_engine_local::MiningMode;
+use reth_engine_primitives::TreeConfig;
 use reth_ethereum_forks::{EthereumHardforks, Head};
 use reth_network_p2p::headers::client::HeadersClient;
 use reth_primitives_traits::SealedHeader;
@@ -191,6 +192,11 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             storage: StorageArgs::default(),
             jit: JitArgs::default(),
         }
+    }
+
+    /// Creates a [`TreeConfig`] from all node arguments that affect the engine tree.
+    pub fn tree_config(&self) -> TreeConfig {
+        self.engine.tree_config().with_skip_state_root(self.debug.skip_state_root)
     }
 
     /// Sets --dev mode for the node.
@@ -630,5 +636,19 @@ impl<ChainSpec> Clone for NodeConfig<ChainSpec> {
             storage: self.storage,
             jit: self.jit.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tree_config_applies_debug_skip_state_root() {
+        let config = NodeConfig::default();
+        assert!(!config.tree_config().skip_state_root());
+
+        let config = config.with_debug(DebugArgs { skip_state_root: true, ..Default::default() });
+        assert!(config.tree_config().skip_state_root());
     }
 }

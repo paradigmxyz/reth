@@ -1,5 +1,5 @@
 use alloy_primitives::{Address, StorageKey};
-use reth_execution_cache::{CachedStateProvider, ExecutionCache};
+use reth_execution_cache::{CachedStateProvider, ExecutionCache, TxPoolPrewarmCacheSnapshot};
 use reth_provider::{
     AccountReader, BytecodeReader, ProviderResult, StateProvider, StateProviderBox,
 };
@@ -10,6 +10,7 @@ use std::{
     },
     thread::JoinHandle,
 };
+use tokio::sync::oneshot;
 use tracing::trace;
 
 /// Builds a fresh `StateProviderBox` over the block's parent state. Type-erased so the pool is not
@@ -26,11 +27,15 @@ enum PrewarmTarget {
 /// FIFO): one `BeginBlock`, then the worker's share of `Warm`s, then one `EndBlock`.
 enum PrewarmMsg {
     /// Open a read txn for the new block: build a provider over the parent state and hold it.
-    BeginBlock { build: Arc<BuildProviderFn>, caches: ExecutionCache },
+    BeginBlock {
+        build: Arc<BuildProviderFn>,
+        caches: ExecutionCache,
+        txpool_snapshot: Option<TxPoolPrewarmCacheSnapshot>,
+    },
     /// Warm one target into the held provider's cache. Ignored if no provider is held.
     Warm(PrewarmTarget),
     /// Drop the held provider (and its read txn).
-    EndBlock,
+    EndBlock(Arc<SendOnDrop>),
 }
 
 /// Long-lived pool of blocking threads that warm the BAL read-set into the shared execution cache.
@@ -65,10 +70,18 @@ impl BalPrewarmPool {
 
     /// Begins a block: hands every worker the provider builder and shared cache so each opens its
     /// own read txn over the parent state. Pair with [`end_block`](Self::end_block).
-    pub(crate) fn begin_block(&self, build: Arc<BuildProviderFn>, caches: ExecutionCache) {
+    pub(crate) fn begin_block(
+        &self,
+        build: Arc<BuildProviderFn>,
+        caches: ExecutionCache,
+        txpool_snapshot: Option<TxPoolPrewarmCacheSnapshot>,
+    ) {
         for worker in &self.workers {
-            let _ = worker
-                .send(PrewarmMsg::BeginBlock { build: build.clone(), caches: caches.clone() });
+            let _ = worker.send(PrewarmMsg::BeginBlock {
+                build: build.clone(),
+                caches: caches.clone(),
+                txpool_snapshot: txpool_snapshot.clone(),
+            });
         }
     }
 
@@ -84,10 +97,18 @@ impl BalPrewarmPool {
 
     /// Ends the block: every worker drops its provider (and read txn) once it has drained the warm
     /// requests queued ahead of this message.
+    ///
+    /// Blocks until all workers processed the end block message.
     pub(crate) fn end_block(&self) {
+        let (tx, rx) = oneshot::channel();
+        let tx = Arc::new(SendOnDrop { sender: Some(tx) });
+
         for worker in &self.workers {
-            let _ = worker.send(PrewarmMsg::EndBlock);
+            let _ = worker.send(PrewarmMsg::EndBlock(tx.clone()));
         }
+
+        drop(tx);
+        rx.blocking_recv().expect("BAL prewarm pool dropped without signaling completion");
     }
 
     fn send_warm(&self, target: PrewarmTarget) {
@@ -126,9 +147,12 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
     // Blocks when idle; the channel disconnects (and the loop ends) when the pool is dropped.
     while let Ok(msg) = rx.recv() {
         match msg {
-            PrewarmMsg::BeginBlock { build, caches } => {
+            PrewarmMsg::BeginBlock { build, caches, txpool_snapshot } => {
                 provider = match (build)() {
-                    Ok(inner) => Some(CachedStateProvider::new_prewarm(inner, caches)),
+                    Ok(inner) => Some(
+                        CachedStateProvider::new_prewarm(inner, caches)
+                            .with_txpool_snapshot(txpool_snapshot),
+                    ),
                     Err(err) => {
                         trace!(target: "engine::tree::bal_prewarm_pool", %err, "failed to build provider");
                         None
@@ -151,9 +175,22 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
                     }
                 }
             }
-            PrewarmMsg::EndBlock => {
+            PrewarmMsg::EndBlock(end_tx) => {
                 provider = None;
+                drop(end_tx);
             }
+        }
+    }
+}
+
+struct SendOnDrop {
+    sender: Option<oneshot::Sender<()>>,
+}
+
+impl Drop for SendOnDrop {
+    fn drop(&mut self) {
+        if let Some(sender) = self.sender.take() {
+            let _ = sender.send(());
         }
     }
 }

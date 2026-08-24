@@ -5,7 +5,8 @@ use alloy_primitives::{Address, Bytes, B256, U64};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_eth::{Account, AccountInfo, Bundle, Index, StateContext};
 use alloy_rpc_types_trace::geth::{
-    BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
+    ChainBlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
+    TraceResult,
 };
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_trie_common::{updates::TrieUpdates, ExecutionWitnessMode, HashedPostState};
@@ -21,6 +22,10 @@ pub trait DebugApi<TxReq: RpcObject> {
     /// Returns an RLP-encoded block.
     #[method(name = "getRawBlock")]
     async fn raw_block(&self, block_id: BlockId) -> RpcResult<Bytes>;
+
+    /// Returns the RLP-encoded EIP-7928 block access list.
+    #[method(name = "getRawBlockAccessList")]
+    async fn raw_block_access_list(&self, block_id: BlockId) -> RpcResult<Bytes>;
 
     /// Returns an EIP-2718 binary-encoded transaction.
     ///
@@ -40,14 +45,24 @@ pub trait DebugApi<TxReq: RpcObject> {
     #[method(name = "getBadBlocks")]
     async fn bad_blocks(&self) -> RpcResult<Vec<serde_json::Value>>;
 
-    /// Returns the structured logs created during the execution of EVM between two blocks
-    /// (excluding start) as a JSON object.
-    #[method(name = "traceChain")]
-    async fn debug_trace_chain(
+    /// Clears all transactions from the transaction pool.
+    #[method(name = "clearTxpool")]
+    async fn debug_clear_txpool(&self) -> RpcResult<()>;
+
+    /// Subscribes to structured logs created during EVM execution between two blocks, excluding
+    /// the start block and including the end block.
+    #[subscription(
+        name = "subscribe" => "subscription",
+        unsubscribe = "unsubscribe",
+        item = ChainBlockTraceResult
+    )]
+    async fn debug_subscribe(
         &self,
+        subscription: String,
         start_exclusive: BlockNumberOrTag,
         end_inclusive: BlockNumberOrTag,
-    ) -> RpcResult<Vec<BlockTraceResult>>;
+        opts: Option<GethDebugTracingOptions>,
+    ) -> jsonrpsee::core::SubscriptionResult;
 
     /// The `debug_traceBlock` method will return a full stack trace of all invoked opcodes of all
     /// transaction that were included in this block.
@@ -139,12 +154,12 @@ pub trait DebugApi<TxReq: RpcObject> {
     /// to their preimages that were required during the execution of the block, including during
     /// state root recomputation.
     ///
-    /// The first argument is the block number or tag. The optional second argument selects the
+    /// The first argument is the block identifier. The optional second argument selects the
     /// witness generation mode and defaults to `legacy`.
     #[method(name = "executionWitness")]
     async fn debug_execution_witness(
         &self,
-        block: BlockNumberOrTag,
+        block: BlockId,
         mode: Option<ExecutionWitnessMode>,
     ) -> RpcResult<ExecutionWitness>;
 

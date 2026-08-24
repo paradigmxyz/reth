@@ -21,7 +21,6 @@ reth-tasks = { workspace = true, features = ["rayon"] }
 reth-trie.workspace = true
 
 # alloy
-alloy-eip7928.workspace = true
 alloy-evm.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
@@ -30,13 +29,10 @@ alloy-rlp.workspace = true
 tracing.workspace = true
 
 # revm
-revm-state.workspace = true
+revm.workspace = true
 
 # misc
 thiserror.workspace = true
-derive_more.workspace = true
-rayon.workspace = true
-itertools.workspace = true
 crossbeam-channel.workspace = true
 crossbeam-utils.workspace = true
 
@@ -54,13 +50,11 @@ reth-chainspec.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
-reth-trie-db.workspace = true
+reth-storage-overlay.workspace = true
 reth-trie = { workspace = true, features = ["test-utils"] }
 
 # misc
 rand.workspace = true
-proptest.workspace = true
-proptest-arbitrary-interop.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros"] }
 
 [features]
@@ -74,7 +68,6 @@ trie-debug = [
 test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-provider/test-utils",
-    "reth-trie-db/test-utils",
     "reth-trie/test-utils",
     "reth-tasks/test-utils",
     "reth-chainspec/test-utils",

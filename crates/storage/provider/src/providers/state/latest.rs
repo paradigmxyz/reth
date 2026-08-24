@@ -9,7 +9,7 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory,
+    hashed_cursor::{zero_destroyed_account_storage, HashedPostStateCursorFactory},
     proof::{Proof, StorageProof},
     trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdates,
@@ -252,8 +252,18 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
 }
 
 impl<Provider: DBProvider> HashedPostStateProvider for LatestStateProviderRef<'_, Provider> {
-    fn hashed_post_state(&self, bundle_state: &revm_database::BundleState) -> HashedPostState {
-        HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
+    fn hashed_post_state(
+        &self,
+        bundle_state: &revm::database::BundleState,
+    ) -> ProviderResult<HashedPostState> {
+        let mut hashed_state =
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state());
+        zero_destroyed_account_storage(
+            &reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
+            bundle_state.state(),
+            &mut hashed_state,
+        )?;
+        Ok(hashed_state)
     }
 }
 

@@ -42,6 +42,7 @@ otlp-logs = ["reth-tracing/otlp-logs", "reth-node-core/otlp-logs"]
 dev = ["reth-cli-commands/arbitrary"]
 
 jit = ["reth-node-ethereum/jit"]
+gmp = ["reth-node-ethereum/gmp"]
 
 asm-keccak = [
     "reth-node-core/asm-keccak",

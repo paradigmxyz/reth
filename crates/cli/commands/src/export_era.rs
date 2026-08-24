@@ -42,25 +42,46 @@ pub struct ExportArgs {
     path: Option<PathBuf>,
 }
 
-/// Execution-layer ERA formats that can be produced from the database.
+/// ERA formats accepted by `--file-type`.
 ///
-/// Consensus-layer `.era` files cannot be exported, so they are not representable here.
+/// Only `era1`/`ere` are exportable; `era` is listed but rejected at runtime.
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 enum ExportFileType {
     /// Execution blocks written in the `.era1` format.
     Era1,
     /// Execution blocks written in the `.ere` format.
     Ere,
+    /// Consensus-layer `.era` format. Not exportable from an execution client; selecting it is an
+    /// error.
+    Era,
 }
 
 impl ExportFileType {
-    /// The format name (`era1` / `ere`), used for log lines and the default directory name.
+    /// The format name (`era1` / `ere` / `era`), used for log lines and the default directory name.
     const fn format(&self) -> &'static str {
         match self {
             Self::Era1 => "era1",
             Self::Ere => "ere",
+            Self::Era => "era",
         }
     }
+
+    /// Rejects consensus-layer `.era`, which can't be produced from the execution database.
+    fn ensure_exportable(self) -> eyre::Result<()> {
+        if matches!(self, Self::Era) {
+            return Err(era_not_exportable());
+        }
+        Ok(())
+    }
+}
+
+/// Error returned when a consensus-layer `.era` export is requested. Such files require beacon
+/// blocks and state that the execution database does not store.
+fn era_not_exportable() -> eyre::Report {
+    eyre::eyre!(
+        "Consensus-layer ERA (.era) files cannot be exported: they require beacon blocks and \
+         state that the execution database does not store. Export `era1` or `ere` instead."
+    )
 }
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ExportEraCommand<C> {
@@ -69,10 +90,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ExportEraC
     where
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
     {
-        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RO, runtime)?;
-
         let file_type = self.export.file_type;
+        file_type.ensure_exportable()?;
         let format = file_type.format();
+
+        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RO, runtime)?;
 
         // Either the specified path or default to `<data-dir>/<chain>/<format>-export/`.
         let data_dir = match &self.export.path {
@@ -115,6 +137,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ExportEraC
         let exported_files = match file_type {
             ExportFileType::Era1 => era::export::<era::Era1, _>(&provider, &export_config)?,
             ExportFileType::Ere => era::export::<era::Ere, _>(&provider, &export_config)?,
+            // Rejected above by `ensure_exportable`.
+            ExportFileType::Era => return Err(era_not_exportable()),
         };
 
         info!(
