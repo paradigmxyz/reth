@@ -12,6 +12,13 @@ Options:
       --config <FILE>
           The path to the configuration file to use.
 
+      --sync.fetch-block-access-lists <BOOL>
+          Enable or disable best-effort historical block access-list fetching.
+
+          This overrides `[stages.block_access_lists].downloader_enabled` in the TOML configuration when supplied.
+
+          [possible values: true, false]
+
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
           Possible values are either a built-in chain or the path to a chain specification file.

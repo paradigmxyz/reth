@@ -115,6 +115,8 @@ pub struct StageConfig {
     pub headers: HeadersConfig,
     /// Body stage configuration.
     pub bodies: BodiesConfig,
+    /// Block access-list stage configuration.
+    pub block_access_lists: BlockAccessListsConfig,
     /// Sender Recovery stage configuration.
     pub sender_recovery: SenderRecoveryConfig,
     /// Execution stage configuration.
@@ -247,6 +249,42 @@ impl Default for BodiesConfig {
             downloader_max_buffered_blocks_size_bytes: 2 * 1024 * 1024 * 1024, // ~2GB
             downloader_min_concurrent_requests: 5,
             downloader_max_concurrent_requests: 100,
+        }
+    }
+}
+
+/// Configuration for historical block access-list downloading.
+///
+/// This is deliberately disabled by default: block access lists are an execution optimization and
+/// a node must never require `eth/71` peers to make historical sync progress.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
+pub struct BlockAccessListsConfig {
+    /// Enables fetching missing block access lists while downloading historical bodies.
+    pub downloader_enabled: bool,
+    /// Maximum number of block hashes to include in one request.
+    pub downloader_request_limit: usize,
+    /// Maximum number of in-flight block access-list requests.
+    pub downloader_max_concurrent_requests: usize,
+    /// Number of candidates that can wait to be requested before new candidates are skipped.
+    pub downloader_max_buffered_candidates: usize,
+    /// Minimum number of transactions a block must contain to be eligible.
+    pub downloader_min_transaction_count: usize,
+    /// Minimum amount of gas a block must use to be eligible.
+    pub downloader_min_gas_used: u64,
+}
+
+impl Default for BlockAccessListsConfig {
+    fn default() -> Self {
+        Self {
+            downloader_enabled: false,
+            downloader_request_limit: 200,
+            downloader_max_concurrent_requests: 4,
+            downloader_max_buffered_candidates: 1_000,
+            // Fetch only for blocks with enough work to plausibly benefit from a BAL.
+            downloader_min_transaction_count: 50,
+            downloader_min_gas_used: 50 * 21_000,
         }
     }
 }
@@ -643,7 +681,7 @@ where
 
 #[cfg(all(test, feature = "serde"))]
 mod tests {
-    use super::{Config, EXTENSION};
+    use super::{BlockAccessListsConfig, Config, EXTENSION};
     use crate::PruneConfig;
     use alloy_primitives::Address;
     use reth_network_peers::TrustedPeer;
@@ -1237,5 +1275,33 @@ connect_trusted_nodes_only = true
     fn test_bootnodes_default_empty() {
         let conf: Config = toml::from_str("").unwrap();
         assert!(conf.bootnodes.is_empty());
+    }
+
+    #[test]
+    fn block_access_lists_config_roundtrips() {
+        let config: Config = toml::from_str(
+            r#"
+                [stages.block_access_lists]
+                downloader_enabled = true
+                downloader_request_limit = 32
+                downloader_max_concurrent_requests = 2
+                downloader_max_buffered_candidates = 128
+                downloader_min_transaction_count = 3
+                downloader_min_gas_used = 250000
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.stages.block_access_lists,
+            BlockAccessListsConfig {
+                downloader_enabled: true,
+                downloader_request_limit: 32,
+                downloader_max_concurrent_requests: 2,
+                downloader_max_buffered_candidates: 128,
+                downloader_min_transaction_count: 3,
+                downloader_min_gas_used: 250_000,
+            }
+        );
     }
 }

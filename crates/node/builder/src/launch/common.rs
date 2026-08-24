@@ -177,6 +177,9 @@ impl LaunchContext {
         // Update the config with the command line arguments. Only override when the CLI flag is
         // set, so the TOML value is preserved when the flag is not passed.
         toml_config.peers.trusted_nodes_only |= config.network.trusted_only;
+        if let Some(enabled) = config.fetch_block_access_lists {
+            toml_config.stages.block_access_lists.downloader_enabled = enabled;
+        }
 
         // Merge static file CLI arguments with config file, giving priority to CLI
         toml_config.static_files =

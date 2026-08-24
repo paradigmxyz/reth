@@ -95,6 +95,9 @@ pub struct NodeConfig<ChainSpec> {
     /// The path to the configuration file to use.
     pub config: Option<PathBuf>,
 
+    /// CLI override for best-effort historical block access-list fetching.
+    pub fetch_block_access_lists: Option<bool>,
+
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
@@ -174,6 +177,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     pub fn new(chain: Arc<ChainSpec>) -> Self {
         Self {
             config: None,
+            fetch_block_access_lists: None,
             chain,
             metrics: MetricArgs::default(),
             instance: None,
@@ -257,6 +261,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         let Self {
             datadir,
             config,
+            fetch_block_access_lists,
             metrics,
             instance,
             network,
@@ -277,6 +282,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         NodeConfig {
             datadir,
             config,
+            fetch_block_access_lists,
             chain: chain.into(),
             metrics,
             instance,
@@ -577,6 +583,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             chain,
             datadir: self.datadir,
             config: self.config,
+            fetch_block_access_lists: self.fetch_block_access_lists,
             metrics: self.metrics,
             instance: self.instance,
             network: self.network,
@@ -619,6 +626,7 @@ impl<ChainSpec> Clone for NodeConfig<ChainSpec> {
         Self {
             chain: self.chain.clone(),
             config: self.config.clone(),
+            fetch_block_access_lists: self.fetch_block_access_lists,
             metrics: self.metrics.clone(),
             instance: self.instance,
             network: self.network.clone(),

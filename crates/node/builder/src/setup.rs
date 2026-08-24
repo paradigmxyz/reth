@@ -7,16 +7,20 @@ use alloy_primitives::{BlockNumber, B256};
 use reth_config::{config::StageConfig, PruneConfig};
 use reth_consensus::FullConsensus;
 use reth_downloaders::{
-    bodies::bodies::BodiesDownloaderBuilder,
+    bodies::{
+        bal_prefetch::{BalPrefetchingBodiesDownloader, HistoricalBalPrefetcher},
+        bodies::BodiesDownloaderBuilder,
+    },
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_evm::ConfigureEvm;
 use reth_exex::ExExManagerHandle;
 use reth_network_p2p::{
-    bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader, BlockClient,
+    block_access_lists::client::BlockAccessListsClient, bodies::downloader::BodyDownloader,
+    headers::downloader::HeaderDownloader, BlockClient,
 };
 use reth_node_api::HeaderTy;
-use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
+use reth_provider::{providers::ProviderNodeTypes, BalProvider, ProviderFactory};
 use reth_stages::{
     prelude::DefaultStages,
     stages::{EraImportSource, ExecutionStage},
@@ -46,7 +50,7 @@ pub fn build_networked_pipeline<N, Client, Evm>(
 ) -> eyre::Result<Pipeline<N>>
 where
     N: ProviderNodeTypes,
-    Client: BlockClient<Block = BlockTy<N>> + 'static,
+    Client: BlockClient<Block = BlockTy<N>> + BlockAccessListsClient + Clone + 'static,
     Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
 {
     // building network downloaders using the fetch client
@@ -55,8 +59,15 @@ where
         .into_task_with(task_executor);
 
     let body_downloader = BodiesDownloaderBuilder::new(config.bodies)
-        .build(client, consensus.clone(), provider_factory.clone())
+        .build(client.clone(), consensus.clone(), provider_factory.clone())
         .into_task_with(task_executor);
+    let bal_prefetcher = HistoricalBalPrefetcher::spawn(
+        config.block_access_lists,
+        client.clone(),
+        provider_factory.bal_store().clone(),
+        task_executor,
+    );
+    let body_downloader = BalPrefetchingBodiesDownloader::new(body_downloader, bal_prefetcher);
 
     let pipeline = build_pipeline(
         provider_factory,

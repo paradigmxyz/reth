@@ -2,6 +2,9 @@
 #[expect(clippy::module_inception)]
 pub mod bodies;
 
+/// Best-effort historical block access-list fetching.
+pub mod bal_prefetch;
+
 /// A body downloader that does nothing. Useful to build unwind-only pipelines.
 pub mod noop;
 

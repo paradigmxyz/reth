@@ -25,6 +25,13 @@ pub struct NodeCommand<C: ChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs
     #[arg(long, value_name = "FILE", verbatim_doc_comment)]
     pub config: Option<PathBuf>,
 
+    /// Enable or disable best-effort historical block access-list fetching.
+    ///
+    /// This overrides `[stages.block_access_lists].downloader_enabled` in the TOML configuration
+    /// when supplied.
+    #[arg(long = "sync.fetch-block-access-lists", value_name = "BOOL")]
+    pub fetch_block_access_lists: Option<bool>,
+
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
@@ -163,6 +170,7 @@ where
         let Self {
             datadir,
             config,
+            fetch_block_access_lists,
             chain,
             metrics,
             instance,
@@ -189,6 +197,7 @@ where
         let mut node_config = NodeConfig {
             datadir,
             config,
+            fetch_block_access_lists,
             chain,
             metrics,
             instance,
@@ -287,6 +296,13 @@ mod tests {
                 NodeCommand::parse_from(["reth", "--chain", chain]);
             assert_eq!(args.chain.chain, chain.parse::<reth_chainspec::Chain>().unwrap());
         }
+    }
+
+    #[test]
+    fn parse_historical_bal_fetch_override() {
+        let args: NodeCommand<EthereumChainSpecParser> =
+            NodeCommand::parse_from(["reth", "--sync.fetch-block-access-lists", "true"]);
+        assert_eq!(args.fetch_block_access_lists, Some(true));
     }
 
     #[test]
