@@ -646,7 +646,11 @@ impl SegmentRangeInclusive {
 
     /// Returns the length of the inclusive range.
     pub const fn len(&self) -> u64 {
-        self.end.saturating_sub(self.start).saturating_add(1)
+        if self.is_empty() {
+            0
+        } else {
+            self.end.saturating_sub(self.start).saturating_add(1)
+        }
     }
 
     /// Returns true if the range is empty.
@@ -871,5 +875,31 @@ mod tests {
                 segment.as_short_str()
             );
         }
+    }
+
+    #[test]
+    fn test_segment_range_inclusive_len() {
+        let reversed = SegmentRangeInclusive::new(2, 1);
+        assert!(reversed.is_empty());
+        assert!(!reversed.contains(1));
+        assert!(!reversed.contains(2));
+        assert_eq!(reversed.len(), 0);
+
+        let max_reversed = SegmentRangeInclusive::new(u64::MAX, 0);
+        assert!(max_reversed.is_empty());
+        assert_eq!(max_reversed.len(), 0);
+
+        let singleton = SegmentRangeInclusive::new(5, 5);
+        assert!(!singleton.is_empty());
+        assert_eq!(singleton.len(), 1);
+        assert!(singleton.contains(5));
+
+        let ordinary = SegmentRangeInclusive::new(0, 9);
+        assert!(!ordinary.is_empty());
+        assert_eq!(ordinary.len(), 10);
+
+        let full = SegmentRangeInclusive::new(0, u64::MAX);
+        assert!(!full.is_empty());
+        assert_eq!(full.len(), u64::MAX);
     }
 }
