@@ -132,7 +132,9 @@ impl ArenaCursor {
         if let Some(parent) = self.stack.last() {
             let child_is_dirty = arena.get(entry.index).is_some_and(|node| match node {
                 ArenaSparseNode::Branch(b) => matches!(b.state, ArenaSparseNodeState::Dirty),
-                ArenaSparseNode::Leaf { state, .. } => matches!(state, ArenaSparseNodeState::Dirty),
+                ArenaSparseNode::Extension { state, .. } | ArenaSparseNode::Leaf { state, .. } => {
+                    matches!(state, ArenaSparseNodeState::Dirty)
+                }
                 ArenaSparseNode::Subtrie(s) => {
                     let root = &s.arena[s.root];
                     matches!(root.state_ref(), Some(ArenaSparseNodeState::Dirty))
@@ -164,10 +166,10 @@ impl ArenaCursor {
         logical_branch_path(arena, self.stack.last().expect("cursor is non-empty"))
     }
 
-    /// Returns the length of the logical path of the branch at the top of the stack.
-    /// Equivalent to `head_logical_branch_path(arena).len()` but avoids constructing the path.
-    pub(super) fn head_logical_branch_path_len(&self, arena: &NodeArena) -> usize {
-        logical_branch_path_len(arena, self.stack.last().expect("cursor is non-empty"))
+    /// Returns the length of the logical path of the branch or extension at the top of the stack.
+    pub(super) fn head_logical_path_len(&self, arena: &NodeArena) -> usize {
+        let head = self.stack.last().expect("cursor is non-empty");
+        head.path.len() + arena[head.index].short_key().expect("head has a short key").len()
     }
 
     /// Returns the absolute path of a child at `child_nibble` under the branch at the top of
@@ -321,6 +323,15 @@ impl ArenaCursor {
                         SeekResult::Diverged
                     };
                 }
+                ArenaSparseNode::Extension { key, .. } => {
+                    let mut child_path = head.path;
+                    child_path.extend(key);
+                    return if full_path == &head.path || full_path.starts_with(&child_path) {
+                        SeekResult::Blinded
+                    } else {
+                        SeekResult::Diverged
+                    };
+                }
                 ArenaSparseNode::Branch(b) => b,
                 ArenaSparseNode::Subtrie(_) => {
                     return SeekResult::RevealedSubtrie;
@@ -364,10 +375,4 @@ fn logical_branch_path(arena: &NodeArena, entry: &ArenaCursorStackEntry) -> Nibb
     let mut path = entry.path;
     path.extend(&arena[entry.index].branch_ref().short_key);
     path
-}
-
-/// Returns the length of the logical path of a branch stack entry.
-/// Equivalent to `logical_branch_path(arena, entry).len()` but avoids constructing the path.
-fn logical_branch_path_len(arena: &NodeArena, entry: &ArenaCursorStackEntry) -> usize {
-    entry.path.len() + arena[entry.index].branch_ref().short_key.len()
 }

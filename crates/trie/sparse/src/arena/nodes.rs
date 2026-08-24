@@ -173,6 +173,15 @@ pub(super) enum ArenaSparseNode {
     },
     /// A branch node with up to 16 children.
     Branch(ArenaSparseNodeBranch),
+    /// An extension node whose child is blinded.
+    Extension {
+        /// Cached or dirty state of this node.
+        state: ArenaSparseNodeState,
+        /// The path segment compressed by this extension.
+        key: Nibbles,
+        /// The RLP-encoded pointer to the blinded child.
+        child: RlpNode,
+    },
     /// A leaf node containing a value.
     Leaf {
         /// Cached or dirty state of this node.
@@ -189,27 +198,32 @@ pub(super) enum ArenaSparseNode {
 }
 
 impl ArenaSparseNode {
-    /// Returns the state of an `EmptyRoot`, `Branch`, `Leaf`, or `Subtrie` root node, or `None` for
-    /// other types.
+    /// Returns the state of an `EmptyRoot`, `Branch`, `Extension`, `Leaf`, or `Subtrie` root node,
+    /// or `None` for other types.
     pub(super) fn state_ref(&self) -> Option<&ArenaSparseNodeState> {
         match self {
-            Self::EmptyRoot { state } | Self::Leaf { state, .. } => Some(state),
+            Self::EmptyRoot { state } |
+            Self::Extension { state, .. } |
+            Self::Leaf { state, .. } => Some(state),
             Self::Branch(b) => Some(&b.state),
             Self::Subtrie(s) => s.arena[s.root].state_ref(),
             _ => None,
         }
     }
 
-    /// Returns a mutable reference to the state of an `EmptyRoot`, `Branch`, or `Leaf` node.
+    /// Returns a mutable reference to the state of an `EmptyRoot`, `Branch`, `Extension`, or `Leaf`
+    /// node.
     ///
     /// # Panics
     ///
-    /// Panics if called on a non-EmptyRoot/Branch/Leaf node.
+    /// Panics if called on another node type.
     pub(super) fn state_mut(&mut self) -> &mut ArenaSparseNodeState {
         match self {
-            Self::EmptyRoot { state } | Self::Leaf { state, .. } => state,
+            Self::EmptyRoot { state } |
+            Self::Extension { state, .. } |
+            Self::Leaf { state, .. } => state,
             Self::Branch(b) => &mut b.state,
-            _ => panic!("state_mut called on non-EmptyRoot/Branch/Leaf node"),
+            _ => panic!("state_mut called on node without direct state"),
         }
     }
 
@@ -218,11 +232,11 @@ impl ArenaSparseNode {
         self.state_ref().is_some_and(|s| matches!(s, ArenaSparseNodeState::Cached { .. }))
     }
 
-    /// Returns the short key of the branch or leaf, or None.
+    /// Returns the short key of the branch, extension, or leaf, or `None`.
     pub(super) const fn short_key(&self) -> Option<&Nibbles> {
         match self {
             Self::Branch(b) => Some(&b.short_key),
-            Self::Leaf { key, .. } => Some(key),
+            Self::Extension { key, .. } | Self::Leaf { key, .. } => Some(key),
             _ => None,
         }
     }
@@ -295,9 +309,11 @@ impl ArenaSparseNode {
     /// case where a branch's RLP is small enough to be embedded rather than hashed.
     pub(super) fn cached_hash(&self) -> B256 {
         let rlp_node = match self {
-            Self::Branch(ArenaSparseNodeBranch { state, .. }) | Self::Leaf { state, .. } => state
+            Self::Branch(ArenaSparseNodeBranch { state, .. }) |
+            Self::Extension { state, .. } |
+            Self::Leaf { state, .. } => state
                 .cached_rlp_node()
-                .expect("cached_hash called on non-Cached branch or leaf: {self:?}"),
+                .expect("cached_hash called on non-Cached branch, extension, or leaf: {self:?}"),
             Self::Subtrie(s) => return s.arena[s.root].cached_hash(),
             _ => panic!("cached_hash called on {self:?}"),
         };
@@ -307,11 +323,6 @@ impl ArenaSparseNode {
 
 impl ArenaSparseNode {
     /// Converts a [`ProofTrieNodeV2`] into an [`ArenaSparseNode`].
-    ///
-    /// # Panics
-    ///
-    /// Panics if the node is an `Extension`, which should have been merged into a branch
-    /// by [`TrieNodeV2`].
     pub(super) fn from_proof_node(proof_node: ProofTrieNodeV2) -> Self {
         let ProofTrieNodeV2 { node, masks, .. } = proof_node;
         match node {
@@ -334,9 +345,11 @@ impl ArenaSparseNode {
                     branch_masks: masks.unwrap_or_default(),
                 })
             }
-            TrieNodeV2::Extension(_) => {
-                panic!("Extension nodes should be merged into branches by TrieNodeV2")
-            }
+            TrieNodeV2::Extension(extension) => Self::Extension {
+                state: ArenaSparseNodeState::Revealed,
+                key: extension.key,
+                child: extension.child,
+            },
         }
     }
 }
