@@ -103,7 +103,8 @@ use crate::tree::{
     txpool_prewarm,
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
-    PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
+    PayloadExecutionCache, PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig,
+    WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};
@@ -369,6 +370,12 @@ where
         state_root_strategy: Arc<dyn StateRootStrategy<N, P, Evm>>,
     ) -> Self {
         self.state_root_strategy = state_root_strategy;
+        self
+    }
+
+    /// Replaces the execution cache with a shared handle.
+    pub fn with_execution_cache(mut self, execution_cache: PayloadExecutionCache) -> Self {
+        self.payload_processor = self.payload_processor.with_execution_cache(execution_cache);
         self
     }
 
