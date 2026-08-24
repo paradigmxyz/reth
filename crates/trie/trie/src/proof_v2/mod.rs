@@ -19,7 +19,7 @@ use reth_trie_common::{
     prefix_set::PrefixSet, BranchNodeMasks, BranchNodeRef, BranchNodeV2, Nibbles, ProofTrieNodeV2,
     ProofV2Target, RlpNode, TrieNodeV2,
 };
-use std::cmp::Ordering;
+use std::{cmp::Ordering, ops::Bound};
 use tracing::{error, instrument, trace};
 
 mod value;
@@ -978,15 +978,65 @@ where
     // to `next_path`, if any, has been computed. Any branches which were under-construction
     // previously, and which do not share a prefix with `next_path`, can be assumed to be completed;
     // they will not have any further keys added to them.
+    //
+    // Returns a range to calculate if a branch still has dirty keys to process, or popping it
+    // exposes dirty keys which could split its extension. A missing lower bound disables these
+    // checks when the caller has already scheduled the remaining range.
     fn commit_branches<'a>(
         &mut self,
         targets: &mut Option<TargetsCursor<'a>>,
         next_path: &Nibbles,
-    ) -> Result<(), StateProofError> {
+        uncalculated_lower_bound: Option<&Nibbles>,
+    ) -> Result<Option<(Nibbles, Option<Nibbles>)>, StateProofError> {
+        let dirty_range = |prefix_set: &mut PrefixSet, upper_bound: Option<Nibbles>| {
+            let uncalculated_lower_bound = uncalculated_lower_bound?;
+
+            if upper_bound.as_ref().is_some_and(|upper| uncalculated_lower_bound >= upper) {
+                return None
+            }
+
+            prefix_set
+                .contains_range((
+                    Bound::Included(uncalculated_lower_bound),
+                    upper_bound.as_ref().map_or(Bound::Unbounded, Bound::Excluded),
+                ))
+                .then_some((*uncalculated_lower_bound, upper_bound))
+        };
+
+        let mut popped_child_path_upper = None;
         while !next_path.starts_with(&self.branch_path) {
+            // If the lower bound is still within this branch, process any remaining dirty keys
+            // before popping it so they can be added directly to the branch.
+            if uncalculated_lower_bound.is_some_and(|lower| lower.starts_with(&self.branch_path)) &&
+                let Some(range) =
+                    dirty_range(&mut self.prefix_set, self.branch_path.next_without_prefix())
+            {
+                return Ok(Some(range))
+            }
+
+            let branch = self.branch_stack.last().expect("branch_stack cannot be empty");
+            // Once popped, this branch becomes a child at this path. Its upper bound therefore
+            // covers any keys which could split the branch's extension on the right.
+            popped_child_path_upper = Some(
+                self.branch_path
+                    .slice_unchecked(0, self.branch_path.len() - branch.ext_len as usize)
+                    .next_without_prefix(),
+            );
+
             self.pop_branch(targets)?;
         }
-        Ok(())
+
+        // An empty branch_stack is skipped because a popped local root does not need this check:
+        // any gap before `next_path` was already returned by `try_pop_cached_branch`, and forward
+        // traversal will split its extension and process later dirty keys as needed.
+        if !self.branch_stack.is_empty() &&
+            let Some(upper_bound) = popped_child_path_upper &&
+            let Some(range) = dirty_range(&mut self.prefix_set, upper_bound)
+        {
+            return Ok(Some(range))
+        }
+
+        Ok(None)
     }
 
     // Returns the next child nibble on the current branch to process, or None if there are no
@@ -1110,13 +1160,13 @@ where
                     // used to return that range.
                     trace!(target: TRACE_TARGET, ?uncalculated_lower_bound, "Exhausted cached trie nodes");
                     if let Some(lower) = uncalculated_lower_bound {
-                        self.commit_branches(targets, &lower)?;
+                        self.commit_branches(targets, &lower, None)?;
                         return Ok(Some((lower, traversal_upper_bound.copied())));
                     }
                     return Ok(None)
                 }
                 PopCachedBranchOutcome::CalculateLeaves(range) => {
-                    self.commit_branches(targets, &range.0)?;
+                    self.commit_branches(targets, &range.0, None)?;
                     return Ok(Some(range));
                 }
             };
@@ -1135,7 +1185,12 @@ where
                 "loop",
             );
 
-            self.commit_branches(targets, &cached_path)?;
+            if let Some(range) =
+                self.commit_branches(targets, &cached_path, Some(uncalculated_lower_bound_ref))?
+            {
+                self.cached_branch_stack.push((cached_path, cached_branch));
+                return Ok(Some(range))
+            }
 
             // Since we've popped all branches which don't start with cached_path, branch_path at
             // this point must be equal to or shorter than cached_path.
@@ -1176,41 +1231,27 @@ where
             );
 
             let Some(child_nibble) = child_nibble else {
-                // If there are no further children to construct for this branch then pop it off
-                // both stacks and loop using the parent branch.
+                // Defer popping this completed branch to `commit_branches`, which checks for dirty
+                // keys around it before looping with the parent branch.
                 trace!(
                     target: TRACE_TARGET,
                     path=?cached_path,
                     ?curr_branch,
                     ?cached_branch,
-                    "No further children, popping branch",
+                    "No further children",
                 );
-                self.pop_branch(targets)?;
 
                 // no need to pop from `cached_branch_stack`, the current cached branch is already
                 // popped (see note at the top of the loop).
 
-                // The just-popped branch is completely processed; we know there can be no more keys
-                // with that prefix. Set the lower bound which can be returned from this method to
-                // be the next possible prefix, if any.
+                // The completed branch has no more keys with its prefix. Set the lower bound which
+                // can be returned from this method to be the next possible prefix, if any.
                 uncalculated_lower_bound = cached_path.next_without_prefix();
 
                 continue
             };
 
             let child_path = self.child_path_at(child_nibble);
-
-            // If the previous child was a cached branch with a short key (extension), then the new
-            // uncalculated_lower_bound will be the increment of that branch's path. If there are
-            // any dirty leaves between that path and this child, it indicates there may be leaves
-            // which would split that extension node. In that case we return the range to process
-            // the leaves.
-            if uncalculated_lower_bound_ref < &child_path &&
-                self.prefix_set.contains_range(uncalculated_lower_bound_ref..&child_path)
-            {
-                self.cached_branch_stack.push((cached_path, cached_branch));
-                return Ok(Some((*uncalculated_lower_bound_ref, Some(child_path))));
-            }
 
             // If the `hash_mask` bit is set for the next child it means the child's hash is cached
             // in the `cached_branch`. We can use that instead of re-calculating the hash of the
