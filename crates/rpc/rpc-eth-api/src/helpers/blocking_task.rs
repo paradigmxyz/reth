@@ -193,8 +193,10 @@ pub trait SpawnBlocking: EthApiTypes + Clone + Send + Sync + 'static {
             let fut = f(this);
             tokio::pin!(fut);
             let res = tokio::select! {
-                res = &mut fut => Some(res),
+                // Futures executed here may perform blocking work before their first yield.
+                biased;
                 _ = tx.closed() => None,
+                res = &mut fut => Some(res),
             };
             if let Some(res) = res {
                 let _ = tx.send(res);

@@ -664,8 +664,10 @@ where
             let fut = this.get_logs_in_block_range_inner(&filter, from_block, to_block, limits);
             tokio::pin!(fut);
             let res = tokio::select! {
-                res = &mut fut => Some(res),
+                // Range scans perform blocking reads before their first yield.
+                biased;
                 _ = tx.closed() => None,
+                res = &mut fut => Some(res),
             };
             if let Some(res) = res {
                 let _ = tx.send(res);
