@@ -7,8 +7,10 @@
 //! 3. Create the `RocksDB` batch / [`EitherWriter`](crate::EitherWriter).
 //! 4. Serially put the prepared physical shards.
 //!
-//! Parallel [`RocksDBProvider::get`](crate::providers::RocksDBProvider::get) while a write batch
-//! from `with_rocksdb_batch_auto_commit` is open deadlocks for more than one unique key.
+//! Last-shard `get`s read committed state only, not pending batch writes. Getting a key after
+//! putting it in the same batch would miss the merge (one logical key per batch). Do not overlap
+//! parallel [`RocksDBProvider::get`](crate::providers::RocksDBProvider::get) with auto-commit
+//! `write_opt`. MDBX `DbTx` is not safe for concurrent `get`s — use the serial prepare path.
 
 use alloy_primitives::{Address, BlockNumber, B256};
 use itertools::Itertools;
@@ -86,8 +88,9 @@ impl<T: ShardedHistoryTable> PreparedHistoryShardWrites<T> {
 
 /// Prepares history shard writes, reading last shards in parallel.
 ///
-/// `get_last` must read **committed** state only (for example [`RocksDBProvider::get`]). Do not
-/// call this while a `RocksDB` write batch is open.
+/// `get_last` must read **committed** state only (for example [`RocksDBProvider::get`]). Join all
+/// reads before opening a `RocksDB` write batch: gets do not see pending puts, and parallel gets
+/// must not overlap auto-commit `write_opt`.
 pub fn prepare_history_shard_writes_parallel<T, F>(
     grouped: BTreeMap<T::PartialKey, Vec<BlockNumber>>,
     get_last: F,
@@ -101,8 +104,8 @@ where
 
 /// Prepares history shard writes from an owned vector, reading last shards in parallel.
 ///
-/// `get_last` must read **committed** state only. Do not call this while a `RocksDB` write batch is
-/// open. `grouped` must be strictly ordered by logical key so every key occurs exactly once.
+/// `get_last` must read **committed** state only. Join all reads before opening a `RocksDB` write
+/// batch. `grouped` must be strictly ordered by logical key so every key occurs exactly once.
 pub fn prepare_history_shard_writes_parallel_vec<T, F>(
     grouped: Vec<(T::PartialKey, Vec<BlockNumber>)>,
     get_last: F,

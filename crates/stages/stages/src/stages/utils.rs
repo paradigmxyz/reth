@@ -433,7 +433,8 @@ where
 
 /// Spools prepared account-history shards after merging each key's committed last shard.
 ///
-/// Call this **before** opening a `RocksDB` write batch.
+/// Call this **before** opening a `RocksDB` write batch so last-shard gets observe committed state
+/// only and do not overlap auto-commit `write_opt`.
 pub(crate) fn prepare_account_history_writes<Provider>(
     collector: Collector<ShardedKey<Address>, BlockNumberList>,
     provider: &Provider,
@@ -453,7 +454,8 @@ where
 
 /// Spools prepared storage-history shards after merging each key's committed last shard.
 ///
-/// Call this **before** opening a `RocksDB` write batch.
+/// Call this **before** opening a `RocksDB` write batch so last-shard gets observe committed state
+/// only and do not overlap auto-commit `write_opt`.
 pub(crate) fn prepare_storage_history_writes<Provider>(
     collector: Collector<StorageShardedKey, BlockNumberList>,
     provider: &Provider,
@@ -827,7 +829,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{address, b256};
+    use alloy_primitives::{address, b256, BlockNumber};
 
     fn list(indices: &[u64]) -> BlockNumberList {
         BlockNumberList::new(indices.iter().copied()).unwrap()
@@ -911,5 +913,51 @@ mod tests {
             HistoryPreparationLimits { max_keys: usize::MAX, max_bytes: 1 },
         );
         assert_eq!(chunks.iter().map(Vec::len).collect::<Vec<_>>(), vec![1, 1]);
+    }
+
+    #[test]
+    fn grouping_keeps_a_coalesced_key_together_when_byte_limit_is_exceeded() {
+        let address_a = Address::repeat_byte(1);
+        let address_b = Address::repeat_byte(2);
+        let first_row: Vec<BlockNumber> = (1..=8).collect();
+        let second_row: Vec<BlockNumber> = (9..=16).collect();
+        let combined: Vec<BlockNumber> = (1..=16).collect();
+
+        let mut collector = Collector::new(1, None);
+        collector
+            .insert(ShardedKey::new(address_a, *first_row.last().unwrap()), list(&first_row))
+            .unwrap();
+        collector
+            .insert(ShardedKey::new(address_a, *second_row.last().unwrap()), list(&second_row))
+            .unwrap();
+        collector.insert(ShardedKey::new(address_b, u64::MAX), list(&[1])).unwrap();
+
+        let first_row_bytes = super::history_group_bytes::<tables::AccountsHistory>(&first_row);
+        let combined_bytes = super::history_group_bytes::<tables::AccountsHistory>(&combined);
+        assert!(
+            combined_bytes > first_row_bytes,
+            "combined={combined_bytes} first={first_row_bytes}"
+        );
+
+        let chunks = grouped_account_chunks(
+            collector,
+            HistoryPreparationLimits { max_keys: usize::MAX, max_bytes: first_row_bytes },
+        );
+
+        let a_indices: Vec<_> = chunks
+            .iter()
+            .flat_map(|chunk| chunk.iter().filter(|(addr, _)| *addr == address_a))
+            .map(|(_, indices)| indices.clone())
+            .collect();
+        assert_eq!(
+            a_indices,
+            vec![combined],
+            "coalesced key must occupy one prepare batch: {chunks:?}"
+        );
+        assert!(chunks.len() >= 2, "neighbor key must not share the over-budget batch: {chunks:?}");
+        assert_eq!(
+            chunks.iter().filter(|chunk| chunk.iter().any(|(addr, _)| *addr == address_b)).count(),
+            1
+        );
     }
 }

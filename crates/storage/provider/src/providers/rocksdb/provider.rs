@@ -1519,7 +1519,9 @@ impl RocksDBProvider {
 
     /// Parallel last-shard reads, then a serial batch of prepared puts.
     ///
-    /// All committed `get`s (and Rayon workers) finish before [`Self::batch`] is created.
+    /// Last-shard `get`s read committed state only. All of them (and Rayon workers) finish before
+    /// [`Self::batch`] is created so a key is never read after it has been put, and so parallel
+    /// gets do not overlap `write_opt`.
     fn write_history<T: ShardedHistoryTable>(
         &self,
         grouped: BTreeMap<T::PartialKey, Vec<BlockNumber>>,
