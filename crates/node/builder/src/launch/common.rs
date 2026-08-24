@@ -71,10 +71,10 @@ use reth_node_metrics::{
 };
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
-    BalStoreHandle, BlockHashReader, BlockNumReader, DBProvider, DatabaseProviderFactory,
-    MetadataProvider, MetadataWriter, ProviderError, ProviderFactory, ProviderResult,
-    RocksDBBalStore, RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
-    StaticFileProviderFactory, StorageSettingsCache,
+    BalConfig, BalStoreHandle, BlockHashReader, BlockNumReader, DBProvider,
+    DatabaseProviderFactory, InMemoryBalStore, MetadataProvider, MetadataWriter, ProviderError,
+    ProviderFactory, ProviderResult, RocksDBProviderFactory, StageCheckpointReader,
+    StaticFileProviderBuilder, StaticFileProviderFactory, StorageSettingsCache,
 };
 use reth_prune::{PruneMode, PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -524,15 +524,14 @@ where
                 .build()?
         };
 
-        let bal_store = self
+        let balstore_cache_size = self
             .node_config()
             .db
             .balstore_cache_size
-            .map(|distance| {
-                RocksDBBalStore::with_buffer_retention_distance(rocksdb_provider.clone(), distance)
-            })
-            .unwrap_or_else(|| RocksDBBalStore::new(rocksdb_provider.clone()));
-        let bal_store = BalStoreHandle::new(bal_store);
+            .unwrap_or(BalConfig::DEFAULT_IN_MEMORY_RETENTION_DISTANCE);
+        let bal_store = BalStoreHandle::new(InMemoryBalStore::new(
+            BalConfig::with_in_memory_retention_distance(balstore_cache_size),
+        ));
         let factory = ProviderFactory::new(
             self.right().clone(),
             self.chain_spec(),
