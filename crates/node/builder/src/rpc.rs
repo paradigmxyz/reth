@@ -4,8 +4,9 @@ pub use jsonrpsee::{
     core::middleware::layer::Either,
     server::middleware::rpc::{RpcService, RpcServiceBuilder},
 };
-use reth_engine_tree::tree::WaitForCaches;
 pub use reth_engine_tree::tree::{BasicEngineValidator, EngineValidator};
+use reth_engine_tree::tree::{ExecutionCache, PayloadExecutionCache, SavedCache, WaitForCaches};
+use reth_provider::BlockNumReader;
 pub use reth_rpc_builder::{
     middleware::{RethAuthHttpMiddleware, RethRpcMiddleware},
     Identity, Stack,
@@ -1423,12 +1424,20 @@ pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone 
 pub struct BasicEngineValidatorBuilder<EV> {
     /// The payload validator builder used to create the engine validator.
     payload_validator_builder: EV,
+    /// Optional execution cache handle shared with the engine validator.
+    execution_cache: Option<PayloadExecutionCache>,
 }
 
 impl<EV> BasicEngineValidatorBuilder<EV> {
     /// Creates a new instance with the given payload validator builder.
     pub const fn new(payload_validator_builder: EV) -> Self {
-        Self { payload_validator_builder }
+        Self { payload_validator_builder, execution_cache: None }
+    }
+
+    /// Shares the engine execution cache with external cache warmers.
+    pub fn with_execution_cache(mut self, execution_cache: PayloadExecutionCache) -> Self {
+        self.execution_cache = Some(execution_cache);
+        self
     }
 }
 
@@ -1467,6 +1476,7 @@ where
         let invalid_block_hook = ctx.create_invalid_block_hook(&data_dir).await?;
 
         let txpool_prewarming = tree_config.txpool_prewarming();
+        let execution_cache_size = tree_config.cross_block_cache_size();
         let mut validator = BasicEngineValidator::new(
             ctx.node.provider().clone(),
             std::sync::Arc::new(ctx.node.consensus().clone()),
@@ -1477,6 +1487,15 @@ where
             overlay_manager,
             ctx.node.task_executor().clone(),
         );
+
+        if let Some(execution_cache) = self.execution_cache {
+            let parent_hash = ctx.node.provider().chain_info()?.best_hash;
+            execution_cache.update_with_guard(|cache| {
+                *cache =
+                    Some(SavedCache::new(parent_hash, ExecutionCache::new(execution_cache_size)));
+            });
+            validator = validator.with_execution_cache(execution_cache);
+        }
 
         if txpool_prewarming {
             validator = validator

@@ -142,6 +142,12 @@ where
         }
     }
 
+    /// Replaces the execution cache used by this processor with a shared handle.
+    pub(crate) fn with_execution_cache(mut self, execution_cache: PayloadExecutionCache) -> Self {
+        self.execution_cache = execution_cache;
+        self
+    }
+
     /// Returns the dedicated BAL read-set prewarm pool, spawning its blocking worker threads on
     /// first use (only the BAL parallel execution path calls this).
     fn bal_prewarm_pool(&self) -> Arc<bal_prewarm_pool::BalPrewarmPool> {
