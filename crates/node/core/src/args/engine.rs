@@ -723,8 +723,8 @@ impl EngineArgs {
             tracing::warn!(target: "reth::cli", "--engine.legacy-state-root has no effect anymore, use --engine.state-root-fallback to force synchronous state root computation");
         }
         let config = TreeConfig::default()
-            .with_persistence_backpressure_threshold(self.persistence_backpressure_threshold())
             .with_persistence_threshold(self.persistence_threshold)
+            .with_persistence_backpressure_threshold(self.persistence_backpressure_threshold())
             .with_memory_block_buffer_target(self.memory_block_buffer_target())
             .with_num_state_masking_blocks(self.num_state_masking_blocks)
             .with_invalid_header_hit_eviction_threshold(self.invalid_header_hit_eviction_threshold)
@@ -1007,6 +1007,30 @@ mod tests {
         .args;
 
         assert_eq!(args.tree_config().num_state_masking_blocks(), 7);
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn build_aggressive_partial_persistence_tree_config() {
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.persistence-threshold",
+            "2",
+            "--engine.persistence-backpressure-threshold",
+            "4",
+            "--engine.memory-block-buffer-target",
+            "0",
+            "--engine.num-state-masking-blocks",
+            "1",
+        ])
+        .args;
+
+        args.validate().unwrap();
+        let config = args.tree_config();
+        assert_eq!(config.persistence_threshold(), 2);
+        assert_eq!(config.persistence_backpressure_threshold(), 4);
+        assert_eq!(config.memory_block_buffer_target(), 0);
+        assert_eq!(config.num_state_masking_blocks(), 1);
     }
 
     #[cfg(not(feature = "partial-persistence"))]
