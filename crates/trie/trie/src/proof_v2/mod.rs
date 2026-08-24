@@ -1149,6 +1149,16 @@ where
             // top branch is the parent of this cached branch. Either way we push a branch
             // corresponding to the cached one onto the stack, so we can begin constructing it.
             if self.branch_path != cached_path {
+                // If the prefix set contains any entries from the lower bound up until the new
+                // cached path it means that there might be a new node(s) which split the extension
+                // node between cached_path and its parent (self.branch_path).
+                if uncalculated_lower_bound_ref < &cached_path &&
+                    self.prefix_set.contains_range(uncalculated_lower_bound_ref..&cached_path)
+                {
+                    self.cached_branch_stack.push((cached_path, cached_branch));
+                    return Ok(Some((*uncalculated_lower_bound_ref, Some(cached_path))))
+                }
+
                 self.push_cached_branch(targets, cached_path, &cached_branch)?;
             }
 
@@ -1276,16 +1286,6 @@ where
             {
                 // Push the current cached branch back on before pushing its child and then looping
                 self.cached_branch_stack.push((cached_path, cached_branch));
-
-                // If the next cached branch's path is in the prefix set, it could indicate that
-                // there are dirty leaves which would split the cached branch's extension node (if
-                // there is one). In that case we return the range those leaves would potentially be
-                // in to calculate them.
-                if self.prefix_set.contains(&child_path) {
-                    let gap_upper = Some(*next_cached_path);
-                    self.cached_branch_stack.push(trie_cursor_state.take());
-                    return Ok(Some((*uncalculated_lower_bound_ref, gap_upper)));
-                }
 
                 trace!(
                     target: TRACE_TARGET,
