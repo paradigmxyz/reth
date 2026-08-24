@@ -198,8 +198,9 @@ impl<B: Block> BlockBuffer<B> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_eip7928::bal::RawBal;
     use alloy_eips::BlockNumHash;
-    use alloy_primitives::BlockHash;
+    use alloy_primitives::{BlockHash, Bytes};
     use reth_testing_utils::generators::{self, random_block, BlockParams, Rng};
     use std::collections::HashMap;
 
@@ -256,11 +257,9 @@ mod tests {
         assert_eq!(buffer.block(&block1.hash()), Some(&block1));
     }
 
-    /// Creates raw access list bytes.
-    fn raw_bal() -> alloy_eip7928::bal::RawBal {
-        alloy_eip7928::bal::RawBal::from(alloy_primitives::Bytes::from_static(&[
-            alloy_rlp::EMPTY_LIST_CODE,
-        ]))
+    /// Creates a raw access list holding an empty RLP list.
+    fn raw_bal() -> RawBal {
+        RawBal::from(Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE]))
     }
 
     #[test]

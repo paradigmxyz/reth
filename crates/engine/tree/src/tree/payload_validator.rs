@@ -2027,9 +2027,7 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
                 .block_access_list()
                 .map(|block_access_list| DecodedBal::from_rlp_bytes(block_access_list.clone()))
                 .transpose(),
-            Self::Block(block) => {
-                block.data().as_ref().cloned().map(DecodedBal::from_raw_bal).transpose()
-            }
+            Self::Block(block) => block.data().clone().map(DecodedBal::from_raw_bal).transpose(),
         }
     }
 

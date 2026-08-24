@@ -308,12 +308,6 @@ impl<B: Block> From<SealedBlockWithAccessList<B>> for OrderedDownloadedBlock<B> 
     }
 }
 
-impl<B: Block> From<OrderedDownloadedBlock<B>> for SealedBlockWithAccessList<B> {
-    fn from(value: OrderedDownloadedBlock<B>) -> Self {
-        value.0
-    }
-}
-
 /// An in-flight full block request that optionally also fetches the block's access list.
 enum FullBlockDownload<Client>
 where

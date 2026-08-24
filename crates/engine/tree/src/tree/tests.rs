@@ -44,6 +44,7 @@ use std::{
 };
 use tokio::sync::oneshot;
 
+/// Wraps blocks as if they had been downloaded without any access list data.
 fn downloaded_blocks<B: reth_primitives_traits::Block>(
     blocks: Vec<reth_primitives_traits::SealedBlock<B>>,
 ) -> Vec<SealedBlockWithAccessList<B>> {
