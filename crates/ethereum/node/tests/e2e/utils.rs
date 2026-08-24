@@ -17,7 +17,7 @@ use reth_node_ethereum::EthereumNode;
 use reth_provider::FullProvider;
 
 /// Helper function to create a new eth payload attributes
-pub(crate) const fn eth_payload_attributes(timestamp: u64) -> PayloadAttributes {
+pub(crate) fn eth_payload_attributes(timestamp: u64) -> PayloadAttributes {
     PayloadAttributes {
         timestamp,
         prev_randao: B256::ZERO,
@@ -25,13 +25,13 @@ pub(crate) const fn eth_payload_attributes(timestamp: u64) -> PayloadAttributes 
         withdrawals: Some(vec![]),
         parent_beacon_block_root: Some(B256::ZERO),
         slot_number: None,
-        target_gas_limit: None,
+        ..Default::default()
     }
 }
 
 /// Helper function to create pre-Cancun (Shanghai) payload attributes.
 /// No `parent_beacon_block_root` field.
-pub(crate) const fn eth_payload_attributes_shanghai(timestamp: u64) -> PayloadAttributes {
+pub(crate) fn eth_payload_attributes_shanghai(timestamp: u64) -> PayloadAttributes {
     PayloadAttributes {
         timestamp,
         prev_randao: B256::ZERO,
@@ -39,7 +39,7 @@ pub(crate) const fn eth_payload_attributes_shanghai(timestamp: u64) -> PayloadAt
         withdrawals: Some(vec![]),
         parent_beacon_block_root: None,
         slot_number: None,
-        target_gas_limit: None,
+        ..Default::default()
     }
 }
 
@@ -49,7 +49,7 @@ pub(crate) const fn eth_payload_attributes_shanghai(timestamp: u64) -> PayloadAt
 /// `slot_number` in the attributes once Amsterdam is active. Tests use the timestamp as a
 /// deterministic dummy slot because the exact beacon slot is irrelevant for these local e2e
 /// payloads.
-pub(crate) const fn eth_payload_attributes_amsterdam(timestamp: u64) -> PayloadAttributes {
+pub(crate) fn eth_payload_attributes_amsterdam(timestamp: u64) -> PayloadAttributes {
     PayloadAttributes {
         timestamp,
         prev_randao: B256::ZERO,
@@ -57,7 +57,7 @@ pub(crate) const fn eth_payload_attributes_amsterdam(timestamp: u64) -> PayloadA
         withdrawals: Some(vec![]),
         parent_beacon_block_root: Some(B256::ZERO),
         slot_number: Some(timestamp),
-        target_gas_limit: None,
+        ..Default::default()
     }
 }
 
