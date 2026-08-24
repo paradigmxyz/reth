@@ -606,7 +606,7 @@ pub trait Call:
         F: FnOnce(Self, StateCacheDb) -> Result<R, Self::Error> + Send + 'static,
         R: Send + 'static,
     {
-        self.spawn_with_state(Some(at.into()), move |this, state| {
+        self.spawn_blocking_with_state(Some(at.into()), move |this, state| {
             let db = State::builder()
                 .with_database(StateProviderDatabase::new(StateProviderTraitObjWrapper(state)))
                 .build();
