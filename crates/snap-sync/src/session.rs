@@ -6,7 +6,7 @@
 
 use crate::{
     error::db_error, BlockAccessListCatchUp, BlockAccessListCatchUpOutcome, RangeBudget,
-    SnapGeneration, SnapPhase, SnapPivotPolicy, SnapStateStore, SnapSyncError,
+    SnapGeneration, SnapPhase, SnapPipelineHandoff, SnapPivotPolicy, SnapStateStore, SnapSyncError,
     StateDownloadOutcome, StateDownloader, TrieGenerator,
 };
 use core::future::Future;
@@ -14,9 +14,9 @@ use reth_db_api::transaction::DbTxMut;
 use reth_network_p2p::snap::client::SnapClient;
 use reth_provider::DatabaseProviderFactory;
 use reth_storage_api::{
-    AccountExtReader, ChangeSetReader, DBProvider, HeaderProvider, StageCheckpointReader,
-    StageCheckpointWriter, StateWriter, StatsReader, StorageChangeSetReader, StorageSettingsCache,
-    TrieWriter,
+    AccountExtReader, ChangeSetReader, DBProvider, HeaderProvider, PruneCheckpointWriter,
+    StageCheckpointReader, StageCheckpointWriter, StateWriter, StatsReader, StorageChangeSetReader,
+    StorageSettingsCache, TrieWriter,
 };
 use reth_tasks::Runtime;
 use tracing::{debug, info};
@@ -256,6 +256,9 @@ impl<'a, C, F, X> SnapSyncSession<'a, C, F, X> {
                         "Rebuilding snap state trie"
                     );
                     self.rebuild_trie(generation).await?;
+                    // Without this the pipeline would resume from genesis and look for bodies
+                    // and change sets below the pivot that were never downloaded.
+                    SnapPipelineHandoff::new(self.factory).commit(generation.target_block)?;
                     return Ok(SessionStep::Complete(generation))
                 }
             }
@@ -335,6 +338,7 @@ pub trait SnapSyncProvider:
     + AccountExtReader
     + ChangeSetReader
     + HeaderProvider
+    + PruneCheckpointWriter
     + StageCheckpointReader
     + StageCheckpointWriter
     + StateWriter
@@ -350,6 +354,7 @@ impl<T> SnapSyncProvider for T where
         + AccountExtReader
         + ChangeSetReader
         + HeaderProvider
+        + PruneCheckpointWriter
         + StageCheckpointReader
         + StageCheckpointWriter
         + StateWriter
@@ -499,7 +504,14 @@ mod tests {
         assert!(context.waits().is_empty());
         let store = SnapStateStore::new(&factory);
         assert_eq!(store.interrupted_generation().unwrap(), None);
+        // A completed session publishes the frontier, so the pipeline resumes above the pivot
+        // instead of looking for bodies below it that were never downloaded.
+        assert_eq!(SnapPipelineHandoff::new(&factory).published_block().unwrap(), Some(1));
         let provider = factory.database_provider_ro().unwrap();
+        assert_eq!(
+            provider.get_stage_checkpoint(StageId::Finish).unwrap().map(|it| it.block_number),
+            Some(1)
+        );
         assert_eq!(
             provider.tx_ref().get::<tables::HashedAccounts>(account_hash).unwrap(),
             Some(Account::from(account))

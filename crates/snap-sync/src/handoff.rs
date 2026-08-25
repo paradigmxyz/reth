@@ -16,23 +16,16 @@ use reth_storage_api::{
 };
 use tracing::info;
 
-// Stages whose work the downloaded state stands in for. Headers are excluded: they were really
-// downloaded, and the pipeline owns that checkpoint.
-const STATE_STAGES: [StageId; 10] = [
-    StageId::Bodies,
-    StageId::SenderRecovery,
-    StageId::Execution,
-    StageId::PruneSenderRecovery,
-    StageId::MerkleUnwind,
-    StageId::AccountHashing,
-    StageId::StorageHashing,
-    StageId::TransactionLookup,
-    StageId::IndexStorageHistory,
-    StageId::IndexAccountHistory,
-];
+// Stages a snap sync satisfies without running them, beyond the ones every externally supplied
+// state covers. Bodies and its dependants are included because nothing below the pivot was
+// downloaded, and `Finish` because the pipeline reports overall progress from it. Headers stay
+// out: they were really downloaded, and the pipeline owns that checkpoint.
+const EXTRA_STATE_STAGES: [StageId; 4] =
+    [StageId::Bodies, StageId::SenderRecovery, StageId::TransactionLookup, StageId::Finish];
 
 // Segments whose pre-pivot rows a snap sync never produced.
-const PRUNED_SEGMENTS: [PruneSegment; 5] = [
+const PRUNED_SEGMENTS: [PruneSegment; 6] = [
+    PruneSegment::Bodies,
     PruneSegment::SenderRecovery,
     PruneSegment::TransactionLookup,
     PruneSegment::Receipts,
@@ -77,17 +70,15 @@ impl<'a, F> SnapPipelineHandoff<'a, F> {
         }
 
         let checkpoint = StageCheckpoint::new(block_number);
-        for stage in STATE_STAGES {
+        for stage in StageId::STATE_REQUIRED.into_iter().chain(EXTRA_STATE_STAGES) {
             provider.save_stage_checkpoint(stage, checkpoint).map_err(db_error)?;
         }
-        // The pipeline reports overall progress from the last stage, so it must agree.
-        provider.save_stage_checkpoint(StageId::Finish, checkpoint).map_err(db_error)?;
 
-        // `Before` keeps the pivot itself, whose state and receipts the node does have.
+        // `before_inclusive` keeps the pivot itself, whose state the node does have.
         let pruned = PruneCheckpoint {
             block_number: Some(block_number),
             tx_number: None,
-            prune_mode: PruneMode::Before(block_number.saturating_add(1)),
+            prune_mode: PruneMode::before_inclusive(block_number),
         };
         for segment in PRUNED_SEGMENTS {
             provider.save_prune_checkpoint(segment, pruned).map_err(db_error)?;
@@ -103,54 +94,18 @@ impl<'a, F> SnapPipelineHandoff<'a, F> {
     }
 
     /// Returns the block the pipeline was handed, if this node was snap synced.
+    ///
+    /// Nothing below it can be re-executed: the change sets a rewind replays were never
+    /// downloaded, so a pipeline unwind must treat this block as its floor and require a fresh
+    /// snap sync rather than walking towards genesis. Geth takes the same position on its own
+    /// pivot: *"If pivot block is reached, return the genesis block as the new chain head.
+    /// Theoretically there must be a persistent state before or at the pivot block, prevent
+    /// endless rewinding towards the genesis just in case."*
     pub fn published_block(&self) -> Result<Option<u64>, SnapSyncError>
     where
         F: DatabaseProviderFactory<Provider: StageCheckpointReader>,
     {
         self.store.completed_block()
-    }
-
-    /// Checks that a rewind stops at or above the published state.
-    ///
-    /// Nothing below that block can be re-executed: the change sets a rewind replays were never
-    /// downloaded, so a node that rewinds through it has no state to fall back on and has to snap
-    /// sync again. Geth takes the same position on its own pivot, stopping the rewind rather than
-    /// walking towards genesis: *"If pivot block is reached, return the genesis block as the new
-    /// chain head. Theoretically there must be a persistent state before or at the pivot block,
-    /// prevent endless rewinding towards the genesis just in case."*
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SnapSyncError::BelowStateFloor`] when `target` is below the published block. The
-    /// caller should treat that as needing a fresh snap sync, not as a recoverable unwind.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use reth_snap_sync::{SnapPipelineHandoff, SnapSyncError};
-    ///
-    /// # fn example<F>(factory: &F) -> Result<(), SnapSyncError>
-    /// # where
-    /// #     F: reth_provider::DatabaseProviderFactory<
-    /// #         Provider: reth_storage_api::StageCheckpointReader,
-    /// #     >,
-    /// # {
-    /// let handoff = SnapPipelineHandoff::new(factory);
-    /// if let Err(SnapSyncError::BelowStateFloor { floor, .. }) = handoff.ensure_rewind_target(10) {
-    ///     println!("resync required, snap state starts at {floor}");
-    /// }
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn ensure_rewind_target(&self, target: u64) -> Result<(), SnapSyncError>
-    where
-        F: DatabaseProviderFactory<Provider: StageCheckpointReader>,
-    {
-        let Some(floor) = self.published_block()? else { return Ok(()) };
-        if target < floor {
-            return Err(SnapSyncError::BelowStateFloor { target, floor })
-        }
-        Ok(())
     }
 }
 
@@ -221,7 +176,7 @@ mod tests {
         handoff.commit(pivot).unwrap();
 
         let provider = factory.database_provider_ro().unwrap();
-        for stage in STATE_STAGES.into_iter().chain([StageId::Finish]) {
+        for stage in StageId::STATE_REQUIRED.into_iter().chain(EXTRA_STATE_STAGES) {
             assert_eq!(
                 provider.get_stage_checkpoint(stage).unwrap().map(|it| it.block_number),
                 Some(pivot),
@@ -243,31 +198,8 @@ mod tests {
         for segment in PRUNED_SEGMENTS {
             let checkpoint = provider.get_prune_checkpoint(segment).unwrap().unwrap();
             assert_eq!(checkpoint.block_number, Some(pivot));
-            assert_eq!(checkpoint.prune_mode, PruneMode::Before(pivot + 1));
+            assert_eq!(checkpoint.prune_mode, PruneMode::before_inclusive(pivot));
         }
-    }
-
-    #[test]
-    fn rewind_stops_at_the_published_state() {
-        let (factory, pivot) = snap_synced_factory();
-        let handoff = SnapPipelineHandoff::new(&factory);
-        handoff.commit(pivot).unwrap();
-
-        assert!(handoff.ensure_rewind_target(pivot + 1).is_ok());
-        assert!(handoff.ensure_rewind_target(pivot).is_ok());
-        let error = handoff.ensure_rewind_target(pivot - 1).unwrap_err();
-
-        assert!(matches!(
-            error,
-            SnapSyncError::BelowStateFloor { target, floor } if target == pivot - 1 && floor == pivot
-        ));
-    }
-
-    #[test]
-    fn a_node_that_never_snap_synced_has_no_floor() {
-        let factory = create_test_provider_factory();
-
-        assert!(SnapPipelineHandoff::new(&factory).ensure_rewind_target(0).is_ok());
     }
 
     #[test]
