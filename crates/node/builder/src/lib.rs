@@ -43,6 +43,9 @@ pub use handle::NodeHandle;
 
 pub mod rpc;
 
+/// Backfill implementations for the engine orchestrator.
+pub mod sync;
+
 pub mod setup;
 
 /// Type aliases for traits that are often used together
