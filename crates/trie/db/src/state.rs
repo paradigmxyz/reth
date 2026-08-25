@@ -325,7 +325,7 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
             .into_iter()
             .map(|(address, mut slots)| {
                 slots.sort_unstable_by_key(|(slot, _)| *slot);
-                (address, HashedStorageSorted { storage_slots: slots, wiped: false })
+                (address, HashedStorageSorted { storage_slots: slots })
             })
             .collect();
 

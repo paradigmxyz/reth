@@ -44,14 +44,6 @@ impl MultiAddedRemovedKeys {
                 .map(|entry| entry.unwrap_or_default())
                 .unwrap_or_default();
 
-            if storage.wiped {
-                self.storages.remove(hashed_address);
-                if account.is_empty() {
-                    self.account.insert_removed(*hashed_address);
-                }
-                continue
-            }
-
             let storage_removed_keys =
                 self.storages.entry(*hashed_address).or_insert_with(default_added_removed_keys);
 
@@ -129,32 +121,6 @@ mod tests {
     }
 
     #[test]
-    fn test_update_with_state_wiped_storage() {
-        let mut multi_keys = MultiAddedRemovedKeys::new();
-        let mut update = HashedPostState::default();
-
-        let addr = B256::random();
-        let slot1 = B256::random();
-
-        // First add some removed keys
-        let mut storage = HashedStorage::default();
-        storage.storage.insert(slot1, U256::ZERO);
-        update.storages.insert(addr, storage);
-        multi_keys.update_with_state(&update);
-        assert!(multi_keys.get_storage(&addr).is_some());
-
-        // Now wipe the storage
-        let mut update2 = HashedPostState::default();
-        let wiped_storage = HashedStorage::new(true);
-        update2.storages.insert(addr, wiped_storage);
-        multi_keys.update_with_state(&update2);
-
-        // Storage and account should be removed
-        assert!(multi_keys.get_storage(&addr).is_none());
-        assert!(multi_keys.get_accounts().is_removed(&addr));
-    }
-
-    #[test]
     fn test_update_with_state_account_tracking() {
         let mut multi_keys = MultiAddedRemovedKeys::new();
         let mut update = HashedPostState::default();
@@ -204,17 +170,6 @@ mod tests {
         multi_keys.update_with_state(&update);
 
         // Account should not be marked as removed because it has balance
-        assert!(!multi_keys.get_accounts().is_removed(&addr));
-
-        // Now wipe the storage
-        let mut update2 = HashedPostState::default();
-        let wiped_storage = HashedStorage::new(true);
-        update2.storages.insert(addr, wiped_storage);
-        update2.accounts.insert(addr, Some(account));
-        multi_keys.update_with_state(&update2);
-
-        // Storage should be None, but account should not be removed.
-        assert!(multi_keys.get_storage(&addr).is_none());
         assert!(!multi_keys.get_accounts().is_removed(&addr));
     }
 }

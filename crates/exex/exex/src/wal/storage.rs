@@ -275,7 +275,6 @@ mod tests {
             storage_tries: HashMap::from_iter([(
                 hashed_address,
                 StorageTrieUpdates {
-                    is_deleted: false,
                     storage_nodes: HashMap::from_iter([(
                         Nibbles::from_nibbles_unchecked([0x04]),
                         BranchNodeCompact::default(),
@@ -292,10 +291,7 @@ mod tests {
             )]),
             storages: HashMap::from_iter([(
                 hashed_address,
-                HashedStorage {
-                    wiped: false,
-                    storage: HashMap::from_iter([(storage_key, U256::from(101))]),
-                },
+                HashedStorage { storage: HashMap::from_iter([(storage_key, U256::from(101))]) },
             )]),
         };
 
