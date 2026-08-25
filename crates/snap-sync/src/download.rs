@@ -83,68 +83,93 @@ impl<'a, C, F> StateDownloader<'a, C, F> {
                 return Ok(StateDownloadOutcome::Paused { generation })
             };
             remaining = next_remaining;
-            let Some(range) = self
-                .download_account_range(generation.state_root, generation.next_account, MAX_HASH)
-                .await?
-            else {
-                return Ok(StateDownloadOutcome::Unavailable { generation })
-            };
-            if range.accounts.is_empty() {
-                if range.has_more {
-                    return Err(SnapSyncError::InvalidRequest(
-                        "account range requires continuation without advancing".to_string(),
-                    ))
+
+            match self.download_range(generation).await? {
+                RangeStep::Unavailable(generation) => {
+                    return Ok(StateDownloadOutcome::Unavailable { generation })
                 }
-                generation = self.store.commit_account_range(
-                    generation,
-                    HashedPostState::default(),
-                    Vec::new(),
-                    AccountRangeProgress::Complete,
-                )?;
-                return Ok(StateDownloadOutcome::Complete { generation })
-            }
-
-            let account_count = range.accounts.len();
-            for (index, accounts) in range.accounts.chunks(STATE_ACCOUNTS_PER_BATCH).enumerate() {
-                let Some(storages) =
-                    self.download_storages(generation.state_root, accounts).await?
-                else {
-                    return Ok(StateDownloadOutcome::Unavailable { generation })
-                };
-                let Some(bytecodes) = self.download_bytecodes(accounts).await? else {
-                    return Ok(StateDownloadOutcome::Unavailable { generation })
-                };
-                let state = HashedPostState::default()
-                    .with_accounts(
-                        accounts
-                            .iter()
-                            .map(|(hash, account)| (*hash, Some(Account::from(*account)))),
-                    )
-                    .with_storages(storages);
-                let committed = (index + 1) * STATE_ACCOUNTS_PER_BATCH;
-                let is_last = committed >= account_count;
-                let progress = if is_last && !range.has_more {
-                    AccountRangeProgress::Complete
-                } else {
-                    AccountRangeProgress::More {
-                        next_account: next_hash(
-                            accounts.last().expect("account batch is non-empty").0,
-                        )
-                        .ok_or_else(|| {
-                            SnapSyncError::InvalidRequest(
-                                "account range continues past the maximum hash".to_string(),
-                            )
-                        })?,
+                RangeStep::Committed(committed) => {
+                    generation = committed;
+                    // Leaving the account phase means the trie was exhausted.
+                    if generation.phase != SnapPhase::Accounts {
+                        return Ok(StateDownloadOutcome::Complete { generation })
                     }
-                };
-                generation =
-                    self.store.commit_account_range(generation, state, bytecodes, progress)?;
-            }
-
-            if generation.phase != SnapPhase::Accounts {
-                return Ok(StateDownloadOutcome::Complete { generation })
+                }
             }
         }
+    }
+
+    /// Commits one authenticated account range, batch by batch.
+    ///
+    /// Each batch's storage and code are downloaded before the batch becomes durable, so an
+    /// interruption never exposes accounts whose dependencies are still missing.
+    async fn download_range(
+        &mut self,
+        mut generation: SnapGeneration,
+    ) -> Result<RangeStep, SnapSyncError>
+    where
+        C: SnapClient,
+        F: DatabaseProviderFactory,
+        F::ProviderRW: DBProvider
+            + StageCheckpointReader
+            + StageCheckpointWriter
+            + StateWriter
+            + StorageSettingsCache,
+    {
+        let Some(range) = self
+            .download_account_range(generation.state_root, generation.next_account, MAX_HASH)
+            .await?
+        else {
+            return Ok(RangeStep::Unavailable(generation))
+        };
+
+        if range.accounts.is_empty() {
+            if range.has_more {
+                return Err(SnapSyncError::InvalidRequest(
+                    "account range requires continuation without advancing".to_string(),
+                ))
+            }
+            generation = self.store.commit_account_range(
+                generation,
+                HashedPostState::default(),
+                Vec::new(),
+                AccountRangeProgress::Complete,
+            )?;
+            return Ok(RangeStep::Committed(generation))
+        }
+
+        let total = range.accounts.len();
+        for (index, accounts) in range.accounts.chunks(STATE_ACCOUNTS_PER_BATCH).enumerate() {
+            let Some((state, bytecodes)) =
+                self.download_batch(generation.state_root, accounts).await?
+            else {
+                return Ok(RangeStep::Unavailable(generation))
+            };
+            let committed = (index + 1) * STATE_ACCOUNTS_PER_BATCH;
+            let progress = account_progress(accounts, committed >= total && !range.has_more)?;
+            generation = self.store.commit_account_range(generation, state, bytecodes, progress)?;
+        }
+        Ok(RangeStep::Committed(generation))
+    }
+
+    // Storage and code complete before their accounts become durable, so `None` means the batch
+    // must be retried rather than committed.
+    async fn download_batch(
+        &mut self,
+        root: B256,
+        accounts: &[AccountEntry],
+    ) -> Result<Option<(HashedPostState, Vec<(B256, Bytes)>)>, SnapSyncError>
+    where
+        C: SnapClient,
+    {
+        let Some(storages) = self.download_storages(root, accounts).await? else { return Ok(None) };
+        let Some(bytecodes) = self.download_bytecodes(accounts).await? else { return Ok(None) };
+        let state = HashedPostState::default()
+            .with_accounts(
+                accounts.iter().map(|(hash, account)| (*hash, Some(Account::from(*account)))),
+            )
+            .with_storages(storages);
+        Ok(Some((state, bytecodes)))
     }
 
     // Retries unavailable roots across distinct peers without penalizing them.
@@ -188,7 +213,7 @@ impl<'a, C, F> StateDownloader<'a, C, F> {
     async fn download_storages(
         &mut self,
         root: B256,
-        accounts: &[(B256, TrieAccount)],
+        accounts: &[AccountEntry],
     ) -> Result<Option<Vec<(B256, HashedStorage)>>, SnapSyncError>
     where
         C: SnapClient,
@@ -240,36 +265,8 @@ impl<'a, C, F> StateDownloader<'a, C, F> {
                             .expect("verified range belongs to a requested account");
                         storage.1.storage.extend(range.slots);
                     }
-                    let previous_len = pending.len();
-                    let previous_origin = origin;
-                    match verified.continuation {
-                        Some(StorageRangeContinuation::Partial {
-                            account_index,
-                            starting_hash,
-                            ..
-                        }) => {
-                            pending = pending.get(account_index..).ok_or_else(|| {
-                                SnapSyncError::InvalidRequest(
-                                    "storage continuation exceeds the request".to_string(),
-                                )
-                            })?;
-                            origin = starting_hash;
-                        }
-                        Some(StorageRangeContinuation::NextAccount { account_index, .. }) => {
-                            pending = pending.get(account_index..).ok_or_else(|| {
-                                SnapSyncError::InvalidRequest(
-                                    "storage continuation exceeds the request".to_string(),
-                                )
-                            })?;
-                            origin = B256::ZERO;
-                        }
-                        None => pending = &[],
-                    }
-                    if pending.len() == previous_len && origin <= previous_origin {
-                        return Err(SnapSyncError::InvalidRequest(
-                            "storage range continuation does not advance".to_string(),
-                        ))
-                    }
+                    (pending, origin) =
+                        storage_continuation(pending, origin, verified.continuation)?;
                     excluded.clear();
                 }
             }
@@ -280,7 +277,7 @@ impl<'a, C, F> StateDownloader<'a, C, F> {
     // Preserves missing hashes across truncated responses until the batch is complete.
     async fn download_bytecodes(
         &mut self,
-        accounts: &[(B256, TrieAccount)],
+        accounts: &[AccountEntry],
     ) -> Result<Option<Vec<(B256, Bytes)>>, SnapSyncError>
     where
         C: SnapClient,
@@ -349,6 +346,63 @@ impl<'a, C, F> StateDownloader<'a, C, F> {
     }
 }
 
+/// A hashed account key with the trie value a range proof authenticated.
+type AccountEntry = (B256, TrieAccount);
+
+/// Where the next storage request resumes: the accounts still pending, and the slot to start at.
+type StorageCursor<'a> = (&'a [AccountEntry], B256);
+
+/// Resumes the next storage request, rejecting a continuation that would repeat this one.
+fn storage_continuation(
+    pending: &[AccountEntry],
+    origin: B256,
+    continuation: Option<StorageRangeContinuation>,
+) -> Result<StorageCursor<'_>, SnapSyncError> {
+    let (remaining, next_origin) = match continuation {
+        Some(StorageRangeContinuation::Partial { account_index, starting_hash, .. }) => {
+            (pending.get(account_index..), starting_hash)
+        }
+        Some(StorageRangeContinuation::NextAccount { account_index, .. }) => {
+            (pending.get(account_index..), B256::ZERO)
+        }
+        // Every requested account was served in full.
+        None => (Some(&[][..]), origin),
+    };
+    let remaining = remaining.ok_or_else(|| {
+        SnapSyncError::InvalidRequest("storage continuation exceeds the request".to_string())
+    })?;
+    // Neither consuming an account nor moving the slot cursor would reissue the same request.
+    if !remaining.is_empty() && remaining.len() == pending.len() && next_origin <= origin {
+        return Err(SnapSyncError::InvalidRequest(
+            "storage range continuation does not advance".to_string(),
+        ))
+    }
+    Ok((remaining, next_origin))
+}
+
+/// Resumes at the hash after the last committed account, unless the range exhausted the trie.
+fn account_progress(
+    accounts: &[AccountEntry],
+    complete: bool,
+) -> Result<AccountRangeProgress, SnapSyncError> {
+    if complete {
+        return Ok(AccountRangeProgress::Complete)
+    }
+    let last = accounts.last().expect("account batch is non-empty").0;
+    let next_account = next_hash(last).ok_or_else(|| {
+        SnapSyncError::InvalidRequest("account range continues past the maximum hash".to_string())
+    })?;
+    Ok(AccountRangeProgress::More { next_account })
+}
+
+/// Whether one account range finished, or ran out of peers part way through its batches.
+enum RangeStep {
+    /// Every batch of the range is durable at this generation.
+    Committed(SnapGeneration),
+    /// No eligible peer served a batch; the generation is the last one committed.
+    Unavailable(SnapGeneration),
+}
+
 /// Terminal result of one state-download attempt.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StateDownloadOutcome {
@@ -402,7 +456,7 @@ impl RangeBudget {
 /// Prioritizes follow-ups while preserving the unavailable-peer set.
 pub(crate) fn request_options(excluded: &[PeerId]) -> SnapRequestOptions {
     let priority = if excluded.is_empty() { Priority::Normal } else { Priority::High };
-    SnapRequestOptions::new(priority).with_excluded_peers(excluded.to_vec())
+    SnapRequestOptions::new(priority).with_excluded_peers(excluded.iter().copied())
 }
 
 /// Keeps exclusions stable and duplicate-free across retries.
@@ -454,7 +508,7 @@ mod tests {
         }
     }
 
-    fn root_and_proof(accounts: &[(B256, TrieAccount)], targets: &[B256]) -> (B256, Vec<Bytes>) {
+    fn root_and_proof(accounts: &[AccountEntry], targets: &[B256]) -> (B256, Vec<Bytes>) {
         let targets = targets.iter().copied().map(Nibbles::unpack).collect();
         let mut builder = HashBuilder::default().with_proof_retainer(ProofRetainer::new(targets));
         for (hash, account) in accounts {

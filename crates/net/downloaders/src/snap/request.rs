@@ -113,7 +113,7 @@ where
         }
         self.retries += 1;
         let options = SnapRequestOptions::new(Priority::High)
-            .with_excluded_peers(self.excluded_peers.clone());
+            .with_excluded_peers(self.excluded_peers.iter().copied());
         self.fut = self.request.send(&self.client, options);
         true
     }
@@ -281,7 +281,7 @@ mod tests {
             limit_hash: B256::ZERO,
             response_bytes: 0,
         };
-        let options = SnapRequestOptions::default().with_excluded_peers(vec![PeerId::random()]);
+        let options = SnapRequestOptions::default().with_excluded_peers([PeerId::random()]);
         let mut verifying = VerifyingRequest::new_with_options(
             client,
             request,

@@ -361,7 +361,7 @@ mod tests {
             },
         );
         let client = Arc::new(TestSnapClient::new([bad, good]));
-        let options = SnapRequestOptions::default().with_excluded_peers(vec![excluded]);
+        let options = SnapRequestOptions::default().with_excluded_peers([excluded]);
 
         let outcome = AccountRangeDownloader::new_with_options(
             Arc::clone(&client),

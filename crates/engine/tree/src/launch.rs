@@ -2,8 +2,10 @@
 //!
 //! Both wire the engine components into a [`ChainOrchestrator`](crate::chain::ChainOrchestrator)
 //! ready to be polled as a `Stream`. They differ only in how the node backfills:
-//! [`build_engine_orchestrator`] uses the staged [`Pipeline`],
-//! [`build_engine_orchestrator_with_backfill`] takes any [`BackfillSync`].
+//! [`build_engine_orchestrator`](crate::launch::build_engine_orchestrator) uses the staged
+//! [`Pipeline`](reth_stages_api::Pipeline), while
+//! [`build_engine_orchestrator_with_backfill`](crate::launch::build_engine_orchestrator_with_backfill)
+//! takes any [`BackfillSync`](crate::backfill::BackfillSync).
 
 use crate::{
     backfill::{BackfillSync, PipelineSync},

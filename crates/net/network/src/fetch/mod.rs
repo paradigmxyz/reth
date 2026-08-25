@@ -2194,7 +2194,7 @@ mod tests {
                 response_bytes: 0,
             }),
             response: oneshot::channel().0,
-            options: SnapRequestOptions::default().with_excluded_peers(vec![peer_id]),
+            options: SnapRequestOptions::default().with_excluded_peers([peer_id]),
         };
 
         assert!(fetcher.should_fail_fast(&request));
@@ -2225,7 +2225,7 @@ mod tests {
                 response_bytes: 0,
             }),
             response: oneshot::channel().0,
-            options: SnapRequestOptions::default().with_excluded_peers(vec![peer_id]),
+            options: SnapRequestOptions::default().with_excluded_peers([peer_id]),
         });
 
         assert!(fetcher.followup_request(peer_id).is_none());

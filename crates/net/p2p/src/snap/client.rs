@@ -31,8 +31,8 @@ impl SnapRequestOptions {
     }
 
     /// Sets peers that must not receive this request.
-    pub fn with_excluded_peers(mut self, peers: Vec<PeerId>) -> Self {
-        self.excluded_peers = peers;
+    pub fn with_excluded_peers(mut self, peers: impl IntoIterator<Item = PeerId>) -> Self {
+        self.excluded_peers = peers.into_iter().collect();
         self
     }
 }
