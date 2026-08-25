@@ -398,6 +398,21 @@ mod tests {
     }
 
     #[test]
+    fn test_contains_range_bounds() {
+        let first = Nibbles::from_nibbles([1, 2, 3]);
+        let middle = Nibbles::from_nibbles([1, 2, 4]);
+        let last = Nibbles::from_nibbles([4, 5, 6]);
+        let mut prefix_set = PrefixSetMut::from([first, middle, last]).freeze();
+
+        assert!(prefix_set.contains_range(&first..&middle));
+        assert!(!prefix_set.contains_range((Bound::Excluded(&first), Bound::Excluded(&middle))));
+        assert!(prefix_set.contains_range(&middle..));
+        assert!(prefix_set.contains_range(..=&first));
+        assert!(!prefix_set.contains_range(..&first));
+        assert!(prefix_set.contains_range((Bound::Excluded(&middle), Bound::Included(&last))));
+    }
+
+    #[test]
     fn test_from_sorted_b256_iterator() {
         let first = B256::with_last_byte(1);
         let second = B256::with_last_byte(2);
