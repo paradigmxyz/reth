@@ -4235,11 +4235,11 @@ mod tests {
                 StateWriteConfig::default(),
             )
             .unwrap();
-        for i in 0..3 {
-            provider_rw.insert_block(&data.blocks[i].0).unwrap();
+        for (block, execution_outcome) in data.blocks.iter().take(3) {
+            provider_rw.insert_block(block).unwrap();
             provider_rw
                 .write_state(
-                    &data.blocks[i].1,
+                    execution_outcome,
                     crate::OriginalValuesKnown::No,
                     StateWriteConfig::default(),
                 )
@@ -4274,11 +4274,11 @@ mod tests {
             .unwrap();
 
         // insert blocks 1-3 with receipts
-        for i in 0..3 {
-            provider_rw.insert_block(&data.blocks[i].0).unwrap();
+        for (block, execution_outcome) in data.blocks.iter().take(3) {
+            provider_rw.insert_block(block).unwrap();
             provider_rw
                 .write_state(
-                    &data.blocks[i].1,
+                    execution_outcome,
                     crate::OriginalValuesKnown::No,
                     StateWriteConfig::default(),
                 )
@@ -4310,11 +4310,11 @@ mod tests {
                 StateWriteConfig::default(),
             )
             .unwrap();
-        for i in 0..3 {
-            provider_rw.insert_block(&data.blocks[i].0).unwrap();
+        for (block, execution_outcome) in data.blocks.iter().take(3) {
+            provider_rw.insert_block(block).unwrap();
             provider_rw
                 .write_state(
-                    &data.blocks[i].1,
+                    execution_outcome,
                     crate::OriginalValuesKnown::No,
                     StateWriteConfig::default(),
                 )
@@ -4380,11 +4380,11 @@ mod tests {
                 StateWriteConfig::default(),
             )
             .unwrap();
-        for i in 0..3 {
-            provider_rw.insert_block(&data.blocks[i].0).unwrap();
+        for (block, execution_outcome) in data.blocks.iter().take(3) {
+            provider_rw.insert_block(block).unwrap();
             provider_rw
                 .write_state(
-                    &data.blocks[i].1,
+                    execution_outcome,
                     crate::OriginalValuesKnown::No,
                     StateWriteConfig::default(),
                 )
