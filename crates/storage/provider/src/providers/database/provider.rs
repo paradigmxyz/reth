@@ -4235,14 +4235,10 @@ mod tests {
                 StateWriteConfig::default(),
             )
             .unwrap();
-        for i in 0..3 {
-            provider_rw.insert_block(&data.blocks[i].0).unwrap();
+        for block in data.blocks.iter().take(3) {
+            provider_rw.insert_block(&block.0).unwrap();
             provider_rw
-                .write_state(
-                    &data.blocks[i].1,
-                    crate::OriginalValuesKnown::No,
-                    StateWriteConfig::default(),
-                )
+                .write_state(&block.1, crate::OriginalValuesKnown::No, StateWriteConfig::default())
                 .unwrap();
         }
         provider_rw.commit().unwrap();
@@ -4274,14 +4270,10 @@ mod tests {
             .unwrap();
 
         // insert blocks 1-3 with receipts
-        for i in 0..3 {
-            provider_rw.insert_block(&data.blocks[i].0).unwrap();
+        for block in data.blocks.iter().take(3) {
+            provider_rw.insert_block(&block.0).unwrap();
             provider_rw
-                .write_state(
-                    &data.blocks[i].1,
-                    crate::OriginalValuesKnown::No,
-                    StateWriteConfig::default(),
-                )
+                .write_state(&block.1, crate::OriginalValuesKnown::No, StateWriteConfig::default())
                 .unwrap();
         }
         provider_rw.commit().unwrap();
@@ -4310,14 +4302,10 @@ mod tests {
                 StateWriteConfig::default(),
             )
             .unwrap();
-        for i in 0..3 {
-            provider_rw.insert_block(&data.blocks[i].0).unwrap();
+        for block in data.blocks.iter().take(3) {
+            provider_rw.insert_block(&block.0).unwrap();
             provider_rw
-                .write_state(
-                    &data.blocks[i].1,
-                    crate::OriginalValuesKnown::No,
-                    StateWriteConfig::default(),
-                )
+                .write_state(&block.1, crate::OriginalValuesKnown::No, StateWriteConfig::default())
                 .unwrap();
         }
         provider_rw.commit().unwrap();
@@ -4380,14 +4368,10 @@ mod tests {
                 StateWriteConfig::default(),
             )
             .unwrap();
-        for i in 0..3 {
-            provider_rw.insert_block(&data.blocks[i].0).unwrap();
+        for block in data.blocks.iter().take(3) {
+            provider_rw.insert_block(&block.0).unwrap();
             provider_rw
-                .write_state(
-                    &data.blocks[i].1,
-                    crate::OriginalValuesKnown::No,
-                    StateWriteConfig::default(),
-                )
+                .write_state(&block.1, crate::OriginalValuesKnown::No, StateWriteConfig::default())
                 .unwrap();
         }
         provider_rw.commit().unwrap();
