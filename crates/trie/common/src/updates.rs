@@ -7,7 +7,7 @@ use alloc::{
     vec::Vec,
 };
 use alloy_primitives::{
-    map::{B256Map, B256Set, HashMap, HashSet},
+    map::{B256Map, HashMap, HashSet},
     FixedBytes, B256,
 };
 
@@ -141,7 +141,7 @@ impl TrieUpdates {
         &mut self,
         hash_builder: HashBuilder,
         removed_keys: HashSet<Nibbles>,
-        destroyed_accounts: B256Set,
+        destroyed_storage_trie_nodes: B256Map<Vec<Nibbles>>,
     ) {
         // Retrieve updated nodes from hash builder.
         let (_, updated_nodes) = hash_builder.split();
@@ -150,9 +150,13 @@ impl TrieUpdates {
         // Add deleted node paths.
         self.removed_nodes.extend(exclude_empty(removed_keys));
 
-        // Add deleted storage tries for destroyed accounts.
-        for destroyed in destroyed_accounts {
-            self.storage_tries.entry(destroyed).or_default().set_deleted(true);
+        // Add removed storage trie nodes for destroyed accounts.
+        for (hashed_address, removed_nodes) in destroyed_storage_trie_nodes {
+            let storage_updates = self.storage_tries.entry(hashed_address).or_default();
+            storage_updates.removed_nodes.extend(removed_nodes);
+            storage_updates
+                .storage_nodes
+                .retain(|path, _| !storage_updates.removed_nodes.contains(path));
         }
     }
 
