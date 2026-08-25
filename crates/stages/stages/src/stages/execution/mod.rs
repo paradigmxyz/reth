@@ -320,38 +320,49 @@ where
         let db = StateProviderDatabase(LatestStateProviderRef::new(provider));
         let mut executor = self.evm_config.batch_executor(db);
 
-        // BALs are keyed by block hash. Fetch and decode the complete candidate range once so
-        // the execution loop never performs per-block store I/O. The store is advisory: a lookup
-        // failure or malformed entry only disables this optimization for the affected blocks.
-        let bal_hashes =
-            provider.canonical_hashes_range(start_block, max_block.saturating_add(1))?;
-        let cached_bals: Vec<Option<DecodedBal>> = match provider.get_bals_by_hashes(&bal_hashes) {
-            Ok(bals) if bals.len() == bal_hashes.len() => bals
-                .into_iter()
-                .map(|raw| {
-                    raw.and_then(|raw| match DecodedBal::from_rlp_bytes(raw) {
-                        Ok(bal) => Some(bal),
-                        Err(err) => {
-                            self.metrics.bal_execution_invalid_total.increment(1);
-                            debug!(target: "sync::stages::execution", %err, "Ignoring undecodable cached BAL");
-                            None
-                        }
+        // BALs do not exist before Amsterdam. Checking the end of the range avoids every store
+        // lookup for pre-Amsterdam batches while still allowing a range that crosses the fork to
+        // use the BALs it contains.
+        let has_amsterdam_blocks = provider.header_by_number(max_block)?.is_some_and(|header| {
+            provider.chain_spec().is_amsterdam_active_at_timestamp(header.timestamp())
+        });
+        let cached_bals: Vec<Option<DecodedBal>> = if has_amsterdam_blocks {
+            // BALs are keyed by block hash. Fetch and decode the complete candidate range once so
+            // the execution loop never performs per-block store I/O. The store is advisory: a
+            // lookup failure or malformed entry only disables this optimization for the affected
+            // blocks.
+            let bal_hashes =
+                provider.canonical_hashes_range(start_block, max_block.saturating_add(1))?;
+            match provider.get_bals_by_hashes(&bal_hashes) {
+                Ok(bals) if bals.len() == bal_hashes.len() => bals
+                    .into_iter()
+                    .map(|raw| {
+                        raw.and_then(|raw| match DecodedBal::from_rlp_bytes(raw) {
+                            Ok(bal) => Some(bal),
+                            Err(err) => {
+                                self.metrics.bal_execution_invalid_total.increment(1);
+                                debug!(target: "sync::stages::execution", %err, "Ignoring undecodable cached BAL");
+                                None
+                            }
+                        })
                     })
-                })
-                .collect(),
-            Ok(bals) => {
-                debug!(
-                    target: "sync::stages::execution",
-                    expected = bal_hashes.len(),
-                    actual = bals.len(),
-                    "Ignoring misaligned cached BAL lookup result"
-                );
-                vec![None; bal_hashes.len()]
+                    .collect(),
+                Ok(bals) => {
+                    debug!(
+                        target: "sync::stages::execution",
+                        expected = bal_hashes.len(),
+                        actual = bals.len(),
+                        "Ignoring misaligned cached BAL lookup result"
+                    );
+                    vec![None; bal_hashes.len()]
+                }
+                Err(err) => {
+                    debug!(target: "sync::stages::execution", %err, "Cached BAL lookup failed");
+                    vec![None; bal_hashes.len()]
+                }
             }
-            Err(err) => {
-                debug!(target: "sync::stages::execution", %err, "Cached BAL lookup failed");
-                vec![None; bal_hashes.len()]
-            }
+        } else {
+            Vec::new()
         };
 
         // Progress tracking
