@@ -507,6 +507,18 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             }
 
             let chain_id = self.chain_id();
+            // A caller that pins `chainId` is asserting which chain it means to sign for.
+            // Silently rewriting it would sign and submit on a different chain than asked
+            // for, so reject the mismatch instead. Matches geth's `setDefaults`.
+            if let Some(request_chain_id) = request.as_ref().chain_id() &&
+                request_chain_id != chain_id.to::<u64>()
+            {
+                return Err(EthApiError::InvalidParams(format!(
+                    "chainId does not match node's (have={request_chain_id}, want={})",
+                    chain_id.to::<u64>()
+                ))
+                .into())
+            }
             request.as_mut().set_chain_id(chain_id.to());
 
             if request.as_ref().gas_limit().is_none() {
@@ -556,6 +568,18 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             }
 
             let chain_id = self.chain_id();
+            // A caller that pins `chainId` is asserting which chain it means to sign for.
+            // Silently rewriting it would sign and submit on a different chain than asked
+            // for, so reject the mismatch instead. Matches geth's `setDefaults`.
+            if let Some(request_chain_id) = request.as_ref().chain_id() &&
+                request_chain_id != chain_id.to::<u64>()
+            {
+                return Err(EthApiError::InvalidParams(format!(
+                    "chainId does not match node's (have={request_chain_id}, want={})",
+                    chain_id.to::<u64>()
+                ))
+                .into())
+            }
             request.as_mut().set_chain_id(chain_id.to());
 
             if request.as_ref().has_eip4844_fields() &&

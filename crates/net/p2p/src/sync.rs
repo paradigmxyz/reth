@@ -1,6 +1,6 @@
 //! Traits used when interacting with the sync status of the network.
 
-use alloy_eips::eip2124::Head;
+use alloy_eips::eip2124::{ForkFilter, Head};
 use reth_eth_wire_types::BlockRangeUpdate;
 
 /// A type that provides information about whether the node is currently syncing and the network is
@@ -31,6 +31,17 @@ pub trait NetworkSyncUpdater: std::fmt::Debug + Send + Sync + 'static {
 
     /// Updates the advertised block range.
     fn update_block_range(&self, update: BlockRangeUpdate);
+
+    /// Replaces the node's active [`ForkFilter`] to adopt a fork schedule that changed at runtime
+    /// (e.g. an L1-signalled upgrade) without a restart.
+    ///
+    /// The caller must build `fork_filter` from the updated chain spec advanced to the node's
+    /// current head, and should do so before the fork's activation timestamp so the node
+    /// announces the upcoming fork ahead of time. Defaults to a no-op for updaters that do not
+    /// track a fork filter.
+    fn set_fork_filter(&self, fork_filter: ForkFilter) {
+        let _ = fork_filter;
+    }
 }
 
 /// The state the network is currently in when it comes to synchronization.
