@@ -50,5 +50,4 @@ reth-trie = { workspace = true, features = ["test-utils"] }
 alloy-consensus.workspace = true
 
 [features]
-partial-persistence = ["reth-stages-types/partial-persistence"]
 rayon = ["dep:rayon", "dep:reth-tasks"]
