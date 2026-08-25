@@ -294,6 +294,7 @@ mod tests {
             base_url: None,
             reth_version: None,
             components: BTreeMap::new(),
+            extensions: Default::default(),
         }
     }
 

@@ -199,7 +199,6 @@ min-trace-logs = [
     "reth-node-core/min-trace-logs",
 ]
 
-partial-persistence = ["reth-node-core/partial-persistence"]
 trie-debug = ["reth-node-builder/trie-debug", "reth-node-core/trie-debug"]
 
 [[bin]]
