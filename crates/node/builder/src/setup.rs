@@ -63,7 +63,7 @@ where
         .into_task_with(task_executor);
     let bal_prefetcher = HistoricalBalPrefetcher::spawn(
         config.block_access_lists,
-        client.clone(),
+        client,
         provider_factory.bal_store().clone(),
         task_executor,
     );
