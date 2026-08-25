@@ -353,7 +353,7 @@ where
         let root = hash_builder.root();
 
         let mut destroyed_storage_trie_nodes = B256Map::default();
-        if !self.prefix_sets.destroyed_accounts.is_empty() {
+        if retain_updates && !self.prefix_sets.destroyed_accounts.is_empty() {
             let mut storage_trie_cursor = match storage_trie_cursor {
                 Some(cursor) => cursor,
                 None => self.trie_cursor_factory.storage_trie_cursor(B256::ZERO)?,
