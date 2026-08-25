@@ -26,7 +26,6 @@ const MAX_RETRIES: u8 = 2;
 ///
 /// Invalid responses penalize their peer and retry at high priority. Proof verification runs on
 /// the blocking pool.
-#[derive(Debug)]
 pub struct AccountRangeDownloader<C: SnapClient> {
     client: C,
     runtime: Runtime,
@@ -34,6 +33,17 @@ pub struct AccountRangeDownloader<C: SnapClient> {
     fut: C::Output,
     verification: Option<VerificationTask>,
     retries: u8,
+}
+
+impl<C: SnapClient> std::fmt::Debug for AccountRangeDownloader<C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AccountRangeDownloader")
+            .field("client", &self.client)
+            .field("request", &self.request)
+            .field("verification", &self.verification)
+            .field("retries", &self.retries)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<C: SnapClient> AccountRangeDownloader<C> {
@@ -78,6 +88,7 @@ impl<C: SnapClient> AccountRangeDownloader<C> {
                 Ok(Some(AccountRangeOutcome::Verified(VerifiedAccountRange {
                     accounts: Vec::new(),
                     has_more: false,
+                    next: None,
                 })))
             } else {
                 Ok(Some(AccountRangeOutcome::Unavailable { peer_id }))
@@ -164,7 +175,7 @@ impl<C: SnapClient> AccountRangeDownloader<C> {
 
 impl<C> Future for AccountRangeDownloader<C>
 where
-    C: SnapClient + Unpin + 'static,
+    C: SnapClient + Unpin,
 {
     type Output = Result<AccountRangeOutcome, RequestError>;
 
@@ -217,8 +228,15 @@ struct VerificationTask {
 pub struct VerifiedAccountRange {
     /// Accounts in strictly increasing hashed-key order.
     pub accounts: Vec<(B256, TrieAccount)>,
-    /// Whether another request is needed to complete the requested interval.
+    /// Whether another request may be needed to complete the requested interval.
+    ///
+    /// Conservative: [`Self::next`] is only a lower bound when the trie continues inside a
+    /// subtree the proof left unexpanded, so this can be `true` for an interval that is already
+    /// complete.
     pub has_more: bool,
+    /// Authenticated lower bound for the first key after the response, or `None` when the range
+    /// exhausted the trie.
+    pub next: Option<B256>,
 }
 
 // Authenticate the full response before trimming its optional boundary account.
@@ -249,7 +267,7 @@ fn verify_account_range(
     accounts.truncate(accounts.partition_point(|(hash, _)| *hash <= request.limit_hash));
     let has_more = next.is_some_and(|next| next <= request.limit_hash);
 
-    Ok(VerifiedAccountRange { accounts, has_more })
+    Ok(VerifiedAccountRange { accounts, has_more, next })
 }
 
 // Re-encode decoded accounts so the proof authenticates their canonical trie values.
@@ -259,18 +277,21 @@ fn verify_proof(
     proof: &[alloy_primitives::Bytes],
 ) -> Result<Option<B256>, RequestError> {
     let leaves = accounts.iter().map(|(hash, account)| (*hash, alloy_rlp::encode(account)));
-    verify_range_proof(request.root_hash, request.starting_hash, leaves, proof).map_err(|error| {
-        debug!(target: "downloaders::snap", %error, "Invalid account range proof");
-        RequestError::BadResponse
-    })
+    verify_range_proof(request.root_hash, request.starting_hash, request.limit_hash, leaves, proof)
+        .map_err(|error| {
+            debug!(target: "downloaders::snap", %error, "Invalid account range proof");
+            RequestError::BadResponse
+        })
 }
 
 /// An account-range request whose origin exceeds its limit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("account range origin {origin} exceeds limit {limit}")]
 pub struct InvalidAccountRange {
-    origin: B256,
-    limit: B256,
+    /// Inclusive origin the range was requested from.
+    pub origin: B256,
+    /// Inclusive limit the range was requested to.
+    pub limit: B256,
 }
 
 #[cfg(test)]
@@ -446,7 +467,11 @@ mod tests {
 
         assert_eq!(
             outcome,
-            AccountRangeOutcome::Verified(VerifiedAccountRange { accounts, has_more: false })
+            AccountRangeOutcome::Verified(VerifiedAccountRange {
+                accounts,
+                has_more: false,
+                next: None,
+            })
         );
         assert!(client.reported.lock().unwrap().is_empty());
         assert_eq!(*client.priorities.lock().unwrap(), [Priority::Normal]);
@@ -533,6 +558,7 @@ mod tests {
             AccountRangeOutcome::Verified(VerifiedAccountRange {
                 accounts: vec![accounts[0]],
                 has_more: false,
+                next: Some(key(4)),
             })
         );
         assert!(client.reported.lock().unwrap().is_empty());
@@ -588,6 +614,7 @@ mod tests {
             AccountRangeOutcome::Verified(VerifiedAccountRange {
                 accounts: accounts[..2].to_vec(),
                 has_more: false,
+                next: Some(key(3)),
             })
         );
         assert!(client.reported.lock().unwrap().is_empty());
@@ -616,6 +643,31 @@ mod tests {
             AccountRangeOutcome::Verified(VerifiedAccountRange {
                 accounts: Vec::new(),
                 has_more: false,
+                next: None,
+            })
+        );
+        assert!(client.reported.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn empty_interval_is_proven_without_a_boundary_account() {
+        let accounts = vec![(key(1), account(7)), (key(9), account(8))];
+        let (root_hash, proof) = root_and_proof(&accounts, &[key(3), key(5)]);
+        let peer = PeerId::random();
+        let message = AccountRangeMessage { request_id: 1, accounts: Vec::new(), proof };
+        let client = Arc::new(TestSnapClient::new([response(peer, message)]));
+        let mut request = request(root_hash);
+        request.starting_hash = key(3);
+        request.limit_hash = key(5);
+
+        let outcome = downloader(Arc::clone(&client), request).unwrap().await.unwrap();
+
+        assert_eq!(
+            outcome,
+            AccountRangeOutcome::Verified(VerifiedAccountRange {
+                accounts: Vec::new(),
+                has_more: false,
+                next: Some(key(9)),
             })
         );
         assert!(client.reported.lock().unwrap().is_empty());
@@ -643,6 +695,7 @@ mod tests {
             AccountRangeOutcome::Verified(VerifiedAccountRange {
                 accounts: vec![accounts[0]],
                 has_more: false,
+                next: Some(key(9)),
             })
         );
     }
@@ -668,6 +721,7 @@ mod tests {
             AccountRangeOutcome::Verified(VerifiedAccountRange {
                 accounts: vec![accounts[0]],
                 has_more: true,
+                next: Some(key(3)),
             })
         );
     }
