@@ -6,7 +6,6 @@ use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip4895::Withdrawals,
     eip7685::RequestsOrHash,
-    Encodable2718,
 };
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealable, B128, B256, U64};
 use alloy_rpc_types_engine::{
@@ -31,7 +30,7 @@ use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
 use reth_storage_api::{BalProvider, BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::Runtime;
-use reth_transaction_pool::{BestTransactions, PoolTransaction, TransactionPool};
+use reth_transaction_pool::{BestTransactions, TransactionPool};
 use std::{
     sync::Arc,
     time::{Instant, SystemTime},
@@ -485,7 +484,7 @@ where
         let mut inclusion_list = Vec::new();
 
         for pool_tx in self.inner.tx_pool.best_transactions().without_blobs().without_updates() {
-            let encoded: Bytes = pool_tx.transaction.consensus_ref().encoded_2718().into();
+            let encoded = pool_tx.encoded_2718_consensus();
             let new_size = total_size + alloy_rlp::Encodable::length(&encoded);
             if new_size + alloy_rlp::length_of_length(new_size) >
                 MAX_BYTES_PER_INCLUSION_LIST as usize
@@ -1164,7 +1163,7 @@ where
         let indices_bitarray = B128::from(u128::from_le_bytes(indices_bitarray.into()));
         let current_timestamp =
             SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_secs();
-        if !self.inner.chain_spec.is_amsterdam_active_at_timestamp(current_timestamp) {
+        if !self.inner.chain_spec.is_osaka_active_at_timestamp(current_timestamp) {
             return Err(EngineApiError::EngineObjectValidationError(
                 reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
             ));
@@ -1765,7 +1764,7 @@ struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSp
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::{eip7685::Requests, NumHash};
+    use alloy_eips::{eip7685::Requests, Encodable2718, NumHash};
     use alloy_primitives::{Address, Bytes, B256};
     use alloy_rpc_types_engine::{
         ClientCode, ClientVersionV1, ExecutionPayloadV2, PayloadAttributes, PayloadStatusEnum,
@@ -1902,7 +1901,7 @@ mod tests {
         let third = pooled_transaction(
             TransactionBuilder::default().max_fee_per_gas(1_000_000_000u128).into_legacy(),
         );
-        let expected: Bytes = first.consensus_ref().encoded_2718().into();
+        let expected = first.encoded_2718_consensus();
 
         pool.add_transaction(TransactionOrigin::External, first).await.unwrap();
         pool.add_transaction(TransactionOrigin::External, second).await.unwrap();
@@ -1931,7 +1930,7 @@ mod tests {
                 .max_priority_fee_per_gas(1_000_000_000u128)
                 .into_eip1559(),
         );
-        let expected: Bytes = non_blob.consensus_ref().encoded_2718().into();
+        let expected = non_blob.encoded_2718_consensus();
 
         pool.add_transaction(TransactionOrigin::External, blob).await.unwrap();
         pool.add_transaction(TransactionOrigin::External, non_blob).await.unwrap();
@@ -2224,7 +2223,7 @@ mod tests {
     #[tokio::test]
     async fn get_blobs_v4_returns_null_when_syncing() {
         let chain_spec: Arc<ChainSpec> =
-            Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build());
+            Arc::new(ChainSpecBuilder::mainnet().osaka_activated().build());
         let provider = Arc::new(MockEthProvider::default());
         let payload_store = spawn_test_payload_service::<EthEngineTypes>();
         let (to_engine, _engine_rx) = unbounded_channel::<BeaconEngineMessage<EthEngineTypes>>();

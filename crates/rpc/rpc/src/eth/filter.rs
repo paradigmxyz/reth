@@ -658,12 +658,20 @@ where
             return Err(EthFilterError::QueryExceedsMaxBlocks(max_blocks_per_filter))
         }
 
-        let (tx, rx) = oneshot::channel();
+        let (mut tx, rx) = oneshot::channel();
         let this = self.clone();
         self.task_spawner.spawn_blocking_task(async move {
-            let res =
-                this.get_logs_in_block_range_inner(&filter, from_block, to_block, limits).await;
-            let _ = tx.send(res);
+            let fut = this.get_logs_in_block_range_inner(&filter, from_block, to_block, limits);
+            tokio::pin!(fut);
+            let res = tokio::select! {
+                // Range scans perform blocking reads before their first yield.
+                biased;
+                _ = tx.closed() => None,
+                res = &mut fut => Some(res),
+            };
+            if let Some(res) = res {
+                let _ = tx.send(res);
+            }
         });
 
         rx.await.map_err(|_| EthFilterError::InternalError)?
