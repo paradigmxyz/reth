@@ -660,6 +660,16 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let rocksdb_ctx = first_number.map(|first_number| self.rocksdb_write_ctx(first_number));
         let rocksdb_enabled =
             rocksdb_ctx.as_ref().is_some_and(|ctx| ctx.storage_settings.storage_v2);
+        let state_reverts = (sf_ctx
+            .as_ref()
+            .is_some_and(|ctx| ctx.write_account_changesets || ctx.write_storage_changesets) ||
+            rocksdb_enabled)
+            .then(|| {
+                blocks
+                    .iter()
+                    .map(|block| block.execution_outcome().state.reverts.to_plain_state_reverts())
+                    .collect::<Vec<_>>()
+            });
 
         let mut sf_result = None;
         let mut rocksdb_result = None;
@@ -679,7 +689,13 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                         sf_ctx.expect("static file context exists when blocks are persisted");
                     sf_result = Some(
                         sf_provider
-                            .write_blocks_data(blocks, &tx_nums, sf_ctx, runtime)
+                            .write_blocks_data(
+                                blocks,
+                                &tx_nums,
+                                sf_ctx,
+                                state_reverts.as_deref(),
+                                runtime,
+                            )
                             .map(|()| start.elapsed()),
                     );
                 });
@@ -694,7 +710,15 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                         rocksdb_ctx.clone().expect("RocksDB context exists when enabled");
                     rocksdb_result = Some(
                         rocksdb_provider
-                            .write_blocks_data(blocks, &tx_nums, rocksdb_ctx, runtime)
+                            .write_blocks_data(
+                                blocks,
+                                &tx_nums,
+                                rocksdb_ctx,
+                                state_reverts
+                                    .as_deref()
+                                    .expect("state reverts are required for RocksDB history"),
+                                runtime,
+                            )
                             .map(|()| start.elapsed()),
                     );
                 });
