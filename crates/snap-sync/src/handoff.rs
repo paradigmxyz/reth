@@ -1,25 +1,22 @@
 //! Publishes a completed generation as the staged pipeline's starting point.
 //!
 //! Bodies, receipts, senders, change sets and history indexes below the pivot were never
-//! downloaded, so they are declared pruned rather than synced. Reth already represents history
-//! that is not available locally: `earliest_history_height` follows the lowest static file block,
-//! stages consult prune checkpoints before assuming a range exists, and the engine publishes the
-//! served range to peers. Claiming the range was synced instead would fail the static file
+//! downloaded, so they are declared pruned rather than synced. History that is not available
+//! locally is already representable: `earliest_history_height` follows the lowest static file
+//! block, stages consult prune checkpoints before assuming a range exists, and the engine publishes
+//! the served range to peers. Claiming the range was synced instead would fail the static file
 //! consistency check, or answer historical queries from data that is not there.
 
 use crate::{error::db_error, SnapStateStore, SnapSyncError};
 use reth_provider::DatabaseProviderFactory;
 use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::{
-    DBProvider, PruneCheckpointWriter, StageCheckpointReader, StageCheckpointWriter,
-};
+use reth_storage_api::{PruneCheckpointWriter, StageCheckpointReader, StageCheckpointWriter};
 use tracing::info;
 
-// Stages a snap sync satisfies without running them, beyond the ones every externally supplied
-// state covers. Bodies and its dependants are included because nothing below the pivot was
-// downloaded, and `Finish` because the pipeline reports overall progress from it. Headers stay
-// out: they were really downloaded, and the pipeline owns that checkpoint.
+// Stages a snap sync satisfies beyond those any externally supplied state covers: nothing below
+// the pivot was downloaded, and the pipeline reports overall progress from `Finish`. Headers stay
+// out, since they really were downloaded and the pipeline owns that checkpoint.
 const EXTRA_STATE_STAGES: [StageId; 4] =
     [StageId::Bodies, StageId::SenderRecovery, StageId::TransactionLookup, StageId::Finish];
 
@@ -36,8 +33,6 @@ const PRUNED_SEGMENTS: [PruneSegment; 6] = [
 /// Hands a finished generation to the staged pipeline.
 #[derive(Debug)]
 pub struct SnapPipelineHandoff<'a, F> {
-    // Checkpoint reads and writes observe the same provider factory.
-    factory: &'a F,
     // The completed generation is read back through the store that wrote it.
     store: SnapStateStore<'a, F>,
 }
@@ -45,68 +40,57 @@ pub struct SnapPipelineHandoff<'a, F> {
 impl<'a, F> SnapPipelineHandoff<'a, F> {
     /// Creates a handoff without opening a database transaction.
     pub const fn new(factory: &'a F) -> Self {
-        Self { factory, store: SnapStateStore::new(factory) }
-    }
-
-    /// Publishes the state at `block_number` as the frontier every state stage starts from.
-    ///
-    /// The pipeline resumes at `block_number + 1`, and everything below it is recorded as pruned
-    /// so no stage looks for rows that were never downloaded.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SnapSyncError::IncompleteState`] unless a generation was accepted at exactly
-    /// `block_number`, since an unfinished generation's state is not a valid frontier.
-    pub fn commit(&self, block_number: u64) -> Result<(), SnapSyncError>
-    where
-        F: DatabaseProviderFactory,
-        F::ProviderRW:
-            DBProvider + PruneCheckpointWriter + StageCheckpointReader + StageCheckpointWriter,
-    {
-        let provider = self.factory.database_provider_rw().map_err(db_error)?;
-        let completed = SnapStateStore::<F>::completed_block_in(&provider)?;
-        if completed != Some(block_number) {
-            return Err(SnapSyncError::IncompleteState { expected: block_number, actual: completed })
-        }
-
-        let checkpoint = StageCheckpoint::new(block_number);
-        for stage in StageId::STATE_REQUIRED.into_iter().chain(EXTRA_STATE_STAGES) {
-            provider.save_stage_checkpoint(stage, checkpoint).map_err(db_error)?;
-        }
-
-        // `before_inclusive` keeps the pivot itself, whose state the node does have.
-        let pruned = PruneCheckpoint {
-            block_number: Some(block_number),
-            tx_number: None,
-            prune_mode: PruneMode::before_inclusive(block_number),
-        };
-        for segment in PRUNED_SEGMENTS {
-            provider.save_prune_checkpoint(segment, pruned).map_err(db_error)?;
-        }
-        provider.commit().map_err(db_error)?;
-
-        info!(
-            target: "snap::handoff",
-            block_number,
-            "Snap state published; history below it is unavailable"
-        );
-        Ok(())
+        Self { store: SnapStateStore::new(factory) }
     }
 
     /// Returns the block the pipeline was handed, if this node was snap synced.
     ///
     /// Nothing below it can be re-executed: the change sets a rewind replays were never
-    /// downloaded, so a pipeline unwind must treat this block as its floor and require a fresh
-    /// snap sync rather than walking towards genesis. Geth takes the same position on its own
-    /// pivot: *"If pivot block is reached, return the genesis block as the new chain head.
-    /// Theoretically there must be a persistent state before or at the pivot block, prevent
-    /// endless rewinding towards the genesis just in case."*
+    /// downloaded, so an unwind must treat it as a floor and require a fresh snap sync.
+    ///
+    /// `geth` stops at its own pivot for the same reason, returning genesis as the new head
+    /// rather than rewinding towards it when no persistent state exists below.
     pub fn published_block(&self) -> Result<Option<u64>, SnapSyncError>
     where
         F: DatabaseProviderFactory<Provider: StageCheckpointReader>,
     {
         self.store.completed_block()
     }
+}
+
+/// Publishes the state at `block_number` as the frontier every state stage starts from.
+///
+/// The pipeline resumes at `block_number + 1`, and everything below it is recorded as pruned so no
+/// stage looks for rows that were never downloaded. The prune checkpoints double as the unwind
+/// floor: `PruneModes::ensure_unwind_target_unpruned` refuses to rewind past them.
+///
+/// Writes through `provider` without committing, so the caller can make publication atomic with
+/// whatever else accepts the state.
+pub(crate) fn publish_state_snapshot(
+    provider: &(impl PruneCheckpointWriter + StageCheckpointWriter),
+    block_number: u64,
+) -> Result<(), SnapSyncError> {
+    let checkpoint = StageCheckpoint::new(block_number);
+    for stage in StageId::STATE_REQUIRED.into_iter().chain(EXTRA_STATE_STAGES) {
+        provider.save_stage_checkpoint(stage, checkpoint).map_err(db_error)?;
+    }
+
+    // `before_inclusive` keeps the pivot itself, whose state the node does have.
+    let pruned = PruneCheckpoint {
+        block_number: Some(block_number),
+        tx_number: None,
+        prune_mode: PruneMode::before_inclusive(block_number),
+    };
+    for segment in PRUNED_SEGMENTS {
+        provider.save_prune_checkpoint(segment, pruned).map_err(db_error)?;
+    }
+
+    info!(
+        target: "snap::handoff",
+        block_number,
+        "Snap state published; history below it is unavailable"
+    );
+    Ok(())
 }
 
 #[cfg(test)]
@@ -168,12 +152,12 @@ mod tests {
         (factory, generation.target_block)
     }
 
+    // Publication rides the generation's own commit, so a finished snap sync has already
+    // published its frontier.
     #[test]
     fn published_state_moves_every_state_stage_to_the_pivot() {
         let (factory, pivot) = snap_synced_factory();
         let handoff = SnapPipelineHandoff::new(&factory);
-
-        handoff.commit(pivot).unwrap();
 
         let provider = factory.database_provider_ro().unwrap();
         for stage in StageId::STATE_REQUIRED.into_iter().chain(EXTRA_STATE_STAGES) {
@@ -192,8 +176,6 @@ mod tests {
     fn skipped_history_is_recorded_as_pruned() {
         let (factory, pivot) = snap_synced_factory();
 
-        SnapPipelineHandoff::new(&factory).commit(pivot).unwrap();
-
         let provider = factory.database_provider_ro().unwrap();
         for segment in PRUNED_SEGMENTS {
             let checkpoint = provider.get_prune_checkpoint(segment).unwrap().unwrap();
@@ -209,10 +191,12 @@ mod tests {
         let generation = SnapGeneration::new(7, B256::repeat_byte(1), B256::repeat_byte(2));
         SnapStateStore::new(&factory).begin_generation(generation).unwrap();
 
-        let error = SnapPipelineHandoff::new(&factory).commit(7).unwrap_err();
+        // Still downloading accounts, so the trie phase, and with it publication, is refused.
+        let error = TrieGenerator::new(&factory).run(generation).unwrap_err();
 
-        assert!(matches!(error, SnapSyncError::IncompleteState { expected: 7, actual: None }));
+        assert!(matches!(error, SnapSyncError::UnexpectedPhase { .. }));
         let provider = factory.database_provider_ro().unwrap();
         assert_eq!(provider.get_stage_checkpoint(StageId::Execution).unwrap(), None);
+        assert_eq!(SnapPipelineHandoff::new(&factory).published_block().unwrap(), None);
     }
 }

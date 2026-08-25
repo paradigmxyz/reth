@@ -3,7 +3,7 @@
 //! A generation marker remains present until the downloaded state and rebuilt trie are accepted,
 //! preventing partial hashed tables from being mistaken for canonical state.
 
-use crate::{error::db_error, SnapSyncError};
+use crate::{error::db_error, handoff::publish_state_snapshot, SnapSyncError};
 use alloy_eip7928::bal::DecodedBal;
 use alloy_primitives::{keccak256, Bytes, B256};
 use alloy_rlp::{Decodable, Encodable};
@@ -12,8 +12,8 @@ use reth_primitives_traits::AlloyBlockHeader;
 use reth_provider::DatabaseProviderFactory;
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    AccountExtReader, DBProvider, HeaderProvider, StageCheckpointReader, StageCheckpointWriter,
-    StateWriter, StorageSettingsCache,
+    AccountExtReader, DBProvider, HeaderProvider, PruneCheckpointWriter, StageCheckpointReader,
+    StageCheckpointWriter, StateWriter, StorageSettingsCache,
 };
 use reth_trie_common::{
     bal::{deployed_bytecode, hashed_storage_changes, BalAccountState},
@@ -184,12 +184,15 @@ impl<'a, F> SnapStateStore<'a, F> {
         Ok(next_generation)
     }
 
-    // Clears the restart marker only after the canonical root and Merkle checkpoint agree.
+    // Clears the restart marker only after the canonical root and Merkle checkpoint agree, and
+    // publishes the frontier in the same transaction so a crash can never leave an accepted state
+    // that the pipeline would resume from genesis.
     pub(crate) fn finish_generation(&self, generation: SnapGeneration) -> Result<(), SnapSyncError>
     where
         F: DatabaseProviderFactory,
         F::ProviderRW: DBProvider
             + HeaderProvider
+            + PruneCheckpointWriter
             + StageCheckpointReader
             + StageCheckpointWriter
             + StorageSettingsCache,
@@ -227,6 +230,7 @@ impl<'a, F> SnapStateStore<'a, F> {
             .save_stage_checkpoint(SNAP_SYNC_STAGE, StageCheckpoint::new(generation.target_block))
             .map_err(db_error)?;
         provider.save_stage_checkpoint_progress(SNAP_SYNC_STAGE, Vec::new()).map_err(db_error)?;
+        publish_state_snapshot(&provider, generation.target_block)?;
         provider.commit().map_err(db_error)
     }
 

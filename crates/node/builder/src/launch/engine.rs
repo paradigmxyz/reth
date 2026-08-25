@@ -16,7 +16,7 @@ use reth_db::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_tree::{
     chain::{ChainEvent, FromOrchestrator},
     engine::{EngineApiKind, EngineApiRequest, EngineRequestHandler},
-    launch::build_engine_orchestrator,
+    launch::{build_engine_orchestrator, EngineOrchestratorConfig},
     tree::TreeConfig,
 };
 use reth_engine_util::EngineMessageStreamExt;
@@ -245,21 +245,23 @@ impl EngineNodeLauncher {
         };
 
         let mut orchestrator = build_engine_orchestrator(
-            engine_kind,
-            consensus.clone(),
-            network_client.clone(),
-            Box::pin(consensus_engine_stream),
+            EngineOrchestratorConfig {
+                engine_kind,
+                consensus: consensus.clone(),
+                client: network_client.clone(),
+                incoming_requests: Box::pin(consensus_engine_stream),
+                provider: ctx.provider_factory().clone(),
+                blockchain_db: ctx.blockchain_db().clone(),
+                pruner,
+                payload_builder: ctx.components().payload_builder_handle().clone(),
+                payload_validator: engine_validator,
+                overlay_manager,
+                tree_config: engine_tree_config,
+                sync_metrics_tx: ctx.sync_metrics_tx(),
+                evm_config: ctx.components().evm_config().clone(),
+                runtime: ctx.task_executor().clone(),
+            },
             pipeline,
-            ctx.task_executor().clone(),
-            ctx.provider_factory().clone(),
-            ctx.blockchain_db().clone(),
-            pruner,
-            ctx.components().payload_builder_handle().clone(),
-            engine_validator,
-            overlay_manager,
-            engine_tree_config,
-            ctx.sync_metrics_tx(),
-            ctx.components().evm_config().clone(),
             ctx.task_executor().clone(),
         );
 

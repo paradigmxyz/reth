@@ -6,7 +6,7 @@
 
 use crate::{
     error::db_error, BlockAccessListCatchUp, BlockAccessListCatchUpOutcome, RangeBudget,
-    SnapGeneration, SnapPhase, SnapPipelineHandoff, SnapPivotPolicy, SnapStateStore, SnapSyncError,
+    SnapGeneration, SnapPhase, SnapPivotPolicy, SnapStateStore, SnapSyncError,
     StateDownloadOutcome, StateDownloader, TrieGenerator,
 };
 use core::future::Future;
@@ -256,9 +256,6 @@ impl<'a, C, F, X> SnapSyncSession<'a, C, F, X> {
                         "Rebuilding snap state trie"
                     );
                     self.rebuild_trie(generation).await?;
-                    // Without this the pipeline would resume from genesis and look for bodies
-                    // and change sets below the pivot that were never downloaded.
-                    SnapPipelineHandoff::new(self.factory).commit(generation.target_block)?;
                     return Ok(SessionStep::Complete(generation))
                 }
             }
@@ -395,7 +392,7 @@ const fn is_reorg(error: &SnapSyncError) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{store::SNAP_SYNC_STAGE, AccountRangeProgress};
+    use crate::{store::SNAP_SYNC_STAGE, AccountRangeProgress, SnapPipelineHandoff};
     use alloy_consensus::Header;
     use alloy_primitives::{B256, KECCAK256_EMPTY, U256};
     use reth_db_api::{tables, transaction::DbTx};

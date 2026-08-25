@@ -1,4 +1,4 @@
-//! Coordinates EIP-8189 state bootstrap without changing Reth's default sync path.
+//! Coordinates EIP-8189 state bootstrap without changing the default sync path.
 //!
 //! Verified ranges are persisted as resumable v2 hashed-state generations before BAL catch-up and
 //! final trie validation.

@@ -1,4 +1,4 @@
-//! Rebuilds the downloaded state's trie with Reth's existing Merkle stage.
+//! Rebuilds the downloaded state's trie with the existing Merkle stage.
 //!
 //! Stage and Snap checkpoints remain durable independently, while the generation marker is only
 //! cleared after the canonical header root and completed Merkle checkpoint agree.
@@ -9,8 +9,8 @@ use reth_provider::DatabaseProviderFactory;
 use reth_stages::{stages::MerkleStage, ExecInput, Stage};
 use reth_stages_types::StageId;
 use reth_storage_api::{
-    ChangeSetReader, DBProvider, HeaderProvider, StageCheckpointReader, StageCheckpointWriter,
-    StatsReader, StorageChangeSetReader, StorageSettingsCache, TrieWriter,
+    ChangeSetReader, DBProvider, HeaderProvider, PruneCheckpointWriter, StageCheckpointReader,
+    StageCheckpointWriter, StatsReader, StorageChangeSetReader, StorageSettingsCache, TrieWriter,
 };
 
 /// Drives a clean, resumable Merkle rebuild for one downloaded generation.
@@ -28,13 +28,14 @@ impl<'a, F> TrieGenerator<'a, F> {
         Self { factory, store: SnapStateStore::new(factory) }
     }
 
-    /// Resumes Reth's Merkle stage and accepts the generation after root validation.
+    /// Resumes the Merkle stage and accepts the generation after root validation.
     pub fn run(&self, generation: SnapGeneration) -> Result<(), SnapSyncError>
     where
         F: DatabaseProviderFactory,
         F::ProviderRW: DBProvider<Tx: DbTxMut>
             + ChangeSetReader
             + HeaderProvider
+            + PruneCheckpointWriter
             + StageCheckpointReader
             + StageCheckpointWriter
             + StatsReader

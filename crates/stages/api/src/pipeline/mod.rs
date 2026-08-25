@@ -221,6 +221,47 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
     /// the pipeline (for example the `Finish` stage). Or [`ControlFlow::Unwind`] of the stage
     /// that caused the unwind.
     pub async fn run_loop(&mut self) -> Result<ControlFlow, PipelineError> {
+        self.run_loop_until(None).await
+    }
+
+    /// Runs the pipeline through `last_stage` and stops, leaving later stages untouched.
+    ///
+    /// Lets a hybrid backfill take only the prefix it needs when something else supplies the
+    /// state the remaining stages would have produced.
+    ///
+    /// # Errors
+    ///
+    /// [`PipelineError::MissingStage`] if `last_stage` is not in this pipeline.
+    pub async fn run_until(
+        &mut self,
+        last_stage: StageId,
+        target: Option<PipelineTarget>,
+    ) -> Result<ControlFlow, PipelineError> {
+        let _ = self.register_metrics();
+        if !self.stages.iter().any(|stage| stage.id() == last_stage) {
+            return Err(PipelineError::MissingStage(last_stage))
+        }
+
+        match target {
+            Some(PipelineTarget::Sync(tip)) => self.set_tip(tip),
+            // An unwind rewinds every stage, so stopping part way through has no meaning.
+            Some(PipelineTarget::Unwind(target)) => {
+                self.move_to_static_files()?;
+                self.unwind(target, None)?;
+                self.progress.update(target);
+                return Ok(ControlFlow::Continue { block_number: target })
+            }
+            None => {}
+        }
+
+        self.run_loop_until(Some(last_stage)).await
+    }
+
+    // Shared stage loop. `last_stage` stops the pass once that stage has been executed.
+    async fn run_loop_until(
+        &mut self,
+        last_stage: Option<StageId>,
+    ) -> Result<ControlFlow, PipelineError> {
         self.move_to_static_files()?;
 
         let mut previous_stage = None;
@@ -253,6 +294,10 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                     .unwrap_or_default()
                     .block_number,
             );
+
+            if last_stage == Some(stage_id) {
+                break
+            }
         }
 
         Ok(self.progress.next_ctrl())
@@ -699,6 +744,51 @@ mod tests {
 
         progress.update(1);
         assert_eq!(progress.next_ctrl(), ControlFlow::Continue { block_number: 1 });
+    }
+
+    /// Runs only the requested prefix of the pipeline.
+    #[tokio::test]
+    async fn run_until_stops_after_the_named_stage() {
+        let provider_factory = create_test_provider_factory();
+
+        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+            .add_stage(
+                TestStage::new(StageId::Other("A"))
+                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
+            )
+            // No execution is queued for B, so running it would panic on the empty script.
+            .add_stage(TestStage::new(StageId::Other("B")))
+            .with_max_block(10)
+            .build(
+                provider_factory.clone(),
+                StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
+            );
+
+        pipeline.run_until(StageId::Other("A"), None).await.unwrap();
+
+        let provider = provider_factory.provider().unwrap();
+        assert_eq!(
+            provider.get_stage_checkpoint(StageId::Other("A")).unwrap(),
+            Some(StageCheckpoint::new(10))
+        );
+        assert_eq!(provider.get_stage_checkpoint(StageId::Other("B")).unwrap(), None);
+    }
+
+    /// A prefix run naming a stage the pipeline does not have is an error, not a full run.
+    #[tokio::test]
+    async fn run_until_rejects_an_unknown_stage() {
+        let provider_factory = create_test_provider_factory();
+
+        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+            .add_stage(TestStage::new(StageId::Other("A")))
+            .build(
+                provider_factory.clone(),
+                StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
+            );
+
+        let result = pipeline.run_until(StageId::Other("Z"), None).await;
+
+        assert_matches!(result, Err(PipelineError::MissingStage(StageId::Other("Z"))));
     }
 
     /// Runs a simple pipeline.
