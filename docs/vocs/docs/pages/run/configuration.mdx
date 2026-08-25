@@ -29,6 +29,7 @@ The configuration file contains the following sections:
     -   [`index_storage_history`](#index_storage_history)
     -   [`etl`](#etl)
     -   [`prune`](#prune)
+-   [`[historical_bal]`](#the-historical_bal-section) -- Best-effort historical block access list downloading
 -   [`[peers]`](#the-peers-section)
     -   [`connection_info`](#connection_info)
     -   [`reputation_weights`](#reputation_weights)
@@ -284,6 +285,27 @@ An ETL (extract, transform, load) data collector. Used mainly to insert data int
 # but lowers temporary storage usage
 file_size = 524_288_000 # 500 * 1024 * 1024
 ```
+
+## The `[historical_bal]` section
+
+The historical BAL section controls best-effort downloading of missing block access lists during historical pipeline sync. Downloading is disabled by default and does not block or fail sync when eth/71 peers or individual responses are unavailable.
+
+```toml
+[historical_bal]
+# Enable historical block access list downloading.
+enabled = false
+# Inclusive minimum transaction count for an eligible block. Must be greater than 0.
+min_transactions = 2
+# Maximum block hashes per request. Must be between 1 and 1024.
+request_batch_size = 1024
+# Maximum requests in flight. Must be greater than 0 and fit the worker semaphore limit.
+max_concurrent_requests = 4
+# Maximum blocks to inspect ahead of execution progress. Must be greater than 0 and is
+# clamped to the active block access list store retention window.
+lookahead = 1024
+```
+
+The `--historical-bal[=<true|false>]` CLI option overrides `enabled` when provided. Omitting it preserves the TOML value and all numeric settings.
 
 ## The `[peers]` section
 

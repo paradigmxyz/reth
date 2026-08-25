@@ -13,6 +13,7 @@ use alloy_consensus::BlockHeader;
 use futures::{stream::FusedStream, stream_select, FutureExt, StreamExt};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_db::{database_metrics::DatabaseMetrics, Database};
+use reth_downloaders::historical_bal::{HistoricalBalWorker, HistoricalBalWorkerConfig};
 use reth_engine_tree::{
     chain::{ChainEvent, FromOrchestrator},
     engine::{EngineApiKind, EngineApiRequest, EngineRequestHandler},
@@ -35,13 +36,14 @@ use reth_node_core::{
 use reth_node_events::node;
 use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider},
-    BlockNumReader, StorageSettingsCache,
+    BalConfig, BalProvider, BlockNumReader, StorageSettingsCache,
 };
+use reth_stages::{PipelineEvent, StageId};
 use reth_storage_overlay::OverlayManager;
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info};
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::{future::Future, num::NonZeroU64, pin::Pin, sync::Arc};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -180,6 +182,28 @@ impl EngineNodeLauncher {
         pipeline.move_to_static_files()?;
 
         let pipeline_events = pipeline.events();
+
+        let retention = ctx
+            .node_config()
+            .db
+            .balstore_cache_size
+            .unwrap_or(BalConfig::DEFAULT_IN_MEMORY_RETENTION_DISTANCE);
+        if let Some(worker_config) =
+            historical_bal_worker_config(ctx.toml_config().historical_bal, retention)?
+        {
+            let wake_stream = pipeline
+                .events()
+                .filter_map(|event| async move { is_historical_bal_wakeup(&event).then_some(()) });
+            HistoricalBalWorker::new(
+                ctx.provider_factory().clone(),
+                ctx.provider_factory().bal_store().clone(),
+                network_client.clone(),
+                Box::pin(wake_stream),
+                ctx.task_executor().clone(),
+                worker_config,
+            )
+            .spawn();
+        }
 
         let mut pruner_builder = ctx.pruner_builder();
         if let Some(exex_manager_handle) = &maybe_exex_manager_handle {
@@ -443,6 +467,26 @@ impl EngineNodeLauncher {
     }
 }
 
+fn historical_bal_worker_config(
+    config: reth_config::HistoricalBalConfig,
+    retention: u64,
+) -> Result<
+    Option<HistoricalBalWorkerConfig>,
+    reth_downloaders::historical_bal::HistoricalBalConfigError,
+> {
+    let enabled = config.enabled;
+    let config = HistoricalBalWorkerConfig::try_from(config)?;
+    if !enabled {
+        return Ok(None)
+    }
+    let retention = NonZeroU64::new(retention.max(1)).expect("retention is at least one");
+    Ok(Some(config.with_effective_lookahead(retention)))
+}
+
+const fn is_historical_bal_wakeup(event: &PipelineEvent) -> bool {
+    matches!(event, PipelineEvent::Ran { stage_id: StageId::Bodies | StageId::Execution, .. })
+}
+
 impl<N, DB, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
 where
     T: FullNodeTypes<
@@ -462,5 +506,59 @@ where
 
     fn launch_node(self, target: NodeBuilderWithComponents<T, CB, AO>) -> Self::Future {
         Box::pin(self.launch_node(target))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_stages::{ExecOutput, PipelineStagesProgress, StageCheckpoint, UnwindOutput};
+
+    #[test]
+    fn enabled_historical_bal_launches_with_zero_retention() {
+        let config = reth_config::HistoricalBalConfig { enabled: true, ..Default::default() };
+
+        let config = historical_bal_worker_config(config, 0).unwrap().unwrap();
+
+        assert_eq!(config.window(0, 2), Some(1..=1));
+    }
+
+    #[test]
+    fn disabled_historical_bal_does_not_launch() {
+        let config = historical_bal_worker_config(Default::default(), 0).unwrap();
+
+        assert_eq!(config, None);
+    }
+
+    #[test]
+    fn disabled_historical_bal_still_validates_programmatic_bounds() {
+        let config = reth_config::HistoricalBalConfig {
+            request_batch_size: std::num::NonZeroUsize::new(2_048).unwrap(),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            historical_bal_worker_config(config, 0).unwrap_err(),
+            reth_downloaders::historical_bal::HistoricalBalConfigError::RequestBatchTooLarge(2_048)
+        );
+    }
+
+    #[test]
+    fn historical_bal_wakes_only_after_relevant_stage_runs() {
+        let ran = |stage_id| PipelineEvent::Ran {
+            pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 1 },
+            stage_id,
+            result: ExecOutput::done(StageCheckpoint::new(1)),
+        };
+        let unwound = |stage_id| PipelineEvent::Unwound {
+            stage_id,
+            result: UnwindOutput { checkpoint: StageCheckpoint::new(1) },
+        };
+
+        assert!(is_historical_bal_wakeup(&ran(StageId::Bodies)));
+        assert!(is_historical_bal_wakeup(&ran(StageId::Execution)));
+        assert!(!is_historical_bal_wakeup(&unwound(StageId::Bodies)));
+        assert!(!is_historical_bal_wakeup(&unwound(StageId::Execution)));
+        assert!(!is_historical_bal_wakeup(&ran(StageId::Headers)));
     }
 }

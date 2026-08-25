@@ -15,9 +15,11 @@ workspace = true
 # reth
 reth-config.workspace = true
 reth-consensus.workspace = true
+reth-execution-types.workspace = true
 reth-network-p2p.workspace = true
 reth-network-peers.workspace = true
 reth-primitives-traits.workspace = true
+reth-stages-types.workspace = true
 reth-storage-api.workspace = true
 reth-tasks.workspace = true
 
@@ -28,6 +30,7 @@ reth-testing-utils = { workspace = true, optional = true }
 
 # ethereum
 alloy-consensus.workspace = true
+alloy-eip7928.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp = { workspace = true, optional = true }
@@ -55,6 +58,7 @@ itertools = { workspace = true, optional = true }
 
 [dev-dependencies]
 async-compression = { workspace = true, features = ["gzip", "tokio"] }
+metrics-util = { workspace = true, features = ["debugging"] }
 reth-ethereum-primitives.workspace = true
 reth-chainspec.workspace = true
 reth-consensus = { workspace = true, features = ["test-utils"] }
@@ -81,6 +85,7 @@ test-utils = [
     "reth-chainspec/test-utils",
     "reth-provider/test-utils",
     "reth-primitives-traits/test-utils",
+    "reth-stages-types/test-utils",
     "dep:reth-ethereum-primitives",
     "reth-ethereum-primitives?/test-utils",
     "reth-tasks/test-utils",

@@ -5,6 +5,7 @@ use reth_prune_types::{PruneModes, MINIMUM_UNWIND_SAFE_DISTANCE};
 use reth_stages_types::ExecutionStageThresholds;
 use reth_static_file_types::{StaticFileMap, StaticFileSegment};
 use std::{
+    num::{NonZeroU64, NonZeroUsize},
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -37,6 +38,9 @@ pub struct Config {
     /// Configuration for static files.
     #[cfg_attr(feature = "serde", serde(default))]
     pub static_files: StaticFilesConfig,
+    /// Configuration for downloading historical block access lists.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub historical_bal: HistoricalBalConfig,
 }
 
 impl Config {
@@ -102,6 +106,58 @@ impl Config {
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?,
         )
     }
+}
+
+/// Configuration for downloading historical block access lists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
+pub struct HistoricalBalConfig {
+    /// Whether historical block access list downloading is enabled.
+    pub enabled: bool,
+    /// Inclusive minimum transaction count for an eligible block.
+    pub min_transactions: NonZeroU64,
+    /// Maximum number of block hashes in a single request.
+    #[cfg_attr(feature = "serde", serde(deserialize_with = "deserialize_request_batch_size"))]
+    pub request_batch_size: NonZeroUsize,
+    /// Maximum number of requests in flight at once. Must fit the worker semaphore's permit limit.
+    pub max_concurrent_requests: NonZeroUsize,
+    /// Maximum number of blocks to inspect ahead of execution progress.
+    pub lookahead: NonZeroU64,
+}
+
+impl HistoricalBalConfig {
+    /// Maximum number of block hashes accepted by an eth/71 BAL request.
+    pub const MAX_REQUEST_BATCH_SIZE: usize = 1024;
+}
+
+impl Default for HistoricalBalConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            min_transactions: NonZeroU64::new(2).unwrap(),
+            request_batch_size: NonZeroUsize::new(Self::MAX_REQUEST_BATCH_SIZE).unwrap(),
+            max_concurrent_requests: NonZeroUsize::new(4).unwrap(),
+            lookahead: NonZeroU64::new(1024).unwrap(),
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+fn deserialize_request_batch_size<'de, D>(deserializer: D) -> Result<NonZeroUsize, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+
+    let value = <NonZeroUsize as serde::Deserialize>::deserialize(deserializer)?;
+    if value.get() > HistoricalBalConfig::MAX_REQUEST_BATCH_SIZE {
+        return Err(D::Error::custom(format_args!(
+            "request_batch_size must be at most {}",
+            HistoricalBalConfig::MAX_REQUEST_BATCH_SIZE
+        )))
+    }
+    Ok(value)
 }
 
 /// Configuration for each stage in the pipeline.
@@ -796,6 +852,55 @@ mod tests {
             // Compare the loaded config with the original config
             assert_eq!(config, loaded_config);
         })
+    }
+
+    #[test]
+    fn historical_bal_config_defaults_disabled_with_valid_bounds() {
+        let config = Config::default().historical_bal;
+
+        assert!(!config.enabled);
+        assert_eq!(config.min_transactions.get(), 2);
+        assert_eq!(config.request_batch_size.get(), 1024);
+        assert_eq!(config.max_concurrent_requests.get(), 4);
+        assert_eq!(config.lookahead.get(), 1024);
+    }
+
+    #[test]
+    fn historical_bal_config_deserializes_valid_values() {
+        let config: Config = toml::from_str(
+            r#"
+[historical_bal]
+enabled = true
+min_transactions = 3
+request_batch_size = 1
+max_concurrent_requests = 2
+lookahead = 64
+"#,
+        )
+        .unwrap();
+
+        let config = config.historical_bal;
+        assert!(config.enabled);
+        assert_eq!(config.min_transactions.get(), 3);
+        assert_eq!(config.request_batch_size.get(), 1);
+        assert_eq!(config.max_concurrent_requests.get(), 2);
+        assert_eq!(config.lookahead.get(), 64);
+    }
+
+    #[test]
+    fn historical_bal_config_rejects_invalid_bounds() {
+        for invalid in [
+            "[historical_bal]\nmin_transactions = 0",
+            "[historical_bal]\nrequest_batch_size = 0",
+            "[historical_bal]\nrequest_batch_size = 1025",
+            "[historical_bal]\nmax_concurrent_requests = 0",
+            "[historical_bal]\nlookahead = 0",
+        ] {
+            assert!(
+                toml::from_str::<Config>(invalid).is_err(),
+                "accepted invalid config: {invalid}"
+            );
+        }
     }
 
     // ensures config deserialization is backwards compatible
