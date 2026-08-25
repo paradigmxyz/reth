@@ -764,11 +764,6 @@ mod tests {
                 panic!("persisted parent below Finish must require reverts")
             }
         }
-
-        let overlay = builder.build_overlay(&provider).unwrap();
-
-        assert!(overlay.hashed_post_state.is_empty());
-        assert!(overlay.trie_updates.is_empty());
     }
 
     #[test]

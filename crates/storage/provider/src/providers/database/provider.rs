@@ -5036,6 +5036,10 @@ mod tests {
         save_genesis(&provider_rw, &genesis).unwrap();
         provider_rw.commit().unwrap();
 
+        for block in &blocks[2..] {
+            factory.overlay_manager().insert_block(block.clone());
+        }
+
         let provider_rw = factory.provider_rw().unwrap();
         let input = SaveBlocksInput::new(blocks, 0, 0, 4, 2);
         provider_rw.save_blocks(&input).unwrap();
