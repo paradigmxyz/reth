@@ -86,4 +86,5 @@ test-utils = [
     "dep:reth-ethereum-primitives",
     "reth-ethereum-primitives?/test-utils",
     "reth-tasks/test-utils",
+    "reth-trie-common/test-utils",
 ]
