@@ -1,7 +1,7 @@
 //! Implementation of the [`jsonrpsee`] generated [`EthApiServer`](crate::EthApi) trait
 //! Handles RPC requests for the `eth_` namespace.
 
-use std::{sync::Arc, time::Duration};
+use std::{num::NonZeroUsize, sync::Arc, time::Duration};
 
 use crate::{eth::helpers::types::EthRpcConverter, EthApiBuilder};
 use alloy_consensus::BlockHeader;
@@ -333,8 +333,10 @@ where
         let (raw_tx_sender, _) = broadcast::channel(DEFAULT_BROADCAST_CAPACITY);
 
         // Create tx pool insertion batcher
-        let (processor, tx_batch_sender) =
-            BatchTxProcessor::new(components.pool().clone(), max_batch_size);
+        let (processor, tx_batch_sender) = BatchTxProcessor::new(
+            components.pool().clone(),
+            NonZeroUsize::new(max_batch_size).expect("max batch size must be non-zero"),
+        );
         task_spawner.spawn_critical_task("tx-batcher", processor);
 
         Self {

@@ -9,6 +9,7 @@ use crate::{
 use pin_project::pin_project;
 use std::{
     future::Future,
+    num::NonZeroUsize,
     pin::Pin,
     task::{ready, Context, Poll},
 };
@@ -44,7 +45,7 @@ where
 #[derive(Debug)]
 pub struct BatchTxProcessor<Pool: TransactionPool> {
     pool: Pool,
-    max_batch_size: usize,
+    max_batch_size: NonZeroUsize,
     buf: Vec<BatchTxRequest<Pool::Transaction>>,
     #[pin]
     request_rx: mpsc::UnboundedReceiver<BatchTxRequest<Pool::Transaction>>,
@@ -57,7 +58,7 @@ where
     /// Create a new `BatchTxProcessor`
     pub fn new(
         pool: Pool,
-        max_batch_size: usize,
+        max_batch_size: NonZeroUsize,
     ) -> (Self, mpsc::UnboundedSender<BatchTxRequest<Pool::Transaction>>) {
         let (request_tx, request_rx) = mpsc::unbounded_channel();
 
@@ -116,7 +117,7 @@ where
 
         loop {
             // Drain all available requests from the receiver
-            ready!(this.request_rx.poll_recv_many(cx, this.buf, *this.max_batch_size));
+            ready!(this.request_rx.poll_recv_many(cx, this.buf, this.max_batch_size.get()));
 
             if !this.buf.is_empty() {
                 let batch = std::mem::take(this.buf);
@@ -202,7 +203,8 @@ mod tests {
     #[tokio::test]
     async fn test_batch_processor() {
         let pool = testing_pool();
-        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), 1000);
+        let (processor, request_tx) =
+            BatchTxProcessor::new(pool.clone(), NonZeroUsize::new(1000).unwrap());
 
         // Spawn the processor
         let handle = tokio::spawn(processor);
@@ -236,7 +238,8 @@ mod tests {
     #[tokio::test]
     async fn test_add_transaction() {
         let pool = testing_pool();
-        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), 1000);
+        let (processor, request_tx) =
+            BatchTxProcessor::new(pool.clone(), NonZeroUsize::new(1000).unwrap());
 
         // Spawn the processor
         let handle = tokio::spawn(processor);
@@ -264,7 +267,8 @@ mod tests {
     async fn test_max_batch_size() {
         let pool = testing_pool();
         let max_batch_size = 10;
-        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), max_batch_size);
+        let (processor, request_tx) =
+            BatchTxProcessor::new(pool.clone(), NonZeroUsize::new(max_batch_size).unwrap());
 
         // Spawn batch processor with threshold
         let handle = tokio::spawn(processor);

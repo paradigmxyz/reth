@@ -17,6 +17,11 @@ use reth_transaction_pool::{
 };
 use std::{path::PathBuf, sync::OnceLock, time::Duration};
 
+fn parse_nonzero_usize(value: &str) -> Result<usize, String> {
+    let value = value.parse().map_err(|_| format!("invalid usize: {value}"))?;
+    (value != 0).then_some(value).ok_or_else(|| "must be greater than zero".to_owned())
+}
+
 /// Global static transaction pool defaults
 static TXPOOL_DEFAULTS: OnceLock<DefaultTxPoolValues> = OnceLock::new();
 
@@ -409,7 +414,7 @@ pub struct TxPoolArgs {
     pub disable_transactions_backup: bool,
 
     /// Max batch size for transaction pool insertions
-    #[arg(long = "txpool.max-batch-size", default_value_t = DefaultTxPoolValues::get_global().max_batch_size)]
+    #[arg(long = "txpool.max-batch-size", value_parser = parse_nonzero_usize, default_value_t = DefaultTxPoolValues::get_global().max_batch_size)]
     pub max_batch_size: usize,
 }
 
@@ -587,6 +592,17 @@ mod tests {
             CommandParser::<TxPoolArgs>::try_parse_from(["reth", "--txpool.lifetime", "invalid"]);
 
         assert!(result.is_err(), "Expected an error for invalid duration");
+    }
+
+    #[test]
+    fn txpool_max_batch_size_must_be_nonzero() {
+        let zero =
+            CommandParser::<TxPoolArgs>::try_parse_from(["reth", "--txpool.max-batch-size", "0"]);
+        assert!(zero.is_err());
+
+        let valid =
+            CommandParser::<TxPoolArgs>::parse_from(["reth", "--txpool.max-batch-size", "1"]);
+        assert_eq!(valid.args.max_batch_size, 1);
     }
 
     #[test]
