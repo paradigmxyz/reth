@@ -695,3 +695,6 @@ vergen-git2 = "10.0.1"
 
 # networking
 ipnet = "2.11"
+
+[patch.crates-io]
+revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "72d2237dc701756fd0736908bcf928cf7c43bd63" }
