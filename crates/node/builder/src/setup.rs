@@ -124,13 +124,16 @@ where
                 prune_config.segments,
                 era_import_source,
             )
-            .set(ExecutionStage::new(
-                evm_config,
-                consensus,
-                stage_config.execution.into(),
-                stage_config.execution_external_clean_threshold(),
-                exex_manager_handle,
-            ))
+            .set(
+                ExecutionStage::new(
+                    evm_config,
+                    consensus,
+                    stage_config.execution.into(),
+                    stage_config.execution_external_clean_threshold(),
+                    exex_manager_handle,
+                )
+                .with_bal_execution_min_tx_count(stage_config.execution.bal_execution_min_tx_count),
+            )
             .disable_all(disabled_stages),
         )
         .build(provider_factory, static_file_producer);

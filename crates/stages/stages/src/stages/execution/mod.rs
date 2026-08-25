@@ -1,6 +1,6 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD;
 use alloy_consensus::BlockHeader;
-use alloy_eip7928::bal::Bal;
+use alloy_eip7928::bal::{Bal, DecodedBal};
 use alloy_primitives::BlockNumber;
 use num_traits::Zero;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
@@ -13,7 +13,7 @@ use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockHashReader, BlockReader, DBProvider, EitherWriter, ExecutionOutcome,
+    BalProvider, BlockHashReader, BlockReader, DBProvider, EitherWriter, ExecutionOutcome,
     HashedPostStateProvider, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
     ProviderError, StateWriteConfig, StateWriter, StaticFileProviderFactory, StatsReader,
     StoragePath, StorageSettingsCache, TransactionVariant,
@@ -97,6 +97,8 @@ where
     exex_manager_handle: ExExManagerHandle<E::Primitives>,
     /// Executor metrics.
     metrics: ExecutorMetrics,
+    /// Minimum number of transactions required before trying cached BAL execution.
+    bal_execution_min_tx_count: usize,
 }
 
 impl<E> ExecutionStage<E>
@@ -120,6 +122,7 @@ where
             post_unwind_commit_input: None,
             exex_manager_handle,
             metrics: ExecutorMetrics::default(),
+            bal_execution_min_tx_count: ExecutionConfig::default().bal_execution_min_tx_count,
         }
     }
 
@@ -146,6 +149,7 @@ where
         config: ExecutionConfig,
         external_clean_threshold: u64,
     ) -> Self {
+        let bal_execution_min_tx_count = config.bal_execution_min_tx_count;
         Self::new(
             evm_config,
             consensus,
@@ -153,6 +157,13 @@ where
             external_clean_threshold,
             ExExManagerHandle::empty(),
         )
+        .with_bal_execution_min_tx_count(bal_execution_min_tx_count)
+    }
+
+    /// Sets the minimum block transaction count for cached BAL execution.
+    pub const fn with_bal_execution_min_tx_count(mut self, value: usize) -> Self {
+        self.bal_execution_min_tx_count = value;
+        self
     }
 
     /// Returns whether we can perform pruning of [`tables::AccountChangeSets`] and
@@ -266,6 +277,7 @@ impl<E, Provider> Stage<Provider> for ExecutionStage<E>
 where
     E: ConfigureEvm,
     Provider: DBProvider
+        + BalProvider
         + BlockReader<
             Block = <E::Primitives as NodePrimitives>::Block,
             Header = <E::Primitives as NodePrimitives>::BlockHeader,
@@ -308,6 +320,40 @@ where
         let db = StateProviderDatabase(LatestStateProviderRef::new(provider));
         let mut executor = self.evm_config.batch_executor(db);
 
+        // BALs are keyed by block hash. Fetch and decode the complete candidate range once so
+        // the execution loop never performs per-block store I/O. The store is advisory: a lookup
+        // failure or malformed entry only disables this optimization for the affected blocks.
+        let bal_hashes =
+            provider.canonical_hashes_range(start_block, max_block.saturating_add(1))?;
+        let cached_bals: Vec<Option<DecodedBal>> = match provider.get_bals_by_hashes(&bal_hashes) {
+            Ok(bals) if bals.len() == bal_hashes.len() => bals
+                .into_iter()
+                .map(|raw| {
+                    raw.and_then(|raw| match DecodedBal::from_rlp_bytes(raw) {
+                        Ok(bal) => Some(bal),
+                        Err(err) => {
+                            self.metrics.bal_execution_invalid_total.increment(1);
+                            debug!(target: "sync::stages::execution", %err, "Ignoring undecodable cached BAL");
+                            None
+                        }
+                    })
+                })
+                .collect(),
+            Ok(bals) => {
+                debug!(
+                    target: "sync::stages::execution",
+                    expected = bal_hashes.len(),
+                    actual = bals.len(),
+                    "Ignoring misaligned cached BAL lookup result"
+                );
+                vec![None; bal_hashes.len()]
+            }
+            Err(err) => {
+                debug!(target: "sync::stages::execution", %err, "Cached BAL lookup failed");
+                vec![None; bal_hashes.len()]
+            }
+        };
+
         // Progress tracking
         let mut stage_progress = start_block;
         let mut stage_checkpoint = execution_checkpoint(
@@ -349,18 +395,84 @@ where
 
             cumulative_gas += block.header().gas_used();
 
+            let cached_bal = if block.header().block_access_list_hash().is_none() {
+                None
+            } else if block.body().transactions().len() < self.bal_execution_min_tx_count {
+                self.metrics.bal_execution_ineligible_total.increment(1);
+                None
+            } else {
+                let index = (block_number - start_block) as usize;
+                match cached_bals.get(index).and_then(Option::as_ref) {
+                    None => {
+                        self.metrics.bal_store_miss_total.increment(1);
+                        None
+                    }
+                    Some(decoded_bal) => {
+                        let expected =
+                            block.header().block_access_list_hash().expect("checked above");
+                        if let Err(err) = decoded_bal.ensure_hash(expected) {
+                            self.metrics.bal_execution_invalid_total.increment(1);
+                            debug!(
+                                target: "sync::stages::execution",
+                                number = block_number,
+                                %err,
+                                "Ignoring cached BAL with a mismatched commitment"
+                            );
+                            None
+                        } else if let Err(err) =
+                            decoded_bal.as_bal().validate_gas_limit(block.header().gas_limit())
+                        {
+                            self.metrics.bal_execution_invalid_total.increment(1);
+                            debug!(
+                                target: "sync::stages::execution",
+                                number = block_number,
+                                %err,
+                                "Ignoring cached BAL that exceeds the block gas limit"
+                            );
+                            None
+                        } else {
+                            match reth_revm::revm::state::bal::Bal::clone_from_alloy(
+                                decoded_bal.as_bal().as_vec(),
+                            ) {
+                                Ok(bal) => Some(Arc::new(bal)),
+                                Err(err) => {
+                                    self.metrics.bal_execution_invalid_total.increment(1);
+                                    debug!(
+                                        target: "sync::stages::execution",
+                                        number = block_number,
+                                        ?err,
+                                        "Ignoring cached BAL unusable by the EVM"
+                                    );
+                                    None
+                                }
+                            }
+                        }
+                    }
+                }
+            };
+
             // Configure the executor to use the current state.
             trace!(target: "sync::stages::execution", number = block_number, txs = block.body().transactions().len(), "Executing block");
 
             // Execute the block
             let execute_start = Instant::now();
 
+            let used_cached_bal = cached_bal.is_some();
             let result = self.metrics.metered_one(&block, |input| {
-                executor.execute_one(input).map_err(|error| StageError::Block {
+                let result = if let Some(bal) = cached_bal {
+                    executor.execute_one_with_bal(input, bal)
+                } else {
+                    executor.execute_one(input)
+                };
+                result.map_err(|error| StageError::Block {
                     block: Box::new(block.block_with_parent()),
                     error: BlockErrorKind::Execution(error),
                 })
             })?;
+            if used_cached_bal {
+                self.metrics.bal_execution_total.increment(1);
+                self.metrics.bal_execution_histogram.record(execute_start.elapsed().as_secs_f64());
+            }
 
             let built_bal = executor.take_bal().map(Bal::from);
             if let Some(bal) = &built_bal &&
