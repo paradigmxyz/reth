@@ -10260,7 +10260,6 @@ dependencies = [
  "reth-db-api",
  "reth-downloaders",
  "reth-eth-wire-types",
- "reth-ethereum-primitives",
  "reth-network-p2p",
  "reth-network-peers",
  "reth-primitives-traits",

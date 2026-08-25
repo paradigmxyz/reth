@@ -42,8 +42,6 @@ tracing.workspace = true
 
 [dev-dependencies]
 alloy-consensus.workspace = true
-reth-ethereum-primitives.workspace = true
-reth-network-p2p = { workspace = true, features = ["test-utils"] }
 reth-db-api = { workspace = true, features = ["test-utils"] }
 reth-downloaders = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }

@@ -5,15 +5,13 @@
 //! the trie. Phases that run out of peers wait for the node to report progress instead of spinning.
 
 use crate::{
-    error::db_error, BlockAccessListCatchUp, BlockAccessListCatchUpOutcome, PivotReorgRecovery,
-    RangeBudget, ReorgLimits, ReorgRecoveryOutcome, SnapGeneration, SnapPhase, SnapPivotPolicy,
-    SnapStateStore, SnapSyncError, StateDownloadOutcome, StateDownloader, TrieGenerator,
+    error::db_error, BlockAccessListCatchUp, BlockAccessListCatchUpOutcome, RangeBudget,
+    SnapGeneration, SnapPhase, SnapPivotPolicy, SnapStateStore, SnapSyncError,
+    StateDownloadOutcome, StateDownloader, TrieGenerator,
 };
-use alloy_primitives::Sealable;
 use core::future::Future;
 use reth_db_api::transaction::DbTxMut;
-use reth_network_p2p::{headers::client::HeadersClient, snap::client::SnapClient};
-use reth_primitives_traits::BlockHeader;
+use reth_network_p2p::snap::client::SnapClient;
 use reth_provider::DatabaseProviderFactory;
 use reth_storage_api::{
     AccountExtReader, ChangeSetReader, DBProvider, HeaderProvider, StageCheckpointReader,
@@ -28,11 +26,9 @@ const DEFAULT_RANGE_BUDGET: RangeBudget = RangeBudget::new(64);
 
 /// Drives a Snap state bootstrap to a validated state root.
 #[derive(Debug)]
-pub struct SnapSyncSession<'a, C, H, F, X> {
+pub struct SnapSyncSession<'a, C, F, X> {
     // A reference avoids requiring network clients to implement Clone.
     client: &'a C,
-    // Walks orphaned chains back to their common ancestor during recovery.
-    headers: &'a H,
     // Every phase observes the same provider factory.
     factory: &'a F,
     // Generation transitions stay durable through the store.
@@ -45,29 +41,19 @@ pub struct SnapSyncSession<'a, C, H, F, X> {
     policy: SnapPivotPolicy,
     // Account ranges committed between pivot re-anchoring checks.
     budget: RangeBudget,
-    // Bounds beyond which an orphaned generation is restarted instead of recovered.
-    reorg_limits: ReorgLimits,
 }
 
-impl<'a, C, H, F, X> SnapSyncSession<'a, C, H, F, X> {
+impl<'a, C, F, X> SnapSyncSession<'a, C, F, X> {
     /// Creates a session without starting network or database work.
-    pub const fn new(
-        client: &'a C,
-        headers: &'a H,
-        factory: &'a F,
-        context: X,
-        runtime: Runtime,
-    ) -> Self {
+    pub const fn new(client: &'a C, factory: &'a F, context: X, runtime: Runtime) -> Self {
         Self {
             client,
-            headers,
             factory,
             store: SnapStateStore::new(factory),
             context,
             runtime,
             policy: SnapPivotPolicy::new(),
             budget: DEFAULT_RANGE_BUDGET,
-            reorg_limits: ReorgLimits::new(),
         }
     }
 
@@ -83,21 +69,16 @@ impl<'a, C, H, F, X> SnapSyncSession<'a, C, H, F, X> {
         self
     }
 
-    /// Sets the bounds beyond which an orphaned generation is restarted instead of recovered.
-    pub const fn with_reorg_limits(mut self, limits: ReorgLimits) -> Self {
-        self.reorg_limits = limits;
-        self
-    }
-
     /// Runs until the state is validated or the context reports no further progress.
     ///
     /// A pivot that leaves the canonical chain, or falls behind the block access list history
     /// peers serve, is abandoned and replaced by a fresh generation rather than failing the
-    /// session.
+    /// session. EIP-8189 also describes restoring an orphaned pivot from the fork's block access
+    /// lists; restarting is the simpler policy and costs a re-download only when a reorg runs
+    /// deeper than the pivot distance.
     pub async fn run(&mut self) -> Result<SnapSyncOutcome, SnapSyncError>
     where
         C: SnapClient,
-        H: HeadersClient<Header: BlockHeader + Sealable>,
         F: DatabaseProviderFactory<Provider: HeaderProvider + StageCheckpointReader>
             + Clone
             + Send
@@ -109,18 +90,6 @@ impl<'a, C, H, F, X> SnapSyncSession<'a, C, H, F, X> {
             let head = self.context.canonical_head()?;
             let generation = match self.resolve_generation(head)? {
                 Resolved::Ready(generation) => generation,
-                Resolved::Orphaned(generation) => match self.recover(generation).await? {
-                    ReorgRecoveryOutcome::Recovered { generation } => generation,
-                    ReorgRecoveryOutcome::Unrecoverable => match self.start_generation(head)? {
-                        Some(generation) => generation,
-                        None => {
-                            if !self.context.wait_for_progress(head).await {
-                                return Ok(SnapSyncOutcome::Stalled { generation: None })
-                            }
-                            continue
-                        }
-                    },
-                },
                 Resolved::Wait => {
                     debug!(target: "snap::session", head, "No eligible snap pivot");
                     if !self.context.wait_for_progress(head).await {
@@ -145,8 +114,16 @@ impl<'a, C, H, F, X> SnapSyncSession<'a, C, H, F, X> {
                         "Snap pivot outlived the served BAL history, restarting"
                     );
                 }
+                // Re-resolving immediately is what makes progress here: a reorg that replaces the
+                // anchor at the same height leaves the head number unchanged, so waiting on it
+                // would stall until an unrelated block arrived.
                 Err(error) if is_reorg(&error) => {
                     info!(target: "snap::session", %error, "Snap pivot left the canonical chain, restarting");
+                }
+                // Unlike a reorg, a header the session has not downloaded yet only becomes
+                // available once the chain progresses, so this is the one path that waits.
+                Err(SnapSyncError::MissingHeader(block_number)) => {
+                    debug!(target: "snap::session", block_number, "Waiting for a canonical snap header");
                     if !self.context.wait_for_progress(head).await {
                         return Ok(SnapSyncOutcome::Stalled { generation: Some(generation) })
                     }
@@ -166,11 +143,11 @@ impl<'a, C, H, F, X> SnapSyncSession<'a, C, H, F, X> {
             self.policy.is_finishable(generation, head)
         {
             let provider = self.factory.database_provider_ro().map_err(db_error)?;
-            return Ok(if self.policy.is_canonical_anchor(&provider, generation)? {
-                Resolved::Ready(generation)
-            } else {
-                Resolved::Orphaned(generation)
-            })
+            if self.policy.is_canonical_anchor(&provider, generation)? {
+                return Ok(Resolved::Ready(generation))
+            }
+            // An orphaned anchor is discarded rather than reconciled, so it falls through to a
+            // fresh generation on the current canonical pivot.
         }
         Ok(self.start_generation(head)?.map_or(Resolved::Wait, Resolved::Ready))
     }
@@ -194,28 +171,6 @@ impl<'a, C, H, F, X> SnapSyncSession<'a, C, H, F, X> {
         );
         self.store.begin_generation(pivot)?;
         Ok(Some(pivot))
-    }
-
-    // Reconciles an orphaned generation with the canonical chain, per EIP-8189.
-    async fn recover(
-        &self,
-        generation: SnapGeneration,
-    ) -> Result<ReorgRecoveryOutcome, SnapSyncError>
-    where
-        C: SnapClient,
-        H: HeadersClient<Header: BlockHeader + Sealable>,
-        F: DatabaseProviderFactory<Provider: HeaderProvider>,
-        F::ProviderRW: SnapSyncProvider,
-    {
-        info!(
-            target: "snap::session",
-            target_block = generation.target_block,
-            "Recovering snap pivot across a reorg"
-        );
-        PivotReorgRecovery::new(self.client, self.headers, self.factory, self.runtime.clone())
-            .with_limits(self.reorg_limits)
-            .run(generation)
-            .await
     }
 
     // Advances one generation through its remaining phases, waiting whenever peers run out.
@@ -405,12 +360,10 @@ impl<T> SnapSyncProvider for T where
 {
 }
 
-// Distinguishes a generation that can continue from one that must first be reconciled.
+// Distinguishes a generation that can continue from a chain that cannot yet be pivoted on.
 enum Resolved {
     // Ready to be driven.
     Ready(SnapGeneration),
-    // Anchored on a block the canonical chain no longer contains.
-    Orphaned(SnapGeneration),
     // No generation can start until the chain or peers progress.
     Wait,
 }
@@ -425,43 +378,32 @@ enum SessionStep {
     Stalled(SnapGeneration),
 }
 
-// A reorged or missing anchor invalidates the generation, not the session.
+// A reorged anchor invalidates the generation, not the session.
 const fn is_reorg(error: &SnapSyncError) -> bool {
     matches!(
         error,
         SnapSyncError::CanonicalHeaderMismatch { .. } |
-            SnapSyncError::CanonicalStateRootMismatch { .. } |
-            SnapSyncError::MissingHeader(_)
+            SnapSyncError::CanonicalStateRootMismatch { .. }
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::AccountRangeProgress;
+    use crate::{store::SNAP_SYNC_STAGE, AccountRangeProgress};
     use alloy_consensus::Header;
-    use alloy_eip7928::{
-        bal::{Bal, DecodedBal},
-        AccountChanges, BalanceChange, BlockAccessIndex,
-    };
-    use alloy_primitives::{Address, Bytes, B256, KECCAK256_EMPTY, U256};
+    use alloy_primitives::{B256, KECCAK256_EMPTY, U256};
     use reth_db_api::{tables, transaction::DbTx};
     use reth_downloaders::snap::test_utils::TestSnapClient;
-    use reth_eth_wire_types::{
-        snap::{AccountData, AccountRangeMessage, BlockAccessListsMessage},
-        BlockAccessLists,
-    };
-    use reth_ethereum_primitives::BlockBody;
-    use reth_network_p2p::{
-        error::PeerRequestResult, snap::client::SnapResponse, test_utils::TestFullBlockClient,
-    };
+    use reth_eth_wire_types::snap::{AccountData, AccountRangeMessage};
+    use reth_network_p2p::{error::PeerRequestResult, snap::client::SnapResponse};
     use reth_network_peers::{PeerId, WithPeerId};
-    use reth_primitives_traits::{Account, SealedHeader};
+    use reth_primitives_traits::Account;
     use reth_provider::{
         test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
         ProviderFactory, StaticFileProviderFactory, StaticFileWriter,
     };
-    use reth_stages_types::StageId;
+    use reth_stages_types::{StageCheckpoint, StageId};
     use reth_static_file_types::StaticFileSegment;
     use reth_storage_api::StorageSettings;
     use reth_trie_common::{HashBuilder, HashedPostState, Nibbles, TrieAccount, EMPTY_ROOT_HASH};
@@ -542,15 +484,13 @@ mod tests {
         let root = state_root(account_hash, &account);
         let blocks = chain(&factory, [B256::ZERO, root], true);
         let client = TestSnapClient::new([account_range(vec![(account_hash, account)])]);
-        let headers = TestFullBlockClient::default();
         let context = TestContext::new(2, []);
 
-        let outcome =
-            SnapSyncSession::new(&client, &headers, &factory, context.clone(), Runtime::test())
-                .with_policy(policy())
-                .run()
-                .await
-                .unwrap();
+        let outcome = SnapSyncSession::new(&client, &factory, context.clone(), Runtime::test())
+            .with_policy(policy())
+            .run()
+            .await
+            .unwrap();
 
         let SnapSyncOutcome::Complete { generation } = outcome else { panic!("completed session") };
         assert_eq!(generation.target_block, 1);
@@ -589,15 +529,13 @@ mod tests {
             )
             .unwrap();
         let client = TestSnapClient::new(std::iter::empty());
-        let headers = TestFullBlockClient::default();
         let context = TestContext::new(3, []);
 
-        let outcome =
-            SnapSyncSession::new(&client, &headers, &factory, context.clone(), Runtime::test())
-                .with_policy(SnapPivotPolicy { history: 1, ..policy() })
-                .run()
-                .await
-                .unwrap();
+        let outcome = SnapSyncSession::new(&client, &factory, context.clone(), Runtime::test())
+            .with_policy(SnapPivotPolicy { history: 1, ..policy() })
+            .run()
+            .await
+            .unwrap();
 
         let SnapSyncOutcome::Stalled { generation } = outcome else { panic!("stalled session") };
         let generation = generation.expect("restarted generation");
@@ -629,15 +567,13 @@ mod tests {
             )
             .unwrap();
         let client = TestSnapClient::new(std::iter::empty());
-        let headers = TestFullBlockClient::default();
         let context = TestContext::new(3, []);
 
-        let outcome =
-            SnapSyncSession::new(&client, &headers, &factory, context.clone(), Runtime::test())
-                .with_policy(policy())
-                .run()
-                .await
-                .unwrap();
+        let outcome = SnapSyncSession::new(&client, &factory, context.clone(), Runtime::test())
+            .with_policy(policy())
+            .run()
+            .await
+            .unwrap();
 
         assert_eq!(outcome, SnapSyncOutcome::Stalled { generation: Some(interrupted) });
         assert_eq!(store.interrupted_generation().unwrap(), Some(interrupted));
@@ -651,15 +587,13 @@ mod tests {
         factory.set_storage_settings_cache(StorageSettings::v2());
         chain(&factory, [B256::ZERO; 4], false);
         let client = TestSnapClient::new(std::iter::empty());
-        let headers = TestFullBlockClient::default();
         let context = TestContext::new(3, [3]);
 
-        let outcome =
-            SnapSyncSession::new(&client, &headers, &factory, context.clone(), Runtime::test())
-                .with_policy(policy())
-                .run()
-                .await
-                .unwrap();
+        let outcome = SnapSyncSession::new(&client, &factory, context.clone(), Runtime::test())
+            .with_policy(policy())
+            .run()
+            .await
+            .unwrap();
 
         assert_eq!(outcome, SnapSyncOutcome::Stalled { generation: None });
         // One wait per unproductive head, and no request while no pivot is eligible.
@@ -668,58 +602,76 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn orphaned_generation_is_recovered_instead_of_restarted() {
+    async fn orphaned_account_download_restarts_on_the_canonical_pivot() {
+        restarts_on_the_canonical_pivot(SnapPhase::Accounts).await;
+    }
+
+    #[tokio::test]
+    async fn orphaned_block_access_list_catch_up_restarts_on_the_canonical_pivot() {
+        restarts_on_the_canonical_pivot(SnapPhase::BlockAccessLists).await;
+    }
+
+    // The expensive case: a fully downloaded state is discarded rather than reconciled.
+    #[tokio::test]
+    async fn orphaned_trie_generation_restarts_on_the_canonical_pivot() {
+        restarts_on_the_canonical_pivot(SnapPhase::Trie).await;
+    }
+
+    // Whatever an orphaned generation had assembled, the session drops it and anchors a clean
+    // generation on the canonical pivot instead of reconciling the fork.
+    async fn restarts_on_the_canonical_pivot(phase: SnapPhase) {
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
         let blocks = chain(&factory, [B256::ZERO; 4], true);
-        let (block_access_list, raw) = orphan_block_access_list();
-        // Shares the canonical parent of block 2, so the generation's anchor is a real fork.
-        let orphan = Header {
-            number: 2,
-            parent_hash: blocks[1].hash_slow(),
-            state_root: B256::repeat_byte(0xee),
-            block_access_list_hash: Some(block_access_list.hash()),
-            ..Default::default()
-        };
-        let headers = TestFullBlockClient::default();
-        for header in [blocks[0].clone(), blocks[1].clone(), orphan.clone()] {
-            headers.insert(SealedHeader::seal_slow(header), BlockBody::default());
-        }
+        let stale_account = B256::repeat_byte(0x11);
 
-        let store = SnapStateStore::new(&factory);
-        let generation = SnapGeneration::new(2, orphan.hash_slow(), orphan.state_root);
-        store.begin_generation(generation).unwrap();
-        let client = TestSnapClient::new([Ok(WithPeerId::new(
-            PeerId::random(),
-            SnapResponse::BlockAccessLists(BlockAccessListsMessage {
-                request_id: 1,
-                block_access_lists: BlockAccessLists(vec![Some(raw)]),
-            }),
-        ))]);
+        let mut orphaned = SnapGeneration::new(2, B256::repeat_byte(0xee), B256::repeat_byte(0xdd));
+        orphaned.phase = phase;
+        orphaned.next_account = stale_account;
+        seed_generation(&factory, orphaned);
+        let provider = factory.database_provider_rw().unwrap();
+        provider
+            .write_hashed_state(
+                &HashedPostState::default()
+                    .with_accounts([(stale_account, Some(Account::default()))])
+                    .into_sorted(),
+            )
+            .unwrap();
+        provider.commit().unwrap();
+
+        let client = TestSnapClient::new(std::iter::empty());
         let context = TestContext::new(3, []);
 
-        let outcome =
-            SnapSyncSession::new(&client, &headers, &factory, context.clone(), Runtime::test())
-                .with_policy(policy())
-                .run()
-                .await
-                .unwrap();
+        let outcome = SnapSyncSession::new(&client, &factory, context.clone(), Runtime::test())
+            .with_policy(policy())
+            .run()
+            .await
+            .unwrap();
 
         let SnapSyncOutcome::Stalled { generation } = outcome else { panic!("stalled session") };
-        let generation = generation.expect("recovered generation");
-        assert_eq!(generation.target_block, 1);
-        assert_eq!(generation.target_hash, blocks[1].hash_slow());
-        assert_eq!(generation.state_root, blocks[1].state_root);
-        assert_eq!(generation.next_block, 2);
-        assert_eq!(store.interrupted_generation().unwrap(), Some(generation));
+        let generation = generation.expect("fresh generation");
+        assert_eq!(generation, SnapGeneration::new(2, blocks[2].hash_slow(), blocks[2].state_root));
+        assert_eq!(
+            SnapStateStore::new(&factory).interrupted_generation().unwrap(),
+            Some(generation)
+        );
+        // A reorg is resolved by re-selecting a pivot, never by waiting for a higher head.
+        assert_eq!(context.waits(), [3]);
+
+        let provider = factory.database_provider_ro().unwrap();
+        assert!(provider.tx_ref().get::<tables::HashedAccounts>(stale_account).unwrap().is_none());
     }
 
-    // A single mutation is enough to exercise recovery; nothing was downloaded to restore.
-    fn orphan_block_access_list() -> (DecodedBal, Bytes) {
-        let changes = AccountChanges::new(Address::repeat_byte(1))
-            .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::from(1)));
-        let raw = Bytes::from(alloy_rlp::encode(Bal::new(vec![changes])));
-        (DecodedBal::from_rlp_bytes(raw.clone()).unwrap(), raw)
+    // Seeds a durable generation in a phase the store only reaches through real transitions.
+    fn seed_generation(factory: &ProviderFactory<MockNodeTypesWithDB>, generation: SnapGeneration) {
+        let provider = factory.database_provider_rw().unwrap();
+        provider
+            .save_stage_checkpoint(SNAP_SYNC_STAGE, StageCheckpoint::new(generation.target_block))
+            .unwrap();
+        provider
+            .save_stage_checkpoint_progress(SNAP_SYNC_STAGE, alloy_rlp::encode(generation))
+            .unwrap();
+        provider.commit().unwrap();
     }
 
     // Scripted head progression shared with the test that inspects it.

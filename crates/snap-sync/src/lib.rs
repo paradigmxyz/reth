@@ -16,18 +16,16 @@ mod download;
 mod error;
 mod handoff;
 mod pivot;
-mod reorg;
 mod session;
 mod store;
 mod trie;
 
 pub use catch_up::{BlockAccessListCatchUp, BlockAccessListCatchUpOutcome};
 pub use context::NodeSnapContext;
-pub use download::{DownloadedAccounts, RangeBudget, StateDownloadOutcome, StateDownloader};
+pub use download::{RangeBudget, StateDownloadOutcome, StateDownloader};
 pub use error::SnapSyncError;
 pub use handoff::SnapPipelineHandoff;
 pub use pivot::SnapPivotPolicy;
-pub use reorg::{PivotReorgRecovery, ReorgLimits, ReorgRecoveryOutcome};
 pub use session::{SnapSyncContext, SnapSyncOutcome, SnapSyncProvider, SnapSyncSession};
 pub use store::{
     AccountRangeProgress, BlockAccessListProgress, SnapGeneration, SnapPhase, SnapStateStore,

@@ -147,48 +147,6 @@ impl<'a, C, F> StateDownloader<'a, C, F> {
         }
     }
 
-    /// Downloads the state of specific accounts, with their storage and code, at `root`.
-    ///
-    /// Accounts absent at `root` are omitted rather than reported: that is how a reorg recovery
-    /// learns an entry created on the orphaned fork has no value to restore.
-    ///
-    /// `None` means no eligible peer served `root`.
-    pub async fn download_accounts(
-        &mut self,
-        root: B256,
-        hashes: &[B256],
-    ) -> Result<Option<DownloadedAccounts>, SnapSyncError>
-    where
-        C: SnapClient,
-    {
-        let mut requested = hashes.to_vec();
-        requested.sort_unstable();
-        requested.dedup();
-
-        // Each account is requested as its own single-key range so the proof authenticates
-        // exactly the entry being restored.
-        let mut accounts = Vec::with_capacity(requested.len());
-        for hash in requested {
-            let Some(range) = self.download_account_range(root, hash, hash).await? else {
-                return Ok(None)
-            };
-            if let Some(account) = range.accounts.iter().find(|(found, _)| *found == hash) {
-                accounts.push(*account);
-            }
-        }
-
-        let Some(storages) = self.download_storages(root, &accounts).await? else {
-            return Ok(None)
-        };
-        let Some(bytecodes) = self.download_bytecodes(&accounts).await? else { return Ok(None) };
-        let state = HashedPostState::default()
-            .with_accounts(
-                accounts.iter().map(|(hash, account)| (*hash, Some(Account::from(*account)))),
-            )
-            .with_storages(storages);
-        Ok(Some(DownloadedAccounts { state, bytecodes }))
-    }
-
     // Retries unavailable roots across distinct peers without penalizing them.
     async fn download_account_range(
         &mut self,
@@ -409,15 +367,6 @@ pub enum StateDownloadOutcome {
         /// Last fully committed generation position.
         generation: SnapGeneration,
     },
-}
-
-/// Verified state of a set of accounts at one root.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct DownloadedAccounts {
-    /// Accounts and their full storage, with storage marked as replacing any local slots.
-    pub state: HashedPostState,
-    /// Bytecode for the accounts' code hashes.
-    pub bytecodes: Vec<(B256, Bytes)>,
 }
 
 /// Number of account ranges a single download attempt commits before yielding.
@@ -685,46 +634,6 @@ mod tests {
         assert_eq!(generation.next_account, next_hash(first.0).unwrap());
         // Only the first range was requested, so the peer never saw a continuation.
         assert_eq!(client.priorities().len(), 1);
-    }
-
-    #[tokio::test]
-    async fn refetched_accounts_omit_entries_absent_at_the_root() {
-        let factory = create_test_provider_factory();
-        let first = (B256::repeat_byte(0x11), empty_account(1));
-        let second = (B256::repeat_byte(0x99), empty_account(2));
-        let missing = B256::repeat_byte(0x55);
-        let (root, present_proof) = root_and_proof(&[first, second], &[first.0]);
-        let (_, absent_proof) = root_and_proof(&[first, second], &[missing, second.0]);
-        let peer = PeerId::random();
-        let client = TestSnapClient::new([
-            response(
-                peer,
-                SnapResponse::AccountRange(AccountRangeMessage {
-                    request_id: 1,
-                    accounts: vec![AccountData::from_trie_account(first.0, &first.1)],
-                    proof: present_proof,
-                }),
-            ),
-            // The boundary account proves nothing exists at the requested hash.
-            response(
-                peer,
-                SnapResponse::AccountRange(AccountRangeMessage {
-                    request_id: 2,
-                    accounts: vec![AccountData::from_trie_account(second.0, &second.1)],
-                    proof: absent_proof,
-                }),
-            ),
-        ]);
-
-        let downloaded = StateDownloader::new(&client, &factory, Runtime::test())
-            .download_accounts(root, &[missing, first.0])
-            .await
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(downloaded.state.accounts.keys().copied().collect::<Vec<_>>(), vec![first.0]);
-        assert!(downloaded.state.storages.is_empty());
-        assert!(downloaded.bytecodes.is_empty());
     }
 
     #[test]
