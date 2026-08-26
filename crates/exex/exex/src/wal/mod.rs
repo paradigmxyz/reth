@@ -113,13 +113,14 @@ where
     /// Fills the block cache with the notifications from the storage.
     #[instrument(skip(self))]
     fn fill_block_cache(&self) -> WalResult<()> {
-        let Some(files_range) = self.storage.files_range()? else { return Ok(()) };
-        self.next_file_id.store(files_range.end() + 1, Ordering::Relaxed);
+        let file_ids = self.storage.file_ids()?;
+        let Some(&last_id) = file_ids.last() else { return Ok(()) };
+        self.next_file_id.store(last_id + 1, Ordering::Relaxed);
 
         let mut block_cache = self.block_cache.write();
         let mut notifications_size = 0;
 
-        for entry in self.storage.iter_notifications(files_range) {
+        for entry in self.storage.iter_notifications(file_ids) {
             let (file_id, size, notification) = entry?;
 
             notifications_size += size;
@@ -198,11 +199,12 @@ where
     fn iter_notifications(
         &self,
     ) -> WalResult<Box<dyn Iterator<Item = WalResult<ExExNotification<N>>> + '_>> {
-        let Some(range) = self.storage.files_range()? else {
+        let file_ids = self.storage.file_ids()?;
+        if file_ids.is_empty() {
             return Ok(Box::new(std::iter::empty()))
-        };
+        }
 
-        Ok(Box::new(self.storage.iter_notifications(range).map(|entry| Ok(entry?.2))))
+        Ok(Box::new(self.storage.iter_notifications(file_ids).map(|entry| Ok(entry?.2))))
     }
 }
 
@@ -238,6 +240,7 @@ mod tests {
     use crate::wal::{cache::CachedBlock, error::WalResult, Wal};
     use alloy_primitives::B256;
     use itertools::Itertools;
+    use reth_ethereum_primitives::EthPrimitives;
     use reth_exex_types::ExExNotification;
     use reth_provider::Chain;
     use reth_testing_utils::generators::{
@@ -246,13 +249,15 @@ mod tests {
     use std::{collections::BTreeMap, sync::Arc};
 
     fn read_notifications(wal: &Wal) -> WalResult<Vec<ExExNotification>> {
-        wal.inner.storage.files_range()?.map_or(Ok(Vec::new()), |range| {
-            wal.inner
-                .storage
-                .iter_notifications(range)
-                .map(|entry| entry.map(|(_, _, n)| n))
-                .collect()
-        })
+        let file_ids = wal.inner.storage.file_ids()?;
+        if file_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        wal.inner
+            .storage
+            .iter_notifications(file_ids)
+            .map(|entry| entry.map(|(_, _, n)| n))
+            .collect()
     }
 
     fn sort_committed_blocks(
@@ -522,4 +527,40 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_finalize_sparse_wal_hole() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+
+        let temp_dir = tempfile::tempdir()?;
+        let wal = Wal::<EthPrimitives>::new(&temp_dir)?;
+
+        let blocks = random_block_range(&mut rng, 0..=5, BlockRangeParams::default())
+            .into_iter()
+            .map(|block| block.try_recover())
+            .collect::<Result<Vec<_>, _>>()?;
+        let chain = |range: std::ops::RangeInclusive<usize>| {
+            Arc::new(Chain::new(blocks[range].to_vec(), Default::default(), BTreeMap::new()))
+        };
+
+        // file 0: commit up to block 4 -> max block 4
+        wal.commit(&ExExNotification::ChainCommitted { new: chain(1..=4) })?;
+        // file 1: deep revert of blocks 2..=4 -> max block 4
+        wal.commit(&ExExNotification::ChainReverted { old: chain(2..=4) })?;
+        // file 2: re-commit block 2 only -> max block 2 (drops below files 0 and 1)
+        wal.commit(&ExExNotification::ChainCommitted { new: chain(2..=2) })?;
+        // file 3: commit up to block 5 -> max block 5
+        wal.commit(&ExExNotification::ChainCommitted { new: chain(3..=5) })?;
+
+        // Finalizing at block 2 evicts only file 2. Files 0 and 1 are pinned at max block 4 and
+        // file 3 is at max block 5, so all three survive and a hole is created at file id 2.
+        wal.finalize((blocks[2].number, blocks[2].hash()).into())?;
+
+        // Restart: WAL should reopen cleanly even with hole at file id 2.
+        let wal = Wal::<EthPrimitives>::new(&temp_dir)?;
+        assert_eq!(wal.inner.next_file_id.load(std::sync::atomic::Ordering::Relaxed), 4);
+
+        Ok(())
+    }
 }
+

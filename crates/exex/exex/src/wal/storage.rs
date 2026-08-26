@@ -69,12 +69,9 @@ where
         }
     }
 
-    /// Returns the range of file IDs in the storage.
-    ///
-    /// If there are no files in the storage, returns `None`.
-    pub(super) fn files_range(&self) -> WalResult<Option<RangeInclusive<u32>>> {
-        let mut min_id = None;
-        let mut max_id = None;
+    /// Returns all file IDs present in the storage, sorted in ascending order.
+    pub(super) fn file_ids(&self) -> WalResult<Vec<u32>> {
+        let mut ids = Vec::new();
 
         for entry in reth_fs_util::read_dir(&self.path)? {
             let entry = entry.map_err(|err| WalError::DirEntry(self.path.clone(), err))?;
@@ -82,13 +79,20 @@ where
             if entry.path().extension() == Some(FILE_EXTENSION.as_ref()) {
                 let file_name = entry.file_name();
                 let file_id = Self::parse_filename(&file_name.to_string_lossy())?;
-
-                min_id = min_id.map_or(Some(file_id), |min_id: u32| Some(min_id.min(file_id)));
-                max_id = max_id.map_or(Some(file_id), |max_id: u32| Some(max_id.max(file_id)));
+                ids.push(file_id);
             }
         }
 
-        Ok(min_id.zip(max_id).map(|(min_id, max_id)| min_id..=max_id))
+        ids.sort_unstable();
+        Ok(ids)
+    }
+
+    /// Returns the range of file IDs in the storage.
+    ///
+    /// If there are no files in the storage, returns `None`.
+    pub(super) fn files_range(&self) -> WalResult<Option<RangeInclusive<u32>>> {
+        let ids = self.file_ids()?;
+        Ok(ids.first().zip(ids.last()).map(|(&min, &max)| min..=max))
     }
 
     /// Removes notifications from the storage according to the given list of file IDs.
@@ -113,11 +117,11 @@ where
         Ok((deleted_total, deleted_size))
     }
 
-    pub(super) fn iter_notifications(
-        &self,
-        range: RangeInclusive<u32>,
-    ) -> impl Iterator<Item = WalResult<(u32, u64, ExExNotification<N>)>> + '_ {
-        range.map(move |id| {
+    pub(super) fn iter_notifications<'a>(
+        &'a self,
+        file_ids: impl IntoIterator<Item = u32> + 'a,
+    ) -> impl Iterator<Item = WalResult<(u32, u64, ExExNotification<N>)>> + 'a {
+        file_ids.into_iter().map(move |id| {
             let (notification, size) =
                 self.read_notification(id)?.ok_or(WalError::FileNotFound(id))?;
 
