@@ -39,7 +39,6 @@ pub struct Config {
     #[cfg_attr(feature = "serde", serde(default))]
     pub static_files: StaticFilesConfig,
     /// Configuration for downloading historical block access lists.
-    #[cfg_attr(feature = "serde", serde(default))]
     pub historical_bal: HistoricalBalConfig,
 }
 

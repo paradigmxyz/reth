@@ -19,36 +19,10 @@ use std::{
 use tokio::sync::{oneshot, Notify};
 
 impl<P, C, W> HistoricalBalWorker<P, C, W> {
-    fn new_for_test(
-        provider: P,
-        store: BalStoreHandle,
-        client: C,
-        wake_stream: W,
-        runtime: Runtime,
-        config: HistoricalBalWorkerConfig,
-    ) -> Self {
-        Self::from_parts(provider, store, client, wake_stream, runtime, config)
-    }
-
     /// Sets the retry cooldown used after terminal unavailability, request failure, or invalidity.
     const fn with_retry_cooldown(mut self, retry_cooldown: Duration) -> Self {
         self.retry_cooldown = retry_cooldown;
         self
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-struct TestClient {
-    reports: Arc<Mutex<Vec<PeerId>>>,
-}
-
-impl DownloadClient for TestClient {
-    fn report_bad_message(&self, peer_id: PeerId) {
-        self.reports.lock().unwrap().push(peer_id);
-    }
-
-    fn num_connected_peers(&self) -> usize {
-        1
     }
 }
 
@@ -666,6 +640,26 @@ fn worker_config(enabled: bool) -> HistoricalBalWorkerConfig {
     HistoricalBalWorkerConfig::new(enabled, 1, 2, 2, 8).unwrap()
 }
 
+fn test_worker<P, C>(
+    provider: P,
+    store: BalStoreHandle,
+    client: C,
+    config: HistoricalBalWorkerConfig,
+) -> HistoricalBalWorker<P, C, futures::stream::Empty<()>> {
+    HistoricalBalWorker::from_parts(
+        provider,
+        store,
+        client,
+        futures::stream::empty(),
+        Runtime::test(),
+        config,
+    )
+}
+
+fn successful_response(values: Vec<Option<Bytes>>) -> PeerRequestResult<BlockAccessLists> {
+    Ok(WithPeerId::new(PeerId::random(), BlockAccessLists(values)))
+}
+
 fn counter_values(snapshotter: &Snapshotter) -> HashMap<String, u64> {
     snapshotter
         .snapshot()
@@ -703,8 +697,7 @@ async fn disabled_worker_sends_no_requests() {
         TestProvider::with_candidates(1, 0, vec![candidate(1, Some(keccak256(&raw)), 1, true)]);
     let store = BalStoreHandle::new(InMemoryBalStore::default());
     let client = ScriptedBalClient::default();
-    client.push_response(Ok(WithPeerId::new(PeerId::random(), BlockAccessLists(vec![Some(raw)]))));
-    let mut worker = HistoricalBalWorker::new_for_test(
+    let mut worker = HistoricalBalWorker::from_parts(
         provider,
         store,
         client.clone(),
@@ -727,36 +720,15 @@ async fn enabled_startup_downloads_store_miss_and_restart_skips_store_hit() {
     let provider = TestProvider::with_candidates(1, 0, vec![candidate]);
     let store = BalStoreHandle::new(InMemoryBalStore::default());
     let client = ScriptedBalClient::default();
-    client.push_response(Ok(WithPeerId::new(
-        PeerId::random(),
-        BlockAccessLists(vec![Some(raw.clone())]),
-    )));
+    client.push_response(successful_response(vec![Some(raw.clone())]));
 
-    HistoricalBalWorker::new_for_test(
-        provider.clone(),
-        store.clone(),
-        client.clone(),
-        futures::stream::empty::<()>(),
-        Runtime::test(),
-        worker_config(true),
-    )
-    .run()
-    .await;
+    test_worker(provider.clone(), store.clone(), client.clone(), worker_config(true)).run().await;
 
     let requests = client.requests();
     assert_eq!(requests, vec![(vec![candidate.num_hash.hash], BalRequirement::Optional)]);
     assert_eq!(store.get_by_hash(candidate.num_hash.hash).unwrap(), Some(raw));
 
-    HistoricalBalWorker::new_for_test(
-        provider,
-        store,
-        client.clone(),
-        futures::stream::empty::<()>(),
-        Runtime::test(),
-        worker_config(true),
-    )
-    .run()
-    .await;
+    test_worker(provider, store, client.clone(), worker_config(true)).run().await;
 
     assert_eq!(client.requests().len(), 1);
 }
@@ -769,11 +741,8 @@ async fn later_wakeup_reconciles_missed_committed_progress() {
     provider.set_checkpoint_overrides([(0, 0), (1, 0), (1, 0)]);
     let store = BalStoreHandle::new(InMemoryBalStore::default());
     let client = ScriptedBalClient::default();
-    client.push_response(Ok(WithPeerId::new(
-        PeerId::random(),
-        BlockAccessLists(vec![Some(raw.clone())]),
-    )));
-    let worker = HistoricalBalWorker::new_for_test(
+    client.push_response(successful_response(vec![Some(raw.clone())]));
+    let worker = HistoricalBalWorker::from_parts(
         provider,
         store.clone(),
         client.clone(),
@@ -796,19 +765,9 @@ async fn request_error_does_not_stop_later_reconciliation() {
     let store = BalStoreHandle::new(InMemoryBalStore::default());
     let client = ScriptedBalClient::default();
     client.push_response(Err(RequestError::Timeout));
-    client.push_response(Ok(WithPeerId::new(
-        PeerId::random(),
-        BlockAccessLists(vec![Some(raw.clone())]),
-    )));
-    let mut worker = HistoricalBalWorker::new_for_test(
-        provider,
-        store.clone(),
-        client.clone(),
-        futures::stream::empty::<()>(),
-        Runtime::test(),
-        worker_config(true),
-    )
-    .with_retry_cooldown(Duration::ZERO);
+    client.push_response(successful_response(vec![Some(raw.clone())]));
+    let mut worker = test_worker(provider, store.clone(), client.clone(), worker_config(true))
+        .with_retry_cooldown(Duration::ZERO);
 
     worker.run_once().await;
     worker.run_once().await;
@@ -826,18 +785,13 @@ async fn metrics_count_requested_downloaded_skipped_and_unavailable() {
     let low_work = candidate(3, Some(expected), 0, true);
     let provider = TestProvider::with_candidates(3, 0, vec![valid, unavailable, low_work]);
     let client = ScriptedBalClient::default();
-    client.push_response(Ok(WithPeerId::new(
-        PeerId::random(),
-        BlockAccessLists(vec![Some(raw), None]),
-    )));
+    client.push_response(successful_response(vec![Some(raw), None]));
     let recorder = DebuggingRecorder::new();
     let snapshotter = recorder.snapshotter();
-    let mut worker = HistoricalBalWorker::new_for_test(
+    let mut worker = test_worker(
         provider,
         BalStoreHandle::new(InMemoryBalStore::default()),
         client,
-        futures::stream::empty::<()>(),
-        Runtime::test(),
         worker_config(true),
     );
     worker.metrics = metrics::with_local_recorder(&recorder, || {
@@ -867,12 +821,10 @@ async fn metrics_count_invalid_response_and_report_peer_once() {
     client.push_response(Ok(WithPeerId::new(peer, BlockAccessLists(vec![None, None]))));
     let recorder = DebuggingRecorder::new();
     let snapshotter = recorder.snapshotter();
-    let mut worker = HistoricalBalWorker::new_for_test(
+    let mut worker = test_worker(
         provider,
         BalStoreHandle::new(InMemoryBalStore::default()),
         client.clone(),
-        futures::stream::empty::<()>(),
-        Runtime::test(),
         worker_config(true),
     );
     worker.metrics = metrics::with_local_recorder(&recorder, || {
@@ -897,18 +849,12 @@ async fn metrics_count_all_candidates_abandoned_after_recheck_error() {
     let provider = TestProvider::with_candidates(3, 0, candidates);
     provider.fail_canonical_call(2);
     let client = ScriptedBalClient::default();
-    client.push_response(Ok(WithPeerId::new(PeerId::random(), BlockAccessLists(vec![Some(raw)]))));
+    client.push_response(successful_response(vec![Some(raw)]));
     let recorder = DebuggingRecorder::new();
     let snapshotter = recorder.snapshotter();
     let config = HistoricalBalWorkerConfig::new(true, 1, 1, 2, 3).unwrap();
-    let mut worker = HistoricalBalWorker::new_for_test(
-        provider,
-        BalStoreHandle::new(InMemoryBalStore::default()),
-        client,
-        futures::stream::empty::<()>(),
-        Runtime::test(),
-        config,
-    );
+    let mut worker =
+        test_worker(provider, BalStoreHandle::new(InMemoryBalStore::default()), client, config);
     worker.metrics = metrics::with_local_recorder(&recorder, || {
         HistoricalBalDownloaderMetrics::new_with_labels(Vec::<metrics::Label>::new())
     });
@@ -932,20 +878,10 @@ async fn execution_progress_drops_later_batch_before_dispatch() {
     let store = BalStoreHandle::new(InMemoryBalStore::default());
     let client = ScriptedBalClient::default();
     for _ in 0..2 {
-        client.push_response(Ok(WithPeerId::new(
-            PeerId::random(),
-            BlockAccessLists(vec![Some(raw.clone())]),
-        )));
+        client.push_response(successful_response(vec![Some(raw.clone())]));
     }
     let config = HistoricalBalWorkerConfig::new(true, 1, 1, 1, 2).unwrap();
-    let mut worker = HistoricalBalWorker::new_for_test(
-        provider,
-        store,
-        client.clone(),
-        futures::stream::empty::<()>(),
-        Runtime::test(),
-        config,
-    );
+    let mut worker = test_worker(provider, store, client.clone(), config);
 
     worker.run_once().await;
 
@@ -962,19 +898,9 @@ async fn later_batch_recheck_error_preserves_in_flight_response() {
     provider.fail_canonical_call(2);
     let store = BalStoreHandle::new(InMemoryBalStore::default());
     let client = ScriptedBalClient::default();
-    client.push_response(Ok(WithPeerId::new(
-        PeerId::random(),
-        BlockAccessLists(vec![Some(raw.clone())]),
-    )));
+    client.push_response(successful_response(vec![Some(raw.clone())]));
     let config = HistoricalBalWorkerConfig::new(true, 1, 1, 2, 2).unwrap();
-    let mut worker = HistoricalBalWorker::new_for_test(
-        provider,
-        store.clone(),
-        client.clone(),
-        futures::stream::empty::<()>(),
-        Runtime::test(),
-        config,
-    );
+    let mut worker = test_worker(provider, store.clone(), client.clone(), config);
 
     worker.run_once().await;
 
@@ -989,12 +915,10 @@ async fn predispatch_recheck_drops_reorged_candidate() {
     let provider = TestProvider::with_candidates(1, 0, vec![candidate]);
     provider.set_noncanonical_calls([1]);
     let client = ScriptedBalClient::default();
-    let mut worker = HistoricalBalWorker::new_for_test(
+    let mut worker = test_worker(
         provider,
         BalStoreHandle::new(InMemoryBalStore::default()),
         client.clone(),
-        futures::stream::empty::<()>(),
-        Runtime::test(),
         worker_config(true),
     );
 
@@ -1014,14 +938,7 @@ async fn predispatch_recheck_drops_new_store_hit() {
     };
     let store = BalStoreHandle::new(changing_store);
     let client = ScriptedBalClient::default();
-    let mut worker = HistoricalBalWorker::new_for_test(
-        provider,
-        store.clone(),
-        client.clone(),
-        futures::stream::empty::<()>(),
-        Runtime::test(),
-        worker_config(true),
-    );
+    let mut worker = test_worker(provider, store.clone(), client.clone(), worker_config(true));
 
     worker.run_once().await;
 
@@ -1038,18 +955,8 @@ async fn partial_insert_error_still_rechecks_and_flushes() {
     let fault_store = FaultingBalStore { partial_insert_error: true, ..Default::default() };
     let store = BalStoreHandle::new(fault_store.clone());
     let client = ScriptedBalClient::default();
-    client.push_response(Ok(WithPeerId::new(
-        PeerId::random(),
-        BlockAccessLists(vec![Some(raw.clone())]),
-    )));
-    let mut worker = HistoricalBalWorker::new_for_test(
-        provider.clone(),
-        store.clone(),
-        client,
-        futures::stream::empty::<()>(),
-        Runtime::test(),
-        worker_config(true),
-    );
+    client.push_response(successful_response(vec![Some(raw.clone())]));
+    let mut worker = test_worker(provider.clone(), store.clone(), client, worker_config(true));
 
     worker.run_once().await;
 
@@ -1067,11 +974,8 @@ async fn post_insert_canonical_error_retries_flush_on_next_wakeup() {
     let fault_store = FaultingBalStore::default();
     let store = BalStoreHandle::new(fault_store.clone());
     let client = ScriptedBalClient::default();
-    client.push_response(Ok(WithPeerId::new(
-        PeerId::random(),
-        BlockAccessLists(vec![Some(raw.clone())]),
-    )));
-    let worker = HistoricalBalWorker::new_for_test(
+    client.push_response(successful_response(vec![Some(raw.clone())]));
+    let worker = HistoricalBalWorker::from_parts(
         provider.clone(),
         store.clone(),
         client.clone(),
@@ -1098,15 +1002,8 @@ async fn post_insert_canonical_error_drops_stale_identity_without_flush() {
     let fault_store = FaultingBalStore::default();
     let store = BalStoreHandle::new(fault_store.clone());
     let client = ScriptedBalClient::default();
-    client.push_response(Ok(WithPeerId::new(PeerId::random(), BlockAccessLists(vec![Some(raw)]))));
-    let mut worker = HistoricalBalWorker::new_for_test(
-        provider.clone(),
-        store,
-        client.clone(),
-        futures::stream::empty::<()>(),
-        Runtime::test(),
-        worker_config(true),
-    );
+    client.push_response(successful_response(vec![Some(raw)]));
+    let mut worker = test_worker(provider.clone(), store, client.clone(), worker_config(true));
 
     worker.run_once().await;
     worker.run_once().await;
@@ -1127,15 +1024,8 @@ async fn post_insert_canonical_panic_drops_stale_identity_without_flush() {
     let fault_store = FaultingBalStore::default();
     let store = BalStoreHandle::new(fault_store.clone());
     let client = ScriptedBalClient::default();
-    client.push_response(Ok(WithPeerId::new(PeerId::random(), BlockAccessLists(vec![Some(raw)]))));
-    let mut worker = HistoricalBalWorker::new_for_test(
-        provider.clone(),
-        store,
-        client.clone(),
-        futures::stream::empty::<()>(),
-        Runtime::test(),
-        worker_config(true),
-    );
+    client.push_response(successful_response(vec![Some(raw)]));
+    let mut worker = test_worker(provider.clone(), store, client.clone(), worker_config(true));
 
     worker.run_once().await;
     worker.run_once().await;
@@ -1156,11 +1046,8 @@ async fn failed_flush_does_not_replay_reorged_identity_on_retry() {
     let retaining_store = RetainingFlushBalStore::with_failed_first_flush();
     let store = BalStoreHandle::new(retaining_store.clone());
     let client = ScriptedBalClient::default();
-    client.push_response(Ok(WithPeerId::new(
-        PeerId::random(),
-        BlockAccessLists(vec![Some(raw.clone())]),
-    )));
-    let worker = HistoricalBalWorker::new_for_test(
+    client.push_response(successful_response(vec![Some(raw.clone())]));
+    let worker = HistoricalBalWorker::from_parts(
         provider,
         store,
         client.clone(),
@@ -1186,19 +1073,9 @@ async fn uncertain_flush_waits_for_all_identities_to_be_canonical() {
     let retaining_store = RetainingFlushBalStore::with_failed_first_flush();
     let store = BalStoreHandle::new(retaining_store.clone());
     let client = ScriptedBalClient::default();
-    client.push_response(Ok(WithPeerId::new(
-        PeerId::random(),
-        BlockAccessLists(vec![Some(raw.clone()), Some(raw.clone())]),
-    )));
+    client.push_response(successful_response(vec![Some(raw.clone()), Some(raw.clone())]));
     let config = HistoricalBalWorkerConfig::new(true, 1, 2, 1, 2).unwrap();
-    let mut worker = HistoricalBalWorker::new_for_test(
-        provider.clone(),
-        store,
-        client.clone(),
-        futures::stream::empty::<()>(),
-        Runtime::test(),
-        config,
-    );
+    let mut worker = test_worker(provider.clone(), store, client.clone(), config);
 
     worker.run_once().await;
     provider.set_canonical_hash(second.num_hash.number, B256::ZERO);
@@ -1238,23 +1115,10 @@ async fn uncertain_flush_does_not_block_canonical_new_work() {
     let retaining_store = RetainingFlushBalStore::with_failed_first_flush();
     let store = BalStoreHandle::new(retaining_store.clone());
     let client = ScriptedBalClient::default();
-    client.push_response(Ok(WithPeerId::new(
-        PeerId::random(),
-        BlockAccessLists(vec![Some(raw.clone())]),
-    )));
-    client.push_response(Ok(WithPeerId::new(
-        PeerId::random(),
-        BlockAccessLists(vec![Some(raw.clone())]),
-    )));
+    client.push_response(successful_response(vec![Some(raw.clone())]));
+    client.push_response(successful_response(vec![Some(raw.clone())]));
     let config = HistoricalBalWorkerConfig::new(true, 1, 2, 1, 2).unwrap();
-    let mut worker = HistoricalBalWorker::new_for_test(
-        provider,
-        store,
-        client.clone(),
-        futures::stream::empty::<()>(),
-        Runtime::test(),
-        config,
-    );
+    let mut worker = test_worker(provider, store, client.clone(), config);
 
     worker.run_once().await;
 
@@ -1278,19 +1142,9 @@ async fn pending_flush_capacity_bounds_new_work() {
     let retaining_store = RetainingFlushBalStore::with_failed_first_flush();
     let store = BalStoreHandle::new(retaining_store);
     let client = ScriptedBalClient::default();
-    client.push_response(Ok(WithPeerId::new(
-        PeerId::random(),
-        BlockAccessLists(vec![Some(raw.clone()), Some(raw.clone())]),
-    )));
+    client.push_response(successful_response(vec![Some(raw.clone()), Some(raw.clone())]));
     let config = HistoricalBalWorkerConfig::new(true, 1, 2, 1, 2).unwrap();
-    let mut worker = HistoricalBalWorker::new_for_test(
-        provider.clone(),
-        store,
-        client.clone(),
-        futures::stream::empty::<()>(),
-        Runtime::test(),
-        config,
-    );
+    let mut worker = test_worker(provider.clone(), store, client.clone(), config);
 
     worker.run_once().await;
     assert_eq!(worker.pending_flush.len(), 2);
@@ -1315,23 +1169,10 @@ async fn flush_error_does_not_prevent_next_reconciliation() {
         FaultingBalStore { partial_insert_error: true, fail_flush: true, ..Default::default() };
     let store = BalStoreHandle::new(fault_store.clone());
     let client = ScriptedBalClient::default();
-    client.push_response(Ok(WithPeerId::new(
-        PeerId::random(),
-        BlockAccessLists(vec![Some(raw.clone()), Some(raw.clone())]),
-    )));
-    client.push_response(Ok(WithPeerId::new(
-        PeerId::random(),
-        BlockAccessLists(vec![Some(raw.clone())]),
-    )));
-    let mut worker = HistoricalBalWorker::new_for_test(
-        provider,
-        store.clone(),
-        client.clone(),
-        futures::stream::empty::<()>(),
-        Runtime::test(),
-        worker_config(true),
-    )
-    .with_retry_cooldown(Duration::ZERO);
+    client.push_response(successful_response(vec![Some(raw.clone()), Some(raw.clone())]));
+    client.push_response(successful_response(vec![Some(raw.clone())]));
+    let mut worker = test_worker(provider, store.clone(), client.clone(), worker_config(true))
+        .with_retry_cooldown(Duration::ZERO);
 
     worker.run_once().await;
     worker.run_once().await;
@@ -1356,15 +1197,8 @@ async fn post_response_reorg_rejects_stale_bal() {
     provider.set_noncanonical_calls([2]);
     let store = BalStoreHandle::new(InMemoryBalStore::default());
     let client = ScriptedBalClient::default();
-    client.push_response(Ok(WithPeerId::new(PeerId::random(), BlockAccessLists(vec![Some(raw)]))));
-    let mut worker = HistoricalBalWorker::new_for_test(
-        provider.clone(),
-        store.clone(),
-        client,
-        futures::stream::empty::<()>(),
-        Runtime::test(),
-        worker_config(true),
-    );
+    client.push_response(successful_response(vec![Some(raw)]));
+    let mut worker = test_worker(provider.clone(), store.clone(), client, worker_config(true));
 
     worker.run_once().await;
 
@@ -1381,18 +1215,8 @@ async fn pre_flush_reorg_excludes_stale_block() {
     let recording_store = FaultingBalStore::default();
     let store = BalStoreHandle::new(recording_store.clone());
     let client = ScriptedBalClient::default();
-    client.push_response(Ok(WithPeerId::new(
-        PeerId::random(),
-        BlockAccessLists(vec![Some(raw.clone())]),
-    )));
-    let mut worker = HistoricalBalWorker::new_for_test(
-        provider.clone(),
-        store.clone(),
-        client,
-        futures::stream::empty::<()>(),
-        Runtime::test(),
-        worker_config(true),
-    );
+    client.push_response(successful_response(vec![Some(raw.clone())]));
+    let mut worker = test_worker(provider.clone(), store.clone(), client, worker_config(true));
 
     worker.run_once().await;
 
@@ -1411,20 +1235,10 @@ async fn request_batching_and_future_construction_respect_bounds() {
     let store = BalStoreHandle::new(InMemoryBalStore::default());
     let client = ScriptedBalClient::default();
     for response_len in [2, 2, 1] {
-        client.push_response(Ok(WithPeerId::new(
-            PeerId::random(),
-            BlockAccessLists(vec![Some(raw.clone()); response_len]),
-        )));
+        client.push_response(successful_response(vec![Some(raw.clone()); response_len]));
     }
     let config = HistoricalBalWorkerConfig::new(true, 1, 2, 2, 5).unwrap();
-    let mut worker = HistoricalBalWorker::new_for_test(
-        provider,
-        store,
-        client.clone(),
-        futures::stream::empty::<()>(),
-        Runtime::test(),
-        config,
-    );
+    let mut worker = test_worker(provider, store, client.clone(), config);
 
     worker.run_once().await;
 
@@ -1443,25 +1257,12 @@ async fn positive_short_prefix_continues_only_missing_tail_without_cooldown() {
     let provider = TestProvider::with_candidates(3, 0, candidates.clone());
     let store = BalStoreHandle::new(InMemoryBalStore::default());
     let client = ScriptedBalClient::default();
-    client.push_response(Ok(WithPeerId::new(
-        PeerId::random(),
-        BlockAccessLists(vec![Some(raw.clone())]),
-    )));
-    client.push_response(Ok(WithPeerId::new(
-        PeerId::random(),
-        BlockAccessLists(vec![Some(raw.clone()), Some(raw.clone())]),
-    )));
+    client.push_response(successful_response(vec![Some(raw.clone())]));
+    client.push_response(successful_response(vec![Some(raw.clone()), Some(raw.clone())]));
     let recorder = DebuggingRecorder::new();
     let snapshotter = recorder.snapshotter();
     let config = HistoricalBalWorkerConfig::new(true, 1, 3, 1, 3).unwrap();
-    let mut worker = HistoricalBalWorker::new_for_test(
-        provider,
-        store.clone(),
-        client.clone(),
-        futures::stream::empty::<()>(),
-        Runtime::test(),
-        config,
-    );
+    let mut worker = test_worker(provider, store.clone(), client.clone(), config);
     worker.metrics = metrics::with_local_recorder(&recorder, || {
         HistoricalBalDownloaderMetrics::new_with_labels(Vec::<metrics::Label>::new())
     });
@@ -1499,23 +1300,10 @@ async fn short_prefix_none_stays_cooled_while_missing_tail_continues() {
     let provider = TestProvider::with_candidates(4, 0, candidates.clone());
     let store = BalStoreHandle::new(InMemoryBalStore::default());
     let client = ScriptedBalClient::default();
-    client.push_response(Ok(WithPeerId::new(
-        PeerId::random(),
-        BlockAccessLists(vec![Some(raw.clone()), None]),
-    )));
-    client.push_response(Ok(WithPeerId::new(
-        PeerId::random(),
-        BlockAccessLists(vec![Some(raw.clone()), Some(raw.clone())]),
-    )));
+    client.push_response(successful_response(vec![Some(raw.clone()), None]));
+    client.push_response(successful_response(vec![Some(raw.clone()), Some(raw.clone())]));
     let config = HistoricalBalWorkerConfig::new(true, 1, 4, 1, 4).unwrap();
-    let mut worker = HistoricalBalWorker::new_for_test(
-        provider,
-        store.clone(),
-        client.clone(),
-        futures::stream::empty::<()>(),
-        Runtime::test(),
-        config,
-    );
+    let mut worker = test_worker(provider, store.clone(), client.clone(), config);
 
     worker.run_once().await;
     worker.run_once().await;
@@ -1550,20 +1338,10 @@ async fn repeated_positive_prefixes_shrink_monotonically_and_stop_at_lookahead()
     let store = BalStoreHandle::new(InMemoryBalStore::default());
     let client = ScriptedBalClient::default();
     for _ in &candidates {
-        client.push_response(Ok(WithPeerId::new(
-            PeerId::random(),
-            BlockAccessLists(vec![Some(raw.clone())]),
-        )));
+        client.push_response(successful_response(vec![Some(raw.clone())]));
     }
     let config = HistoricalBalWorkerConfig::new(true, 1, 4, 1, 4).unwrap();
-    let mut worker = HistoricalBalWorker::new_for_test(
-        provider,
-        store.clone(),
-        client.clone(),
-        futures::stream::empty::<()>(),
-        Runtime::test(),
-        config,
-    );
+    let mut worker = test_worker(provider, store.clone(), client.clone(), config);
 
     worker.run_once().await;
 
@@ -1593,18 +1371,11 @@ async fn zero_progress_response_does_not_continue_or_bypass_cooldown() {
     let provider = TestProvider::with_candidates(3, 0, candidates.clone());
     let store = BalStoreHandle::new(InMemoryBalStore::default());
     let client = ScriptedBalClient::default();
-    client.push_response(Ok(WithPeerId::new(PeerId::random(), BlockAccessLists(Vec::new()))));
+    client.push_response(successful_response(Vec::new()));
     let recorder = DebuggingRecorder::new();
     let snapshotter = recorder.snapshotter();
     let config = HistoricalBalWorkerConfig::new(true, 1, 3, 1, 3).unwrap();
-    let mut worker = HistoricalBalWorker::new_for_test(
-        provider,
-        store.clone(),
-        client.clone(),
-        futures::stream::empty::<()>(),
-        Runtime::test(),
-        config,
-    );
+    let mut worker = test_worker(provider, store.clone(), client.clone(), config);
     worker.metrics = metrics::with_local_recorder(&recorder, || {
         HistoricalBalDownloaderMetrics::new_with_labels(Vec::<metrics::Label>::new())
     });
@@ -1633,12 +1404,10 @@ async fn request_error_and_invalid_short_response_do_not_continue() {
     let client = ScriptedBalClient::default();
     client.push_response(Err(RequestError::Timeout));
     let config = HistoricalBalWorkerConfig::new(true, 1, 3, 1, 3).unwrap();
-    let mut worker = HistoricalBalWorker::new_for_test(
+    let mut worker = test_worker(
         provider,
         BalStoreHandle::new(InMemoryBalStore::default()),
         client.clone(),
-        futures::stream::empty::<()>(),
-        Runtime::test(),
         config,
     );
 
@@ -1656,14 +1425,7 @@ async fn request_error_and_invalid_short_response_do_not_continue() {
     let client = ScriptedBalClient::default();
     let peer = PeerId::random();
     client.push_response(Ok(WithPeerId::new(peer, BlockAccessLists(vec![Some(raw)]))));
-    let mut worker = HistoricalBalWorker::new_for_test(
-        provider,
-        store.clone(),
-        client.clone(),
-        futures::stream::empty::<()>(),
-        Runtime::test(),
-        config,
-    );
+    let mut worker = test_worker(provider, store.clone(), client.clone(), config);
 
     worker.run_once().await;
     worker.run_once().await;
@@ -1686,19 +1448,9 @@ async fn short_tail_rejected_by_progress_stays_cooled_if_window_reopens() {
     provider.set_checkpoint_overrides([(3, 0), (3, 0), (3, 3)]);
     let store = BalStoreHandle::new(InMemoryBalStore::default());
     let client = ScriptedBalClient::default();
-    client.push_response(Ok(WithPeerId::new(
-        PeerId::random(),
-        BlockAccessLists(vec![Some(raw.clone())]),
-    )));
+    client.push_response(successful_response(vec![Some(raw.clone())]));
     let config = HistoricalBalWorkerConfig::new(true, 1, 3, 1, 3).unwrap();
-    let mut worker = HistoricalBalWorker::new_for_test(
-        provider,
-        store.clone(),
-        client.clone(),
-        futures::stream::empty::<()>(),
-        Runtime::test(),
-        config,
-    );
+    let mut worker = test_worker(provider, store.clone(), client.clone(), config);
 
     worker.run_once().await;
     worker.run_once().await;
@@ -1725,28 +1477,16 @@ async fn completed_response_is_persisted_before_pending_tail_resolves() {
     });
     let client = ScriptedBalClient::default();
     for _ in 0..2 {
-        client.push_response(Ok(WithPeerId::new(
-            PeerId::random(),
-            BlockAccessLists(vec![Some(raw.clone())]),
-        )));
+        client.push_response(successful_response(vec![Some(raw.clone())]));
     }
     let pending = client.push_pending_response();
     let config = HistoricalBalWorkerConfig::new(true, 1, 1, 2, 3).unwrap();
-    let mut worker = HistoricalBalWorker::new_for_test(
-        provider,
-        store.clone(),
-        client,
-        futures::stream::empty::<()>(),
-        Runtime::test(),
-        config,
-    );
+    let mut worker = test_worker(provider, store.clone(), client, config);
 
     let task = tokio::spawn(async move { worker.run_once().await });
     let persisted_before_tail =
         tokio::time::timeout(Duration::from_secs(1), insert_notify.notified()).await.is_ok();
-    pending
-        .send(Ok(WithPeerId::new(PeerId::random(), BlockAccessLists(vec![Some(raw.clone())]))))
-        .unwrap();
+    pending.send(successful_response(vec![Some(raw.clone())])).unwrap();
     task.await.unwrap();
 
     assert!(persisted_before_tail);
@@ -1763,7 +1503,7 @@ async fn blanket_provider_scan_filters_commitment_work_and_store_hits() {
     add_mock_header(&provider, 1, None, 3);
     add_mock_header(&provider, 2, Some(expected), 1);
     let stored_hash = add_mock_header(&provider, 3, Some(expected), 3);
-    let requested_hash = add_mock_header(&provider, 4, Some(expected), 3);
+    let requested_hash = add_mock_header(&provider, 4, Some(expected), 2);
     provider.inner.add_stage_checkpoint(StageId::Bodies, StageCheckpoint::new(4));
     provider.inner.add_stage_checkpoint(StageId::Execution, StageCheckpoint::new(0));
 
@@ -1771,55 +1511,18 @@ async fn blanket_provider_scan_filters_commitment_work_and_store_hits() {
     let store = BalStoreHandle::new(recording_store.clone());
     store.insert(NumHash::new(3, stored_hash), RawBal::new(raw.clone())).unwrap();
     let client = ScriptedBalClient::default();
-    client.push_response(Ok(WithPeerId::new(PeerId::random(), BlockAccessLists(vec![Some(raw)]))));
+    client.push_response(successful_response(vec![Some(raw)]));
     let config = HistoricalBalWorkerConfig::new(true, 2, 4, 1, 4).unwrap();
-    let mut worker = HistoricalBalWorker::new_for_test(
-        provider,
-        store,
-        client.clone(),
-        futures::stream::empty::<()>(),
-        Runtime::test(),
-        config,
-    );
+    let mut worker = test_worker(provider, store, client.clone(), config);
 
     worker.run_once().await;
 
     assert_eq!(client.requests(), vec![(vec![requested_hash], BalRequirement::Optional)]);
-    assert_eq!(recording_store.lookups().first(), Some(&vec![stored_hash, requested_hash]));
     assert_eq!(
         recording_store.lookups(),
         vec![vec![stored_hash, requested_hash], vec![requested_hash]]
     );
     assert!(client.reports().is_empty());
-}
-
-#[tokio::test]
-async fn scan_queries_store_only_after_commitment_and_work_filter() {
-    let raw = Bytes::from_static(&[0xc0]);
-    let expected = keccak256(&raw);
-    let provider = RangeMockProvider::new();
-    add_mock_header(&provider, 1, None, 10);
-    add_mock_header(&provider, 2, Some(expected), 1);
-    let requested_hash = add_mock_header(&provider, 3, Some(expected), 2);
-    provider.inner.add_stage_checkpoint(StageId::Bodies, StageCheckpoint::new(3));
-    provider.inner.add_stage_checkpoint(StageId::Execution, StageCheckpoint::new(0));
-    let recording_store = FaultingBalStore::default();
-    let store = BalStoreHandle::new(recording_store.clone());
-    let client = ScriptedBalClient::default();
-    client.push_response(Ok(WithPeerId::new(PeerId::random(), BlockAccessLists(vec![Some(raw)]))));
-    let config = HistoricalBalWorkerConfig::new(true, 2, 2, 1, 3).unwrap();
-    let mut worker = HistoricalBalWorker::new_for_test(
-        provider,
-        store,
-        client,
-        futures::stream::empty::<()>(),
-        Runtime::test(),
-        config,
-    );
-
-    worker.run_once().await;
-
-    assert_eq!(recording_store.lookups().first(), Some(&vec![requested_hash]));
 }
 
 #[test]
@@ -1934,7 +1637,6 @@ fn worker_config_enforces_bounds_and_window() {
     assert_eq!(config.window(10, 100), Some(11..=74));
     assert_eq!(config.window(100, 100), None);
     assert_eq!(config.window(u64::MAX, u64::MAX), None);
-    assert_eq!(config.with_effective_lookahead(NonZeroU64::new(8).unwrap()).lookahead.get(), 8);
 }
 
 #[test]
@@ -2029,7 +1731,7 @@ fn attempted_cooldown_retries_at_boundary() {
 fn validates_prefix_none_short_tail_and_request_error_without_reporting() {
     let bal = Bytes::from_static(&[0xc0]);
     let expected = keccak256(&bal);
-    let client = TestClient::default();
+    let client = ScriptedBalClient::default();
     let requested = vec![eligible_candidate(1, expected), eligible_candidate(2, expected)];
     let peer = PeerId::random();
 
@@ -2056,12 +1758,12 @@ fn validates_prefix_none_short_tail_and_request_error_without_reporting() {
         Err(reth_network_p2p::error::RequestError::Timeout),
     );
     assert_eq!(outcome.unavailable, requested.len());
-    assert!(client.reports.lock().unwrap().is_empty());
+    assert!(client.reports().is_empty());
 }
 
 #[test]
 fn rejects_overlong_response_and_reports_peer_once() {
-    let client = TestClient::default();
+    let client = ScriptedBalClient::default();
     let requested = [eligible_candidate(1, B256::ZERO)];
     let peer = PeerId::random();
 
@@ -2074,13 +1776,13 @@ fn rejects_overlong_response_and_reports_peer_once() {
     assert!(outcome.values.is_empty());
     assert_eq!(outcome.unavailable, 0);
     assert_eq!(outcome.invalid, 1);
-    assert_eq!(*client.reports.lock().unwrap(), vec![peer]);
+    assert_eq!(client.reports(), vec![peer]);
 }
 
 #[test]
 fn rejects_malformed_nested_rlp_even_when_raw_hash_matches() {
     let malformed = Bytes::from_static(&[0xc1, 0x7f]);
-    let client = TestClient::default();
+    let client = ScriptedBalClient::default();
     let requested = [eligible_candidate(1, keccak256(&malformed))];
     let peer = PeerId::random();
     let encoded = alloy_rlp::encode(BlockAccessLists(vec![Some(malformed)]));
@@ -2090,13 +1792,13 @@ fn rejects_malformed_nested_rlp_even_when_raw_hash_matches() {
 
     assert!(outcome.values.is_empty());
     assert_eq!(outcome.invalid, 1);
-    assert_eq!(*client.reports.lock().unwrap(), vec![peer]);
+    assert_eq!(client.reports(), vec![peer]);
 }
 
 #[test]
 fn rejects_hash_mismatch_once_and_preserves_valid_prefix() {
     let bal = Bytes::from_static(&[0xc0]);
-    let client = TestClient::default();
+    let client = ScriptedBalClient::default();
     let requested = [eligible_candidate(1, keccak256(&bal)), eligible_candidate(2, B256::ZERO)];
     let peer = PeerId::random();
 
@@ -2109,5 +1811,5 @@ fn rejects_hash_mismatch_once_and_preserves_valid_prefix() {
     assert_eq!(outcome.values.len(), 1);
     assert_eq!(outcome.values[0].0, requested[0].num_hash);
     assert_eq!(outcome.invalid, 1);
-    assert_eq!(*client.reports.lock().unwrap(), vec![peer]);
+    assert_eq!(client.reports(), vec![peer]);
 }

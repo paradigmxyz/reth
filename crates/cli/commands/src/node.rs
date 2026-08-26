@@ -383,30 +383,16 @@ mod tests {
 
     #[test]
     fn parse_historical_bal_override() {
-        let omitted =
-            NodeCommand::<EthereumChainSpecParser>::try_parse_args_from(["reth"]).unwrap();
-        assert_eq!(omitted.historical_bal, None);
-
-        let bare = NodeCommand::<EthereumChainSpecParser>::try_parse_args_from([
-            "reth",
-            "--historical-bal",
-        ])
-        .unwrap();
-        assert_eq!(bare.historical_bal, Some(true));
-
-        let explicit_true = NodeCommand::<EthereumChainSpecParser>::try_parse_args_from([
-            "reth",
-            "--historical-bal=true",
-        ])
-        .unwrap();
-        assert_eq!(explicit_true.historical_bal, Some(true));
-
-        let explicit_false = NodeCommand::<EthereumChainSpecParser>::try_parse_args_from([
-            "reth",
-            "--historical-bal=false",
-        ])
-        .unwrap();
-        assert_eq!(explicit_false.historical_bal, Some(false));
+        for (args, expected) in [
+            (&["reth"][..], None),
+            (&["reth", "--historical-bal"][..], Some(true)),
+            (&["reth", "--historical-bal=true"][..], Some(true)),
+            (&["reth", "--historical-bal=false"][..], Some(false)),
+        ] {
+            let command =
+                NodeCommand::<EthereumChainSpecParser>::try_parse_args_from(args).unwrap();
+            assert_eq!(command.historical_bal, expected, "args: {args:?}");
+        }
     }
 
     #[test]

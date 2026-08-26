@@ -24,12 +24,6 @@ mod tests {
     use core::num::NonZeroU64;
 
     #[test]
-    fn construction_requires_positive_minimum() {
-        assert!(NonZeroU64::new(0).map(BalExecutionPolicy::new).is_none());
-        assert!(NonZeroU64::new(1).map(BalExecutionPolicy::new).is_some());
-    }
-
-    #[test]
     fn rejects_transaction_count_below_minimum() {
         let policy = BalExecutionPolicy::new(NonZeroU64::new(3).unwrap());
 

@@ -478,13 +478,9 @@ impl<P, C, W> HistoricalBalWorker<P, C, W> {
         W: Stream + Send + Unpin + 'static,
         W::Item: Send,
     {
-        if self.config.enabled {
-            self.run_once().await;
-        }
+        self.run_once().await;
         while self.wake_stream.next().await.is_some() {
-            if self.config.enabled {
-                self.run_once().await;
-            }
+            self.run_once().await;
         }
     }
 
@@ -501,8 +497,8 @@ impl<P, C, W> HistoricalBalWorker<P, C, W> {
         self.retry_pending_flush().await;
 
         let provider = self.provider.clone();
-        let Some(Ok((bodies, execution))) =
-            self.runtime.spawn_blocking(move || provider.historical_bal_checkpoints()).await.ok()
+        let Ok(Ok((bodies, execution))) =
+            self.runtime.spawn_blocking(move || provider.historical_bal_checkpoints()).await
         else {
             return
         };
@@ -515,11 +511,10 @@ impl<P, C, W> HistoricalBalWorker<P, C, W> {
         let store = self.store.clone();
         let scan_range = window.clone();
         let policy = self.config.policy();
-        let Some(Ok(scan)) = self
+        let Ok(Ok(scan)) = self
             .runtime
             .spawn_blocking(move || provider.historical_bal_scan(scan_range, &store, policy))
             .await
-            .ok()
         else {
             return
         };
@@ -563,16 +558,11 @@ impl<P, C, W> HistoricalBalWorker<P, C, W> {
         while !pending.is_empty() || !in_flight.is_empty() {
             while scheduling && in_flight.len() < max_concurrent_requests {
                 let Some(chunk) = pending.pop_front() else { break };
-                let permit = match semaphore.clone().acquire_owned().await {
-                    Ok(permit) => permit,
-                    Err(_) => {
-                        let abandoned = chunk.len() + pending.iter().map(Vec::len).sum::<usize>();
-                        self.metrics.skipped.increment(abandoned as u64);
-                        pending.clear();
-                        scheduling = false;
-                        break
-                    }
-                };
+                let permit = semaphore
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .expect("the reconciliation-local request semaphore is never closed");
 
                 let provider = self.provider.clone();
                 let store = self.store.clone();
@@ -627,9 +617,9 @@ impl<P, C, W> HistoricalBalWorker<P, C, W> {
                 }
 
                 let attempted_at = Instant::now();
-                for candidate in &dispatchable {
-                    self.attempted.insert(candidate.num_hash, attempted_at);
-                }
+                self.attempted.extend(
+                    dispatchable.iter().map(|candidate| (candidate.num_hash, attempted_at)),
+                );
                 let client = self.client.clone();
                 let chunk = dispatchable;
                 let hashes =
@@ -773,7 +763,6 @@ impl<P, C, W> HistoricalBalWorker<P, C, W> {
         let mut blocks = self.pending_flush.iter().copied().collect::<Vec<_>>();
         blocks.sort_unstable_by_key(|block| block.number);
         let pending = blocks.len();
-        let uncertain_flush = self.uncertain_flush.clone();
         let provider = self.provider.clone();
         let canonical_result = self
             .runtime
@@ -811,7 +800,8 @@ impl<P, C, W> HistoricalBalWorker<P, C, W> {
 
         // A failed flush may retain its internal canonical set. Do not issue a narrower retry while
         // any identity from that uncertain set is no longer canonical.
-        if uncertain_flush.iter().any(|block| stale.contains(block)) {
+        if self.uncertain_flush.iter().any(|block| stale.contains(block)) {
+            let uncertain_flush = &self.uncertain_flush;
             self.pending_flush
                 .retain(|block| uncertain_flush.contains(block) || !stale.contains(block));
             self.uncertain_flush.retain(|block| self.pending_flush.contains(block));
@@ -831,12 +821,10 @@ impl<P, C, W> HistoricalBalWorker<P, C, W> {
             Ok(Ok(())) => {
                 self.pending_flush
                     .retain(|block| !attempted.contains(block) && !stale.contains(block));
-                self.uncertain_flush.retain(|block| self.pending_flush.contains(block));
             }
             Ok(Err(error)) => {
                 self.pending_flush.retain(|block| !stale.contains(block));
                 self.uncertain_flush.extend(attempted);
-                self.uncertain_flush.retain(|block| self.pending_flush.contains(block));
                 tracing::debug!(
                     target: "downloaders::historical_bal",
                     %error,
@@ -847,7 +835,6 @@ impl<P, C, W> HistoricalBalWorker<P, C, W> {
             Err(error) => {
                 self.pending_flush.retain(|block| !stale.contains(block));
                 self.uncertain_flush.extend(attempted);
-                self.uncertain_flush.retain(|block| self.pending_flush.contains(block));
                 tracing::debug!(
                     target: "downloaders::historical_bal",
                     %error,
@@ -856,6 +843,7 @@ impl<P, C, W> HistoricalBalWorker<P, C, W> {
                 );
             }
         }
+        self.uncertain_flush.retain(|block| self.pending_flush.contains(block));
     }
 }
 

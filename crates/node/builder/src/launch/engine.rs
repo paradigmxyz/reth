@@ -183,8 +183,7 @@ impl EngineNodeLauncher {
 
         let pipeline_events = pipeline.events();
 
-        let retention = ctx
-            .node_config()
+        let retention = node_config
             .db
             .balstore_cache_size
             .unwrap_or(BalConfig::DEFAULT_IN_MEMORY_RETENTION_DISTANCE);
@@ -517,14 +516,10 @@ mod tests {
     #[test]
     fn enabled_historical_bal_launches_with_zero_retention() {
         let config = reth_config::HistoricalBalConfig { enabled: true, ..Default::default() };
-
+        let expected = HistoricalBalWorkerConfig::try_from(config)
+            .unwrap()
+            .with_effective_lookahead(NonZeroU64::new(1).unwrap());
         let config = historical_bal_worker_config(config, 0).unwrap().unwrap();
-        let expected = HistoricalBalWorkerConfig::try_from(reth_config::HistoricalBalConfig {
-            enabled: true,
-            ..Default::default()
-        })
-        .unwrap()
-        .with_effective_lookahead(NonZeroU64::new(1).unwrap());
 
         assert_eq!(config, expected);
     }

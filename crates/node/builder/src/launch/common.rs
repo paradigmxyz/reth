@@ -1547,31 +1547,23 @@ mod tests {
     #[test]
     fn test_historical_bal_cli_override_preserves_toml_when_omitted() {
         with_tempdir("historical-bal-config", |config_path| {
-            std::fs::write(config_path, "[historical_bal]\nenabled = true\nmin_transactions = 9\n")
-                .unwrap();
+            const ENABLED_CONFIG: &str = "[historical_bal]\nenabled = true\nmin_transactions = 9\n";
+            const DISABLED_CONFIG: &str =
+                "[historical_bal]\nenabled = false\nmin_transactions = 11\n";
 
-            let node_config = NodeConfig::test().with_config(config_path);
-            let context = LaunchContext::new(Runtime::test(), node_config.datadir());
-            let loaded = context.load_toml_config(&node_config).unwrap();
-            assert!(loaded.historical_bal.enabled);
-            assert_eq!(loaded.historical_bal.min_transactions.get(), 9);
-
-            let node_config = node_config.with_historical_bal(Some(false));
-            let context = LaunchContext::new(Runtime::test(), node_config.datadir());
-            let loaded = context.load_toml_config(&node_config).unwrap();
-            assert!(!loaded.historical_bal.enabled);
-            assert_eq!(loaded.historical_bal.min_transactions.get(), 9);
-
-            std::fs::write(
-                config_path,
-                "[historical_bal]\nenabled = false\nmin_transactions = 11\n",
-            )
-            .unwrap();
-            let node_config = node_config.with_historical_bal(Some(true));
-            let context = LaunchContext::new(Runtime::test(), node_config.datadir());
-            let loaded = context.load_toml_config(&node_config).unwrap();
-            assert!(loaded.historical_bal.enabled);
-            assert_eq!(loaded.historical_bal.min_transactions.get(), 11);
+            for (toml, cli_override, expected_enabled, expected_min_transactions) in [
+                (ENABLED_CONFIG, None, true, 9),
+                (ENABLED_CONFIG, Some(false), false, 9),
+                (DISABLED_CONFIG, Some(true), true, 11),
+            ] {
+                std::fs::write(config_path, toml).unwrap();
+                let node_config =
+                    NodeConfig::test().with_config(config_path).with_historical_bal(cli_override);
+                let context = LaunchContext::new(Runtime::test(), node_config.datadir());
+                let loaded = context.load_toml_config(&node_config).unwrap();
+                assert_eq!(loaded.historical_bal.enabled, expected_enabled);
+                assert_eq!(loaded.historical_bal.min_transactions.get(), expected_min_transactions);
+            }
         })
     }
 
