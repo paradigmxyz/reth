@@ -13,7 +13,7 @@ use reth_network_p2p::{
 };
 use reth_network_peers::PeerId;
 use reth_tasks::Runtime;
-use reth_trie_common::{range_proof::verify_range_proof, TrieAccount};
+use reth_trie_common::{range_proof::verify_range_proof, TrieAccount, EMPTY_ROOT_HASH};
 use std::{
     pin::Pin,
     task::{Context, Poll},
@@ -199,7 +199,8 @@ impl StorageRangeVerifier {
         };
 
         // Only the last returned range may carry the response's shared boundary proof.
-        let proof_index = (!response.proof.is_empty()).then_some(response.slots.len() - 1);
+        let proof_index =
+            response.slots.len().checked_sub(1).filter(|_| !response.proof.is_empty());
         let mut ranges = Vec::with_capacity(response.slots.len());
         let mut final_next = None;
 
@@ -239,7 +240,12 @@ impl StorageRangeVerifier {
         }
         if response.slots.is_empty() {
             if response.proof.is_empty() {
-                return Ok(None)
+                // An empty reply is the correct answer only when no requested account has storage.
+                if !self.storage_roots.iter().all(|root| *root == EMPTY_ROOT_HASH) {
+                    return Ok(None)
+                }
+                response.slots = vec![Vec::new(); self.storage_roots.len()];
+                return Ok(Some(response))
             }
             // A boundary proof can authenticate an empty suffix without an encoded inner list.
             response.slots.push(Vec::new());
@@ -526,18 +532,57 @@ mod tests {
         assert!(client.reported().is_empty());
     }
 
+    // The authenticated roots alone prove every requested trie is empty, so the reply completes
+    // the batch instead of leaving it unserved.
+    #[tokio::test]
+    async fn an_all_empty_batch_verifies_from_an_entirely_empty_response() {
+        let batch = [(key(100), account(EMPTY_ROOT_HASH)), (key(200), account(EMPTY_ROOT_HASH))];
+        for count in 1..=batch.len() {
+            let accounts = batch[..count].to_vec();
+            let client = Arc::new(TestSnapClient::new([response(
+                PeerId::random(),
+                1,
+                Vec::new(),
+                Vec::new(),
+            )]));
+
+            let outcome = downloader(Arc::clone(&client), request(&accounts), &accounts)
+                .unwrap()
+                .await
+                .unwrap();
+
+            let StorageRangeOutcome::Verified(verified) = outcome else {
+                panic!("verified ranges")
+            };
+            assert_eq!(verified.ranges.len(), count);
+            assert!(verified.ranges.iter().all(|range| range.slots.is_empty()));
+            assert_eq!(verified.continuation, None);
+            assert!(client.reported().is_empty());
+        }
+    }
+
     #[tokio::test]
     async fn a_response_without_slots_or_proof_reports_the_state_unavailable() {
-        let accounts = vec![(key(100), account(B256::repeat_byte(0xbb)))];
-        let peer = PeerId::random();
-        let client = Arc::new(TestSnapClient::new([response(peer, 1, Vec::new(), Vec::new())]));
+        let batches = [
+            vec![(key(100), account(B256::repeat_byte(0xbb)))],
+            vec![
+                (key(100), account(EMPTY_ROOT_HASH)),
+                (key(200), account(B256::repeat_byte(0xbb))),
+            ],
+        ];
+        for accounts in batches {
+            let peer = PeerId::random();
+            let client = Arc::new(TestSnapClient::new([response(peer, 1, Vec::new(), Vec::new())]));
 
-        let outcome =
-            downloader(Arc::clone(&client), request(&accounts), &accounts).unwrap().await.unwrap();
+            let outcome = downloader(Arc::clone(&client), request(&accounts), &accounts)
+                .unwrap()
+                .await
+                .unwrap();
 
-        assert_eq!(outcome, StorageRangeOutcome::Unavailable { peer_id: peer });
-        // Lacking the state is not misbehaviour.
-        assert!(client.reported().is_empty());
+            assert_eq!(outcome, StorageRangeOutcome::Unavailable { peer_id: peer });
+            // Lacking the state is not misbehaviour.
+            assert!(client.reported().is_empty());
+        }
     }
 
     #[tokio::test]
