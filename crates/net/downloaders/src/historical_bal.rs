@@ -46,6 +46,9 @@ pub struct HistoricalBalWorker<P, C, W> {
     config: HistoricalBalWorkerConfig,
     retry_cooldown: Duration,
     attempted: HashMap<NumHash, Instant>,
+    pending_flush: HashSet<NumHash>,
+    /// Identities passed to a flush that failed after the store may have marked them canonical.
+    uncertain_flush: HashSet<NumHash>,
     metrics: HistoricalBalDownloaderMetrics,
 }
 
@@ -172,6 +175,12 @@ pub struct HistoricalBalFilterOutcome {
     pub candidates: Vec<HistoricalBalCandidate>,
     /// Number of candidates excluded by the filters.
     pub skipped: usize,
+}
+
+#[derive(Debug)]
+struct FlushCandidates {
+    canonical: Vec<NumHash>,
+    stale: Vec<NumHash>,
 }
 
 /// Filters candidates in the locked order: commitment, work policy, store miss, window, attempts.
@@ -421,6 +430,8 @@ where
             config,
             retry_cooldown: Duration::from_secs(30),
             attempted: HashMap::new(),
+            pending_flush: HashSet::new(),
+            uncertain_flush: HashSet::new(),
             metrics: HistoricalBalDownloaderMetrics::default(),
         }
     }
@@ -460,6 +471,8 @@ where
             return
         }
 
+        self.retry_pending_flush().await;
+
         let provider = self.provider.clone();
         let Some(Ok((bodies, execution))) =
             self.runtime.spawn_blocking(move || provider.historical_bal_checkpoints()).await.ok()
@@ -487,7 +500,7 @@ where
         self.metrics.skipped.increment(scan.skipped as u64);
 
         let now = Instant::now();
-        let filtered = filter_candidates(
+        let mut filtered = filter_candidates(
             scan.candidates,
             self.config.policy(),
             &window,
@@ -496,6 +509,15 @@ where
             self.retry_cooldown,
         );
         self.metrics.skipped.increment(filtered.skipped as u64);
+        let pending_flush_limit =
+            usize::try_from(self.config.lookahead.get()).unwrap_or(usize::MAX);
+        let available = pending_flush_limit.saturating_sub(self.pending_flush.len());
+        if filtered.candidates.len() > available {
+            self.metrics.skipped.increment((filtered.candidates.len() - available) as u64);
+            // Failed flushes consume admission capacity. Evicting them would strand buffered BALs
+            // once the store reports a hit, so new work waits for retry capacity instead.
+            filtered.candidates.truncate(available);
+        }
         if filtered.candidates.is_empty() {
             return
         }
@@ -596,16 +618,7 @@ where
             }
 
             let Some((client, requested, response)) = in_flight.next().await else { break };
-            let continuation = Self::process_response(
-                self.runtime.clone(),
-                self.provider.clone(),
-                self.store.clone(),
-                self.metrics.clone(),
-                client,
-                requested,
-                response,
-            )
-            .await;
+            let continuation = self.process_response(client, requested, response).await;
             if !continuation.is_empty() {
                 // Continuations bypass cooldown inside this reconciliation. Retaining the original
                 // attempt keeps a suffix cooled if its pre-dispatch recheck rejects it; a suffix
@@ -616,10 +629,7 @@ where
     }
 
     async fn process_response(
-        runtime: Runtime,
-        provider: P,
-        store: BalStoreHandle,
-        metrics: HistoricalBalDownloaderMetrics,
+        &mut self,
         client: C,
         requested: Vec<HistoricalBalCandidate>,
         response: PeerRequestResult<BlockAccessLists>,
@@ -630,68 +640,184 @@ where
             (response_len > 0 && response_len < requested_len)
                 .then(|| requested[response_len..].to_vec())
         });
-        let Ok(outcome) = runtime
+        let Ok(outcome) = self
+            .runtime
             .spawn_blocking(move || validate_bal_response(&client, &requested, response))
             .await
         else {
-            metrics.unavailable.increment(requested_len as u64);
+            self.metrics.unavailable.increment(requested_len as u64);
             return Vec::new()
         };
-        metrics.downloaded.increment(outcome.values.len() as u64);
-        metrics.unavailable.increment(outcome.unavailable as u64);
-        metrics.invalid.increment(outcome.invalid as u64);
+        self.metrics.downloaded.increment(outcome.values.len() as u64);
+        self.metrics.unavailable.increment(outcome.unavailable as u64);
+        self.metrics.invalid.increment(outcome.invalid as u64);
 
         if outcome.invalid > 0 {
             continuation = None;
         }
-        Self::persist_valid(runtime, provider, store, outcome.values).await;
+        self.persist_valid(outcome.values).await;
         continuation.unwrap_or_default()
     }
 
-    async fn persist_valid(
-        runtime: Runtime,
-        provider: P,
-        store: BalStoreHandle,
-        valid: Vec<(NumHash, RawBal)>,
-    ) {
+    async fn persist_valid(&mut self, valid: Vec<(NumHash, RawBal)>) {
         if valid.is_empty() {
             return
         }
 
         let valid_blocks = valid.iter().map(|(num_hash, _)| *num_hash).collect::<Vec<_>>();
-        let _ = runtime
-            .spawn_blocking(move || -> reth_storage_api::errors::provider::ProviderResult<()> {
-                let canonical = provider.historical_bal_canonical(&valid_blocks)?;
-                if canonical.len() != valid.len() {
-                    return Err(
-                        reth_storage_api::errors::provider::ProviderError::InvalidStorageOutput,
-                    )
-                }
-                let entries = valid
-                    .into_iter()
-                    .zip(canonical)
-                    .filter_map(|(entry, canonical)| canonical.then_some(entry))
-                    .collect::<Vec<_>>();
-                if entries.is_empty() {
-                    return Ok(())
-                }
-                let blocks = entries.iter().map(|(num_hash, _)| *num_hash).collect::<Vec<_>>();
-                let _ = store.insert_many(entries);
-                let canonical = provider.historical_bal_canonical(&blocks)?;
-                if canonical.len() != blocks.len() {
-                    return Err(
-                        reth_storage_api::errors::provider::ProviderError::InvalidStorageOutput,
-                    )
-                }
-                let canonical_blocks = blocks
-                    .into_iter()
-                    .zip(canonical)
-                    .filter_map(|(block, canonical)| canonical.then_some(block))
-                    .collect::<Vec<_>>();
-                let _ = store.flush(&canonical_blocks);
-                Ok(())
-            })
+        let uncertain_blocks = valid_blocks.clone();
+        let provider = self.provider.clone();
+        let store = self.store.clone();
+        let attempted_insert = self
+            .runtime
+            .spawn_blocking(
+                move || -> reth_storage_api::errors::provider::ProviderResult<Vec<NumHash>> {
+                    let canonical = provider.historical_bal_canonical(&valid_blocks)?;
+                    if canonical.len() != valid.len() {
+                        return Err(
+                            reth_storage_api::errors::provider::ProviderError::InvalidStorageOutput,
+                        )
+                    }
+                    let entries = valid
+                        .into_iter()
+                        .zip(canonical)
+                        .filter_map(|(entry, canonical)| canonical.then_some(entry))
+                        .collect::<Vec<_>>();
+                    if entries.is_empty() {
+                        return Ok(Vec::new())
+                    }
+                    let blocks = entries.iter().map(|(num_hash, _)| *num_hash).collect::<Vec<_>>();
+                    if let Err(error) = store.insert_many(entries) {
+                        tracing::debug!(
+                            target: "downloaders::historical_bal",
+                            %error,
+                            blocks = blocks.len(),
+                            "Historical BAL insertion may have partially succeeded"
+                        );
+                    }
+                    Ok(blocks)
+                },
+            )
             .await;
+
+        let blocks = match attempted_insert {
+            Ok(Ok(blocks)) => blocks,
+            Ok(Err(error)) => {
+                tracing::debug!(
+                    target: "downloaders::historical_bal",
+                    %error,
+                    "Failed to verify historical BAL canonicality before insertion"
+                );
+                return
+            }
+            Err(error) => {
+                tracing::debug!(
+                    target: "downloaders::historical_bal",
+                    %error,
+                    "Historical BAL insertion task failed with an unknown partial result"
+                );
+                uncertain_blocks
+            }
+        };
+        if blocks.is_empty() {
+            return
+        }
+
+        self.pending_flush.extend(blocks);
+        self.retry_pending_flush().await;
+    }
+
+    async fn retry_pending_flush(&mut self) {
+        if self.pending_flush.is_empty() {
+            return
+        }
+
+        let mut blocks = self.pending_flush.iter().copied().collect::<Vec<_>>();
+        blocks.sort_unstable_by_key(|block| block.number);
+        let pending = blocks.len();
+        let uncertain_flush = self.uncertain_flush.clone();
+        let provider = self.provider.clone();
+        let canonical_result = self
+            .runtime
+            .spawn_blocking(
+                move || -> reth_storage_api::errors::provider::ProviderResult<FlushCandidates> {
+                    let canonical = provider.historical_bal_canonical(&blocks)?;
+                    if canonical.len() != blocks.len() {
+                        return Err(
+                            reth_storage_api::errors::provider::ProviderError::InvalidStorageOutput,
+                        )
+                    }
+                    let (canonical_blocks, stale): (Vec<_>, Vec<_>) =
+                        blocks.into_iter().zip(canonical).partition(|(_, canonical)| *canonical);
+                    let canonical_blocks =
+                        canonical_blocks.into_iter().map(|(block, _)| block).collect::<Vec<_>>();
+                    let stale = stale.into_iter().map(|(block, _)| block).collect::<Vec<_>>();
+                    Ok(FlushCandidates { canonical: canonical_blocks, stale })
+                },
+            )
+            .await;
+
+        let FlushCandidates { canonical, stale } = match canonical_result {
+            Ok(Ok(result)) => result,
+            Ok(Err(error)) => {
+                tracing::debug!(target: "downloaders::historical_bal", %error, pending,
+                    "Failed to recheck pending historical BAL canonicality");
+                return
+            }
+            Err(error) => {
+                tracing::debug!(target: "downloaders::historical_bal", %error, pending,
+                    "Historical BAL canonicality task failed");
+                return
+            }
+        };
+
+        // A failed flush may retain its internal canonical set. Do not issue a narrower retry while
+        // any identity from that uncertain set is no longer canonical.
+        if uncertain_flush.iter().any(|block| stale.contains(block)) {
+            self.pending_flush
+                .retain(|block| uncertain_flush.contains(block) || !stale.contains(block));
+            self.uncertain_flush.retain(|block| self.pending_flush.contains(block));
+            return
+        }
+
+        if canonical.is_empty() {
+            self.pending_flush.retain(|block| !stale.contains(block));
+            self.uncertain_flush.retain(|block| self.pending_flush.contains(block));
+            return
+        }
+
+        let attempted = canonical.clone();
+        let store = self.store.clone();
+        let flush_result = self.runtime.spawn_blocking(move || store.flush(&canonical)).await;
+        match flush_result {
+            Ok(Ok(())) => {
+                self.pending_flush
+                    .retain(|block| !attempted.contains(block) && !stale.contains(block));
+                self.uncertain_flush.retain(|block| self.pending_flush.contains(block));
+            }
+            Ok(Err(error)) => {
+                self.pending_flush.retain(|block| !stale.contains(block));
+                self.uncertain_flush.extend(attempted);
+                self.uncertain_flush.retain(|block| self.pending_flush.contains(block));
+                tracing::debug!(
+                    target: "downloaders::historical_bal",
+                    %error,
+                    pending,
+                    "Failed to flush pending historical BALs"
+                );
+            }
+            Err(error) => {
+                self.pending_flush.retain(|block| !stale.contains(block));
+                self.uncertain_flush.extend(attempted);
+                self.uncertain_flush.retain(|block| self.pending_flush.contains(block));
+                tracing::debug!(
+                    target: "downloaders::historical_bal",
+                    %error,
+                    pending,
+                    "Historical BAL flush task failed"
+                );
+            }
+        }
     }
 }
 
@@ -742,10 +868,12 @@ mod tests {
         bodies: u64,
         execution: u64,
         checkpoint_overrides: VecDeque<(u64, u64)>,
+        canonical_results: VecDeque<Vec<bool>>,
         candidates: Vec<HistoricalBalCandidate>,
         canonical: HashMap<u64, B256>,
         canonical_calls: usize,
         fail_canonical_call: Option<usize>,
+        panic_canonical_call: Option<usize>,
         noncanonical_calls: HashSet<usize>,
     }
 
@@ -764,10 +892,12 @@ mod tests {
                     bodies,
                     execution,
                     checkpoint_overrides: VecDeque::new(),
+                    canonical_results: VecDeque::new(),
                     candidates,
                     canonical,
                     canonical_calls: 0,
                     fail_canonical_call: None,
+                    panic_canonical_call: None,
                     noncanonical_calls: HashSet::new(),
                 })),
             }
@@ -781,12 +911,24 @@ mod tests {
             self.state.lock().unwrap().fail_canonical_call = Some(call);
         }
 
+        fn panic_canonical_call(&self, call: usize) {
+            self.state.lock().unwrap().panic_canonical_call = Some(call);
+        }
+
+        fn set_canonical_results(&self, results: impl IntoIterator<Item = Vec<bool>>) {
+            self.state.lock().unwrap().canonical_results = results.into_iter().collect();
+        }
+
         fn canonical_calls(&self) -> usize {
             self.state.lock().unwrap().canonical_calls
         }
 
         fn set_noncanonical_calls(&self, calls: impl IntoIterator<Item = usize>) {
             self.state.lock().unwrap().noncanonical_calls = calls.into_iter().collect();
+        }
+
+        fn set_canonical_hash(&self, number: BlockNumber, hash: B256) {
+            self.state.lock().unwrap().canonical.insert(number, hash);
         }
     }
 
@@ -979,8 +1121,19 @@ mod tests {
             &self,
             blocks: &[NumHash],
         ) -> reth_storage_api::errors::provider::ProviderResult<Vec<bool>> {
+            let (call, should_panic) = {
+                let mut state = self.state.lock().unwrap();
+                state.canonical_calls += 1;
+                let call = state.canonical_calls;
+                let should_panic = state.panic_canonical_call == Some(call);
+                (call, should_panic)
+            };
+            assert!(!should_panic, "scripted canonical provider panic at call {call}");
+
             let mut state = self.state.lock().unwrap();
-            state.canonical_calls += 1;
+            if let Some(result) = state.canonical_results.pop_front() {
+                return Ok(result)
+            }
             if state.fail_canonical_call == Some(state.canonical_calls) {
                 return Err(reth_storage_api::errors::provider::ProviderError::InvalidStorageOutput)
             }
@@ -1203,6 +1356,112 @@ mod tests {
                 values.pop();
             }
             Ok(values)
+        }
+
+        fn bal_stream(&self) -> BalNotificationStream {
+            self.inner.bal_stream()
+        }
+    }
+
+    /// Models stores that retain identities marked canonical when a flush fails and replay all of
+    /// those identities on a later flush, as the production `RocksDB` store does.
+    #[derive(Debug, Clone, Default)]
+    struct RetainingFlushBalStore {
+        inner: InMemoryBalStore,
+        pending: Arc<Mutex<HashMap<NumHash, RawBal>>>,
+        canonical_pending: Arc<Mutex<HashSet<NumHash>>>,
+        durable: Arc<Mutex<HashMap<NumHash, RawBal>>>,
+        flushes: Arc<Mutex<Vec<Vec<NumHash>>>>,
+        fail_next_flush: Arc<Mutex<bool>>,
+    }
+
+    impl RetainingFlushBalStore {
+        fn with_failed_first_flush() -> Self {
+            Self { fail_next_flush: Arc::new(Mutex::new(true)), ..Default::default() }
+        }
+
+        fn durable(&self, block: NumHash) -> Option<RawBal> {
+            self.durable.lock().unwrap().get(&block).cloned()
+        }
+
+        fn flushes(&self) -> Vec<Vec<NumHash>> {
+            self.flushes.lock().unwrap().clone()
+        }
+    }
+
+    impl BalStore for RetainingFlushBalStore {
+        fn insert(
+            &self,
+            num_hash: NumHash,
+            bal: RawBal,
+        ) -> reth_storage_api::errors::provider::ProviderResult<()> {
+            self.pending.lock().unwrap().insert(num_hash, bal.clone());
+            self.canonical_pending.lock().unwrap().remove(&num_hash);
+            self.inner.insert(num_hash, bal)
+        }
+
+        fn insert_many(
+            &self,
+            entries: Vec<(NumHash, RawBal)>,
+        ) -> reth_storage_api::errors::provider::ProviderResult<()> {
+            {
+                let mut pending = self.pending.lock().unwrap();
+                let mut canonical_pending = self.canonical_pending.lock().unwrap();
+                for (num_hash, bal) in &entries {
+                    pending.insert(*num_hash, bal.clone());
+                    canonical_pending.remove(num_hash);
+                }
+            }
+            self.inner.insert_many(entries)
+        }
+
+        fn flush(
+            &self,
+            blocks: &[NumHash],
+        ) -> reth_storage_api::errors::provider::ProviderResult<()> {
+            self.flushes.lock().unwrap().push(blocks.to_vec());
+            {
+                let pending = self.pending.lock().unwrap();
+                self.canonical_pending
+                    .lock()
+                    .unwrap()
+                    .extend(blocks.iter().copied().filter(|block| pending.contains_key(block)));
+            }
+
+            let mut fail_next = self.fail_next_flush.lock().unwrap();
+            if *fail_next {
+                *fail_next = false;
+                return Err(reth_storage_api::errors::provider::ProviderError::InvalidStorageOutput)
+            }
+            drop(fail_next);
+
+            let pending = self.pending.lock().unwrap();
+            let canonical_pending = self.canonical_pending.lock().unwrap();
+            let mut durable = self.durable.lock().unwrap();
+            for block in canonical_pending.iter().copied() {
+                if let Some(bal) = pending.get(&block) {
+                    durable.insert(block, bal.clone());
+                }
+            }
+            drop(durable);
+            drop(canonical_pending);
+            drop(pending);
+            self.canonical_pending.lock().unwrap().clear();
+            Ok(())
+        }
+
+        fn prune(
+            &self,
+            tip: BlockNumber,
+        ) -> reth_storage_api::errors::provider::ProviderResult<usize> {
+            self.inner.prune(tip)
+        }
+
+        fn get_by_hashes(
+            &self,
+            block_hashes: &[BlockHash],
+        ) -> reth_storage_api::errors::provider::ProviderResult<Vec<Option<Bytes>>> {
+            self.inner.get_by_hashes(block_hashes)
         }
 
         fn bal_stream(&self) -> BalNotificationStream {
@@ -1630,6 +1889,261 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn post_insert_canonical_error_retries_flush_on_next_wakeup() {
+        let raw = Bytes::from_static(&[0xc0]);
+        let candidate = candidate(1, Some(keccak256(&raw)), 1, true);
+        let provider = TestProvider::with_candidates(1, 0, vec![candidate]);
+        provider.fail_canonical_call(3);
+        let fault_store = FaultingBalStore::default();
+        let store = BalStoreHandle::new(fault_store.clone());
+        let client = ScriptedBalClient::default();
+        client.push_response(Ok(WithPeerId::new(
+            PeerId::random(),
+            BlockAccessLists(vec![Some(raw.clone())]),
+        )));
+        let worker = HistoricalBalWorker::new(
+            provider.clone(),
+            store.clone(),
+            client.clone(),
+            futures::stream::iter([()]),
+            Runtime::test(),
+            worker_config(true),
+        );
+
+        worker.run().await;
+
+        assert_eq!(
+            client.requests(),
+            vec![(vec![candidate.num_hash.hash], BalRequirement::Optional)]
+        );
+        assert_eq!(store.get_by_hash(candidate.num_hash.hash).unwrap(), Some(raw));
+        assert_eq!(provider.canonical_calls(), 4);
+        assert_eq!(fault_store.flushes(), vec![vec![candidate.num_hash]]);
+    }
+
+    #[tokio::test]
+    async fn post_insert_canonical_error_drops_stale_identity_without_flush() {
+        let raw = Bytes::from_static(&[0xc0]);
+        let candidate = candidate(1, Some(keccak256(&raw)), 1, true);
+        let provider = TestProvider::with_candidates(1, 0, vec![candidate]);
+        provider.fail_canonical_call(3);
+        provider.set_noncanonical_calls([4]);
+        let fault_store = FaultingBalStore::default();
+        let store = BalStoreHandle::new(fault_store.clone());
+        let client = ScriptedBalClient::default();
+        client.push_response(Ok(WithPeerId::new(
+            PeerId::random(),
+            BlockAccessLists(vec![Some(raw)]),
+        )));
+        let mut worker = HistoricalBalWorker::new(
+            provider.clone(),
+            store,
+            client.clone(),
+            futures::stream::empty::<()>(),
+            Runtime::test(),
+            worker_config(true),
+        );
+
+        worker.run_once().await;
+        worker.run_once().await;
+
+        assert_eq!(client.requests().len(), 1);
+        assert_eq!(provider.canonical_calls(), 4);
+        assert!(fault_store.flushes().is_empty());
+        assert!(worker.pending_flush.is_empty());
+    }
+
+    #[tokio::test]
+    async fn post_insert_canonical_panic_drops_stale_identity_without_flush() {
+        let raw = Bytes::from_static(&[0xc0]);
+        let candidate = candidate(1, Some(keccak256(&raw)), 1, true);
+        let provider = TestProvider::with_candidates(1, 0, vec![candidate]);
+        provider.panic_canonical_call(3);
+        provider.set_noncanonical_calls([4]);
+        let fault_store = FaultingBalStore::default();
+        let store = BalStoreHandle::new(fault_store.clone());
+        let client = ScriptedBalClient::default();
+        client.push_response(Ok(WithPeerId::new(
+            PeerId::random(),
+            BlockAccessLists(vec![Some(raw)]),
+        )));
+        let mut worker = HistoricalBalWorker::new(
+            provider.clone(),
+            store,
+            client.clone(),
+            futures::stream::empty::<()>(),
+            Runtime::test(),
+            worker_config(true),
+        );
+
+        worker.run_once().await;
+        worker.run_once().await;
+
+        assert_eq!(client.requests().len(), 1);
+        assert_eq!(provider.canonical_calls(), 4);
+        assert!(fault_store.flushes().is_empty());
+        assert!(worker.pending_flush.is_empty());
+        assert!(worker.uncertain_flush.is_empty());
+    }
+
+    #[tokio::test]
+    async fn failed_flush_does_not_replay_reorged_identity_on_retry() {
+        let raw = Bytes::from_static(&[0xc0]);
+        let candidate = candidate(1, Some(keccak256(&raw)), 1, true);
+        let provider = TestProvider::with_candidates(1, 0, vec![candidate]);
+        provider.set_noncanonical_calls([4]);
+        let retaining_store = RetainingFlushBalStore::with_failed_first_flush();
+        let store = BalStoreHandle::new(retaining_store.clone());
+        let client = ScriptedBalClient::default();
+        client.push_response(Ok(WithPeerId::new(
+            PeerId::random(),
+            BlockAccessLists(vec![Some(raw.clone())]),
+        )));
+        let worker = HistoricalBalWorker::new(
+            provider,
+            store,
+            client.clone(),
+            futures::stream::iter([()]),
+            Runtime::test(),
+            worker_config(true),
+        );
+
+        worker.run().await;
+
+        assert_eq!(client.requests().len(), 1);
+        assert_eq!(retaining_store.durable(candidate.num_hash), None);
+        assert_eq!(retaining_store.flushes(), vec![vec![candidate.num_hash]]);
+    }
+
+    #[tokio::test]
+    async fn uncertain_flush_waits_for_all_identities_to_be_canonical() {
+        let raw = Bytes::from_static(&[0xc0]);
+        let expected = keccak256(&raw);
+        let first = candidate(1, Some(expected), 1, true);
+        let second = candidate(2, Some(expected), 1, true);
+        let provider = TestProvider::with_candidates(2, 0, vec![first, second]);
+        let retaining_store = RetainingFlushBalStore::with_failed_first_flush();
+        let store = BalStoreHandle::new(retaining_store.clone());
+        let client = ScriptedBalClient::default();
+        client.push_response(Ok(WithPeerId::new(
+            PeerId::random(),
+            BlockAccessLists(vec![Some(raw.clone()), Some(raw.clone())]),
+        )));
+        let config = HistoricalBalWorkerConfig::new(true, 1, 2, 1, 2).unwrap();
+        let mut worker = HistoricalBalWorker::new(
+            provider.clone(),
+            store,
+            client.clone(),
+            futures::stream::empty::<()>(),
+            Runtime::test(),
+            config,
+        );
+
+        worker.run_once().await;
+        provider.set_canonical_hash(second.num_hash.number, B256::ZERO);
+        worker.run_once().await;
+
+        assert_eq!(client.requests().len(), 1);
+        assert_eq!(retaining_store.flushes().len(), 1);
+        assert_eq!(retaining_store.durable(first.num_hash), None);
+        assert_eq!(retaining_store.durable(second.num_hash), None);
+        assert_eq!(worker.pending_flush.len(), 2);
+
+        provider.set_canonical_hash(second.num_hash.number, second.num_hash.hash);
+        worker.run_once().await;
+
+        assert_eq!(retaining_store.flushes().len(), 2);
+        assert_eq!(retaining_store.durable(first.num_hash), Some(RawBal::new(raw.clone())));
+        assert_eq!(retaining_store.durable(second.num_hash), Some(RawBal::new(raw)));
+        assert!(worker.pending_flush.is_empty());
+        assert!(worker.uncertain_flush.is_empty());
+    }
+
+    #[tokio::test]
+    async fn uncertain_flush_does_not_block_canonical_new_work() {
+        let raw = Bytes::from_static(&[0xc0]);
+        let expected = keccak256(&raw);
+        let first = candidate(1, Some(expected), 1, true);
+        let second = candidate(2, Some(expected), 1, true);
+        let provider = TestProvider::with_candidates(2, 0, vec![first, second]);
+        provider.set_canonical_results([
+            vec![true, true],
+            vec![true],
+            vec![true],
+            vec![true],
+            vec![true],
+            vec![true, false],
+        ]);
+        let retaining_store = RetainingFlushBalStore::with_failed_first_flush();
+        let store = BalStoreHandle::new(retaining_store.clone());
+        let client = ScriptedBalClient::default();
+        client.push_response(Ok(WithPeerId::new(
+            PeerId::random(),
+            BlockAccessLists(vec![Some(raw.clone())]),
+        )));
+        client.push_response(Ok(WithPeerId::new(
+            PeerId::random(),
+            BlockAccessLists(vec![Some(raw.clone())]),
+        )));
+        let config = HistoricalBalWorkerConfig::new(true, 1, 2, 1, 2).unwrap();
+        let mut worker = HistoricalBalWorker::new(
+            provider,
+            store,
+            client.clone(),
+            futures::stream::empty::<()>(),
+            Runtime::test(),
+            config,
+        );
+
+        worker.run_once().await;
+
+        assert_eq!(client.requests().len(), 2);
+        assert!(worker.pending_flush.is_empty());
+        assert!(worker.uncertain_flush.is_empty());
+        assert_eq!(retaining_store.durable(first.num_hash), Some(RawBal::new(raw)));
+        assert_eq!(retaining_store.durable(second.num_hash), None);
+        assert_eq!(retaining_store.flushes(), vec![vec![first.num_hash], vec![first.num_hash]]);
+    }
+
+    #[tokio::test]
+    async fn pending_flush_capacity_bounds_new_work() {
+        let raw = Bytes::from_static(&[0xc0]);
+        let expected = keccak256(&raw);
+        let candidates =
+            (1..=4).map(|number| candidate(number, Some(expected), 1, true)).collect::<Vec<_>>();
+        let provider = TestProvider::with_candidates(4, 0, candidates[..2].to_vec());
+        provider.set_checkpoint_overrides([(2, 0), (2, 0), (4, 2)]);
+        provider.set_noncanonical_calls(4..=8);
+        let retaining_store = RetainingFlushBalStore::with_failed_first_flush();
+        let store = BalStoreHandle::new(retaining_store);
+        let client = ScriptedBalClient::default();
+        client.push_response(Ok(WithPeerId::new(
+            PeerId::random(),
+            BlockAccessLists(vec![Some(raw.clone()), Some(raw.clone())]),
+        )));
+        let config = HistoricalBalWorkerConfig::new(true, 1, 2, 1, 2).unwrap();
+        let mut worker = HistoricalBalWorker::new(
+            provider.clone(),
+            store,
+            client.clone(),
+            futures::stream::empty::<()>(),
+            Runtime::test(),
+            config,
+        );
+
+        worker.run_once().await;
+        assert_eq!(worker.pending_flush.len(), 2);
+        assert_eq!(client.requests().len(), 1);
+
+        provider.state.lock().unwrap().candidates.extend_from_slice(&candidates[2..]);
+        worker.run_once().await;
+        worker.run_once().await;
+
+        assert_eq!(worker.pending_flush.len(), 2);
+        assert_eq!(client.requests().len(), 1);
+    }
+
+    #[tokio::test]
     async fn flush_error_does_not_prevent_next_reconciliation() {
         let raw = Bytes::from_static(&[0xc0]);
         let expected = keccak256(&raw);
@@ -1670,7 +2184,7 @@ mod tests {
         );
         assert_eq!(store.get_by_hash(first.num_hash.hash).unwrap(), Some(raw.clone()));
         assert_eq!(store.get_by_hash(second.num_hash.hash).unwrap(), Some(raw));
-        assert_eq!(fault_store.flushes().len(), 2);
+        assert_eq!(fault_store.flushes().len(), 3);
     }
 
     #[tokio::test]
@@ -1726,7 +2240,7 @@ mod tests {
 
         assert_eq!(provider.canonical_calls(), 3);
         assert_eq!(store.get_by_hash(candidate.num_hash.hash).unwrap(), Some(raw));
-        assert_eq!(recording_store.flushes(), vec![Vec::new()]);
+        assert!(recording_store.flushes().is_empty());
     }
 
     #[tokio::test]
