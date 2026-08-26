@@ -1,33 +1,8 @@
 use super::*;
 
-/// Calling `wipe()` resets the trie so that
-/// `root()` returns `EMPTY_ROOT_HASH`.
-pub(super) fn test_wipe_resets_to_empty_root<T: SparseTrie>(new_trie: fn() -> T) {
-    let storage: BTreeMap<B256, U256> = BTreeMap::from([
-        (B256::with_last_byte(0x10), U256::from(1)),
-        (B256::with_last_byte(0x20), U256::from(2)),
-        (B256::with_last_byte(0x30), U256::from(3)),
-        (B256::with_last_byte(0x40), U256::from(4)),
-        (B256::with_last_byte(0x50), U256::from(5)),
-    ]);
-
-    let harness = SuiteTestHarness::new(storage);
-    let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);
-
-    // Compute root to confirm the trie is populated.
-    let root_before = trie.root(epoch(0));
-    assert_eq!(root_before, harness.original_root());
-    assert_ne!(root_before, EMPTY_ROOT_HASH);
-
-    // Wipe and verify empty root.
-    trie.wipe();
-    let root_after = trie.root(epoch(0));
-    assert_eq!(root_after, EMPTY_ROOT_HASH, "root must be EMPTY_ROOT_HASH after wipe");
-}
-
 /// `clear()` resets the trie to empty but preserves
 /// update tracking mode. After clear, `root()` returns `EMPTY_ROOT_HASH` and
-/// `take_updates()` returns empty (non-wiped) updates.
+/// `take_updates()` returns empty updates.
 pub(super) fn test_clear_resets_trie_but_preserves_update_tracking<T: SparseTrie>(
     new_trie: fn() -> T,
 ) {
@@ -51,42 +26,10 @@ pub(super) fn test_clear_resets_trie_but_preserves_update_tracking<T: SparseTrie
     let root_after = trie.root(epoch(0));
     assert_eq!(root_after, EMPTY_ROOT_HASH, "root must be EMPTY_ROOT_HASH after clear");
 
-    // take_updates should return empty (non-wiped) updates since tracking is preserved.
+    // take_updates should return empty updates since tracking is preserved.
     let updates = trie.take_updates();
-    assert!(!updates.wiped, "clear should not produce wiped updates");
     assert!(updates.updated_nodes.is_empty(), "clear should produce empty updated_nodes");
     assert!(updates.removed_nodes.is_empty(), "clear should produce empty removed_nodes");
-}
-
-/// `wipe()` produces special "wiped" updates distinct
-/// from normal empty updates. After wipe, `take_updates()` returns updates with
-/// the wiped flag set and `root()` returns `EMPTY_ROOT_HASH`.
-pub(super) fn test_wipe_produces_wiped_updates<T: SparseTrie>(new_trie: fn() -> T) {
-    let storage: BTreeMap<B256, U256> = BTreeMap::from([
-        (B256::with_last_byte(0x10), U256::from(1)),
-        (B256::with_last_byte(0x20), U256::from(2)),
-        (B256::with_last_byte(0x30), U256::from(3)),
-    ]);
-
-    let harness = SuiteTestHarness::new(storage);
-    // retain_updates = true so update tracking is active
-    let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
-
-    // Compute root to populate the trie fully.
-    let root_before = trie.root(epoch(0));
-    assert_eq!(root_before, harness.original_root());
-    assert_ne!(root_before, EMPTY_ROOT_HASH);
-
-    // Wipe the trie.
-    trie.wipe();
-
-    // Root should be EMPTY_ROOT_HASH after wipe.
-    let root_after = trie.root(epoch(0));
-    assert_eq!(root_after, EMPTY_ROOT_HASH, "root must be EMPTY_ROOT_HASH after wipe");
-
-    // take_updates should return updates with the wiped flag set.
-    let updates = trie.take_updates();
-    assert!(updates.wiped, "wipe should produce wiped updates");
 }
 
 /// A cleared trie can be fully re-initialized and used

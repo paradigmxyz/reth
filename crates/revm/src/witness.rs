@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 use alloy_primitives::{keccak256, Bytes, B256};
-use reth_trie::{ExecutionWitnessMode, HashedPostState, HashedStorage};
+use reth_trie::{ExecutionWitnessMode, HashedPostState};
 use revm::database::State;
 
 /// Borrows finalized execution state for witness generation.
@@ -106,10 +106,7 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
                 .accounts
                 .insert(hashed_address, account.account.as_ref().map(|a| (&a.info).into()));
 
-            let storage = hashed_state
-                .storages
-                .entry(hashed_address)
-                .or_insert_with(|| HashedStorage::new(false));
+            let storage = hashed_state.storages.entry(hashed_address).or_default();
 
             if let Some(account) = &account.account {
                 keys.push(address.to_vec().into());
@@ -138,6 +135,7 @@ mod tests {
     use alloy_primitives::{Address, U256};
     use reth_storage_api::HashedPostStateProvider;
     use reth_storage_errors::provider::ProviderResult;
+    use reth_trie::HashedStorage;
     use revm::{
         database::{states::CacheAccount, AccountStatus, BundleAccount, EmptyDB},
         state::AccountInfo,
@@ -157,7 +155,7 @@ mod tests {
     }
 
     #[test]
-    fn destroyed_account_storage_is_zero_expanded_without_wipe() {
+    fn destroyed_account_storage_is_zero_expanded() {
         let address = Address::with_last_byte(1);
         let hashed_address = keccak256(address);
         let hashed_slot = B256::with_last_byte(2);
@@ -184,7 +182,6 @@ mod tests {
         let (hashed_state, _) =
             ExecutionWitnessRecord::new(&state).hashed_post_state(&provider).unwrap();
         let storage = hashed_state.storages.get(&hashed_address).unwrap();
-        assert!(!storage.wiped);
         assert_eq!(storage.storage.get(&hashed_slot), Some(&U256::ZERO));
     }
 }
