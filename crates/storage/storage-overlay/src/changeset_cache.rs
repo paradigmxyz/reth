@@ -155,10 +155,7 @@ where
             storage_nodes.push((*nibbles, node_value));
         }
 
-        storage_tries.insert(
-            *hashed_address,
-            StorageTrieUpdatesSorted { storage_nodes, is_deleted: storage_changeset.is_deleted },
-        );
+        storage_tries.insert(*hashed_address, StorageTrieUpdatesSorted { storage_nodes });
     }
 
     Ok(TrieUpdatesSorted::new(account_nodes, storage_tries))

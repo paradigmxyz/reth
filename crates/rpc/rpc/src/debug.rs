@@ -1534,7 +1534,6 @@ mod tests {
         let hashed_state = provider.hashed_post_state(&bundle_state).unwrap();
         let storage = &hashed_state.storages[&hashed_address];
 
-        assert!(!storage.wiped);
         assert_eq!(storage.storage[&hashed_old_slot], U256::ZERO);
         assert_eq!(storage.storage[&hashed_new_slot], new_value);
     }

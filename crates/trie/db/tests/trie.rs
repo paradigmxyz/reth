@@ -218,7 +218,7 @@ fn test_empty_storage_root() {
 }
 
 #[test]
-fn cleared_storage_emits_node_removals_without_deleted_flag() {
+fn cleared_storage_emits_node_removals() {
     let factory = create_test_provider_factory();
     let tx = factory.provider_rw().unwrap();
     let hashed_address = B256::random();
@@ -271,7 +271,6 @@ fn cleared_storage_emits_node_removals_without_deleted_flag() {
             .root_with_updates()
             .unwrap();
         assert_eq!(root, EMPTY_ROOT_HASH);
-        assert!(!updates.is_deleted());
         assert!(!updates.removed_nodes_ref().is_empty());
     });
 }
@@ -345,7 +344,6 @@ fn destroyed_account_storage_emits_node_removals() {
 
     assert_eq!(root, EMPTY_ROOT_HASH);
     let storage_updates = &updates.storage_tries_ref()[&hashed_address];
-    assert!(!storage_updates.is_deleted());
     let mut removed_nodes: Vec<_> = storage_updates.removed_nodes_ref().iter().copied().collect();
     removed_nodes.sort_unstable();
     assert_eq!(removed_nodes, expected_removed_nodes);
