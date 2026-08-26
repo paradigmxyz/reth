@@ -519,8 +519,14 @@ mod tests {
         let config = reth_config::HistoricalBalConfig { enabled: true, ..Default::default() };
 
         let config = historical_bal_worker_config(config, 0).unwrap().unwrap();
+        let expected = HistoricalBalWorkerConfig::try_from(reth_config::HistoricalBalConfig {
+            enabled: true,
+            ..Default::default()
+        })
+        .unwrap()
+        .with_effective_lookahead(NonZeroU64::new(1).unwrap());
 
-        assert_eq!(config.window(0, 2), Some(1..=1));
+        assert_eq!(config, expected);
     }
 
     #[test]

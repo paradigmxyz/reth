@@ -33,7 +33,7 @@ use tokio::sync::Semaphore;
 use crate::metrics::HistoricalBalDownloaderMetrics;
 
 /// The maximum number of hashes accepted by an eth/71 BAL request.
-pub const MAX_REQUEST_BATCH_SIZE: usize = reth_config::HistoricalBalConfig::MAX_REQUEST_BATCH_SIZE;
+const MAX_REQUEST_BATCH_SIZE: usize = reth_config::HistoricalBalConfig::MAX_REQUEST_BATCH_SIZE;
 
 /// A detached, best-effort historical BAL downloader.
 #[derive(Debug)]
@@ -120,14 +120,14 @@ impl HistoricalBalWorkerConfig {
     }
 
     /// Returns the inclusive historical execution window.
-    pub fn window(&self, execution: u64, bodies: u64) -> Option<RangeInclusive<u64>> {
+    fn window(&self, execution: u64, bodies: u64) -> Option<RangeInclusive<u64>> {
         let start = execution.checked_add(1)?;
         let end = bodies.min(execution.saturating_add(self.lookahead.get()));
         (start <= end).then_some(start..=end)
     }
 
     /// Returns the execution eligibility policy shared with execution consumers.
-    pub const fn policy(&self) -> BalExecutionPolicy {
+    const fn policy(&self) -> BalExecutionPolicy {
         BalExecutionPolicy::new(self.min_transactions)
     }
 }
@@ -146,35 +146,34 @@ impl TryFrom<reth_config::HistoricalBalConfig> for HistoricalBalWorkerConfig {
     }
 }
 
-/// A canonical block candidate found while scanning historical storage.
+/// A canonical block observed while scanning historical storage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct HistoricalBalCandidate {
-    /// Block number and canonical hash.
-    pub num_hash: NumHash,
-    /// Header BAL commitment, if advertised.
-    pub commitment: Option<B256>,
-    /// Number of transactions in the stored body indices.
-    pub transaction_count: u64,
-    /// Whether the BAL store missed this block hash.
-    pub store_miss: bool,
+struct ScannedCandidate {
+    num_hash: NumHash,
+    commitment: Option<B256>,
+    transaction_count: u64,
+    store_miss: bool,
+}
+
+/// A scanned candidate whose structural request requirements have been validated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct EligibleCandidate {
+    num_hash: NumHash,
+    commitment: B256,
 }
 
 /// The result of scanning one committed historical BAL window.
 #[derive(Debug, Default, PartialEq, Eq)]
-pub struct HistoricalBalScanOutcome {
-    /// Candidates that passed the cheap commitment and work filters.
-    pub candidates: Vec<HistoricalBalCandidate>,
-    /// Number of headers excluded before the BAL store was queried.
-    pub skipped: usize,
+struct HistoricalBalScanOutcome {
+    candidates: Vec<ScannedCandidate>,
+    skipped: usize,
 }
 
 /// The result of applying worker eligibility filters.
 #[derive(Debug, Default, PartialEq, Eq)]
-pub struct HistoricalBalFilterOutcome {
-    /// Candidates that may be requested.
-    pub candidates: Vec<HistoricalBalCandidate>,
-    /// Number of candidates excluded by the filters.
-    pub skipped: usize,
+struct HistoricalBalFilterOutcome {
+    candidates: Vec<EligibleCandidate>,
+    skipped: usize,
 }
 
 #[derive(Debug)]
@@ -184,8 +183,8 @@ struct FlushCandidates {
 }
 
 /// Filters candidates in the locked order: commitment, work policy, store miss, window, attempts.
-pub fn filter_candidates(
-    candidates: impl IntoIterator<Item = HistoricalBalCandidate>,
+fn filter_candidates(
+    candidates: impl IntoIterator<Item = ScannedCandidate>,
     policy: BalExecutionPolicy,
     window: &RangeInclusive<u64>,
     attempted: &mut HashMap<NumHash, Instant>,
@@ -202,35 +201,35 @@ pub fn filter_candidates(
 
     let mut outcome = HistoricalBalFilterOutcome::default();
     for candidate in candidates {
-        let eligible = candidate.commitment.is_some() &&
-            policy.is_eligible(candidate.transaction_count) &&
-            candidate.store_miss &&
-            window.contains(&candidate.num_hash.number) &&
-            !attempted.contains_key(&candidate.num_hash);
-        if eligible {
-            outcome.candidates.push(candidate);
-        } else {
+        let Some(commitment) = candidate.commitment else {
             outcome.skipped += 1;
+            continue
+        };
+        if !policy.is_eligible(candidate.transaction_count) ||
+            !candidate.store_miss ||
+            !window.contains(&candidate.num_hash.number) ||
+            attempted.contains_key(&candidate.num_hash)
+        {
+            outcome.skipped += 1;
+            continue
         }
+        outcome.candidates.push(EligibleCandidate { num_hash: candidate.num_hash, commitment });
     }
     outcome
 }
 
 /// Validated BALs from one positional response.
 #[derive(Debug, Default, PartialEq, Eq)]
-pub struct BalResponseOutcome {
-    /// Valid entries retaining their requested block numbers and hashes.
-    pub values: Vec<(NumHash, RawBal)>,
-    /// Entries that were explicitly unavailable or absent from a short response.
-    pub unavailable: usize,
-    /// Invalid response entries or response shape errors.
-    pub invalid: usize,
+struct BalResponseOutcome {
+    values: Vec<(NumHash, RawBal)>,
+    unavailable: usize,
+    invalid: usize,
 }
 
 /// Validates one successful or failed positional BAL response.
-pub fn validate_bal_response<C: DownloadClient>(
+fn validate_bal_response<C: DownloadClient>(
     client: &C,
-    requested: &[HistoricalBalCandidate],
+    requested: &[EligibleCandidate],
     response: PeerRequestResult<BlockAccessLists>,
 ) -> BalResponseOutcome {
     let mut outcome = BalResponseOutcome::default();
@@ -256,13 +255,10 @@ pub fn validate_bal_response<C: DownloadClient>(
             continue
         };
 
-        let Some(expected) = candidate.commitment else {
-            client.report_bad_message(peer);
-            outcome.invalid = 1;
-            break
-        };
         let raw = RawBal::new(bytes.clone());
-        if raw.ensure_hash(expected).is_err() || DecodedBal::from_raw_bal(raw.clone()).is_err() {
+        if raw.ensure_hash(candidate.commitment).is_err() ||
+            DecodedBal::from_raw_bal(raw.clone()).is_err()
+        {
             client.report_bad_message(peer);
             outcome.invalid = 1;
             break
@@ -285,7 +281,7 @@ fn range_len(
 }
 
 /// Provider operations required by the worker.
-pub trait HistoricalBalProvider: Clone + Send + Sync + 'static {
+trait HistoricalBalProvider: Clone + Send + Sync + 'static {
     /// Reads the committed Bodies and Execution checkpoints.
     fn historical_bal_checkpoints(
         &self,
@@ -360,7 +356,7 @@ where
                 outcome.skipped += 1;
                 continue
             }
-            outcome.candidates.push(HistoricalBalCandidate {
+            outcome.candidates.push(ScannedCandidate {
                 num_hash: NumHash::new(header.number(), header.hash()),
                 commitment,
                 transaction_count: indices.tx_count,
@@ -404,16 +400,46 @@ where
     }
 }
 
-impl<P, C, W> HistoricalBalWorker<P, C, W>
-where
-    P: HistoricalBalProvider,
-    C: BlockAccessListsClient + Clone + 'static,
-    C::Output: 'static,
-    W: Stream + Send + Unpin + 'static,
-    W::Item: Send,
-{
+impl<P, C, W> HistoricalBalWorker<P, C, W> {
     /// Creates a worker. `config.lookahead` should already be clamped to store retention.
     pub fn new(
+        provider: P,
+        store: BalStoreHandle,
+        client: C,
+        wake_stream: W,
+        runtime: Runtime,
+        config: HistoricalBalWorkerConfig,
+    ) -> Self
+    where
+        P: HeaderProvider
+            + BlockBodyIndicesProvider
+            + BlockHashReader
+            + StageCheckpointReader
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+        C: BlockAccessListsClient + Clone + 'static,
+        C::Output: 'static,
+        W: Stream + Send + Unpin + 'static,
+        W::Item: Send,
+    {
+        Self::from_parts(provider, store, client, wake_stream, runtime, config)
+    }
+
+    #[cfg(test)]
+    fn new_for_test(
+        provider: P,
+        store: BalStoreHandle,
+        client: C,
+        wake_stream: W,
+        runtime: Runtime,
+        config: HistoricalBalWorkerConfig,
+    ) -> Self {
+        Self::from_parts(provider, store, client, wake_stream, runtime, config)
+    }
+
+    fn from_parts(
         provider: P,
         store: BalStoreHandle,
         client: C,
@@ -437,24 +463,40 @@ where
     }
 
     /// Sets the retry cooldown used after terminal unavailability, request failure, or invalidity.
-    pub const fn with_retry_cooldown(mut self, retry_cooldown: Duration) -> Self {
+    #[cfg(test)]
+    const fn with_retry_cooldown(mut self, retry_cooldown: Duration) -> Self {
         self.retry_cooldown = retry_cooldown;
         self
     }
 
-    /// Returns a clone of the worker metrics handles.
-    pub fn metrics(&self) -> HistoricalBalDownloaderMetrics {
-        self.metrics.clone()
-    }
-
     /// Spawns this worker as a regular detached task.
-    pub fn spawn(self) -> tokio::task::JoinHandle<()> {
+    pub fn spawn(self) -> tokio::task::JoinHandle<()>
+    where
+        P: HeaderProvider
+            + BlockBodyIndicesProvider
+            + BlockHashReader
+            + StageCheckpointReader
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+        C: BlockAccessListsClient + Clone + 'static,
+        C::Output: 'static,
+        W: Stream + Send + Unpin + 'static,
+        W::Item: Send,
+    {
         let runtime = self.runtime.clone();
         runtime.spawn_task(self.run())
     }
 
-    /// Runs the worker until its wake stream closes.
-    pub async fn run(mut self) {
+    async fn run(mut self)
+    where
+        P: HistoricalBalProvider,
+        C: BlockAccessListsClient + Clone + 'static,
+        C::Output: 'static,
+        W: Stream + Send + Unpin + 'static,
+        W::Item: Send,
+    {
         if self.config.enabled {
             self.run_once().await;
         }
@@ -465,8 +507,12 @@ where
         }
     }
 
-    /// Reconciles one committed historical window.
-    pub async fn run_once(&mut self) {
+    async fn run_once(&mut self)
+    where
+        P: HistoricalBalProvider,
+        C: BlockAccessListsClient + Clone + 'static,
+        C::Output: 'static,
+    {
         if !self.config.enabled {
             return
         }
@@ -631,9 +677,14 @@ where
     async fn process_response(
         &mut self,
         client: C,
-        requested: Vec<HistoricalBalCandidate>,
+        requested: Vec<EligibleCandidate>,
         response: PeerRequestResult<BlockAccessLists>,
-    ) -> Vec<HistoricalBalCandidate> {
+    ) -> Vec<EligibleCandidate>
+    where
+        P: HistoricalBalProvider,
+        C: BlockAccessListsClient + Clone + 'static,
+        C::Output: 'static,
+    {
         let requested_len = requested.len();
         let mut continuation = response.as_ref().ok().and_then(|response| {
             let response_len = response.data().0.len();
@@ -659,7 +710,10 @@ where
         continuation.unwrap_or_default()
     }
 
-    async fn persist_valid(&mut self, valid: Vec<(NumHash, RawBal)>) {
+    async fn persist_valid(&mut self, valid: Vec<(NumHash, RawBal)>)
+    where
+        P: HistoricalBalProvider,
+    {
         if valid.is_empty() {
             return
         }
@@ -727,7 +781,10 @@ where
         self.retry_pending_flush().await;
     }
 
-    async fn retry_pending_flush(&mut self) {
+    async fn retry_pending_flush(&mut self)
+    where
+        P: HistoricalBalProvider,
+    {
         if self.pending_flush.is_empty() {
             return
         }
@@ -869,7 +926,7 @@ mod tests {
         execution: u64,
         checkpoint_overrides: VecDeque<(u64, u64)>,
         canonical_results: VecDeque<Vec<bool>>,
-        candidates: Vec<HistoricalBalCandidate>,
+        candidates: Vec<ScannedCandidate>,
         canonical: HashMap<u64, B256>,
         canonical_calls: usize,
         fail_canonical_call: Option<usize>,
@@ -878,11 +935,7 @@ mod tests {
     }
 
     impl TestProvider {
-        fn with_candidates(
-            bodies: u64,
-            execution: u64,
-            candidates: Vec<HistoricalBalCandidate>,
-        ) -> Self {
+        fn with_candidates(bodies: u64, execution: u64, candidates: Vec<ScannedCandidate>) -> Self {
             let canonical = candidates
                 .iter()
                 .map(|candidate| (candidate.num_hash.number, candidate.num_hash.hash))
@@ -1474,12 +1527,19 @@ mod tests {
         commitment: Option<B256>,
         tx_count: u64,
         store_miss: bool,
-    ) -> HistoricalBalCandidate {
-        HistoricalBalCandidate {
+    ) -> ScannedCandidate {
+        ScannedCandidate {
             num_hash: NumHash::new(number, B256::with_last_byte(number as u8)),
             commitment,
             transaction_count: tx_count,
             store_miss,
+        }
+    }
+
+    fn eligible_candidate(number: u64, commitment: B256) -> EligibleCandidate {
+        EligibleCandidate {
+            num_hash: NumHash::new(number, B256::with_last_byte(number as u8)),
+            commitment,
         }
     }
 
@@ -1528,7 +1588,7 @@ mod tests {
             PeerId::random(),
             BlockAccessLists(vec![Some(raw)]),
         )));
-        let mut worker = HistoricalBalWorker::new(
+        let mut worker = HistoricalBalWorker::new_for_test(
             provider,
             store,
             client.clone(),
@@ -1556,7 +1616,7 @@ mod tests {
             BlockAccessLists(vec![Some(raw.clone())]),
         )));
 
-        HistoricalBalWorker::new(
+        HistoricalBalWorker::new_for_test(
             provider.clone(),
             store.clone(),
             client.clone(),
@@ -1571,7 +1631,7 @@ mod tests {
         assert_eq!(requests, vec![(vec![candidate.num_hash.hash], BalRequirement::Optional)]);
         assert_eq!(store.get_by_hash(candidate.num_hash.hash).unwrap(), Some(raw));
 
-        HistoricalBalWorker::new(
+        HistoricalBalWorker::new_for_test(
             provider,
             store,
             client.clone(),
@@ -1597,7 +1657,7 @@ mod tests {
             PeerId::random(),
             BlockAccessLists(vec![Some(raw.clone())]),
         )));
-        let worker = HistoricalBalWorker::new(
+        let worker = HistoricalBalWorker::new_for_test(
             provider,
             store.clone(),
             client.clone(),
@@ -1627,7 +1687,7 @@ mod tests {
             PeerId::random(),
             BlockAccessLists(vec![Some(raw.clone())]),
         )));
-        let mut worker = HistoricalBalWorker::new(
+        let mut worker = HistoricalBalWorker::new_for_test(
             provider,
             store.clone(),
             client.clone(),
@@ -1659,7 +1719,7 @@ mod tests {
         )));
         let recorder = DebuggingRecorder::new();
         let snapshotter = recorder.snapshotter();
-        let mut worker = HistoricalBalWorker::new(
+        let mut worker = HistoricalBalWorker::new_for_test(
             provider,
             BalStoreHandle::new(InMemoryBalStore::default()),
             client,
@@ -1694,7 +1754,7 @@ mod tests {
         client.push_response(Ok(WithPeerId::new(peer, BlockAccessLists(vec![None, None]))));
         let recorder = DebuggingRecorder::new();
         let snapshotter = recorder.snapshotter();
-        let mut worker = HistoricalBalWorker::new(
+        let mut worker = HistoricalBalWorker::new_for_test(
             provider,
             BalStoreHandle::new(InMemoryBalStore::default()),
             client.clone(),
@@ -1731,7 +1791,7 @@ mod tests {
         let recorder = DebuggingRecorder::new();
         let snapshotter = recorder.snapshotter();
         let config = HistoricalBalWorkerConfig::new(true, 1, 1, 2, 3).unwrap();
-        let mut worker = HistoricalBalWorker::new(
+        let mut worker = HistoricalBalWorker::new_for_test(
             provider,
             BalStoreHandle::new(InMemoryBalStore::default()),
             client,
@@ -1768,7 +1828,7 @@ mod tests {
             )));
         }
         let config = HistoricalBalWorkerConfig::new(true, 1, 1, 1, 2).unwrap();
-        let mut worker = HistoricalBalWorker::new(
+        let mut worker = HistoricalBalWorker::new_for_test(
             provider,
             store,
             client.clone(),
@@ -1797,7 +1857,7 @@ mod tests {
             BlockAccessLists(vec![Some(raw.clone())]),
         )));
         let config = HistoricalBalWorkerConfig::new(true, 1, 1, 2, 2).unwrap();
-        let mut worker = HistoricalBalWorker::new(
+        let mut worker = HistoricalBalWorker::new_for_test(
             provider,
             store.clone(),
             client.clone(),
@@ -1819,7 +1879,7 @@ mod tests {
         let provider = TestProvider::with_candidates(1, 0, vec![candidate]);
         provider.set_noncanonical_calls([1]);
         let client = ScriptedBalClient::default();
-        let mut worker = HistoricalBalWorker::new(
+        let mut worker = HistoricalBalWorker::new_for_test(
             provider,
             BalStoreHandle::new(InMemoryBalStore::default()),
             client.clone(),
@@ -1844,7 +1904,7 @@ mod tests {
         };
         let store = BalStoreHandle::new(changing_store);
         let client = ScriptedBalClient::default();
-        let mut worker = HistoricalBalWorker::new(
+        let mut worker = HistoricalBalWorker::new_for_test(
             provider,
             store.clone(),
             client.clone(),
@@ -1872,7 +1932,7 @@ mod tests {
             PeerId::random(),
             BlockAccessLists(vec![Some(raw.clone())]),
         )));
-        let mut worker = HistoricalBalWorker::new(
+        let mut worker = HistoricalBalWorker::new_for_test(
             provider.clone(),
             store.clone(),
             client,
@@ -1901,7 +1961,7 @@ mod tests {
             PeerId::random(),
             BlockAccessLists(vec![Some(raw.clone())]),
         )));
-        let worker = HistoricalBalWorker::new(
+        let worker = HistoricalBalWorker::new_for_test(
             provider.clone(),
             store.clone(),
             client.clone(),
@@ -1935,7 +1995,7 @@ mod tests {
             PeerId::random(),
             BlockAccessLists(vec![Some(raw)]),
         )));
-        let mut worker = HistoricalBalWorker::new(
+        let mut worker = HistoricalBalWorker::new_for_test(
             provider.clone(),
             store,
             client.clone(),
@@ -1967,7 +2027,7 @@ mod tests {
             PeerId::random(),
             BlockAccessLists(vec![Some(raw)]),
         )));
-        let mut worker = HistoricalBalWorker::new(
+        let mut worker = HistoricalBalWorker::new_for_test(
             provider.clone(),
             store,
             client.clone(),
@@ -1999,7 +2059,7 @@ mod tests {
             PeerId::random(),
             BlockAccessLists(vec![Some(raw.clone())]),
         )));
-        let worker = HistoricalBalWorker::new(
+        let worker = HistoricalBalWorker::new_for_test(
             provider,
             store,
             client.clone(),
@@ -2030,7 +2090,7 @@ mod tests {
             BlockAccessLists(vec![Some(raw.clone()), Some(raw.clone())]),
         )));
         let config = HistoricalBalWorkerConfig::new(true, 1, 2, 1, 2).unwrap();
-        let mut worker = HistoricalBalWorker::new(
+        let mut worker = HistoricalBalWorker::new_for_test(
             provider.clone(),
             store,
             client.clone(),
@@ -2086,7 +2146,7 @@ mod tests {
             BlockAccessLists(vec![Some(raw.clone())]),
         )));
         let config = HistoricalBalWorkerConfig::new(true, 1, 2, 1, 2).unwrap();
-        let mut worker = HistoricalBalWorker::new(
+        let mut worker = HistoricalBalWorker::new_for_test(
             provider,
             store,
             client.clone(),
@@ -2122,7 +2182,7 @@ mod tests {
             BlockAccessLists(vec![Some(raw.clone()), Some(raw.clone())]),
         )));
         let config = HistoricalBalWorkerConfig::new(true, 1, 2, 1, 2).unwrap();
-        let mut worker = HistoricalBalWorker::new(
+        let mut worker = HistoricalBalWorker::new_for_test(
             provider.clone(),
             store,
             client.clone(),
@@ -2162,7 +2222,7 @@ mod tests {
             PeerId::random(),
             BlockAccessLists(vec![Some(raw.clone())]),
         )));
-        let mut worker = HistoricalBalWorker::new(
+        let mut worker = HistoricalBalWorker::new_for_test(
             provider,
             store.clone(),
             client.clone(),
@@ -2199,7 +2259,7 @@ mod tests {
             PeerId::random(),
             BlockAccessLists(vec![Some(raw)]),
         )));
-        let mut worker = HistoricalBalWorker::new(
+        let mut worker = HistoricalBalWorker::new_for_test(
             provider.clone(),
             store.clone(),
             client,
@@ -2227,7 +2287,7 @@ mod tests {
             PeerId::random(),
             BlockAccessLists(vec![Some(raw.clone())]),
         )));
-        let mut worker = HistoricalBalWorker::new(
+        let mut worker = HistoricalBalWorker::new_for_test(
             provider.clone(),
             store.clone(),
             client,
@@ -2259,7 +2319,7 @@ mod tests {
             )));
         }
         let config = HistoricalBalWorkerConfig::new(true, 1, 2, 2, 5).unwrap();
-        let mut worker = HistoricalBalWorker::new(
+        let mut worker = HistoricalBalWorker::new_for_test(
             provider,
             store,
             client.clone(),
@@ -2296,7 +2356,7 @@ mod tests {
         let recorder = DebuggingRecorder::new();
         let snapshotter = recorder.snapshotter();
         let config = HistoricalBalWorkerConfig::new(true, 1, 3, 1, 3).unwrap();
-        let mut worker = HistoricalBalWorker::new(
+        let mut worker = HistoricalBalWorker::new_for_test(
             provider,
             store.clone(),
             client.clone(),
@@ -2350,7 +2410,7 @@ mod tests {
             BlockAccessLists(vec![Some(raw.clone()), Some(raw.clone())]),
         )));
         let config = HistoricalBalWorkerConfig::new(true, 1, 4, 1, 4).unwrap();
-        let mut worker = HistoricalBalWorker::new(
+        let mut worker = HistoricalBalWorker::new_for_test(
             provider,
             store.clone(),
             client.clone(),
@@ -2398,7 +2458,7 @@ mod tests {
             )));
         }
         let config = HistoricalBalWorkerConfig::new(true, 1, 4, 1, 4).unwrap();
-        let mut worker = HistoricalBalWorker::new(
+        let mut worker = HistoricalBalWorker::new_for_test(
             provider,
             store.clone(),
             client.clone(),
@@ -2439,7 +2499,7 @@ mod tests {
         let recorder = DebuggingRecorder::new();
         let snapshotter = recorder.snapshotter();
         let config = HistoricalBalWorkerConfig::new(true, 1, 3, 1, 3).unwrap();
-        let mut worker = HistoricalBalWorker::new(
+        let mut worker = HistoricalBalWorker::new_for_test(
             provider,
             store.clone(),
             client.clone(),
@@ -2475,7 +2535,7 @@ mod tests {
         let client = ScriptedBalClient::default();
         client.push_response(Err(RequestError::Timeout));
         let config = HistoricalBalWorkerConfig::new(true, 1, 3, 1, 3).unwrap();
-        let mut worker = HistoricalBalWorker::new(
+        let mut worker = HistoricalBalWorker::new_for_test(
             provider,
             BalStoreHandle::new(InMemoryBalStore::default()),
             client.clone(),
@@ -2498,7 +2558,7 @@ mod tests {
         let client = ScriptedBalClient::default();
         let peer = PeerId::random();
         client.push_response(Ok(WithPeerId::new(peer, BlockAccessLists(vec![Some(raw)]))));
-        let mut worker = HistoricalBalWorker::new(
+        let mut worker = HistoricalBalWorker::new_for_test(
             provider,
             store.clone(),
             client.clone(),
@@ -2533,7 +2593,7 @@ mod tests {
             BlockAccessLists(vec![Some(raw.clone())]),
         )));
         let config = HistoricalBalWorkerConfig::new(true, 1, 3, 1, 3).unwrap();
-        let mut worker = HistoricalBalWorker::new(
+        let mut worker = HistoricalBalWorker::new_for_test(
             provider,
             store.clone(),
             client.clone(),
@@ -2574,7 +2634,7 @@ mod tests {
         }
         let pending = client.push_pending_response();
         let config = HistoricalBalWorkerConfig::new(true, 1, 1, 2, 3).unwrap();
-        let mut worker = HistoricalBalWorker::new(
+        let mut worker = HistoricalBalWorker::new_for_test(
             provider,
             store.clone(),
             client,
@@ -2618,7 +2678,7 @@ mod tests {
             BlockAccessLists(vec![Some(raw)]),
         )));
         let config = HistoricalBalWorkerConfig::new(true, 2, 4, 1, 4).unwrap();
-        let mut worker = HistoricalBalWorker::new(
+        let mut worker = HistoricalBalWorker::new_for_test(
             provider,
             store,
             client.clone(),
@@ -2635,6 +2695,7 @@ mod tests {
             recording_store.lookups(),
             vec![vec![stored_hash, requested_hash], vec![requested_hash]]
         );
+        assert!(client.reports().is_empty());
     }
 
     #[tokio::test]
@@ -2655,7 +2716,7 @@ mod tests {
             BlockAccessLists(vec![Some(raw)]),
         )));
         let config = HistoricalBalWorkerConfig::new(true, 2, 2, 1, 3).unwrap();
-        let mut worker = HistoricalBalWorker::new(
+        let mut worker = HistoricalBalWorker::new_for_test(
             provider,
             store,
             client,
@@ -2818,9 +2879,8 @@ mod tests {
         let now = Instant::now();
         let old = candidate(5, Some(B256::ZERO), 3, true);
         let current =
-            HistoricalBalCandidate { num_hash: NumHash::new(5, B256::repeat_byte(0x22)), ..old };
-        let next =
-            HistoricalBalCandidate { num_hash: NumHash::new(5, B256::repeat_byte(0x33)), ..old };
+            ScannedCandidate { num_hash: NumHash::new(5, B256::repeat_byte(0x22)), ..old };
+        let next = ScannedCandidate { num_hash: NumHash::new(5, B256::repeat_byte(0x33)), ..old };
         let mut attempted = HashMap::from([(old.num_hash, now), (current.num_hash, now)]);
         let policy = BalExecutionPolicy::new(NonZeroU64::new(1).unwrap());
 
@@ -2844,7 +2904,10 @@ mod tests {
             now,
             Duration::from_secs(30),
         );
-        assert_eq!(result.candidates, vec![next]);
+        assert_eq!(
+            result.candidates,
+            vec![EligibleCandidate { num_hash: next.num_hash, commitment: B256::ZERO }]
+        );
         assert!(attempted.is_empty());
     }
 
@@ -2874,7 +2937,10 @@ mod tests {
             attempted_at + cooldown,
             cooldown,
         );
-        assert_eq!(at_boundary.candidates, vec![candidate]);
+        assert_eq!(
+            at_boundary.candidates,
+            vec![EligibleCandidate { num_hash: candidate.num_hash, commitment: B256::ZERO }]
+        );
         assert!(attempted.is_empty());
     }
 
@@ -2883,8 +2949,7 @@ mod tests {
         let bal = Bytes::from_static(&[0xc0]);
         let expected = keccak256(&bal);
         let client = TestClient::default();
-        let requested =
-            vec![candidate(1, Some(expected), 3, true), candidate(2, Some(expected), 3, true)];
+        let requested = vec![eligible_candidate(1, expected), eligible_candidate(2, expected)];
         let peer = PeerId::random();
 
         let response = Ok(WithPeerId::new(peer, BlockAccessLists(vec![Some(bal.clone()), None])));
@@ -2916,7 +2981,7 @@ mod tests {
     #[test]
     fn rejects_overlong_response_and_reports_peer_once() {
         let client = TestClient::default();
-        let requested = [candidate(1, Some(B256::ZERO), 3, true)];
+        let requested = [eligible_candidate(1, B256::ZERO)];
         let peer = PeerId::random();
 
         let outcome = validate_bal_response(
@@ -2935,7 +3000,7 @@ mod tests {
     fn rejects_malformed_nested_rlp_even_when_raw_hash_matches() {
         let malformed = Bytes::from_static(&[0xc1, 0x7f]);
         let client = TestClient::default();
-        let requested = [candidate(1, Some(keccak256(&malformed)), 3, true)];
+        let requested = [eligible_candidate(1, keccak256(&malformed))];
         let peer = PeerId::random();
         let encoded = alloy_rlp::encode(BlockAccessLists(vec![Some(malformed)]));
         let response = alloy_rlp::decode_exact::<BlockAccessLists>(&encoded).unwrap();
@@ -2952,8 +3017,7 @@ mod tests {
     fn rejects_hash_mismatch_once_and_preserves_valid_prefix() {
         let bal = Bytes::from_static(&[0xc0]);
         let client = TestClient::default();
-        let requested =
-            [candidate(1, Some(keccak256(&bal)), 3, true), candidate(2, Some(B256::ZERO), 3, true)];
+        let requested = [eligible_candidate(1, keccak256(&bal)), eligible_candidate(2, B256::ZERO)];
         let peer = PeerId::random();
 
         let outcome = validate_bal_response(
