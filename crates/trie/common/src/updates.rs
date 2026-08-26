@@ -7,7 +7,7 @@ use alloc::{
     vec::Vec,
 };
 use alloy_primitives::{
-    map::{B256Map, B256Set, HashMap, HashSet},
+    map::{B256Map, HashMap, HashSet},
     FixedBytes, B256,
 };
 
@@ -141,7 +141,7 @@ impl TrieUpdates {
         &mut self,
         hash_builder: HashBuilder,
         removed_keys: HashSet<Nibbles>,
-        destroyed_accounts: B256Set,
+        destroyed_storage_trie_nodes: B256Map<Vec<Nibbles>>,
     ) {
         // Retrieve updated nodes from hash builder.
         let (_, updated_nodes) = hash_builder.split();
@@ -150,9 +150,10 @@ impl TrieUpdates {
         // Add deleted node paths.
         self.removed_nodes.extend(exclude_empty(removed_keys));
 
-        // Add deleted storage tries for destroyed accounts.
-        for destroyed in destroyed_accounts {
-            self.storage_tries.entry(destroyed).or_default().set_deleted(true);
+        // Add removed storage trie nodes for destroyed accounts.
+        for (hashed_address, removed_nodes) in destroyed_storage_trie_nodes {
+            let storage_updates = self.storage_tries.entry(hashed_address).or_default();
+            storage_updates.removed_nodes.extend(removed_nodes);
         }
     }
 
@@ -941,6 +942,34 @@ impl From<StorageTrieUpdatesSorted> for StorageTrieUpdates {
 mod tests {
     use super::*;
     use alloy_primitives::B256;
+
+    #[test]
+    fn test_finalize_keeps_storage_updates_after_destroyed_node_removal() {
+        let hashed_address = B256::with_last_byte(1);
+        let path = Nibbles::from_nibbles_unchecked([0x01]);
+        let node = BranchNodeCompact::default();
+        let mut updates = TrieUpdates {
+            storage_tries: B256Map::from_iter([(
+                hashed_address,
+                StorageTrieUpdates {
+                    storage_nodes: HashMap::from_iter([(path, node.clone())]),
+                    ..Default::default()
+                },
+            )]),
+            ..Default::default()
+        };
+
+        updates.finalize(
+            HashBuilder::default(),
+            Default::default(),
+            B256Map::from_iter([(hashed_address, vec![path])]),
+        );
+
+        assert_eq!(
+            updates.into_sorted().storage_tries[&hashed_address].storage_nodes,
+            vec![(path, Some(node))]
+        );
+    }
 
     #[test]
     fn test_trie_updates_sorted_extend_ref() {
