@@ -3,7 +3,10 @@
 use crate::cli::config::RethTransactionPoolConfig;
 use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, MIN_PROTOCOL_BASE_FEE};
 use alloy_primitives::Address;
-use clap::{builder::Resettable, Args};
+use clap::{
+    builder::{RangedU64ValueParser, Resettable},
+    Args,
+};
 use reth_cli_util::{parse_duration_from_secs_or_ms, parsers::format_duration_as_secs_or_ms};
 use reth_transaction_pool::{
     blobstore::disk::DEFAULT_MAX_CACHED_BLOBS,
@@ -16,11 +19,6 @@ use reth_transaction_pool::{
     TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT, TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
 };
 use std::{path::PathBuf, sync::OnceLock, time::Duration};
-
-fn parse_nonzero_usize(value: &str) -> Result<usize, String> {
-    let value = value.parse().map_err(|_| format!("invalid usize: {value}"))?;
-    (value != 0).then_some(value).ok_or_else(|| "must be greater than zero".to_owned())
-}
 
 /// Global static transaction pool defaults
 static TXPOOL_DEFAULTS: OnceLock<DefaultTxPoolValues> = OnceLock::new();
@@ -414,7 +412,7 @@ pub struct TxPoolArgs {
     pub disable_transactions_backup: bool,
 
     /// Max batch size for transaction pool insertions
-    #[arg(long = "txpool.max-batch-size", value_parser = parse_nonzero_usize, default_value_t = DefaultTxPoolValues::get_global().max_batch_size)]
+    #[arg(long = "txpool.max-batch-size", value_parser = RangedU64ValueParser::<usize>::new().range(1..), default_value_t = DefaultTxPoolValues::get_global().max_batch_size)]
     pub max_batch_size: usize,
 }
 
