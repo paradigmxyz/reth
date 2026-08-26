@@ -747,8 +747,17 @@ where
             return Ok(PopCachedBranchOutcome::Exhausted)
         };
 
-        // If there is a branch on top of the stack we use that.
-        if let Some(cached) = self.cached_branch_stack.pop() {
+        // Use the branch on top of the stack unless a previously calculated range has already
+        // covered its entire subtrie.
+        while let Some(cached) = self.cached_branch_stack.pop() {
+            if cached
+                .0
+                .next_without_prefix()
+                .is_some_and(|upper_bound| upper_bound <= *uncalculated_lower_bound)
+            {
+                trace!(target: TRACE_TARGET, cached_path=?cached.0, ?uncalculated_lower_bound, "Skipping covered cached branch");
+                continue
+            }
             return Ok(PopCachedBranchOutcome::Popped(cached));
         }
 
@@ -2873,6 +2882,35 @@ mod tests {
             Some(expected_root),
             harness.root_with_prefix_set(prefix_set.freeze()),
             "a dirty prefix must not omit a clean sibling after collapsing a cached branch",
+        );
+    }
+
+    #[test]
+    fn test_prefix_set_range_skips_covered_cached_branch() {
+        reth_tracing::init_test_tracing();
+
+        let before = B256::right_padding_from(&[0x30]);
+        let cached_a = B256::right_padding_from(&[0x80, 0x10]);
+        let cached_b = B256::right_padding_from(&[0x80, 0x15]);
+        let dirty = B256::right_padding_from(&[0x80, 0xc0]);
+        let after = B256::right_padding_from(&[0x90]);
+
+        // The cached branch at 0x80 remains parked while its children are rebuilt. Processing the
+        // dirty child advances the lower bound to 0x9, past the cached branch's entire range.
+        let storage = [before, cached_a, cached_b, dirty, after]
+            .into_iter()
+            .enumerate()
+            .map(|(i, key)| (key, U256::from(i + 1)))
+            .collect();
+
+        let harness = ProofTestHarness::new(storage);
+        let expected_root = harness.original_root();
+        let mut prefix_set = PrefixSetMut::default();
+        prefix_set.insert(Nibbles::unpack(dirty));
+
+        pretty_assertions::assert_eq!(
+            Some(expected_root),
+            harness.root_with_prefix_set(prefix_set.freeze()),
         );
     }
 
