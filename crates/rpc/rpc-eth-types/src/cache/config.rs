@@ -27,6 +27,11 @@ pub struct EthStateCacheConfig {
     ///
     /// Default is 1000.
     pub max_bals: u32,
+    /// Whether to fetch and prewarm BALs for new canonical blocks.
+    ///
+    /// Default is false.
+    #[serde(default)]
+    pub prewarm_bals: bool,
     /// Max number of concurrent database requests.
     ///
     /// Default is 512.
@@ -42,6 +47,7 @@ impl Default for EthStateCacheConfig {
             max_receipts: DEFAULT_RECEIPT_CACHE_MAX_LEN,
             max_headers: DEFAULT_HEADER_CACHE_MAX_LEN,
             max_bals: DEFAULT_BAL_CACHE_MAX_LEN,
+            prewarm_bals: false,
             max_concurrent_db_requests: DEFAULT_CONCURRENT_DB_REQUESTS,
             max_cached_tx_hashes: DEFAULT_MAX_CACHED_TX_HASHES,
         }

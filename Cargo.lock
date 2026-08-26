@@ -10159,6 +10159,7 @@ dependencies = [
  "alloy-evm",
  "alloy-network",
  "alloy-primitives",
+ "alloy-rlp",
  "alloy-rpc-client",
  "alloy-rpc-types-eth",
  "alloy-serde",
