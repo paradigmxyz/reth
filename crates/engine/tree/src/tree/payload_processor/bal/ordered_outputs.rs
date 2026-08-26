@@ -95,11 +95,11 @@ impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
                     // consumer observes them in block order: verdict precedence must follow
                     // block position, not worker completion order. Errors without an index
                     // cannot be attributed to a transaction and end the iteration.
-                    let BalWorkerError::Execution { index, .. } = &err else {
+                    let BalWorkerError::Execution { tx_index, .. } = &err else {
                         self.failed = true;
                         return Some(Err(err.into()));
                     };
-                    (*index, Err(err))
+                    (*tx_index, Err(err))
                 }
                 Err(_) => {
                     self.failed = true;
@@ -176,7 +176,7 @@ mod tests {
     fn defers_indexed_execution_errors_to_their_slot() {
         let (tx, rx) = crossbeam_channel::unbounded();
         tx.send(Err(BalWorkerError::Execution {
-            index: 1,
+            tx_index: 1,
             tx_gas_limit: 42,
             source: alloy_evm::block::BlockExecutionError::msg("bal miss"),
         }))
@@ -187,7 +187,7 @@ mod tests {
         let mut outputs = ordered_worker_outputs(&rx, 2);
 
         assert_eq!(outputs.next().expect("first item").expect("first output").result, 0);
-        expect_err_contains(outputs.next().expect("second item"), "bal miss");
+        expect_err_contains(outputs.next().expect("second item"), "transaction 1: bal miss");
         assert!(outputs.next().is_none());
     }
 
@@ -195,7 +195,7 @@ mod tests {
     fn continues_past_indexed_execution_errors() {
         let (tx, rx) = crossbeam_channel::unbounded();
         tx.send(Err(BalWorkerError::Execution {
-            index: 0,
+            tx_index: 0,
             tx_gas_limit: 42,
             source: alloy_evm::block::BlockExecutionError::msg("bal miss"),
         }))
@@ -205,7 +205,7 @@ mod tests {
 
         let mut outputs = ordered_worker_outputs(&rx, 2);
 
-        expect_err_contains(outputs.next().expect("first item"), "bal miss");
+        expect_err_contains(outputs.next().expect("first item"), "transaction 0: bal miss");
         assert_eq!(outputs.next().expect("second item").expect("second output").result, 10);
         assert!(outputs.next().is_none());
     }

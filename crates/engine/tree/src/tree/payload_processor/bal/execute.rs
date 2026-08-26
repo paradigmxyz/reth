@@ -155,7 +155,7 @@ where
             let output = match output {
                 Ok(output) => output,
                 Err(OrderedWorkerOutputError::Worker(worker::BalWorkerError::Execution {
-                    index,
+                    tx_index,
                     tx_gas_limit,
                     source,
                 })) => {
@@ -167,7 +167,7 @@ where
                     // verdict: a BAL miss proves the received BAL diverges from this execution.
                     tracing::debug!(
                         target: "engine::tree::payload_processor::bal",
-                        index,
+                        tx_index,
                         err = %source,
                         "Speculative BAL execution failed; rejecting block in transaction order"
                     );
