@@ -308,6 +308,29 @@ mod tests {
         assert_eq!(block, expected);
     }
 
+    /// The body must come from the stream, not from the payload's raw bytes. Streaming
+    /// transactions that differ from the encoded ones is the only way to tell the two apart:
+    /// when both agree, a silent fallback to decoding produces an identical block.
+    #[test]
+    fn body_is_taken_from_the_stream_not_the_raw_bytes() {
+        let encoded: Vec<_> = (0..3).map(signed_tx).collect();
+        let payload = payload_with_txs(&encoded);
+
+        // The last transaction sent over the stream differs from the one encoded in the payload.
+        let mut streamed = encoded.clone();
+        streamed[2] = signed_tx(99);
+        assert_ne!(streamed[2], encoded[2]);
+
+        let (tx, rx) = mpsc::sync_channel(streamed.len());
+        for (idx, tx_signed) in streamed.iter().enumerate() {
+            tx.send((idx, tx_signed.clone())).unwrap();
+        }
+        drop(tx);
+
+        let block = ensure_well_formed_payload_with_tx_stream(&*MAINNET, payload, rx).unwrap();
+        assert_eq!(block.body().transactions, streamed);
+    }
+
     #[test]
     fn fallback_reproduces_decode_error() {
         // Garbage transaction bytes but a self-consistent block hash: the early hash check

@@ -3409,3 +3409,37 @@ fn test_payload_tx_stream_aborted_execution_does_not_hang() {
         other => panic!("expected post-conversion block error, got: {other:?}"),
     }
 }
+
+/// Blocks at or above `SMALL_BLOCK_TX_THRESHOLD` take the parallel fan-out instead of the
+/// sequential one every other test in this suite exercises. This covers that path end to end:
+/// conversion terminates and assembles the same block the non-streaming path would.
+///
+/// It deliberately claims nothing about *how* the body was assembled. The disconnect fallback
+/// re-decodes from the retained raw bytes and yields an identical block, so a stream defect on
+/// this path — a wrong index offset, no sends at all — is invisible here. Verified by mutation:
+/// breaking `idx = i + prefetch` keeps this test green. That the body comes from the stream at
+/// all is locked in `body_is_taken_from_the_stream_not_the_raw_bytes` instead.
+#[test]
+fn test_payload_tx_stream_parallel_path_assembles_correct_body() {
+    reth_tracing::init_test_tracing();
+
+    let mut harness = StreamingValidatorHarness::new(MAINNET.clone());
+    let genesis = harness.genesis_header();
+
+    // Above the 30-tx threshold and past the 4-tx sequential prefetch, so the chunked parallel
+    // path runs with a non-zero index offset.
+    let raw_txs: Vec<Bytes> = (0..40).map(streaming_raw_tx).collect();
+    let payload = streaming_payload(&genesis, raw_txs, genesis.gas_limit);
+
+    let expected = PayloadValidator::<EthEngineTypes>::convert_payload_to_block(
+        &EthereumEngineValidator::new(MAINNET.clone()),
+        payload.clone(),
+    )
+    .expect("payload converts via the non-streaming path");
+
+    let err = harness.validate_payload(payload).unwrap_err();
+    match err {
+        InsertPayloadError::Block(err) => assert_eq!(err.block(), &expected),
+        other => panic!("expected post-conversion block error, got: {other:?}"),
+    }
+}
