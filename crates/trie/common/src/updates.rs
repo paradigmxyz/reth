@@ -1267,9 +1267,13 @@ mod tests {
 #[cfg(feature = "serde-bincode-compat")]
 pub mod serde_bincode_compat {
     use crate::{BranchNodeCompact, Nibbles};
-    use alloc::borrow::Cow;
+    use alloc::{borrow::Cow, vec::Vec};
     use alloy_primitives::map::{B256Map, HashMap, HashSet};
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use core::fmt;
+    use serde::{
+        de::{Error as _, SeqAccess, Visitor},
+        Deserialize, Deserializer, Serialize, Serializer,
+    };
     use serde_with::{DeserializeAs, SerializeAs};
 
     /// Bincode-compatible [`super::TrieUpdates`] serde implementation.
@@ -1475,9 +1479,53 @@ pub mod serde_bincode_compat {
     ///     trie_updates: StorageTrieUpdatesSorted,
     /// }
     /// ```
-    #[derive(Debug, Serialize, Deserialize)]
+    #[derive(Debug, Serialize)]
     pub struct StorageTrieUpdatesSorted<'a> {
         storage_nodes: Cow<'a, [(Nibbles, Option<BranchNodeCompact>)]>,
+    }
+
+    impl<'de, 'a> Deserialize<'de> for StorageTrieUpdatesSorted<'a> {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            struct StorageTrieUpdatesSortedVisitor;
+
+            impl<'de> Visitor<'de> for StorageTrieUpdatesSortedVisitor {
+                type Value = Vec<(Nibbles, Option<BranchNodeCompact>)>;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("storage trie updates with an optional legacy wipe marker")
+                }
+
+                fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+                where
+                    A: SeqAccess<'de>,
+                {
+                    let len = seq.size_hint().unwrap_or_default();
+                    let storage_nodes = match len {
+                        1 => {
+                            seq.next_element()?.ok_or_else(|| A::Error::invalid_length(0, &self))?
+                        }
+                        2 => {
+                            let _: bool = seq
+                                .next_element()?
+                                .ok_or_else(|| A::Error::invalid_length(0, &self))?;
+                            seq.next_element()?.ok_or_else(|| A::Error::invalid_length(1, &self))?
+                        }
+                        _ => return Err(A::Error::invalid_length(len, &self)),
+                    };
+
+                    Ok(storage_nodes)
+                }
+            }
+
+            // Bincode uses the supplied tuple length for the current format, while MessagePack
+            // exposes the encoded sequence length so legacy ExEx WAL entries can still be read.
+            deserializer
+                .deserialize_tuple(1, StorageTrieUpdatesSortedVisitor)
+                .map(|storage_nodes| Self { storage_nodes: Cow::Owned(storage_nodes) })
+        }
     }
 
     impl<'a> From<&'a super::StorageTrieUpdatesSorted> for StorageTrieUpdatesSorted<'a> {
