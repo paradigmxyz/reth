@@ -22,8 +22,8 @@ use reth_trie_common::{MultiProofTargetsV2, ProofV2Target, ProofV2TargetParent};
 use reth_trie_parallel::{
     error::StateRootTaskError,
     proof_task::{
-        AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofResultSender,
-        ProofWorkerHandle,
+        AccountMultiproofInput, ProofCancellationToken, ProofResultContext, ProofResultMessage,
+        ProofResultSender, ProofWorkerHandle,
     },
 };
 use reth_trie_sparse::{
@@ -45,6 +45,8 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// waiting for the result anymore. This is the teardown path for a task whose pending
     /// work never drains, since the updates channel closing is a normal end of stream.
     cancel_rx: CrossbeamReceiver<()>,
+    /// Shared cancellation state attached to every proof job dispatched by this task.
+    proof_cancellation: ProofCancellationToken,
     /// Sender half for the channel to send final hashed state to.
     final_hashed_state_tx: Option<std::sync::mpsc::Sender<Arc<HashedPostState>>>,
     /// `SparseStateTrie` used for computing the state root.
@@ -135,6 +137,7 @@ where
         executor: &Runtime,
         updates: CrossbeamReceiver<StateRootMessage>,
         cancel_rx: CrossbeamReceiver<()>,
+        proof_cancellation: ProofCancellationToken,
         final_hashed_state_tx: std::sync::mpsc::Sender<Arc<HashedPostState>>,
         proof_worker_handle: ProofWorkerHandle,
         proof_result_tx: ProofResultSender,
@@ -159,6 +162,7 @@ where
             proof_result_rx,
             updates: hashed_state_rx,
             cancel_rx,
+            proof_cancellation,
             proof_worker_handle,
             final_hashed_state_tx: Some(final_hashed_state_tx),
             trie,
@@ -259,6 +263,14 @@ where
         skip_all
     )]
     pub(super) fn run(&mut self) -> Result<StateRootComputeOutcome, StateRootTaskError> {
+        let result = self.run_inner();
+        if result.is_err() {
+            self.proof_cancellation.cancel();
+        }
+        result
+    }
+
+    fn run_inner(&mut self) -> Result<StateRootComputeOutcome, StateRootTaskError> {
         let now = Instant::now();
 
         let mut total_idle_time = std::time::Duration::ZERO;
@@ -860,6 +872,9 @@ where
     }
 
     fn dispatch_pending_targets(&mut self) -> Result<(), StateRootTaskError> {
+        if self.proof_cancellation.is_cancelled() {
+            return Err(StateRootTaskError::Canceled)
+        }
         if self.pending_targets.is_empty() {
             return Ok(())
         }
@@ -876,18 +891,22 @@ where
             self.proof_worker_handle.has_multiple_idle_storage_workers(),
             MultiProofTargetsV2::chunks,
             |proof_targets| {
-                if dispatch_error.is_some() {
+                if dispatch_error.is_some() || self.proof_cancellation.is_cancelled() {
+                    dispatch_error.get_or_insert(StateRootTaskError::Canceled);
                     return;
                 }
 
-                match self.proof_worker_handle.dispatch_account_multiproof(AccountMultiproofInput {
-                    targets: proof_targets,
-                    proof_result_sender: ProofResultContext::new(
-                        self.proof_result_tx.clone(),
-                        HashedPostState::default(),
-                        Instant::now(),
+                match self.proof_worker_handle.dispatch_account_multiproof(
+                    AccountMultiproofInput::new(
+                        proof_targets,
+                        ProofResultContext::new(
+                            self.proof_result_tx.clone(),
+                            HashedPostState::default(),
+                            Instant::now(),
+                        ),
+                        self.proof_cancellation.clone(),
                     ),
-                }) {
+                ) {
                     Ok(()) => {
                         self.in_flight_proof_batches += 1;
                     }
@@ -1258,6 +1277,7 @@ mod tests {
             &runtime,
             updates_rx,
             cancel_rx,
+            Default::default(),
             std::sync::mpsc::channel().0,
             proof_worker_handle,
             proof_result_tx,
@@ -1312,6 +1332,7 @@ mod tests {
             &runtime,
             updates_rx,
             cancel_rx,
+            Default::default(),
             std::sync::mpsc::channel().0,
             proof_worker_handle,
             proof_result_tx,
@@ -1400,6 +1421,7 @@ mod tests {
             &runtime,
             updates_rx,
             cancel_rx,
+            Default::default(),
             std::sync::mpsc::channel().0,
             proof_worker_handle,
             proof_result_tx,
@@ -1453,6 +1475,7 @@ mod tests {
             &runtime,
             updates_rx,
             cancel_rx,
+            Default::default(),
             std::sync::mpsc::channel().0,
             proof_worker_handle,
             proof_result_tx,
@@ -1526,6 +1549,7 @@ mod tests {
             &runtime,
             updates_rx,
             cancel_rx,
+            Default::default(),
             std::sync::mpsc::channel().0,
             proof_worker_handle,
             proof_result_tx,

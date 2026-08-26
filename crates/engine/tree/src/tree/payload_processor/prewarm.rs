@@ -27,7 +27,7 @@ use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx,
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, FastInstant as Instant, NodePrimitives};
 use reth_provider::{
-    AccountReader, BlockExecutionOutput, BlockNumReader, DatabaseProviderFactory,
+    AccountReader, BlockExecutionOutput, BlockNumReader, DatabaseProviderFactory, ProviderResult,
     PruneCheckpointReader, StageCheckpointReader, StorageSettingsCache,
     TryIntoHistoricalStateProvider,
 };
@@ -352,12 +352,21 @@ where
         let bal = decoded_bal.as_bal();
         if bal.is_empty() {
             if let Some(hashed_update_stream) = hashed_update_stream {
-                hashed_update_stream.finish();
+                if ctx.is_cancelled() {
+                    drop(hashed_update_stream);
+                } else {
+                    hashed_update_stream.finish();
+                }
             }
-            let _ =
-                actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
+            if !ctx.is_cancelled() {
+                let _ = actions_tx
+                    .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
+            }
             return;
         }
+
+        // Clear per-thread providers on every exit, including unwinding from either prewarm half.
+        let pool_cleanup = PrewarmPoolCleanup(executor.clone());
 
         trace!(
             target: "engine::tree::payload_processor::prewarm",
@@ -390,12 +399,19 @@ where
                     WorkerPool::with_worker_mut(|worker| {
                         let provider =
                             worker.get_or_init::<Option<Box<dyn AccountReader>>>(|| None);
-                        ctx.send_bal_hashed_state(
+                        if let Err(err) = ctx.send_bal_hashed_state(
                             &parent_span,
                             provider,
                             account_changes,
                             &hashed_update_stream,
-                        );
+                        ) {
+                            warn!(
+                                target: "engine::tree::payload_processor::prewarm",
+                                ?err,
+                                "Failed to build complete BAL hashed-state stream"
+                            );
+                            ctx.cancel();
+                        }
                     });
                 });
 
@@ -414,6 +430,7 @@ where
 
         if let Some(saved_cache) = &ctx.saved_cache &&
             !ctx.disable_bal_batch_io &&
+            !ctx.is_cancelled() &&
             let Some(pool) = ctx.bal_prewarm_pool.as_ref()
         {
             // If
@@ -432,31 +449,50 @@ where
             let provider_builder = ctx.provider.clone();
             let build = Arc::new(move || provider_builder.build());
 
-            pool.begin_block(build, caches, ctx.env.txpool_snapshot.clone());
-            for account in prefetch_bal.as_bal() {
+            let block = pool.begin_block(
+                build,
+                caches,
+                ctx.env.txpool_snapshot.clone(),
+                ctx.cancelled.clone(),
+            );
+            'accounts: for account in prefetch_bal.as_bal() {
                 if ctx.is_cancelled() {
                     break;
                 }
-                pool.warm_account(account.address);
+                block.warm_account(account.address);
                 for change in &account.storage_changes {
-                    pool.warm_storage(account.address, change.slot.into());
+                    if ctx.is_cancelled() {
+                        break 'accounts;
+                    }
+                    block.warm_storage(account.address, change.slot.into());
                 }
                 for &slot in &account.storage_reads {
-                    pool.warm_storage(account.address, slot.into());
+                    if ctx.is_cancelled() {
+                        break 'accounts;
+                    }
+                    block.warm_storage(account.address, slot.into());
                 }
             }
-            pool.end_block();
+            if !block.finish() {
+                ctx.cancel();
+            }
         }
 
-        stream_rx
-            .blocking_recv()
-            .expect("BAL hashed-state streaming task dropped without signaling completion");
+        if stream_rx.blocking_recv().is_err() {
+            warn!(
+                target: "engine::tree::payload_processor::prewarm",
+                "BAL hashed-state streaming task dropped without signaling completion"
+            );
+            ctx.cancel();
+        }
 
         // Drop the per-thread providers
-        executor.bal_streaming_pool().clear();
-        executor.prewarming_pool().clear();
+        drop(pool_cleanup);
 
-        let _ = actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
+        if !ctx.is_cancelled() {
+            let _ =
+                actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
+        }
     }
 
     /// Executes the task.
@@ -540,8 +576,16 @@ where
 
         debug!(target: "engine::tree::payload_processor::prewarm", "Completed prewarm execution");
 
+        if !finished_execution {
+            // The producer disappeared without its completion marker, for example after a panic.
+            // Do not publish a cache from a run that skipped its cleanup/completion barrier.
+            self.ctx.cancel();
+        }
+
         // save caches and finish using the shared ExecutionOutcome
-        if let Some(Some((execution_outcome, valid_block_rx))) = final_execution_outcome {
+        if finished_execution &&
+            let Some(Some((execution_outcome, valid_block_rx))) = final_execution_outcome
+        {
             self.save_cache(execution_outcome, valid_block_rx);
         }
     }
@@ -707,16 +751,16 @@ where
         provider: &mut Option<Box<dyn AccountReader>>,
         account_changes: &alloy_eip7928::AccountChanges,
         hashed_update_stream: &StateRootUpdateStream,
-    ) {
+    ) -> ProviderResult<()> {
         if self.disable_bal_parallel_state_root {
-            return;
+            return Ok(())
         }
         let address = account_changes.address;
         let mut hashed_address = None;
         let account_fields = BalAccountStateFields::from_changes(account_changes);
 
         if !bal_account_changes_state_root(account_changes, account_fields) {
-            return;
+            return Ok(())
         }
 
         // If there are any storage changes we can assume that the resulting account info will be
@@ -748,17 +792,7 @@ where
                 )
                 .entered();
 
-                let inner = match self.provider.build() {
-                    Ok(p) => p,
-                    Err(err) => {
-                        warn!(
-                            target: "engine::tree::payload_processor::prewarm",
-                            ?err,
-                            "Failed to build provider for BAL account reads"
-                        );
-                        return;
-                    }
-                };
+                let inner = self.provider.build()?;
                 let boxed: Box<dyn AccountReader> =
                     match (self.disable_bal_batch_io, &self.saved_cache) {
                         (false, Some(saved)) => {
@@ -773,7 +807,7 @@ where
                 *provider = Some(boxed);
             }
             let account_reader = provider.as_ref().expect("provider just initialized");
-            account_reader.basic_account(&address).ok().flatten()
+            account_reader.basic_account(&address)?
         } else {
             None
         };
@@ -797,6 +831,17 @@ where
         let mut hashed_state = reth_trie::HashedPostState::default();
         hashed_state.accounts.insert(hashed_address, account);
         hashed_update_stream.on_hashed_state_update(hashed_state);
+        Ok(())
+    }
+}
+
+/// Clears worker-local BAL providers before the producer publishes its completion marker.
+struct PrewarmPoolCleanup(Runtime);
+
+impl Drop for PrewarmPoolCleanup {
+    fn drop(&mut self) {
+        self.0.bal_streaming_pool().clear();
+        self.0.prewarming_pool().clear();
     }
 }
 
@@ -871,7 +916,7 @@ fn multiproof_targets_from_withdrawals(withdrawals: &[Withdrawal]) -> MultiProof
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tree::payload_processor::StateRootSink;
+    use crate::tree::{payload_processor::StateRootSink, ExecutionCache};
     use alloy_consensus::transaction::Recovered;
     use alloy_eip7928::{
         bal::Bal, AccountChanges, BalanceChange, BlockAccessIndex, CodeChange, NonceChange,
@@ -883,25 +928,31 @@ mod tests {
     use reth_evm::{execute::WithTxEnv, TxEnvFor};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_provider::test_utils::MockEthProvider;
+    use reth_stages_api::{StageCheckpoint, StageId};
     use reth_storage_overlay::OverlayManager;
     use reth_trie::HashedPostState;
     use revm::state::EvmState;
 
-    /// Builds a prewarm context without caches or a BAL prefetch pool, sharing the given flags.
+    /// Builds a prewarm context with the default BAL batch-I/O path enabled.
     fn test_ctx(
         terminate_execution: Arc<AtomicBool>,
         cancelled: Arc<AtomicBool>,
     ) -> PrewarmContext<EthPrimitives, MockEthProvider, EthEvmConfig> {
+        let provider = MockEthProvider::default();
+        provider.enable_database_provider();
+        provider.add_header(B256::ZERO, Default::default());
+        provider.add_stage_checkpoint(StageId::Finish, StageCheckpoint::new(0));
+
         PrewarmContext {
             env: ExecutionEnv::test_default(),
             evm_config: EthEvmConfig::new(Arc::new(ChainSpec::default())),
-            saved_cache: None,
+            saved_cache: Some(SavedCache::new(B256::ZERO, ExecutionCache::new(1_000))),
             provider: StateProviderBuilder::<EthPrimitives, _>::new(
-                MockEthProvider::default(),
+                provider,
                 B256::ZERO,
                 OverlayManager::default(),
             ),
-            bal_prewarm_pool: None,
+            bal_prewarm_pool: Some(BalPrewarmPool::new(1)),
             metrics: PrewarmMetrics::default(),
             cache_metrics: None,
             cache_state_metrics: None,
@@ -1011,6 +1062,41 @@ mod tests {
         let (updates, finished) = run_bal_prewarm_to_sink(ACCOUNTS, true);
         assert_eq!(updates, 0);
         assert!(!finished, "a cancelled stream must not be finished");
+    }
+
+    #[test]
+    fn bal_provider_error_leaves_stream_unfinished() {
+        let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
+            .with_storage_change(SlotChanges::new(
+                U256::from(1),
+                vec![StorageChange::new(BlockAccessIndex::new(1), U256::from(2))],
+            ));
+        let bal = Bal::from(vec![changes]);
+        let raw = alloy_rlp::encode(&bal).into();
+        let bal = Arc::new(DecodedBal::new(bal, raw));
+
+        let sink = Arc::new(CountingSink::default());
+        let updates = StateRootUpdateStream::new(sink.clone());
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let mut ctx = test_ctx(Arc::new(AtomicBool::new(false)), Arc::clone(&cancelled));
+        // This mock rejects database-provider creation, forcing the parent account read to fail.
+        ctx.provider = StateProviderBuilder::new(
+            MockEthProvider::default(),
+            B256::ZERO,
+            OverlayManager::default(),
+        );
+        let runtime = Runtime::test();
+        let (task, actions_tx) =
+            PrewarmCacheTask::new(runtime.clone(), PayloadExecutionCache::default(), ctx);
+
+        task.run::<WithTxEnv<TxEnvFor<EthEvmConfig>, Recovered<TransactionSigned>>>(
+            PrewarmMode::BlockAccessList { bal, updates: Some(updates) },
+            actions_tx,
+        );
+        runtime.spawn_blocking_named("prewarm-bal", || {}).get();
+
+        assert!(cancelled.load(Ordering::Relaxed));
+        assert!(!sink.finished.load(Ordering::Relaxed));
     }
 
     #[test]

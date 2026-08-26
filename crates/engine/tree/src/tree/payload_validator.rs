@@ -896,7 +896,7 @@ where
         });
 
         if let Some(valid_block_tx) = valid_block_tx {
-            let _ = valid_block_tx.send(());
+            valid_block_tx.notify_valid();
         }
 
         let executed_block =
