@@ -64,6 +64,47 @@ pub trait StorageRootProvider {
         slots: &[B256],
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof>;
+
+    /// Same as [`Self::storage_root`], but reuses the provided in-memory storage trie `nodes`
+    /// instead of reading every storage trie node from disk.
+    ///
+    /// The default implementation ignores `nodes` and falls back to [`Self::storage_root`], so
+    /// implementations that cannot overlay trie nodes remain correct (just not faster).
+    fn storage_root_from_nodes(
+        &self,
+        address: Address,
+        hashed_storage: HashedStorage,
+        _nodes: &StorageTrieUpdatesSorted,
+    ) -> ProviderResult<B256> {
+        self.storage_root(address, hashed_storage)
+    }
+
+    /// Same as [`Self::storage_proof`], but reuses the provided in-memory storage trie `nodes`.
+    ///
+    /// The default implementation ignores `nodes` and falls back to [`Self::storage_proof`].
+    fn storage_proof_from_nodes(
+        &self,
+        address: Address,
+        slot: B256,
+        hashed_storage: HashedStorage,
+        _nodes: &StorageTrieUpdatesSorted,
+    ) -> ProviderResult<StorageProof> {
+        self.storage_proof(address, slot, hashed_storage)
+    }
+
+    /// Same as [`Self::storage_multiproof`], but reuses the provided in-memory storage trie
+    /// `nodes`.
+    ///
+    /// The default implementation ignores `nodes` and falls back to [`Self::storage_multiproof`].
+    fn storage_multiproof_from_nodes(
+        &self,
+        address: Address,
+        slots: &[B256],
+        hashed_storage: HashedStorage,
+        _nodes: &StorageTrieUpdatesSorted,
+    ) -> ProviderResult<StorageMultiProof> {
+        self.storage_multiproof(address, slots, hashed_storage)
+    }
 }
 
 /// A type that can iterate over consecutive hashed accounts and storage slots, and generate
