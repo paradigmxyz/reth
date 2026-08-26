@@ -1,19 +1,37 @@
 use alloc::vec::Vec;
-use alloy_primitives::{keccak256, Bytes, B256};
+use alloy_primitives::{keccak256, map::HashMap, Address, Bytes, B256, U256};
 use reth_trie::{ExecutionWitnessMode, HashedPostState, HashedStorage};
 use revm::database::State;
+
+/// Accounts and storage slots (with their post-execution values) observed during execution,
+/// keyed by address.
+///
+/// Collected from the per-transaction journal states, which see accesses that never reach
+/// the post-execution cache: storage reads of accounts created in the same transaction
+/// (e.g. EIP-7702 delegations reading their uninitialized storage) and accounts that end
+/// execution non-existing.
+pub type AccessedState = HashMap<Address, HashMap<B256, U256>>;
 
 /// Borrows finalized execution state for witness generation.
 #[derive(Debug, Clone, Copy)]
 pub struct ExecutionWitnessRecord<'a, DB> {
     /// State after execution.
     state: &'a State<DB>,
+    /// Accesses observed by execution, used to backfill key preimages and proof targets
+    /// that the cache alone cannot provide.
+    accessed: Option<&'a AccessedState>,
 }
 
 impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
     /// Creates a new record from the state after execution.
     pub const fn new(state: &'a State<DB>) -> Self {
-        Self { state }
+        Self { state, accessed: None }
+    }
+
+    /// Attaches accesses observed during execution (see [`AccessedState`]).
+    pub const fn with_accessed(mut self, accessed: &'a AccessedState) -> Self {
+        self.accessed = Some(accessed);
+        self
     }
 
     /// Converts this record into a complete [`alloy_rpc_types_debug::ExecutionWitness`] by
@@ -111,15 +129,50 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
                 .entry(hashed_address)
                 .or_insert_with(|| HashedStorage::new(false));
 
-            if let Some(account) = &account.account {
-                keys.push(address.to_vec().into());
+            // The account preimage must be recorded even when the account no longer
+            // exists post-execution (destroyed, or emptied by EIP-161 state clear):
+            // its presence in the cache means execution accessed it, and a stateless
+            // consumer needs the address preimage to resolve the pre-state leaf.
+            keys.push(address.to_vec().into());
 
+            if let Some(account) = &account.account {
                 for (slot, value) in &account.storage {
                     let slot = B256::from(*slot);
                     let hashed_slot = keccak256(slot);
                     storage.storage.insert(hashed_slot, *value);
 
                     keys.push(slot.into());
+                }
+            }
+        }
+
+        // Backfill accesses the cache cannot see: reads against accounts that were
+        // journal-resident when accessed (created in the same transaction) or that ended
+        // execution non-existing leave no trace in `cache.accounts[..].account`, so their
+        // key preimages and proof targets must come from the recorded journal states.
+        if let Some(accessed) = self.accessed {
+            for (address, slots) in accessed {
+                let hashed_address = keccak256(address);
+                let cached_account =
+                    self.state.cache.accounts.get(address).and_then(|a| a.account.as_ref());
+
+                if cached_account.is_none() {
+                    hashed_state.accounts.entry(hashed_address).or_insert(None);
+                    keys.push(address.to_vec().into());
+                }
+
+                let storage = hashed_state
+                    .storages
+                    .entry(hashed_address)
+                    .or_insert_with(|| HashedStorage::new(false));
+                for (slot, value) in slots {
+                    let in_cache = cached_account.is_some_and(|account| {
+                        account.storage.contains_key(&U256::from_be_bytes(slot.0))
+                    });
+                    if !in_cache {
+                        storage.storage.insert(keccak256(slot), *value);
+                        keys.push((*slot).into());
+                    }
                 }
             }
         }
@@ -154,6 +207,59 @@ mod tests {
             assert!(bundle_state.state.values().any(BundleAccount::was_destroyed));
             Ok(self.0.clone())
         }
+    }
+
+    #[derive(Debug)]
+    struct EmptyStateProvider;
+
+    impl HashedPostStateProvider for EmptyStateProvider {
+        fn hashed_post_state(
+            &self,
+            _bundle_state: &revm::database::BundleState,
+        ) -> ProviderResult<HashedPostState> {
+            Ok(HashedPostState::default())
+        }
+    }
+
+    #[test]
+    fn accessed_state_backfills_missing_preimages() {
+        // Cached account whose slot read never reached the cache (journal-resident at access
+        // time), plus an account execution touched that ended non-existing.
+        let cached_addr = Address::with_last_byte(1);
+        let journal_only_addr = Address::with_last_byte(2);
+        let slot = B256::with_last_byte(3);
+        let value = U256::from(7);
+
+        let mut state = State::builder().with_database(EmptyDB::default()).build();
+        state.cache.accounts.insert(
+            cached_addr,
+            CacheAccount::new_loaded(AccountInfo::default(), Default::default()),
+        );
+
+        let mut accessed = AccessedState::default();
+        accessed.entry(cached_addr).or_default().insert(slot, value);
+        accessed.entry(journal_only_addr).or_default();
+
+        let (hashed_state, keys) = ExecutionWitnessRecord::new(&state)
+            .with_accessed(&accessed)
+            .hashed_post_state(&EmptyStateProvider)
+            .unwrap();
+
+        let has_key = |preimage: &[u8]| keys.iter().any(|k| k.as_ref() == preimage);
+        assert!(has_key(slot.as_slice()), "missing slot preimage from accessed state");
+        assert!(
+            has_key(journal_only_addr.as_slice()),
+            "missing address preimage for journal-only account"
+        );
+
+        let hashed_addr = keccak256(cached_addr);
+        let storage = hashed_state.storages.get(&hashed_addr).unwrap();
+        assert_eq!(storage.storage.get(&keccak256(slot)), Some(&value));
+        assert_eq!(
+            hashed_state.accounts.get(&keccak256(journal_only_addr)),
+            Some(&None),
+            "journal-only account must become an exclusion proof target"
+        );
     }
 
     #[test]
