@@ -137,7 +137,7 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
         ForwardInMemoryCursor::new(storage_nodes)
     }
 
-    fn get_cursor_mut(&mut self) -> &mut C {
+    const fn get_cursor_mut(&mut self) -> &mut C {
         &mut self.cursor
     }
 

@@ -188,7 +188,7 @@ where
     C: HashedCursor<Value = V::NonZero>,
     V: HashedPostStateCursorValue,
 {
-    fn get_cursor_mut(&mut self) -> &mut C {
+    const fn get_cursor_mut(&mut self) -> &mut C {
         &mut self.cursor
     }
 
