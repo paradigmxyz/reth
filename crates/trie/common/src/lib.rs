@@ -83,8 +83,6 @@ pub mod ordered_root;
 /// Buffer for trie updates.
 pub mod updates;
 
-pub mod added_removed_keys;
-
 /// Utilities used by other modules in this crate.
 mod utils;
 

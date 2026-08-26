@@ -1,7 +1,4 @@
-use core::ops::Not;
-
 use crate::{
-    added_removed_keys::MultiAddedRemovedKeys,
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
     utils::{extend_sorted_vec, kway_merge_disjoint_sorted, kway_merge_sorted},
     KeyHasher, MultiProofTargets, Nibbles,
@@ -167,74 +164,6 @@ impl HashedPostState {
             }
         }
         targets
-    }
-
-    /// Partition the state update into two state updates:
-    /// - First with accounts and storages slots that are present in the provided targets.
-    /// - Second with all other.
-    ///
-    /// CAUTION: The state updates are expected to be applied in order, so that the storage wipes
-    /// are done correctly.
-    pub fn partition_by_targets(
-        mut self,
-        targets: &MultiProofTargets,
-        added_removed_keys: &MultiAddedRemovedKeys,
-    ) -> (Self, Self) {
-        let mut state_updates_not_in_targets = Self::default();
-
-        self.storages.retain(|&address, storage| {
-            let storage_added_removed_keys = added_removed_keys.get_storage(&address);
-
-            let (retain, storage_not_in_targets) = match targets.get(&address) {
-                Some(storage_in_targets) => {
-                    let mut storage_not_in_targets = HashedStorage::default();
-                    storage.storage.retain(|&slot, value| {
-                        if storage_in_targets.contains(&slot) &&
-                            !storage_added_removed_keys.is_some_and(|k| k.is_removed(&slot))
-                        {
-                            return true
-                        }
-
-                        storage_not_in_targets.storage.insert(slot, *value);
-                        false
-                    });
-
-                    // We do not check the wiped flag here, because targets only contain addresses
-                    // and storage slots. So if there are no storage slots left, the storage update
-                    // can be fully removed.
-                    let retain = !storage.storage.is_empty();
-
-                    // Since state updates are expected to be applied in order, we can only set the
-                    // wiped flag in the second storage update if the first storage update is empty
-                    // and will not be retained.
-                    if !retain {
-                        storage_not_in_targets.wiped = storage.wiped;
-                    }
-
-                    (
-                        retain,
-                        storage_not_in_targets.is_empty().not().then_some(storage_not_in_targets),
-                    )
-                }
-                None => (false, Some(core::mem::take(storage))),
-            };
-
-            if let Some(storage_not_in_targets) = storage_not_in_targets {
-                state_updates_not_in_targets.storages.insert(address, storage_not_in_targets);
-            }
-
-            retain
-        });
-        self.accounts.retain(|&address, account| {
-            if targets.contains_key(&address) {
-                return true
-            }
-
-            state_updates_not_in_targets.accounts.insert(address, *account);
-            false
-        });
-
-        (self, state_updates_not_in_targets)
     }
 
     /// Returns an iterator that yields chunks of the specified size.
@@ -1409,59 +1338,6 @@ mod tests {
         assert_eq!(target_slots.len(), 2);
         assert!(target_slots.contains(&slot1));
         assert!(target_slots.contains(&slot2));
-    }
-
-    #[test]
-    fn test_partition_by_targets() {
-        let addr1 = B256::random();
-        let addr2 = B256::random();
-        let slot1 = B256::random();
-        let slot2 = B256::random();
-
-        let state = HashedPostState {
-            accounts: B256Map::from_iter([
-                (addr1, Some(Default::default())),
-                (addr2, Some(Default::default())),
-            ]),
-            storages: B256Map::from_iter([(
-                addr1,
-                HashedStorage {
-                    wiped: true,
-                    storage: B256Map::from_iter([(slot1, U256::ZERO), (slot2, U256::from(1))]),
-                },
-            )]),
-        };
-        let targets = MultiProofTargets::from_iter([(addr1, HashSet::from_iter([slot1]))]);
-
-        let (with_targets, without_targets) =
-            state.partition_by_targets(&targets, &MultiAddedRemovedKeys::new());
-
-        assert_eq!(
-            with_targets,
-            HashedPostState {
-                accounts: B256Map::from_iter([(addr1, Some(Default::default()))]),
-                storages: B256Map::from_iter([(
-                    addr1,
-                    HashedStorage {
-                        wiped: true,
-                        storage: B256Map::from_iter([(slot1, U256::ZERO)])
-                    }
-                )]),
-            }
-        );
-        assert_eq!(
-            without_targets,
-            HashedPostState {
-                accounts: B256Map::from_iter([(addr2, Some(Default::default()))]),
-                storages: B256Map::from_iter([(
-                    addr1,
-                    HashedStorage {
-                        wiped: false,
-                        storage: B256Map::from_iter([(slot2, U256::from(1))])
-                    }
-                )]),
-            }
-        );
     }
 
     #[test]
