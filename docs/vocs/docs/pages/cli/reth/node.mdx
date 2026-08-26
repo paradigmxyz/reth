@@ -332,6 +332,22 @@ RPC:
       --http.disable-compression
           Disable compression for HTTP responses
 
+      --http.compression <ALGOS>
+          Comma-separated list of allowed compression algorithms for HTTP responses.
+
+          If not specified, all supported algorithms are enabled.
+
+          Client `Accept-Encoding` quality values select among allowed algorithms; ties prefer zstd > br > gzip > deflate. Omitted quality values default to 1; without an acceptable allowed algorithm, the response is uncompressed. List order is ignored.
+
+          [possible values: zstd, gzip, deflate, br]
+
+      --http.decompression <ALGOS>
+          Comma-separated list of allowed decompression algorithms for HTTP requests.
+
+          Request decompression is disabled when not specified.
+
+          [possible values: zstd, gzip, deflate, br]
+
       --http.api <HTTP_API>
           Rpc Modules to be configured for the HTTP server
 
@@ -413,7 +429,9 @@ RPC:
           Disable built-in RPC request metrics
 
       --rpc.max-request-size <RPC_MAX_REQUEST_SIZE>
-          Set the maximum RPC request payload size for both HTTP and WS in megabytes
+          Set the maximum RPC request payload size for both HTTP and WS in megabytes.
+
+          For compressed HTTP requests, this limit applies to both the compressed and decompressed payloads.
 
           [default: 15]
 
@@ -992,6 +1010,11 @@ Engine:
           If omitted, this defaults to the larger of the default backpressure threshold and twice `--engine.persistence-threshold`.
 
           This value must be greater than `--engine.persistence-threshold`.
+
+      --engine.num-state-masking-blocks <NUM_STATE_MASKING_BLOCKS>
+          EXPERIMENTAL: Configure how many of the blocks being persisted should only mask state/trie writes instead of durably persisting their state/trie updates in the current cycle
+
+          [default: 0]
 
       --engine.memory-block-buffer-target <MEMORY_BLOCK_BUFFER_TARGET>
           Configure the target number of blocks to keep in memory.

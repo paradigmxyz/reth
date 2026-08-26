@@ -176,6 +176,11 @@ where
 
         let start_time = Instant::now();
 
+        let canonical_blocks = input
+            .persist_rest_blocks()
+            .iter()
+            .map(|block| block.recovered_block().num_hash())
+            .collect::<Vec<_>>();
         let provider_rw = self.provider.database_provider_rw()?;
         let last_state_trie_block = if let Some(block) = input.state_trie_blocks().last() {
             // Newly written static-file headers are not readable until commit finalizes their
@@ -206,7 +211,8 @@ where
         }
 
         provider_rw.commit()?;
-        let _ = self.provider.bal_store().flush().inspect_err(|err| {
+        // BALs live outside the main database and are intentionally flushed last.
+        let _ = self.provider.bal_store().flush(&canonical_blocks).inspect_err(|err| {
             warn!(target: "engine::persistence", last=?last_block, ?err, "Failed to flush BAL store");
         });
         debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");

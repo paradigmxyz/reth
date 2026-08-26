@@ -16,7 +16,7 @@ use crate::{
 use alloy_consensus::{
     constants::{
         EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
-        LEGACY_TX_TYPE_ID,
+        KECCAK_EMPTY, LEGACY_TX_TYPE_ID,
     },
     BlockHeader,
 };
@@ -732,7 +732,9 @@ where
         //
         // Any other case means that the account is not an EOA, and should not be able to send
         // transactions.
-        if let Some(code_hash) = &sender.bytecode_hash {
+        if let Some(code_hash) = &sender.bytecode_hash &&
+            *code_hash != KECCAK_EMPTY
+        {
             let is_eip7702 = if self.fork_tracker.is_prague_activated() {
                 match state.bytecode_by_hash(code_hash) {
                     Ok(bytecode) => bytecode.unwrap_or_default().is_eip7702(),
@@ -1552,7 +1554,7 @@ mod tests {
         eip2718::{Decodable2718, Encodable2718},
         eip2930::{AccessList, AccessListItem},
     };
-    use alloy_primitives::{hex, Address, B256, U256};
+    use alloy_primitives::{hex, Address, Bytes, B256, U256};
     use reth_ethereum_primitives::PooledTransactionVariant;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::SignedTransaction;
@@ -1683,6 +1685,22 @@ mod tests {
         assert!(res.is_ok());
         let tx = pool.get(transaction.hash());
         assert!(tx.is_some());
+    }
+
+    #[test]
+    fn accepts_sender_with_empty_bytecode() {
+        let transaction = get_transaction();
+        let provider = MockEthProvider::default().with_genesis_block();
+        provider.add_account(
+            transaction.sender(),
+            ExtendedAccount::new(transaction.nonce(), U256::MAX).with_bytecode(Bytes::new()),
+        );
+        let validator = EthTransactionValidatorBuilder::new(provider, test_evm_config())
+            .build(InMemoryBlobStore::default());
+
+        let outcome = validator.validate_one(TransactionOrigin::External, transaction);
+
+        assert!(outcome.is_valid());
     }
 
     #[test]

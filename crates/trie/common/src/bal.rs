@@ -58,7 +58,7 @@ impl BalAccountState {
     }
 
     /// Returns `true` when the entry contributes to the block's state root.
-    pub fn changes_state_root(self, changes: &AccountChanges) -> bool {
+    pub const fn changes_state_root(self, changes: &AccountChanges) -> bool {
         !self.is_empty() || !changes.storage_changes.is_empty()
     }
 

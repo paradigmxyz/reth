@@ -60,7 +60,7 @@ async fn testing_rpc_build_block_works() -> eyre::Result<()> {
                 withdrawals: None,
                 parent_beacon_block_root: None,
                 slot_number: None,
-                target_gas_limit: None,
+                ..Default::default()
             };
 
             let request = TestingBuildBlockRequestV1 {
@@ -133,6 +133,8 @@ async fn testing_rpc_commit_block_works() -> eyre::Result<()> {
 
             let chain = ctx.config().chain.clone();
             let timestamp = chain.genesis().timestamp + 1;
+            let target_gas_limit = chain.genesis().gas_limit - 100;
+            #[allow(clippy::needless_update)]
             let payload_attributes = EthPayloadAttributes {
                 timestamp,
                 prev_randao: B256::ZERO,
@@ -140,7 +142,8 @@ async fn testing_rpc_commit_block_works() -> eyre::Result<()> {
                 withdrawals: Some(vec![]),
                 parent_beacon_block_root: Some(B256::ZERO),
                 slot_number: Some(timestamp),
-                target_gas_limit: None,
+                target_gas_limit: Some(target_gas_limit),
+                ..Default::default()
             };
 
             tokio::spawn(async move {
@@ -163,6 +166,10 @@ async fn testing_rpc_commit_block_works() -> eyre::Result<()> {
                         latest.get("hash").and_then(Value::as_str).expect("latest block hash");
                     assert_eq!(latest_hash, block_hash.to_string());
                     assert_eq!(latest.get("extraData"), Some(&serde_json::to_value(extra_data)?));
+                    assert_eq!(
+                        latest.get("gasLimit").and_then(Value::as_str),
+                        Some(format!("{target_gas_limit:#x}").as_str())
+                    );
                     assert!(latest
                         .get("transactions")
                         .and_then(Value::as_array)
