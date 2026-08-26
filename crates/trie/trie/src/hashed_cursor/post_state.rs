@@ -400,13 +400,9 @@ where
     /// This function should be called before attempting to call [`HashedCursor::seek`] or
     /// [`HashedCursor::next`].
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
-        // Storage is not empty if it has non-zero slots.
-        if self.post_state_cursor.has_any(|(_, value)| !value.is_zero()) {
-            return Ok(false);
-        }
-
-        // If no non-zero slots in post state, check the database.
-        self.get_cursor_mut().is_storage_empty()
+        let is_empty = self.seek(B256::ZERO)?.is_none();
+        self.reset();
+        Ok(is_empty)
     }
 
     fn set_hashed_address(&mut self, hashed_address: B256) {

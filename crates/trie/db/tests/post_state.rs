@@ -460,6 +460,8 @@ fn all_storage_slots_deleted_exact_keys() {
 
     let mut cursor = factory.hashed_storage_cursor(address).unwrap();
 
+    assert!(cursor.is_storage_empty().unwrap());
+
     // Seek to beginning should return None (all slots are deleted)
     let result = cursor.seek(B256::ZERO).unwrap();
     assert_eq!(
