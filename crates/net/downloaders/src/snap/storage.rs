@@ -246,7 +246,7 @@ impl StorageRangeVerifier {
             let mut decoded = Self::decode_slots(account_hash, origin, slots)?;
             let leaves = decoded.iter().map(|(hash, value)| (*hash, alloy_rlp::encode(value)));
             let proof = if proof_index == Some(index) { response.proof.as_slice() } else { &[] };
-            let next = verify_range_proof(self.storage_roots[index], origin, leaves, proof)
+            let next = verify_range_proof(self.storage_roots[index], origin, limit, leaves, proof)
                 .map_err(|error| {
                     debug!(
                         target: "downloaders::snap",

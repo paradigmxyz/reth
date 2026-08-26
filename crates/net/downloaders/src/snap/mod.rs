@@ -93,9 +93,15 @@ pub enum AccountRangeOutcome {
 pub struct VerifiedAccountRange {
     /// Accounts in strictly increasing hashed-key order.
     pub accounts: Vec<(B256, TrieAccount)>,
-    /// Whether another request is needed to complete the requested interval.
-    /// A conservative `true` may cause one empty follow-up request.
+    /// Whether another request may be needed to complete the requested interval.
+    ///
+    /// Conservative: [`Self::next`] is only a lower bound when the trie continues inside a
+    /// subtree the proof left unexpanded, so this can be `true` for an interval that is already
+    /// complete.
     pub has_more: bool,
+    /// Authenticated lower bound for the first key after the response, or `None` when the range
+    /// exhausted the trie.
+    pub next: Option<B256>,
 }
 
 /// An account-range request whose origin exceeds its limit.
@@ -164,6 +170,7 @@ impl AccountRangeRequestVerifier for GetAccountRangeMessage {
                 Ok(AccountRangeOutcome::Verified(VerifiedAccountRange {
                     accounts: Vec::new(),
                     has_more: false,
+                    next: None,
                 }))
             } else {
                 Ok(AccountRangeOutcome::Unavailable { peer_id })
@@ -200,7 +207,7 @@ impl AccountRangeRequestVerifier for GetAccountRangeMessage {
         accounts.truncate(accounts.partition_point(|(hash, _)| *hash <= self.limit_hash));
         let has_more = next.is_some_and(|next| next <= self.limit_hash);
 
-        Ok(VerifiedAccountRange { accounts, has_more })
+        Ok(VerifiedAccountRange { accounts, has_more, next })
     }
 
     fn verify_proof(
@@ -209,10 +216,11 @@ impl AccountRangeRequestVerifier for GetAccountRangeMessage {
         proof: &[alloy_primitives::Bytes],
     ) -> Result<Option<B256>, RequestError> {
         let leaves = accounts.iter().map(|(hash, account)| (*hash, alloy_rlp::encode(account)));
-        verify_range_proof(self.root_hash, self.starting_hash, leaves, proof).map_err(|error| {
-            debug!(target: "downloaders::snap", %error, "Invalid account range proof");
-            RequestError::BadResponse
-        })
+        verify_range_proof(self.root_hash, self.starting_hash, self.limit_hash, leaves, proof)
+            .map_err(|error| {
+                debug!(target: "downloaders::snap", %error, "Invalid account range proof");
+                RequestError::BadResponse
+            })
     }
 }
 
@@ -308,7 +316,11 @@ mod tests {
 
         assert_eq!(
             outcome,
-            AccountRangeOutcome::Verified(VerifiedAccountRange { accounts, has_more: false })
+            AccountRangeOutcome::Verified(VerifiedAccountRange {
+                accounts,
+                has_more: false,
+                next: None,
+            })
         );
         assert!(client.reported().is_empty());
         assert_eq!(*client.priorities(), [Priority::Normal]);
@@ -450,6 +462,7 @@ mod tests {
             AccountRangeOutcome::Verified(VerifiedAccountRange {
                 accounts: vec![accounts[0]],
                 has_more: false,
+                next: Some(key(4)),
             })
         );
         assert!(client.reported().is_empty());
@@ -505,6 +518,7 @@ mod tests {
             AccountRangeOutcome::Verified(VerifiedAccountRange {
                 accounts: accounts[..2].to_vec(),
                 has_more: false,
+                next: Some(key(3)),
             })
         );
         assert!(client.reported().is_empty());
@@ -533,6 +547,7 @@ mod tests {
             AccountRangeOutcome::Verified(VerifiedAccountRange {
                 accounts: Vec::new(),
                 has_more: false,
+                next: None,
             })
         );
         assert!(client.reported().is_empty());
@@ -560,6 +575,7 @@ mod tests {
             AccountRangeOutcome::Verified(VerifiedAccountRange {
                 accounts: vec![accounts[0]],
                 has_more: false,
+                next: Some(key(9)),
             })
         );
     }
@@ -585,6 +601,7 @@ mod tests {
             AccountRangeOutcome::Verified(VerifiedAccountRange {
                 accounts: vec![accounts[0]],
                 has_more: true,
+                next: Some(key(3)),
             })
         );
     }

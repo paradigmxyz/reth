@@ -9752,6 +9752,7 @@ dependencies = [
  "assert_matches",
  "eyre",
  "itertools 0.14.0",
+ "libc",
  "metrics",
  "notify",
  "parking_lot",

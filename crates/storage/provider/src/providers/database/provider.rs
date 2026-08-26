@@ -4089,9 +4089,7 @@ mod tests {
         map::{AddressMap, B256Map},
         U256,
     };
-    #[cfg(feature = "partial-persistence")]
-    use reth_chain_state::test_utils::TestBlockBuilder;
-    use reth_chain_state::ExecutedBlock;
+    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
     use reth_db_api::models::StorageSettings;
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
@@ -4235,10 +4233,10 @@ mod tests {
                 StateWriteConfig::default(),
             )
             .unwrap();
-        for block in data.blocks.iter().take(3) {
-            provider_rw.insert_block(&block.0).unwrap();
+        for (block, outcome) in data.blocks.iter().take(3) {
+            provider_rw.insert_block(block).unwrap();
             provider_rw
-                .write_state(&block.1, crate::OriginalValuesKnown::No, StateWriteConfig::default())
+                .write_state(outcome, crate::OriginalValuesKnown::No, StateWriteConfig::default())
                 .unwrap();
         }
         provider_rw.commit().unwrap();
@@ -4270,10 +4268,10 @@ mod tests {
             .unwrap();
 
         // insert blocks 1-3 with receipts
-        for block in data.blocks.iter().take(3) {
-            provider_rw.insert_block(&block.0).unwrap();
+        for (block, outcome) in data.blocks.iter().take(3) {
+            provider_rw.insert_block(block).unwrap();
             provider_rw
-                .write_state(&block.1, crate::OriginalValuesKnown::No, StateWriteConfig::default())
+                .write_state(outcome, crate::OriginalValuesKnown::No, StateWriteConfig::default())
                 .unwrap();
         }
         provider_rw.commit().unwrap();
@@ -4302,10 +4300,10 @@ mod tests {
                 StateWriteConfig::default(),
             )
             .unwrap();
-        for block in data.blocks.iter().take(3) {
-            provider_rw.insert_block(&block.0).unwrap();
+        for (block, outcome) in data.blocks.iter().take(3) {
+            provider_rw.insert_block(block).unwrap();
             provider_rw
-                .write_state(&block.1, crate::OriginalValuesKnown::No, StateWriteConfig::default())
+                .write_state(outcome, crate::OriginalValuesKnown::No, StateWriteConfig::default())
                 .unwrap();
         }
         provider_rw.commit().unwrap();
@@ -4368,10 +4366,10 @@ mod tests {
                 StateWriteConfig::default(),
             )
             .unwrap();
-        for block in data.blocks.iter().take(3) {
-            provider_rw.insert_block(&block.0).unwrap();
+        for (block, outcome) in data.blocks.iter().take(3) {
+            provider_rw.insert_block(block).unwrap();
             provider_rw
-                .write_state(&block.1, crate::OriginalValuesKnown::No, StateWriteConfig::default())
+                .write_state(outcome, crate::OriginalValuesKnown::No, StateWriteConfig::default())
                 .unwrap();
         }
         provider_rw.commit().unwrap();
@@ -4626,7 +4624,6 @@ mod tests {
         provider_rw.commit().unwrap();
     }
 
-    #[cfg(feature = "partial-persistence")]
     #[test]
     fn test_save_blocks_only_masks_trie_with_deferred_blocks() {
         use reth_trie::{
@@ -4848,7 +4845,6 @@ mod tests {
         assert_eq!(masked_entries[0].1.nibbles.0, masked_storage_node);
     }
 
-    #[cfg(feature = "partial-persistence")]
     #[test]
     fn test_save_blocks_merges_storage_wipe_in_multi_block_batch() {
         use reth_trie::{
@@ -4914,7 +4910,6 @@ mod tests {
         assert!(storage_entries.is_empty());
     }
 
-    #[cfg(feature = "partial-persistence")]
     #[test]
     fn test_save_blocks_batches_transient_storage_wipe() {
         use alloy_primitives::map::B256Set;
@@ -4965,7 +4960,6 @@ mod tests {
         assert_eq!(checkpoint.block_number, 3);
     }
 
-    #[cfg(feature = "partial-persistence")]
     #[test]
     fn test_save_blocks_partial_cycles_do_not_duplicate_static_file_writes() {
         let factory = create_test_provider_factory();
@@ -5014,7 +5008,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "partial-persistence")]
     #[test]
     fn remove_block_and_execution_above_returns_persistence_frontiers() {
         let factory = create_test_provider_factory();
@@ -5026,6 +5019,10 @@ mod tests {
         let provider_rw = factory.provider_rw().unwrap();
         save_genesis(&provider_rw, &genesis).unwrap();
         provider_rw.commit().unwrap();
+
+        for block in &blocks[2..] {
+            factory.overlay_manager().insert_block(block.clone());
+        }
 
         let provider_rw = factory.provider_rw().unwrap();
         let input = SaveBlocksInput::new(blocks, 0, 0, 4, 2);

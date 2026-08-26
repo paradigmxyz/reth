@@ -386,7 +386,7 @@ impl<C, Pool> TestnetHandle<C, Pool> {
 
         // add all peers to each other
         for (idx, handle) in self.peers.iter().enumerate().take(self.peers.len() - 1) {
-            for neighbour in self.peers.iter().skip(idx + 1) {
+            for neighbour in &self.peers[idx + 1..] {
                 handle.network.add_peer(*neighbour.peer_id(), neighbour.local_addr());
             }
         }

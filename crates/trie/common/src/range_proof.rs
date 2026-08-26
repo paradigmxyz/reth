@@ -11,14 +11,13 @@ use alloy_primitives::{keccak256, map::B256Map, Bytes, B256};
 use alloy_rlp::Decodable;
 
 const KEY_NIBBLES: usize = B256::len_bytes() * 2;
-const MAX_HASH: B256 = B256::new([0xff; B256::len_bytes()]);
 
 // Coordinates proof traversal and root reconstruction through one shared frontier.
 struct RangeProofVerifier<'a> {
     // Determines which trie paths belong to the response and which remain proof-owned.
     range: ProofRange,
     // Resolves hashed boundary references without depending on proof wire order.
-    nodes: ProofNodeIndex<'a>,
+    nodes: ProofNodes<'a>,
     // Accumulates the disjoint entries needed to reconstruct the requested root.
     frontier: ProofFrontier,
     // Tracks the lowest known path after the response to report whether the trie continues.
@@ -30,7 +29,7 @@ impl<'a> RangeProofVerifier<'a> {
     fn new(left: B256, right: B256, proof: &'a [Bytes], frontier: ProofFrontier) -> Self {
         Self {
             range: ProofRange::new(left, right),
-            nodes: ProofNodeIndex::new(proof),
+            nodes: ProofNodes::new(proof),
             frontier,
             next: None,
         }
@@ -150,7 +149,7 @@ impl<'a> RangeProofVerifier<'a> {
 struct ProofRange {
     // Inclusive origin paired with the proof's left boundary path.
     left: Nibbles,
-    // Inclusive last leaf, or the maximum key when an empty response proves exhaustion.
+    // Inclusive last leaf, or the requested limit when the response is empty.
     right: Nibbles,
 }
 
@@ -217,11 +216,9 @@ enum KeyRelation {
 }
 
 // Indexes proof blobs by commitment because proof wire order has no semantic meaning.
-//
-// Distinct from the crate's [`crate::proof::ProofNodes`], which maps trie paths to nodes.
-struct ProofNodeIndex<'a>(B256Map<&'a [u8]>);
+struct ProofNodes<'a>(B256Map<&'a [u8]>);
 
-impl<'a> ProofNodeIndex<'a> {
+impl<'a> ProofNodes<'a> {
     // Builds the proof index once to avoid rescanning it for every boundary reference.
     fn new(proof: &'a [Bytes]) -> Self {
         Self(proof.iter().map(|node| (keccak256(node), node.as_ref())).collect())
@@ -386,16 +383,16 @@ pub enum RangeProofError {
     Rlp(#[from] alloy_rlp::Error),
 }
 
-/// Verifies a consecutive leaf range against `root`, starting at `origin`.
+/// Verifies a consecutive leaf range against `root`, from `origin` through `limit`.
+///
+/// When `leaves` is empty, `limit` supplies the response's right boundary so an empty interval can
+/// be authenticated without requiring a leaf past the limit.
 ///
 /// Returns a lower bound for the next key, or `None` if the range exhausts the trie.
-///
-/// The bound is exact when the proof expanded the leaf after the range, and the subtree prefix
-/// zero-filled when it did not, so a caller comparing it against a limit can conclude that the
-/// trie continues past the limit but not that it continues before it.
 pub fn verify_range_proof<I, V>(
     root: B256,
     origin: B256,
+    limit: B256,
     leaves: I,
     proof: &[Bytes],
 ) -> Result<Option<B256>, RangeProofError>
@@ -414,7 +411,7 @@ where
         return Ok(None)
     }
 
-    RangeProofVerifier::new(origin, last_key.unwrap_or(MAX_HASH), proof, frontier).verify(root)
+    RangeProofVerifier::new(origin, last_key.unwrap_or(limit), proof, frontier).verify(root)
 }
 
 // Keeps path mutation behind one checked API because external `Nibbles` cannot have inherent
@@ -483,6 +480,21 @@ mod tests {
     use super::*;
     use crate::{proof::ProofRetainer, BranchNode, ExtensionNode, TrieMask, EMPTY_ROOT_HASH};
     use alloc::{vec, vec::Vec};
+
+    const MAX_HASH: B256 = B256::new([0xff; B256::len_bytes()]);
+
+    fn verify_range_proof<I, V>(
+        root: B256,
+        origin: B256,
+        leaves: I,
+        proof: &[Bytes],
+    ) -> Result<Option<B256>, RangeProofError>
+    where
+        I: IntoIterator<Item = (B256, V)>,
+        V: Into<Vec<u8>>,
+    {
+        super::verify_range_proof(root, origin, MAX_HASH, leaves, proof)
+    }
 
     fn key(value: u64) -> B256 {
         B256::left_padding_from(&value.to_be_bytes())
@@ -708,6 +720,17 @@ mod tests {
             verify_range_proof(root, key(2), core::iter::empty::<(B256, Vec<u8>)>(), &proof,),
             Err(RangeProofError::RootMismatch { .. })
         ));
+    }
+
+    #[test]
+    fn empty_interval_is_authenticated_through_its_limit() {
+        let leaves = vec![(key(1), value(1)), (key(3), value(3))];
+        let (root, proof) = build_proof(&leaves, &[key(2)]);
+
+        assert_eq!(
+            super::verify_range_proof(root, key(2), key(2), no_leaves(), &proof).unwrap(),
+            Some(key(3))
+        );
     }
 
     #[test]
