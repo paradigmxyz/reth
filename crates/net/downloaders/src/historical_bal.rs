@@ -22,7 +22,7 @@ use reth_storage_api::{
 };
 use reth_tasks::Runtime;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     num::{NonZeroU64, NonZeroUsize},
     ops::RangeInclusive,
     sync::Arc,
@@ -358,7 +358,7 @@ where
         }
     }
 
-    /// Sets the retry cooldown used for unavailable and invalid requests.
+    /// Sets the retry cooldown used after terminal unavailability, request failure, or invalidity.
     pub const fn with_retry_cooldown(mut self, retry_cooldown: Duration) -> Self {
         self.retry_cooldown = retry_cooldown;
         self
@@ -430,96 +430,103 @@ where
             return
         }
 
-        let semaphore = Arc::new(Semaphore::new(self.config.max_concurrent_requests.get()));
+        let max_concurrent_requests = self.config.max_concurrent_requests.get();
+        let semaphore = Arc::new(Semaphore::new(max_concurrent_requests));
         let mut in_flight = FuturesUnordered::new();
         let request_batch_size = self.config.request_batch_size.get();
-        for (batch_index, chunk) in filtered.candidates.chunks(request_batch_size).enumerate() {
-            let chunk = chunk.to_vec();
-            let permit = match semaphore.clone().acquire_owned().await {
-                Ok(permit) => permit,
-                Err(_) => return,
-            };
+        let mut pending = filtered
+            .candidates
+            .chunks(request_batch_size)
+            .map(|chunk| chunk.to_vec())
+            .collect::<VecDeque<_>>();
+        let mut scheduling = true;
 
-            let provider = self.provider.clone();
-            let store = self.store.clone();
-            let config = self.config;
-            let original_len = chunk.len();
-            let dispatchable = match self
-                .runtime
-                .spawn_blocking(move || {
-                    let (bodies, execution) = provider.historical_bal_checkpoints()?;
-                    let Some(window) = config.window(execution, bodies) else {
-                        return Ok(Vec::new())
-                    };
-                    let blocks =
-                        chunk.iter().map(|candidate| candidate.num_hash).collect::<Vec<_>>();
-                    let hashes = blocks.iter().map(|block| block.hash).collect::<Vec<_>>();
-                    let canonical = provider.historical_bal_canonical(&blocks)?;
-                    let stored = store.get_by_hashes(&hashes)?;
-                    if canonical.len() != chunk.len() || stored.len() != chunk.len() {
-                        return Err(
-                            reth_storage_api::errors::provider::ProviderError::InvalidStorageOutput,
-                        )
+        while !pending.is_empty() || !in_flight.is_empty() {
+            while scheduling && in_flight.len() < max_concurrent_requests {
+                let Some(chunk) = pending.pop_front() else { break };
+                let permit = match semaphore.clone().acquire_owned().await {
+                    Ok(permit) => permit,
+                    Err(_) => {
+                        let abandoned = chunk.len() + pending.iter().map(Vec::len).sum::<usize>();
+                        self.metrics.skipped.increment(abandoned as u64);
+                        pending.clear();
+                        scheduling = false;
+                        break
                     }
-                    Ok(chunk
-                        .into_iter()
-                        .zip(canonical)
-                        .zip(stored)
-                        .filter_map(|((candidate, canonical), stored)| {
-                            (canonical &&
-                                stored.is_none() &&
-                                window.contains(&candidate.num_hash.number))
-                            .then_some(candidate)
-                        })
-                        .collect::<Vec<_>>())
-                })
-                .await
-            {
-                Ok(Ok(dispatchable)) => dispatchable,
-                _ => {
-                    let abandoned = filtered.candidates.len() - batch_index * request_batch_size;
-                    self.metrics.skipped.increment(abandoned as u64);
-                    break
+                };
+
+                let provider = self.provider.clone();
+                let store = self.store.clone();
+                let config = self.config;
+                let original_len = chunk.len();
+                let dispatchable = match self
+                    .runtime
+                    .spawn_blocking(move || {
+                        let (bodies, execution) = provider.historical_bal_checkpoints()?;
+                        let Some(window) = config.window(execution, bodies) else {
+                            return Ok(Vec::new())
+                        };
+                        let blocks =
+                            chunk.iter().map(|candidate| candidate.num_hash).collect::<Vec<_>>();
+                        let hashes = blocks.iter().map(|block| block.hash).collect::<Vec<_>>();
+                        let canonical = provider.historical_bal_canonical(&blocks)?;
+                        let stored = store.get_by_hashes(&hashes)?;
+                        if canonical.len() != chunk.len() || stored.len() != chunk.len() {
+                            return Err(
+                                reth_storage_api::errors::provider::ProviderError::InvalidStorageOutput,
+                            )
+                        }
+                        Ok(chunk
+                            .into_iter()
+                            .zip(canonical)
+                            .zip(stored)
+                            .filter_map(|((candidate, canonical), stored)| {
+                                (canonical &&
+                                    stored.is_none() &&
+                                    window.contains(&candidate.num_hash.number))
+                                .then_some(candidate)
+                            })
+                            .collect::<Vec<_>>())
+                    })
+                    .await
+                {
+                    Ok(Ok(dispatchable)) => dispatchable,
+                    _ => {
+                        let abandoned =
+                            original_len + pending.iter().map(Vec::len).sum::<usize>();
+                        self.metrics.skipped.increment(abandoned as u64);
+                        pending.clear();
+                        scheduling = false;
+                        drop(permit);
+                        break
+                    }
+                };
+                self.metrics.skipped.increment((original_len - dispatchable.len()) as u64);
+                if dispatchable.is_empty() {
+                    drop(permit);
+                    continue
                 }
-            };
-            self.metrics.skipped.increment((original_len - dispatchable.len()) as u64);
-            if dispatchable.is_empty() {
-                drop(permit);
-                continue
+
+                let attempted_at = Instant::now();
+                for candidate in &dispatchable {
+                    self.attempted.insert(candidate.num_hash, attempted_at);
+                }
+                let client = self.client.clone();
+                let chunk = dispatchable;
+                let hashes =
+                    chunk.iter().map(|candidate| candidate.num_hash.hash).collect::<Vec<_>>();
+                self.metrics.requested.increment(hashes.len() as u64);
+                let response = client
+                    .get_block_access_lists_with_requirement(hashes, BalRequirement::Optional);
+                in_flight.push(async move {
+                    let response = response.await;
+                    drop(permit);
+                    (client, chunk, response)
+                });
             }
 
-            let attempted_at = Instant::now();
-            for candidate in &dispatchable {
-                self.attempted.insert(candidate.num_hash, attempted_at);
-            }
-            let client = self.client.clone();
-            let chunk = dispatchable;
-            let hashes = chunk.iter().map(|candidate| candidate.num_hash.hash).collect::<Vec<_>>();
-            self.metrics.requested.increment(hashes.len() as u64);
-            let response =
-                client.get_block_access_lists_with_requirement(hashes, BalRequirement::Optional);
-            in_flight.push(async move {
-                let response = response.await;
-                drop(permit);
-                (client, chunk, response)
-            });
-            if in_flight.len() >= self.config.max_concurrent_requests.get() &&
-                let Some((client, requested, response)) = in_flight.next().await
-            {
-                Self::process_response(
-                    self.runtime.clone(),
-                    self.provider.clone(),
-                    self.store.clone(),
-                    self.metrics.clone(),
-                    client,
-                    requested,
-                    response,
-                )
-                .await;
-            }
-        }
-        while let Some((client, requested, response)) = in_flight.next().await {
-            Self::process_response(
+            let Some((client, requested, response)) = in_flight.next().await else { break };
+            let continuation = Self::process_response(
                 self.runtime.clone(),
                 self.provider.clone(),
                 self.store.clone(),
@@ -529,6 +536,12 @@ where
                 response,
             )
             .await;
+            if !continuation.is_empty() {
+                // Continuations bypass cooldown inside this reconciliation. Retaining the original
+                // attempt keeps a suffix cooled if its pre-dispatch recheck rejects it; a suffix
+                // that is actually dispatched refreshes the attempt timestamp above.
+                pending.push_front(continuation);
+            }
         }
     }
 
@@ -540,20 +553,29 @@ where
         client: C,
         requested: Vec<HistoricalBalCandidate>,
         response: PeerRequestResult<BlockAccessLists>,
-    ) {
+    ) -> Vec<HistoricalBalCandidate> {
         let requested_len = requested.len();
+        let mut continuation = response.as_ref().ok().and_then(|response| {
+            let response_len = response.data().0.len();
+            (response_len > 0 && response_len < requested_len)
+                .then(|| requested[response_len..].to_vec())
+        });
         let Ok(outcome) = runtime
             .spawn_blocking(move || validate_bal_response(&client, &requested, response))
             .await
         else {
             metrics.unavailable.increment(requested_len as u64);
-            return
+            return Vec::new()
         };
         metrics.downloaded.increment(outcome.values.len() as u64);
         metrics.unavailable.increment(outcome.unavailable as u64);
         metrics.invalid.increment(outcome.invalid as u64);
 
+        if outcome.invalid > 0 {
+            continuation = None;
+        }
         Self::persist_valid(runtime, provider, store, outcome.values).await;
+        continuation.unwrap_or_default()
     }
 
     async fn persist_valid(
@@ -1495,6 +1517,283 @@ mod tests {
         assert_eq!(requests.iter().map(|(hashes, _)| hashes.len()).collect::<Vec<_>>(), [2, 2, 1]);
         assert!(requests.iter().all(|(_, requirement)| *requirement == BalRequirement::Optional));
         assert_eq!(client.max_active(), 2);
+    }
+
+    #[tokio::test]
+    async fn positive_short_prefix_continues_only_missing_tail_without_cooldown() {
+        let raw = Bytes::from_static(&[0xc0]);
+        let expected = keccak256(&raw);
+        let candidates =
+            (1..=3).map(|number| candidate(number, Some(expected), 1, true)).collect::<Vec<_>>();
+        let provider = TestProvider::with_candidates(3, 0, candidates.clone());
+        let store = BalStoreHandle::new(InMemoryBalStore::default());
+        let client = ScriptedBalClient::default();
+        client.push_response(Ok(WithPeerId::new(
+            PeerId::random(),
+            BlockAccessLists(vec![Some(raw.clone())]),
+        )));
+        client.push_response(Ok(WithPeerId::new(
+            PeerId::random(),
+            BlockAccessLists(vec![Some(raw.clone()), Some(raw.clone())]),
+        )));
+        let recorder = DebuggingRecorder::new();
+        let snapshotter = recorder.snapshotter();
+        let config = HistoricalBalWorkerConfig::new(true, 1, 3, 1, 3).unwrap();
+        let mut worker = HistoricalBalWorker::new(
+            provider,
+            store.clone(),
+            client.clone(),
+            futures::stream::empty::<()>(),
+            Runtime::test(),
+            config,
+        );
+        worker.metrics = metrics::with_local_recorder(&recorder, || {
+            HistoricalBalDownloaderMetrics::new_with_labels(Vec::<metrics::Label>::new())
+        });
+
+        worker.run_once().await;
+
+        assert_eq!(
+            client.requests(),
+            vec![
+                (
+                    candidates.iter().map(|candidate| candidate.num_hash.hash).collect(),
+                    BalRequirement::Optional,
+                ),
+                (
+                    candidates[1..].iter().map(|candidate| candidate.num_hash.hash).collect(),
+                    BalRequirement::Optional,
+                ),
+            ]
+        );
+        for candidate in candidates {
+            assert_eq!(store.get_by_hash(candidate.num_hash.hash).unwrap(), Some(raw.clone()));
+        }
+        let counters = counter_values(&snapshotter);
+        assert_eq!(counters.get("downloaders.historical_bal.requested"), Some(&5));
+        assert_eq!(counters.get("downloaders.historical_bal.downloaded"), Some(&3));
+        assert_eq!(counters.get("downloaders.historical_bal.unavailable"), Some(&2));
+    }
+
+    #[tokio::test]
+    async fn short_prefix_none_stays_cooled_while_missing_tail_continues() {
+        let raw = Bytes::from_static(&[0xc0]);
+        let expected = keccak256(&raw);
+        let candidates =
+            (1..=4).map(|number| candidate(number, Some(expected), 1, true)).collect::<Vec<_>>();
+        let provider = TestProvider::with_candidates(4, 0, candidates.clone());
+        let store = BalStoreHandle::new(InMemoryBalStore::default());
+        let client = ScriptedBalClient::default();
+        client.push_response(Ok(WithPeerId::new(
+            PeerId::random(),
+            BlockAccessLists(vec![Some(raw.clone()), None]),
+        )));
+        client.push_response(Ok(WithPeerId::new(
+            PeerId::random(),
+            BlockAccessLists(vec![Some(raw.clone()), Some(raw.clone())]),
+        )));
+        let config = HistoricalBalWorkerConfig::new(true, 1, 4, 1, 4).unwrap();
+        let mut worker = HistoricalBalWorker::new(
+            provider,
+            store.clone(),
+            client.clone(),
+            futures::stream::empty::<()>(),
+            Runtime::test(),
+            config,
+        );
+
+        worker.run_once().await;
+        worker.run_once().await;
+
+        assert_eq!(
+            client.requests(),
+            vec![
+                (
+                    candidates.iter().map(|candidate| candidate.num_hash.hash).collect(),
+                    BalRequirement::Optional,
+                ),
+                (
+                    candidates[2..].iter().map(|candidate| candidate.num_hash.hash).collect(),
+                    BalRequirement::Optional,
+                ),
+            ]
+        );
+        assert_eq!(store.get_by_hash(candidates[0].num_hash.hash).unwrap(), Some(raw.clone()));
+        assert_eq!(store.get_by_hash(candidates[1].num_hash.hash).unwrap(), None);
+        for candidate in &candidates[2..] {
+            assert_eq!(store.get_by_hash(candidate.num_hash.hash).unwrap(), Some(raw.clone()));
+        }
+    }
+
+    #[tokio::test]
+    async fn repeated_positive_prefixes_shrink_monotonically_and_stop_at_lookahead() {
+        let raw = Bytes::from_static(&[0xc0]);
+        let expected = keccak256(&raw);
+        let candidates =
+            (1..=4).map(|number| candidate(number, Some(expected), 1, true)).collect::<Vec<_>>();
+        let provider = TestProvider::with_candidates(4, 0, candidates.clone());
+        let store = BalStoreHandle::new(InMemoryBalStore::default());
+        let client = ScriptedBalClient::default();
+        for _ in &candidates {
+            client.push_response(Ok(WithPeerId::new(
+                PeerId::random(),
+                BlockAccessLists(vec![Some(raw.clone())]),
+            )));
+        }
+        let config = HistoricalBalWorkerConfig::new(true, 1, 4, 1, 4).unwrap();
+        let mut worker = HistoricalBalWorker::new(
+            provider,
+            store.clone(),
+            client.clone(),
+            futures::stream::empty::<()>(),
+            Runtime::test(),
+            config,
+        );
+
+        worker.run_once().await;
+
+        let expected_requests = (0..candidates.len())
+            .map(|start| {
+                (
+                    candidates[start..].iter().map(|candidate| candidate.num_hash.hash).collect(),
+                    BalRequirement::Optional,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(client.requests(), expected_requests);
+        assert_eq!(client.requests().len(), candidates.len());
+        assert_eq!(client.max_active(), 1);
+        assert_eq!(worker.attempted.len(), candidates.len());
+        for candidate in candidates {
+            assert_eq!(store.get_by_hash(candidate.num_hash.hash).unwrap(), Some(raw.clone()));
+        }
+    }
+
+    #[tokio::test]
+    async fn zero_progress_response_does_not_continue_or_bypass_cooldown() {
+        let raw = Bytes::from_static(&[0xc0]);
+        let expected = keccak256(&raw);
+        let candidates =
+            (1..=3).map(|number| candidate(number, Some(expected), 1, true)).collect::<Vec<_>>();
+        let provider = TestProvider::with_candidates(3, 0, candidates.clone());
+        let store = BalStoreHandle::new(InMemoryBalStore::default());
+        let client = ScriptedBalClient::default();
+        client.push_response(Ok(WithPeerId::new(PeerId::random(), BlockAccessLists(Vec::new()))));
+        let recorder = DebuggingRecorder::new();
+        let snapshotter = recorder.snapshotter();
+        let config = HistoricalBalWorkerConfig::new(true, 1, 3, 1, 3).unwrap();
+        let mut worker = HistoricalBalWorker::new(
+            provider,
+            store.clone(),
+            client.clone(),
+            futures::stream::empty::<()>(),
+            Runtime::test(),
+            config,
+        );
+        worker.metrics = metrics::with_local_recorder(&recorder, || {
+            HistoricalBalDownloaderMetrics::new_with_labels(Vec::<metrics::Label>::new())
+        });
+
+        worker.run_once().await;
+        worker.run_once().await;
+
+        assert_eq!(client.requests().len(), 1);
+        assert_eq!(worker.attempted.len(), candidates.len());
+        for candidate in candidates {
+            assert_eq!(store.get_by_hash(candidate.num_hash.hash).unwrap(), None);
+        }
+        let counters = counter_values(&snapshotter);
+        assert_eq!(counters.get("downloaders.historical_bal.requested"), Some(&3));
+        assert_eq!(counters.get("downloaders.historical_bal.downloaded"), Some(&0));
+        assert_eq!(counters.get("downloaders.historical_bal.unavailable"), Some(&3));
+    }
+
+    #[tokio::test]
+    async fn request_error_and_invalid_short_response_do_not_continue() {
+        let raw = Bytes::from_static(&[0xc0]);
+        let expected = keccak256(&raw);
+        let candidates =
+            (1..=3).map(|number| candidate(number, Some(expected), 1, true)).collect::<Vec<_>>();
+        let provider = TestProvider::with_candidates(3, 0, candidates.clone());
+        let client = ScriptedBalClient::default();
+        client.push_response(Err(RequestError::Timeout));
+        let config = HistoricalBalWorkerConfig::new(true, 1, 3, 1, 3).unwrap();
+        let mut worker = HistoricalBalWorker::new(
+            provider,
+            BalStoreHandle::new(InMemoryBalStore::default()),
+            client.clone(),
+            futures::stream::empty::<()>(),
+            Runtime::test(),
+            config,
+        );
+
+        worker.run_once().await;
+        worker.run_once().await;
+
+        assert_eq!(client.requests().len(), 1);
+        assert_eq!(worker.attempted.len(), candidates.len());
+        assert!(client.reports().is_empty());
+
+        let invalid_candidates =
+            (1..=3).map(|number| candidate(number, Some(B256::ZERO), 1, true)).collect::<Vec<_>>();
+        let provider = TestProvider::with_candidates(3, 0, invalid_candidates.clone());
+        let store = BalStoreHandle::new(InMemoryBalStore::default());
+        let client = ScriptedBalClient::default();
+        let peer = PeerId::random();
+        client.push_response(Ok(WithPeerId::new(peer, BlockAccessLists(vec![Some(raw)]))));
+        let mut worker = HistoricalBalWorker::new(
+            provider,
+            store.clone(),
+            client.clone(),
+            futures::stream::empty::<()>(),
+            Runtime::test(),
+            config,
+        );
+
+        worker.run_once().await;
+        worker.run_once().await;
+
+        assert_eq!(client.requests().len(), 1);
+        assert_eq!(worker.attempted.len(), invalid_candidates.len());
+        assert_eq!(client.reports(), vec![peer]);
+        for candidate in invalid_candidates {
+            assert_eq!(store.get_by_hash(candidate.num_hash.hash).unwrap(), None);
+        }
+    }
+
+    #[tokio::test]
+    async fn short_tail_rejected_by_progress_stays_cooled_if_window_reopens() {
+        let raw = Bytes::from_static(&[0xc0]);
+        let expected = keccak256(&raw);
+        let candidates =
+            (1..=3).map(|number| candidate(number, Some(expected), 1, true)).collect::<Vec<_>>();
+        let provider = TestProvider::with_candidates(3, 0, candidates.clone());
+        provider.set_checkpoint_overrides([(3, 0), (3, 0), (3, 3)]);
+        let store = BalStoreHandle::new(InMemoryBalStore::default());
+        let client = ScriptedBalClient::default();
+        client.push_response(Ok(WithPeerId::new(
+            PeerId::random(),
+            BlockAccessLists(vec![Some(raw.clone())]),
+        )));
+        let config = HistoricalBalWorkerConfig::new(true, 1, 3, 1, 3).unwrap();
+        let mut worker = HistoricalBalWorker::new(
+            provider,
+            store.clone(),
+            client.clone(),
+            futures::stream::empty::<()>(),
+            Runtime::test(),
+            config,
+        );
+
+        worker.run_once().await;
+        worker.run_once().await;
+
+        assert_eq!(client.requests().len(), 1);
+        assert_eq!(store.get_by_hash(candidates[0].num_hash.hash).unwrap(), Some(raw));
+        for candidate in &candidates[1..] {
+            assert_eq!(store.get_by_hash(candidate.num_hash.hash).unwrap(), None);
+            assert!(worker.attempted.contains_key(&candidate.num_hash));
+        }
     }
 
     #[tokio::test]

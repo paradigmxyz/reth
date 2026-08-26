@@ -296,8 +296,9 @@ The historical BAL section controls best-effort downloading of missing block acc
 enabled = false
 # Inclusive minimum transaction count for an eligible block. Must be greater than 0.
 min_transactions = 2
-# Maximum block hashes per request. Must be between 1 and 1024.
-request_batch_size = 1024
+# Block hashes per request. The default leaves headroom under the 2 MiB response soft limit;
+# values from 1 through the eth/71 protocol ceiling of 1024 are accepted.
+request_batch_size = 16
 # Maximum requests in flight. Must be greater than 0 and fit the worker semaphore limit.
 max_concurrent_requests = 4
 # Maximum blocks to inspect ahead of execution progress. Must be greater than 0 and is
@@ -305,7 +306,20 @@ max_concurrent_requests = 4
 lookahead = 1024
 ```
 
+The 16-hash default uses the raw RLP sizes from the [EIP-7928 60M-gas analysis](https://eips.ethereum.org/assets/eip-7928/bal_size_analysis_60m.md). Reth applies the [2 MiB soft limit](https://eips.ethereum.org/EIPS/eip-8159#blockaccesslists-0x13) to raw stored BAL bytes before wire compression and includes the first item that crosses the limit. Repeating the report's 110.8/106.0 KiB raw mean/median through that rule gives:
+
+| Requested | Raw mean model | Raw median model |
+| ---: | ---: | ---: |
+| 16 | 16 returned (1,772.8 KiB) | 16 returned (1,696.0 KiB) |
+| 24 | 19 returned, short by 5 | 20 returned, short by 4 |
+| 32 | 19 returned, short by 13 | 20 returned, short by 12 |
+| 64 | 19 returned, short by 45 | 20 returned, short by 44 |
+
+The report publishes aggregate sizes rather than its per-block BAL sequence, so this models typical responses rather than an empirical batch success rate. The continuation behavior below covers larger individual BALs and distribution tails.
+
 The `--historical-bal[=<true|false>]` CLI option overrides `enabled` when provided. Omitting it preserves the TOML value and all numeric settings.
+
+Successful short responses are treated as positional prefixes. The worker validates and stores the prefix, then continues only the missing suffix within the same bounded reconciliation; explicit unavailable entries and failed or invalid responses retain the retry cooldown.
 
 ## The `[peers]` section
 

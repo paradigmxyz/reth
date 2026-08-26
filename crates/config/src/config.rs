@@ -127,6 +127,14 @@ pub struct HistoricalBalConfig {
 }
 
 impl HistoricalBalConfig {
+    /// Operational request size chosen to leave headroom under eth/71's 2 MiB response soft limit.
+    ///
+    /// The [EIP-7928 60M-gas analysis] reports a 110.8 KiB mean raw RLP BAL, so 16
+    /// mean-sized entries occupy about 1.73 MiB under the server's raw-byte accounting. Larger
+    /// responses remain covered by bounded short-prefix continuation.
+    ///
+    /// [EIP-7928 60M-gas analysis]: https://eips.ethereum.org/assets/eip-7928/bal_size_analysis_60m.md
+    pub const DEFAULT_REQUEST_BATCH_SIZE: usize = 16;
     /// Maximum number of block hashes accepted by an eth/71 BAL request.
     pub const MAX_REQUEST_BATCH_SIZE: usize = 1024;
 }
@@ -136,7 +144,7 @@ impl Default for HistoricalBalConfig {
         Self {
             enabled: false,
             min_transactions: NonZeroU64::new(2).unwrap(),
-            request_batch_size: NonZeroUsize::new(Self::MAX_REQUEST_BATCH_SIZE).unwrap(),
+            request_batch_size: NonZeroUsize::new(Self::DEFAULT_REQUEST_BATCH_SIZE).unwrap(),
             max_concurrent_requests: NonZeroUsize::new(4).unwrap(),
             lookahead: NonZeroU64::new(1024).unwrap(),
         }
@@ -699,7 +707,7 @@ where
 
 #[cfg(all(test, feature = "serde"))]
 mod tests {
-    use super::{Config, EXTENSION};
+    use super::{Config, HistoricalBalConfig, EXTENSION};
     use crate::PruneConfig;
     use alloy_primitives::Address;
     use reth_network_peers::TrustedPeer;
@@ -860,9 +868,15 @@ mod tests {
 
         assert!(!config.enabled);
         assert_eq!(config.min_transactions.get(), 2);
-        assert_eq!(config.request_batch_size.get(), 1024);
+        assert_eq!(HistoricalBalConfig::DEFAULT_REQUEST_BATCH_SIZE, 16);
+        assert_eq!(HistoricalBalConfig::MAX_REQUEST_BATCH_SIZE, 1024);
+        assert_eq!(config.request_batch_size.get(), 16);
         assert_eq!(config.max_concurrent_requests.get(), 4);
         assert_eq!(config.lookahead.get(), 1024);
+        assert!(
+            config.lookahead.get() as usize >=
+                config.request_batch_size.get() * config.max_concurrent_requests.get()
+        );
     }
 
     #[test]
