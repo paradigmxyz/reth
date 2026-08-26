@@ -2,6 +2,7 @@ use super::*;
 use crate::{
     persistence::PersistenceAction,
     tree::{
+        error::{BlockAccessListDecodeError, InsertBlockErrorKind},
         payload_validator::{BasicEngineValidator, TreeCtx, ValidationOutcome},
         persistence_state::CurrentPersistenceAction,
         PersistTarget, TreeConfig,
@@ -564,6 +565,22 @@ fn test_tree_persist_block_batch() {
         }
         _ => panic!("unexpected message: {msg:#?}"),
     }
+}
+
+#[test]
+fn malformed_input_is_non_fatal_insert_outcome() {
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+    let block = test_harness.block_builder.generate_random_block(1, B256::ZERO);
+    let error = InsertBlockError::new(
+        block,
+        InsertBlockErrorKind::BlockAccessListDecode(BlockAccessListDecodeError::new(
+            alloy_rlp::Error::UnexpectedString,
+        )),
+    );
+    assert_matches!(
+        test_harness.tree.on_insert_block_error(error),
+        Err(InsertBlockProcessingError::MalformedInput(_))
+    );
 }
 
 #[tokio::test]
