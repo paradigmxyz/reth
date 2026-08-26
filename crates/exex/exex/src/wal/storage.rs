@@ -188,8 +188,10 @@ mod tests {
     use reth_provider::Chain;
     use reth_testing_utils::generators::{self, random_block};
     use reth_trie_common::{
-        updates::{StorageTrieUpdates, TrieUpdates},
-        BranchNodeCompact, ComputedTrieData, HashedPostState, HashedStorage, LazyTrieData, Nibbles,
+        serde_bincode_compat,
+        updates::{StorageTrieUpdates, StorageTrieUpdatesSorted, TrieUpdates},
+        BranchNodeCompact, ComputedTrieData, HashedPostState, HashedStorage, HashedStorageSorted,
+        LazyTrieData, Nibbles,
     };
     use std::{collections::BTreeMap, fs::File, sync::Arc};
 
@@ -216,6 +218,26 @@ mod tests {
             deserialized_notification.map(|(notification, _)| notification),
             Some(notification)
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_decode_legacy_sorted_trie_data() -> eyre::Result<()> {
+        let storage_nodes =
+            vec![(Nibbles::from_nibbles_unchecked([0x01]), Some(BranchNodeCompact::default()))];
+        let encoded = rmp_serde::encode::to_vec(&(false, &storage_nodes))?;
+        let decoded: serde_bincode_compat::updates::StorageTrieUpdatesSorted<'_> =
+            rmp_serde::decode::from_slice(&encoded)?;
+        let decoded: StorageTrieUpdatesSorted = decoded.into();
+        assert_eq!(decoded.storage_nodes, storage_nodes);
+
+        let storage_slots = vec![(B256::from([1; 32]), U256::from(1))];
+        let encoded = rmp_serde::encode::to_vec(&(&storage_slots, false))?;
+        let decoded: serde_bincode_compat::hashed_state::HashedStorageSorted<'_> =
+            rmp_serde::decode::from_slice(&encoded)?;
+        let decoded: HashedStorageSorted = decoded.into();
+        assert_eq!(decoded.storage_slots, storage_slots);
 
         Ok(())
     }

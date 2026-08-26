@@ -1704,9 +1704,13 @@ mod tests {
 #[cfg(feature = "serde-bincode-compat")]
 pub mod serde_bincode_compat {
     use super::Account;
-    use alloc::borrow::Cow;
+    use alloc::{borrow::Cow, vec::Vec};
     use alloy_primitives::{map::B256Map, B256, U256};
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use core::fmt;
+    use serde::{
+        de::{Error as _, SeqAccess, Visitor},
+        Deserialize, Deserializer, Serialize, Serializer,
+    };
     use serde_with::{DeserializeAs, SerializeAs};
 
     /// Bincode-compatible [`super::HashedPostState`] serde implementation.
@@ -1894,9 +1898,52 @@ pub mod serde_bincode_compat {
     ///     hashed_storage: HashedStorageSorted,
     /// }
     /// ```
-    #[derive(Debug, Serialize, Deserialize)]
+    #[derive(Debug, Serialize)]
     pub struct HashedStorageSorted<'a> {
         storage_slots: Cow<'a, [(B256, U256)]>,
+    }
+
+    impl<'de, 'a> Deserialize<'de> for HashedStorageSorted<'a> {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            struct HashedStorageSortedVisitor;
+
+            impl<'de> Visitor<'de> for HashedStorageSortedVisitor {
+                type Value = Vec<(B256, U256)>;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("hashed storage with an optional legacy wipe marker")
+                }
+
+                fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+                where
+                    A: SeqAccess<'de>,
+                {
+                    let len = seq.size_hint().unwrap_or_default();
+                    if !matches!(len, 1 | 2) {
+                        return Err(A::Error::invalid_length(len, &self))
+                    }
+
+                    let storage_slots =
+                        seq.next_element()?.ok_or_else(|| A::Error::invalid_length(0, &self))?;
+                    if len == 2 {
+                        let _: bool = seq
+                            .next_element()?
+                            .ok_or_else(|| A::Error::invalid_length(1, &self))?;
+                    }
+
+                    Ok(storage_slots)
+                }
+            }
+
+            // Bincode uses the supplied tuple length for the current format, while MessagePack
+            // exposes the encoded sequence length so legacy ExEx WAL entries can still be read.
+            deserializer
+                .deserialize_tuple(1, HashedStorageSortedVisitor)
+                .map(|storage_slots| Self { storage_slots: Cow::Owned(storage_slots) })
+        }
     }
 
     impl<'a> From<&'a super::HashedStorageSorted> for HashedStorageSorted<'a> {
