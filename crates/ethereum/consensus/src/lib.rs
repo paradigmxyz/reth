@@ -542,4 +542,20 @@ mod tests {
             .validate_header(&SealedHeader::seal_slow(header,))
             .is_ok());
     }
+
+    #[test]
+    fn amsterdam_post_execution_requires_computed_block_access_list_hash() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build());
+        let block = prague_recovered_block_with_bal_hash(B256::ZERO);
+        let result = BlockExecutionResult::<Receipt>::default();
+        let consensus = EthBeaconConsensus::new(chain_spec);
+
+        assert!(matches!(
+            FullConsensus::<EthPrimitives>::validate_block_post_execution(
+                &consensus, &block, &result, None, None,
+            )
+            .unwrap_err(),
+            ConsensusError::BlockAccessListHashMissing
+        ));
+    }
 }

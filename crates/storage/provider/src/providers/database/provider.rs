@@ -786,25 +786,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 let start = Instant::now();
                 let batch = ExecutedBlock::trie_updates_refs(state_trie_blocks);
                 let mask = ExecutedBlock::trie_updates_refs(state_trie_masking_blocks);
-                // Sparse-trie streaming emits node updates, while the serial state-root path,
-                // including fallback, can emit a whole storage-trie wipe. `disjointed_merge_batch`
-                // rejects wipes, so use the ordered merge. Persisting updates shadowed by the
-                // masking suffix is redundant but safe: the in-memory overlay still takes
-                // precedence.
-                //
-                // With a revm release containing bluealloy/revm#3863, post-Cancun selfdestructs
-                // will no longer result in `storage.is_deleted` in serial trie updates. The flag
-                // remains valid `save_blocks` input when processing pre-Cancun historical data.
-                let contains_storage_wipe = batch.iter().chain(&mask).any(|updates| {
-                    updates.storage_tries_ref().values().any(|storage| storage.is_deleted)
-                });
-                let merged_trie = if contains_storage_wipe {
-                    TrieUpdatesSorted::merge_batch(
-                        state_trie_blocks.iter().rev().map(|block| block.trie_updates()),
-                    )
-                } else {
-                    Arc::new(TrieUpdatesSorted::disjointed_merge_batch(&batch, &mask))
-                };
+                let merged_trie =
+                    Arc::new(TrieUpdatesSorted::disjointed_merge_batch(&batch, &mask));
                 if !merged_trie.is_empty() {
                     self.write_trie_updates_sorted(&merged_trie)?;
                 }
@@ -2832,10 +2815,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let mut hashed_storage_cursor =
             self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
         for (hashed_address, storage) in sorted_storages {
-            if storage.is_wiped() && hashed_storage_cursor.seek_exact(*hashed_address)?.is_some() {
-                hashed_storage_cursor.delete_current_duplicates()?;
-            }
-
             for (hashed_slot, value) in storage.storage_slots_ref() {
                 let entry = StorageEntry { key: *hashed_slot, value: *value };
 
@@ -4474,14 +4453,14 @@ mod tests {
                 )
                 .unwrap();
 
-            // Add storage nodes for address2 (will be wiped)
+            // Add storage nodes for address2.
             storage_cursor
                 .upsert(
                     storage_address2,
                     &StorageTrieEntry {
                         nibbles: StoredNibblesSubKey(Nibbles::from_nibbles([0xa, 0xb])),
                         node: BranchNodeCompact::new(
-                            0b1100_1100_1100_1100, // will be wiped
+                            0b1100_1100_1100_1100,
                             0b0000_0000_0000_0000,
                             0b0000_0000_0000_0000,
                             vec![],
@@ -4496,7 +4475,7 @@ mod tests {
                     &StorageTrieEntry {
                         nibbles: StoredNibblesSubKey(Nibbles::from_nibbles([0xc, 0xd])),
                         node: BranchNodeCompact::new(
-                            0b0011_1100_0011_1100, // will be wiped
+                            0b0011_1100_0011_1100,
                             0b0000_0000_0000_0000,
                             0b0000_0000_0000_0000,
                             vec![],
@@ -4534,7 +4513,6 @@ mod tests {
 
         // Create sorted storage trie updates
         let storage_trie1 = StorageTrieUpdatesSorted {
-            is_deleted: false,
             storage_nodes: vec![
                 (
                     Nibbles::from_nibbles([0x1, 0x0]),
@@ -4551,8 +4529,10 @@ mod tests {
         };
 
         let storage_trie2 = StorageTrieUpdatesSorted {
-            is_deleted: true, // Wipe all storage for this address
-            storage_nodes: vec![],
+            storage_nodes: vec![
+                (Nibbles::from_nibbles([0xa, 0xb]), None),
+                (Nibbles::from_nibbles([0xc, 0xd]), None),
+            ],
         };
 
         let mut storage_tries = B256Map::default();
@@ -4564,9 +4544,9 @@ mod tests {
         // Write the sorted trie updates
         let num_entries = provider_rw.write_trie_updates_sorted(&trie_updates).unwrap();
 
-        // We should have 2 account insertions + 1 account deletion + 1 storage insertion + 1
-        // storage deletion = 5
-        assert_eq!(num_entries, 5);
+        // We should have 2 account insertions + 1 account deletion + 1 storage insertion + 3
+        // storage deletions = 7
+        assert_eq!(num_entries, 7);
 
         // Verify account trie updates were written correctly
         let tx = provider_rw.tx_ref();
@@ -4613,13 +4593,13 @@ mod tests {
             "Remaining entry should be [0x1, 0x0]"
         );
 
-        // Check storage for address2 was wiped
+        // Check storage for address2 was removed
         let storage_entries2: Vec<_> = storage_cursor
             .walk_dup(Some(storage_address2), None)
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(storage_entries2.len(), 0, "Storage address2 should be empty after wipe");
+        assert_eq!(storage_entries2.len(), 0, "Storage address2 should be empty after removal");
 
         provider_rw.commit().unwrap();
     }
@@ -4667,17 +4647,11 @@ mod tests {
             B256Map::from_iter([
                 (
                     kept_storage,
-                    HashedStorageSorted {
-                        wiped: false,
-                        storage_slots: vec![(kept_slot, U256::from(1))],
-                    },
+                    HashedStorageSorted { storage_slots: vec![(kept_slot, U256::from(1))] },
                 ),
                 (
                     masked_storage,
-                    HashedStorageSorted {
-                        wiped: false,
-                        storage_slots: vec![(masked_slot, U256::from(2))],
-                    },
+                    HashedStorageSorted { storage_slots: vec![(masked_slot, U256::from(2))] },
                 ),
             ]),
         );
@@ -4690,14 +4664,12 @@ mod tests {
                 (
                     kept_storage,
                     StorageTrieUpdatesSorted {
-                        is_deleted: false,
                         storage_nodes: vec![(kept_storage_node, Some(branch(0b1010)))],
                     },
                 ),
                 (
                     masked_storage,
                     StorageTrieUpdatesSorted {
-                        is_deleted: false,
                         storage_nodes: vec![(masked_storage_node, Some(branch(0b0101)))],
                     },
                 ),
@@ -4717,10 +4689,7 @@ mod tests {
             vec![(masked_account, Some(Account { nonce: 3, ..Default::default() }))],
             B256Map::from_iter([(
                 masked_storage,
-                HashedStorageSorted {
-                    wiped: false,
-                    storage_slots: vec![(masked_slot, U256::from(4))],
-                },
+                HashedStorageSorted { storage_slots: vec![(masked_slot, U256::from(4))] },
             )]),
         );
         let deferred_trie_updates = TrieUpdatesSorted::new(
@@ -4728,7 +4697,6 @@ mod tests {
             B256Map::from_iter([(
                 masked_storage,
                 StorageTrieUpdatesSorted {
-                    is_deleted: false,
                     storage_nodes: vec![(masked_storage_node, Some(branch(0b1100)))],
                 },
             )]),
@@ -4843,121 +4811,6 @@ mod tests {
             .unwrap();
         assert_eq!(masked_entries.len(), 1);
         assert_eq!(masked_entries[0].1.nibbles.0, masked_storage_node);
-    }
-
-    #[test]
-    fn test_save_blocks_merges_storage_wipe_in_multi_block_batch() {
-        use reth_trie::{
-            updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
-            BranchNodeCompact, HashedPostStateSorted,
-        };
-
-        let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
-
-        let mut test_block_builder = TestBlockBuilder::eth().with_state();
-        let genesis = test_block_builder.get_executed_blocks(0..1).next().unwrap();
-        let mut blocks: Vec<_> = test_block_builder.get_executed_blocks(1..4).collect();
-        let address = B256::with_last_byte(1);
-        let storage_path = Nibbles::from_nibbles([0x1, 0x2]);
-
-        let provider_rw = factory.provider_rw().unwrap();
-        save_genesis(&provider_rw, &genesis).unwrap();
-        provider_rw
-            .write_trie_updates_sorted(&TrieUpdatesSorted::new(
-                vec![],
-                B256Map::from_iter([(
-                    address,
-                    StorageTrieUpdatesSorted {
-                        is_deleted: false,
-                        storage_nodes: vec![(storage_path, Some(BranchNodeCompact::default()))],
-                    },
-                )]),
-            ))
-            .unwrap();
-        provider_rw.commit().unwrap();
-
-        let wipe = TrieUpdatesSorted::new(
-            vec![],
-            B256Map::from_iter([(
-                address,
-                StorageTrieUpdatesSorted { is_deleted: true, storage_nodes: vec![] },
-            )]),
-        );
-        let wipe_block = &blocks[2];
-        blocks[2] = ExecutedBlock::new(
-            Arc::clone(&wipe_block.recovered_block),
-            Arc::clone(&wipe_block.execution_output),
-            ComputedTrieData::new(Arc::new(HashedPostStateSorted::default()), Arc::new(wipe)),
-        );
-
-        let provider_rw = factory.provider_rw().unwrap();
-        let input = SaveBlocksInput::new(blocks, 0, 0, 3, 3);
-        provider_rw.save_blocks(&input).unwrap();
-        provider_rw.commit().unwrap();
-
-        let provider = factory.provider().unwrap();
-        let checkpoint = provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
-        assert_eq!(checkpoint.block_number, 3);
-        let storage_entries = provider
-            .tx_ref()
-            .cursor_dup_read::<tables::StoragesTrie>()
-            .unwrap()
-            .walk_dup(Some(address), None)
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        assert!(storage_entries.is_empty());
-    }
-
-    #[test]
-    fn test_save_blocks_batches_transient_storage_wipe() {
-        use alloy_primitives::map::B256Set;
-        use reth_trie::{updates::TrieUpdates, HashBuilder, HashedPostStateSorted};
-
-        let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
-
-        let mut test_block_builder = TestBlockBuilder::eth().with_state();
-        let genesis = test_block_builder.get_executed_blocks(0..1).next().unwrap();
-        let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..4).collect();
-
-        let provider_rw = factory.provider_rw().unwrap();
-        save_genesis(&provider_rw, &genesis).unwrap();
-        provider_rw.commit().unwrap();
-
-        // A contract created and self-destructed in the same transaction leaves an empty whole-
-        // storage wipe in the trie updates, even though the account never reaches persisted state.
-        let ephemeral_account = B256::with_last_byte(0x57);
-        let hashed_state = HashedPostStateSorted::default();
-        let mut trie_updates = TrieUpdates::default();
-        trie_updates.finalize(
-            HashBuilder::default(),
-            Default::default(),
-            B256Set::from_iter([ephemeral_account]),
-        );
-        let trie_updates = trie_updates.into_sorted();
-        assert!(trie_updates.storage_tries_ref()[&ephemeral_account].is_deleted);
-        let selfdestruct_block = ExecutedBlock::new(
-            Arc::clone(&blocks[2].recovered_block),
-            Arc::clone(&blocks[2].execution_output),
-            ComputedTrieData::new(Arc::new(hashed_state), Arc::new(trie_updates)),
-        );
-
-        let provider_rw = factory.provider_rw().unwrap();
-        let input = SaveBlocksInput::new(
-            vec![blocks[0].clone(), blocks[1].clone(), selfdestruct_block],
-            0,
-            0,
-            3,
-            3,
-        );
-        provider_rw.save_blocks(&input).unwrap();
-        provider_rw.commit().unwrap();
-
-        let checkpoint =
-            factory.provider().unwrap().get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
-        assert_eq!(checkpoint.block_number, 3);
     }
 
     #[test]

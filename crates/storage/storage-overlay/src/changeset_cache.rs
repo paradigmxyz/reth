@@ -155,10 +155,7 @@ where
             storage_nodes.push((*nibbles, node_value));
         }
 
-        storage_tries.insert(
-            *hashed_address,
-            StorageTrieUpdatesSorted { storage_nodes, is_deleted: storage_changeset.is_deleted },
-        );
+        storage_tries.insert(*hashed_address, StorageTrieUpdatesSorted { storage_nodes });
     }
 
     Ok(TrieUpdatesSorted::new(account_nodes, storage_tries))
@@ -915,12 +912,7 @@ mod tests {
         let actual =
             reth_trie_db::compute_range_trie_changesets(&*provider, &state_trie_provider, 1..=3, 3)
                 .unwrap();
-        let storage_revert = actual
-            .storage_tries_ref()
-            .get(&hashed_address)
-            .expect("created account storage trie should be deleted by range revert");
-        assert!(storage_revert.is_deleted());
-        assert!(storage_revert.storage_nodes_ref().is_empty());
+        assert!(actual.storage_tries_ref().get(&hashed_address).is_none());
 
         let cache = ChangesetCache::new();
         let overlay_manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
