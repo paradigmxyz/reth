@@ -8274,6 +8274,7 @@ dependencies = [
  "reth-chainspec",
  "reth-config",
  "reth-consensus",
+ "reth-db-api",
  "reth-eth-wire-types",
  "reth-ethereum-primitives",
  "reth-execution-types",

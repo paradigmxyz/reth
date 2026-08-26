@@ -63,6 +63,7 @@ async-compression = { workspace = true, features = ["gzip", "tokio"] }
 metrics-util = { workspace = true, features = ["debugging"] }
 reth-ethereum-primitives.workspace = true
 reth-chainspec.workspace = true
+reth-db-api.workspace = true
 reth-consensus = { workspace = true, features = ["test-utils"] }
 reth-network-p2p = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
@@ -82,6 +83,7 @@ file-client = ["dep:async-compression", "dep:itertools"]
 test-utils = [
     "tempfile",
     "reth-consensus/test-utils",
+    "reth-db-api/test-utils",
     "reth-network-p2p/test-utils",
     "reth-testing-utils",
     "reth-chainspec/test-utils",

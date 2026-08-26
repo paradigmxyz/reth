@@ -156,6 +156,15 @@ pub struct HistoricalBalCandidate {
     pub store_miss: bool,
 }
 
+/// The result of scanning one committed historical BAL window.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct HistoricalBalScanOutcome {
+    /// Candidates that passed the cheap commitment and work filters.
+    pub candidates: Vec<HistoricalBalCandidate>,
+    /// Number of headers excluded before the BAL store was queried.
+    pub skipped: usize,
+}
+
 /// The result of applying worker eligibility filters.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct HistoricalBalFilterOutcome {
@@ -254,6 +263,18 @@ pub fn validate_bal_response<C: DownloadClient>(
     outcome
 }
 
+fn range_len(
+    range: &RangeInclusive<u64>,
+) -> reth_storage_api::errors::provider::ProviderResult<usize> {
+    let len = range
+        .end()
+        .checked_sub(*range.start())
+        .and_then(|len| len.checked_add(1))
+        .ok_or(reth_storage_api::errors::provider::ProviderError::InvalidStorageOutput)?;
+    usize::try_from(len)
+        .map_err(|_| reth_storage_api::errors::provider::ProviderError::InvalidStorageOutput)
+}
+
 /// Provider operations required by the worker.
 pub trait HistoricalBalProvider: Clone + Send + Sync + 'static {
     /// Reads the committed Bodies and Execution checkpoints.
@@ -265,7 +286,8 @@ pub trait HistoricalBalProvider: Clone + Send + Sync + 'static {
         &self,
         range: RangeInclusive<u64>,
         store: &BalStoreHandle,
-    ) -> reth_storage_api::errors::provider::ProviderResult<Vec<HistoricalBalCandidate>>;
+        policy: BalExecutionPolicy,
+    ) -> reth_storage_api::errors::provider::ProviderResult<HistoricalBalScanOutcome>;
     /// Rechecks canonical hashes for the supplied blocks.
     fn historical_bal_canonical(
         &self,
@@ -300,31 +322,76 @@ where
         &self,
         range: RangeInclusive<u64>,
         store: &BalStoreHandle,
-    ) -> reth_storage_api::errors::provider::ProviderResult<Vec<HistoricalBalCandidate>> {
-        let headers = self.sealed_headers_range(range)?;
-        let hashes = headers.iter().map(|header| header.hash()).collect::<Vec<_>>();
-        let stored = store.get_by_hashes(&hashes)?;
-        let mut candidates = Vec::with_capacity(headers.len());
-        for (header, stored) in headers.into_iter().zip(stored) {
-            let Some(indices) = self.block_body_indices(header.number())? else { continue };
-            candidates.push(HistoricalBalCandidate {
+        policy: BalExecutionPolicy,
+    ) -> reth_storage_api::errors::provider::ProviderResult<HistoricalBalScanOutcome> {
+        let expected_len = range_len(&range)?;
+        let headers = self.sealed_headers_range(range.clone())?;
+        if headers.len() != expected_len {
+            return Err(reth_storage_api::errors::provider::ProviderError::InvalidStorageOutput)
+        }
+        let start = *range.start();
+        let indices = self.block_body_indices_range(range)?;
+        if indices.len() != expected_len {
+            return Err(reth_storage_api::errors::provider::ProviderError::InvalidStorageOutput)
+        }
+
+        let mut outcome =
+            HistoricalBalScanOutcome { candidates: Vec::with_capacity(expected_len), skipped: 0 };
+        // Range providers return ascending rows. Exact lengths and header numbers prevent a
+        // missing row from silently shifting the positional body-index pairing.
+        for (offset, (header, indices)) in headers.into_iter().zip(indices).enumerate() {
+            let expected_number = start
+                .checked_add(offset as u64)
+                .ok_or(reth_storage_api::errors::provider::ProviderError::InvalidStorageOutput)?;
+            if header.number() != expected_number {
+                return Err(reth_storage_api::errors::provider::ProviderError::InvalidStorageOutput)
+            }
+            let commitment = header.header().block_access_list_hash();
+            if commitment.is_none() || !policy.is_eligible(indices.tx_count) {
+                outcome.skipped += 1;
+                continue
+            }
+            outcome.candidates.push(HistoricalBalCandidate {
                 num_hash: NumHash::new(header.number(), header.hash()),
-                commitment: header.header().block_access_list_hash(),
+                commitment,
                 transaction_count: indices.tx_count,
-                store_miss: stored.is_none(),
+                store_miss: true,
             });
         }
-        Ok(candidates)
+
+        if outcome.candidates.is_empty() {
+            return Ok(outcome)
+        }
+        let hashes =
+            outcome.candidates.iter().map(|candidate| candidate.num_hash.hash).collect::<Vec<_>>();
+        let stored = store.get_by_hashes(&hashes)?;
+        if stored.len() != hashes.len() {
+            return Err(reth_storage_api::errors::provider::ProviderError::InvalidStorageOutput)
+        }
+        for (candidate, stored) in outcome.candidates.iter_mut().zip(stored) {
+            candidate.store_miss = stored.is_none();
+        }
+        Ok(outcome)
     }
 
     fn historical_bal_canonical(
         &self,
         blocks: &[NumHash],
     ) -> reth_storage_api::errors::provider::ProviderResult<Vec<bool>> {
-        blocks
-            .iter()
-            .map(|block| self.block_hash(block.number).map(|hash| hash == Some(block.hash)))
-            .collect()
+        let mut canonical = Vec::with_capacity(blocks.len());
+        for run in blocks.chunk_by(|left, right| left.number.checked_add(1) == Some(right.number)) {
+            let start = run[0].number;
+            let end = run[run.len() - 1]
+                .number
+                .checked_add(1)
+                .ok_or(reth_storage_api::errors::provider::ProviderError::InvalidStorageOutput)?;
+            let hashes = self.canonical_hashes_range(start, end)?;
+            if hashes.len() != run.len() {
+                return Err(reth_storage_api::errors::provider::ProviderError::InvalidStorageOutput)
+            }
+            canonical.extend(run.iter().zip(hashes).map(|(block, hash)| block.hash == hash));
+        }
+        Ok(canonical)
     }
 }
 
@@ -407,18 +474,21 @@ where
         let provider = self.provider.clone();
         let store = self.store.clone();
         let scan_range = window.clone();
-        let Some(Ok(candidates)) = self
+        let policy = self.config.policy();
+        let Some(Ok(scan)) = self
             .runtime
-            .spawn_blocking(move || provider.historical_bal_scan(scan_range, &store))
+            .spawn_blocking(move || provider.historical_bal_scan(scan_range, &store, policy))
             .await
             .ok()
         else {
             return
         };
 
+        self.metrics.skipped.increment(scan.skipped as u64);
+
         let now = Instant::now();
         let filtered = filter_candidates(
-            candidates,
+            scan.candidates,
             self.config.policy(),
             &window,
             &mut self.attempted,
@@ -592,6 +662,11 @@ where
         let _ = runtime
             .spawn_blocking(move || -> reth_storage_api::errors::provider::ProviderResult<()> {
                 let canonical = provider.historical_bal_canonical(&valid_blocks)?;
+                if canonical.len() != valid.len() {
+                    return Err(
+                        reth_storage_api::errors::provider::ProviderError::InvalidStorageOutput,
+                    )
+                }
                 let entries = valid
                     .into_iter()
                     .zip(canonical)
@@ -603,6 +678,11 @@ where
                 let blocks = entries.iter().map(|(num_hash, _)| *num_hash).collect::<Vec<_>>();
                 let _ = store.insert_many(entries);
                 let canonical = provider.historical_bal_canonical(&blocks)?;
+                if canonical.len() != blocks.len() {
+                    return Err(
+                        reth_storage_api::errors::provider::ProviderError::InvalidStorageOutput,
+                    )
+                }
                 let canonical_blocks = blocks
                     .into_iter()
                     .zip(canonical)
@@ -630,6 +710,7 @@ mod tests {
         collections::{HashMap, HashSet, VecDeque},
         fmt,
         future::Future,
+        ops::RangeBounds,
         pin::Pin,
         sync::{Arc, Mutex},
         task::{Context, Poll},
@@ -709,6 +790,139 @@ mod tests {
         }
     }
 
+    /// `MockEthProvider`'s range body-index adapter is intentionally a no-op. Keep the blanket
+    /// provider test on a local wrapper so it exercises the production range-read path without
+    /// changing the storage test utility shared by other crates.
+    #[derive(Debug, Clone)]
+    struct RangeMockProvider {
+        inner: MockEthProvider,
+        canonical_ranges: Arc<Mutex<Vec<(BlockNumber, BlockNumber)>>>,
+    }
+
+    impl RangeMockProvider {
+        fn new() -> Self {
+            Self { inner: MockEthProvider::new(), canonical_ranges: Default::default() }
+        }
+
+        fn remove_body_indices(&self, number: BlockNumber) {
+            self.inner.block_body_indices.lock().remove(&number);
+        }
+
+        fn remove_header(&self, hash: BlockHash) {
+            self.inner.headers.lock().remove(&hash);
+        }
+
+        fn canonical_ranges(&self) -> Vec<(BlockNumber, BlockNumber)> {
+            self.canonical_ranges.lock().unwrap().clone()
+        }
+    }
+
+    impl HeaderProvider for RangeMockProvider {
+        type Header = <MockEthProvider as HeaderProvider>::Header;
+
+        fn header(
+            &self,
+            block_hash: BlockHash,
+        ) -> reth_storage_api::errors::provider::ProviderResult<Option<Self::Header>> {
+            self.inner.header(block_hash)
+        }
+
+        fn header_by_number(
+            &self,
+            number: BlockNumber,
+        ) -> reth_storage_api::errors::provider::ProviderResult<Option<Self::Header>> {
+            self.inner.header_by_number(number)
+        }
+
+        fn headers_range(
+            &self,
+            range: impl RangeBounds<BlockNumber>,
+        ) -> reth_storage_api::errors::provider::ProviderResult<Vec<Self::Header>> {
+            self.inner.headers_range(range)
+        }
+
+        fn sealed_header(
+            &self,
+            number: BlockNumber,
+        ) -> reth_storage_api::errors::provider::ProviderResult<
+            Option<reth_primitives_traits::SealedHeader<Self::Header>>,
+        > {
+            self.inner.sealed_header(number)
+        }
+
+        fn sealed_headers_while(
+            &self,
+            range: impl RangeBounds<BlockNumber>,
+            predicate: impl FnMut(&reth_primitives_traits::SealedHeader<Self::Header>) -> bool,
+        ) -> reth_storage_api::errors::provider::ProviderResult<
+            Vec<reth_primitives_traits::SealedHeader<Self::Header>>,
+        > {
+            self.inner.sealed_headers_while(range, predicate)
+        }
+    }
+
+    impl BlockHashReader for RangeMockProvider {
+        fn block_hash(
+            &self,
+            number: BlockNumber,
+        ) -> reth_storage_api::errors::provider::ProviderResult<Option<B256>> {
+            self.inner.block_hash(number)
+        }
+
+        fn canonical_hashes_range(
+            &self,
+            start: BlockNumber,
+            end: BlockNumber,
+        ) -> reth_storage_api::errors::provider::ProviderResult<Vec<B256>> {
+            self.canonical_ranges.lock().unwrap().push((start, end));
+            self.inner.canonical_hashes_range(start, end)
+        }
+    }
+
+    impl BlockBodyIndicesProvider for RangeMockProvider {
+        fn block_body_indices(
+            &self,
+            number: BlockNumber,
+        ) -> reth_storage_api::errors::provider::ProviderResult<
+            Option<reth_db_api::models::StoredBlockBodyIndices>,
+        > {
+            self.inner.block_body_indices(number)
+        }
+
+        fn block_body_indices_range(
+            &self,
+            range: RangeInclusive<BlockNumber>,
+        ) -> reth_storage_api::errors::provider::ProviderResult<
+            Vec<reth_db_api::models::StoredBlockBodyIndices>,
+        > {
+            let indices = self.inner.block_body_indices.lock();
+            Ok(range.filter_map(|number| indices.get(&number).copied()).collect())
+        }
+    }
+
+    impl StageCheckpointReader for RangeMockProvider {
+        fn get_stage_checkpoint(
+            &self,
+            id: StageId,
+        ) -> reth_storage_api::errors::provider::ProviderResult<Option<StageCheckpoint>> {
+            self.inner.get_stage_checkpoint(id)
+        }
+
+        fn get_stage_checkpoint_progress(
+            &self,
+            id: StageId,
+        ) -> reth_storage_api::errors::provider::ProviderResult<Option<Vec<u8>>> {
+            self.inner.get_stage_checkpoint_progress(id)
+        }
+
+        fn get_all_checkpoints(
+            &self,
+        ) -> reth_storage_api::errors::provider::ProviderResult<Vec<(String, StageCheckpoint)>>
+        {
+            self.inner.get_all_checkpoints()
+        }
+    }
+
     impl HistoricalBalProvider for TestProvider {
         fn historical_bal_checkpoints(
             &self,
@@ -724,9 +938,9 @@ mod tests {
             &self,
             range: RangeInclusive<u64>,
             store: &BalStoreHandle,
-        ) -> reth_storage_api::errors::provider::ProviderResult<Vec<HistoricalBalCandidate>>
-        {
-            let mut candidates = self
+            policy: BalExecutionPolicy,
+        ) -> reth_storage_api::errors::provider::ProviderResult<HistoricalBalScanOutcome> {
+            let candidates = self
                 .state
                 .lock()
                 .unwrap()
@@ -735,12 +949,30 @@ mod tests {
                 .copied()
                 .filter(|candidate| range.contains(&candidate.num_hash.number))
                 .collect::<Vec<_>>();
-            let hashes =
-                candidates.iter().map(|candidate| candidate.num_hash.hash).collect::<Vec<_>>();
-            for (candidate, stored) in candidates.iter_mut().zip(store.get_by_hashes(&hashes)?) {
+            let mut outcome = HistoricalBalScanOutcome::default();
+            for candidate in candidates {
+                if candidate.commitment.is_none() ||
+                    !policy.is_eligible(candidate.transaction_count)
+                {
+                    outcome.skipped += 1;
+                } else {
+                    outcome.candidates.push(candidate);
+                }
+            }
+            if outcome.candidates.is_empty() {
+                return Ok(outcome)
+            }
+            let hashes = outcome
+                .candidates
+                .iter()
+                .map(|candidate| candidate.num_hash.hash)
+                .collect::<Vec<_>>();
+            let stored = store.get_by_hashes(&hashes)?;
+            assert_eq!(stored.len(), hashes.len());
+            for (candidate, stored) in outcome.candidates.iter_mut().zip(stored) {
                 candidate.store_miss = stored.is_none();
             }
-            Ok(candidates)
+            Ok(outcome)
         }
 
         fn historical_bal_canonical(
@@ -889,6 +1121,8 @@ mod tests {
         flushes: Arc<Mutex<Vec<Vec<NumHash>>>>,
         insert_notify: Option<Arc<Notify>>,
         lookup_calls: Arc<Mutex<usize>>,
+        lookup_hashes: Arc<Mutex<Vec<Vec<BlockHash>>>>,
+        truncate_lookup: bool,
         insert_on_second_lookup: Option<(NumHash, RawBal)>,
         partial_insert_error: bool,
         fail_flush: bool,
@@ -897,6 +1131,10 @@ mod tests {
     impl FaultingBalStore {
         fn flushes(&self) -> Vec<Vec<NumHash>> {
             self.flushes.lock().unwrap().clone()
+        }
+
+        fn lookups(&self) -> Vec<Vec<BlockHash>> {
+            self.lookup_hashes.lock().unwrap().clone()
         }
     }
 
@@ -949,6 +1187,7 @@ mod tests {
             &self,
             block_hashes: &[BlockHash],
         ) -> reth_storage_api::errors::provider::ProviderResult<Vec<Option<Bytes>>> {
+            self.lookup_hashes.lock().unwrap().push(block_hashes.to_vec());
             let lookup = {
                 let mut lookup_calls = self.lookup_calls.lock().unwrap();
                 *lookup_calls += 1;
@@ -959,7 +1198,11 @@ mod tests {
             {
                 self.inner.insert(*num_hash, bal.clone())?;
             }
-            self.inner.get_by_hashes(block_hashes)
+            let mut values = self.inner.get_by_hashes(block_hashes)?;
+            if self.truncate_lookup {
+                values.pop();
+            }
+            Ok(values)
         }
 
         fn bal_stream(&self) -> BalNotificationStream {
@@ -1001,17 +1244,17 @@ mod tests {
     }
 
     fn add_mock_header(
-        provider: &MockEthProvider,
+        provider: &RangeMockProvider,
         number: u64,
         commitment: Option<B256>,
         transaction_count: u64,
     ) -> B256 {
         let header = Header { number, block_access_list_hash: commitment, ..Default::default() };
         let hash = header.hash_slow();
-        provider.add_header(hash, header);
-        let mut indices = provider.block_body_indices(number).unwrap().unwrap_or_default();
+        provider.inner.add_header(hash, header);
+        let mut indices = provider.inner.block_body_indices(number).unwrap().unwrap_or_default();
         indices.tx_count = transaction_count;
-        provider.add_block_body_indices(number, indices);
+        provider.inner.add_block_body_indices(number, indices);
         hash
     }
 
@@ -1844,15 +2087,16 @@ mod tests {
     async fn blanket_provider_scan_filters_commitment_work_and_store_hits() {
         let raw = Bytes::from_static(&[0xc0]);
         let expected = keccak256(&raw);
-        let provider = MockEthProvider::new();
+        let provider = RangeMockProvider::new();
         add_mock_header(&provider, 1, None, 3);
         add_mock_header(&provider, 2, Some(expected), 1);
         let stored_hash = add_mock_header(&provider, 3, Some(expected), 3);
         let requested_hash = add_mock_header(&provider, 4, Some(expected), 3);
-        provider.add_stage_checkpoint(StageId::Bodies, StageCheckpoint::new(4));
-        provider.add_stage_checkpoint(StageId::Execution, StageCheckpoint::new(0));
+        provider.inner.add_stage_checkpoint(StageId::Bodies, StageCheckpoint::new(4));
+        provider.inner.add_stage_checkpoint(StageId::Execution, StageCheckpoint::new(0));
 
-        let store = BalStoreHandle::new(InMemoryBalStore::default());
+        let recording_store = FaultingBalStore::default();
+        let store = BalStoreHandle::new(recording_store.clone());
         store.insert(NumHash::new(3, stored_hash), RawBal::new(raw.clone())).unwrap();
         let client = ScriptedBalClient::default();
         client.push_response(Ok(WithPeerId::new(
@@ -1872,6 +2116,131 @@ mod tests {
         worker.run_once().await;
 
         assert_eq!(client.requests(), vec![(vec![requested_hash], BalRequirement::Optional)]);
+        assert_eq!(recording_store.lookups().first(), Some(&vec![stored_hash, requested_hash]));
+        assert_eq!(
+            recording_store.lookups(),
+            vec![vec![stored_hash, requested_hash], vec![requested_hash]]
+        );
+    }
+
+    #[tokio::test]
+    async fn scan_queries_store_only_after_commitment_and_work_filter() {
+        let raw = Bytes::from_static(&[0xc0]);
+        let expected = keccak256(&raw);
+        let provider = RangeMockProvider::new();
+        add_mock_header(&provider, 1, None, 10);
+        add_mock_header(&provider, 2, Some(expected), 1);
+        let requested_hash = add_mock_header(&provider, 3, Some(expected), 2);
+        provider.inner.add_stage_checkpoint(StageId::Bodies, StageCheckpoint::new(3));
+        provider.inner.add_stage_checkpoint(StageId::Execution, StageCheckpoint::new(0));
+        let recording_store = FaultingBalStore::default();
+        let store = BalStoreHandle::new(recording_store.clone());
+        let client = ScriptedBalClient::default();
+        client.push_response(Ok(WithPeerId::new(
+            PeerId::random(),
+            BlockAccessLists(vec![Some(raw)]),
+        )));
+        let config = HistoricalBalWorkerConfig::new(true, 2, 2, 1, 3).unwrap();
+        let mut worker = HistoricalBalWorker::new(
+            provider,
+            store,
+            client,
+            futures::stream::empty::<()>(),
+            Runtime::test(),
+            config,
+        );
+
+        worker.run_once().await;
+
+        assert_eq!(recording_store.lookups().first(), Some(&vec![requested_hash]));
+    }
+
+    #[test]
+    fn scan_rejects_missing_body_index_range_without_store_lookup() {
+        let provider = RangeMockProvider::new();
+        let raw = Bytes::from_static(&[0xc0]);
+        add_mock_header(&provider, 1, Some(keccak256(raw.clone())), 1);
+        add_mock_header(&provider, 2, Some(keccak256(raw.clone())), 1);
+        add_mock_header(&provider, 3, Some(keccak256(raw)), 1);
+        provider.remove_body_indices(2);
+        let recording_store = FaultingBalStore::default();
+        let store = BalStoreHandle::new(recording_store.clone());
+
+        let result = provider.historical_bal_scan(
+            1..=3,
+            &store,
+            BalExecutionPolicy::new(NonZeroU64::new(1).unwrap()),
+        );
+
+        assert!(matches!(
+            result,
+            Err(reth_storage_api::errors::provider::ProviderError::InvalidStorageOutput)
+        ));
+        assert!(recording_store.lookups().is_empty());
+    }
+
+    #[test]
+    fn scan_rejects_missing_header_range_without_store_lookup() {
+        let provider = RangeMockProvider::new();
+        let raw = Bytes::from_static(&[0xc0]);
+        add_mock_header(&provider, 1, Some(keccak256(raw.clone())), 1);
+        let missing = add_mock_header(&provider, 2, Some(keccak256(raw.clone())), 1);
+        add_mock_header(&provider, 3, Some(keccak256(raw)), 1);
+        provider.remove_header(missing);
+        let recording_store = FaultingBalStore::default();
+        let store = BalStoreHandle::new(recording_store.clone());
+
+        let result = provider.historical_bal_scan(
+            1..=3,
+            &store,
+            BalExecutionPolicy::new(NonZeroU64::new(1).unwrap()),
+        );
+
+        assert!(matches!(
+            result,
+            Err(reth_storage_api::errors::provider::ProviderError::InvalidStorageOutput)
+        ));
+        assert!(recording_store.lookups().is_empty());
+    }
+
+    #[test]
+    fn canonical_ranges_skip_candidate_gaps_and_reject_short_runs() {
+        let provider = RangeMockProvider::new();
+        let first = add_mock_header(&provider, 1, None, 1);
+        let second = add_mock_header(&provider, 2, None, 1);
+        let third = add_mock_header(&provider, 3, None, 1);
+        let fourth = add_mock_header(&provider, 4, None, 1);
+        let blocks = [NumHash::new(1, first), NumHash::new(3, third), NumHash::new(4, fourth)];
+
+        provider.remove_header(second);
+        assert_eq!(provider.historical_bal_canonical(&blocks).unwrap(), [true, true, true]);
+        assert_eq!(provider.canonical_ranges(), [(1, 2), (3, 5)]);
+
+        provider.remove_header(fourth);
+        assert!(matches!(
+            provider.historical_bal_canonical(&blocks),
+            Err(reth_storage_api::errors::provider::ProviderError::InvalidStorageOutput)
+        ));
+    }
+
+    #[test]
+    fn scan_rejects_misaligned_store_output() {
+        let provider = RangeMockProvider::new();
+        let raw = Bytes::from_static(&[0xc0]);
+        add_mock_header(&provider, 1, Some(keccak256(raw)), 1);
+        let recording_store = FaultingBalStore { truncate_lookup: true, ..Default::default() };
+        let store = BalStoreHandle::new(recording_store);
+
+        let result = provider.historical_bal_scan(
+            1..=1,
+            &store,
+            BalExecutionPolicy::new(NonZeroU64::new(1).unwrap()),
+        );
+
+        assert!(matches!(
+            result,
+            Err(reth_storage_api::errors::provider::ProviderError::InvalidStorageOutput)
+        ));
     }
 
     #[test]
