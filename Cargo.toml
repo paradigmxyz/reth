@@ -431,9 +431,9 @@ reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
 reth-zstd-compressors = { version = "0.6.0", default-features = false }
 
 # revm
-revm = { version = "42.0.1", default-features = false }
+revm = { version = "43.0.0", default-features = false }
 revmc = { git = "https://github.com/paradigmxyz/revmc", branch = "main", default-features = false, features = ["llvm-prefer-static"] }
-revm-inspectors = "0.42.2"
+revm-inspectors = "0.43.0"
 
 # eth
 alloy-dyn-abi = "1.6.1"
@@ -443,7 +443,7 @@ alloy-sol-types = { version = "1.6.1", default-features = false }
 alloy-chains = { version = "0.2.33", default-features = false }
 alloy-eip2124 = { version = "0.2.0", default-features = false }
 alloy-eip7928 = { version = "0.4.8", default-features = false, features = ["rlp"] }
-alloy-evm = { version = "0.38.0", default-features = false }
+alloy-evm = { version = "0.39.0", default-features = false }
 alloy-rlp = { version = "0.3.16", default-features = false, features = ["core-net"] }
 alloy-trie = { version = "0.9.4", default-features = false }
 
@@ -695,3 +695,10 @@ vergen-git2 = "10.0.1"
 
 # networking
 ipnet = "2.11"
+
+[patch.crates-io]
+reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "12a5852d02447a9d8764343062d07a31d58cf3c6" }
+reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "12a5852d02447a9d8764343062d07a31d58cf3c6" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "12a5852d02447a9d8764343062d07a31d58cf3c6" }
+reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "12a5852d02447a9d8764343062d07a31d58cf3c6" }
+reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "12a5852d02447a9d8764343062d07a31d58cf3c6" }
