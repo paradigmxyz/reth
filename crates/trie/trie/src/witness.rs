@@ -318,16 +318,16 @@ where
     fn record_witness_node(&mut self, node: &TrieNodeV2, encoded: &mut Vec<u8>) {
         encoded.clear();
         node.encode(encoded);
-        let bytes = Bytes::from(encoded.clone());
-        self.witness.entry(keccak256(&bytes)).or_insert(bytes);
+        let hash = keccak256(encoded.as_slice());
+        self.witness.entry(hash).or_insert_with(|| Bytes::copy_from_slice(encoded));
 
         if let TrieNodeV2::Branch(branch) = node &&
             !branch.key.is_empty()
         {
             encoded.clear();
             BranchNodeRef::new(&branch.stack, branch.state_mask).encode(encoded);
-            let bytes = Bytes::from(encoded.clone());
-            self.witness.entry(keccak256(&bytes)).or_insert(bytes);
+            let hash = keccak256(encoded.as_slice());
+            self.witness.entry(hash).or_insert_with(|| Bytes::copy_from_slice(encoded));
         }
     }
 
