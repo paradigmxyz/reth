@@ -18,8 +18,8 @@ use reth_chain_state::{
 };
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
-    BeaconEngineMessage, BeaconOnNewPayloadError, ConsensusEngineEvent, ExecutionPayload,
-    ForkchoiceStateTracker, NewPayloadTimings, OnForkChoiceUpdated, SlowBlockInfo,
+    BeaconEngineMessage, ConsensusEngineEvent, ExecutionPayload, ForkchoiceStateTracker,
+    NewPayloadTimings, OnForkChoiceUpdated, SlowBlockInfo,
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
@@ -710,17 +710,24 @@ where
 
     /// Blocks until the next event that can safely be processed is ready.
     ///
-    /// A pending persisted handoff only accepts the notification that all active payload builds
-    /// have finished. This keeps queued engine messages from starting replacement payload jobs
-    /// before the handoff can reclaim the in-memory overlay. Otherwise, uses biased selection to
-    /// prioritize persistence completion to update in-memory state and unblock further writes.
+    /// A pending persisted handoff keeps processing engine messages while prioritizing the
+    /// notification that all active payload builds have finished. This keeps the engine responsive
+    /// without reclaiming the in-memory overlay while a payload job may still access it. Otherwise,
+    /// uses biased selection to prioritize persistence completion to update in-memory state and
+    /// unblock further writes.
     fn wait_for_event(&mut self) -> LoopEvent<T, N> {
         if self.pending_persisted_handoff.is_some() {
             self.metrics.engine.backpressure_active.set(0.0);
-            return match self.payload_build_finished.recv() {
-                Ok(()) => LoopEvent::PayloadBuildFinished,
-                Err(_) => LoopEvent::Disconnected,
-            };
+            return crossbeam_channel::select_biased! {
+                recv(self.payload_build_finished) -> result => match result {
+                    Ok(()) => LoopEvent::PayloadBuildFinished,
+                    Err(_) => LoopEvent::Disconnected,
+                },
+                recv(self.incoming) -> msg => match msg {
+                    Ok(m) => LoopEvent::EngineMessage(m),
+                    Err(_) => LoopEvent::Disconnected,
+                },
+            }
         }
 
         // Take ownership of persistence rx if present
@@ -1830,9 +1837,7 @@ where
 
                                 // emit response
                                 if let Err(err) =
-                                    tx.send(output.map(|o| o.outcome).map_err(|e| {
-                                        BeaconOnNewPayloadError::Internal(Box::new(e))
-                                    }))
+                                    tx.send(output.map(|o| o.outcome).map_err(Into::into))
                                 {
                                     warn!(target: "engine::tree", payload=?num_hash, elapsed=?start.elapsed(), "Failed to deliver newPayload response, receiver dropped (request cancelled): {err:?}");
                                     self.metrics
@@ -1916,10 +1921,8 @@ where
                                         .map(|wait| wait.execution_cache),
                                     sparse_trie_wait: cache_wait.map(|wait| wait.sparse_trie),
                                 };
-                                if let Err(err) =
-                                    tx.send(output.map(|o| (o.outcome, timings)).map_err(|e| {
-                                        BeaconOnNewPayloadError::Internal(Box::new(e))
-                                    }))
+                                if let Err(err) = tx
+                                    .send(output.map(|o| (o.outcome, timings)).map_err(Into::into))
                                 {
                                     error!(
                                         target: "engine::tree",
@@ -3667,7 +3670,11 @@ impl Drop for PayloadBuildLease {
 /// is valid or not.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BlockStatus {
-    /// The block is valid and block extends canonical chain.
+    /// The block is valid: its parent state was available, so it was executed and inserted into
+    /// the tree.
+    ///
+    /// Note: this does not imply the block extends the canonical chain. Blocks on a fork are
+    /// executed and inserted the same way and report this status as well.
     Valid,
     /// The block may be valid and has an unknown missing ancestor.
     Disconnected {

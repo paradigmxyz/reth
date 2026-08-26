@@ -416,7 +416,7 @@ where
         trace!(target: "payload_builder", id = %self.config.payload_id(), "spawn new payload build task");
         let (tx, rx) = oneshot::channel();
         let cancel = CancelOnDrop::default();
-        let _cancel = cancel.clone();
+        let pending_cancel = cancel.clone();
         let guard = self.payload_task_guard.clone();
         let payload_config = self.config.clone();
         let best_payload = self.best_payload.payload().cloned();
@@ -446,7 +446,7 @@ where
             });
         });
 
-        self.pending_block = Some(PendingPayload { _cancel, payload: rx });
+        self.pending_block = Some(PendingPayload { cancel: pending_cancel, payload: rx });
     }
 }
 
@@ -567,6 +567,10 @@ where
         let mut empty_payload = None;
 
         if best_payload.is_none() {
+            if let Some(pending) = maybe_better.as_ref() {
+                pending.cancel.request_finalization();
+            }
+
             debug!(target: "payload_builder", id=%self.config.payload_id(), "no best payload yet to resolve, building empty payload");
 
             let args = BuildArguments {
@@ -734,8 +738,8 @@ where
 /// A future that resolves to the result of the block building job.
 #[derive(Debug)]
 pub struct PendingPayload<P> {
-    /// The marker to cancel the job on drop
-    _cancel: CancelOnDrop,
+    /// Cancels the job on drop and carries cooperative control signals.
+    cancel: CancelOnDrop,
     /// The channel to send the result to.
     payload: oneshot::Receiver<Result<BuildOutcome<P>, PayloadBuilderError>>,
 }
@@ -746,7 +750,7 @@ impl<P> PendingPayload<P> {
         cancel: CancelOnDrop,
         payload: oneshot::Receiver<Result<BuildOutcome<P>, PayloadBuilderError>>,
     ) -> Self {
-        Self { _cancel: cancel, payload }
+        Self { cancel, payload }
     }
 }
 

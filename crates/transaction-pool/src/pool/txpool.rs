@@ -494,12 +494,12 @@ impl<T: TransactionOrdering> TxPool<T> {
         &self,
         sender: SenderId,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        self.pending_pool.txs_by_sender(sender)
+        self.pending_pool.txs_by_sender(sender).collect()
     }
 
     /// Returns all transactions from parked pools
     pub(crate) fn queued_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        self.basefee_pool.all().chain(self.queued_pool.all()).collect()
+        self.basefee_pool.all().chain(self.queued_pool.all()).chain(self.blob_pool.all()).collect()
     }
 
     /// Returns the number of transactions in parked pools
@@ -520,9 +520,11 @@ impl<T: TransactionOrdering> TxPool<T> {
         &self,
         sender: SenderId,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let mut txs = self.basefee_pool.txs_by_sender(sender);
-        txs.extend(self.queued_pool.txs_by_sender(sender));
-        txs
+        self.basefee_pool
+            .txs_by_sender(sender)
+            .chain(self.queued_pool.txs_by_sender(sender))
+            .chain(self.blob_pool.txs_by_sender(sender))
+            .collect()
     }
 
     /// Returns `true` if the transaction with the given hash is already included in this pool.
@@ -3667,6 +3669,34 @@ mod tests {
         assert_eq!(tx_meta.subpool, SubPool::Pending);
         assert!(tx_meta.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
         assert!(tx_meta.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK));
+    }
+
+    #[test]
+    fn queued_transactions_include_blob_pool() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let initial_blob_fee = pool.all_transactions.pending_fees.blob_fee;
+        let tx = MockTransaction::eip4844()
+            .with_max_fee(500)
+            .with_priority_fee(1)
+            .with_blob_fee(initial_blob_fee + 100);
+        let validated = f.validated(tx);
+        let id = *validated.id();
+        let sender = validated.sender_id();
+        pool.add_transaction(validated, U256::from(1_000_000), 0, None).unwrap();
+
+        // Raise the base fee beyond the transaction's cap so it gets parked in the blob pool.
+        pool.update_basefee(600, |_| {});
+        assert_eq!(pool.blob_pool.len(), 1);
+
+        let queued = pool.queued_transactions();
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].id(), &id);
+
+        let by_sender = pool.queued_txs_by_sender(sender);
+        assert_eq!(by_sender.len(), 1);
+        assert_eq!(by_sender[0].id(), &id);
     }
 
     #[test]
