@@ -23,11 +23,7 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
     /// State recorded during execution takes precedence over additional state for overlapping
     /// accounts and storage slots.
     pub fn with_additional_state(mut self, additional_state: HashedPostState) -> Self {
-        if let Some(state) = &mut self.additional_state {
-            state.extend(additional_state);
-        } else {
-            self.additional_state = Some(additional_state);
-        }
+        self.additional_state.get_or_insert_default().extend(additional_state);
         self
     }
 
