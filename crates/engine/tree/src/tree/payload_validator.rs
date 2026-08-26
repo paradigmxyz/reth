@@ -106,7 +106,10 @@ use crate::tree::{
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
-use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash_with_buf, BlockAccessList};
+use alloy_eip7928::{
+    bal::{Bal, DecodedBal},
+    BlockAccessList,
+};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::{
@@ -1010,7 +1013,7 @@ where
     {
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
-        let has_bal = env.decoded_bal.is_some();
+        let has_bal = input.has_block_access_list();
         let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
             State::builder()
                 .with_database(StateProviderDatabase::new(state_provider))
@@ -1326,16 +1329,24 @@ where
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
                 .entered();
-        let block_access_list_hash = built_bal
-            .as_ref()
-            .map(|bal| compute_block_access_list_hash_with_buf(bal, &mut self.bal_hash_buf));
+        let built_bal = built_bal.map(Bal::from);
+        let block_access_list_hash =
+            built_bal.as_ref().map(|bal| bal.compute_hash_with_buf(&mut self.bal_hash_buf));
 
-        if let Err(err) = self.consensus.validate_block_post_execution(
-            block,
-            output,
-            receipt_root_bloom,
-            block_access_list_hash,
-        ) {
+        let validation_result = built_bal
+            .as_ref()
+            .map(|bal| bal.validate_gas_limit(block.gas_limit()).map_err(ConsensusError::from))
+            .transpose()
+            .and_then(|_| {
+                self.consensus.validate_block_post_execution(
+                    block,
+                    output,
+                    receipt_root_bloom,
+                    block_access_list_hash,
+                )
+            });
+
+        if let Err(err) = validation_result {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
             return Err(err.into())
@@ -2027,6 +2038,14 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
                 .map(|block_access_list| DecodedBal::from_rlp_bytes(block_access_list.clone()))
                 .transpose(),
             Self::Block(_) => Ok(None),
+        }
+    }
+
+    /// Returns whether execution must build a block access list.
+    pub fn has_block_access_list(&self) -> bool {
+        match self {
+            Self::Payload(payload) => payload.block_access_list().is_some(),
+            Self::Block(block) => block.block_access_list_hash().is_some(),
         }
     }
 
