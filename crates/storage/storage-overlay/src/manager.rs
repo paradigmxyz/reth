@@ -846,13 +846,13 @@ fn compute_execution_overlay_inner<N: NodePrimitives>(
     let overlay = match input {
         ComputeOverlayInput::ExtendCached { block, parent_input } => {
             let mut parent_input = parent_input;
-            extend_execution_overlay(Arc::make_mut(&mut parent_input), &block);
+            Arc::make_mut(&mut parent_input).extend(&block);
             Arc::try_unwrap(parent_input).expect("Arc::make_mut leaves the child overlay unique")
         }
         ComputeOverlayInput::MergeBlocks(blocks) => {
             let mut overlay = ExecutionOverlay::default();
             for block in blocks.iter().rev() {
-                extend_execution_overlay(&mut overlay, block);
+                overlay.extend(block);
             }
             overlay
         }
@@ -871,40 +871,6 @@ fn compute_execution_overlay_inner<N: NodePrimitives>(
     );
 
     overlay
-}
-
-fn extend_execution_overlay<N: NodePrimitives>(
-    overlay: &mut ExecutionOverlay,
-    block: &ExecutedBlock<N>,
-) {
-    overlay.block_hashes.push(block.recovered_block().num_hash());
-    let state = &block.execution_output.state;
-    let (accounts, storage, code_hashes) =
-        (&mut overlay.accounts, &mut overlay.storage, &mut overlay.code_hashes);
-
-    #[allow(unused_mut)]
-    let mut extend_state = || {
-        for (address, account) in state.state() {
-            accounts.insert(*address, account.info.clone());
-            let account_storage = storage.entry(*address).or_default();
-            for (slot, value) in &account.storage {
-                account_storage.insert(*slot, value.present_value);
-            }
-        }
-    };
-    #[allow(unused_mut)]
-    let mut extend_code_hashes = || {
-        code_hashes.extend(state.contracts.iter().map(|(hash, code)| (*hash, code.clone())));
-    };
-
-    #[cfg(feature = "rayon")]
-    rayon::join(extend_state, extend_code_hashes);
-
-    #[cfg(not(feature = "rayon"))]
-    {
-        extend_state();
-        extend_code_hashes();
-    }
 }
 
 #[cfg(test)]
@@ -1161,12 +1127,9 @@ mod tests {
             OverlayCacheEntry::Computing(Arc::clone(&waiter)),
         );
 
-        let precompute_manager = manager.clone();
         let (tx, rx) = mpsc::channel();
         worker_pool.spawn(move || {
-            precompute_manager
-                .precompute_execution_overlay_for_parent(tip_hash, anchor_hash)
-                .unwrap();
+            manager.precompute_execution_overlay_for_parent(tip_hash, anchor_hash).unwrap();
             tx.send(()).unwrap();
         });
 

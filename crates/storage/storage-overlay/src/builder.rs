@@ -46,7 +46,11 @@ impl StateTrieOverlay {
 /// Execution state required to initialize an overlay state provider.
 ///
 /// Account entries preserve known non-existence, while storage and code entries contain only data
-/// explicitly observed during execution.
+/// explicitly observed during execution. This intentionally does not retain account status or
+/// known-storage wipes, so it cannot represent pre-Dencun `SELFDESTRUCT` of existing accounts.
+/// The execution overlay is used only for post-Dencun engine execution, where that operation does
+/// not clear existing storage; pipeline sync does not use it. Extend this representation before
+/// using it for pre-Dencun execution.
 #[derive(Clone, Debug, Default)]
 pub struct ExecutionOverlay {
     /// In-memory block hashes in ascending block-number order.
@@ -57,6 +61,39 @@ pub struct ExecutionOverlay {
     pub storage: AddressMap<U256Map<U256>>,
     /// Bytecode by code hash.
     pub code_hashes: B256Map<Bytecode>,
+}
+
+impl ExecutionOverlay {
+    pub(crate) fn extend<N: NodePrimitives>(&mut self, block: &ExecutedBlock<N>) {
+        self.block_hashes.push(block.recovered_block().num_hash());
+        let state = &block.execution_output.state;
+        let (accounts, storage, code_hashes) =
+            (&mut self.accounts, &mut self.storage, &mut self.code_hashes);
+
+        #[allow(unused_mut)]
+        let mut extend_state = || {
+            for (address, account) in state.state() {
+                accounts.insert(*address, account.info.clone());
+                let account_storage = storage.entry(*address).or_default();
+                for (slot, value) in &account.storage {
+                    account_storage.insert(*slot, value.present_value);
+                }
+            }
+        };
+        #[allow(unused_mut)]
+        let mut extend_code_hashes = || {
+            code_hashes.extend(state.contracts.iter().map(|(hash, code)| (*hash, code.clone())));
+        };
+
+        #[cfg(feature = "rayon")]
+        rayon::join(extend_state, extend_code_hashes);
+
+        #[cfg(not(feature = "rayon"))]
+        {
+            extend_state();
+            extend_code_hashes();
+        }
+    }
 }
 
 /// Source of data to apply on top of the durable database state.
