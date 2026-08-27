@@ -134,7 +134,8 @@ impl VerifiedStorageRanges {
     /// Builds the request that resumes this response, or `None` when nothing remains to fetch.
     ///
     /// Only the first account keeps the original bounds; later accounts are always fetched as
-    /// whole tries.
+    /// whole tries. The result always asks for less than this request did, so resuming in a loop
+    /// terminates.
     pub fn follow_up(&self, request_id: u64) -> Option<GetStorageRangesMessage> {
         let (index, starting_hash, limit_hash) = match self.continuation? {
             StorageRangeContinuation::Partial { account_index: 0, starting_hash, .. } => {
@@ -359,6 +360,13 @@ impl StorageRangeVerifier {
                 );
                 RequestError::BadResponse
             })?;
+
+        // Resuming at or before the origin would reissue this request forever, so a peer that
+        // reports one has withheld a slot it was asked for.
+        if next.is_some_and(|next| next <= origin) {
+            debug!(target: "downloaders::snap", %account_hash, "Storage range does not advance");
+            return Err(RequestError::BadResponse)
+        }
 
         decoded.truncate(decoded.partition_point(|(hash, _)| *hash <= limit));
         Ok(VerifiedRange {
@@ -924,5 +932,44 @@ mod tests {
         assert_eq!(follow_up.account_hashes, vec![key(200)]);
         assert_eq!(follow_up.starting_hash, key(2).into());
         assert_eq!(follow_up.limit_hash, RangeBound::default());
+    }
+
+    // Each follow-up must resume strictly past the last one, so the loop terminates.
+    #[tokio::test]
+    async fn resuming_a_partial_range_advances_until_the_trie_is_exhausted() {
+        let all = slots(&[(key(1), 11), (key(2), 12), (key(3), 13)]);
+        let (root, _) = storage_root(&all, &[]);
+        let accounts = vec![(key(100), account(root))];
+        let mut request = request(&accounts);
+        let mut origins = Vec::new();
+        let mut collected = Vec::new();
+
+        for served in 0..all.len() {
+            let origin = request.starting_hash.unwrap_or(B256::ZERO);
+            origins.push(origin);
+            let (_, proof) = storage_root(&all, &[origin, all[served].0]);
+            let client = Arc::new(TestSnapClient::new([response(
+                PeerId::random(),
+                request.request_id,
+                vec![wire_slots(&all[served..=served])],
+                proof,
+            )]));
+
+            let outcome =
+                downloader(Arc::clone(&client), request.clone(), &accounts).unwrap().await.unwrap();
+            let StorageRangeOutcome::Verified(verified) = outcome else {
+                panic!("verified ranges")
+            };
+            collected.extend(verified.ranges[0].slots.clone());
+
+            let Some(follow_up) = verified.follow_up(request.request_id + 1) else {
+                assert_eq!(served, all.len() - 1);
+                break
+            };
+            request = follow_up;
+        }
+
+        assert_eq!(collected, all);
+        assert_eq!(origins, vec![B256::ZERO, key(2), key(3)]);
     }
 }
