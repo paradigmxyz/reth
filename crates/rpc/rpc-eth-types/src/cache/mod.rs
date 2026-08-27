@@ -48,6 +48,8 @@ type ReceiptsResponseSender<R> = oneshot::Sender<ProviderResult<Option<Arc<Vec<R
 
 type CachedBlockResponseSender<B> = oneshot::Sender<Option<Arc<RecoveredBlock<B>>>>;
 
+type CachedBalResponseSender = oneshot::Sender<Option<CachedRevmBal>>;
+
 type CachedBlockAndReceiptsResponseSender<B, R> =
     oneshot::Sender<(Option<Arc<RecoveredBlock<B>>>, Option<Arc<Vec<R>>>)>;
 
@@ -190,6 +192,25 @@ impl<N: NodePrimitives> EthStateCache<N> {
         let (block, receipts) = futures::try_join!(block, receipts)?;
 
         Ok(block.zip(receipts))
+    }
+
+    /// Retrieves the block and its BAL if the BAL is already cached.
+    ///
+    /// The block is fetched if it is not cached. Returns `None` if the block does not exist.
+    pub async fn get_recovered_block_and_maybe_bal(
+        &self,
+        block_hash: B256,
+    ) -> ProviderResult<
+        Option<(Arc<RecoveredBlock<N::Block>>, Option<Arc<DecodedBal<Arc<RevmBal>>>>)>,
+    > {
+        let (response_tx, rx) = oneshot::channel();
+        let _ = self.to_service.send(CacheAction::GetCachedBal { block_hash, response_tx });
+
+        let block = self.get_recovered_block(block_hash);
+        let (block, bal) = futures::join!(block, rx);
+
+        let bal = bal.map_err(|_| CacheServiceUnavailable)?.map(|cached| cached.0);
+        Ok(block?.map(|block| (block, bal)))
     }
 
     /// Retrieves receipts and blocks from cache if block is in the cache, otherwise only receipts.
@@ -520,6 +541,9 @@ where
                             let _ =
                                 response_tx.send(this.full_block_cache.get(&block_hash).cloned());
                         }
+                        CacheAction::GetCachedBal { block_hash, response_tx } => {
+                            let _ = response_tx.send(this.bal_cache.get(&block_hash).cloned());
+                        }
                         CacheAction::GetCachedBlockAndReceipts { block_hash, response_tx } => {
                             let block = this.full_block_cache.get(&block_hash).cloned();
                             let receipts = this.receipts_cache.get(&block_hash).cloned();
@@ -759,6 +783,10 @@ enum CacheAction<B: Block, R> {
     GetCachedBlock {
         block_hash: B256,
         response_tx: CachedBlockResponseSender<B>,
+    },
+    GetCachedBal {
+        block_hash: B256,
+        response_tx: CachedBalResponseSender,
     },
     GetCachedBlockAndReceipts {
         block_hash: B256,
@@ -1194,6 +1222,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn get_recovered_block_and_maybe_bal_does_not_fetch_bal() {
+        let bal_fetches = Arc::new(AtomicUsize::default());
+        let block = test_block();
+        let block_hash = block.hash();
+        let provider = TestBalProvider::new(bal_fetches.clone()).with_block(block);
+        let cache = EthStateCache::<EthPrimitives>::spawn_with(
+            provider,
+            EthStateCacheConfig {
+                max_blocks: 4,
+                max_receipts: 0,
+                max_headers: 0,
+                max_bals: 4,
+                max_concurrent_db_requests: 1,
+                max_cached_tx_hashes: 0,
+            },
+            Runtime::test(),
+        );
+
+        let (returned_block, bal) = cache
+            .get_recovered_block_and_maybe_bal(block_hash)
+            .await
+            .unwrap()
+            .expect("block exists");
+        assert_eq!(returned_block.hash(), block_hash);
+        assert!(bal.is_none());
+        assert_eq!(bal_fetches.load(Ordering::SeqCst), 0);
+
+        assert!(cache.get_bal(block_hash).await.unwrap().is_some());
+
+        let (_, bal) = cache
+            .get_recovered_block_and_maybe_bal(block_hash)
+            .await
+            .unwrap()
+            .expect("block exists");
+        assert!(bal.is_some());
+        assert_eq!(bal_fetches.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
     async fn concurrent_get_bal_requests_share_fetch() {
         let fetches = Arc::new(AtomicUsize::default());
         let provider = TestBalProvider::new(fetches.clone());
@@ -1221,11 +1288,17 @@ mod tests {
     #[derive(Clone, Debug, Default)]
     struct TestBalProvider {
         bal_store: BalStoreHandle,
+        block: Option<RecoveredBlock<Block>>,
     }
 
     impl TestBalProvider {
         fn new(fetches: Arc<AtomicUsize>) -> Self {
-            Self { bal_store: BalStoreHandle::new(TestBalStore { fetches }) }
+            Self { bal_store: BalStoreHandle::new(TestBalStore { fetches }), block: None }
+        }
+
+        fn with_block(mut self, block: RecoveredBlock<Block>) -> Self {
+            self.block = Some(block);
+            self
         }
     }
 
@@ -1471,7 +1544,7 @@ mod tests {
             _id: BlockHashOrNumber,
             _transaction_kind: TransactionVariant,
         ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-            Ok(None)
+            Ok(self.block.clone())
         }
 
         fn block_range(
