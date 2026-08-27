@@ -112,6 +112,7 @@ impl From<BalExecutionError> for InsertBlockErrorKind {
     fn from(e: BalExecutionError) -> Self {
         match e {
             BalExecutionError::Consensus(inner) => Self::Consensus(inner),
+            BalExecutionError::BlockAccessListDecode(inner) => Self::BlockAccessListDecode(inner),
             BalExecutionError::Execution(inner) => Self::Execution(inner),
             BalExecutionError::Provider(inner) => Self::Provider(inner),
             BalExecutionError::Other(inner) => Self::Other(inner),
