@@ -397,6 +397,10 @@ impl<N: NodePrimitives> OverlayManager<N> {
         anchor_hash: B256,
         wait_for_pending: bool,
     ) -> Result<Option<Arc<ExecutionOverlay>>, StateTrieOverlayError> {
+        if parent_hash == anchor_hash {
+            return Ok(Some(Arc::new(ExecutionOverlay::default())))
+        }
+
         self.get_or_compute_overlay(
             &self.execution_overlays,
             &self.execution_metrics,
@@ -1032,6 +1036,19 @@ mod tests {
             .execution_overlay_for_parent(blocks[2].recovered_block().hash(), short_anchor)
             .unwrap();
         assert_eq!(short.accounts.len(), 1);
+    }
+
+    #[test]
+    fn execution_overlay_for_parent_at_anchor_is_empty() {
+        let manager = OverlayManager::<EthPrimitives>::default();
+        let anchor_hash = B256::with_last_byte(1);
+
+        let overlay = manager.execution_overlay_for_parent(anchor_hash, anchor_hash).unwrap();
+
+        assert!(overlay.accounts.is_empty());
+        assert!(overlay.storage.is_empty());
+        assert!(overlay.code_hashes.is_empty());
+        assert!(overlay.block_hashes.is_empty());
     }
 
     #[test]
