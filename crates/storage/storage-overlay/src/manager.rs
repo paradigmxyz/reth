@@ -8,13 +8,10 @@ use crate::{
     changeset_cache::compute_block_trie_updates,
     database_state_frontiers,
     manager_metrics::{ExecutionOverlayMetrics, OverlayCacheMetrics, StateTrieOverlayMetrics},
-    ChangesetCache, OverlayBuilder,
+    ChangesetCache, ExecutionOverlay, OverlayBuilder,
 };
 use alloy_eips::BlockNumHash;
-use alloy_primitives::{
-    map::{AddressMap, B256Map, U256Map},
-    BlockNumber, B256, U256,
-};
+use alloy_primitives::{BlockNumber, B256};
 use parking_lot::Mutex;
 use reth_chain_state::{ExecutedBlock, PreservedSparseTrie};
 use reth_errors::ProviderResult;
@@ -30,7 +27,6 @@ use reth_storage_api::{
 #[cfg(feature = "rayon")]
 use reth_tasks::WorkerPool;
 use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSorted};
-use revm::{bytecode::Bytecode, state::AccountInfo};
 use std::{
     fmt,
     ops::RangeInclusive,
@@ -573,20 +569,6 @@ impl<N: NodePrimitives> OverlayManager<N> {
 
         compute_execution_overlay_inner(compute_input, anchor_hash, &self.execution_metrics)
     }
-}
-
-/// Execution state accumulated from in-memory blocks.
-///
-/// Account entries preserve known non-existence, while storage and code entries contain only data
-/// explicitly observed during execution.
-#[derive(Clone, Debug, Default)]
-pub struct ExecutionOverlay {
-    /// Account state by address.
-    pub accounts: AddressMap<Option<AccountInfo>>,
-    /// Storage values by address and slot.
-    pub storage: AddressMap<U256Map<U256>>,
-    /// Bytecode by code hash.
-    pub code_hashes: B256Map<Bytecode>,
 }
 
 /// Error returned when a state trie overlay cannot be built from the manager's current block set.

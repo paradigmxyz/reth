@@ -1,4 +1,4 @@
-use crate::{database_state_frontiers, Overlay, OverlayBuilder};
+use crate::{database_state_frontiers, OverlayBuilder, StateTrieOverlay};
 use alloy_primitives::{BlockHash, B256};
 use metrics::{Counter, Histogram};
 use reth_db_api::{tables, transaction::DbTx, DatabaseError};
@@ -34,7 +34,7 @@ pub(crate) struct OverlayStateProviderFactoryMetrics {
     create_provider_duration: Histogram,
     /// Overall duration of the [`OverlayStateProviderFactory::database_provider_ro`] call.
     database_provider_ro_duration: Histogram,
-    /// Number of cache misses when fetching [`Overlay`]s from the overlay cache.
+    /// Number of cache misses when fetching state trie overlays from the overlay cache.
     overlay_cache_misses: Counter,
 }
 
@@ -48,11 +48,11 @@ pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
     factory: F,
     /// Overlay builder containing the configuration and overlay calculation logic.
     overlay_builder: OverlayBuilder<N>,
-    /// A cache which maps `(state_trie_tip, finish_tip) -> Overlay`.
+    /// A cache which maps `(state_trie_tip, finish_tip) -> [`StateTrieOverlay`].
     ///
     /// Under partial persistence the overlay depends on both durable frontiers, so both hashes are
     /// part of the cache key.
-    overlay_cache: Arc<DashMap<(BlockHash, BlockHash), Overlay>>,
+    overlay_cache: Arc<DashMap<(BlockHash, BlockHash), StateTrieOverlay>>,
     /// Metrics for provider factory operations.
     metrics: OverlayStateProviderFactoryMetrics,
 }
@@ -77,10 +77,14 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
         self
     }
 
-    /// Fetches an [`Overlay`] from the cache based on the current durable frontiers. If there is no
-    /// cached value then this calculates the [`Overlay`] and populates the cache.
+    /// Fetches a [`StateTrieOverlay`] from the cache based on the current durable frontiers. If
+    /// there is no cached value then this calculates the [`StateTrieOverlay`] and populates the
+    /// cache.
     #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
-    fn get_overlay<Provider>(&self, provider: &Provider) -> ProviderResult<Overlay>
+    fn get_state_trie_overlay<Provider>(
+        &self,
+        provider: &Provider,
+    ) -> ProviderResult<StateTrieOverlay>
     where
         Provider: StageCheckpointReader
             + PruneCheckpointReader
@@ -97,7 +101,7 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
                 dashmap::Entry::Occupied(entry) => entry.get().clone(),
                 dashmap::Entry::Vacant(entry) => {
                     self.metrics.overlay_cache_misses.increment(1);
-                    let overlay = self.overlay_builder.build_overlay_at_frontiers(
+                    let overlay = self.overlay_builder.build_state_trie_overlay_at_frontiers(
                         provider,
                         state_trie_tip_block,
                         finish_tip_block,
@@ -137,7 +141,7 @@ where
             res
         };
 
-        let overlay = self.get_overlay(&provider)?;
+        let overlay = self.get_state_trie_overlay(&provider)?;
 
         let is_v2 = provider.cached_storage_settings().is_v2();
         self.metrics.database_provider_ro_duration.record(overall_start.elapsed());
@@ -153,13 +157,13 @@ where
 #[derive(Debug)]
 pub struct OverlayStateProvider<Provider> {
     provider: Provider,
-    overlay: Overlay,
+    overlay: StateTrieOverlay,
     is_v2: bool,
 }
 
 impl<Provider> OverlayStateProvider<Provider> {
     /// Creates a new overlay state provider.
-    pub const fn new(provider: Provider, overlay: Overlay, is_v2: bool) -> Self {
+    pub const fn new(provider: Provider, overlay: StateTrieOverlay, is_v2: bool) -> Self {
         Self { provider, overlay, is_v2 }
     }
 }
@@ -328,11 +332,11 @@ mod tests {
         (factory, blocks)
     }
 
-    fn account_keys(overlay: &Overlay) -> Vec<B256> {
+    fn account_keys(overlay: &StateTrieOverlay) -> Vec<B256> {
         overlay.hashed_post_state.accounts.iter().map(|(key, _)| *key).collect()
     }
 
-    fn account_node_paths(overlay: &Overlay) -> Vec<Nibbles> {
+    fn account_node_paths(overlay: &StateTrieOverlay) -> Vec<Nibbles> {
         overlay.trie_updates.account_nodes_ref().iter().map(|(path, _)| *path).collect()
     }
 
