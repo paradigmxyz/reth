@@ -25,6 +25,7 @@ use alloy_evm::{
 };
 use alloy_primitives::Address;
 use crossbeam_channel::{Receiver, Sender};
+use reth_engine_primitives::BlockAccessListDecodeError;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor};
 use reth_primitives_traits::ReceiptTy;
 use reth_provider::BlockExecutionOutput;
@@ -193,7 +194,8 @@ fn convert_alloy_to_revm_bal(alloy_bal: &AlloyBal) -> Result<Arc<RevmBal>, BalEx
     // is triggered then the execution is reverted, and as such no actual code change event takes
     // place. Therefore, if we do observe such a bytecode in a BAL then that means the BAL is
     // invalid as no legal execution should've led to this bytecode deployment.
-    let received_bal_revm = RevmBal::clone_from_alloy(alloy_bal.as_vec())?;
+    let received_bal_revm =
+        RevmBal::clone_from_alloy(alloy_bal.as_vec()).map_err(BlockAccessListDecodeError::new)?;
     Ok(Arc::new(received_bal_revm))
 }
 
@@ -461,7 +463,7 @@ mod tests {
         .into();
 
         let error = convert_alloy_to_revm_bal(&alloy_bal).unwrap_err();
-        assert!(matches!(&error, BalExecutionError::BlockAccessListInvalid(_)));
+        assert!(matches!(&error, BalExecutionError::BlockAccessListDecode(_)));
         let error = InsertBlockErrorKind::from(error);
         assert!(matches!(&error, InsertBlockErrorKind::BlockAccessListDecode(_)));
         assert!(matches!(
