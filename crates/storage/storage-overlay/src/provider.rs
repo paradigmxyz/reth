@@ -48,7 +48,7 @@ pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
     factory: F,
     /// Overlay builder containing the configuration and overlay calculation logic.
     overlay_builder: OverlayBuilder<N>,
-    /// A cache which maps `(state_trie_tip, finish_tip) -> [`StateTrieOverlay`].
+    /// A cache mapping `(state_trie_tip, finish_tip)` to [`StateTrieOverlay`].
     ///
     /// Under partial persistence the overlay depends on both durable frontiers, so both hashes are
     /// part of the cache key.
