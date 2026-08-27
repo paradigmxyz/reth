@@ -400,7 +400,31 @@ where
         Receipt,
         Header,
         TransactionSigned,
-    >::get_multi_proof(client, vec![(address, vec![B256::ZERO])], None)
+    >::get_multi_proof(client, vec![(address, vec![B256::ZERO])], None, None)
+    .await
+    .unwrap();
+    assert_eq!(proofs.len(), 1);
+    assert_eq!(proofs[0].address, address);
+
+    // The optional proof format argument does not break existing two-parameter requests.
+    let proofs = client
+        .request::<Vec<alloy_rpc_types_eth::EIP1186AccountProofResponse>, _>(
+            "eth_getMultiProof",
+            rpc_params![vec![(address, vec![B256::ZERO])], Option::<BlockId>::None],
+        )
+        .await
+        .unwrap();
+    assert_eq!(proofs.len(), 1);
+    assert_eq!(proofs[0].address, address);
+
+    let proofs = EthApiClient::<
+        TransactionRequest,
+        Transaction,
+        Block,
+        Receipt,
+        Header,
+        TransactionSigned,
+    >::get_multi_proof(client, vec![(address, vec![B256::ZERO])], None, Some(true))
     .await
     .unwrap();
     assert_eq!(proofs.len(), 1);
