@@ -5,7 +5,9 @@
 
 use alloy_primitives::B256;
 use futures::Future;
-use reth_eth_wire_types::snap::{AccountRangeMessage, GetAccountRangeMessage};
+use reth_eth_wire_types::snap::{
+    AccountRangeMessage, GetAccountRangeMessage, GetStorageRangesMessage,
+};
 use reth_network_p2p::{
     error::RequestError,
     snap::client::{SnapClient, SnapResponse},
@@ -14,6 +16,7 @@ use reth_network_peers::PeerId;
 use reth_tasks::Runtime;
 use reth_trie_common::{range_proof::verify_range_proof, TrieAccount, EMPTY_ROOT_HASH};
 use std::{
+    ops::Range,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -79,23 +82,59 @@ pub enum AccountRangeOutcome {
 /// A decoded account range authenticated against a state root.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VerifiedAccountRange {
-    /// State root the accounts were authenticated against.
-    pub state_root: B256,
-    /// Accounts in strictly increasing hashed-key order.
-    pub accounts: Vec<(B256, TrieAccount)>,
-    /// Whether another request may be needed to complete the interval.
-    ///
-    /// Conservative: can be `true` for an interval that is already complete.
-    pub has_more: bool,
-    /// Authenticated lower bound for the first key after the response, or `None` when the range
-    /// exhausted the trie.
-    pub next: Option<B256>,
+    // Root the accounts were proven against. Private so a range cannot be relabelled with a root
+    // that did not authenticate it.
+    state_root: B256,
+    // Accounts as the response returned them, in the order every positional check assumes.
+    accounts: Vec<(B256, TrieAccount)>,
+    // Whether the requested interval may continue past this response.
+    has_more: bool,
+    // First key after the response, or none when the range ran out of trie.
+    next: Option<B256>,
 }
 
 impl VerifiedAccountRange {
+    /// State root the accounts were authenticated against.
+    pub const fn state_root(&self) -> B256 {
+        self.state_root
+    }
+
+    /// Accounts in strictly increasing hashed-key order.
+    pub fn accounts(&self) -> &[(B256, TrieAccount)] {
+        &self.accounts
+    }
+
+    /// Consumes the range and returns the accounts it authenticated.
+    pub fn into_accounts(self) -> Vec<(B256, TrieAccount)> {
+        self.accounts
+    }
+
+    /// Whether another request may be needed to complete the interval.
+    ///
+    /// Conservative: can be `true` for an interval that is already complete.
+    pub const fn has_more(&self) -> bool {
+        self.has_more
+    }
+
+    /// Authenticated lower bound for the first key after the response, or `None` when the range
+    /// exhausted the trie.
+    pub const fn next(&self) -> Option<B256> {
+        self.next
+    }
+
     /// Borrows the accounts together with the root that authenticated them.
     pub fn batch(&self) -> VerifiedAccountBatch<'_> {
         VerifiedAccountBatch { state_root: self.state_root, accounts: &self.accounts }
+    }
+
+    /// Borrows a positional subrange of the accounts, so a caller can request storage in bounded
+    /// chunks without losing the root that authenticated them.
+    ///
+    /// `None` when the range falls outside the response.
+    pub fn batch_range(&self, range: Range<usize>) -> Option<VerifiedAccountBatch<'_>> {
+        self.accounts
+            .get(range)
+            .map(|accounts| VerifiedAccountBatch { state_root: self.state_root, accounts })
     }
 }
 
@@ -105,7 +144,9 @@ impl VerifiedAccountRange {
 /// checked against the root the accounts came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct VerifiedAccountBatch<'a> {
+    // Root and accounts travel together, so neither can be swapped for another generation's.
     state_root: B256,
+    // Accounts the root authenticated, in response order.
     accounts: &'a [(B256, TrieAccount)],
 }
 
@@ -118,6 +159,43 @@ impl<'a> VerifiedAccountBatch<'a> {
     /// Accounts in the order the range returned them.
     pub const fn accounts(&self) -> &'a [(B256, TrieAccount)] {
         self.accounts
+    }
+
+    // Confirms the batch is the one `request` was built from, so every returned range is checked
+    // against the root that authenticated its account.
+    pub(super) fn verify_batch(
+        &self,
+        request: &GetStorageRangesMessage,
+    ) -> Result<(), InvalidStorageRangeRequest> {
+        if request.root_hash != self.state_root {
+            return Err(InvalidStorageRangeRequest::StateRootMismatch {
+                requested: request.root_hash,
+                authenticated: self.state_root,
+            })
+        }
+        if request.account_hashes.len() != self.accounts.len() {
+            return Err(InvalidStorageRangeRequest::AccountCount {
+                requested: request.account_hashes.len(),
+                supplied: self.accounts.len(),
+            })
+        }
+        for (index, (requested, (supplied, _))) in
+            request.account_hashes.iter().zip(self.accounts).enumerate()
+        {
+            if requested != supplied {
+                return Err(InvalidStorageRangeRequest::AccountMismatch {
+                    index,
+                    requested: *requested,
+                    supplied: *supplied,
+                })
+            }
+        }
+        Ok(())
+    }
+
+    // The accounts from `from` onwards under the same state root, or none if the batch is shorter.
+    pub(super) fn slice(&self, from: usize) -> Option<Self> {
+        self.accounts.get(from..).map(|accounts| Self { state_root: self.state_root, accounts })
     }
 }
 
@@ -167,7 +245,7 @@ impl SnapVerifier for GetAccountRangeMessage {
     }
 }
 
-// Authenticate the full response before trimming its optional boundary account.
+// Authenticates the full response before trimming its optional boundary account.
 fn verify_account_range(
     request: &GetAccountRangeMessage,
     response: AccountRangeMessage,
@@ -198,7 +276,7 @@ fn verify_account_range(
     Ok(VerifiedAccountRange { state_root: request.root_hash, accounts, has_more, next })
 }
 
-// Re-encode decoded accounts so the proof authenticates their canonical trie values.
+// Re-encodes decoded accounts so the proof authenticates their canonical trie values.
 fn verify_proof(
     request: &GetAccountRangeMessage,
     accounts: &[(B256, TrieAccount)],
@@ -354,6 +432,24 @@ mod tests {
 
         assert_eq!(outcome, AccountRangeOutcome::Unavailable { peer_id: peer });
         assert!(client.reported().is_empty());
+    }
+
+    #[test]
+    fn batch_range_narrows_the_accounts_and_keeps_their_root() {
+        let accounts = vec![(key(1), account(7)), (key(2), account(8)), (key(3), account(9))];
+        let root_hash = root(&accounts);
+        let range = VerifiedAccountRange {
+            state_root: root_hash,
+            accounts: accounts.clone(),
+            has_more: false,
+            next: None,
+        };
+
+        let chunk = range.batch_range(1..3).expect("chunk is inside the range");
+        assert_eq!(chunk.accounts(), &accounts[1..3]);
+        assert_eq!(chunk.state_root(), root_hash);
+
+        assert_eq!(range.batch_range(2..4), None);
     }
 
     #[test]

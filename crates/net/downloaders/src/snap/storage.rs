@@ -44,13 +44,6 @@ impl<C: SnapClient> StorageRangeDownloader<C> {
         batch: VerifiedAccountBatch<'_>,
         runtime: Runtime,
     ) -> Result<Self, InvalidStorageRangeRequest> {
-        if request.root_hash != batch.state_root() {
-            return Err(InvalidStorageRangeRequest::StateRootMismatch {
-                requested: request.root_hash,
-                authenticated: batch.state_root(),
-            })
-        }
-        let accounts = batch.accounts();
         let origin = request.starting_hash.unwrap_or(B256::ZERO);
         let limit = request.limit_hash.unwrap_or(MAX_HASH);
         if origin > limit {
@@ -59,35 +52,9 @@ impl<C: SnapClient> StorageRangeDownloader<C> {
         if request.account_hashes.is_empty() {
             return Err(InvalidStorageRangeRequest::NoAccounts)
         }
-        // Only the first account is verified against the request bounds. An origin tells a
-        // responder to stop after that account; a bare limit does not, so it must not be paired
-        // with accounts whose ranges would then be checked as whole tries.
-        if origin == B256::ZERO && limit < MAX_HASH && request.account_hashes.len() > 1 {
-            return Err(InvalidStorageRangeRequest::UnboundedBatchWithLimit {
-                limit,
-                accounts: request.account_hashes.len(),
-            })
-        }
-        if request.account_hashes.len() != accounts.len() {
-            return Err(InvalidStorageRangeRequest::AccountCount {
-                requested: request.account_hashes.len(),
-                supplied: accounts.len(),
-            })
-        }
-
-        let mut storage_roots = Vec::with_capacity(accounts.len());
-        for (index, (requested, (supplied, account))) in
-            request.account_hashes.iter().zip(accounts).enumerate()
-        {
-            if requested != supplied {
-                return Err(InvalidStorageRangeRequest::AccountMismatch {
-                    index,
-                    requested: *requested,
-                    supplied: *supplied,
-                })
-            }
-            storage_roots.push(account.storage_root);
-        }
+        batch.verify_batch(&request)?;
+        let storage_roots =
+            batch.accounts().iter().map(|(_, account)| account.storage_root).collect();
 
         let verifier = StorageRangeVerifier { request: request.clone(), storage_roots };
         Ok(Self(VerifyingRequest::new(client, request, verifier, runtime)))
@@ -122,31 +89,59 @@ pub enum StorageRangeOutcome {
 /// Carries the request it answers so [`Self::follow_up`] can resume it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VerifiedStorageRanges {
-    /// Ranges in request account order.
-    pub ranges: Vec<VerifiedStorageRange>,
-    /// Position at which a follow-up request must resume.
-    pub continuation: Option<StorageRangeContinuation>,
-    /// First slot after the final range, unclamped by the requested limit, or `None` when that
-    /// account's trie was exhausted.
-    pub next_slot: Option<B256>,
-    // Retained so the follow-up cannot be rebuilt against a different request. Boxed to keep
-    // `StorageRangeOutcome` small.
+    // Slots per account. Private so they stay consistent with the position to resume at.
+    ranges: Vec<VerifiedStorageRange>,
+    // Where a follow-up resumes, or none when every requested account is complete.
+    continuation: Option<StorageRangeContinuation>,
+    // First slot after the final range, unclamped by the requested limit.
+    next_slot: Option<B256>,
+    // The request these ranges answer. Retained so a follow-up cannot be built against another.
     request: Box<GetStorageRangesMessage>,
 }
 
 impl VerifiedStorageRanges {
+    /// Ranges in request account order.
+    pub fn ranges(&self) -> &[VerifiedStorageRange] {
+        &self.ranges
+    }
+
+    /// Consumes the result and returns the ranges it authenticated.
+    pub fn into_ranges(self) -> Vec<VerifiedStorageRange> {
+        self.ranges
+    }
+
+    /// Position at which a follow-up request must resume.
+    pub const fn continuation(&self) -> Option<StorageRangeContinuation> {
+        self.continuation
+    }
+
+    /// First slot after the final range, unclamped by the requested limit, or `None` when that
+    /// account's trie was exhausted.
+    pub const fn next_slot(&self) -> Option<B256> {
+        self.next_slot
+    }
+
     /// The request these ranges answer.
     pub fn request(&self) -> &GetStorageRangesMessage {
         &self.request
     }
 
-    /// Builds the request that resumes this response, or `None` when nothing remains to fetch.
+    /// Resumes this response, narrowing `batch` to the accounts the new request covers.
     ///
-    /// Only the first account keeps the original bounds; later accounts are always fetched as
-    /// whole tries. The result always asks for less than this request did, so resuming in a loop
-    /// terminates.
-    pub fn follow_up(&self, request_id: u64) -> Option<GetStorageRangesMessage> {
-        let (index, starting_hash, limit_hash) = match self.continuation? {
+    /// `Ok(None)` once every requested account is complete, and an error when `batch` is not the
+    /// one the answered request was built from. Each resumption asks for strictly less than the
+    /// last, and only its first account stays bounded.
+    pub fn follow_up<'a>(
+        &self,
+        request_id: u64,
+        batch: VerifiedAccountBatch<'a>,
+    ) -> Result<
+        Option<(GetStorageRangesMessage, VerifiedAccountBatch<'a>)>,
+        InvalidStorageRangeRequest,
+    > {
+        batch.verify_batch(&self.request)?;
+        let Some(continuation) = self.continuation else { return Ok(None) };
+        let (index, starting_hash, limit_hash) = match continuation {
             StorageRangeContinuation::Partial { account_index: 0, starting_hash, .. } => {
                 (0, starting_hash.into(), self.request.limit_hash)
             }
@@ -158,13 +153,15 @@ impl VerifiedStorageRanges {
             }
         };
 
-        Some(GetStorageRangesMessage {
+        let request = GetStorageRangesMessage {
             request_id,
             account_hashes: self.request.account_hashes[index..].to_vec(),
             starting_hash,
             limit_hash,
             ..(*self.request).clone()
-        })
+        };
+        let narrowed = batch.slice(index).expect("checked batch covers the continuation");
+        Ok(Some((request, narrowed)))
     }
 }
 
@@ -201,14 +198,6 @@ pub enum StorageRangeContinuation {
 /// A storage request that does not match its authenticated accounts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum InvalidStorageRangeRequest {
-    /// The request limits its first account but asks for more than one.
-    #[error("storage range limited to {limit} requests {accounts} accounts, but only the first is bounded")]
-    UnboundedBatchWithLimit {
-        /// Inclusive limit the first account was requested to.
-        limit: B256,
-        /// Number of accounts in the request.
-        accounts: usize,
-    },
     /// The request targets a different state root than the one that authenticated the accounts.
     #[error(
         "storage range requests state root {requested}, but accounts are authenticated by {authenticated}"
@@ -252,10 +241,12 @@ pub enum InvalidStorageRangeRequest {
     },
 }
 
-// Owns the authenticated roots needed by the blocking verifier.
+// Checks a storage response against the request and the account roots it was built from.
 #[derive(Clone, Debug)]
 struct StorageRangeVerifier {
+    // The request being answered, which every response is bound to.
     request: GetStorageRangesMessage,
+    // Authenticated storage root per requested account, in the same order.
     storage_roots: Vec<B256>,
 }
 
@@ -453,6 +444,7 @@ impl StorageRangeVerifier {
 
 // One account's verified slots and where its trie continues.
 struct VerifiedRange {
+    // The account's slots, once its proof checked out.
     range: VerifiedStorageRange,
     // First slot after the range, or `None` when the trie was exhausted.
     next: Option<B256>,
@@ -503,7 +495,7 @@ mod tests {
     const STATE_ROOT: B256 = B256::repeat_byte(0xaa);
 
     // Accounts reach the downloader only through a range that authenticated them.
-    fn verified(accounts: &[(B256, TrieAccount)]) -> VerifiedAccountRange {
+    fn verified_range(accounts: &[(B256, TrieAccount)]) -> VerifiedAccountRange {
         VerifiedAccountRange {
             state_root: STATE_ROOT,
             accounts: accounts.to_vec(),
@@ -555,7 +547,7 @@ mod tests {
         request: GetStorageRangesMessage,
         accounts: &[(B256, TrieAccount)],
     ) -> Result<StorageRangeDownloader<C>, InvalidStorageRangeRequest> {
-        let range = verified(accounts);
+        let range = verified_range(accounts);
         StorageRangeDownloader::new(client, request, range.batch(), Runtime::test())
     }
 
@@ -843,7 +835,10 @@ mod tests {
                 account_hash: key(300),
             })
         );
-        assert_eq!(verified.follow_up(2).unwrap().account_hashes, vec![key(300)]);
+        let range = verified_range(&accounts);
+        let (follow_up, narrowed) = verified.follow_up(2, range.batch()).unwrap().unwrap();
+        assert_eq!(follow_up.account_hashes, vec![key(300)]);
+        assert_eq!(narrowed.accounts(), &accounts[2..]);
     }
 
     #[tokio::test]
@@ -862,8 +857,9 @@ mod tests {
             downloader(Arc::clone(&client), request(&accounts), &accounts).unwrap().await.unwrap();
 
         let StorageRangeOutcome::Verified(verified) = outcome else { panic!("verified ranges") };
+        let range = verified_range(&accounts);
         assert_eq!(verified.continuation, None);
-        assert_eq!(verified.follow_up(2), None);
+        assert_eq!(verified.follow_up(2, range.batch()).unwrap(), None);
     }
 
     // A range that stops at the limit is complete for this request but not for the trie, and only
@@ -908,7 +904,9 @@ mod tests {
             downloader(Arc::clone(&client), bounded.clone(), &accounts).unwrap().await.unwrap();
 
         let StorageRangeOutcome::Verified(verified) = outcome else { panic!("verified ranges") };
-        let follow_up = verified.follow_up(2).unwrap();
+        let range = verified_range(&accounts);
+        let (follow_up, narrowed) = verified.follow_up(2, range.batch()).unwrap().unwrap();
+        assert_eq!(narrowed.accounts(), &accounts[..]);
         assert_eq!(follow_up.request_id, 2);
         assert_eq!(follow_up.root_hash, bounded.root_hash);
         assert_eq!(follow_up.account_hashes, bounded.account_hashes);
@@ -945,7 +943,9 @@ mod tests {
             })
         );
 
-        let follow_up = verified.follow_up(2).unwrap();
+        let range = verified_range(&accounts);
+        let (follow_up, narrowed) = verified.follow_up(2, range.batch()).unwrap().unwrap();
+        assert_eq!(narrowed.accounts(), &accounts[1..]);
         assert_eq!(follow_up.account_hashes, vec![key(200)]);
         assert_eq!(follow_up.starting_hash, key(2).into());
         assert_eq!(follow_up.limit_hash, RangeBound::default());
@@ -957,6 +957,7 @@ mod tests {
         let all = slots(&[(key(1), 11), (key(2), 12), (key(3), 13)]);
         let (root, _) = storage_root(&all, &[]);
         let accounts = vec![(key(100), account(root))];
+        let range = verified_range(&accounts);
         let mut request = request(&accounts);
         let mut origins = Vec::new();
         let mut collected = Vec::new();
@@ -979,7 +980,9 @@ mod tests {
             };
             collected.extend(verified.ranges[0].slots.clone());
 
-            let Some(follow_up) = verified.follow_up(request.request_id + 1) else {
+            let Some((follow_up, _)) =
+                verified.follow_up(request.request_id + 1, range.batch()).unwrap()
+            else {
                 assert_eq!(served, all.len() - 1);
                 break
             };
@@ -990,10 +993,10 @@ mod tests {
         assert_eq!(origins, vec![B256::ZERO, key(2), key(3)]);
     }
 
-    // Only the first account is checked against the limit, so a limit without an origin cannot be
-    // paired with accounts a responder might apply it to as well.
+    // The bounds apply to the first account only; the rest are requested as whole tries, which is
+    // what the Snap servers do, so a limited request may still carry several accounts.
     #[test]
-    fn a_limit_without_an_origin_is_refused_for_more_than_one_account() {
+    fn a_limited_request_may_carry_several_accounts() {
         let accounts =
             vec![(key(100), account(EMPTY_ROOT_HASH)), (key(200), account(EMPTY_ROOT_HASH))];
         // Accepted requests are submitted on construction, so the client must have replies ready.
@@ -1003,19 +1006,80 @@ mod tests {
 
         let mut bounded = request(&accounts);
         bounded.limit_hash = key(5).into();
+        assert!(downloader(&client, bounded.clone(), &accounts).is_ok());
+
+        bounded.starting_hash = key(1).into();
+        assert!(downloader(&client, bounded, &accounts).is_ok());
+    }
+
+    // Consecutive account transitions must chain: each follow-up is driven by the batch the
+    // previous one returned, never by accounts the caller re-derived.
+    #[tokio::test]
+    async fn consecutive_account_transitions_carry_their_batch_forward() {
+        let served = slots(&[(key(1), 11)]);
+        let (root, _) = storage_root(&served, &[]);
+        let accounts =
+            vec![(key(100), account(root)), (key(200), account(root)), (key(300), account(root))];
+        let range = verified_range(&accounts);
+        let mut request = request(&accounts);
+        let mut batch = range.batch();
+
+        for remaining in (1..accounts.len()).rev() {
+            let client = Arc::new(TestSnapClient::new([response(
+                PeerId::random(),
+                request.request_id,
+                vec![wire_slots(&served)],
+                Vec::new(),
+            )]));
+            let outcome = StorageRangeDownloader::new(
+                Arc::clone(&client),
+                request.clone(),
+                batch,
+                Runtime::test(),
+            )
+            .unwrap()
+            .await
+            .unwrap();
+
+            let StorageRangeOutcome::Verified(verified) = outcome else {
+                panic!("verified ranges")
+            };
+            let (follow_up, narrowed) =
+                verified.follow_up(request.request_id + 1, batch).unwrap().unwrap();
+            assert_eq!(follow_up.account_hashes.len(), remaining);
+            assert_eq!(narrowed.accounts(), &accounts[accounts.len() - remaining..]);
+            request = follow_up;
+            batch = narrowed;
+        }
+
+        assert_eq!(request.account_hashes, vec![key(300)]);
+    }
+
+    #[tokio::test]
+    async fn a_follow_up_refuses_a_batch_from_another_request() {
+        let served = slots(&[(key(1), 11)]);
+        let (root, _) = storage_root(&served, &[]);
+        let accounts = vec![(key(100), account(root)), (key(200), account(root))];
+        let client = Arc::new(TestSnapClient::new([response(
+            PeerId::random(),
+            1,
+            vec![wire_slots(&served)],
+            Vec::new(),
+        )]));
+
+        let outcome =
+            downloader(Arc::clone(&client), request(&accounts), &accounts).unwrap().await.unwrap();
+        let StorageRangeOutcome::Verified(verified) = outcome else { panic!("verified ranges") };
+
+        let others = vec![(key(900), account(root)), (key(901), account(root))];
+        let other_range = verified_range(&others);
         assert_eq!(
-            downloader(&client, bounded.clone(), &accounts).unwrap_err(),
-            InvalidStorageRangeRequest::UnboundedBatchWithLimit { limit: key(5), accounts: 2 }
+            verified.follow_up(2, other_range.batch()).unwrap_err(),
+            InvalidStorageRangeRequest::AccountMismatch {
+                index: 0,
+                requested: key(100),
+                supplied: key(900),
+            }
         );
-
-        // An origin tells the responder to stop after the first account, so the batch is fine.
-        let mut resumed = bounded.clone();
-        resumed.starting_hash = key(1).into();
-        assert!(downloader(&client, resumed, &accounts).is_ok());
-
-        // A single account is bounded by the request itself.
-        let mut single = bounded;
-        single.account_hashes.truncate(1);
-        assert!(downloader(&client, single, &accounts[..1]).is_ok());
     }
 }
