@@ -112,8 +112,8 @@ impl From<BalExecutionError> for InsertBlockErrorKind {
     fn from(e: BalExecutionError) -> Self {
         match e {
             BalExecutionError::Consensus(inner) => Self::Consensus(inner),
-            inner @ BalExecutionError::BlockAccessListInvalid(_) => {
-                Self::Consensus(ConsensusError::other(inner))
+            BalExecutionError::BlockAccessListInvalid(inner) => {
+                Self::BlockAccessListDecode(BlockAccessListDecodeError::new(inner))
             }
             BalExecutionError::Execution(inner) => Self::Execution(inner),
             BalExecutionError::Provider(inner) => Self::Provider(inner),

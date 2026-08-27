@@ -324,7 +324,7 @@ impl BlockGasTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tree::error::InsertBlockErrorKind;
+    use crate::tree::error::{InsertBlockErrorKind, InsertBlockProcessingError};
     use alloy_consensus::{BlockHeader, Header};
     use alloy_eip7928::{
         bal::Bal as AlloyBal, AccountChanges, BlockAccessIndex, BlockAccessList, CodeChange,
@@ -449,7 +449,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_bal_bytecode_is_a_consensus_error() {
+    fn invalid_bal_bytecode_is_malformed_input() {
         let alloy_bal = vec![AccountChanges {
             address: Address::ZERO,
             code_changes: vec![CodeChange::new(
@@ -462,9 +462,11 @@ mod tests {
 
         let error = convert_alloy_to_revm_bal(&alloy_bal).unwrap_err();
         assert!(matches!(&error, BalExecutionError::BlockAccessListInvalid(_)));
+        let error = InsertBlockErrorKind::from(error);
+        assert!(matches!(&error, InsertBlockErrorKind::BlockAccessListDecode(_)));
         assert!(matches!(
-            InsertBlockErrorKind::from(error),
-            InsertBlockErrorKind::Consensus(reth_consensus::ConsensusError::Other(_))
+            error.ensure_validation_error(),
+            Err(InsertBlockProcessingError::MalformedInput(_))
         ));
     }
 
