@@ -2,7 +2,10 @@
 
 use crate::{engine::DownloadRequest, metrics::BlockDownloaderMetrics};
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{map::B256Set, B256};
+use alloy_primitives::{
+    map::{hash_map::Entry, B256Map, B256Set},
+    B256,
+};
 use futures::FutureExt;
 use reth_consensus::Consensus;
 use reth_network_p2p::{
@@ -15,7 +18,7 @@ use reth_network_p2p::{
 use reth_primitives_traits::{Block, SealedBlockWith};
 use std::{
     cmp::{Ordering, Reverse},
-    collections::{binary_heap::PeekMut, BinaryHeap, VecDeque},
+    collections::{BinaryHeap, VecDeque},
     fmt::Debug,
     sync::Arc,
     task::{Context, Poll},
@@ -264,22 +267,29 @@ where
             return Poll::Pending;
         }
 
-        // drain all unique element of the block buffer if there are any
+        // Drain the buffer, keeping one entry per block hash in ascending block number order.
+        //
+        // The heap only orders by block number, so duplicates of the same block are not
+        // necessarily adjacent: a fork block at the same height can sit between them. Duplicates
+        // are therefore tracked by hash across the entire drain, preferring the copy that carries
+        // access list data.
         let mut downloaded_blocks = Vec::with_capacity(self.set_buffered_blocks.len());
-        while let Some(block) = self.set_buffered_blocks.pop() {
-            let mut block = block.0 .0;
-            // peek ahead and pop duplicates, keeping the copy that includes access list data
-            while let Some(peek) = self.set_buffered_blocks.peek_mut() {
-                if peek.0 .0.hash() == block.hash() {
-                    let duplicate = PeekMut::pop(peek).0 .0;
-                    if block.data().is_none() && duplicate.data().is_some() {
-                        block = duplicate;
+        let mut positions =
+            B256Map::with_capacity_and_hasher(self.set_buffered_blocks.len(), Default::default());
+        while let Some(Reverse(OrderedDownloadedBlock(block))) = self.set_buffered_blocks.pop() {
+            match positions.entry(block.hash()) {
+                Entry::Occupied(entry) => {
+                    let seen: &mut SealedBlockWithAccessList<B> =
+                        &mut downloaded_blocks[*entry.get()];
+                    if seen.data().is_none() && block.data().is_some() {
+                        *seen = block;
                     }
-                } else {
-                    break
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(downloaded_blocks.len());
+                    downloaded_blocks.push(block);
                 }
             }
-            downloaded_blocks.push(block);
         }
         Poll::Ready(DownloadOutcome::Blocks(downloaded_blocks))
     }
@@ -405,12 +415,13 @@ mod tests {
     use super::*;
     use crate::test_utils::insert_headers_into_client;
     use alloy_consensus::Header;
+    use alloy_eip7928::bal::RawBal;
     use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M;
     use assert_matches::assert_matches;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_network_p2p::test_utils::TestFullBlockClient;
-    use reth_primitives_traits::SealedHeader;
+    use reth_primitives_traits::{SealedBlock, SealedHeader};
     use std::{future::poll_fn, sync::Arc};
 
     struct TestHarness {
@@ -522,6 +533,46 @@ mod tests {
             for num in 1..=TOTAL_BLOCKS {
                 assert_eq!(blocks[num - 1].number(), num as u64);
             }
+        });
+    }
+
+    /// The heap only orders by block number, so a fork block at the same height can sit between
+    /// two copies of the same block. The BAL-bearing copy must still win.
+    #[tokio::test]
+    async fn block_downloader_merges_non_adjacent_duplicates() {
+        let mut harness = TestHarness::new(1);
+
+        let block = harness.client.highest_block().expect("there should be blocks here");
+        let hash = block.hash();
+        let sealed: SealedBlock<reth_ethereum_primitives::Block> = SealedBlock::from_sealed_parts(
+            SealedHeader::new(block.header().clone(), hash),
+            reth_ethereum_primitives::BlockBody::default(),
+        );
+
+        // a distinct block at the same height, ordering between equal keys is unspecified
+        let mut fork_header = block.header().clone();
+        fork_header.extra_data = alloy_primitives::Bytes::from_static(b"fork");
+        let fork: SealedBlock<reth_ethereum_primitives::Block> = SealedBlock::from_sealed_parts(
+            SealedHeader::seal_slow(fork_header),
+            reth_ethereum_primitives::BlockBody::default(),
+        );
+
+        let access_list =
+            RawBal::from(alloy_primitives::Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE]));
+        let buffered = &mut harness.block_downloader.set_buffered_blocks;
+        buffered.push(Reverse(OrderedDownloadedBlock(sealed.clone().into())));
+        buffered.push(Reverse(OrderedDownloadedBlock(fork.into())));
+        buffered.push(Reverse(OrderedDownloadedBlock(SealedBlockWithAccessList::new(
+            sealed,
+            Some(access_list.clone()),
+        ))));
+
+        let outcome = poll_fn(|cx| harness.block_downloader.poll(cx)).await;
+        assert_matches!(outcome, DownloadOutcome::Blocks(blocks) => {
+            // the duplicate is merged even though the fork block separated the two copies
+            assert_eq!(blocks.len(), 2);
+            let merged = blocks.iter().find(|b| b.hash() == hash).expect("block is present");
+            assert_eq!(merged.data().as_ref(), Some(&access_list));
         });
     }
 
