@@ -19,7 +19,7 @@ use reth_trie_common::{
     prefix_set::PrefixSet, BranchNodeMasks, BranchNodeRef, BranchNodeV2, Nibbles, ProofTrieNodeV2,
     ProofV2Target, RlpNode, TrieNodeV2,
 };
-use std::{cmp::Ordering, ops::Bound};
+use std::cmp::Ordering;
 use tracing::{error, instrument, trace};
 
 mod value;
@@ -995,12 +995,14 @@ where
                 return None
             }
 
-            prefix_set
-                .contains_range((
-                    Bound::Included(uncalculated_lower_bound),
-                    upper_bound.as_ref().map_or(Bound::Unbounded, Bound::Excluded),
-                ))
-                .then_some((*uncalculated_lower_bound, upper_bound))
+            match upper_bound {
+                Some(upper_bound) => prefix_set
+                    .contains_range(uncalculated_lower_bound..&upper_bound)
+                    .then_some((*uncalculated_lower_bound, Some(upper_bound))),
+                None => prefix_set
+                    .contains_from(uncalculated_lower_bound)
+                    .then_some((*uncalculated_lower_bound, None)),
+            }
         };
 
         let mut popped_child_path_upper = None;

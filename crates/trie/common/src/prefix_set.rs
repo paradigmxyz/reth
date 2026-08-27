@@ -4,7 +4,7 @@ use alloy_primitives::{
     map::{B256Map, B256Set},
     B256,
 };
-use core::ops::{Bound, RangeBounds};
+use core::ops::Range;
 
 /// Collection of mutable prefix sets.
 #[derive(Clone, Default, Debug, PartialEq, Eq)]
@@ -293,50 +293,51 @@ impl PrefixSet {
         false
     }
 
-    /// Returns `true` if any key in the set falls within the given range bounds.
+    /// Returns `true` if any key in the set falls within the given half-open range
+    /// `[start, end)`.
     ///
     /// Like [`Self::contains`], this method maintains the internal index for sequential access
     /// optimization.
     #[inline]
-    pub fn contains_range<'a>(&mut self, range: impl RangeBounds<&'a Nibbles>) -> bool {
+    pub fn contains_range(&mut self, range: Range<&Nibbles>) -> bool {
         if self.all {
             return true
         }
 
-        let start_bound = match range.start_bound() {
-            Bound::Included(bound) => Bound::Included(*bound),
-            Bound::Excluded(bound) => Bound::Excluded(*bound),
-            Bound::Unbounded => Bound::Unbounded,
-        };
-        let end_bound = match range.end_bound() {
-            Bound::Included(bound) => Bound::Included(*bound),
-            Bound::Excluded(bound) => Bound::Excluded(*bound),
-            Bound::Unbounded => Bound::Unbounded,
-        };
-        let satisfies_start = |key: &Nibbles| match start_bound {
-            Bound::Included(start) => key >= start,
-            Bound::Excluded(start) => key > start,
-            Bound::Unbounded => true,
-        };
-        let satisfies_end = |key: &Nibbles| match end_bound {
-            Bound::Included(end) => key <= end,
-            Bound::Excluded(end) => key < end,
-            Bound::Unbounded => true,
-        };
-
-        while self.index > 0 && !satisfies_end(&self.keys[self.index]) {
+        while self.index > 0 && &self.keys[self.index] >= range.end {
             self.index -= 1;
         }
 
         for (idx, key) in self.keys[self.index..].iter().enumerate() {
-            if satisfies_start(key) && satisfies_end(key) {
+            if key >= range.start && key < range.end {
                 self.index += idx;
                 return true
             }
 
-            if !satisfies_end(key) {
+            if key >= range.end {
                 self.index += idx;
                 return false
+            }
+        }
+
+        false
+    }
+
+    /// Returns `true` if any key in the set is at or after `start`.
+    #[inline]
+    pub fn contains_from(&mut self, start: &Nibbles) -> bool {
+        if self.all {
+            return true
+        }
+
+        while self.index > 0 && &self.keys[self.index] > start {
+            self.index -= 1;
+        }
+
+        for (idx, key) in self.keys[self.index..].iter().enumerate() {
+            if key >= start {
+                self.index += idx;
+                return true
             }
         }
 
@@ -395,6 +396,19 @@ mod tests {
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([4, 5])));
         assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([7, 8])));
         assert_eq!(prefix_set.len(), 3); // Length should be 3 (excluding duplicate)
+    }
+
+    #[test]
+    fn test_contains_from() {
+        let first = Nibbles::from_nibbles([1, 2, 3]);
+        let middle = Nibbles::from_nibbles([1, 2, 4]);
+        let last = Nibbles::from_nibbles([4, 5, 6]);
+        let mut prefix_set = PrefixSetMut::from([first, middle, last]).freeze();
+
+        assert!(prefix_set.contains_range(&first..&middle));
+        assert!(prefix_set.contains_from(&middle));
+        assert!(prefix_set.contains_from(&last));
+        assert!(!prefix_set.contains_from(&Nibbles::from_nibbles([5])));
     }
 
     #[test]
