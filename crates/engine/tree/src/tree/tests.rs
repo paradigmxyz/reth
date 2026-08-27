@@ -3,7 +3,7 @@ use crate::{
     persistence::PersistenceAction,
     tree::{
         error::{BlockAccessListDecodeError, InsertBlockErrorKind},
-        payload_validator::{BasicEngineValidator, BlockOrPayload, TreeCtx, ValidationOutcome},
+        payload_validator::{BasicEngineValidator, TreeCtx, ValidationOutcome},
         persistence_state::CurrentPersistenceAction,
         PersistTarget, TreeConfig,
     },
@@ -587,26 +587,6 @@ fn malformed_input_is_non_fatal_insert_outcome() {
         test_harness.tree.on_insert_block_error(error),
         Err(InsertBlockProcessingError::MalformedInput(_))
     );
-}
-
-/// A downloaded block's access list is bound to the header's commitment, so bytes that don't
-/// decode invalidate the block rather than being discarded as malformed request params.
-#[test]
-fn undecodable_downloaded_access_list_invalidates_block() {
-    let mut test_harness = TestHarness::new(MAINNET.clone());
-    let block = test_harness.block_builder.generate_random_block(1, B256::ZERO);
-    let input = BlockOrPayload::<EthEngineTypes>::Block(SealedBlockWithAccessList::new(
-        block.clone(),
-        Some(RawBal::from(Bytes::from_static(&[alloy_rlp::EMPTY_STRING_CODE]))),
-    ));
-
-    let kind = input.access_list_decode_error(alloy_rlp::Error::UnexpectedString);
-    assert!(kind.is_validation_error(), "downloaded sidecar must invalidate the block");
-
-    // the block is reported invalid instead of being silently dropped and downloaded again
-    let status =
-        test_harness.tree.on_insert_block_error(InsertBlockError::new(block, kind)).unwrap();
-    assert!(status.is_invalid());
 }
 
 #[tokio::test]

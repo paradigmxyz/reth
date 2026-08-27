@@ -571,12 +571,11 @@ where
             .in_scope(|| self.evm_env_for(&input))
             .map_err(NewPayloadError::other)?;
 
-        // Extract the decoded BAL, if present. How undecodable bytes are treated depends on where
-        // they came from, see `access_list_decode_error`.
-        let decoded_bal = ensure_ok!(input
-            .try_decoded_access_list()
-            .map_err(|err| input.access_list_decode_error(err)))
-        .map(Arc::new);
+        // Extract the decoded BAL, if present. Undecodable block access list bytes are malformed
+        // request params, not an invalid block.
+        let decoded_bal =
+            ensure_ok!(input.try_decoded_access_list().map_err(BlockAccessListDecodeError::new))
+                .map(Arc::new);
 
         if let Some(decoded_bal) = decoded_bal.as_deref() {
             // Reject oversized BAL sidecars before executing the block.
@@ -2041,21 +2040,6 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
                 .map(|block_access_list| DecodedBal::from_rlp_bytes(block_access_list.clone()))
                 .transpose(),
             Self::Block(block) => block.data().clone().map(DecodedBal::from_raw_bal).transpose(),
-        }
-    }
-
-    /// Maps a block access list decode failure onto the error kind matching where the bytes came
-    /// from.
-    ///
-    /// A payload's access list is a request parameter supplied by the consensus layer, so bytes
-    /// that don't decode are malformed input rather than proof of an invalid block. A downloaded
-    /// block's access list is bound to the header's access list commitment, so bytes that don't
-    /// decode mean the block itself is invalid and must be marked as such, otherwise it is
-    /// silently discarded and requested again forever.
-    pub fn access_list_decode_error(&self, err: alloy_rlp::Error) -> InsertBlockErrorKind {
-        match self {
-            Self::Payload(_) => BlockAccessListDecodeError::new(err).into(),
-            Self::Block(_) => ConsensusError::BlockAccessListInvalid(err.to_string()).into(),
         }
     }
 
