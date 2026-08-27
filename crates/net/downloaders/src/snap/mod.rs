@@ -119,13 +119,6 @@ impl<'a> VerifiedAccountBatch<'a> {
     pub const fn accounts(&self) -> &'a [(B256, TrieAccount)] {
         self.accounts
     }
-
-    /// Narrows the batch to the accounts from `index` onwards, keeping their state root.
-    ///
-    /// `None` when `index` is past the end.
-    pub fn from_index(&self, index: usize) -> Option<Self> {
-        self.accounts.get(index..).map(|accounts| Self { state_root: self.state_root, accounts })
-    }
 }
 
 /// An account-range request whose origin exceeds its limit.
