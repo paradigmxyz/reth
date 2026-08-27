@@ -1,6 +1,6 @@
-use crate::tree::{error::InsertBlockFatalError, TreeOutcome};
+use crate::tree::TreeOutcome;
 use alloy_rpc_types_engine::{PayloadStatus, PayloadStatusEnum};
-use reth_engine_primitives::{ForkchoiceStatus, OnForkChoiceUpdated};
+use reth_engine_primitives::{ForkchoiceStatus, InsertBlockProcessingError, OnForkChoiceUpdated};
 use reth_errors::ProviderError;
 use reth_evm::metrics::ExecutorMetrics;
 use reth_execution_types::BlockExecutionOutput;
@@ -443,7 +443,7 @@ impl NewPayloadStatusMetrics {
         &mut self,
         start: Instant,
         latest_forkchoice_updated_at: &mut Option<Instant>,
-        result: &Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError>,
+        result: &Result<TreeOutcome<PayloadStatus>, InsertBlockProcessingError>,
         gas_used: u64,
     ) {
         let finish = Instant::now();
