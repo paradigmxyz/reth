@@ -6,7 +6,7 @@
 //! explicit operator flag.
 
 use alloy_primitives::{Bytes, B256};
-use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV5, PayloadAttributes};
+use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV6, PayloadAttributes};
 use jsonrpsee::proc_macros::rpc;
 
 pub use alloy_rpc_types_engine::{TestingBuildBlockRequestV1, TESTING_BUILD_BLOCK_V1};
@@ -40,7 +40,7 @@ pub trait TestingApi {
         payload_attributes: PayloadAttributes,
         transactions: Option<Vec<Bytes>>,
         extra_data: Option<Bytes>,
-    ) -> jsonrpsee::core::RpcResult<ExecutionPayloadEnvelopeV5>;
+    ) -> jsonrpsee::core::RpcResult<ExecutionPayloadEnvelopeV6>;
 
     /// Builds a block on top of the current canonical head, inserts it, and makes it canonical.
     ///
