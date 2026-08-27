@@ -193,11 +193,7 @@ fn convert_alloy_to_revm_bal(alloy_bal: &AlloyBal) -> Result<Arc<RevmBal>, BalEx
     // is triggered then the execution is reverted, and as such no actual code change event takes
     // place. Therefore, if we do observe such a bytecode in a BAL then that means the BAL is
     // invalid as no legal execution should've led to this bytecode deployment.
-    let received_bal_revm = RevmBal::clone_from_alloy(alloy_bal.as_vec()).map_err(|e| {
-        BalExecutionError::Consensus(reth_consensus::ConsensusError::BlockAccessListInvalid(
-            format!("{e:?}"),
-        ))
-    })?;
+    let received_bal_revm = RevmBal::clone_from_alloy(alloy_bal.as_vec())?;
     Ok(Arc::new(received_bal_revm))
 }
 
@@ -328,8 +324,11 @@ impl BlockGasTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tree::error::InsertBlockErrorKind;
     use alloy_consensus::{BlockHeader, Header};
-    use alloy_eip7928::{bal::Bal as AlloyBal, BlockAccessList};
+    use alloy_eip7928::{
+        bal::Bal as AlloyBal, AccountChanges, BlockAccessIndex, BlockAccessList, CodeChange,
+    };
     use alloy_eips::{
         eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE},
@@ -447,6 +446,26 @@ mod tests {
             executor.apply_post_execution_changes().expect("post-exec");
         }
         state.take_built_alloy_bal().expect("with_bal_builder was set")
+    }
+
+    #[test]
+    fn invalid_bal_bytecode_is_a_consensus_error() {
+        let alloy_bal = vec![AccountChanges {
+            address: Address::ZERO,
+            code_changes: vec![CodeChange::new(
+                BlockAccessIndex::new(1),
+                vec![0xef, 0x01, 0xde].into(),
+            )],
+            ..Default::default()
+        }]
+        .into();
+
+        let error = convert_alloy_to_revm_bal(&alloy_bal).unwrap_err();
+        assert!(matches!(&error, BalExecutionError::BlockAccessListInvalid(_)));
+        assert!(matches!(
+            InsertBlockErrorKind::from(error),
+            InsertBlockErrorKind::Consensus(reth_consensus::ConsensusError::Other(_))
+        ));
     }
 
     #[test]
