@@ -38,6 +38,10 @@ impl<C: SnapClient> StorageRangeDownloader<C> {
     /// `batch` must hold the accounts in `request.account_hashes` order, under the same state
     /// root; their storage roots authenticate the returned ranges. Pairing a batch with a request
     /// for another root would penalize a peer that answered honestly.
+    ///
+    /// Accounts with empty storage roots must be omitted because Snap responses do not preserve
+    /// an outer-list position for them. Use [`super::VerifiedAccountRange::batch_range`] to select
+    /// the accounts included in the request without losing their state-root provenance.
     pub fn new(
         client: C,
         request: GetStorageRangesMessage,
@@ -53,8 +57,16 @@ impl<C: SnapClient> StorageRangeDownloader<C> {
             return Err(InvalidStorageRangeRequest::NoAccounts)
         }
         batch.verify_batch(&request)?;
-        let storage_roots =
-            batch.accounts().iter().map(|(_, account)| account.storage_root).collect();
+        let mut storage_roots = Vec::with_capacity(batch.accounts().len());
+        for (index, (account_hash, account)) in batch.accounts().iter().enumerate() {
+            if account.storage_root == EMPTY_ROOT_HASH {
+                return Err(InvalidStorageRangeRequest::EmptyStorageRoot {
+                    index,
+                    account_hash: *account_hash,
+                })
+            }
+            storage_roots.push(account.storage_root);
+        }
 
         let verifier = StorageRangeVerifier { request: request.clone(), storage_roots };
         Ok(Self(VerifyingRequest::new(client, request, verifier, runtime)))
@@ -216,6 +228,14 @@ pub enum InvalidStorageRangeRequest {
         /// Hash in the authenticated batch.
         supplied: B256,
     },
+    /// An account has no storage to download.
+    #[error("storage range account {index} ({account_hash}) has an empty storage root")]
+    EmptyStorageRoot {
+        /// Position of the account in the request.
+        index: usize,
+        /// Hashed address of the account.
+        account_hash: B256,
+    },
 }
 
 // Checks a storage response against the request and the account roots it was built from.
@@ -293,12 +313,7 @@ impl StorageRangeVerifier {
         }
         if response.slots.is_empty() {
             if response.proof.is_empty() {
-                // An empty reply is the correct answer only when no requested account has storage.
-                if !self.storage_roots.iter().all(|root| *root == EMPTY_ROOT_HASH) {
-                    return Ok(None)
-                }
-                response.slots = vec![Vec::new(); self.storage_roots.len()];
-                return Ok(Some(response))
+                return Ok(None)
             }
             // A boundary proof can authenticate an empty suffix without an encoded inner list.
             response.slots.push(Vec::new());
@@ -371,12 +386,7 @@ impl StorageRangeVerifier {
                 starting_hash,
             })
         }
-        // An unreturned account whose authenticated storage root is empty has nothing to fetch,
-        // so resuming at it would cost a round trip for a range already known to be empty.
-        let mut account_index = ranges.len();
-        while self.storage_roots.get(account_index) == Some(&EMPTY_ROOT_HASH) {
-            account_index += 1;
-        }
+        let account_index = ranges.len();
         self.request.account_hashes.get(account_index).copied().map(|account_hash| {
             StorageRangeContinuation::NextAccount { account_index, account_hash }
         })
@@ -602,52 +612,29 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn an_empty_storage_trie_verifies_without_slots() {
-        let accounts = vec![(key(100), account(EMPTY_ROOT_HASH))];
-        let client = Arc::new(TestSnapClient::new([response(
-            PeerId::random(),
-            1,
-            vec![Vec::new()],
-            Vec::new(),
-        )]));
+    #[test]
+    fn a_mixed_batch_with_an_empty_storage_root_is_refused_before_submission() {
+        let accounts = vec![
+            (key(100), account(EMPTY_ROOT_HASH)),
+            (key(200), account(B256::repeat_byte(0xbb))),
+        ];
+        let client = TestSnapClient::new([response(PeerId::random(), 1, Vec::new(), Vec::new())]);
 
-        let outcome =
-            downloader(Arc::clone(&client), request(&accounts), &accounts).unwrap().await.unwrap();
+        assert_eq!(
+            downloader(&client, request(&accounts), &accounts).unwrap_err(),
+            InvalidStorageRangeRequest::EmptyStorageRoot { index: 0, account_hash: key(100) }
+        );
+        assert!(client.priorities().is_empty());
 
-        let StorageRangeOutcome::Verified(verified) = outcome else { panic!("verified ranges") };
-        assert!(verified.ranges[0].slots.is_empty());
-        assert_eq!(verified.continuation, None);
-        assert!(client.reported().is_empty());
-    }
-
-    // The authenticated roots alone prove every requested trie is empty, so the reply completes
-    // the batch instead of leaving it unserved.
-    #[tokio::test]
-    async fn an_all_empty_batch_verifies_from_an_entirely_empty_response() {
-        let batch = [(key(100), account(EMPTY_ROOT_HASH)), (key(200), account(EMPTY_ROOT_HASH))];
-        for count in 1..=batch.len() {
-            let accounts = batch[..count].to_vec();
-            let client = Arc::new(TestSnapClient::new([response(
-                PeerId::random(),
-                1,
-                Vec::new(),
-                Vec::new(),
-            )]));
-
-            let outcome = downloader(Arc::clone(&client), request(&accounts), &accounts)
-                .unwrap()
-                .await
-                .unwrap();
-
-            let StorageRangeOutcome::Verified(verified) = outcome else {
-                panic!("verified ranges")
-            };
-            assert_eq!(verified.ranges.len(), count);
-            assert!(verified.ranges.iter().all(|range| range.slots.is_empty()));
-            assert_eq!(verified.continuation, None);
-            assert!(client.reported().is_empty());
-        }
+        let range = verified_range(&accounts);
+        assert!(StorageRangeDownloader::new(
+            &client,
+            request(&accounts[1..]),
+            range.batch_range(1..2).unwrap(),
+            Runtime::test(),
+        )
+        .is_ok());
+        assert_eq!(*client.priorities(), [Priority::Normal]);
     }
 
     #[tokio::test]
@@ -655,7 +642,7 @@ mod tests {
         let batches = [
             vec![(key(100), account(B256::repeat_byte(0xbb)))],
             vec![
-                (key(100), account(EMPTY_ROOT_HASH)),
+                (key(100), account(B256::repeat_byte(0xaa))),
                 (key(200), account(B256::repeat_byte(0xbb))),
             ],
         ];
@@ -776,61 +763,6 @@ mod tests {
                 authenticated: STATE_ROOT,
             }
         );
-    }
-
-    // The account range already proved these tries empty, so resuming at one would waste a request.
-    #[tokio::test]
-    async fn a_continuation_skips_accounts_proven_to_have_no_storage() {
-        let first = slots(&[(key(1), 11)]);
-        let (first_root, _) = storage_root(&first, &[]);
-        let accounts = vec![
-            (key(100), account(first_root)),
-            (key(200), account(EMPTY_ROOT_HASH)),
-            (key(300), account(B256::repeat_byte(0xbb))),
-        ];
-        let client = Arc::new(TestSnapClient::new([response(
-            PeerId::random(),
-            1,
-            vec![wire_slots(&first)],
-            Vec::new(),
-        )]));
-
-        let outcome =
-            downloader(Arc::clone(&client), request(&accounts), &accounts).unwrap().await.unwrap();
-
-        let StorageRangeOutcome::Verified(verified) = outcome else { panic!("verified ranges") };
-        assert_eq!(
-            verified.continuation,
-            Some(StorageRangeContinuation::NextAccount {
-                account_index: 2,
-                account_hash: key(300),
-            })
-        );
-        let range = verified_range(&accounts);
-        let (follow_up, narrowed) = verified.follow_up(2, range.batch()).unwrap().unwrap();
-        assert_eq!(follow_up.account_hashes, vec![key(300)]);
-        assert_eq!(narrowed.accounts(), &accounts[2..]);
-    }
-
-    #[tokio::test]
-    async fn a_batch_ending_in_empty_tries_needs_no_continuation() {
-        let first = slots(&[(key(1), 11)]);
-        let (first_root, _) = storage_root(&first, &[]);
-        let accounts = vec![(key(100), account(first_root)), (key(200), account(EMPTY_ROOT_HASH))];
-        let client = Arc::new(TestSnapClient::new([response(
-            PeerId::random(),
-            1,
-            vec![wire_slots(&first)],
-            Vec::new(),
-        )]));
-
-        let outcome =
-            downloader(Arc::clone(&client), request(&accounts), &accounts).unwrap().await.unwrap();
-
-        let StorageRangeOutcome::Verified(verified) = outcome else { panic!("verified ranges") };
-        let range = verified_range(&accounts);
-        assert_eq!(verified.continuation, None);
-        assert_eq!(verified.follow_up(2, range.batch()).unwrap(), None);
     }
 
     #[tokio::test]
@@ -966,8 +898,10 @@ mod tests {
     // what the Snap servers do, so a limited request may still carry several accounts.
     #[test]
     fn a_limited_request_may_carry_several_accounts() {
-        let accounts =
-            vec![(key(100), account(EMPTY_ROOT_HASH)), (key(200), account(EMPTY_ROOT_HASH))];
+        let accounts = vec![
+            (key(100), account(B256::repeat_byte(0xaa))),
+            (key(200), account(B256::repeat_byte(0xbb))),
+        ];
         // Accepted requests are submitted on construction, so the client must have replies ready.
         let client = TestSnapClient::new(
             (0..2).map(|_| response(PeerId::random(), 1, vec![Vec::new()], Vec::new())),
