@@ -152,7 +152,7 @@ impl<'a, Provider, N: NodePrimitives> OverlayStateProvider<'a, Provider, N> {
         }
     }
 
-    pub(crate) fn new_state_trie(
+    pub(crate) fn new_with_state_trie(
         provider: &'a Provider,
         state_trie_overlay: StateTrieOverlay,
         is_v2: bool,
@@ -170,7 +170,7 @@ impl<'a, Provider, N: NodePrimitives> OverlayStateProvider<'a, Provider, N> {
     }
 
     #[cfg(test)]
-    fn new_execution(
+    fn new_with_execution(
         provider: Provider,
         execution_overlay: Arc<ExecutionOverlay>,
         is_v2: bool,
@@ -795,7 +795,7 @@ mod tests {
             .or_default()
             .insert(U256::from_be_bytes(storage_key.0), storage_value);
         execution_overlay.code_hashes.insert(code_hash, bytecode.clone());
-        let provider = OverlayStateProvider::<_, EthPrimitives>::new_execution(
+        let provider = OverlayStateProvider::<_, EthPrimitives>::new_with_execution(
             factory.provider().unwrap(),
             Arc::new(execution_overlay),
             false,
