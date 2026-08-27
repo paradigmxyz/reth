@@ -1618,12 +1618,6 @@ fn worker_config_enforces_bounds_and_window() {
     let config = HistoricalBalWorkerConfig::new(true, 1, 2_048, 3, 64);
     assert_eq!(config.unwrap_err(), HistoricalBalConfigError::RequestBatchTooLarge(2_048));
 
-    let config = HistoricalBalWorkerConfig::new(true, 1, 1, Semaphore::MAX_PERMITS + 1, 64);
-    assert_eq!(
-        config.unwrap_err(),
-        HistoricalBalConfigError::ConcurrencyTooLarge(Semaphore::MAX_PERMITS + 1)
-    );
-
     let invalid = reth_config::HistoricalBalConfig {
         request_batch_size: NonZeroUsize::new(2_048).unwrap(),
         ..Default::default()

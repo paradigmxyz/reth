@@ -119,7 +119,7 @@ pub struct HistoricalBalConfig {
     /// Maximum number of block hashes in a single request.
     #[cfg_attr(feature = "serde", serde(deserialize_with = "deserialize_request_batch_size"))]
     pub request_batch_size: NonZeroUsize,
-    /// Maximum number of requests in flight at once. Must fit the worker semaphore's permit limit.
+    /// Maximum number of requests in flight at once.
     pub max_concurrent_requests: NonZeroUsize,
     /// Maximum number of blocks to inspect ahead of execution progress.
     pub lookahead: NonZeroU64,

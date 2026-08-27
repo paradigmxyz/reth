@@ -25,10 +25,8 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     num::{NonZeroU64, NonZeroUsize},
     ops::RangeInclusive,
-    sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::sync::Semaphore;
 
 use crate::metrics::HistoricalBalDownloaderMetrics;
 
@@ -76,9 +74,6 @@ pub enum HistoricalBalConfigError {
     /// The request batch exceeded the protocol limit.
     #[error("request_batch_size {0} exceeds the eth/71 limit of {MAX_REQUEST_BATCH_SIZE}")]
     RequestBatchTooLarge(usize),
-    /// The request concurrency exceeded the worker semaphore limit.
-    #[error("max_concurrent_requests {0} exceeds the worker semaphore limit")]
-    ConcurrencyTooLarge(usize),
 }
 
 impl HistoricalBalWorkerConfig {
@@ -99,9 +94,6 @@ impl HistoricalBalWorkerConfig {
         }
         let max_concurrent_requests = NonZeroUsize::new(max_concurrent_requests)
             .ok_or(HistoricalBalConfigError::ZeroValue("max_concurrent_requests"))?;
-        if max_concurrent_requests.get() > Semaphore::MAX_PERMITS {
-            return Err(HistoricalBalConfigError::ConcurrencyTooLarge(max_concurrent_requests.get()))
-        }
         let lookahead =
             NonZeroU64::new(lookahead).ok_or(HistoricalBalConfigError::ZeroValue("lookahead"))?;
         Ok(Self {
@@ -545,7 +537,6 @@ impl<P, C, W> HistoricalBalWorker<P, C, W> {
         }
 
         let max_concurrent_requests = self.config.max_concurrent_requests.get();
-        let semaphore = Arc::new(Semaphore::new(max_concurrent_requests));
         let mut in_flight = FuturesUnordered::new();
         let request_batch_size = self.config.request_batch_size.get();
         let mut pending = filtered
@@ -556,13 +547,10 @@ impl<P, C, W> HistoricalBalWorker<P, C, W> {
         let mut scheduling = true;
 
         while !pending.is_empty() || !in_flight.is_empty() {
+            // Request construction enqueues synchronously; check the in-flight slot before the
+            // blocking recheck so this single scheduler never exceeds the bound.
             while scheduling && in_flight.len() < max_concurrent_requests {
                 let Some(chunk) = pending.pop_front() else { break };
-                let permit = semaphore
-                    .clone()
-                    .acquire_owned()
-                    .await
-                    .expect("the reconciliation-local request semaphore is never closed");
 
                 let provider = self.provider.clone();
                 let store = self.store.clone();
@@ -606,13 +594,11 @@ impl<P, C, W> HistoricalBalWorker<P, C, W> {
                         self.metrics.skipped.increment(abandoned as u64);
                         pending.clear();
                         scheduling = false;
-                        drop(permit);
                         break
                     }
                 };
                 self.metrics.skipped.increment((original_len - dispatchable.len()) as u64);
                 if dispatchable.is_empty() {
-                    drop(permit);
                     continue
                 }
 
@@ -629,7 +615,6 @@ impl<P, C, W> HistoricalBalWorker<P, C, W> {
                     .get_block_access_lists_with_requirement(hashes, BalRequirement::Optional);
                 in_flight.push(async move {
                     let response = response.await;
-                    drop(permit);
                     (client, chunk, response)
                 });
             }
