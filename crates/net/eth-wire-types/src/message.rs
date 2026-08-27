@@ -11,6 +11,7 @@ use super::{
     GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts,
     GetReceipts70, NewPooledTransactionHashes66, NewPooledTransactionHashes68, NodeData,
     PooledTransactions, Receipts, Status, StatusEth69, Transactions,
+    MAX_BLOCK_ACCESS_LISTS_RESPONSE_ENTRIES,
 };
 use crate::{
     status::StatusMessage, BlockRangeUpdate, BroadcastPoolTransactions, Cells,
@@ -209,7 +210,12 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                 if version < EthVersion::Eth71 {
                     return Err(MessageError::Invalid(version, EthMessageID::BlockAccessLists))
                 }
-                EthMessage::BlockAccessLists(RequestPair::decode(buf)?)
+                EthMessage::BlockAccessLists(RequestPair::decode_with(buf, |buf| {
+                    BlockAccessLists::decode_with_max_entries(
+                        buf,
+                        MAX_BLOCK_ACCESS_LISTS_RESPONSE_ENTRIES,
+                    )
+                })?)
             }
             EthMessageID::Cells => {
                 if version < EthVersion::Eth72 {
@@ -893,7 +899,7 @@ mod tests {
     use crate::{
         message::RequestPair, BlockAccessLists, EthMessage, EthMessageID, EthNetworkPrimitives,
         EthVersion, GetBlockAccessLists, GetNodeData, NodeData, ProtocolMessage,
-        RawCapabilityMessage,
+        RawCapabilityMessage, MAX_BLOCK_ACCESS_LISTS_RESPONSE_ENTRIES,
     };
     use alloy_primitives::hex;
     use alloy_rlp::{Decodable, Encodable, Error};
@@ -986,6 +992,23 @@ mod tests {
         .unwrap();
 
         assert_eq!(decoded, msg);
+    }
+
+    #[test]
+    fn test_bal_message_eth71_rejects_too_many_response_entries() {
+        let msg = ProtocolMessage::from(EthMessage::<EthNetworkPrimitives>::BlockAccessLists(
+            RequestPair {
+                request_id: 42,
+                message: BlockAccessLists(vec![None; MAX_BLOCK_ACCESS_LISTS_RESPONSE_ENTRIES + 1]),
+            },
+        ));
+        let encoded = encode(msg);
+        let decoded = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
+            EthVersion::Eth71,
+            &mut &encoded[..],
+        );
+
+        assert!(matches!(decoded, Err(MessageError::RlpError(Error::Custom(_)))));
     }
 
     #[test]

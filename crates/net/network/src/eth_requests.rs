@@ -62,7 +62,8 @@ pub const MAX_BODIES_SERVE: usize = 1024;
 /// Maximum number of block access lists to serve.
 ///
 /// Used to limit lookups.
-pub const MAX_BLOCK_ACCESS_LISTS_SERVE: usize = 1024;
+pub const MAX_BLOCK_ACCESS_LISTS_SERVE: usize =
+    reth_eth_wire::MAX_BLOCK_ACCESS_LISTS_RESPONSE_ENTRIES;
 
 /// Maximum number of cell lookups to serve.
 ///

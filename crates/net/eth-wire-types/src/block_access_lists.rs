@@ -8,6 +8,9 @@ use alloy_rlp::{
 };
 use reth_codecs_derive::add_arbitrary_tests;
 
+/// Maximum number of BAL response entries Reth serves or accepts from peers.
+pub const MAX_BLOCK_ACCESS_LISTS_RESPONSE_ENTRIES: usize = 1024;
+
 /// A request for block access lists from the given block hashes.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -48,6 +51,39 @@ impl Encodable for BlockAccessLists {
         let payload_length =
             self.0.iter().map(|entry| entry.as_ref().map_or(1, |bytes| bytes.len())).sum();
         Header { list: true, payload_length }.length_with_payload()
+    }
+}
+
+impl BlockAccessLists {
+    /// Decodes a response after validating its entry count without allocating.
+    pub(crate) fn decode_with_max_entries(
+        buf: &mut &[u8],
+        max_entries: usize,
+    ) -> alloy_rlp::Result<Self> {
+        let input = *buf;
+        let mut rest = input;
+        let mut payload = Header::decode_bytes(&mut rest, true)?;
+        let raw_length = input.len() - rest.len();
+        let mut entries = 0usize;
+
+        while !payload.is_empty() {
+            if entries >= max_entries {
+                return Err(alloy_rlp::Error::Custom(
+                    "block access lists response exceeds maximum entry count",
+                ))
+            }
+            let item_header = Header::decode(&mut payload)?;
+            payload = &payload[item_header.payload_length..];
+            entries += 1;
+        }
+
+        let mut raw = &input[..raw_length];
+        let decoded = <Self as Decodable>::decode(&mut raw)?;
+        if !raw.is_empty() {
+            return Err(alloy_rlp::Error::UnexpectedLength)
+        }
+        *buf = rest;
+        Ok(decoded)
     }
 }
 
@@ -226,6 +262,48 @@ mod tests {
         let err =
             alloy_rlp::decode_exact::<BlockAccessLists>(&[0xc2, EMPTY_LIST_CODE]).unwrap_err();
         assert!(matches!(err, alloy_rlp::Error::InputTooShort));
+    }
+
+    #[test]
+    fn bounded_decoder_accepts_maximum_entries() {
+        let original = BlockAccessLists(vec![None; MAX_BLOCK_ACCESS_LISTS_RESPONSE_ENTRIES]);
+        let encoded = alloy_rlp::encode(&original);
+        let mut encoded = encoded.as_slice();
+        let decoded = BlockAccessLists::decode_with_max_entries(
+            &mut encoded,
+            MAX_BLOCK_ACCESS_LISTS_RESPONSE_ENTRIES,
+        )
+        .unwrap();
+
+        assert_eq!(decoded, original);
+        assert!(encoded.is_empty());
+    }
+
+    #[test]
+    fn bounded_decoder_rejects_too_many_entries_without_advancing() {
+        let encoded = alloy_rlp::encode(BlockAccessLists(vec![
+            None;
+            MAX_BLOCK_ACCESS_LISTS_RESPONSE_ENTRIES +
+                1
+        ]));
+        let mut input = encoded.as_slice();
+        let err = BlockAccessLists::decode_with_max_entries(
+            &mut input,
+            MAX_BLOCK_ACCESS_LISTS_RESPONSE_ENTRIES,
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, alloy_rlp::Error::Custom(_)));
+        assert_eq!(input, encoded.as_slice());
+    }
+
+    #[test]
+    fn canonical_decoder_does_not_apply_response_policy() {
+        let original = BlockAccessLists(vec![None; MAX_BLOCK_ACCESS_LISTS_RESPONSE_ENTRIES + 1]);
+        let encoded = alloy_rlp::encode(&original);
+        let decoded = alloy_rlp::decode_exact::<BlockAccessLists>(&encoded).unwrap();
+
+        assert_eq!(decoded, original);
     }
 
     #[test]

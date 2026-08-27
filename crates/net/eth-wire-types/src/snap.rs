@@ -5,10 +5,10 @@
 //!
 //! This module implements the snap/2 (EIP-8189) message definitions.
 
-use crate::BlockAccessLists;
+use crate::{BlockAccessLists, MAX_BLOCK_ACCESS_LISTS_RESPONSE_ENTRIES};
 use alloc::vec::Vec;
 use alloy_primitives::{Bytes, B256, KECCAK256_EMPTY, U256};
-use alloy_rlp::{BufMut, Decodable, Encodable, RlpDecodable, RlpEncodable};
+use alloy_rlp::{BufMut, Decodable, Encodable, Header, RlpDecodable, RlpEncodable};
 use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
 use reth_codecs_derive::add_arbitrary_tests;
 
@@ -323,6 +323,19 @@ pub struct BlockAccessListsMessage {
     pub block_access_lists: BlockAccessLists,
 }
 
+impl BlockAccessListsMessage {
+    fn decode_with_max_entries(buf: &mut &[u8], max_entries: usize) -> alloy_rlp::Result<Self> {
+        let mut payload = Header::decode_bytes(buf, true)?;
+        let request_id = u64::decode(&mut payload)?;
+        let block_access_lists =
+            BlockAccessLists::decode_with_max_entries(&mut payload, max_entries)?;
+        if !payload.is_empty() {
+            return Err(alloy_rlp::Error::UnexpectedLength)
+        }
+        Ok(Self { request_id, block_access_lists })
+    }
+}
+
 /// Represents all types of messages in the snap sync protocol.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SnapProtocolMessage {
@@ -498,13 +511,12 @@ impl SnapProtocolMessage {
             GetBlockAccessLists,
             GetBlockAccessListsMessage
         );
-        decode_snap_message_variant!(
-            message_id,
-            buf,
-            SnapMessageId::BlockAccessLists,
-            BlockAccessLists,
-            BlockAccessListsMessage
-        );
+        if message_id == SnapMessageId::BlockAccessLists as u8 {
+            return Ok(Self::BlockAccessLists(BlockAccessListsMessage::decode_with_max_entries(
+                buf,
+                MAX_BLOCK_ACCESS_LISTS_RESPONSE_ENTRIES,
+            )?));
+        }
 
         Err(alloy_rlp::Error::Custom("Unknown message ID"))
     }
@@ -843,6 +855,23 @@ mod tests {
         assert!(matches!(
             SnapProtocolMessage::decode_versioned(SnapVersion::V2, &[0x08, 0xff]),
             Err(SnapProtocolError::Rlp(_))
+        ));
+    }
+
+    #[test]
+    fn decode_versioned_rejects_too_many_block_access_list_response_entries() {
+        let msg = SnapProtocolMessage::BlockAccessLists(BlockAccessListsMessage {
+            request_id: 1,
+            block_access_lists: BlockAccessLists(vec![
+                None;
+                crate::MAX_BLOCK_ACCESS_LISTS_RESPONSE_ENTRIES +
+                    1
+            ]),
+        });
+
+        assert!(matches!(
+            SnapProtocolMessage::decode_versioned(SnapVersion::V2, &msg.encode()),
+            Err(SnapProtocolError::Rlp(alloy_rlp::Error::Custom(_)))
         ));
     }
 
