@@ -93,37 +93,14 @@ pub struct VerifiedStorageRanges {
     ranges: Vec<VerifiedStorageRange>,
     // Where a follow-up resumes, or none when every requested account is complete.
     continuation: Option<StorageRangeContinuation>,
-    // First slot after the final range, unclamped by the requested limit.
-    next_slot: Option<B256>,
     // The request these ranges answer. Retained so a follow-up cannot be built against another.
     request: Box<GetStorageRangesMessage>,
 }
 
 impl VerifiedStorageRanges {
-    /// Ranges in request account order.
-    pub fn ranges(&self) -> &[VerifiedStorageRange] {
-        &self.ranges
-    }
-
     /// Consumes the result and returns the ranges it authenticated.
     pub fn into_ranges(self) -> Vec<VerifiedStorageRange> {
         self.ranges
-    }
-
-    /// Position at which a follow-up request must resume.
-    pub const fn continuation(&self) -> Option<StorageRangeContinuation> {
-        self.continuation
-    }
-
-    /// First slot after the final range, unclamped by the requested limit, or `None` when that
-    /// account's trie was exhausted.
-    pub const fn next_slot(&self) -> Option<B256> {
-        self.next_slot
-    }
-
-    /// The request these ranges answer.
-    pub fn request(&self) -> &GetStorageRangesMessage {
-        &self.request
     }
 
     /// Resumes this response, narrowing `batch` to the accounts the new request covers.
@@ -174,9 +151,9 @@ pub struct VerifiedStorageRange {
     pub slots: Vec<(B256, U256)>,
 }
 
-/// Resume position for an incomplete storage-ranges response.
+// Resume position for an incomplete storage-ranges response.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum StorageRangeContinuation {
+enum StorageRangeContinuation {
     /// The final returned account remains incomplete.
     Partial {
         /// Position in the original account list.
@@ -274,14 +251,12 @@ impl StorageRangeVerifier {
         let proof_index =
             response.slots.len().checked_sub(1).filter(|_| !response.proof.is_empty());
         let mut ranges = Vec::with_capacity(response.slots.len());
-        let mut next_slot = None;
         let mut bounded_next = None;
 
         for (index, slots) in response.slots.iter().enumerate() {
             let proof = if proof_index == Some(index) { response.proof.as_slice() } else { &[] };
             let verified = self.verify_range(index, slots, proof)?;
             ranges.push(verified.range);
-            next_slot = verified.next;
             bounded_next = verified.within_limit;
         }
 
@@ -289,7 +264,6 @@ impl StorageRangeVerifier {
         Ok(StorageRangeOutcome::Verified(VerifiedStorageRanges {
             ranges,
             continuation,
-            next_slot,
             request: Box::new(self.request.clone()),
         }))
     }
@@ -379,7 +353,6 @@ impl StorageRangeVerifier {
         decoded.truncate(decoded.partition_point(|(hash, _)| *hash <= limit));
         Ok(VerifiedRange {
             range: VerifiedStorageRange { account_hash, slots: decoded },
-            next,
             within_limit: next.filter(|next| *next <= limit),
         })
     }
@@ -442,13 +415,11 @@ impl StorageRangeVerifier {
     }
 }
 
-// One account's verified slots and where its trie continues.
+// One account's verified slots and whether it continues within the request limit.
 struct VerifiedRange {
     // The account's slots, once its proof checked out.
     range: VerifiedStorageRange,
-    // First slot after the range, or `None` when the trie was exhausted.
-    next: Option<B256>,
-    // `next` within the requested limit, which is what a follow-up may still ask for.
+    // First slot after the range when it remains within the requested limit.
     within_limit: Option<B256>,
 }
 
@@ -862,10 +833,8 @@ mod tests {
         assert_eq!(verified.follow_up(2, range.batch()).unwrap(), None);
     }
 
-    // A range that stops at the limit is complete for this request but not for the trie, and only
-    // the unclamped next slot tells the two apart.
     #[tokio::test]
-    async fn a_trie_continuing_past_the_limit_is_reported_by_the_next_slot() {
+    async fn a_trie_continuing_past_the_limit_needs_no_follow_up() {
         let all = slots(&[(key(1), 11), (key(2), 12), (key(3), 13)]);
         let (root, proof) = storage_root(&all, &[B256::ZERO, key(2)]);
         let accounts = vec![(key(100), account(root))];
@@ -881,9 +850,9 @@ mod tests {
         let outcome = downloader(Arc::clone(&client), bounded, &accounts).unwrap().await.unwrap();
 
         let StorageRangeOutcome::Verified(verified) = outcome else { panic!("verified ranges") };
-        assert_eq!(verified.ranges[0].slots, all[..2]);
-        assert_eq!(verified.continuation, None);
-        assert_eq!(verified.next_slot, Some(key(3)));
+        let range = verified_range(&accounts);
+        assert_eq!(verified.follow_up(2, range.batch()).unwrap(), None);
+        assert_eq!(verified.into_ranges()[0].slots, all[..2]);
     }
 
     #[tokio::test]
