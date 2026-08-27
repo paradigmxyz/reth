@@ -56,6 +56,13 @@ impl<C: SnapClient> StorageRangeDownloader<C> {
         if request.account_hashes.is_empty() {
             return Err(InvalidStorageRangeRequest::NoAccounts)
         }
+        // Servers disagree on whether a finite limit applies only to the first account or every
+        // account, so the final proof cannot be assigned reliably for this request shape.
+        if request.account_hashes.len() > 1 && origin == B256::ZERO && limit != MAX_HASH {
+            return Err(InvalidStorageRangeRequest::LimitedMultipleAccounts {
+                accounts: request.account_hashes.len(),
+            })
+        }
         batch.verify_batch(&request)?;
         let mut storage_roots = Vec::with_capacity(batch.accounts().len());
         for (index, (account_hash, account)) in batch.accounts().iter().enumerate() {
@@ -200,6 +207,12 @@ pub enum InvalidStorageRangeRequest {
     /// No account was requested.
     #[error("storage range request contains no accounts")]
     NoAccounts,
+    /// A finite limit with a zero origin was requested for multiple accounts.
+    #[error("limited storage range request contains {accounts} accounts")]
+    LimitedMultipleAccounts {
+        /// Number of requested accounts.
+        accounts: usize,
+    },
     /// The inclusive bounds are reversed.
     #[error("storage range origin {origin} exceeds limit {limit}")]
     ReversedBounds {
@@ -894,22 +907,24 @@ mod tests {
         assert_eq!(origins, vec![B256::ZERO, key(2), key(3)]);
     }
 
-    // The bounds apply to the first account only; the rest are requested as whole tries, which is
-    // what the Snap servers do, so a limited request may still carry several accounts.
+    // A non-zero origin makes the first account unambiguously partial, so servers stop there and
+    // the shared proof can still be assigned to it.
     #[test]
-    fn a_limited_request_may_carry_several_accounts() {
+    fn a_zero_origin_limited_request_must_not_carry_several_accounts() {
         let accounts = vec![
             (key(100), account(B256::repeat_byte(0xaa))),
             (key(200), account(B256::repeat_byte(0xbb))),
         ];
         // Accepted requests are submitted on construction, so the client must have replies ready.
-        let client = TestSnapClient::new(
-            (0..2).map(|_| response(PeerId::random(), 1, vec![Vec::new()], Vec::new())),
-        );
+        let client =
+            TestSnapClient::new([response(PeerId::random(), 1, vec![Vec::new()], Vec::new())]);
 
         let mut bounded = request(&accounts);
         bounded.limit_hash = key(5).into();
-        assert!(downloader(&client, bounded.clone(), &accounts).is_ok());
+        assert_eq!(
+            downloader(&client, bounded.clone(), &accounts).unwrap_err(),
+            InvalidStorageRangeRequest::LimitedMultipleAccounts { accounts: 2 }
+        );
 
         bounded.starting_hash = key(1).into();
         assert!(downloader(&client, bounded, &accounts).is_ok());
