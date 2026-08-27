@@ -113,8 +113,8 @@ impl<N: NodePrimitives> OverlayManager<N> {
         P: DBProvider
             + ChangeSetReader
             + StorageChangeSetReader
-            + PruneCheckpointReader
             + StageCheckpointReader
+            + PruneCheckpointReader
             + BlockNumReader
             + StorageSettingsCache,
     {
@@ -138,6 +138,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
         P: DBProvider
             + ChangeSetReader
             + StorageChangeSetReader
+            + StageCheckpointReader
             + PruneCheckpointReader
             + BlockNumReader
             + StorageSettingsCache,
