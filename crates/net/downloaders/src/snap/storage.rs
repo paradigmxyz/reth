@@ -59,6 +59,15 @@ impl<C: SnapClient> StorageRangeDownloader<C> {
         if request.account_hashes.is_empty() {
             return Err(InvalidStorageRangeRequest::NoAccounts)
         }
+        // Only the first account is verified against the request bounds. An origin tells a
+        // responder to stop after that account; a bare limit does not, so it must not be paired
+        // with accounts whose ranges would then be checked as whole tries.
+        if origin == B256::ZERO && limit < MAX_HASH && request.account_hashes.len() > 1 {
+            return Err(InvalidStorageRangeRequest::UnboundedBatchWithLimit {
+                limit,
+                accounts: request.account_hashes.len(),
+            })
+        }
         if request.account_hashes.len() != accounts.len() {
             return Err(InvalidStorageRangeRequest::AccountCount {
                 requested: request.account_hashes.len(),
@@ -192,6 +201,14 @@ pub enum StorageRangeContinuation {
 /// A storage request that does not match its authenticated accounts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum InvalidStorageRangeRequest {
+    /// The request limits its first account but asks for more than one.
+    #[error("storage range limited to {limit} requests {accounts} accounts, but only the first is bounded")]
+    UnboundedBatchWithLimit {
+        /// Inclusive limit the first account was requested to.
+        limit: B256,
+        /// Number of accounts in the request.
+        accounts: usize,
+    },
     /// The request targets a different state root than the one that authenticated the accounts.
     #[error(
         "storage range requests state root {requested}, but accounts are authenticated by {authenticated}"
@@ -971,5 +988,34 @@ mod tests {
 
         assert_eq!(collected, all);
         assert_eq!(origins, vec![B256::ZERO, key(2), key(3)]);
+    }
+
+    // Only the first account is checked against the limit, so a limit without an origin cannot be
+    // paired with accounts a responder might apply it to as well.
+    #[test]
+    fn a_limit_without_an_origin_is_refused_for_more_than_one_account() {
+        let accounts =
+            vec![(key(100), account(EMPTY_ROOT_HASH)), (key(200), account(EMPTY_ROOT_HASH))];
+        // Accepted requests are submitted on construction, so the client must have replies ready.
+        let client = TestSnapClient::new(
+            (0..2).map(|_| response(PeerId::random(), 1, vec![Vec::new()], Vec::new())),
+        );
+
+        let mut bounded = request(&accounts);
+        bounded.limit_hash = key(5).into();
+        assert_eq!(
+            downloader(&client, bounded.clone(), &accounts).unwrap_err(),
+            InvalidStorageRangeRequest::UnboundedBatchWithLimit { limit: key(5), accounts: 2 }
+        );
+
+        // An origin tells the responder to stop after the first account, so the batch is fine.
+        let mut resumed = bounded.clone();
+        resumed.starting_hash = key(1).into();
+        assert!(downloader(&client, resumed, &accounts).is_ok());
+
+        // A single account is bounded by the request itself.
+        let mut single = bounded;
+        single.account_hashes.truncate(1);
+        assert!(downloader(&client, single, &accounts[..1]).is_ok());
     }
 }
