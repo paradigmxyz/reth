@@ -653,6 +653,9 @@ impl<T> OverlayCache<T> {
     }
 
     /// Removes and returns a ready entry.
+    ///
+    /// Transferring a parent entry lets `Arc::make_mut` extend it in place when no caller retains
+    /// it. Keeping the cache entry would otherwise guarantee a clone.
     fn take_ready(&self, key: &OverlayCacheKey) -> Option<Arc<T>> {
         let (_, entry) =
             self.entries.remove_if(key, |_, entry| matches!(entry, OverlayCacheEntry::Ready(_)))?;
