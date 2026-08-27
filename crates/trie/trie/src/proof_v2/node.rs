@@ -148,7 +148,7 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
     /// - If the given len is longer than the short key
     pub(crate) fn trim_short_key_prefix(&mut self, len: usize) {
         match self {
-            Self::Leaf { short_key, .. } => {
+            Self::Leaf { short_key, .. } | Self::RlpNode { short_key, .. } => {
                 *short_key = trim_nibbles_prefix(short_key, len);
             }
             Self::Branch { node: BranchNodeV2 { key, branch_rlp_node, .. }, .. } => {
@@ -156,9 +156,6 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
                 if key.is_empty() {
                     *branch_rlp_node = None;
                 }
-            }
-            Self::RlpNode { short_key, .. } => {
-                *short_key = trim_nibbles_prefix(short_key, len);
             }
         }
     }
