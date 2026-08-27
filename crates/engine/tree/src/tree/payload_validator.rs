@@ -321,8 +321,9 @@ where
         + StateReader
         + Clone
         + 'static,
-    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
-        + Clone
+    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
+            Provider: TrieCursorFactory + HashedCursorFactory + StateProvider + Send,
+        > + Clone
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
@@ -603,7 +604,7 @@ where
         let provider_factory = self.provider.clone();
         let overlay_builder = ctx.state().tree_state.overlay_manager.overlay_builder(parent_hash);
         let overlay_factory = OverlayStateProviderFactory::new(provider_factory, overlay_builder);
-        let execution_overlay_factory = OverlayStateProviderFactory::new_execution(
+        let execution_overlay_factory = OverlayStateProviderFactory::new(
             self.provider.clone(),
             ctx.state().tree_state.overlay_manager.overlay_builder(parent_hash),
         );
@@ -1810,8 +1811,9 @@ where
         + ChangeSetReader
         + Clone
         + 'static,
-    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
-        + Clone
+    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
+            Provider: TrieCursorFactory + HashedCursorFactory + StateProvider + Send,
+        > + Clone
         + 'static,
     N: NodePrimitives,
     V: PayloadValidator<Types, Block = N::Block> + Clone,

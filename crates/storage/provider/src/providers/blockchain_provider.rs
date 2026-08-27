@@ -153,7 +153,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         &self,
         state: &BlockState<N::Primitives>,
     ) -> ProviderResult<StateProviderBox> {
-        let overlay_factory = OverlayStateProviderFactory::new_execution(
+        let overlay_factory = OverlayStateProviderFactory::new(
             self.database.clone(),
             self.database.overlay_manager().overlay_builder(state.hash()),
         );
