@@ -960,11 +960,11 @@ mod tests {
             let code_hash = B256::with_last_byte(id + 64);
             assert_eq!(overlay.accounts()[&address].as_ref().unwrap().nonce, id as u64);
             assert_eq!(overlay.accounts()[&address].as_ref().unwrap().account_id, None);
-            assert_eq!(overlay.storage[&address][&U256::from(id)], U256::from(id));
-            assert_eq!(overlay.code_hashes[&code_hash], Bytecode::new_raw(vec![id].into()));
+            assert_eq!(overlay.storage()[&address][&U256::from(id)], U256::from(id));
+            assert_eq!(overlay.code_hashes()[&code_hash], Bytecode::new_raw(vec![id].into()));
         }
         assert_eq!(
-            overlay.block_hashes,
+            overlay.block_hashes(),
             blocks[..=2].iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(),
         );
 

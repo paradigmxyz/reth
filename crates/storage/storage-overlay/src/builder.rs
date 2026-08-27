@@ -52,19 +52,34 @@ impl StateTrieOverlay {
 #[derive(Clone, Debug, Default)]
 pub struct ExecutionOverlay {
     /// In-memory block hashes in ascending block-number order.
-    pub block_hashes: Vec<BlockNumHash>,
+    block_hashes: Vec<BlockNumHash>,
     /// Account state by address, without database-context-local [`AccountInfo::account_id`] hints.
     accounts: AddressMap<Option<AccountInfo>>,
     /// Storage values by address and slot.
-    pub storage: AddressMap<U256Map<U256>>,
+    storage: AddressMap<U256Map<U256>>,
     /// Bytecode by code hash.
-    pub code_hashes: B256Map<Bytecode>,
+    code_hashes: B256Map<Bytecode>,
 }
 
 impl ExecutionOverlay {
+    /// Returns the in-memory block hashes in ascending block-number order.
+    pub const fn block_hashes(&self) -> &[BlockNumHash] {
+        self.block_hashes.as_slice()
+    }
+
     /// Returns the account state by address.
     pub const fn accounts(&self) -> &AddressMap<Option<AccountInfo>> {
         &self.accounts
+    }
+
+    /// Returns the storage values by address and slot.
+    pub const fn storage(&self) -> &AddressMap<U256Map<U256>> {
+        &self.storage
+    }
+
+    /// Returns the bytecode by code hash.
+    pub const fn code_hashes(&self) -> &B256Map<Bytecode> {
+        &self.code_hashes
     }
 
     /// Extends this overlay with the execution state of a later block.
