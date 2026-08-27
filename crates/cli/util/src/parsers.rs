@@ -102,18 +102,75 @@ pub fn read_json_from_file<T: serde::de::DeserializeOwned>(path: &str) -> Result
 /// Parses an ether value from a string.
 ///
 /// The amount in eth like "1.05" will be interpreted in wei (1.05 * 1e18).
-/// Supports both decimal and integer inputs.
+/// Supports integer, decimal, and scientific notation.
 ///
 /// # Examples
 /// - "1.05" -> 1.05 ETH = 1.05 * 10^18 wei
 /// - "2" -> 2 ETH = 2 * 10^18 wei
+/// - "1e-3" -> 0.001 ETH = 10^15 wei
 pub fn parse_ether_value(value: &str) -> eyre::Result<u128> {
-    let eth = value.parse::<f64>()?;
-    if eth.is_sign_negative() {
-        return Err(eyre::eyre!("Ether value cannot be negative"))
+    if value.starts_with('-') {
+        eyre::bail!("Ether value cannot be negative");
     }
-    let wei = eth * 1e18;
-    Ok(wei as u128)
+
+    let value = value.strip_prefix('+').unwrap_or(value);
+    let (mantissa, exponent) = if let Some(exponent_index) = value.find(['e', 'E']) {
+        let (mantissa, exponent) = value.split_at(exponent_index);
+        let exponent = exponent[1..]
+            .parse::<i64>()
+            .map_err(|_| eyre::eyre!("Invalid ether value: {value}"))?;
+        (mantissa, exponent)
+    } else {
+        (value, 0)
+    };
+
+    let (integer, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+    if integer.is_empty() && fraction.is_empty() ||
+        !integer.bytes().chain(fraction.bytes()).all(|digit| digit.is_ascii_digit())
+    {
+        eyre::bail!("Invalid ether value: {value}");
+    }
+
+    let mut digits = String::with_capacity(integer.len() + fraction.len());
+    digits.push_str(integer);
+    digits.push_str(fraction);
+
+    if digits.bytes().all(|digit| digit == b'0') {
+        return Ok(0)
+    }
+
+    // Interpret the mantissa as an integer, then account for its decimal places and wei units.
+    let scale = 18i128 + i128::from(exponent) - i128::try_from(fraction.len())?;
+    if scale < 0 {
+        // An ether amount must resolve to a whole number of wei.
+        let Ok(discarded_digits) = usize::try_from(-scale) else {
+            eyre::bail!("Ether value has sub-wei precision");
+        };
+        if discarded_digits >= digits.len() {
+            eyre::bail!("Ether value has sub-wei precision");
+        }
+
+        let retained_digits = digits.len() - discarded_digits;
+        if !digits[retained_digits..].bytes().all(|digit| digit == b'0') {
+            eyre::bail!("Ether value has sub-wei precision");
+        }
+        digits.truncate(retained_digits);
+    }
+
+    let digits = digits.trim_start_matches('0');
+    if digits.is_empty() {
+        return Ok(0)
+    }
+
+    let wei =
+        digits.parse::<u128>().map_err(|_| eyre::eyre!("Ether value exceeds u128::MAX wei"))?;
+    let scale = u32::try_from(scale.max(0))
+        .map_err(|_| eyre::eyre!("Ether value exceeds u128::MAX wei"))?;
+    let multiplier = 10u128
+        .checked_pow(scale)
+        .ok_or_else(|| eyre::eyre!("Ether value exceeds u128::MAX wei"))?;
+
+    wei.checked_mul(multiplier).ok_or_else(|| eyre::eyre!("Ether value exceeds u128::MAX wei"))
 }
 
 #[cfg(test)]
@@ -161,22 +218,41 @@ mod tests {
 
     #[test]
     fn parse_ether_values() {
-        // Test basic decimal value
-        let wei = parse_ether_value("1.05").unwrap();
-        assert_eq!(wei, 1_050_000_000_000_000_000u128);
+        for (value, expected) in [
+            ("0", 0),
+            ("0e-999", 0),
+            ("1.05", 1_050_000_000_000_000_000),
+            ("2", 2_000_000_000_000_000_000),
+            ("+1", 1_000_000_000_000_000_000),
+            (".5", 500_000_000_000_000_000),
+            ("1.", 1_000_000_000_000_000_000),
+            ("1e-3", 1_000_000_000_000_000),
+            ("1E+3", 1_000_000_000_000_000_000_000),
+            ("10e-19", 1),
+            ("0.0000000000000000010", 1),
+            ("1.000000000000000001", 1_000_000_000_000_000_001),
+            ("340282366920938463463.374607431768211455", u128::MAX),
+        ] {
+            assert_eq!(parse_ether_value(value).unwrap(), expected, "failed to parse {value}");
+        }
 
-        // Test integer value
-        let wei = parse_ether_value("2").unwrap();
-        assert_eq!(wei, 2_000_000_000_000_000_000u128);
-
-        // Test zero
-        let wei = parse_ether_value("0").unwrap();
-        assert_eq!(wei, 0);
-
-        // Test negative value fails
-        assert!(parse_ether_value("-1").is_err());
-
-        // Test invalid input fails
-        assert!(parse_ether_value("abc").is_err());
+        for invalid in [
+            "",
+            ".",
+            "-0",
+            "-1",
+            "abc",
+            "NaN",
+            "inf",
+            "1e",
+            "e1",
+            "1.2.3",
+            "1e-19",
+            "0.0000000000000000009",
+            "340282366920938463463.374607431768211456",
+            "441711766194596082395824375185729628956870974218904739530401550323154944",
+        ] {
+            assert!(parse_ether_value(invalid).is_err(), "accepted {invalid}");
+        }
     }
 }
