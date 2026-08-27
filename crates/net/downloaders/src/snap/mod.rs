@@ -104,11 +104,6 @@ impl VerifiedAccountRange {
         &self.accounts
     }
 
-    /// Consumes the range and returns the accounts it authenticated.
-    pub fn into_accounts(self) -> Vec<(B256, TrieAccount)> {
-        self.accounts
-    }
-
     /// Whether another request may be needed to complete the interval.
     ///
     /// Conservative: can be `true` for an interval that is already complete.
