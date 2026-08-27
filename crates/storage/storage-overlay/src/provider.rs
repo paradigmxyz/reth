@@ -353,7 +353,7 @@ mod tests {
         );
 
         let provider = factory.provider().unwrap();
-        let first = overlay_factory.get_overlay(&provider).unwrap();
+        let first = overlay_factory.get_state_trie_overlay(&provider).unwrap();
         assert_eq!(account_keys(&first), vec![B256::with_last_byte(3), B256::with_last_byte(4)]);
         drop(provider);
 
@@ -369,7 +369,7 @@ mod tests {
         provider_rw.commit().unwrap();
 
         let provider = factory.provider().unwrap();
-        let second = overlay_factory.get_overlay(&provider).unwrap();
+        let second = overlay_factory.get_state_trie_overlay(&provider).unwrap();
         assert_eq!(account_keys(&second), vec![B256::with_last_byte(4)]);
         assert_eq!(account_node_paths(&second), vec![Nibbles::from_nibbles([4])]);
         assert_eq!(overlay_factory.overlay_cache.len(), 2);
