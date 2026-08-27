@@ -4,7 +4,8 @@ use crate::tree::payload_processor::bal::BalExecutionError;
 use alloy_consensus::BlockHeader;
 use reth_consensus::ConsensusError;
 pub use reth_engine_primitives::{
-    InsertBlockErrorKind, InsertBlockFatalError, InsertBlockValidationError,
+    BlockAccessListDecodeError, InsertBlockErrorKind, InsertBlockFatalError,
+    InsertBlockProcessingError, InsertBlockValidationError,
 };
 use reth_errors::ProviderError;
 use reth_payload_primitives::NewPayloadError;
