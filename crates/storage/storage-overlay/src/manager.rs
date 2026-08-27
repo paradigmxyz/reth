@@ -264,6 +264,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
         #[cfg(not(feature = "rayon"))]
         let _ = cached_parent_overlays;
 
+        // When a new block is inserted we optimistically and asynchronously flatten an execution overlay for it
         #[cfg(feature = "rayon")]
         {
             let parent_span = span;
