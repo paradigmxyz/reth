@@ -6,7 +6,6 @@ use reth_chainspec::EthereumHardforks;
 use reth_node_api::{BlockTy, FullNodeComponents};
 use reth_node_builder::{rpc::RpcRegistry, NodeTypes};
 use reth_provider::BlockReader;
-use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{
     helpers::{EthApiSpec, EthTransactions, TraceExt},
     EthApiTypes,
@@ -35,7 +34,7 @@ where
         &self,
         hash: B256,
     ) -> eyre::Result<EthereumTxEnvelope<TxEip4844Variant<BlobTransactionSidecarVariant>>> {
-        let tx = self.inner.debug_api().raw_transaction(hash).await?.unwrap();
+        let tx = self.inner.eth_api().raw_transaction_by_hash(hash).await?.unwrap();
         let tx = tx.to_vec();
         Ok(EthereumTxEnvelope::decode_2718(&mut tx.as_ref()).unwrap())
     }

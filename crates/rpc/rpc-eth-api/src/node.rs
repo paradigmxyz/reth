@@ -8,7 +8,7 @@ use reth_node_api::{FullNodeComponents, NodePrimitives, PrimitivesTy};
 use reth_primitives_traits::{BlockTy, HeaderTy, ReceiptTy, TxTy};
 use reth_rpc_eth_types::EthStateCache;
 use reth_storage_api::{
-    BalProvider, BlockReader, BlockReaderIdExt, PruneCheckpointReader, StageCheckpointReader,
+    BalProvider, BlockReaderIdExt, PruneCheckpointReader, StageCheckpointReader,
     StateProviderFactory,
 };
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
@@ -98,7 +98,7 @@ where
 
 /// Additional components, asides the core node components, needed to run `eth_` namespace API
 /// server.
-pub trait RpcNodeCoreExt: RpcNodeCore<Provider: BlockReader> {
+pub trait RpcNodeCoreExt: RpcNodeCore {
     /// Returns handle to RPC cache service.
     fn cache(&self) -> &EthStateCache<Self::Primitives>;
 }

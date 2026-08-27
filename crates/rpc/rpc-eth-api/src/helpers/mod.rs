@@ -44,44 +44,35 @@ pub use subscriptions::EthSubscriptions;
 pub use trace::Trace;
 pub use transaction::{EthTransactions, LoadTransaction};
 
-use crate::FullEthApiTypes;
-
 /// Extension trait that bundles traits needed for tracing transactions.
-pub trait TraceExt:
-    LoadTransaction + LoadBlock + SpawnBlocking + Trace + Call + GetBlockAccessList
-{
-}
+pub trait TraceExt: LoadTransaction + LoadBlock + Trace {}
 
-impl<T> TraceExt for T where T: LoadTransaction + LoadBlock + Trace + Call + GetBlockAccessList {}
+impl<T> TraceExt for T where T: LoadTransaction + LoadBlock + Trace {}
 
 /// Helper trait to unify all `eth` rpc server building block traits, for simplicity.
 ///
 /// This trait is automatically implemented for any type that implements all the `Eth` traits.
 pub trait FullEthApi:
-    FullEthApiTypes
-    + EthApiSpec
+    EthApiSpec
     + EthTransactions
     + EthBlocks
     + EthState
     + EthCall
     + EthFees
     + EthSubscriptions
-    + Trace
     + LoadReceipt
     + GetBlockAccessList
 {
 }
 
 impl<T> FullEthApi for T where
-    T: FullEthApiTypes
-        + EthApiSpec
+    T: EthApiSpec
         + EthTransactions
         + EthBlocks
         + EthState
         + EthCall
         + EthFees
         + EthSubscriptions
-        + Trace
         + LoadReceipt
         + GetBlockAccessList
 {

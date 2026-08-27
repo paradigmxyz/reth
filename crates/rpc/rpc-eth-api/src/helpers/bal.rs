@@ -10,12 +10,12 @@ use reth_rpc_eth_types::{error::FromEthApiError, EthApiError};
 use reth_storage_api::StateProviderFactory;
 
 use crate::{
-    helpers::{Call, LoadBlock, Trace},
-    RpcNodeCore, RpcNodeCoreExt,
+    helpers::{LoadBlock, Trace},
+    RpcNodeCore,
 };
 
 /// Helper trait for `eth_blockAccessList` RPC method.
-pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
+pub trait GetBlockAccessList: Trace + LoadBlock {
     /// Retrieves the block access list for a block identified by its hash.
     fn get_block_access_list(
         &self,

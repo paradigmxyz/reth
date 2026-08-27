@@ -45,8 +45,8 @@ use reth_rpc_api::servers::*;
 use reth_rpc_engine_api::RethEngineApi;
 use reth_rpc_eth_api::{
     helpers::{
-        pending_block::PendingEnvBuilder, Call, EthApiSpec, EthTransactions, LoadPendingBlock,
-        TraceExt,
+        pending_block::PendingEnvBuilder, Call, EthApiSpec, EthTransactions, GetBlockAccessList,
+        LoadPendingBlock, TraceExt,
     },
     node::RpcNodeCoreAdapter,
     EthApiServer, EthApiTypes, FullEthApiServer, FullEthApiTypes, RpcBlock, RpcConvert,
@@ -710,7 +710,7 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn register_debug(&mut self) -> &mut Self
     where
-        EthApi: EthTransactions + TraceExt,
+        EthApi: EthTransactions + TraceExt + GetBlockAccessList,
     {
         let debug_api = self.debug_api();
         self.modules.insert(RethRpcModule::Debug, debug_api.into_rpc().into());

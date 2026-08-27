@@ -1,6 +1,6 @@
 //! Loads a pending block from database. Helper trait for `eth_` call and trace RPC methods.
 
-use super::{Call, LoadBlock, LoadState, LoadTransaction};
+use super::{Call, LoadBlock, LoadTransaction};
 use crate::{FromEthApiError, FromEvmError};
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eip7928::bal::DecodedBal;
@@ -20,7 +20,7 @@ use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use std::sync::Arc;
 
 /// Executes CPU heavy tasks.
-pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
+pub trait Trace: Call {
     /// Executes the [`TxEnvFor`] with [`reth_evm::EvmEnv`] against the given [`StateCacheDb`]
     /// without committing state changes.
     fn inspect<'a>(
