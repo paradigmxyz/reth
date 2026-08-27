@@ -128,6 +128,11 @@ impl ExecutionOverlay {
         self.code_hashes.extend(other.code_hashes.iter().map(|(hash, code)| (*hash, code.clone())));
     }
 
+    /// Removes the database-local account lookup hint before caching account state.
+    ///
+    /// `account_id` indexes the database or BAL context that produced the [`AccountInfo`]. A later
+    /// execution context can assign that ID to a different account, so it must not cross the
+    /// execution-overlay boundary.
     const fn normalized_account_info(mut info: Option<AccountInfo>) -> Option<AccountInfo> {
         if let Some(info) = &mut info {
             info.account_id = None;
