@@ -79,17 +79,53 @@ pub enum AccountRangeOutcome {
 /// A decoded account range authenticated against a state root.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VerifiedAccountRange {
+    /// State root the accounts were authenticated against.
+    pub state_root: B256,
     /// Accounts in strictly increasing hashed-key order.
     pub accounts: Vec<(B256, TrieAccount)>,
-    /// Whether another request may be needed to complete the requested interval.
+    /// Whether another request may be needed to complete the interval.
     ///
-    /// Conservative: [`Self::next`] is only a lower bound when the trie continues inside a
-    /// subtree the proof left unexpanded, so this can be `true` for an interval that is already
-    /// complete.
+    /// Conservative: can be `true` for an interval that is already complete.
     pub has_more: bool,
     /// Authenticated lower bound for the first key after the response, or `None` when the range
     /// exhausted the trie.
     pub next: Option<B256>,
+}
+
+impl VerifiedAccountRange {
+    /// Borrows the accounts together with the root that authenticated them.
+    pub fn batch(&self) -> VerifiedAccountBatch<'_> {
+        VerifiedAccountBatch { state_root: self.state_root, accounts: &self.accounts }
+    }
+}
+
+/// Accounts and the state root they were authenticated against.
+///
+/// Only obtainable from [`VerifiedAccountRange::batch`], so requests built from it can always be
+/// checked against the root the accounts came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VerifiedAccountBatch<'a> {
+    state_root: B256,
+    accounts: &'a [(B256, TrieAccount)],
+}
+
+impl<'a> VerifiedAccountBatch<'a> {
+    /// State root the accounts were authenticated against.
+    pub const fn state_root(&self) -> B256 {
+        self.state_root
+    }
+
+    /// Accounts in the order the range returned them.
+    pub const fn accounts(&self) -> &'a [(B256, TrieAccount)] {
+        self.accounts
+    }
+
+    /// Narrows the batch to the accounts from `index` onwards, keeping their state root.
+    ///
+    /// `None` when `index` is past the end.
+    pub fn from_index(&self, index: usize) -> Option<Self> {
+        self.accounts.get(index..).map(|accounts| Self { state_root: self.state_root, accounts })
+    }
 }
 
 /// An account-range request whose origin exceeds its limit.
@@ -124,6 +160,7 @@ impl SnapVerifier for GetAccountRangeMessage {
         if response.accounts.is_empty() && response.proof.is_empty() {
             return if self.root_hash == EMPTY_ROOT_HASH {
                 Ok(AccountRangeOutcome::Verified(VerifiedAccountRange {
+                    state_root: self.root_hash,
                     accounts: Vec::new(),
                     has_more: false,
                     next: None,
@@ -165,7 +202,7 @@ fn verify_account_range(
     accounts.truncate(accounts.partition_point(|(hash, _)| *hash <= request.limit_hash));
     let has_more = next.is_some_and(|next| next <= request.limit_hash);
 
-    Ok(VerifiedAccountRange { accounts, has_more, next })
+    Ok(VerifiedAccountRange { state_root: request.root_hash, accounts, has_more, next })
 }
 
 // Re-encode decoded accounts so the proof authenticates their canonical trie values.
@@ -273,6 +310,7 @@ mod tests {
         assert_eq!(
             outcome,
             AccountRangeOutcome::Verified(VerifiedAccountRange {
+                state_root: root_hash,
                 accounts,
                 has_more: false,
                 next: None,
@@ -361,6 +399,7 @@ mod tests {
         assert_eq!(
             outcome,
             AccountRangeOutcome::Verified(VerifiedAccountRange {
+                state_root: root_hash,
                 accounts: vec![accounts[0]],
                 has_more: false,
                 next: Some(key(4)),
@@ -417,6 +456,7 @@ mod tests {
         assert_eq!(
             outcome,
             AccountRangeOutcome::Verified(VerifiedAccountRange {
+                state_root: root_hash,
                 accounts: accounts[..2].to_vec(),
                 has_more: false,
                 next: Some(key(3)),
@@ -446,6 +486,7 @@ mod tests {
         assert_eq!(
             outcome,
             AccountRangeOutcome::Verified(VerifiedAccountRange {
+                state_root: root_hash,
                 accounts: Vec::new(),
                 has_more: false,
                 next: None,
@@ -470,6 +511,7 @@ mod tests {
         assert_eq!(
             outcome,
             AccountRangeOutcome::Verified(VerifiedAccountRange {
+                state_root: root_hash,
                 accounts: Vec::new(),
                 has_more: false,
                 next: Some(key(9)),
@@ -498,6 +540,7 @@ mod tests {
         assert_eq!(
             outcome,
             AccountRangeOutcome::Verified(VerifiedAccountRange {
+                state_root: root_hash,
                 accounts: vec![accounts[0]],
                 has_more: false,
                 next: Some(key(9)),
@@ -524,6 +567,7 @@ mod tests {
         assert_eq!(
             outcome,
             AccountRangeOutcome::Verified(VerifiedAccountRange {
+                state_root: root_hash,
                 accounts: vec![accounts[0]],
                 has_more: true,
                 next: Some(key(3)),
