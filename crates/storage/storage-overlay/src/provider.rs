@@ -16,15 +16,25 @@ use reth_storage_api::{
     StateRootProvider, StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
 };
 use reth_trie::{
-    hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
-    trie_cursor::{InMemoryTrieCursor, TrieCursor, TrieCursorFactory, TrieStorageCursor},
+    hashed_cursor::{
+        zero_destroyed_account_storage, HashedCursorFactory, HashedPostStateCursorFactory,
+    },
+    proof::{Proof, StorageProof as TrieStorageProof},
+    trie_cursor::{
+        InMemoryTrieCursor, InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory,
+        TrieStorageCursor,
+    },
     updates::TrieUpdates,
+    witness::TrieWitness,
     AccountProof, ExecutionWitnessMode, HashedPostState, HashedPostStateSorted, HashedStorage,
-    MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    KeccakKeyHasher, MultiProof, MultiProofTargets, StateRoot, StorageMultiProof, StorageProof,
+    StorageRoot, TrieInput, TrieInputSorted,
 };
 use reth_trie_db::{
-    DatabaseAccountTrieCursor, DatabaseHashedCursorFactory, DatabaseStorageTrieCursor,
-    LegacyKeyAdapter, PackedAccountsTrie, PackedKeyAdapter, PackedStoragesTrie,
+    DatabaseAccountTrieCursor, DatabaseHashedCursorFactory, DatabaseProof, DatabaseStateRoot,
+    DatabaseStorageProof, DatabaseStorageRoot, DatabaseStorageTrieCursor,
+    DatabaseTrieCursorFactory, LegacyKeyAdapter, PackedAccountsTrie, PackedKeyAdapter,
+    PackedStoragesTrie,
 };
 use std::{cell::OnceCell, fmt, sync::Arc, time::Instant};
 use tracing::instrument;
@@ -128,7 +138,7 @@ pub struct OverlayStateProvider<'a, Provider, N: NodePrimitives = EthPrimitives>
 }
 
 impl<'a, Provider, N: NodePrimitives> OverlayStateProvider<'a, Provider, N> {
-    fn new(
+    const fn new(
         provider: Provider,
         overlay_builder: OverlayBuilder<N>,
         state_trie_overlay_cache: StateTrieOverlayCache,
@@ -362,73 +372,182 @@ where
     }
 }
 
-impl<Provider, N: NodePrimitives> StateRootProvider for OverlayStateProvider<'_, Provider, N> {
-    fn state_root(&self, _: HashedPostState) -> ProviderResult<B256> {
-        unimplemented!()
+impl<Provider, N: NodePrimitives> StateRootProvider for OverlayStateProvider<'_, Provider, N>
+where
+    Provider: DBProvider + StorageSettingsCache,
+{
+    fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
+        reth_trie_db::with_adapter!(self.provider(), |A| {
+            let sorted = hashed_state.into_sorted();
+            Ok(<DbStateRoot<'_, _, A> as DatabaseStateRoot<_>>::overlay_root(
+                self.provider().tx(),
+                &sorted,
+            )?)
+        })
     }
 
-    fn state_root_from_nodes(&self, _: TrieInput) -> ProviderResult<B256> {
-        unimplemented!()
+    fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256> {
+        reth_trie_db::with_adapter!(self.provider(), |A| {
+            Ok(<DbStateRoot<'_, _, A> as DatabaseStateRoot<_>>::overlay_root_from_nodes(
+                self.provider().tx(),
+                TrieInputSorted::from_unsorted(input),
+            )?)
+        })
     }
 
-    fn state_root_with_updates(&self, _: HashedPostState) -> ProviderResult<(B256, TrieUpdates)> {
-        unimplemented!()
+    fn state_root_with_updates(
+        &self,
+        hashed_state: HashedPostState,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        reth_trie_db::with_adapter!(self.provider(), |A| {
+            let sorted = hashed_state.into_sorted();
+            Ok(<DbStateRoot<'_, _, A> as DatabaseStateRoot<_>>::overlay_root_with_updates(
+                self.provider().tx(),
+                &sorted,
+            )?)
+        })
     }
 
     fn state_root_from_nodes_with_updates(
         &self,
-        _: TrieInput,
+        input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        unimplemented!()
+        reth_trie_db::with_adapter!(self.provider(), |A| {
+            Ok(
+                <DbStateRoot<'_, _, A> as DatabaseStateRoot<_>>::overlay_root_from_nodes_with_updates(
+                    self.provider().tx(),
+                    TrieInputSorted::from_unsorted(input),
+                )?,
+            )
+        })
     }
 }
 
-impl<Provider, N: NodePrimitives> StorageRootProvider for OverlayStateProvider<'_, Provider, N> {
-    fn storage_root(&self, _: Address, _: HashedStorage) -> ProviderResult<B256> {
-        unimplemented!()
+impl<Provider, N: NodePrimitives> StorageRootProvider for OverlayStateProvider<'_, Provider, N>
+where
+    Provider: DBProvider + StorageSettingsCache,
+{
+    fn storage_root(
+        &self,
+        address: Address,
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<B256> {
+        reth_trie_db::with_adapter!(self.provider(), |A| {
+            <DbStorageRoot<'_, _, A>>::overlay_root(self.provider().tx(), address, hashed_storage)
+                .map_err(|err| ProviderError::Database(err.into()))
+        })
     }
 
-    fn storage_proof(&self, _: Address, _: B256, _: HashedStorage) -> ProviderResult<StorageProof> {
-        unimplemented!()
+    fn storage_proof(
+        &self,
+        address: Address,
+        slot: B256,
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<StorageProof> {
+        reth_trie_db::with_adapter!(self.provider(), |A| {
+            <DbStorageProof<'_, _, A>>::overlay_storage_proof(
+                self.provider().tx(),
+                address,
+                slot,
+                hashed_storage,
+            )
+            .map_err(ProviderError::from)
+        })
     }
 
     fn storage_multiproof(
         &self,
-        _: Address,
-        _: &[B256],
-        _: HashedStorage,
+        address: Address,
+        slots: &[B256],
+        hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof> {
-        unimplemented!()
+        reth_trie_db::with_adapter!(self.provider(), |A| {
+            <DbStorageProof<'_, _, A>>::overlay_storage_multiproof(
+                self.provider().tx(),
+                address,
+                slots,
+                hashed_storage,
+            )
+            .map_err(ProviderError::from)
+        })
     }
 }
 
-impl<Provider, N: NodePrimitives> StateProofProvider for OverlayStateProvider<'_, Provider, N> {
-    fn proof(&self, _: TrieInput, _: Address, _: &[B256]) -> ProviderResult<AccountProof> {
-        unimplemented!()
+impl<Provider, N: NodePrimitives> StateProofProvider for OverlayStateProvider<'_, Provider, N>
+where
+    Provider: DBProvider + StorageSettingsCache,
+{
+    fn proof(
+        &self,
+        input: TrieInput,
+        address: Address,
+        slots: &[B256],
+    ) -> ProviderResult<AccountProof> {
+        reth_trie_db::with_adapter!(self.provider(), |A| {
+            let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.provider().tx());
+            proof.overlay_account_proof(input, address, slots).map_err(ProviderError::from)
+        })
     }
 
-    fn multiproof(&self, _: TrieInput, _: MultiProofTargets) -> ProviderResult<MultiProof> {
-        unimplemented!()
+    fn multiproof(
+        &self,
+        input: TrieInput,
+        targets: MultiProofTargets,
+    ) -> ProviderResult<MultiProof> {
+        reth_trie_db::with_adapter!(self.provider(), |A| {
+            let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.provider().tx());
+            proof.overlay_multiproof(input, targets).map_err(ProviderError::from)
+        })
     }
 
     fn witness(
         &self,
-        _: TrieInput,
-        _: HashedPostState,
-        _: ExecutionWitnessMode,
+        input: TrieInput,
+        target: HashedPostState,
+        mode: ExecutionWitnessMode,
     ) -> ProviderResult<Vec<alloy_primitives::Bytes>> {
-        unimplemented!()
+        reth_trie_db::with_adapter!(self.provider(), |A| {
+            let nodes_sorted = input.nodes.into_sorted();
+            let state_sorted = input.state.into_sorted();
+            let witness = TrieWitness::new(
+                InMemoryTrieCursorFactory::new(
+                    DatabaseTrieCursorFactory::<_, A>::new(self.provider().tx()),
+                    &nodes_sorted,
+                ),
+                HashedPostStateCursorFactory::new(
+                    DatabaseHashedCursorFactory::new(self.provider().tx()),
+                    &state_sorted,
+                ),
+            )
+            .with_prefix_sets_mut(input.prefix_sets)
+            .with_execution_witness_mode(mode);
+            let witness =
+                if mode.is_canonical() { witness } else { witness.always_include_root_node() };
+            let mut values: Vec<_> = witness.compute(target)?.into_values().collect();
+            if mode.is_canonical() {
+                values.sort_unstable();
+            }
+            Ok(values)
+        })
     }
 }
 
-impl<Provider, N: NodePrimitives> HashedPostStateProvider
-    for OverlayStateProvider<'_, Provider, N>
+impl<Provider, N: NodePrimitives> HashedPostStateProvider for OverlayStateProvider<'_, Provider, N>
+where
+    Provider: DBProvider,
 {
     fn hashed_post_state(
         &self,
-        _: &revm::database::BundleState,
+        bundle_state: &revm::database::BundleState,
     ) -> ProviderResult<HashedPostState> {
-        unimplemented!()
+        let mut hashed_state =
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state());
+        zero_destroyed_account_storage(
+            &DatabaseHashedCursorFactory::new(self.provider().tx()),
+            bundle_state.state(),
+            &mut hashed_state,
+        )?;
+        Ok(hashed_state)
     }
 }
 
@@ -594,6 +713,18 @@ pub(crate) struct OverlayStateProviderFactoryMetrics {
 
 type StateTrieOverlayCache = Arc<DashMap<(BlockHash, BlockHash), StateTrieOverlay>>;
 type ExecutionOverlayCache = Arc<DashMap<(BlockHash, BlockHash), Arc<ExecutionOverlay>>>;
+
+type DbStateRoot<'a, TX, A> =
+    StateRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
+type DbStorageRoot<'a, TX, A> =
+    StorageRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
+type DbStorageProof<'a, TX, A> = TrieStorageProof<
+    'static,
+    DatabaseTrieCursorFactory<&'a TX, A>,
+    DatabaseHashedCursorFactory<&'a TX>,
+>;
+type DbProof<'a, TX, A> =
+    Proof<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
 
 enum ProviderSource<'a, Provider> {
     Owned(Provider),
