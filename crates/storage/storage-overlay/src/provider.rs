@@ -26,11 +26,7 @@ use reth_trie_db::{
     DatabaseAccountTrieCursor, DatabaseHashedCursorFactory, DatabaseStorageTrieCursor,
     LegacyKeyAdapter, PackedAccountsTrie, PackedKeyAdapter, PackedStoragesTrie,
 };
-use std::{
-    fmt,
-    sync::{Arc, OnceLock},
-    time::Instant,
-};
+use std::{cell::OnceCell, fmt, sync::Arc, time::Instant};
 use tracing::instrument;
 
 /// Factory for creating overlay state providers with optional reverts and overlays.
@@ -126,8 +122,8 @@ pub struct OverlayStateProvider<'a, Provider, N: NodePrimitives = EthPrimitives>
     state_trie_overlay_cache: StateTrieOverlayCache,
     execution_overlay_cache: ExecutionOverlayCache,
     metrics: OverlayStateProviderFactoryMetrics,
-    state_trie_overlay: OnceLock<StateTrieOverlay>,
-    execution_overlay: OnceLock<Arc<ExecutionOverlay>>,
+    state_trie_overlay: OnceCell<StateTrieOverlay>,
+    execution_overlay: OnceCell<Arc<ExecutionOverlay>>,
     is_v2: bool,
 }
 
@@ -146,8 +142,8 @@ impl<'a, Provider, N: NodePrimitives> OverlayStateProvider<'a, Provider, N> {
             state_trie_overlay_cache,
             execution_overlay_cache,
             metrics,
-            state_trie_overlay: OnceLock::new(),
-            execution_overlay: OnceLock::new(),
+            state_trie_overlay: OnceCell::new(),
+            execution_overlay: OnceCell::new(),
             is_v2,
         }
     }
@@ -163,8 +159,8 @@ impl<'a, Provider, N: NodePrimitives> OverlayStateProvider<'a, Provider, N> {
             state_trie_overlay_cache: Default::default(),
             execution_overlay_cache: Default::default(),
             metrics: Default::default(),
-            state_trie_overlay: OnceLock::from(state_trie_overlay),
-            execution_overlay: OnceLock::new(),
+            state_trie_overlay: OnceCell::from(state_trie_overlay),
+            execution_overlay: OnceCell::new(),
             is_v2,
         }
     }
@@ -181,8 +177,8 @@ impl<'a, Provider, N: NodePrimitives> OverlayStateProvider<'a, Provider, N> {
             state_trie_overlay_cache: Default::default(),
             execution_overlay_cache: Default::default(),
             metrics: Default::default(),
-            state_trie_overlay: OnceLock::new(),
-            execution_overlay: OnceLock::from(execution_overlay),
+            state_trie_overlay: OnceCell::new(),
+            execution_overlay: OnceCell::from(execution_overlay),
             is_v2,
         }
     }
