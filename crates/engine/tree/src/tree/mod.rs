@@ -6,9 +6,8 @@ use crate::{
     tree::{error::InsertPayloadError, payload_validator::TreeCtx},
 };
 use alloy_consensus::BlockHeader;
-use alloy_eip7928::bal::RawBal;
 use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS, BlockNumHash, NumHash};
-use alloy_primitives::{map::B256Map, Bytes, B256};
+use alloy_primitives::{map::B256Map, B256};
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
@@ -30,7 +29,7 @@ use reth_network_p2p::full_block::SealedBlockWithAccessList;
 use reth_payload_builder::{BuildNewPayload, PayloadBuilderHandle, PayloadBuilderLease};
 use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadAttributes, PayloadTypes};
 use reth_primitives_traits::{
-    Block, FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
+    FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
 use reth_provider::{
     BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockNumReader, BlockReader,
@@ -977,7 +976,7 @@ where
         let parent_hash = payload.parent_hash();
         let num_hash = payload.num_hash();
 
-        match self.convert_payload_to_block_with_access_list(payload) {
+        match self.payload_validator.convert_payload_to_block(payload) {
             // if the block is well-formed, buffer it for later
             Ok(block) => {
                 if let Err(error) = self.buffer_block(block) {
@@ -2755,13 +2754,12 @@ where
     /// Pre-validates the block and inserts it into the buffer.
     fn buffer_block(
         &mut self,
-        block: SealedBlockWithAccessList<N::Block>,
+        block: SealedBlock<N::Block>,
     ) -> Result<(), InsertBlockError<N::Block>> {
         if let Err(err) = self.validate_block(&block) {
-            let (block, _) = block.split();
             return Err(InsertBlockError::consensus_error(err, block))
         }
-        self.state.buffer.insert_block(block);
+        self.state.buffer.insert_block(block.into());
         Ok(())
     }
 
@@ -3144,7 +3142,7 @@ where
             payload.block_with_parent(),
             payload,
             |validator, payload, ctx| validator.validate_payload(payload, ctx),
-            |this, payload| Ok(this.convert_payload_to_block_with_access_list(payload)?),
+            |this, payload| Ok(this.payload_validator.convert_payload_to_block(payload)?.into()),
         )
     }
 
@@ -3158,18 +3156,6 @@ where
             |validator, block, ctx| validator.validate_block(block, ctx),
             |_, block| Ok(block),
         )
-    }
-
-    /// Converts the payload into a block, retaining the payload's access list if it matches the
-    /// header's commitment.
-    fn convert_payload_to_block_with_access_list(
-        &self,
-        payload: T::ExecutionData,
-    ) -> Result<SealedBlockWithAccessList<N::Block>, NewPayloadError> {
-        let access_list = payload.block_access_list().cloned();
-        let block = self.payload_validator.convert_payload_to_block(payload)?;
-        let access_list = seal_access_list(&block, access_list);
-        Ok(SealedBlockWithAccessList::new(block, access_list))
     }
 
     /// Inserts a block or payload into the blockchain tree with full execution.
@@ -3776,18 +3762,4 @@ pub trait WaitForCaches {
     ///
     /// Returns the time spent waiting for each cache separately.
     fn wait_for_caches(&self) -> CacheWaitDurations;
-}
-
-/// Seals the raw access list against the block's header commitment.
-///
-/// Returns `None` if the block has no access list hash, no access list is given, or the access
-/// list doesn't match the header commitment. A mismatch is not an error here because it is
-/// rejected during block validation.
-fn seal_access_list<B: Block>(
-    block: &SealedBlock<B>,
-    access_list: Option<Bytes>,
-) -> Option<RawBal> {
-    let expected = block.header().block_access_list_hash()?;
-    let raw = RawBal::from(access_list?);
-    raw.ensure_hash(expected).is_ok().then_some(raw)
 }
