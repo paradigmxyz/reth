@@ -600,14 +600,10 @@ where
         // Get an iterator over the transactions in the payload
         let txs = self.tx_iterator_for(&input)?;
 
-        // Create overlay factory for state-root tasks that need multiproofs.
+        // Share one overlay factory between state-root tasks and EVM execution.
         let provider_factory = self.provider.clone();
         let overlay_builder = ctx.state().tree_state.overlay_manager.overlay_builder(parent_hash);
         let overlay_factory = OverlayStateProviderFactory::new(provider_factory, overlay_builder);
-        let execution_overlay_factory = OverlayStateProviderFactory::new(
-            self.provider.clone(),
-            ctx.state().tree_state.overlay_manager.overlay_builder(parent_hash),
-        );
 
         let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
 
@@ -619,7 +615,7 @@ where
                 &env,
                 &parent_block,
                 provider_builder.clone(),
-                overlay_factory,
+                overlay_factory.clone(),
                 &self.config,
                 parallel_bal_execution,
                 ctx.state_mut(),
@@ -680,7 +676,7 @@ where
         // The second parameter `instrument_state_provider` controls whether we should
         // instrument the state provider with metrics.
         let make_state_provider = |fill_on_miss: bool| -> ProviderResult<StateProviderBox> {
-            let provider = execution_overlay_factory.database_provider_ro()?;
+            let provider = overlay_factory.database_provider_ro()?;
             let mut provider = if let Some((caches, cache_metrics)) = &execution_cache {
                 let fill_mode = if fill_on_miss {
                     CacheFillMode::FillOnMiss
