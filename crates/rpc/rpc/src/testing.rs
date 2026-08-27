@@ -23,9 +23,8 @@ use alloy_primitives::{
 };
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{
-    BlobsBundleV2, ExecutionData, ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6,
-    ExecutionPayloadSidecar, ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState,
-    PayloadAttributes, PraguePayloadFields,
+    BlobsBundleV2, ExecutionData, ExecutionPayloadEnvelopeV6, ExecutionPayloadSidecar,
+    ExecutionPayloadV4, ForkchoiceState, PayloadAttributes, PraguePayloadFields,
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
@@ -297,6 +296,7 @@ where
             .await?;
         let fees = payload.fees();
         let requests = payload.requests().unwrap_or_default();
+        let block_access_list = payload.block_access_list().cloned().unwrap_or_default();
         let block = Arc::unwrap_or_clone(payload.into_block_arc());
         let block_hash = block.hash();
         let block = block.into_block().into_ethereum_block();
@@ -305,7 +305,7 @@ where
             execution_payload: ExecutionPayloadV4::from_block_unchecked_with_bal(
                 block_hash,
                 &block,
-                *payload.block_access_list().unwrap_or_default(),
+                block_access_list,
             ),
             block_value: fees,
             blobs_bundle: BlobsBundleV2::empty(),
