@@ -846,7 +846,8 @@ fn extend_execution_overlay<N: NodePrimitives>(
     let (accounts, storage, code_hashes) =
         (&mut overlay.accounts, &mut overlay.storage, &mut overlay.code_hashes);
 
-    let extend_state = || {
+    #[allow(unused_mut)]
+    let mut extend_state = || {
         for (address, account) in state.state() {
             accounts.insert(*address, account.info.clone());
             let account_storage = storage.entry(*address).or_default();
@@ -855,7 +856,8 @@ fn extend_execution_overlay<N: NodePrimitives>(
             }
         }
     };
-    let extend_code_hashes = || {
+    #[allow(unused_mut)]
+    let mut extend_code_hashes = || {
         code_hashes.extend(state.contracts.iter().map(|(hash, code)| (*hash, code.clone())));
     };
 
