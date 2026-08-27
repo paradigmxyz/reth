@@ -2273,8 +2273,8 @@ where
                     return None
                 }
 
-                if canonical_head_number.saturating_sub(prev_db_tip) <=
-                    self.config.persistence_threshold()
+                if self.canonical_in_memory_state.canonical_chain().count() <=
+                    self.config.persistence_threshold() as usize
                 {
                     return None
                 }
