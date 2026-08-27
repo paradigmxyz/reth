@@ -812,13 +812,13 @@ fn compute_execution_overlay_inner<N: NodePrimitives>(
     let overlay = match input {
         ComputeOverlayInput::ExtendCached { block, parent_input } => {
             let mut parent_input = parent_input;
-            extend_execution_overlay(Arc::make_mut(&mut parent_input), &block);
+            Arc::make_mut(&mut parent_input).extend_block(&block);
             Arc::try_unwrap(parent_input).expect("Arc::make_mut leaves the child overlay unique")
         }
         ComputeOverlayInput::MergeBlocks(blocks) => {
             let mut overlay = ExecutionOverlay::default();
             for block in blocks.iter().rev() {
-                extend_execution_overlay(&mut overlay, block);
+                overlay.extend_block(block);
             }
             overlay
         }
@@ -839,40 +839,6 @@ fn compute_execution_overlay_inner<N: NodePrimitives>(
     overlay
 }
 
-fn extend_execution_overlay<N: NodePrimitives>(
-    overlay: &mut ExecutionOverlay,
-    block: &ExecutedBlock<N>,
-) {
-    overlay.block_hashes.push(block.recovered_block().num_hash());
-    let state = &block.execution_output.state;
-    let (accounts, storage, code_hashes) =
-        (&mut overlay.accounts, &mut overlay.storage, &mut overlay.code_hashes);
-
-    #[allow(unused_mut)]
-    let mut extend_state = || {
-        for (address, account) in state.state() {
-            accounts.insert(*address, account.info.clone());
-            let account_storage = storage.entry(*address).or_default();
-            for (slot, value) in &account.storage {
-                account_storage.insert(*slot, value.present_value);
-            }
-        }
-    };
-    #[allow(unused_mut)]
-    let mut extend_code_hashes = || {
-        code_hashes.extend(state.contracts.iter().map(|(hash, code)| (*hash, code.clone())));
-    };
-
-    #[cfg(feature = "rayon")]
-    rayon::join(extend_state, extend_code_hashes);
-
-    #[cfg(not(feature = "rayon"))]
-    {
-        extend_state();
-        extend_code_hashes();
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -883,7 +849,11 @@ mod tests {
     #[cfg(feature = "rayon")]
     use reth_tasks::WorkerPool;
     use reth_trie::{updates::TrieUpdatesSorted, ComputedTrieData, HashedPostState, HashedStorage};
-    use revm::{bytecode::Bytecode, database::BundleState, state::AccountInfo};
+    use revm::{
+        bytecode::Bytecode,
+        database::BundleState,
+        state::{AccountId, AccountInfo},
+    };
     use std::{
         sync::{mpsc, Arc},
         thread,
@@ -909,7 +879,12 @@ mod tests {
         let state = BundleState::builder(block.block_number()..=block.block_number())
             .state_present_account_info(
                 address,
-                AccountInfo { nonce: id as u64, balance: U256::from(id), ..Default::default() },
+                AccountInfo {
+                    nonce: id as u64,
+                    balance: U256::from(id),
+                    account_id: AccountId::new(id as usize),
+                    ..Default::default()
+                },
             )
             .state_storage(address, HashMap::from_iter([(slot, (U256::ZERO, U256::from(id)))]))
             .contract(code_hash, Bytecode::new_raw(vec![id].into()))
@@ -983,7 +958,8 @@ mod tests {
         for id in 1..=3 {
             let address = Address::with_last_byte(id);
             let code_hash = B256::with_last_byte(id + 64);
-            assert_eq!(overlay.accounts[&address].as_ref().unwrap().nonce, id as u64);
+            assert_eq!(overlay.accounts()[&address].as_ref().unwrap().nonce, id as u64);
+            assert_eq!(overlay.accounts()[&address].as_ref().unwrap().account_id, None);
             assert_eq!(overlay.storage[&address][&U256::from(id)], U256::from(id));
             assert_eq!(overlay.code_hashes[&code_hash], Bytecode::new_raw(vec![id].into()));
         }
@@ -1001,7 +977,7 @@ mod tests {
         let short = manager
             .execution_overlay_for_parent(blocks[2].recovered_block().hash(), short_anchor)
             .unwrap();
-        assert_eq!(short.accounts.len(), 1);
+        assert_eq!(short.accounts().len(), 1);
     }
 
     #[test]
@@ -1063,9 +1039,14 @@ mod tests {
         assert!(!manager.state_trie_overlays.entries.contains_key(&parent_key));
         assert!(!manager.execution_overlays.entries.contains_key(&parent_key));
         assert_eq!(state_parent.state.accounts.len(), 2);
-        assert_eq!(execution_parent.accounts.len(), 2);
+        assert_eq!(execution_parent.accounts().len(), 2);
         assert_eq!(child_state.accounts.len(), 3);
-        assert_eq!(child_execution.accounts.len(), 3);
+        assert_eq!(child_execution.accounts().len(), 3);
+        assert!(child_execution
+            .accounts()
+            .values()
+            .flatten()
+            .all(|account| account.account_id.is_none()));
     }
 
     #[cfg(feature = "rayon")]
@@ -1235,6 +1216,6 @@ mod tests {
         let execution = manager
             .execution_overlay_for_parent(blocks[2].recovered_block().hash(), anchor_hash)
             .unwrap();
-        assert_eq!(execution.accounts.len(), 1);
+        assert_eq!(execution.accounts().len(), 1);
     }
 }
