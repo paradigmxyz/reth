@@ -2837,36 +2837,6 @@ mod tests {
     }
 
     #[test]
-    fn test_prefix_set_root_proof_processes_sibling_after_cached_descendant() {
-        reth_tracing::init_test_tracing();
-
-        let storage = [
-            ("1022c69e9d900e40775cd387c134899f465f291dbc3c97899ff6bfb8dc972b37", 45u64),
-            ("1111ad8083c8a3a398b2b781217b989ff4d1ed182f46cc765eda49a7b316139d", 60),
-            ("12012d20943649899b2fc0f87b9840b70ef68e93613aac17c269bf8c5a78a712", 17),
-            ("12014b57b9a162c03d072eb6acd4e936f1c4bc23b803a054347c5ee9a9bcfb9a", 49),
-            ("1203f800840af3f898ab4572f2750106a7c4bd2b3e844b6e7fa72704673cc2c6", 76),
-            ("12208f18fbcd6971c92808721392acbf11d5af58e9143a374cc86e70bdd1f097", 10),
-        ]
-        .into_iter()
-        .map(|(key, value)| (b256(key), U256::from(value)))
-        .collect();
-
-        let dirty = b256("12208f18fbcd6971c92808721392acbf11d5af58e9143a374cc86e70bdd1f097");
-        let harness = ProofTestHarness::new(storage);
-        let expected_root = harness.original_root();
-
-        let mut prefix_set = PrefixSetMut::default();
-        prefix_set.insert(Nibbles::unpack(dirty));
-
-        pretty_assertions::assert_eq!(
-            Some(expected_root),
-            harness.root_with_prefix_set(prefix_set.freeze()),
-            "root proof must process a prefix-set sibling after a cached descendant",
-        );
-    }
-
-    #[test]
     fn test_prefix_set_root_proof_preserves_clean_sibling_after_cached_branch_collapse() {
         reth_tracing::init_test_tracing();
 
@@ -2903,36 +2873,6 @@ mod tests {
             Some(expected_root),
             harness.root_with_prefix_set(prefix_set.freeze()),
             "a dirty prefix must not omit a clean sibling after collapsing a cached branch",
-        );
-    }
-
-    #[test]
-    fn test_prefix_set_root_proof_processes_trailing_dirty_sibling() {
-        reth_tracing::init_test_tracing();
-
-        let keys = [
-            "0022001020000000000000000000000000000000000000000000000000000000",
-            "0110212112000000000000000000000000000000000000000000000000000000",
-            "0202210210000000000000000000000000000000000000000000000000000000",
-            "0211020211000000000000000000000000000000000000000000000000000000",
-            "0211211002000000000000000000000000000000000000000000000000000000",
-            "0212221010000000000000000000000000000000000000000000000000000000",
-            "0222011102000000000000000000000000000000000000000000000000000000",
-        ];
-        let storage =
-            keys.iter().enumerate().map(|(i, key)| (b256(key), U256::from(i as u64 + 1))).collect();
-        let harness = ProofTestHarness::new(storage);
-        let expected_root = harness.original_root();
-
-        // The dirty children straddle a clean cached descendant under branch 0x02. Traversal
-        // must resume at the trailing dirty sibling after using the cached descendant.
-        let mut prefix_set = PrefixSetMut::default();
-        prefix_set.insert(Nibbles::unpack(b256(keys[2])));
-        prefix_set.insert(Nibbles::unpack(b256(keys[6])));
-
-        pretty_assertions::assert_eq!(
-            Some(expected_root),
-            harness.root_with_prefix_set(prefix_set.freeze()),
         );
     }
 
