@@ -32,7 +32,7 @@ pub use block::CachedTransaction;
 pub use builder::config::{EthConfig, EthFilterConfig};
 pub use cache::{
     config::EthStateCacheConfig, db::StateCacheDb, multi_consumer::MultiConsumerLruCache,
-    EthStateCache,
+    EthStateCache, EthStateCacheProvider,
 };
 pub use capabilities::{EthCapabilities, EthCapabilitiesHead, EthCapabilitiesResource};
 pub use error::{EthApiError, EthResult, RevertError, RpcInvalidTransactionError, SignError};
