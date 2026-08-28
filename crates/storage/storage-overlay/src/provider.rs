@@ -274,6 +274,7 @@ where
             + PruneCheckpointReader
             + ChangeSetReader
             + StorageChangeSetReader
+            + DBProvider
             + BlockNumReader,
     {
         if let Some(overlay) = self.execution_overlay.get() {
@@ -334,7 +335,7 @@ where
 {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         let overlay = self.execution_overlay()?;
-        if let Some(account) = overlay.accounts.get(address) {
+        if let Some(account) = overlay.accounts().get(address) {
             return Ok(account.as_ref().map(Account::from))
         }
         if self.provider().cached_storage_settings().use_hashed_state() {
@@ -356,6 +357,7 @@ impl<Provider, N: NodePrimitives> BlockHashReader for OverlayStateProvider<Provi
 where
     Provider: Deref,
     Provider::Target: BlockHashReader
+        + DBProvider
         + Sized
         + StageCheckpointReader
         + PruneCheckpointReader
@@ -365,7 +367,7 @@ where
 {
     fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>> {
         let overlay = self.execution_overlay()?;
-        if let Some(block) = overlay.block_hashes.iter().find(|block| block.number == number) {
+        if let Some(block) = overlay.block_hashes().iter().find(|block| block.number == number) {
             return Ok(Some(block.hash))
         }
         self.provider().block_hash(number)
@@ -378,7 +380,7 @@ where
     ) -> ProviderResult<Vec<B256>> {
         let overlay = self.execution_overlay()?;
         let mut block_hashes =
-            overlay.block_hashes.iter().filter(|block| (start..end).contains(&block.number));
+            overlay.block_hashes().iter().filter(|block| (start..end).contains(&block.number));
         let Some(first_block) = block_hashes.next() else {
             return self.provider().canonical_hashes_range(start, end)
         };
@@ -405,7 +407,7 @@ where
         code_hash: &B256,
     ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>> {
         let overlay = self.execution_overlay()?;
-        if let Some(bytecode) = overlay.code_hashes.get(code_hash) {
+        if let Some(bytecode) = overlay.code_hashes().get(code_hash) {
             return Ok(Some(reth_primitives_traits::Bytecode(bytecode.clone())));
         }
         self.provider().tx().get_by_encoded_key::<tables::Bytecodes>(code_hash).map_err(Into::into)
@@ -706,7 +708,7 @@ where
     ) -> ProviderResult<Option<alloy_primitives::StorageValue>> {
         let overlay = self.execution_overlay()?;
         if let Some(value) = overlay
-            .storage
+            .storage()
             .get(&address)
             .and_then(|storage| storage.get(&U256::from_be_bytes(storage_key.0)))
         {
