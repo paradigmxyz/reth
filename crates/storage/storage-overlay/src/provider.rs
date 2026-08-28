@@ -712,12 +712,8 @@ where
         storage_key: alloy_primitives::StorageKey,
     ) -> ProviderResult<Option<alloy_primitives::StorageValue>> {
         let overlay = self.execution_overlay()?;
-        if let Some(value) = overlay
-            .storage()
-            .get(&address)
-            .and_then(|storage| storage.get(&U256::from_be_bytes(storage_key.0)))
-        {
-            return Ok(Some(*value));
+        if let Some(value) = overlay.storage_value(address, U256::from_be_bytes(storage_key.0)) {
+            return Ok(Some(value));
         }
         if self.provider().cached_storage_settings().use_hashed_state() {
             let hashed_address = alloy_primitives::keccak256(address);
