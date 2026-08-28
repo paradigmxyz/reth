@@ -321,6 +321,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             + StorageChangeSetReader
             + DBProvider
             + BlockNumReader
+            + StageCheckpointReader
             + PruneCheckpointReader
             + StorageSettingsCache,
     {
