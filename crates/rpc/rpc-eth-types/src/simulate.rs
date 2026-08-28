@@ -726,7 +726,7 @@ mod tests {
         protocol_log.address = ETH_TRANSFER_LOG_ADDRESS;
         let mut logs = vec![protocol_log];
 
-        append_transfer_logs_to_result(&mut logs, &[transfer.clone()]);
+        append_transfer_logs_to_result(&mut logs, std::slice::from_ref(&transfer));
 
         assert_eq!(logs.len(), 2);
         assert_eq!(logs[0].address, ETH_TRANSFER_LOG_ADDRESS);
