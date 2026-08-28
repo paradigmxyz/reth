@@ -464,22 +464,20 @@ where
     if matches!(
         execute_inclusion_list_transactions(
             &mut builder,
-            InclusionListExecutionState {
-                inclusion_list: &mut inclusion_list,
-                executed_tx_hashes: &mut executed_tx_hashes,
-                cancel: &cancel,
-                block_gas_limit,
-                tx_gas_limit_cap,
-                base_fee,
-                is_amsterdam,
-                is_osaka,
-                withdrawals_rlp_length,
-                total_fees: &mut total_fees,
-                cumulative_tx_gas_used: &mut cumulative_tx_gas_used,
-                block_regular_gas_used: &mut block_regular_gas_used,
-                block_state_gas_used: &mut block_state_gas_used,
-                block_transactions_rlp_length: &mut block_transactions_rlp_length,
-            },
+            &mut inclusion_list,
+            &mut executed_tx_hashes,
+            &cancel,
+            block_gas_limit,
+            tx_gas_limit_cap,
+            base_fee,
+            is_amsterdam,
+            is_osaka,
+            withdrawals_rlp_length,
+            &mut total_fees,
+            &mut cumulative_tx_gas_used,
+            &mut block_regular_gas_used,
+            &mut block_state_gas_used,
+            &mut block_transactions_rlp_length,
         )?,
         InclusionListExecutionOutcome::Cancelled,
     ) {
@@ -558,9 +556,23 @@ where
 /// transaction whose nonce or balance was established by an earlier inclusion-list transaction to
 /// execute in the same payload. Transactions already executed by the pool or an earlier pass are
 /// skipped by hash.
+#[allow(clippy::too_many_arguments)]
 fn execute_inclusion_list_transactions<B>(
     builder: &mut B,
-    mut state: InclusionListExecutionState<'_>,
+    inclusion_list: &mut [Option<Recovered<TransactionSigned>>],
+    executed_tx_hashes: &mut HashSet<B256>,
+    cancel: &CancelOnDrop,
+    block_gas_limit: u64,
+    tx_gas_limit_cap: u64,
+    base_fee: u64,
+    is_amsterdam: bool,
+    is_osaka: bool,
+    withdrawals_rlp_length: usize,
+    total_fees: &mut U256,
+    cumulative_tx_gas_used: &mut u64,
+    block_regular_gas_used: &mut u64,
+    block_state_gas_used: &mut u64,
+    block_transactions_rlp_length: &mut usize,
 ) -> Result<InclusionListExecutionOutcome, PayloadBuilderError>
 where
     B: BlockBuilder<Primitives = EthPrimitives>,
@@ -569,43 +581,39 @@ where
     while made_progress {
         made_progress = false;
 
-        for transaction in state.inclusion_list.iter_mut() {
+        for transaction in inclusion_list.iter_mut() {
             let Some(tx) = transaction.as_ref() else { continue };
             let tx_hash = tx.recalculate_hash();
-            if state.executed_tx_hashes.contains(&tx_hash) {
+            if executed_tx_hashes.contains(&tx_hash) {
                 *transaction = None;
                 continue
             }
 
-            let exceeds_gas_limit = if state.is_amsterdam {
-                let regular_available_gas =
-                    state.block_gas_limit.saturating_sub(*state.block_regular_gas_used);
-                let state_available_gas =
-                    state.block_gas_limit.saturating_sub(*state.block_state_gas_used);
-                let regular_tx_gas_limit = tx.gas_limit().min(state.tx_gas_limit_cap);
+            let exceeds_gas_limit = if is_amsterdam {
+                let regular_available_gas = block_gas_limit.saturating_sub(*block_regular_gas_used);
+                let state_available_gas = block_gas_limit.saturating_sub(*block_state_gas_used);
+                let regular_tx_gas_limit = tx.gas_limit().min(tx_gas_limit_cap);
                 regular_tx_gas_limit > regular_available_gas || tx.gas_limit() > state_available_gas
             } else {
-                tx.gas_limit() > state.block_gas_limit.saturating_sub(*state.cumulative_tx_gas_used)
+                tx.gas_limit() > block_gas_limit.saturating_sub(*cumulative_tx_gas_used)
             };
             if exceeds_gas_limit {
                 *transaction = None;
                 continue
             }
-            if state.cancel.is_cancelled() {
+            if cancel.is_cancelled() {
                 return Ok(InclusionListExecutionOutcome::Cancelled)
             }
 
             let tx_rlp_len = tx.inner().length();
-            let estimated_block_size_with_tx = *state.block_transactions_rlp_length +
-                tx_rlp_len +
-                state.withdrawals_rlp_length +
-                1024;
-            if state.is_osaka && estimated_block_size_with_tx > MAX_RLP_BLOCK_SIZE {
+            let estimated_block_size_with_tx =
+                *block_transactions_rlp_length + tx_rlp_len + withdrawals_rlp_length + 1024;
+            if is_osaka && estimated_block_size_with_tx > MAX_RLP_BLOCK_SIZE {
                 *transaction = None;
                 continue
             }
 
-            let miner_fee = tx.effective_tip_per_gas(state.base_fee);
+            let miner_fee = tx.effective_tip_per_gas(base_fee);
             let mut tx_regular_gas_used = 0;
             let gas_output =
                 match builder.execute_transaction_with_result_closure(tx.clone(), |result| {
@@ -639,36 +647,18 @@ where
 
             let gas_used = gas_output.tx_gas_used();
             let miner_fee = miner_fee.expect("fee is always valid; execution succeeded");
-            *state.total_fees += U256::from(miner_fee) * U256::from(gas_used);
-            *state.cumulative_tx_gas_used += gas_used;
-            *state.block_regular_gas_used += tx_regular_gas_used;
-            *state.block_state_gas_used += gas_output.state_gas_used();
-            *state.block_transactions_rlp_length += tx_rlp_len;
-            state.executed_tx_hashes.insert(tx_hash);
+            *total_fees += U256::from(miner_fee) * U256::from(gas_used);
+            *cumulative_tx_gas_used += gas_used;
+            *block_regular_gas_used += tx_regular_gas_used;
+            *block_state_gas_used += gas_output.state_gas_used();
+            *block_transactions_rlp_length += tx_rlp_len;
+            executed_tx_hashes.insert(tx_hash);
             *transaction = None;
             made_progress = true;
         }
     }
 
     Ok(InclusionListExecutionOutcome::Complete)
-}
-
-/// Mutable payload accounting used while executing inclusion-list transactions.
-struct InclusionListExecutionState<'a> {
-    inclusion_list: &'a mut [Option<Recovered<TransactionSigned>>],
-    executed_tx_hashes: &'a mut HashSet<B256>,
-    cancel: &'a CancelOnDrop,
-    block_gas_limit: u64,
-    tx_gas_limit_cap: u64,
-    base_fee: u64,
-    is_amsterdam: bool,
-    is_osaka: bool,
-    withdrawals_rlp_length: usize,
-    total_fees: &'a mut U256,
-    cumulative_tx_gas_used: &'a mut u64,
-    block_regular_gas_used: &'a mut u64,
-    block_state_gas_used: &'a mut u64,
-    block_transactions_rlp_length: &'a mut usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
