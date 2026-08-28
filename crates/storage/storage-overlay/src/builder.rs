@@ -372,6 +372,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             + PruneCheckpointReader
             + ChangeSetReader
             + StorageChangeSetReader
+            + DBProvider
             + BlockNumReader,
     {
         let (state_trie_tip_block, finish_tip_block) = database_state_frontiers(provider)?;
@@ -392,7 +393,11 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         finish_tip_block: BlockNumHash,
     ) -> ProviderResult<Arc<ExecutionOverlay>>
     where
-        Provider: ChangeSetReader + StorageChangeSetReader + BlockNumReader + PruneCheckpointReader,
+        Provider: ChangeSetReader
+            + StorageChangeSetReader
+            + DBProvider
+            + BlockNumReader
+            + PruneCheckpointReader,
     {
         let anchor_for_parent =
             self.anchor_at_parent_with_frontiers(provider, state_trie_tip_block, finish_tip_block)?;
