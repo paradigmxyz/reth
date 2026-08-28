@@ -227,13 +227,6 @@ pub trait EthState: LoadState + SpawnBlocking {
                             .or_default()
                             .extend(slots.iter().map(|slot| ProofV2Target::new(keccak256(slot))));
                     }
-                    proof_targets.account_targets.sort_unstable_by_key(ProofV2Target::key);
-                    proof_targets.account_targets.dedup_by_key(|target| target.key());
-                    for targets in proof_targets.storage_targets.values_mut() {
-                        targets.sort_unstable_by_key(ProofV2Target::key);
-                        targets.dedup_by_key(|target| target.key());
-                    }
-
                     let multiproof = state
                         .multiproof_v2(Default::default(), proof_targets)
                         .map_err(Self::Error::from_eth_err)?;
