@@ -1,7 +1,10 @@
 use crate::utils::{
     advance_with_random_transactions, eth_payload_attributes, eth_payload_attributes_amsterdam,
 };
-use alloy_eips::eip7685::{Requests, RequestsOrHash};
+use alloy_eips::{
+    eip4844::BlobAndProofV2,
+    eip7685::{Requests, RequestsOrHash},
+};
 use alloy_genesis::Genesis;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::{ClientVersionV1, ForkchoiceState, PayloadStatusEnum};
@@ -37,6 +40,7 @@ const ENGINE_EXECUTION_VERSION_HEADER: &str = "Eth-Execution-Version";
 const ENGINE_AMSTERDAM_FORK_HEADER: &str = "amsterdam";
 const ENGINE_PAYLOADS_ROUTE: &str = "/engine/v1/payloads";
 const ENGINE_FORKCHOICE_ROUTE: &str = "/engine/v1/forkchoice";
+const ENGINE_V2_BLOBS_ROUTE: &str = "/engine/v1/blobs/v2";
 const ENGINE_CAPABILITIES_ROUTE: &str = "/engine/v1/capabilities";
 const ENGINE_IDENTITY_ROUTE: &str = "/engine/v1/identity";
 
@@ -295,6 +299,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
             RpcServerArgs::default()
                 .with_unused_ports()
                 .with_http()
+                .with_force_blob_sidecar_upcasting()
                 .with_http_api(reth_rpc_server_types::RpcModuleSelection::All),
         );
 
@@ -320,7 +325,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
 
     let node = NodeTestContext::new(node, eth_payload_attributes_amsterdam).await?;
 
-    let wallets = Wallet::new(1).wallet_gen();
+    let wallets = Wallet::new(2).wallet_gen();
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallets[0].clone()).await;
 
     let payload_attributes = eth_payload_attributes_amsterdam(chain_spec.genesis().timestamp + 1);
@@ -442,6 +447,24 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
         .send()
         .await?;
     assert_eq!(fcu_response.status(), reqwest::StatusCode::OK);
+
+    let blob_tx = TransactionTestContext::tx_with_blobs_bytes(1, wallets[1].clone()).await?;
+    let blob_tx_hash = node.rpc.inject_tx(blob_tx).await?;
+    let envelope = node.rpc.envelope_by_hash(blob_tx_hash).await?;
+    let versioned_hashes = TransactionTestContext::validate_sidecar(envelope);
+
+    let blobs_response = client
+        .post(format!("{auth_url}{ENGINE_V2_BLOBS_ROUTE}"))
+        .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
+        .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+        .header(reqwest::header::ACCEPT, "application/octet-stream")
+        .body(versioned_hashes.as_ssz_bytes())
+        .send()
+        .await?;
+    assert_eq!(blobs_response.status(), reqwest::StatusCode::OK);
+
+    let blobs = Vec::<BlobAndProofV2>::from_ssz_bytes(&blobs_response.bytes().await?).unwrap();
+    assert_eq!(blobs.len(), versioned_hashes.len());
 
     let fcu = SszForkchoiceUpdateResponse::from_ssz_bytes(&fcu_response.bytes().await?).unwrap();
     assert_eq!(fcu.payload_status.status, PayloadStatusEnum::Valid);
