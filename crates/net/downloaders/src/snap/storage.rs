@@ -39,13 +39,13 @@ impl<C: SnapClient> StorageRangeDownloader<C> {
     /// root; their storage roots authenticate the returned ranges. Pairing a batch with a request
     /// for another root would penalize a peer that answered honestly.
     ///
-    /// Accounts with empty storage roots must be omitted because Snap responses do not preserve
-    /// an outer-list position for them. Use [`super::VerifiedAccountRange::batch_range`] to select
-    /// the accounts included in the request without losing their state-root provenance.
+    /// Accounts without storage must be omitted, since snap responses do not preserve an
+    /// outer-list position for them. [`super::VerifiedAccountRange::storage_batch`] selects the
+    /// accounts to request, and [`VerifiedAccountBatch::range`] splits them into bounded chunks.
     pub fn new(
         client: C,
         request: GetStorageRangesMessage,
-        batch: VerifiedAccountBatch<'_>,
+        batch: &VerifiedAccountBatch<'_>,
         runtime: Runtime,
     ) -> Result<Self, InvalidStorageRangeRequest> {
         let origin = request.starting_hash.unwrap_or(B256::ZERO);
@@ -506,6 +506,10 @@ mod tests {
         slots.iter().map(|(hash, value)| StorageData::from_value(*hash, *value)).collect()
     }
 
+    fn account_refs(accounts: &[(B256, TrieAccount)]) -> Vec<(B256, &TrieAccount)> {
+        accounts.iter().map(|(hash, account)| (*hash, account)).collect()
+    }
+
     fn request(accounts: &[(B256, TrieAccount)]) -> GetStorageRangesMessage {
         GetStorageRangesMessage {
             request_id: 1,
@@ -542,7 +546,7 @@ mod tests {
         accounts: &[(B256, TrieAccount)],
     ) -> Result<StorageRangeDownloader<C>, InvalidStorageRangeRequest> {
         let range = verified_range(accounts);
-        StorageRangeDownloader::new(client, request, range.batch(), Runtime::test())
+        StorageRangeDownloader::new(client, request, &range.batch(), Runtime::test())
     }
 
     #[tokio::test]
@@ -626,27 +630,28 @@ mod tests {
     }
 
     #[test]
-    fn a_mixed_batch_with_an_empty_storage_root_is_refused_before_submission() {
+    fn empty_storage_roots_must_be_filtered_before_submission() {
         let accounts = vec![
-            (key(100), account(EMPTY_ROOT_HASH)),
-            (key(200), account(B256::repeat_byte(0xbb))),
+            (key(100), account(B256::repeat_byte(0xaa))),
+            (key(200), account(EMPTY_ROOT_HASH)),
+            (key(300), account(B256::repeat_byte(0xbb))),
         ];
         let client = TestSnapClient::new([response(PeerId::random(), 1, Vec::new(), Vec::new())]);
 
         assert_eq!(
             downloader(&client, request(&accounts), &accounts).unwrap_err(),
-            InvalidStorageRangeRequest::EmptyStorageRoot { index: 0, account_hash: key(100) }
+            InvalidStorageRangeRequest::EmptyStorageRoot { index: 1, account_hash: key(200) }
         );
         assert!(client.priorities().is_empty());
 
         let range = verified_range(&accounts);
-        assert!(StorageRangeDownloader::new(
-            &client,
-            request(&accounts[1..]),
-            range.batch_range(1..2).unwrap(),
-            Runtime::test(),
-        )
-        .is_ok());
+        let batch = range.storage_batch();
+        let mut storage_request = request(&accounts);
+        storage_request.account_hashes = batch.accounts().iter().map(|(hash, _)| *hash).collect();
+        assert_eq!(storage_request.account_hashes, vec![key(100), key(300)]);
+        assert!(
+            StorageRangeDownloader::new(&client, storage_request, &batch, Runtime::test()).is_ok()
+        );
         assert_eq!(*client.priorities(), [Priority::Normal]);
     }
 
@@ -820,7 +825,7 @@ mod tests {
         let StorageRangeOutcome::Verified(verified) = outcome else { panic!("verified ranges") };
         let range = verified_range(&accounts);
         let (follow_up, narrowed) = verified.follow_up(2, range.batch()).unwrap().unwrap();
-        assert_eq!(narrowed.accounts(), &accounts[..]);
+        assert_eq!(narrowed.accounts(), account_refs(&accounts));
         assert_eq!(follow_up.request_id, 2);
         assert_eq!(follow_up.root_hash, bounded.root_hash);
         assert_eq!(follow_up.account_hashes, bounded.account_hashes);
@@ -859,7 +864,7 @@ mod tests {
 
         let range = verified_range(&accounts);
         let (follow_up, narrowed) = verified.follow_up(2, range.batch()).unwrap().unwrap();
-        assert_eq!(narrowed.accounts(), &accounts[1..]);
+        assert_eq!(narrowed.accounts(), account_refs(&accounts[1..]));
         assert_eq!(follow_up.account_hashes, vec![key(200)]);
         assert_eq!(follow_up.starting_hash, key(2).into());
         assert_eq!(follow_up.limit_hash, RangeBound::default());
@@ -952,7 +957,7 @@ mod tests {
             let outcome = StorageRangeDownloader::new(
                 Arc::clone(&client),
                 request.clone(),
-                batch,
+                &batch,
                 Runtime::test(),
             )
             .unwrap()
@@ -965,7 +970,7 @@ mod tests {
             let (follow_up, narrowed) =
                 verified.follow_up(request.request_id + 1, batch).unwrap().unwrap();
             assert_eq!(follow_up.account_hashes.len(), remaining);
-            assert_eq!(narrowed.accounts(), &accounts[accounts.len() - remaining..]);
+            assert_eq!(narrowed.accounts(), account_refs(&accounts[accounts.len() - remaining..]));
             request = follow_up;
             batch = narrowed;
         }
