@@ -6,6 +6,7 @@ use crate::{
     RpcReceipt,
 };
 use alloy_consensus::{transaction::TxHashRef, TxReceipt};
+use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::BlockId;
 use alloy_rlp::Encodable;
 use alloy_rpc_types_eth::{Block, BlockTransactions, Index};
@@ -15,6 +16,7 @@ use reth_primitives_traits::{AlloyBlockHeader, RecoveredBlock, SealedHeader, Tra
 use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert, RpcHeader};
 use reth_storage_api::{BlockIdReader, BlockReader, ProviderHeader, ProviderReceipt, ProviderTx};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
+use revm::state::bal::Bal as RevmBal;
 use std::sync::Arc;
 
 /// Result type of the fetched block receipts.
@@ -292,6 +294,45 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
             };
 
             self.cache().get_recovered_block(block_hash).await.map_err(Self::Error::from_eth_err)
+        }
+    }
+
+    /// Returns the block for the given block id, together with the block's cached block access
+    /// list, if any.
+    ///
+    /// The BAL is only returned if it is already cached, it is never fetched from the BAL store.
+    /// Pending blocks never have a BAL.
+    #[expect(clippy::type_complexity)]
+    fn recovered_block_and_maybe_bal(
+        &self,
+        block_id: BlockId,
+    ) -> impl Future<
+        Output = Result<
+            Option<(
+                Arc<RecoveredBlock<<Self::Provider as BlockReader>::Block>>,
+                Option<Arc<DecodedBal<Arc<RevmBal>>>>,
+            )>,
+            Self::Error,
+        >,
+    > + Send {
+        async move {
+            if block_id.is_pending() {
+                return Ok(self.recovered_block(block_id).await?.map(|block| (block, None)));
+            }
+
+            let block_hash = match self
+                .provider()
+                .block_hash_for_id(block_id)
+                .map_err(Self::Error::from_eth_err)?
+            {
+                Some(block_hash) => block_hash,
+                None => return Ok(None),
+            };
+
+            self.cache()
+                .get_recovered_block_and_maybe_bal(block_hash)
+                .await
+                .map_err(Self::Error::from_eth_err)
         }
     }
 }
