@@ -315,7 +315,6 @@ where
                           + ChangeSetReader
                           + StorageChangeSetReader
                           + StorageSettingsCache
-                          + TryIntoHistoricalStateProvider
                           + 'static,
         > + BlockReader<Header = N::BlockHeader>
         + ChangeSetReader
@@ -1796,7 +1795,6 @@ where
                           + ChangeSetReader
                           + StorageChangeSetReader
                           + StorageSettingsCache
-                          + TryIntoHistoricalStateProvider
                           + 'static,
         > + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
