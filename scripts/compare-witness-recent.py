@@ -145,27 +145,11 @@ def report_superset(label, required, actual):
     return True
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Compare the latest common debug_executionWitness from local Reth and Geth."
-    )
-    parser.add_argument("--reth-url", default="http://127.0.0.1:8545")
-    parser.add_argument("--geth-url", default="http://127.0.0.1:8546")
-    parser.add_argument("--block", help="block number in decimal or 0x-prefixed hexadecimal")
-    parser.add_argument("--timeout", type=float, default=600, help="RPC timeout in seconds (default: 600)")
-    args = parser.parse_args()
-
+def compare_block(reth_url, geth_url, block, timeout):
     try:
-        if args.block:
-            block = int(args.block, 0)
-        else:
-            reth_head = int(rpc(args.reth_url, "eth_blockNumber", [], args.timeout), 16)
-            geth_head = int(rpc(args.geth_url, "eth_blockNumber", [], args.timeout), 16)
-            block = min(reth_head, geth_head)
         block_id = hex(block)
-
-        reth_block = rpc(args.reth_url, "eth_getBlockByNumber", [block_id, False], args.timeout)
-        geth_block = rpc(args.geth_url, "eth_getBlockByNumber", [block_id, False], args.timeout)
+        reth_block = rpc(reth_url, "eth_getBlockByNumber", [block_id, False], timeout)
+        geth_block = rpc(geth_url, "eth_getBlockByNumber", [block_id, False], timeout)
         if not reth_block or not geth_block:
             raise RuntimeError(f"block {block_id} is unavailable on both nodes")
         if reth_block["hash"].lower() != geth_block["hash"].lower():
@@ -173,8 +157,8 @@ def main():
                 f"block {block_id} differs: Reth={reth_block['hash']}, Geth={geth_block['hash']}"
             )
 
-        reth = rpc(args.reth_url, "debug_executionWitness", [block_id], args.timeout)
-        geth = rpc(args.geth_url, "debug_executionWitness", [block_id], args.timeout)
+        reth = rpc(reth_url, "debug_executionWitness", [block_id], timeout)
+        geth = rpc(geth_url, "debug_executionWitness", [block_id], timeout)
 
         reth_state, geth_state = hex_set(reth, "state"), hex_set(geth, "state")
         reth_codes, geth_codes = hex_set(reth, "codes"), hex_set(geth, "codes")
@@ -203,6 +187,40 @@ def main():
     if failed:
         return 1
     print("OK: every Geth witness item is present in Reth (Reth extras are allowed).")
+    return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Compare the 20 latest common debug_executionWitness responses from local Reth and Geth."
+    )
+    parser.add_argument("--reth-url", default="http://127.0.0.1:8545")
+    parser.add_argument("--geth-url", default="http://127.0.0.1:8546")
+    parser.add_argument("--block", help="compare only this block (decimal or 0x-prefixed hexadecimal)")
+    parser.add_argument("--count", type=int, default=20, help="number of latest common blocks (default: 20)")
+    parser.add_argument("--timeout", type=float, default=600, help="RPC timeout in seconds (default: 600)")
+    args = parser.parse_args()
+
+    if args.count < 1:
+        parser.error("--count must be positive")
+
+    try:
+        if args.block:
+            blocks = [int(args.block, 0)]
+        else:
+            reth_head = int(rpc(args.reth_url, "eth_blockNumber", [], args.timeout), 16)
+            geth_head = int(rpc(args.geth_url, "eth_blockNumber", [], args.timeout), 16)
+            head = min(reth_head, geth_head)
+            blocks = range(max(0, head - args.count + 1), head + 1)
+            print(f"comparing blocks {hex(blocks.start)} through {hex(head)}")
+    except (RuntimeError, ValueError) as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 2
+
+    for block in blocks:
+        result = compare_block(args.reth_url, args.geth_url, block, args.timeout)
+        if result:
+            return result
     return 0
 
 
