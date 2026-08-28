@@ -2,7 +2,9 @@ use crate::{network::NetworkTestContext, payload::PayloadTestContext, rpc::RpcTe
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eips::BlockId;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealable, B256};
-use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV6, ForkchoiceState};
+use alloy_rpc_types_engine::{
+    ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6, ForkchoiceState,
+};
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use eyre::Ok;
 use futures_util::Future;
@@ -17,7 +19,7 @@ use reth_provider::{
     BlockReader, BlockReaderIdExt, CanonStateNotificationStream, CanonStateSubscriptions,
     HeaderProvider, StageCheckpointReader,
 };
-use reth_rpc_api::TestingBuildBlockRequestV1;
+use reth_rpc_api::{TestingBuildBlockRequestV1, TestingBuildBlockResponse};
 use reth_rpc_builder::auth::AuthServerHandle;
 use reth_rpc_eth_api::helpers::{EthApiSpec, EthTransactions, TraceExt};
 use reth_stages_types::StageId;
@@ -353,12 +355,35 @@ where
     pub async fn testing_build_block_v1(
         &self,
         request: TestingBuildBlockRequestV1,
+    ) -> eyre::Result<ExecutionPayloadEnvelopeV5> {
+        let client =
+            self.rpc_client().ok_or_else(|| eyre::eyre!("HTTP RPC client not available"))?;
+
+        let res: TestingBuildBlockResponse =
+            client.request("testing_buildBlockV1", request.into_params()).await?;
+        match res {
+            TestingBuildBlockResponse::V5(envelope) => eyre::Ok(envelope),
+            TestingBuildBlockResponse::V6(_) => {
+                Err(eyre::eyre!("testing_buildBlockV1 returned an Amsterdam payload"))
+            }
+        }
+    }
+
+    /// Calls `testing_buildBlockV1` and retains the Amsterdam payload fields.
+    pub async fn testing_build_block_v1_amsterdam(
+        &self,
+        request: TestingBuildBlockRequestV1,
     ) -> eyre::Result<ExecutionPayloadEnvelopeV6> {
         let client =
             self.rpc_client().ok_or_else(|| eyre::eyre!("HTTP RPC client not available"))?;
 
-        let res: ExecutionPayloadEnvelopeV6 =
+        let res: TestingBuildBlockResponse =
             client.request("testing_buildBlockV1", request.into_params()).await?;
-        eyre::Ok(res)
+        match res {
+            TestingBuildBlockResponse::V6(envelope) => eyre::Ok(envelope),
+            TestingBuildBlockResponse::V5(_) => {
+                Err(eyre::eyre!("testing_buildBlockV1 returned a pre-Amsterdam payload"))
+            }
+        }
     }
 }
