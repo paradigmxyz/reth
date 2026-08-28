@@ -554,8 +554,8 @@ where
         trace!(target: "engine::tree::payload_validator", "Fetching block state provider");
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "state_provider").entered();
-        let Some(provider_builder) =
-            ensure_ok!(self.state_provider_builder(parent_hash, ctx.state()))
+        let Some(overlay_factory) =
+            ensure_ok!(self.overlay_state_provider_factory(parent_hash, ctx.state()))
         else {
             // this is pre-validated in the tree
             return Err(InsertBlockError::new(
@@ -600,11 +600,6 @@ where
         // Get an iterator over the transactions in the payload
         let txs = self.tx_iterator_for(&input)?;
 
-        // Share one overlay factory between state-root tasks and EVM execution.
-        let provider_factory = self.provider.clone();
-        let overlay_builder = ctx.state().tree_state.overlay_manager.overlay_builder(parent_hash);
-        let overlay_factory = OverlayStateProviderFactory::new(provider_factory, overlay_builder);
-
         let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
 
         // Prepare the state-root job before execution so it can provide streaming hooks.
@@ -614,7 +609,6 @@ where
                 &self.overlay_manager,
                 &env,
                 &parent_block,
-                provider_builder.clone(),
                 overlay_factory.clone(),
                 &self.config,
                 parallel_bal_execution,
@@ -640,7 +634,7 @@ where
         let mut handle = ensure_ok!(self.spawn_payload_processor(
             env.clone(),
             txs,
-            provider_builder.clone(),
+            overlay_factory.clone(),
             hint_stream,
             hashed_update_stream,
             parallel_bal_execution,
@@ -815,7 +809,7 @@ where
                 || hashed_state.get(),
                 &block,
                 &parent_block,
-                || provider_builder.build(),
+                || overlay_factory.database_provider_ro(),
             )
         });
 
@@ -851,7 +845,7 @@ where
                     || hashed_state.get(),
                     &block,
                     &parent_block,
-                    || provider_builder.build(),
+                    || overlay_factory.database_provider_ro(),
                 )
             });
         }
@@ -1382,7 +1376,7 @@ where
         &self,
         env: ExecutionEnv<Evm>,
         txs: T,
-        provider_builder: StateProviderBuilder<N, P>,
+        overlay_factory: OverlayStateProviderFactory<P, N>,
         hint_stream: Option<StateRootHintStream>,
         hashed_update_stream: Option<StateRootUpdateStream>,
         parallel_bal_execution: bool,
@@ -1398,7 +1392,7 @@ where
         let handle = self.payload_processor.spawn_with_state_root_streams(
             env,
             txs,
-            provider_builder,
+            overlay_factory,
             hint_stream,
             hashed_update_stream,
             parallel_bal_execution,
@@ -1429,6 +1423,25 @@ where
         )))
     }
 
+    /// Creates an overlay state provider factory for the given parent hash.
+    ///
+    /// Returns `None` when the parent is neither in memory nor persisted.
+    fn overlay_state_provider_factory(
+        &self,
+        hash: B256,
+        state: &EngineApiTreeState<N>,
+    ) -> ProviderResult<Option<OverlayStateProviderFactory<P, N>>> {
+        if !state.tree_state.contains_hash(&hash) && self.provider.header(hash)?.is_none() {
+            debug!(target: "engine::tree::payload_validator", %hash, "no canonical state found for block");
+            return Ok(None)
+        }
+
+        Ok(Some(OverlayStateProviderFactory::new(
+            self.provider.clone(),
+            state.tree_state.overlay_manager.overlay_builder(hash),
+        )))
+    }
+
     /// Called when an invalid block is encountered during validation.
     fn on_invalid_block(
         &self,
@@ -1454,8 +1467,8 @@ where
         timestamp: u64,
         state: &mut EngineApiTreeState<N>,
     ) -> Option<PayloadStateRootHandle> {
-        let provider_builder = match self.state_provider_builder(parent_hash, state) {
-            Ok(Some(provider_builder)) => provider_builder,
+        let overlay_factory = match self.overlay_state_provider_factory(parent_hash, state) {
+            Ok(Some(overlay_factory)) => overlay_factory,
             Ok(None) => return None,
             Err(err) => {
                 warn!(
@@ -1467,11 +1480,6 @@ where
                 return None
             }
         };
-        let overlay_factory = OverlayStateProviderFactory::new(
-            self.provider.clone(),
-            state.tree_state.overlay_manager.overlay_builder(parent_hash),
-        );
-
         match self.state_root_strategy.prepare_payload_builder(PayloadStateRootJobContext::new(
             &self.runtime,
             &self.overlay_manager,
@@ -1479,7 +1487,6 @@ where
             parent_header,
             timestamp,
             state,
-            provider_builder,
             overlay_factory,
             &self.config,
         )) {
