@@ -219,25 +219,24 @@ where
         }
 
         let (state_trie_tip_block, finish_tip_block) = database_state_frontiers(self.provider())?;
-        let overlay = match self
-            .state_trie_overlay_cache
-            .entry((state_trie_tip_block.hash, finish_tip_block.hash))
-        {
-            dashmap::Entry::Occupied(entry) => entry.get().clone(),
-            dashmap::Entry::Vacant(entry) => {
-                self.metrics.state_trie_overlay_cache_misses.increment(1);
-                let overlay = self
-                    .overlay_builder
-                    .as_ref()
-                    .expect("state trie overlay must be initialized or lazily resolvable")
-                    .build_state_trie_overlay_at_frontiers(
-                        self.provider(),
-                        state_trie_tip_block,
-                        finish_tip_block,
-                    )?;
-                entry.insert(overlay.clone());
-                overlay
+        let cache_key = (state_trie_tip_block.hash, finish_tip_block.hash);
+        let overlay = if let Some(overlay) = self.state_trie_overlay_cache.get(&cache_key) {
+            overlay.clone()
+        } else {
+            self.metrics.state_trie_overlay_cache_misses.increment(1);
+            let overlay = self
+                .overlay_builder
+                .as_ref()
+                .expect("state trie overlay must be initialized or lazily resolvable")
+                .build_state_trie_overlay_at_frontiers(
+                    self.provider(),
+                    state_trie_tip_block,
+                    finish_tip_block,
+                )?;
+            if !overlay.skipped_for_reused_sparse_trie() {
+                self.state_trie_overlay_cache.insert(cache_key, overlay.clone());
             }
+            overlay
         };
         let _ = self.state_trie_overlay.set(overlay);
         Ok(self.state_trie_overlay.get().expect("state trie overlay was just initialized"))
@@ -254,6 +253,9 @@ where
             + StorageSettingsCache,
     {
         let overlay = self.state_trie_overlay()?;
+        if overlay.skipped_for_reused_sparse_trie() {
+            return Err(ProviderError::UnsupportedProvider)
+        }
         let TrieInputSorted { nodes: input_nodes, state: input_state, prefix_sets } = input;
         let mut nodes = Arc::clone(&overlay.trie_updates);
         let mut state = Arc::clone(&overlay.hashed_post_state);
@@ -666,6 +668,9 @@ where
         &self,
         bundle_state: &revm::database::BundleState,
     ) -> ProviderResult<HashedPostState> {
+        if self.state_trie_overlay()?.skipped_for_reused_sparse_trie() {
+            return Err(ProviderError::UnsupportedProvider)
+        }
         let mut hashed_state =
             HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state());
         if !bundle_state
@@ -1043,6 +1048,32 @@ mod tests {
     }
 
     #[test]
+    fn skipped_state_trie_overlay_is_not_cached_or_used_for_state_roots() {
+        let (factory, blocks) = setup_frontiers(3, 3);
+        let manager = OverlayManager::default();
+        manager.insert_block(blocks[4].clone());
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            factory,
+            manager
+                .overlay_builder(blocks[4].recovered_block().hash())
+                .with_skip_overlay_for_reused_sparse_trie(blocks[3].recovered_block().hash()),
+        );
+
+        let provider = state_provider_factory.database_provider_ro().unwrap();
+        assert!(provider.state_trie_overlay().unwrap().skipped_for_reused_sparse_trie());
+        assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
+        assert!(matches!(
+            provider.state_root(HashedPostState::default()),
+            Err(ProviderError::UnsupportedProvider)
+        ));
+        assert!(matches!(
+            provider.hashed_post_state(&revm::database::BundleState::default()),
+            Err(ProviderError::UnsupportedProvider)
+        ));
+        assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
+    }
+
+    #[test]
     fn execution_overlay_readers_use_overlay_first() {
         let (factory, _) = setup_frontiers(1, 3);
         let address = Address::with_last_byte(1);
@@ -1053,14 +1084,14 @@ mod tests {
         let code_hash = B256::with_last_byte(6);
         let bytecode = RevmBytecode::new_raw([0x60, 0x01].into());
         let mut execution_overlay = ExecutionOverlay::default();
-        execution_overlay.accounts.insert(address, Some(account_info.clone()));
-        execution_overlay.block_hashes.push(BlockNumHash::new(1, block_hash));
+        execution_overlay.accounts_mut().insert(address, Some(account_info.clone()));
+        execution_overlay.block_hashes_mut().push(BlockNumHash::new(1, block_hash));
         execution_overlay
-            .storage
+            .storage_mut()
             .entry(address)
             .or_default()
             .insert(U256::from_be_bytes(storage_key.0), storage_value);
-        execution_overlay.code_hashes.insert(code_hash, bytecode.clone());
+        execution_overlay.code_hashes_mut().insert(code_hash, bytecode.clone());
         let provider = OverlayStateProvider::<_, EthPrimitives>::new_with_execution(
             factory.provider().unwrap(),
             Arc::new(execution_overlay),
