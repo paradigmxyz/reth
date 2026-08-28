@@ -8,6 +8,7 @@ use alloy_rlp::Decodable;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use reth_chainspec::ChainSpec;
 use reth_consensus::{Consensus, HeaderValidator};
+use reth_db_api::transaction::DbTx;
 use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert_genesis_state};
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
 use reth_ethereum_primitives::Block;
@@ -18,17 +19,25 @@ use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, DatabaseProviderFactory,
     ExecutionOutcome, HashedPostStateProvider, HistoryWriter, OriginalValuesKnown,
     StateWriteConfig, StateWriter, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
-    StorageSettingsCache,
+    StorageSettingsCache, TrieWriter,
 };
 use reth_revm::database::StateProviderDatabase;
-use reth_trie::StateRoot;
-use reth_trie_db::DatabaseStateRoot;
+use reth_trie::{
+    verify::{Output as TrieVerificationOutput, Verifier},
+    StateRoot,
+};
+use reth_trie_db::{
+    DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseTrieCursorFactory, TrieTableAdapter,
+};
 use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
     sync::Arc,
 };
+
+type DbStateRoot<'a, TX, A> =
+    StateRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
 
 /// A handler for the blockchain test suite.
 #[derive(Debug)]
@@ -261,7 +270,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
             .hashed_post_state(&output.state)
             .map_err(|err| Error::block_failed(block_number, err))?;
         let sorted = hashed_state.clone_into_sorted();
-        let (computed_state_root, _) = reth_trie_db::with_adapter!(provider, |A| {
+        let (computed_state_root, trie_updates) = reth_trie_db::with_adapter!(provider, |A| {
             StateRoot::<reth_trie_db::DatabaseTrieCursorFactory<_, A>, _>::overlay_root_with_updates(
                 provider.tx_ref(),
                 &sorted,
@@ -288,8 +297,19 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
             .write_hashed_state(&hashed_state.into_sorted())
             .map_err(|err| Error::block_failed(block_number, err))?;
         provider
+            .write_trie_updates(trie_updates)
+            .map_err(|err| Error::block_failed(block_number, err))?;
+        provider
             .update_history_indices(block.number..=block.number)
             .map_err(|err| Error::block_failed(block_number, err))?;
+
+        // Check the values that would be committed without requiring a database commit. Rebuild
+        // the root from the updated hashed tables, then verify that the trie tables encode the
+        // same state. This catches persistence-only divergence hidden by the overlay root above.
+        reth_trie_db::with_adapter!(provider, |A| {
+            verify_persisted_trie::<_, A>(provider.tx_ref(), block.state_root)
+        })
+        .map_err(|err| Error::block_failed(block_number, err))?;
 
         // Since there were no errors, update the parent block
         parent = block.clone()
@@ -313,6 +333,35 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
         None => {
             // Some tests may not have post-state (e.g., state-heavy benchmark tests).
             // In this case, we can skip the post-state validation.
+        }
+    }
+
+    Ok(())
+}
+
+fn verify_persisted_trie<TX: DbTx, A: TrieTableAdapter>(
+    tx: &TX,
+    expected_root: alloy_primitives::B256,
+) -> Result<(), Error> {
+    let computed_root = DbStateRoot::<_, A>::from_tx(tx).root().map_err(|err| {
+        Error::Assertion(format!("failed to rebuild persisted state root: {err}"))
+    })?;
+    if computed_root != expected_root {
+        return Err(Error::Assertion(format!(
+            "persisted hashed state root mismatch: expected {expected_root}, got {computed_root}"
+        )))
+    }
+
+    let hashed_cursor_factory = DatabaseHashedCursorFactory::new(tx);
+    let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
+    let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory)
+        .map_err(|err| Error::Assertion(format!("failed to initialize trie verifier: {err}")))?;
+
+    for output in verifier {
+        let output = output
+            .map_err(|err| Error::Assertion(format!("failed to verify persisted trie: {err}")))?;
+        if !matches!(output, TrieVerificationOutput::Progress(_)) {
+            return Err(Error::Assertion(format!("persisted trie inconsistency: {output:?}")))
         }
     }
 
@@ -426,4 +475,55 @@ pub fn should_skip(path: &Path) -> bool {
 fn path_contains(path_str: &str, rhs: &[&str]) -> bool {
     let rhs = rhs.join(std::path::MAIN_SEPARATOR_STR);
     path_str.contains(&rhs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{B256, U256};
+    use reth_primitives_traits::Account;
+    use reth_provider::test_utils::create_test_provider_factory;
+    use reth_trie::HashedPostState;
+
+    #[test]
+    fn detects_uncommitted_hashed_state_divergence() {
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+        let initial_state = HashedPostState::default().with_accounts([
+            (
+                B256::with_last_byte(0x10),
+                Some(Account { balance: U256::from(1), ..Default::default() }),
+            ),
+            (
+                B256::with_last_byte(0x20),
+                Some(Account { balance: U256::from(2), ..Default::default() }),
+            ),
+        ]);
+        provider.write_hashed_state(&initial_state.into_sorted()).unwrap();
+
+        let (initial_root, trie_updates) = reth_trie_db::with_adapter!(provider, |A| {
+            DbStateRoot::<_, A>::from_tx(provider.tx_ref()).root_with_updates()
+        })
+        .unwrap();
+        provider.write_trie_updates(trie_updates).unwrap();
+        reth_trie_db::with_adapter!(provider, |A| {
+            verify_persisted_trie::<_, A>(provider.tx_ref(), initial_root)
+        })
+        .unwrap();
+
+        let divergent_state = HashedPostState::default().with_accounts([(
+            B256::with_last_byte(0x30),
+            Some(Account { balance: U256::from(3), ..Default::default() }),
+        )]);
+        provider.write_hashed_state(&divergent_state.into_sorted()).unwrap();
+
+        let error = reth_trie_db::with_adapter!(provider, |A| {
+            verify_persisted_trie::<_, A>(provider.tx_ref(), initial_root)
+        })
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("persisted hashed state root mismatch"),
+            "unexpected error: {error}"
+        );
+    }
 }
