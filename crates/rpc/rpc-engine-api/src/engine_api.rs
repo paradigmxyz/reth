@@ -14,7 +14,6 @@ use alloy_rpc_types_engine::{
     ExecutionPayloadBodyV2, ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1,
     ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated,
     ForkchoiceUpdatedResponseV2, PayloadId, PayloadStatus, PayloadStatusV2, PraguePayloadFields,
-    MAX_BYTES_PER_INCLUSION_LIST,
 };
 use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
@@ -25,8 +24,8 @@ use reth_engine_primitives::{
 use reth_network_api::{CellCustody, NetworkInfo};
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
-    validate_payload_timestamp, EngineApiMessageVersion, MessageValidationKind,
-    PayloadOrAttributes, PayloadTypes,
+    validate_inclusion_list_size, validate_payload_timestamp, EngineApiMessageVersion,
+    MessageValidationKind, PayloadOrAttributes, PayloadTypes, MAX_INCLUSION_LIST_BYTES,
 };
 use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
@@ -42,18 +41,6 @@ use tracing::{debug, trace, warn};
 
 /// The Engine API response sender.
 pub type EngineApiSender<Ok> = oneshot::Sender<EngineApiResult<Ok>>;
-
-/// EIP-7805 bounds the RLP list of transactions supplied by an inclusion-list committee.
-fn validate_inclusion_list_size(transactions: &[Bytes]) -> EngineApiResult<()> {
-    if alloy_rlp::list_length::<Bytes, [u8]>(transactions) > MAX_BYTES_PER_INCLUSION_LIST as usize {
-        return Err(EngineApiError::NewPayload(
-            reth_engine_primitives::BeaconOnNewPayloadError::InvalidParams(
-                "inclusion list exceeds 8 KiB".into(),
-            ),
-        ))
-    }
-    Ok(())
-}
 
 /// The upper limit for payload bodies request.
 const MAX_PAYLOAD_BODIES_LIMIT: u64 = 1024;
@@ -518,9 +505,7 @@ where
         for pool_tx in self.inner.tx_pool.best_transactions().without_blobs().without_updates() {
             let encoded = pool_tx.encoded_2718_consensus();
             let new_size = total_size + alloy_rlp::Encodable::length(&encoded);
-            if new_size + alloy_rlp::length_of_length(new_size) >
-                MAX_BYTES_PER_INCLUSION_LIST as usize
-            {
+            if new_size + alloy_rlp::length_of_length(new_size) > MAX_INCLUSION_LIST_BYTES {
                 break
             }
 
@@ -1942,9 +1927,7 @@ mod tests {
 
         let res = EngineApiServer::get_inclusion_list_v1(&api).await.unwrap();
         assert_eq!(res, vec![expected]);
-        assert!(
-            alloy_rlp::list_length::<Bytes, [u8]>(&res) <= MAX_BYTES_PER_INCLUSION_LIST as usize
-        );
+        assert!(alloy_rlp::list_length::<Bytes, [u8]>(&res) <= MAX_INCLUSION_LIST_BYTES);
     }
 
     #[tokio::test]

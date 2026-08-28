@@ -462,7 +462,7 @@ where
     }
 
     if matches!(
-        validate_inclusion_list_transactions(
+        execute_inclusion_list_transactions(
             &mut builder,
             &mut inclusion_list,
             &mut executed_tx_hashes,
@@ -479,7 +479,7 @@ where
             &mut block_state_gas_used,
             &mut block_transactions_rlp_length,
         )?,
-        InclusionListValidation::Cancelled,
+        InclusionListExecutionOutcome::Cancelled,
     ) {
         return Ok(BuildOutcome::Cancelled)
     }
@@ -554,8 +554,9 @@ where
 ///
 /// Inclusion-list transactions are retried until a full pass makes no progress. This allows a
 /// transaction whose nonce or balance was established by an earlier inclusion-list transaction to
-/// execute in the same payload.
-fn validate_inclusion_list_transactions<B>(
+/// execute in the same payload. Transactions already executed by the pool or an earlier pass are
+/// skipped by hash.
+fn execute_inclusion_list_transactions<B>(
     builder: &mut B,
     inclusion_list: &mut [Option<Recovered<TransactionSigned>>],
     executed_tx_hashes: &mut HashSet<B256>,
@@ -571,7 +572,7 @@ fn validate_inclusion_list_transactions<B>(
     block_regular_gas_used: &mut u64,
     block_state_gas_used: &mut u64,
     block_transactions_rlp_length: &mut usize,
-) -> Result<InclusionListValidation, PayloadBuilderError>
+) -> Result<InclusionListExecutionOutcome, PayloadBuilderError>
 where
     B: BlockBuilder<Primitives = EthPrimitives>,
 {
@@ -600,7 +601,7 @@ where
                 continue
             }
             if cancel.is_cancelled() {
-                return Ok(InclusionListValidation::Cancelled)
+                return Ok(InclusionListExecutionOutcome::Cancelled)
             }
 
             let tx_rlp_len = tx.inner().length();
@@ -656,11 +657,11 @@ where
         }
     }
 
-    Ok(InclusionListValidation::Complete)
+    Ok(InclusionListExecutionOutcome::Complete)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum InclusionListValidation {
+enum InclusionListExecutionOutcome {
     Complete,
     Cancelled,
 }
