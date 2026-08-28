@@ -236,6 +236,21 @@ pub fn validate_payload_timestamp(
     Ok(())
 }
 
+/// Maximum RLP-encoded size of an EIP-7805 inclusion list.
+pub const MAX_INCLUSION_LIST_BYTES: usize = 8192;
+
+/// Validates the encoded RLP size of an EIP-7805 inclusion list.
+pub fn validate_inclusion_list_size(
+    transactions: &[Bytes],
+) -> Result<(), EngineObjectValidationError> {
+    if alloy_rlp::list_length::<Bytes, [u8]>(transactions) > MAX_INCLUSION_LIST_BYTES {
+        return Err(EngineObjectValidationError::InvalidParams(
+            "inclusion list exceeds 8 KiB".into(),
+        ))
+    }
+    Ok(())
+}
+
 /// Validates the presence of the `block access lists` field according to the payload timestamp.
 /// After Amsterdam, block access list field must be [Some].
 /// Before Amsterdam, block access list field must be [None];
@@ -975,6 +990,17 @@ mod tests {
         ];
         assert_matches!(
             validate_execution_requests(&duplicate_request_types),
+            Err(EngineObjectValidationError::InvalidParams(_))
+        );
+    }
+
+    #[test]
+    fn validate_inclusion_list_size_limit() {
+        assert_matches!(validate_inclusion_list_size(&[]), Ok(()));
+
+        let oversized = vec![Bytes::from(vec![0u8; MAX_INCLUSION_LIST_BYTES])];
+        assert_matches!(
+            validate_inclusion_list_size(&oversized),
             Err(EngineObjectValidationError::InvalidParams(_))
         );
     }

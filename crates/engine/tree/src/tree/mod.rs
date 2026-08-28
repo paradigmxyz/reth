@@ -7,7 +7,8 @@ use crate::{
 };
 use alloy_consensus::{BlockHeader, Transaction};
 use alloy_eips::{
-    eip1898::BlockWithParent, eip2718::Decodable2718, merge::EPOCH_SLOTS, BlockNumHash, NumHash,
+    eip1898::BlockWithParent, eip2718::Decodable2718, eip4844::DATA_GAS_PER_BLOB,
+    merge::EPOCH_SLOTS, BlockNumHash, NumHash,
 };
 use alloy_primitives::{
     map::{B256Map, B256Set},
@@ -48,7 +49,11 @@ use reth_stages_api::ControlFlow;
 use reth_storage_overlay::OverlayManager;
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie::ComputedTrieData;
-use revm::interpreter::debug_unreachable;
+use revm::{
+    context_interface::cfg::gas_params::Eip2780TxInfo,
+    interpreter::{debug_unreachable, gas::calculate_initial_tx_gas},
+    primitives::hardfork::SpecId,
+};
 use state::TreeState;
 use std::{
     fmt::Debug,
@@ -183,8 +188,8 @@ where
 
 /// Performs the post-state eligibility portion of the EIP-7805 inclusion-list check.
 ///
-/// Full transaction execution validation remains a follow-up; this check intentionally does not
-/// make an invalid payload invalid, it only reports its inclusion-list status.
+/// This check intentionally does not make an invalid payload invalid; it only reports its
+/// inclusion-list status.
 fn inclusion_list_satisfied<N: NodePrimitives>(
     block: &RecoveredBlock<N::Block>,
     state: &StateProviderBox,
@@ -199,17 +204,67 @@ fn inclusion_list_satisfied<N: NodePrimitives>(
 
     for encoded in transactions {
         let Ok(transaction) = N::SignedTx::decode_2718_exact(encoded) else { continue };
+        // EIP-2681 reserves the maximum uint64 nonce. Such a transaction cannot be appended
+        // because execution would have to increment the sender nonce past the limit.
+        if transaction.nonce() == u64::MAX {
+            continue
+        }
         if included.contains(&transaction.recalculate_hash()) ||
             transaction.gas_limit() > available_gas
         {
             continue
         }
         let Ok(sender) = transaction.try_recover() else { continue };
+
+        // Transactions that cannot pass intrinsic gas or fee-cap validation cannot be appended
+        // and therefore do not make an otherwise valid payload fail its inclusion-list check.
+        if block
+            .base_fee_per_gas()
+            .is_some_and(|base_fee| transaction.max_fee_per_gas() < base_fee as u128) ||
+            transaction
+                .max_priority_fee_per_gas()
+                .is_some_and(|tip| tip > transaction.max_fee_per_gas())
+        {
+            continue
+        }
+        let intrinsic_gas = calculate_initial_tx_gas(
+            SpecId::BOGOTA,
+            transaction.input(),
+            transaction.is_create(),
+            transaction.access_list().map_or(0, |list| list.len()) as u64,
+            transaction
+                .access_list()
+                .map_or(0, |list| list.iter().map(|item| item.storage_keys.len()).sum())
+                as u64,
+            transaction.authorization_list().map_or(0, |list| list.len()) as u64,
+            Some(Eip2780TxInfo {
+                value: transaction.value(),
+                is_self_transfer: transaction.kind().to() == Some(&sender),
+            }),
+        );
+        if transaction.gas_limit() < intrinsic_gas.initial_total_gas() ||
+            transaction.gas_limit() < intrinsic_gas.floor_gas
+        {
+            continue
+        }
         let account = state.basic_account(&sender)?.unwrap_or_default();
         let max_gas_cost = U256::from(transaction.gas_limit())
             .checked_mul(U256::from(transaction.max_fee_per_gas()))
             .unwrap_or(U256::MAX);
-        let max_cost = max_gas_cost.checked_add(transaction.value()).unwrap_or(U256::MAX);
+        let max_blob_gas_cost = transaction
+            .blob_count()
+            .zip(transaction.max_fee_per_blob_gas())
+            .map(|(blob_count, max_fee_per_blob_gas)| {
+                U256::from(blob_count)
+                    .checked_mul(U256::from(DATA_GAS_PER_BLOB))
+                    .and_then(|cost| cost.checked_mul(U256::from(max_fee_per_blob_gas)))
+                    .unwrap_or(U256::MAX)
+            })
+            .unwrap_or_default();
+        let max_cost = max_gas_cost
+            .checked_add(max_blob_gas_cost)
+            .and_then(|cost| cost.checked_add(transaction.value()))
+            .unwrap_or(U256::MAX);
         if account.nonce == transaction.nonce() && account.balance >= max_cost {
             return Ok(false)
         }

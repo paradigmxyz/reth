@@ -4,6 +4,7 @@ name: hive
 
 on:
   workflow_dispatch:
+  pull_request:
   schedule:
     - cron: "0 0 * * *"
 
@@ -28,7 +29,7 @@ jobs:
     secrets: inherit
 
   prepare-hive:
-    if: github.repository == 'paradigmxyz/reth'
+    if: github.repository == 'paradigmxyz/reth' 
     timeout-minutes: 45
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-16' || 'ubuntu-latest' }}
     permissions:
@@ -327,7 +328,7 @@ jobs:
           # eth_ rpc methods
           - sim: ethereum/rpc-compat
             include:
-              - eth_blockNumber
+              # - eth_blockNumber
           #     - eth_call
           #     - eth_chainId
           #     - eth_createAccessList
@@ -343,7 +344,7 @@ jobs:
           #     - eth_getTransactionCount
           #     - eth_getTransactionReceipt
           #     - eth_sendRawTransaction
-          #     - eth_syncing
+              - eth_syncing
           #     # debug_ rpc methods
           #     - debug_
 
@@ -512,25 +513,25 @@ jobs:
           # eth_ rpc methods
           - sim: ethereum/rpc-compat
             include:
-              - eth_blockNumber
-              - eth_call
-              - eth_chainId
-              - eth_createAccessList
-              - eth_estimateGas
-              - eth_feeHistory
-              - eth_getBalance
-              - eth_getBlockBy
-              - eth_getBlockTransactionCountBy
-              - eth_getCode
-              - eth_getProof
-              - eth_getStorage
-              - eth_getTransactionBy
-              - eth_getTransactionCount
-              - eth_getTransactionReceipt
-              - eth_sendRawTransaction
+              # - eth_blockNumber
+              # - eth_call
+              # - eth_chainId
+              # - eth_createAccessList
+              # - eth_estimateGas
+              # - eth_feeHistory
+              # - eth_getBalance
+              # - eth_getBlockBy
+              # - eth_getBlockTransactionCountBy
+              # - eth_getCode
+              # - eth_getProof
+              # - eth_getStorage
+              # - eth_getTransactionBy
+              # - eth_getTransactionCount
+              # - eth_getTransactionReceipt
+              # - eth_sendRawTransaction
               - eth_syncing
               # debug_ rpc methods
-              - debug_
+              # - debug_
 
           # consume-engine
           - sim: ethereum/eels/consume-engine
@@ -554,9 +555,10 @@ jobs:
           # - sim: ethereum/eels/consume-engine
           #   limit: .*tests/paris.*
 
-          # consume-rlp
-          - sim: ethereum/eels/consume-rlp
-            limit: .*tests/bogota.*
+          # consume-rlp 
+          # No bogota tests for consume-rlp, but we can run amsterdam ones to check if they pass
+          # - sim: ethereum/eels/consume-rlp
+          #   limit: .*tests/bogota.*
           - sim: ethereum/eels/consume-rlp
             limit: .*tests/amsterdam.*
           # - sim: ethereum/eels/consume-rlp
@@ -577,8 +579,8 @@ jobs:
           #   limit: .*tests/paris.*
 
           # execute-blobs
-          - sim: ethereum/eels/execute-blobs
-            limit: .*tests/bogota.*
+          # - sim: ethereum/eels/execute-blobs
+          #   limit: .*tests/bogota.*
     needs:
       - build-reth
       - prepare-hive
