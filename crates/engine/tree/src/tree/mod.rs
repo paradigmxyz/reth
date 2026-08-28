@@ -1773,6 +1773,8 @@ where
                             self.canonical_in_memory_state.set_pending_block(block.clone());
                         }
 
+                        self.canonical_in_memory_state
+                            .insert_fork_block(Arc::clone(&block.recovered_block));
                         self.state.tree_state.insert_executed(block.clone());
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
                         self.emit_event(EngineApiEvent::BeaconConsensus(
@@ -2005,7 +2007,7 @@ where
             return Ok(())
         };
 
-        if ctrl.is_unwind() {
+        let removed_hashes = if ctrl.is_unwind() {
             // the node reset so we need to clear everything above that height so that backfill
             // height is the new canonical block.
             self.state.set_pending_sparse_trie_prune(false);
@@ -2015,8 +2017,9 @@ where
                 backfill_num_hash,
                 self.persistence_state.last_persisted_block.hash,
                 Some(backfill_num_hash),
-            );
-        }
+            )
+        };
+        self.canonical_in_memory_state.remove_fork_blocks(removed_hashes);
 
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
         self.metrics.tree.canonical_chain_height.set(backfill_height as f64);
@@ -3270,6 +3273,7 @@ where
             self.canonical_in_memory_state.set_pending_block(executed.clone());
         }
 
+        self.canonical_in_memory_state.insert_fork_block(Arc::clone(&executed.recovered_block));
         self.state.tree_state.insert_executed(executed.clone());
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
 
@@ -3575,11 +3579,12 @@ where
             None
         };
 
-        self.state.tree_state.remove_until(
+        let removed_hashes = self.state.tree_state.remove_until(
             upper_bound,
             self.persistence_state.last_persisted_block.hash,
             num,
         );
+        self.canonical_in_memory_state.remove_fork_blocks(removed_hashes);
         Ok(())
     }
 

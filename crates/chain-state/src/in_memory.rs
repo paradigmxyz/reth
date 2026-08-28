@@ -61,6 +61,8 @@ pub(crate) struct InMemoryState<N: NodePrimitives = EthPrimitives> {
     numbers: RwLock<BTreeMap<u64, B256>>,
     /// The pending block that has not yet been made canonical.
     pending: watch::Sender<Option<BlockState<N>>>,
+    /// Valid non-canonical blocks retained by the engine tree.
+    fork_blocks: RwLock<B256Map<Arc<RecoveredBlock<N::Block>>>>,
     /// Metrics for the in-memory state.
     metrics: InMemoryStateMetrics,
 }
@@ -76,6 +78,7 @@ impl<N: NodePrimitives> InMemoryState<N> {
             blocks: RwLock::new(blocks),
             numbers: RwLock::new(numbers),
             pending,
+            fork_blocks: Default::default(),
             metrics: Default::default(),
         };
         this.update_metrics();
@@ -132,6 +135,11 @@ impl<N: NodePrimitives> InMemoryState<N> {
         self.pending.borrow().clone()
     }
 
+    /// Returns a valid non-canonical block retained by the engine tree.
+    pub(crate) fn fork_block(&self, hash: B256) -> Option<Arc<RecoveredBlock<N::Block>>> {
+        self.fork_blocks.read().get(&hash).cloned()
+    }
+
     #[cfg(test)]
     fn block_count(&self) -> usize {
         self.blocks.read().len()
@@ -163,6 +171,7 @@ impl<N: NodePrimitives> CanonicalInMemoryStateInner<N> {
             self.in_memory_state.pending.send_modify(|p| {
                 p.take();
             });
+            self.in_memory_state.fork_blocks.write().clear();
         }
         self.in_memory_state.update_metrics();
     }
@@ -260,6 +269,24 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         self.inner.in_memory_state.update_metrics();
     }
 
+    /// Makes a valid block retained by the engine tree available for hash-based lookups.
+    pub fn insert_fork_block(&self, block: Arc<RecoveredBlock<N::Block>>) {
+        self.inner.in_memory_state.fork_blocks.write().insert(block.hash(), block);
+    }
+
+    /// Removes blocks that have been evicted from the engine tree.
+    pub fn remove_fork_blocks(&self, hashes: impl IntoIterator<Item = B256>) {
+        let mut fork_blocks = self.inner.in_memory_state.fork_blocks.write();
+        for hash in hashes {
+            fork_blocks.remove(&hash);
+        }
+    }
+
+    /// Returns a valid non-canonical block retained by the engine tree.
+    pub fn fork_block(&self, hash: B256) -> Option<Arc<RecoveredBlock<N::Block>>> {
+        self.inner.in_memory_state.fork_block(hash)
+    }
+
     /// Append new blocks to the in memory state.
     ///
     /// This removes all reorged blocks and appends the new blocks to the tracked chain and connects
@@ -273,6 +300,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             // acquire locks, starting with the numbers lock
             let mut numbers = self.inner.in_memory_state.numbers.write();
             let mut blocks = self.inner.in_memory_state.blocks.write();
+            let mut fork_blocks = self.inner.in_memory_state.fork_blocks.write();
 
             // we first remove the blocks from the reorged chain
             for block in reorged {
@@ -280,6 +308,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
                 let number = block.recovered_block().number();
                 blocks.remove(&hash);
                 numbers.remove(&number);
+                fork_blocks.insert(hash, Arc::clone(&block.recovered_block));
             }
 
             // insert the new blocks
@@ -292,6 +321,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
                 // append new blocks
                 blocks.insert(hash, Arc::new(block_state));
                 numbers.insert(number, hash);
+                fork_blocks.remove(&hash);
             }
 
             // remove the pending state

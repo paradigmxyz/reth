@@ -1051,6 +1051,7 @@ fn test_validated_payload_bal_is_inserted_into_store() {
 
     assert_eq!(outcome, InsertPayloadOk::Inserted(BlockStatus::Valid));
     assert_eq!(bal_store.get_by_hash(child_num_hash.hash).unwrap(), Some(raw_bal));
+    assert!(test_harness.tree.canonical_in_memory_state.fork_block(child_num_hash.hash).is_some());
 }
 
 #[tokio::test]

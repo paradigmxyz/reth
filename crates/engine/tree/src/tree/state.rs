@@ -61,17 +61,18 @@ impl<N: NodePrimitives> TreeState<N> {
     }
 
     /// Resets the state and points to the given canonical head.
-    pub fn reset(&mut self, current_canonical_head: BlockNumHash) {
+    pub fn reset(&mut self, current_canonical_head: BlockNumHash) -> Vec<B256> {
         let engine_kind = self.engine_kind;
         let removed_hashes = self.blocks_by_hash.keys().copied().collect::<Vec<_>>();
         if !removed_hashes.is_empty() {
-            self.overlay_manager.remove_blocks(removed_hashes);
+            self.overlay_manager.remove_blocks(removed_hashes.clone());
         }
         self.blocks_by_hash.clear();
         self.blocks_by_number.clear();
         self.parent_to_child.clear();
         self.current_canonical_head = current_canonical_head;
         self.engine_kind = engine_kind;
+        removed_hashes
     }
 
     /// Returns the number of executed blocks stored.
@@ -292,7 +293,7 @@ impl<N: NodePrimitives> TreeState<N> {
         upper_bound: BlockNumHash,
         last_persisted_hash: B256,
         finalized_num_hash: Option<BlockNumHash>,
-    ) {
+    ) -> Vec<B256> {
         debug!(target: "engine::tree", ?upper_bound, ?finalized_num_hash, "Removing blocks from the tree");
 
         // If the finalized num is ahead of the upper bound, and exists, we need to instead ensure
@@ -322,8 +323,9 @@ impl<N: NodePrimitives> TreeState<N> {
         }
 
         if !removed_hashes.is_empty() {
-            self.overlay_manager.remove_blocks(removed_hashes);
+            self.overlay_manager.remove_blocks(removed_hashes.clone());
         }
+        removed_hashes
     }
 
     /// Updates the canonical head to the given block.
