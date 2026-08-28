@@ -324,22 +324,19 @@ pub fn apply_precompile_overrides(
         }
 
         precompiles.set_precompile_lookup(move |address: &Address| -> Option<DynPrecompile> {
-            moved_precompiles
-                .get(address)
-                .map(|precompile| shared_precompile(Rc::clone(precompile)))
+            moved_precompiles.get(address).map(|precompile| {
+                let precompile = Rc::clone(precompile);
+                let id = precompile.precompile_id().clone();
+                if precompile.supports_caching() {
+                    DynPrecompile::new(id, move |input| precompile.call(input))
+                } else {
+                    DynPrecompile::new_stateful(id, move |input| precompile.call(input))
+                }
+            })
         });
     }
 
     Ok(())
-}
-
-fn shared_precompile(precompile: Rc<DynPrecompile>) -> DynPrecompile {
-    let id = precompile.precompile_id().clone();
-    if precompile.supports_caching() {
-        DynPrecompile::new(id, move |input| precompile.call(input))
-    } else {
-        DynPrecompile::new_stateful(id, move |input| precompile.call(input))
-    }
 }
 
 /// Converts all [`TransactionRequest`]s into [`Recovered`] transactions and applies them to the
