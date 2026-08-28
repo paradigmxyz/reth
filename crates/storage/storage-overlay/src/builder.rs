@@ -564,13 +564,10 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 .overlay_manager
                 .execution_overlay_for_parent(self.parent_hash, anchor_hash)
                 .map_err(ProviderError::other),
-            Some(OverlaySource::Immediate { .. }) if anchor_hash != self.parent_hash => {
-                Err(ProviderError::other(std::io::Error::other(format!(
-                    "anchor_hash {anchor_hash} doesn't match OverlayBuilder's configured parent ({})",
-                    self.parent_hash
-                ))))
-            }
-            _ => Ok(Arc::new(ExecutionOverlay::default())),
+            Some(OverlaySource::Managed) | None => Ok(Arc::new(ExecutionOverlay::default())),
+            Some(OverlaySource::Immediate { .. }) => Err(ProviderError::other(
+                std::io::Error::other("immediate state trie overlay has no execution state"),
+            )),
         }
     }
 
@@ -1164,6 +1161,19 @@ mod tests {
         assert_eq!(overlay.accounts[&address].as_ref().unwrap().balance, U256::from(10));
         assert_eq!(overlay.storage[&address][&slot], U256::from(10));
         assert!(overlay.code_hashes.is_empty());
+    }
+
+    #[test]
+    fn execution_overlay_rejects_immediate_state_trie_overlay() {
+        let (factory, blocks) = setup_frontiers(1, 1);
+        let provider = factory.provider().unwrap();
+        let error = OverlayManager::<EthPrimitives>::default()
+            .overlay_builder(blocks[1].recovered_block().hash())
+            .with_immediate_state_trie_overlay(Default::default(), Default::default())
+            .build_execution_overlay(&provider)
+            .unwrap_err();
+
+        assert!(error.to_string().contains("immediate state trie overlay has no execution state"));
     }
 
     #[test]
