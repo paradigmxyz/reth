@@ -102,22 +102,22 @@ impl ExecutionOverlay {
     }
 
     #[cfg(test)]
-    pub(crate) fn block_hashes_mut(&mut self) -> &mut Vec<BlockNumHash> {
+    pub(crate) const fn block_hashes_mut(&mut self) -> &mut Vec<BlockNumHash> {
         &mut self.block_hashes
     }
 
     #[cfg(test)]
-    pub(crate) fn accounts_mut(&mut self) -> &mut AddressMap<Option<AccountInfo>> {
+    pub(crate) const fn accounts_mut(&mut self) -> &mut AddressMap<Option<AccountInfo>> {
         &mut self.accounts
     }
 
     #[cfg(test)]
-    pub(crate) fn storage_mut(&mut self) -> &mut AddressMap<U256Map<U256>> {
+    pub(crate) const fn storage_mut(&mut self) -> &mut AddressMap<U256Map<U256>> {
         &mut self.storage
     }
 
     #[cfg(test)]
-    pub(crate) fn code_hashes_mut(&mut self) -> &mut B256Map<Bytecode> {
+    pub(crate) const fn code_hashes_mut(&mut self) -> &mut B256Map<Bytecode> {
         &mut self.code_hashes
     }
 
