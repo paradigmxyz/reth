@@ -847,8 +847,8 @@ where
     /// `start`.
     ///
     /// This backs both `debug_accountRange` and `debug_dumpBlock`. The amount of state read per
-    /// call is bounded by [`ACCOUNT_RANGE_MAX_RESULTS`] accounts and
-    /// [`ACCOUNT_RANGE_MAX_STORAGE_SLOTS`] storage slots.
+    /// call is bounded by `ACCOUNT_RANGE_MAX_RESULTS` accounts and
+    /// `ACCOUNT_RANGE_MAX_STORAGE_SLOTS` storage slots.
     pub async fn debug_state_dump(
         &self,
         block_id: BlockId,
@@ -998,7 +998,7 @@ where
     /// Returns a page of `address`'s storage, as of the state the transaction at `tx_index` of
     /// the given block runs on.
     ///
-    /// The number of slots read is bounded by [`STORAGE_RANGE_MAX_RESULTS`], plus the slots the
+    /// The number of slots read is bounded by `STORAGE_RANGE_MAX_RESULTS`, plus the slots the
     /// replayed transactions touched.
     pub async fn debug_storage_range_at(
         &self,
