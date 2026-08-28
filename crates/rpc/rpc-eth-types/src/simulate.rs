@@ -9,7 +9,7 @@ use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction as _};
 use alloy_eips::eip2718::WithEncoded;
 use alloy_evm::{
     block::TxResult,
-    precompiles::{DynPrecompile, PrecompilesMap},
+    precompiles::{DynPrecompile, Precompile, PrecompilesMap},
 };
 use alloy_network::{NetworkTransactionBuilder, TransactionBuilder};
 use alloy_rpc_types_eth::{
@@ -34,7 +34,7 @@ use revm::{
     primitives::{Address, Bytes, TxKind, U256},
     Database,
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, rc::Rc};
 
 /// Fallback seconds added between simulated block timestamps when neither the user nor the chain
 /// hint provides a value.
@@ -320,15 +320,26 @@ pub fn apply_precompile_overrides(
         for (dest, precompile) in extracted {
             // Dynamic lookups are only consulted for addresses absent from the main map.
             precompiles.apply_precompile(&dest, |_| None);
-            moved_precompiles.insert(dest, precompile);
+            moved_precompiles.insert(dest, Rc::new(precompile));
         }
 
         precompiles.set_precompile_lookup(move |address: &Address| -> Option<DynPrecompile> {
-            moved_precompiles.get(address).cloned()
+            moved_precompiles
+                .get(address)
+                .map(|precompile| shared_precompile(Rc::clone(precompile)))
         });
     }
 
     Ok(())
+}
+
+fn shared_precompile(precompile: Rc<DynPrecompile>) -> DynPrecompile {
+    let id = precompile.precompile_id().clone();
+    if precompile.supports_caching() {
+        DynPrecompile::new(id, move |input| precompile.call(input))
+    } else {
+        DynPrecompile::new_stateful(id, move |input| precompile.call(input))
+    }
 }
 
 /// Converts all [`TransactionRequest`]s into [`Recovered`] transactions and applies them to the
