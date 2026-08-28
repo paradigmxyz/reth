@@ -219,24 +219,27 @@ where
         }
 
         let (state_trie_tip_block, finish_tip_block) = database_state_frontiers(self.provider())?;
-        let cache_key = (state_trie_tip_block.hash, finish_tip_block.hash);
-        let overlay = if let Some(overlay) = self.state_trie_overlay_cache.get(&cache_key) {
-            overlay.clone()
-        } else {
-            self.metrics.state_trie_overlay_cache_misses.increment(1);
-            let overlay = self
-                .overlay_builder
-                .as_ref()
-                .expect("state trie overlay must be initialized or lazily resolvable")
-                .build_state_trie_overlay_at_frontiers(
-                    self.provider(),
-                    state_trie_tip_block,
-                    finish_tip_block,
-                )?;
-            if !overlay.skipped_for_reused_sparse_trie() {
-                self.state_trie_overlay_cache.insert(cache_key, overlay.clone());
+        let overlay = match self
+            .state_trie_overlay_cache
+            .entry((state_trie_tip_block.hash, finish_tip_block.hash))
+        {
+            dashmap::Entry::Occupied(entry) => entry.get().clone(),
+            dashmap::Entry::Vacant(entry) => {
+                self.metrics.state_trie_overlay_cache_misses.increment(1);
+                let overlay = self
+                    .overlay_builder
+                    .as_ref()
+                    .expect("state trie overlay must be initialized or lazily resolvable")
+                    .build_state_trie_overlay_at_frontiers(
+                        self.provider(),
+                        state_trie_tip_block,
+                        finish_tip_block,
+                    )?;
+                if !overlay.skipped_for_reused_sparse_trie() {
+                    entry.insert(overlay.clone());
+                }
+                overlay
             }
-            overlay
         };
         let _ = self.state_trie_overlay.set(overlay);
         Ok(self.state_trie_overlay.get().expect("state trie overlay was just initialized"))

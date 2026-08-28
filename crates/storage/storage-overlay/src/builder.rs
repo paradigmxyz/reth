@@ -35,10 +35,17 @@ pub struct StateTrieOverlay {
     /// Hashed state overlay.
     pub hashed_post_state: Arc<HashedPostStateSorted>,
     /// Whether construction was skipped because a reused sparse trie covers this range.
-    pub(crate) skipped_for_reused_sparse_trie: bool,
+    skipped_for_reused_sparse_trie: bool,
 }
 
 impl StateTrieOverlay {
+    pub(crate) const fn new(
+        trie_updates: Arc<TrieUpdatesSorted>,
+        hashed_post_state: Arc<HashedPostStateSorted>,
+    ) -> Self {
+        Self { trie_updates, hashed_post_state, skipped_for_reused_sparse_trie: false }
+    }
+
     fn empty() -> Self {
         Self {
             trie_updates: Arc::new(TrieUpdatesSorted::default()),
@@ -486,11 +493,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         self.metrics.trie_updates_size.record(trie_updates_total_len as f64);
         self.metrics.hashed_state_size.record(hashed_state_updates_total_len as f64);
 
-        Ok(StateTrieOverlay {
-            trie_updates,
-            hashed_post_state,
-            skipped_for_reused_sparse_trie: false,
-        })
+        Ok(StateTrieOverlay::new(trie_updates, hashed_post_state))
     }
 
     /// Builds the effective execution overlay for the given provider.
