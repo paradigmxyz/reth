@@ -666,20 +666,73 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_precompile_overrides, sanitize_chain, EthSimulateError, INTERNAL_ERROR_CODE,
+        append_transfer_logs_to_result, apply_precompile_overrides, sanitize_chain,
+        transfer_to_log, EthSimulateError, INTERNAL_ERROR_CODE,
     };
     use crate::{error::ToRpcError, EthApiError};
     use alloy_chains::Chain;
     use alloy_consensus::Header;
     use alloy_evm::precompiles::PrecompilesMap;
-    use alloy_primitives::{address, U256};
+    use alloy_primitives::{address, Address, U256};
     use alloy_rpc_types_eth::{
         simulate::SimBlock,
         state::{AccountOverride, StateOverride},
         BlockOverrides, TransactionRequest,
     };
     use reth_primitives_traits::SealedHeader;
-    use revm::precompile::Precompiles;
+    use revm::{precompile::Precompiles, primitives::eip7708::ETH_TRANSFER_LOG_ADDRESS};
+    use revm_inspectors::transfer::{TransferKind, TransferOperation, TRANSFER_LOG_EMITTER};
+
+    #[test]
+    fn trace_transfer_logs_precede_matching_eip7708_logs() {
+        let first = TransferOperation {
+            kind: TransferKind::Call,
+            from: address!("c000000000000000000000000000000000000000"),
+            to: address!("c100000000000000000000000000000000000000"),
+            value: U256::from(1),
+        };
+        let second = TransferOperation {
+            kind: TransferKind::Call,
+            from: first.to,
+            to: address!("c200000000000000000000000000000000000000"),
+            value: U256::from(2),
+        };
+        let mut first_protocol_log = transfer_to_log(&first);
+        first_protocol_log.address = ETH_TRANSFER_LOG_ADDRESS;
+        let mut second_protocol_log = transfer_to_log(&second);
+        second_protocol_log.address = ETH_TRANSFER_LOG_ADDRESS;
+        let mut logs = vec![first_protocol_log, second_protocol_log];
+
+        append_transfer_logs_to_result(&mut logs, &[first.clone(), second.clone()]);
+
+        assert_eq!(logs.len(), 4);
+        assert_eq!(logs[0], transfer_to_log(&first));
+        assert_eq!(logs[1].address, ETH_TRANSFER_LOG_ADDRESS);
+        assert_eq!(logs[2], transfer_to_log(&second));
+        assert_eq!(logs[3].address, ETH_TRANSFER_LOG_ADDRESS);
+        assert_eq!(logs[0].address, TRANSFER_LOG_EMITTER);
+        assert_eq!(logs[2].address, TRANSFER_LOG_EMITTER);
+    }
+
+    #[test]
+    fn trace_selfdestruct_log_follows_matching_eip7708_log() {
+        let transfer = TransferOperation {
+            kind: TransferKind::SelfDestruct,
+            from: address!("c200000000000000000000000000000000000000"),
+            to: Address::ZERO,
+            value: U256::from(2_000_000),
+        };
+        let mut protocol_log = transfer_to_log(&transfer);
+        protocol_log.address = ETH_TRANSFER_LOG_ADDRESS;
+        let mut logs = vec![protocol_log];
+
+        append_transfer_logs_to_result(&mut logs, &[transfer.clone()]);
+
+        assert_eq!(logs.len(), 2);
+        assert_eq!(logs[0].address, ETH_TRANSFER_LOG_ADDRESS);
+        assert_eq!(logs[1], transfer_to_log(&transfer));
+        assert_eq!(logs[1].address, TRANSFER_LOG_EMITTER);
+    }
 
     #[test]
     fn nonce_max_value_error_uses_internal_error_code() {
