@@ -842,20 +842,20 @@ where
         } = ctx;
 
         let preserved_sparse_trie = overlay_manager.take_sparse_trie();
-        let state_provider_factory = if let Some(anchor_hash) = preserved_sparse_trie
+        let proof_state_provider_factory = if let Some(anchor_hash) = preserved_sparse_trie
             .as_ref()
             .filter(|trie| trie.state_root() == env.parent_state_root)
             .map(|trie| trie.anchor_hash())
         {
-            state_provider_factory.with_skip_overlay_for_reused_sparse_trie(anchor_hash)
+            state_provider_factory.clone().with_skip_overlay_for_reused_sparse_trie(anchor_hash)
         } else {
-            state_provider_factory
+            state_provider_factory.clone()
         };
 
         let mut handle = self.spawn_state_root(
             executor,
             overlay_manager,
-            state_provider_factory.clone(),
+            proof_state_provider_factory,
             StateRootTaskOptions {
                 parent_header: parent_header.clone(),
                 preserved_sparse_trie,
@@ -917,7 +917,7 @@ where
         let parent_state_root = ctx.parent_state_root();
         let parent_header = SealedHeader::new(ctx.parent_header().clone(), ctx.parent_hash());
         let preserved_sparse_trie = ctx.overlay_manager.take_sparse_trie();
-        let state_provider_factory = if let Some(anchor_hash) = preserved_sparse_trie
+        let proof_state_provider_factory = if let Some(anchor_hash) = preserved_sparse_trie
             .as_ref()
             .filter(|trie| trie.state_root() == parent_state_root)
             .map(|trie| trie.anchor_hash())
@@ -930,7 +930,7 @@ where
             self.spawn_state_root(
                 ctx.executor,
                 ctx.overlay_manager,
-                state_provider_factory,
+                proof_state_provider_factory,
                 StateRootTaskOptions {
                     parent_header,
                     preserved_sparse_trie,
