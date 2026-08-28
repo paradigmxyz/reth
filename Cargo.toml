@@ -431,7 +431,7 @@ reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
 reth-zstd-compressors = { version = "0.6.0", default-features = false }
 
 # revm
-revm = { git = "https://github.com/Rimeeeeee/revm", rev = "39e670741ea8e353d44325dc386ed62d86e34c45", default-features = false }
+revm = { git = "https://github.com/Rimeeeeee/revm", branch = "bogota", default-features = false }
 revmc = { git = "https://github.com/paradigmxyz/revmc", branch = "glamsterdam-devnet-8", default-features = false, features = ["llvm-prefer-static"] }
 revm-inspectors = "0.42.2"
 
@@ -697,7 +697,7 @@ vergen-git2 = "10.0.1"
 ipnet = "2.11"
 
 [patch.crates-io]
-alloy-evm = { git = "https://github.com/Rimeeeeee/evm", rev = "b46cc9c9f618bdaf7d511e4b040db045cd1c9aeb" }
+alloy-evm = { git = "https://github.com/Rimeeeeee/evm", branch = "bogota" }
 alloy-contract = { git = "https://github.com/Rimeeeeee/alloy", rev = "cb7707fbfa3313cb17abade402c19768dc77c0cb" }
 alloy-consensus = { git = "https://github.com/Rimeeeeee/alloy", rev = "cb7707fbfa3313cb17abade402c19768dc77c0cb" }
 alloy-consensus-any = { git = "https://github.com/Rimeeeeee/alloy", rev = "cb7707fbfa3313cb17abade402c19768dc77c0cb" }
@@ -734,29 +734,15 @@ reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "
 reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "1207f7ff0534f6a7fe4d9661ea20d070b67d9c8b" }
 reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "1207f7ff0534f6a7fe4d9661ea20d070b67d9c8b" }
 reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "1207f7ff0534f6a7fe4d9661ea20d070b67d9c8b" }
-revm = { git = "https://github.com/Rimeeeeee/revm", rev = "39e670741ea8e353d44325dc386ed62d86e34c45" }
-revm-bytecode = { git = "https://github.com/Rimeeeeee/revm", rev = "39e670741ea8e353d44325dc386ed62d86e34c45" }
-revm-context = { git = "https://github.com/Rimeeeeee/revm", rev = "39e670741ea8e353d44325dc386ed62d86e34c45" }
-revm-context-interface = { git = "https://github.com/Rimeeeeee/revm", rev = "39e670741ea8e353d44325dc386ed62d86e34c45" }
-revm-database = { git = "https://github.com/Rimeeeeee/revm", rev = "39e670741ea8e353d44325dc386ed62d86e34c45" }
-revm-database-interface = { git = "https://github.com/Rimeeeeee/revm", rev = "39e670741ea8e353d44325dc386ed62d86e34c45" }
-revm-handler = { git = "https://github.com/Rimeeeeee/revm", rev = "39e670741ea8e353d44325dc386ed62d86e34c45" }
-revm-inspector = { git = "https://github.com/Rimeeeeee/revm", rev = "39e670741ea8e353d44325dc386ed62d86e34c45" }
-revm-interpreter = { git = "https://github.com/Rimeeeeee/revm", rev = "39e670741ea8e353d44325dc386ed62d86e34c45" }
-revm-precompile = { git = "https://github.com/Rimeeeeee/revm", rev = "39e670741ea8e353d44325dc386ed62d86e34c45" }
-revm-primitives = { git = "https://github.com/Rimeeeeee/revm", rev = "39e670741ea8e353d44325dc386ed62d86e34c45" }
-revm-state = { git = "https://github.com/Rimeeeeee/revm", rev = "39e670741ea8e353d44325dc386ed62d86e34c45" }
-
-[patch."https://github.com/bluealloy/revm"]
-revm = { git = "https://github.com/Rimeeeeee/revm", rev = "39e670741ea8e353d44325dc386ed62d86e34c45" }
-revm-bytecode = { git = "https://github.com/Rimeeeeee/revm", rev = "39e670741ea8e353d44325dc386ed62d86e34c45" }
-revm-context = { git = "https://github.com/Rimeeeeee/revm", rev = "39e670741ea8e353d44325dc386ed62d86e34c45" }
-revm-context-interface = { git = "https://github.com/Rimeeeeee/revm", rev = "39e670741ea8e353d44325dc386ed62d86e34c45" }
-revm-database = { git = "https://github.com/Rimeeeeee/revm", rev = "39e670741ea8e353d44325dc386ed62d86e34c45" }
-revm-database-interface = { git = "https://github.com/Rimeeeeee/revm", rev = "39e670741ea8e353d44325dc386ed62d86e34c45" }
-revm-handler = { git = "https://github.com/Rimeeeeee/revm", rev = "39e670741ea8e353d44325dc386ed62d86e34c45" }
-revm-inspector = { git = "https://github.com/Rimeeeeee/revm", rev = "39e670741ea8e353d44325dc386ed62d86e34c45" }
-revm-interpreter = { git = "https://github.com/Rimeeeeee/revm", rev = "39e670741ea8e353d44325dc386ed62d86e34c45" }
-revm-precompile = { git = "https://github.com/Rimeeeeee/revm", rev = "39e670741ea8e353d44325dc386ed62d86e34c45" }
-revm-primitives = { git = "https://github.com/Rimeeeeee/revm", rev = "39e670741ea8e353d44325dc386ed62d86e34c45" }
-revm-state = { git = "https://github.com/Rimeeeeee/revm", rev = "39e670741ea8e353d44325dc386ed62d86e34c45" }
+revm = { git = "https://github.com/Rimeeeeee/revm", branch = "bogota" }
+revm-bytecode = { git = "https://github.com/Rimeeeeee/revm", branch = "bogota" }
+revm-context = { git = "https://github.com/Rimeeeeee/revm", branch = "bogota" }
+revm-context-interface = { git = "https://github.com/Rimeeeeee/revm", branch = "bogota" }
+revm-database = { git = "https://github.com/Rimeeeeee/revm", branch = "bogota" }
+revm-database-interface = { git = "https://github.com/Rimeeeeee/revm", branch = "bogota" }
+revm-handler = { git = "https://github.com/Rimeeeeee/revm", branch = "bogota" }
+revm-inspector = { git = "https://github.com/Rimeeeeee/revm", branch = "bogota" }
+revm-interpreter = { git = "https://github.com/Rimeeeeee/revm", branch = "bogota" }
+revm-precompile = { git = "https://github.com/Rimeeeeee/revm", branch = "bogota" }
+revm-primitives = { git = "https://github.com/Rimeeeeee/revm", branch = "bogota" }
+revm-state = { git = "https://github.com/Rimeeeeee/revm", branch = "bogota" }
