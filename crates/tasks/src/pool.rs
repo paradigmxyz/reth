@@ -168,6 +168,10 @@ thread_local! {
 /// [`Worker::init`]. The state is thread-local and accessible during [`install`](Self::install)
 /// calls.
 ///
+/// Worker access is backed by a thread-local [`RefCell`]. Keep [`with_worker`](Self::with_worker)
+/// and [`with_worker_mut`](Self::with_worker_mut) closures short and non-yielding: if Rayon runs
+/// another job on the same thread while a borrow is active, re-entrant worker access can panic.
+///
 /// The pool supports multiple init/clear cycles, allowing reuse of the same threads with
 /// different state configurations.
 ///
@@ -322,15 +326,46 @@ impl WorkerPool {
         self.pool().in_place_scope(f)
     }
 
-    /// Access the current thread's [`Worker`] from within an [`install`](Self::install) closure.
+    /// Accesses the current thread's [`Worker`] from within a pool closure.
     ///
     /// This is useful for accessing the worker from inside `par_iter` where the initial `&Worker`
     /// reference from `install` belongs to a different thread.
+    ///
+    /// This borrows the thread-local worker for the entire duration of `f`. Do not yield to Rayon
+    /// from inside `f` if another job could call [`with_worker_mut`](Self::with_worker_mut) on the
+    /// same thread. Yield points include parallel iterators, `rayon::join`, scopes, and waiting in
+    /// `ThreadPool::install` on a different Rayon pool. A cross-pool `install` may run another job
+    /// from the caller's pool on the same thread while it waits.
+    ///
+    /// Prefer copying or cloning the required worker state in `f`, returning from this method to
+    /// release the borrow, and only then performing work that may yield.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the current thread's worker is already mutably borrowed, including by a
+    /// re-entrant [`with_worker_mut`](Self::with_worker_mut) call.
     pub fn with_worker<R>(f: impl FnOnce(&Worker) -> R) -> R {
         WORKER.with_borrow(|worker| f(worker))
     }
 
-    /// Mutably access the current thread's [`Worker`] from within a pool closure.
+    /// Mutably accesses the current thread's [`Worker`] from within a pool closure.
+    ///
+    /// This exclusively borrows the thread-local worker for the entire duration of `f`. The borrow
+    /// is not re-entrant: if Rayon runs another job on the same thread before `f` returns, any call
+    /// to [`with_worker`](Self::with_worker) or `with_worker_mut` from that job will panic.
+    ///
+    /// Do not call operations that can yield to Rayon from inside `f` when re-entrant worker access
+    /// is possible. This includes parallel iterators, `rayon::join`, scopes, and waiting in
+    /// `ThreadPool::install` on a different Rayon pool. In particular, a cross-pool `install`
+    /// cooperatively runs jobs from the caller's pool while waiting for the target pool.
+    ///
+    /// Prefer computing updates before entering `with_worker_mut`, then use this closure only to
+    /// apply the update to the worker state.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the current thread's worker is already borrowed, including by a re-entrant
+    /// `with_worker` or `with_worker_mut` call.
     pub fn with_worker_mut<R>(f: impl FnOnce(&mut Worker) -> R) -> R {
         WORKER.with_borrow_mut(|worker| f(worker))
     }
