@@ -49,6 +49,11 @@ impl StateTrieOverlay {
 ///
 /// Account entries preserve known non-existence, while storage and code entries contain only data
 /// explicitly observed during execution. Accounts never retain database-context-local lookup IDs.
+/// This intentionally does not retain account status or
+/// known-storage wipes, so it cannot represent pre-Dencun `SELFDESTRUCT` of existing accounts.
+/// The execution overlay is used only for post-Dencun engine execution, where that operation does
+/// not clear existing storage; pipeline sync does not use it. Extend this representation before
+/// using it for pre-Dencun execution.
 #[derive(Clone, Debug, Default)]
 pub struct ExecutionOverlay {
     /// In-memory block hashes in ascending block-number order.
