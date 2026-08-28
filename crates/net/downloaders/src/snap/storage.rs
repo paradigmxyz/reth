@@ -55,7 +55,7 @@ impl<C: SnapClient> StorageRangeDownloader<C> {
     pub fn new_with_options(
         client: C,
         request: GetStorageRangesMessage,
-        batch: VerifiedAccountBatch<'_>,
+        batch: &VerifiedAccountBatch<'_>,
         runtime: Runtime,
         options: SnapRequestOptions,
     ) -> Result<Self, InvalidStorageRangeRequest> {

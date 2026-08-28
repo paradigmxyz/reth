@@ -25,7 +25,6 @@ use reth_storage_api::{
 };
 use reth_tasks::Runtime;
 use reth_trie_common::{HashedPostState, HashedStorage, TrieAccount, EMPTY_ROOT_HASH};
-use std::ops::Range;
 
 // Keeps account and storage requests inclusive through the full trie keyspace.
 const MAX_HASH: B256 = B256::new([0xff; B256::len_bytes()]);
@@ -140,12 +139,24 @@ impl<'a, C, F> StateDownloader<'a, C, F> {
         }
 
         let total = range.accounts().len();
+        let storage_accounts = range.storage_batch();
+        let mut storage_start = 0;
         for start in (0..total).step_by(STATE_ACCOUNTS_PER_BATCH) {
             let end = (start + STATE_ACCOUNTS_PER_BATCH).min(total);
             let accounts = &range.accounts()[start..end];
-            let Some((state, bytecodes)) = self.download_batch(&range, start..end).await? else {
+            let storage_end = storage_start +
+                accounts
+                    .iter()
+                    .filter(|(_, account)| account.storage_root != EMPTY_ROOT_HASH)
+                    .count();
+            let storage_batch = storage_accounts
+                .range(storage_start..storage_end)
+                .expect("storage batch covers the account chunk");
+            let Some((state, bytecodes)) = self.download_batch(accounts, storage_batch).await?
+            else {
                 return Ok(RangeStep::Unavailable(generation))
             };
+            storage_start = storage_end;
             let progress = account_progress(accounts, end >= total && !range.has_more())?;
             generation = self.store.commit_account_range(generation, state, bytecodes, progress)?;
         }
@@ -156,14 +167,13 @@ impl<'a, C, F> StateDownloader<'a, C, F> {
     // must be retried rather than committed.
     async fn download_batch(
         &mut self,
-        range: &VerifiedAccountRange,
-        indices: Range<usize>,
+        accounts: &[AccountEntry],
+        storage_batch: VerifiedAccountBatch<'_>,
     ) -> Result<Option<(HashedPostState, Vec<(B256, Bytes)>)>, SnapSyncError>
     where
         C: SnapClient,
     {
-        let accounts = &range.accounts()[indices.clone()];
-        let Some(storages) = self.download_storages(range, indices).await? else { return Ok(None) };
+        let Some(storages) = self.download_storages(storage_batch).await? else { return Ok(None) };
         let Some(bytecodes) = self.download_bytecodes(accounts).await? else { return Ok(None) };
         let state = HashedPostState::default()
             .with_accounts(
@@ -213,44 +223,22 @@ impl<'a, C, F> StateDownloader<'a, C, F> {
     // Completes every non-empty storage trie before its owning accounts become durable.
     async fn download_storages(
         &mut self,
-        range: &VerifiedAccountRange,
-        indices: Range<usize>,
+        batch: VerifiedAccountBatch<'_>,
     ) -> Result<Option<Vec<(B256, HashedStorage)>>, SnapSyncError>
     where
         C: SnapClient,
     {
-        let storage_accounts = range.accounts()[indices.clone()]
-            .iter()
-            .filter(|(_, account)| account.storage_root != EMPTY_ROOT_HASH)
-            .copied()
-            .collect::<Vec<_>>();
-        if storage_accounts.is_empty() {
+        if batch.accounts().is_empty() {
             return Ok(Some(Vec::new()))
         }
 
-        let mut storages = storage_accounts
+        let mut storages = batch
+            .accounts()
             .iter()
             .map(|(hash, _)| (*hash, HashedStorage::default()))
             .collect::<Vec<_>>();
-        let mut start = indices.start;
-        while start < indices.end {
-            while start < indices.end && range.accounts()[start].1.storage_root == EMPTY_ROOT_HASH {
-                start += 1;
-            }
-            if start == indices.end {
-                break
-            }
-            let mut end = start + 1;
-            while end < indices.end && range.accounts()[end].1.storage_root != EMPTY_ROOT_HASH {
-                end += 1;
-            }
-            let batch = range
-                .batch_range(start..end)
-                .expect("storage run is inside the authenticated account range");
-            if self.download_storage_batch(batch, &mut storages).await?.is_none() {
-                return Ok(None)
-            }
-            start = end;
+        if self.download_storage_batch(batch, &mut storages).await?.is_none() {
+            return Ok(None)
         }
         Ok(Some(storages))
     }
@@ -277,7 +265,7 @@ impl<'a, C, F> StateDownloader<'a, C, F> {
             let downloader = StorageRangeDownloader::new_with_options(
                 self.client,
                 request.clone(),
-                batch,
+                &batch,
                 self.runtime.clone(),
                 request_options(&excluded),
             )
