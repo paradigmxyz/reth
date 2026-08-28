@@ -3,7 +3,10 @@
 
 import argparse
 import json
+import shutil
+import subprocess
 import sys
+import time
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
@@ -190,38 +193,64 @@ def compare_block(reth_url, geth_url, block, timeout):
     return 0
 
 
+def latest_blocks(args):
+    if args.block:
+        return [int(args.block, 0)]
+
+    reth_head = int(rpc(args.reth_url, "eth_blockNumber", [], args.timeout), 16)
+    geth_head = int(rpc(args.geth_url, "eth_blockNumber", [], args.timeout), 16)
+    head = min(reth_head, geth_head)
+    blocks = range(max(0, head - args.count + 1), head + 1)
+    print(f"comparing blocks {hex(blocks.start)} through {hex(head)}")
+    return blocks
+
+
+def alert(message):
+    print(f"ALERT: {message}", file=sys.stderr)
+    if shutil.which("notify-send"):
+        subprocess.run(
+            ["notify-send", "--urgency=critical", "Execution witness comparison failed", message],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Compare the 20 latest common debug_executionWitness responses from local Reth and Geth."
+        description="Continuously compare the 20 latest common debug_executionWitness responses from local Reth and Geth."
     )
     parser.add_argument("--reth-url", default="http://127.0.0.1:8545")
     parser.add_argument("--geth-url", default="http://127.0.0.1:8546")
     parser.add_argument("--block", help="compare only this block (decimal or 0x-prefixed hexadecimal)")
     parser.add_argument("--count", type=int, default=20, help="number of latest common blocks (default: 20)")
+    parser.add_argument("--interval", type=float, default=12, help="minimum seconds between passes (default: 12)")
+    parser.add_argument("--once", action="store_true", help="run one pass instead of watching")
     parser.add_argument("--timeout", type=float, default=600, help="RPC timeout in seconds (default: 600)")
     args = parser.parse_args()
 
     if args.count < 1:
         parser.error("--count must be positive")
+    if args.interval <= 0:
+        parser.error("--interval must be positive")
 
-    try:
-        if args.block:
-            blocks = [int(args.block, 0)]
-        else:
-            reth_head = int(rpc(args.reth_url, "eth_blockNumber", [], args.timeout), 16)
-            geth_head = int(rpc(args.geth_url, "eth_blockNumber", [], args.timeout), 16)
-            head = min(reth_head, geth_head)
-            blocks = range(max(0, head - args.count + 1), head + 1)
-            print(f"comparing blocks {hex(blocks.start)} through {hex(head)}")
-    except (RuntimeError, ValueError) as error:
-        print(f"ERROR: {error}", file=sys.stderr)
-        return 2
+    while True:
+        started = time.monotonic()
+        try:
+            blocks = latest_blocks(args)
+        except (RuntimeError, ValueError) as error:
+            alert(str(error))
+            return 2
 
-    for block in blocks:
-        result = compare_block(args.reth_url, args.geth_url, block, args.timeout)
-        if result:
-            return result
-    return 0
+        for block in blocks:
+            result = compare_block(args.reth_url, args.geth_url, block, args.timeout)
+            if result:
+                alert(f"comparison failed at {hex(block)}")
+                return result
+
+        if args.once:
+            return 0
+        time.sleep(max(0, args.interval - (time.monotonic() - started)))
 
 
 if __name__ == "__main__":
