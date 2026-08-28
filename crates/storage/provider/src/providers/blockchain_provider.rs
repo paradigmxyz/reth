@@ -30,9 +30,9 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, NodePrimitivesProvider, RangeEnd, RangeResponse, RangeResult,
-    StateRangeProvider, StateRangeProviderFactory, StateRangeView, StorageChangeSetReader,
-    StorageRangeResult,
+    BlockBodyIndicesProvider, DatabaseProviderROFactory, NodePrimitivesProvider, RangeEnd,
+    RangeResponse, RangeResult, StateRangeProvider, StateRangeProviderFactory, StateRangeView,
+    StorageChangeSetReader, StorageRangeResult,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_storage_overlay::{OverlayStateProvider, OverlayStateProviderFactory, OwnedProvider};
@@ -158,9 +158,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             self.database.clone(),
             self.database.overlay_manager().overlay_builder(state.hash()),
         );
-        Ok(Box::new(reth_storage_api::DatabaseProviderROFactory::database_provider_ro(
-            &state_provider_factory,
-        )?))
+        Ok(Box::new(state_provider_factory.database_provider_ro()?))
     }
 
     /// Returns a cursor-backed state view for a state root still only in canonical in-memory
@@ -195,8 +193,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
                 .overlay_builder(matched.anchor().hash)
                 .with_immediate_state_trie_overlay(merged.state, merged.nodes),
         );
-        reth_storage_api::DatabaseProviderROFactory::database_provider_ro(&state_provider_factory)
-            .map(Some)
+        state_provider_factory.database_provider_ro().map(Some)
     }
 
     /// Returns a cursor-backed state view for a retained canonical state root.
@@ -223,8 +220,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             self.database.clone(),
             self.database.overlay_manager().overlay_builder(block_hash),
         );
-        reth_storage_api::DatabaseProviderROFactory::database_provider_ro(&state_provider_factory)
-            .map(Some)
+        state_provider_factory.database_provider_ro().map(Some)
     }
 }
 
