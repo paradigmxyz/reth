@@ -671,9 +671,6 @@ where
         &self,
         bundle_state: &revm::database::BundleState,
     ) -> ProviderResult<HashedPostState> {
-        if self.state_trie_overlay()?.skipped_for_reused_sparse_trie() {
-            return Err(ProviderError::UnsupportedProvider)
-        }
         let mut hashed_state =
             HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state());
         if !bundle_state
@@ -1067,10 +1064,6 @@ mod tests {
         assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
         assert!(matches!(
             provider.state_root(HashedPostState::default()),
-            Err(ProviderError::UnsupportedProvider)
-        ));
-        assert!(matches!(
-            provider.hashed_post_state(&revm::database::BundleState::default()),
             Err(ProviderError::UnsupportedProvider)
         ));
         assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
