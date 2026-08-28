@@ -404,7 +404,7 @@ impl ChangesetCache {
             .overlay_builder(finish.hash)
             .with_no_reverts()
             .build_state_trie_overlay_at_frontiers(provider, partial_state_trie, finish)?;
-        let state_trie_provider = OverlayStateProvider::<P, N>::new_with_state_trie(
+        let state_trie_provider = OverlayStateProvider::<&P, N>::new_with_state_trie(
             provider,
             overlay,
             provider.cached_storage_settings().is_v2(),
@@ -907,7 +907,7 @@ mod tests {
 
         let overlay = empty_overlay();
         let state_trie_provider =
-            OverlayStateProvider::<_, reth_ethereum_primitives::EthPrimitives>::new_with_state_trie(
+            OverlayStateProvider::<&_, reth_ethereum_primitives::EthPrimitives>::new_with_state_trie(
                 &*provider,
                 overlay,
                 provider.cached_storage_settings().is_v2(),
@@ -994,7 +994,7 @@ mod tests {
         let expected = legacy_compute_range_trie_changesets(&*provider, 2..=3);
         let overlay = empty_overlay();
         let state_trie_provider =
-            OverlayStateProvider::<_, reth_ethereum_primitives::EthPrimitives>::new_with_state_trie(
+            OverlayStateProvider::<&_, reth_ethereum_primitives::EthPrimitives>::new_with_state_trie(
                 &*provider,
                 overlay,
                 provider.cached_storage_settings().is_v2(),

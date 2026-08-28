@@ -11,7 +11,7 @@ use reth_primitives_traits::{
 };
 use reth_storage_api::{
     AccountReader, BlockHashReader, BlockNumReader, BytecodeReader, ChangeSetReader, DBProvider,
-    DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider,
+    DatabaseProviderFactory, DatabaseProviderROFactory, DbTxProvider, HashedPostStateProvider,
     PruneCheckpointReader, StageCheckpointReader, StateProofProvider, StateProvider,
     StateRootProvider, StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
 };
@@ -36,7 +36,7 @@ use reth_trie_db::{
     DatabaseTrieCursorFactory, LegacyKeyAdapter, PackedAccountsTrie, PackedKeyAdapter,
     PackedStoragesTrie,
 };
-use std::{cell::OnceCell, fmt, sync::Arc, time::Instant};
+use std::{cell::OnceCell, fmt, ops::Deref, sync::Arc, time::Instant};
 use tracing::instrument;
 
 /// Factory for creating overlay state providers with optional reverts and overlays.
@@ -92,16 +92,15 @@ where
         + BlockNumReader
         + ChangeSetReader
         + StorageChangeSetReader
-        + StorageSettingsCache
-        + 'static,
+        + StorageSettingsCache,
 {
-    type Provider = OverlayStateProvider<'static, F::Provider, N>;
+    type Provider = OverlayStateProvider<OwnedProvider<F::Provider>, N>;
 
     /// Create a read-only [`OverlayStateProvider`].
     #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
     fn database_provider_ro(
         &self,
-    ) -> ProviderResult<OverlayStateProvider<'static, F::Provider, N>> {
+    ) -> ProviderResult<OverlayStateProvider<OwnedProvider<F::Provider>, N>> {
         let overall_start = Instant::now();
 
         // Get a read-only provider
@@ -126,8 +125,8 @@ where
 }
 
 /// State provider with lazily resolved state trie and execution overlays.
-pub struct OverlayStateProvider<'a, Provider, N: NodePrimitives = EthPrimitives> {
-    provider: ProviderSource<'a, Provider>,
+pub struct OverlayStateProvider<Provider, N: NodePrimitives = EthPrimitives> {
+    provider: Provider,
     overlay_builder: Option<OverlayBuilder<N>>,
     state_trie_overlay_cache: StateTrieOverlayCache,
     execution_overlay_cache: ExecutionOverlayCache,
@@ -137,7 +136,7 @@ pub struct OverlayStateProvider<'a, Provider, N: NodePrimitives = EthPrimitives>
     is_v2: bool,
 }
 
-impl<'a, Provider, N: NodePrimitives> OverlayStateProvider<'a, Provider, N> {
+impl<Provider, N: NodePrimitives> OverlayStateProvider<OwnedProvider<Provider>, N> {
     const fn new(
         provider: Provider,
         overlay_builder: OverlayBuilder<N>,
@@ -147,29 +146,12 @@ impl<'a, Provider, N: NodePrimitives> OverlayStateProvider<'a, Provider, N> {
         is_v2: bool,
     ) -> Self {
         Self {
-            provider: ProviderSource::Owned(provider),
+            provider: OwnedProvider(provider),
             overlay_builder: Some(overlay_builder),
             state_trie_overlay_cache,
             execution_overlay_cache,
             metrics,
             state_trie_overlay: OnceCell::new(),
-            execution_overlay: OnceCell::new(),
-            is_v2,
-        }
-    }
-
-    pub(crate) fn new_with_state_trie(
-        provider: &'a Provider,
-        state_trie_overlay: StateTrieOverlay,
-        is_v2: bool,
-    ) -> Self {
-        Self {
-            provider: ProviderSource::Borrowed(provider),
-            overlay_builder: None,
-            state_trie_overlay_cache: Default::default(),
-            execution_overlay_cache: Default::default(),
-            metrics: Default::default(),
-            state_trie_overlay: OnceCell::from(state_trie_overlay),
             execution_overlay: OnceCell::new(),
             is_v2,
         }
@@ -182,7 +164,7 @@ impl<'a, Provider, N: NodePrimitives> OverlayStateProvider<'a, Provider, N> {
         is_v2: bool,
     ) -> Self {
         Self {
-            provider: ProviderSource::Owned(provider),
+            provider: OwnedProvider(provider),
             overlay_builder: None,
             state_trie_overlay_cache: Default::default(),
             execution_overlay_cache: Default::default(),
@@ -192,14 +174,39 @@ impl<'a, Provider, N: NodePrimitives> OverlayStateProvider<'a, Provider, N> {
             is_v2,
         }
     }
+}
 
-    const fn provider(&self) -> &Provider {
-        self.provider.as_ref()
+impl<'a, Provider, N: NodePrimitives> OverlayStateProvider<&'a Provider, N> {
+    pub(crate) fn new_with_state_trie(
+        provider: &'a Provider,
+        state_trie_overlay: StateTrieOverlay,
+        is_v2: bool,
+    ) -> Self {
+        Self {
+            provider,
+            overlay_builder: None,
+            state_trie_overlay_cache: Default::default(),
+            execution_overlay_cache: Default::default(),
+            metrics: Default::default(),
+            state_trie_overlay: OnceCell::from(state_trie_overlay),
+            execution_overlay: OnceCell::new(),
+            is_v2,
+        }
+    }
+}
+
+impl<Provider, N: NodePrimitives> OverlayStateProvider<Provider, N>
+where
+    Provider: Deref,
+    Provider::Target: Sized,
+{
+    fn provider(&self) -> &Provider::Target {
+        &self.provider
     }
 
     fn state_trie_overlay(&self) -> ProviderResult<&StateTrieOverlay>
     where
-        Provider: StageCheckpointReader
+        Provider::Target: StageCheckpointReader
             + PruneCheckpointReader
             + ChangeSetReader
             + StorageChangeSetReader
@@ -238,7 +245,7 @@ impl<'a, Provider, N: NodePrimitives> OverlayStateProvider<'a, Provider, N> {
 
     fn build_overlay(&self, input: TrieInputSorted) -> ProviderResult<TrieInputSorted>
     where
-        Provider: StageCheckpointReader
+        Provider::Target: StageCheckpointReader
             + PruneCheckpointReader
             + ChangeSetReader
             + StorageChangeSetReader
@@ -263,7 +270,7 @@ impl<'a, Provider, N: NodePrimitives> OverlayStateProvider<'a, Provider, N> {
 
     fn execution_overlay(&self) -> ProviderResult<&Arc<ExecutionOverlay>>
     where
-        Provider: StageCheckpointReader
+        Provider::Target: StageCheckpointReader
             + PruneCheckpointReader
             + ChangeSetReader
             + StorageChangeSetReader
@@ -299,7 +306,11 @@ impl<'a, Provider, N: NodePrimitives> OverlayStateProvider<'a, Provider, N> {
     }
 }
 
-impl<Provider: fmt::Debug, N: NodePrimitives> fmt::Debug for OverlayStateProvider<'_, Provider, N> {
+impl<Provider, N: NodePrimitives> fmt::Debug for OverlayStateProvider<Provider, N>
+where
+    Provider: Deref,
+    Provider::Target: fmt::Debug + Sized,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OverlayStateProvider")
             .field("provider", self.provider())
@@ -310,9 +321,10 @@ impl<Provider: fmt::Debug, N: NodePrimitives> fmt::Debug for OverlayStateProvide
     }
 }
 
-impl<Provider, N: NodePrimitives> AccountReader for OverlayStateProvider<'_, Provider, N>
+impl<Provider, N: NodePrimitives> AccountReader for OverlayStateProvider<Provider, N>
 where
-    Provider: DBProvider
+    Provider: Deref,
+    Provider::Target: DBProvider
         + StorageSettingsCache
         + StageCheckpointReader
         + PruneCheckpointReader
@@ -340,9 +352,11 @@ where
     }
 }
 
-impl<Provider, N: NodePrimitives> BlockHashReader for OverlayStateProvider<'_, Provider, N>
+impl<Provider, N: NodePrimitives> BlockHashReader for OverlayStateProvider<Provider, N>
 where
-    Provider: BlockHashReader
+    Provider: Deref,
+    Provider::Target: BlockHashReader
+        + Sized
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -376,9 +390,10 @@ where
     }
 }
 
-impl<Provider, N: NodePrimitives> BytecodeReader for OverlayStateProvider<'_, Provider, N>
+impl<Provider, N: NodePrimitives> BytecodeReader for OverlayStateProvider<Provider, N>
 where
-    Provider: DBProvider
+    Provider: Deref,
+    Provider::Target: DBProvider
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -397,9 +412,10 @@ where
     }
 }
 
-impl<Provider, N: NodePrimitives> StateRootProvider for OverlayStateProvider<'_, Provider, N>
+impl<Provider, N: NodePrimitives> StateRootProvider for OverlayStateProvider<Provider, N>
 where
-    Provider: DBProvider
+    Provider: Deref,
+    Provider::Target: DBProvider
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -457,9 +473,10 @@ where
     }
 }
 
-impl<Provider, N: NodePrimitives> StorageRootProvider for OverlayStateProvider<'_, Provider, N>
+impl<Provider, N: NodePrimitives> StorageRootProvider for OverlayStateProvider<Provider, N>
 where
-    Provider: DBProvider
+    Provider: Deref,
+    Provider::Target: DBProvider
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -552,9 +569,10 @@ where
     }
 }
 
-impl<Provider, N: NodePrimitives> StateProofProvider for OverlayStateProvider<'_, Provider, N>
+impl<Provider, N: NodePrimitives> StateProofProvider for OverlayStateProvider<Provider, N>
 where
-    Provider: DBProvider
+    Provider: Deref,
+    Provider::Target: DBProvider
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -631,9 +649,10 @@ where
     }
 }
 
-impl<Provider, N: NodePrimitives> HashedPostStateProvider for OverlayStateProvider<'_, Provider, N>
+impl<Provider, N: NodePrimitives> HashedPostStateProvider for OverlayStateProvider<Provider, N>
 where
-    Provider: DBProvider
+    Provider: Deref,
+    Provider::Target: DBProvider
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -668,9 +687,10 @@ where
     }
 }
 
-impl<Provider, N: NodePrimitives> StateProvider for OverlayStateProvider<'_, Provider, N>
+impl<Provider, N: NodePrimitives> StateProvider for OverlayStateProvider<Provider, N>
 where
-    Provider: DBProvider
+    Provider: Deref,
+    Provider::Target: DBProvider
         + BlockHashReader
         + StorageSettingsCache
         + StageCheckpointReader
@@ -712,9 +732,10 @@ where
     }
 }
 
-impl<Provider, N: NodePrimitives> TrieCursorFactory for OverlayStateProvider<'_, Provider, N>
+impl<Provider, N: NodePrimitives> TrieCursorFactory for OverlayStateProvider<Provider, N>
 where
-    Provider: DBProvider
+    Provider: Deref,
+    Provider::Target: DBProvider
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -766,9 +787,10 @@ where
     }
 }
 
-impl<Provider, N: NodePrimitives> HashedCursorFactory for OverlayStateProvider<'_, Provider, N>
+impl<Provider, N: NodePrimitives> HashedCursorFactory for OverlayStateProvider<Provider, N>
 where
-    Provider: DBProvider
+    Provider: Deref,
+    Provider::Target: DBProvider
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -778,7 +800,7 @@ where
 {
     type AccountCursor<'a>
         = <HashedPostStateCursorFactory<
-        DatabaseHashedCursorFactory<&'a Provider::Tx>,
+        DatabaseHashedCursorFactory<&'a <Provider::Target as DbTxProvider>::Tx>,
         &'a Arc<HashedPostStateSorted>,
     > as HashedCursorFactory>::AccountCursor<'a>
     where
@@ -786,7 +808,7 @@ where
 
     type StorageCursor<'a>
         = <HashedPostStateCursorFactory<
-        DatabaseHashedCursorFactory<&'a Provider::Tx>,
+        DatabaseHashedCursorFactory<&'a <Provider::Target as DbTxProvider>::Tx>,
         &'a Arc<HashedPostStateSorted>,
     > as HashedCursorFactory>::StorageCursor<'a>
     where
@@ -843,17 +865,15 @@ type DbStorageProof<'a, TX, A> = TrieStorageProof<
 type DbProof<'a, TX, A> =
     Proof<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
 
-enum ProviderSource<'a, Provider> {
-    Owned(Provider),
-    Borrowed(&'a Provider),
-}
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct OwnedProvider<Provider>(Provider);
 
-impl<Provider> ProviderSource<'_, Provider> {
-    const fn as_ref(&self) -> &Provider {
-        match self {
-            Self::Owned(provider) => provider,
-            Self::Borrowed(provider) => provider,
-        }
+impl<Provider> Deref for OwnedProvider<Provider> {
+    type Target = Provider;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 

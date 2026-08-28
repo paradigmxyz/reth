@@ -35,7 +35,7 @@ use reth_storage_api::{
     StorageRangeResult,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_storage_overlay::{OverlayStateProvider, OverlayStateProviderFactory};
+use reth_storage_overlay::{OverlayStateProvider, OverlayStateProviderFactory, OwnedProvider};
 use reth_trie::{
     hashed_cursor::{HashedCursor, HashedCursorFactory},
     metrics::TrieRootMetrics,
@@ -55,7 +55,7 @@ pub const SNAPSHOT_STATE_RETENTION: u64 = 128;
 
 type StateRangeDbProvider<N> = <ProviderFactory<N> as DatabaseProviderFactory>::Provider;
 type HistoricalStateRangeProvider<N> =
-    OverlayStateProvider<'static, StateRangeDbProvider<N>, <N as NodeTypes>::Primitives>;
+    OverlayStateProvider<OwnedProvider<StateRangeDbProvider<N>>, <N as NodeTypes>::Primitives>;
 
 /// The main type for interacting with the blockchain.
 ///
