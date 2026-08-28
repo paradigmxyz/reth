@@ -1,7 +1,10 @@
 use crate::utils::{
     advance_with_random_transactions, eth_payload_attributes, eth_payload_attributes_amsterdam,
 };
-use alloy_eips::{eip4844::BlobAndProofV1, eip7685::RequestsOrHash};
+use alloy_eips::{
+    eip4844::BlobAndProofV1,
+    eip7685::{Requests, RequestsOrHash},
+};
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, B256};
 use alloy_rpc_types_engine::{
@@ -21,7 +24,9 @@ use reth_node_core::{
 };
 use reth_node_ethereum::{
     engine_ssz_containers::{
-        ForkchoiceUpdateResponse as SszForkchoiceUpdateResponse, PayloadStatus as SszPayloadStatus,
+        ExecutionPayloadEnvelopeAmsterdam, ForkchoiceUpdateAmsterdam,
+        ForkchoiceUpdateResponse as SszForkchoiceUpdateResponse, Optional,
+        PayloadStatus as SszPayloadStatus,
     },
     engine_ssz_proxy::EngineSszProxyLayer,
     EthereumAddOns, EthereumEngineValidatorBuilder, EthereumNode,
@@ -264,7 +269,7 @@ async fn test_testing_build_block_v1_amsterdam() -> eyre::Result<()> {
 
     let status: alloy_rpc_types_engine::PayloadStatus = engine_client
         .request(
-            "engine_newPayloadV4",
+            "engine_newPayloadV5",
             (payload, versioned_hashes, parent_beacon_block_root, execution_requests),
         )
         .await?;
@@ -407,7 +412,14 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
         .header(ENGINE_EXECUTION_VERSION_HEADER, ENGINE_AMSTERDAM_FORK_HEADER)
         .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
         .header(reqwest::header::ACCEPT, "application/octet-stream")
-        .body((payload, B256::ZERO, envelope.execution_requests.take()).as_ssz_bytes())
+        .body(
+            ExecutionPayloadEnvelopeAmsterdam {
+                payload,
+                parent_beacon_block_root: B256::ZERO,
+                execution_requests: Requests::from_requests(envelope.execution_requests.take()),
+            }
+            .as_ssz_bytes(),
+        )
         .send()
         .await?;
     assert_eq!(new_payload_response.status(), reqwest::StatusCode::OK);
@@ -422,15 +434,16 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
         .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
         .header(reqwest::header::ACCEPT, "application/octet-stream")
         .body(
-            (
-                ForkchoiceState {
+            ForkchoiceUpdateAmsterdam {
+                forkchoice_state: ForkchoiceState {
                     head_block_hash: block_hash,
                     safe_block_hash: genesis_hash,
                     finalized_block_hash: genesis_hash,
                 },
-                Vec::<PayloadAttributes>::new(),
-            )
-                .as_ssz_bytes(),
+                payload_attributes: Optional::none(),
+                custody_columns: Optional::none(),
+            }
+            .as_ssz_bytes(),
         )
         .send()
         .await?;
