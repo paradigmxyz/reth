@@ -301,6 +301,28 @@ impl WorkerPool {
         })
     }
 
+    /// Runs a closure on this pool, waiting for its result.
+    ///
+    /// Unlike [`install_fn`](Self::install_fn), this always queues the closure onto this pool
+    /// when called from another rayon pool. This avoids Rayon running the closure on the caller's
+    /// worker through its cross-pool install path.
+    pub fn spawn_and_wait<R: Send + 'static>(&self, f: impl FnOnce() -> R + Send + 'static) -> R {
+        let pool = self.pool();
+        if pool.current_thread_index().is_some() {
+            return f()
+        }
+
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        self.spawn(move || {
+            let _ = tx.send(catch_unwind(AssertUnwindSafe(f)));
+        });
+
+        match rx.recv().expect("worker pool exited before completing task") {
+            Ok(result) => result,
+            Err(panic) => std::panic::resume_unwind(panic),
+        }
+    }
+
     /// Spawns a closure on the pool.
     pub fn spawn(&self, f: impl FnOnce() + Send + 'static) {
         let pool = self.pool();
@@ -548,5 +570,22 @@ mod tests {
         assert_eq!(results, vec![10, 11, 12, 13]);
 
         pool.clear();
+    }
+
+    #[test]
+    fn worker_pool_spawn_and_wait_runs_on_target_pool() {
+        let caller_pool = WorkerPool::new(1, "caller");
+        let target_pool = Arc::new(WorkerPool::new(1, "target"));
+
+        let thread_name = caller_pool.install_fn({
+            let target_pool = Arc::clone(&target_pool);
+            move || {
+                WorkerPool::with_worker_mut(|_| {
+                    target_pool.spawn_and_wait(|| thread::current().name().unwrap().to_owned())
+                })
+            }
+        });
+
+        assert_eq!(thread_name, "target-00");
     }
 }
