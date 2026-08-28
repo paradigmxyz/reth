@@ -28,8 +28,8 @@ use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     AccountReader, BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory,
-    DatabaseProviderROFactory, PruneCheckpointReader, StageCheckpointReader,
-    StorageChangeSetReader, StorageSettingsCache, TryIntoHistoricalStateProvider,
+    DatabaseProviderROFactory, PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
+    StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_storage_overlay::OverlayStateProviderFactory;
@@ -100,7 +100,6 @@ where
         + ChangeSetReader
         + StorageChangeSetReader
         + StorageSettingsCache
-        + TryIntoHistoricalStateProvider
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
@@ -422,7 +421,9 @@ where
             // spends blocking on the data.
             let caches = saved_cache.cache().clone();
             let overlay_factory = ctx.provider.clone();
-            let build = Arc::new(move || overlay_factory.database_provider_ro());
+            let build = Arc::new(move || {
+                overlay_factory.database_provider_ro().map(|provider| Box::new(provider) as _)
+            });
 
             pool.begin_block(build, caches, ctx.env.txpool_snapshot.clone());
             for account in prefetch_bal.as_bal() {
@@ -582,15 +583,14 @@ where
         + ChangeSetReader
         + StorageChangeSetReader
         + StorageSettingsCache
-        + TryIntoHistoricalStateProvider
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Creates a per-thread EVM for prewarming.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn evm_for_ctx(&self) -> PrewarmEvmState<Evm> {
-        let mut state_provider = match self.provider.database_provider_ro() {
-            Ok(provider) => provider,
+        let mut state_provider: StateProviderBox = match self.provider.database_provider_ro() {
+            Ok(provider) => Box::new(provider),
             Err(err) => {
                 trace!(
                     target: "engine::tree::payload_processor::prewarm",

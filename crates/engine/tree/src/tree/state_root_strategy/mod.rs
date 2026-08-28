@@ -66,9 +66,9 @@ use reth_primitives_traits::{
     AlloyBlockHeader, FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedHeader,
 };
 use reth_provider::{
-    BlockExecutionOutput, BlockNumReader, DatabaseProviderFactory, DatabaseProviderROFactory,
-    HashedPostStateProvider, ProviderError, PruneCheckpointReader, StageCheckpointReader,
-    StateRootProvider, StorageSettingsCache, TryIntoHistoricalStateProvider,
+    BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory,
+    DatabaseProviderROFactory, HashedPostStateProvider, ProviderError, PruneCheckpointReader,
+    StageCheckpointReader, StateRootProvider, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_tasks::utils::increase_thread_priority;
@@ -798,11 +798,17 @@ where
     P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
+        + ChangeSetReader
+        + StorageChangeSetReader
         + StorageSettingsCache
-        + TryIntoHistoricalStateProvider
         + 'static,
-    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
-        + Clone
+    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
+            Provider: TrieCursorFactory
+                          + HashedCursorFactory
+                          + HashedPostStateProvider
+                          + StateRootProvider
+                          + Send,
+        > + Clone
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
@@ -967,9 +973,11 @@ where
     P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
+        + ChangeSetReader
+        + StorageChangeSetReader
         + StorageSettingsCache
-        + TryIntoHistoricalStateProvider
         + 'static,
+    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: StateRootProvider>,
 {
     fn name(&self) -> &'static str {
         "synchronous"
@@ -1005,11 +1013,17 @@ where
     P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
+        + ChangeSetReader
+        + StorageChangeSetReader
         + StorageSettingsCache
-        + TryIntoHistoricalStateProvider
         + 'static,
-    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
-        + Clone
+    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
+            Provider: TrieCursorFactory
+                          + HashedCursorFactory
+                          + HashedPostStateProvider
+                          + StateRootProvider
+                          + Send,
+        > + Clone
         + 'static,
 {
     fn serial_fallback(
@@ -1114,11 +1128,17 @@ where
     P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
+        + ChangeSetReader
+        + StorageChangeSetReader
         + StorageSettingsCache
-        + TryIntoHistoricalStateProvider
         + 'static,
-    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
-        + Clone
+    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
+            Provider: TrieCursorFactory
+                          + HashedCursorFactory
+                          + HashedPostStateProvider
+                          + StateRootProvider
+                          + Send,
+        > + Clone
         + 'static,
 {
     fn name(&self) -> &'static str {
@@ -1206,11 +1226,16 @@ where
     P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
+        + ChangeSetReader
+        + StorageChangeSetReader
         + StorageSettingsCache
-        + TryIntoHistoricalStateProvider
         + 'static,
-    OverlayStateProviderFactory<P, N>:
-        DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>,
+    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
+        Provider: TrieCursorFactory
+                      + HashedCursorFactory
+                      + HashedPostStateProvider
+                      + StateRootProvider,
+    >,
 {
     debug!(target: "engine::tree::state_root_strategy", "Comparing trie updates with serial computation");
 

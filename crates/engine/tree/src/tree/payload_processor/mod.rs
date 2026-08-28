@@ -20,7 +20,6 @@ use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory,
     PruneCheckpointReader, StageCheckpointReader, StorageChangeSetReader, StorageSettingsCache,
-    TryIntoHistoricalStateProvider,
 };
 use reth_revm::db::BundleState;
 use reth_storage_overlay::OverlayStateProviderFactory;
@@ -184,7 +183,6 @@ where
             + ChangeSetReader
             + StorageChangeSetReader
             + StorageSettingsCache
-            + TryIntoHistoricalStateProvider
             + 'static,
     {
         let (prewarm_rx, execution_rx) =
@@ -356,7 +354,6 @@ where
             + ChangeSetReader
             + StorageChangeSetReader
             + StorageSettingsCache
-            + TryIntoHistoricalStateProvider
             + 'static,
     {
         // Each mode carries the capability its producers use; the rest is dropped here, so

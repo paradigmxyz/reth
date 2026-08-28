@@ -105,7 +105,7 @@ use crate::tree::{
     txpool_prewarm,
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
-    PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
+    PayloadHandle, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::{
@@ -152,9 +152,9 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     BlockExecutionOutput, BlockHashReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
-    DatabaseProviderROFactory, ProviderError, PruneCheckpointReader, StageCheckpointReader,
-    StateProvider, StateProviderBox, StateProviderFactory, StateReader, StorageChangeSetReader,
-    StorageSettingsCache, TryIntoHistoricalStateProvider,
+    DatabaseProviderROFactory, HashedPostStateProvider, ProviderError, PruneCheckpointReader,
+    StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
+    StateRootProvider, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
@@ -324,7 +324,12 @@ where
         + Clone
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
-            Provider: TrieCursorFactory + HashedCursorFactory + StateProvider + Send,
+            Provider: TrieCursorFactory
+                          + HashedCursorFactory
+                          + HashedPostStateProvider
+                          + StateRootProvider
+                          + StateProvider
+                          + Send,
         > + Clone
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
@@ -810,7 +815,7 @@ where
                 || hashed_state.get(),
                 &block,
                 &parent_block,
-                || overlay_factory.database_provider_ro(),
+                || overlay_factory.database_provider_ro().map(|provider| Box::new(provider) as _),
             )
         });
 
@@ -846,7 +851,11 @@ where
                     || hashed_state.get(),
                     &block,
                     &parent_block,
-                    || overlay_factory.database_provider_ro(),
+                    || {
+                        overlay_factory
+                            .database_provider_ro()
+                            .map(|provider| Box::new(provider) as _)
+                    },
                 )
             });
         }
@@ -1404,26 +1413,6 @@ where
         Ok(handle)
     }
 
-    /// Creates a `StateProviderBuilder` for the given parent hash.
-    ///
-    /// Returns `None` when the parent is neither in memory nor persisted.
-    fn state_provider_builder(
-        &self,
-        hash: B256,
-        state: &EngineApiTreeState<N>,
-    ) -> ProviderResult<Option<StateProviderBuilder<N, P>>> {
-        if !state.tree_state.contains_hash(&hash) && self.provider.header(hash)?.is_none() {
-            debug!(target: "engine::tree::payload_validator", %hash, "no canonical state found for block");
-            return Ok(None)
-        }
-
-        Ok(Some(StateProviderBuilder::new(
-            self.provider.clone(),
-            hash,
-            state.tree_state.overlay_manager.clone(),
-        )))
-    }
-
     /// Creates an overlay state provider factory for the given parent hash.
     ///
     /// Returns `None` when the parent is neither in memory nor persisted.
@@ -1816,7 +1805,12 @@ where
         + Clone
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
-            Provider: TrieCursorFactory + HashedCursorFactory + StateProvider + Send,
+            Provider: TrieCursorFactory
+                          + HashedCursorFactory
+                          + HashedPostStateProvider
+                          + StateRootProvider
+                          + StateProvider
+                          + Send,
         > + Clone
         + 'static,
     N: NodePrimitives,
@@ -1907,8 +1901,8 @@ where
             }
         };
 
-        let provider_builder = match self.state_provider_builder(parent.hash(), state) {
-            Ok(Some(provider_builder)) => provider_builder,
+        let overlay_factory = match self.overlay_state_provider_factory(parent.hash(), state) {
+            Ok(Some(overlay_factory)) => overlay_factory,
             Ok(None) => return,
             Err(err) => {
                 trace!(
@@ -1920,7 +1914,7 @@ where
                 return
             }
         };
-        txpool_prewarm.start(parent.hash(), evm_env, provider_builder)
+        txpool_prewarm.start(parent.hash(), evm_env, overlay_factory)
     }
 
     fn payload_builder_resources(
