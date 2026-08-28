@@ -235,7 +235,9 @@ where
                         state_trie_tip_block,
                         finish_tip_block,
                     )?;
-                entry.insert(overlay.clone());
+                if !overlay.skipped_for_reused_sparse_trie() {
+                    entry.insert(overlay.clone());
+                }
                 overlay
             }
         };
@@ -254,6 +256,9 @@ where
             + StorageSettingsCache,
     {
         let overlay = self.state_trie_overlay()?;
+        if overlay.skipped_for_reused_sparse_trie() {
+            return Err(ProviderError::UnsupportedProvider)
+        }
         let TrieInputSorted { nodes: input_nodes, state: input_state, prefix_sets } = input;
         let mut nodes = Arc::clone(&overlay.trie_updates);
         let mut state = Arc::clone(&overlay.hashed_post_state);
@@ -1043,6 +1048,28 @@ mod tests {
     }
 
     #[test]
+    fn skipped_state_trie_overlay_is_not_cached_or_used_for_state_roots() {
+        let (factory, blocks) = setup_frontiers(3, 3);
+        let manager = OverlayManager::default();
+        manager.insert_block(blocks[4].clone());
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            factory,
+            manager
+                .overlay_builder(blocks[4].recovered_block().hash())
+                .with_skip_overlay_for_reused_sparse_trie(blocks[3].recovered_block().hash()),
+        );
+
+        let provider = state_provider_factory.database_provider_ro().unwrap();
+        assert!(provider.state_trie_overlay().unwrap().skipped_for_reused_sparse_trie());
+        assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
+        assert!(matches!(
+            provider.state_root(HashedPostState::default()),
+            Err(ProviderError::UnsupportedProvider)
+        ));
+        assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
+    }
+
+    #[test]
     fn execution_overlay_readers_use_overlay_first() {
         let (factory, _) = setup_frontiers(1, 3);
         let address = Address::with_last_byte(1);
@@ -1053,14 +1080,14 @@ mod tests {
         let code_hash = B256::with_last_byte(6);
         let bytecode = RevmBytecode::new_raw([0x60, 0x01].into());
         let mut execution_overlay = ExecutionOverlay::default();
-        execution_overlay.accounts.insert(address, Some(account_info.clone()));
-        execution_overlay.block_hashes.push(BlockNumHash::new(1, block_hash));
+        execution_overlay.accounts_mut().insert(address, Some(account_info.clone()));
+        execution_overlay.block_hashes_mut().push(BlockNumHash::new(1, block_hash));
         execution_overlay
-            .storage
+            .storage_mut()
             .entry(address)
             .or_default()
             .insert(U256::from_be_bytes(storage_key.0), storage_value);
-        execution_overlay.code_hashes.insert(code_hash, bytecode.clone());
+        execution_overlay.code_hashes_mut().insert(code_hash, bytecode.clone());
         let provider = OverlayStateProvider::<_, EthPrimitives>::new_with_execution(
             factory.provider().unwrap(),
             Arc::new(execution_overlay),

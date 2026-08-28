@@ -644,7 +644,7 @@ mod tests {
     }
 
     fn empty_overlay() -> StateTrieOverlay {
-        StateTrieOverlay { trie_updates: Arc::default(), hashed_post_state: Arc::default() }
+        StateTrieOverlay::new(Arc::default(), Arc::default())
     }
 
     fn insert_test_changesets(

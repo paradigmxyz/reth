@@ -302,7 +302,7 @@ where
             .overlay_manager
             .overlay_builder(anchor_hash)
             .with_immediate_state_trie_overlay(state, nodes);
-        let StateTrieOverlay { trie_updates, hashed_post_state } =
+        let StateTrieOverlay { trie_updates, hashed_post_state, .. } =
             overlay_builder.build_state_trie_overlay(self.provider)?;
 
         Ok(TrieInputSorted::new(trie_updates, hashed_post_state, prefix_sets))

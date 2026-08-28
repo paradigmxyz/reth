@@ -34,14 +34,28 @@ pub struct StateTrieOverlay {
     pub trie_updates: Arc<TrieUpdatesSorted>,
     /// Hashed state overlay.
     pub hashed_post_state: Arc<HashedPostStateSorted>,
+    /// Whether construction was skipped because a reused sparse trie covers this range.
+    skipped_for_reused_sparse_trie: bool,
 }
 
 impl StateTrieOverlay {
+    pub(crate) const fn new(
+        trie_updates: Arc<TrieUpdatesSorted>,
+        hashed_post_state: Arc<HashedPostStateSorted>,
+    ) -> Self {
+        Self { trie_updates, hashed_post_state, skipped_for_reused_sparse_trie: false }
+    }
+
     fn empty() -> Self {
         Self {
             trie_updates: Arc::new(TrieUpdatesSorted::default()),
             hashed_post_state: Arc::new(HashedPostStateSorted::default()),
+            skipped_for_reused_sparse_trie: true,
         }
+    }
+
+    pub(crate) const fn skipped_for_reused_sparse_trie(&self) -> bool {
+        self.skipped_for_reused_sparse_trie
     }
 }
 
@@ -85,6 +99,26 @@ impl ExecutionOverlay {
     /// Returns the bytecode by code hash.
     pub const fn code_hashes(&self) -> &B256Map<Bytecode> {
         &self.code_hashes
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn block_hashes_mut(&mut self) -> &mut Vec<BlockNumHash> {
+        &mut self.block_hashes
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn accounts_mut(&mut self) -> &mut AddressMap<Option<AccountInfo>> {
+        &mut self.accounts
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn storage_mut(&mut self) -> &mut AddressMap<U256Map<U256>> {
+        &mut self.storage
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn code_hashes_mut(&mut self) -> &mut B256Map<Bytecode> {
+        &mut self.code_hashes
     }
 
     /// Extends this overlay with the execution state of a later block.
@@ -459,7 +493,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         self.metrics.trie_updates_size.record(trie_updates_total_len as f64);
         self.metrics.hashed_state_size.record(hashed_state_updates_total_len as f64);
 
-        Ok(StateTrieOverlay { trie_updates, hashed_post_state })
+        Ok(StateTrieOverlay::new(trie_updates, hashed_post_state))
     }
 
     /// Builds the effective execution overlay for the given provider.
