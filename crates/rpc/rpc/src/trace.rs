@@ -16,7 +16,7 @@ use alloy_rpc_types_trace::{
     tracerequest::TraceCallRequest,
 };
 use async_trait::async_trait;
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_primitives_traits::{BlockBody, BlockHeader};
@@ -113,6 +113,7 @@ where
                     .map_err(Eth::Error::from_eth_err)?;
                 Ok(trace_res)
             })
+            .boxed()
             .await
     }
 
