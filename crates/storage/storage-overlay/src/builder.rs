@@ -1,8 +1,8 @@
 use crate::OverlayManager;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{
-    map::{AddressMap, B256Map, U256Map},
-    BlockHash, BlockNumber, B256, U256,
+    map::{AddressMap, AddressSet, B256Map, U256Map},
+    Address, BlockHash, BlockNumber, B256, U256,
 };
 use metrics::{Counter, Histogram};
 use reth_chain_state::ExecutedBlock;
@@ -63,11 +63,6 @@ impl StateTrieOverlay {
 ///
 /// Account entries preserve known non-existence, while storage and code entries contain only data
 /// explicitly observed during execution. Accounts never retain database-context-local lookup IDs.
-/// This intentionally does not retain account status or
-/// known-storage wipes, so it cannot represent pre-Dencun `SELFDESTRUCT` of existing accounts.
-/// The execution overlay is used only for post-Dencun engine execution, where that operation does
-/// not clear existing storage; pipeline sync does not use it. Extend this representation before
-/// using it for pre-Dencun execution.
 #[derive(Clone, Debug, Default)]
 pub struct ExecutionOverlay {
     /// In-memory block hashes in ascending block-number order.
@@ -76,6 +71,11 @@ pub struct ExecutionOverlay {
     accounts: AddressMap<Option<AccountInfo>>,
     /// Storage values by address and slot.
     storage: AddressMap<U256Map<U256>>,
+    /// Accounts whose storage was wiped during execution.
+    ///
+    /// An absent slot for one of these accounts is known to be zero, rather than falling back to
+    /// the durable database state.
+    storage_wipes: AddressSet,
     /// Bytecode by code hash.
     code_hashes: B256Map<Bytecode>,
 }
@@ -94,6 +94,16 @@ impl ExecutionOverlay {
     /// Returns the storage values by address and slot.
     pub const fn storage(&self) -> &AddressMap<U256Map<U256>> {
         &self.storage
+    }
+
+    /// Returns an explicitly observed storage value, or zero when the account's storage was
+    /// wiped.
+    pub(crate) fn storage_value(&self, address: Address, slot: U256) -> Option<U256> {
+        self.storage
+            .get(&address)
+            .and_then(|storage| storage.get(&slot))
+            .copied()
+            .or_else(|| self.storage_wipes.contains(&address).then_some(U256::ZERO))
     }
 
     /// Returns the bytecode by code hash.
@@ -133,13 +143,16 @@ impl ExecutionOverlay {
     /// and cannot be reused by the overlay's database context. All other account fields are
     /// preserved.
     fn extend_state(&mut self, state: &BundleState) {
-        let (accounts, storage, code_hashes) =
-            (&mut self.accounts, &mut self.storage, &mut self.code_hashes);
+        let (accounts, storage, storage_wipes, code_hashes) =
+            (&mut self.accounts, &mut self.storage, &mut self.storage_wipes, &mut self.code_hashes);
 
         #[allow(unused_mut)]
         let mut extend_accounts_and_storage = || {
             for (address, account) in state.state() {
                 accounts.insert(*address, Self::normalized_account_info(account.info.clone()));
+                if account.was_destroyed() {
+                    storage_wipes.insert(*address);
+                }
                 let account_storage = storage.entry(*address).or_default();
                 for (slot, value) in &account.storage {
                     account_storage.insert(*slot, value.present_value);
@@ -179,6 +192,7 @@ impl ExecutionOverlay {
                 .or_default()
                 .extend(slots.iter().map(|(slot, value)| (*slot, *value)));
         }
+        self.storage_wipes.extend(other.storage_wipes.iter().copied());
         self.code_hashes.extend(other.code_hashes.iter().map(|(hash, code)| (*hash, code.clone())));
     }
 
@@ -917,7 +931,7 @@ mod tests {
     use reth_trie::{BranchNodeCompact, ComputedTrieData, HashedPostState, HashedStorage, Nibbles};
     use revm::{
         bytecode::Bytecode,
-        database::BundleState,
+        database::{AccountStatus, BundleAccount, BundleState},
         state::{AccountId, AccountInfo},
     };
 
@@ -1044,6 +1058,26 @@ mod tests {
     }
 
     #[test]
+    fn execution_overlay_zeroes_unobserved_storage_for_destroyed_accounts() {
+        let address = Address::with_last_byte(1);
+        let mut state = BundleState::default();
+        state.state.insert(
+            address,
+            BundleAccount::new(
+                Some(AccountInfo::default()),
+                None,
+                Default::default(),
+                AccountStatus::Destroyed,
+            ),
+        );
+
+        let mut overlay = ExecutionOverlay::default();
+        overlay.extend_state(&state);
+
+        assert_eq!(overlay.storage_value(address, U256::ZERO), Some(U256::ZERO));
+    }
+
+    #[test]
     fn execution_overlay_composition_uses_later_values_and_normalizes_accounts() {
         let address = Address::with_last_byte(1);
         let retained_address = Address::with_last_byte(2);
@@ -1072,6 +1106,7 @@ mod tests {
             Some(AccountInfo { nonce: 11, account_id: AccountId::new(12), ..Default::default() }),
         );
         later.storage.entry(address).or_default().insert(slot, U256::from(13));
+        later.storage_wipes.insert(address);
         later.code_hashes.insert(later_code_hash, Bytecode::new_raw(vec![2].into()));
 
         overlay.extend_overlay(&later);
@@ -1083,6 +1118,7 @@ mod tests {
         assert!(overlay.accounts.contains_key(&retained_address));
         assert_eq!(overlay.storage[&address][&slot], U256::from(13));
         assert_eq!(overlay.storage[&address][&retained_slot], U256::from(10));
+        assert_eq!(overlay.storage_value(address, U256::from(14)), Some(U256::ZERO));
         assert!(overlay.code_hashes.contains_key(&first_code_hash));
         assert!(overlay.code_hashes.contains_key(&later_code_hash));
     }
