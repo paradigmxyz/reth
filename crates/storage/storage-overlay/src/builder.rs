@@ -152,6 +152,7 @@ impl ExecutionOverlay {
                 accounts.insert(*address, Self::normalized_account_info(account.info.clone()));
                 if account.was_destroyed() {
                     storage_wipes.insert(*address);
+                    storage.remove(address);
                 }
                 let account_storage = storage.entry(*address).or_default();
                 for (slot, value) in &account.storage {
@@ -186,6 +187,9 @@ impl ExecutionOverlay {
                 .iter()
                 .map(|(address, info)| (*address, Self::normalized_account_info(info.clone()))),
         );
+        for address in &other.storage_wipes {
+            self.storage.remove(address);
+        }
         for (address, slots) in &other.storage {
             self.storage
                 .entry(*address)
@@ -1117,7 +1121,7 @@ mod tests {
         assert_eq!(overlay.accounts[&address].as_ref().unwrap().account_id, None);
         assert!(overlay.accounts.contains_key(&retained_address));
         assert_eq!(overlay.storage[&address][&slot], U256::from(13));
-        assert_eq!(overlay.storage[&address][&retained_slot], U256::from(10));
+        assert!(!overlay.storage[&address].contains_key(&retained_slot));
         assert_eq!(overlay.storage_value(address, U256::from(14)), Some(U256::ZERO));
         assert!(overlay.code_hashes.contains_key(&first_code_hash));
         assert!(overlay.code_hashes.contains_key(&later_code_hash));
