@@ -479,7 +479,8 @@ impl DecodedMultiProofV2 {
         let account_nodes = matching_v2_proof_nodes(&self.account_proofs, &nibbles);
 
         let (info, storage_root) = 'account: {
-            if let Some(ProofTrieNodeV2 { node: TrieNodeV2::Leaf(leaf), .. }) = account_nodes.last() &&
+            if let Some(ProofTrieNodeV2 { node: TrieNodeV2::Leaf(leaf), .. }) =
+                account_nodes.clone().last() &&
                 nibbles.ends_with(&leaf.key)
             {
                 let account = TrieAccount::decode(&mut &leaf.value[..])?;
@@ -501,11 +502,11 @@ impl DecodedMultiProofV2 {
         let mut storage_proofs = Vec::with_capacity(slots.len());
         for slot in slots {
             let nibbles = Nibbles::unpack(keccak256(slot));
-            let nodes = storage_nodes
-                .map(|nodes| matching_v2_proof_nodes(nodes, &nibbles))
-                .unwrap_or_default();
+            let nodes =
+                storage_nodes.iter().flat_map(|nodes| matching_v2_proof_nodes(nodes, &nibbles));
             let value = 'value: {
-                if let Some(ProofTrieNodeV2 { node: TrieNodeV2::Leaf(leaf), .. }) = nodes.last() &&
+                if let Some(ProofTrieNodeV2 { node: TrieNodeV2::Leaf(leaf), .. }) =
+                    nodes.clone().last() &&
                     nibbles.ends_with(&leaf.key)
                 {
                     break 'value U256::decode(&mut &leaf.value[..])?
@@ -621,17 +622,17 @@ impl DecodedMultiProofV2 {
 /// Returns proof nodes matching `path` in root-to-leaf order.
 fn matching_v2_proof_nodes<'a>(
     nodes: &'a [ProofTrieNodeV2],
-    path: &Nibbles,
-) -> Vec<&'a ProofTrieNodeV2> {
-    nodes.iter().rev().filter(|node| path.starts_with(&node.path)).collect()
+    path: &'a Nibbles,
+) -> impl Iterator<Item = &'a ProofTrieNodeV2> + Clone {
+    nodes.iter().rev().filter(move |node| path.starts_with(&node.path))
 }
 
 /// Encodes V2 proof nodes as standard MPT proof nodes.
 ///
 /// V2 combines an extension and its child branch in one node. Both nodes need to be emitted for
 /// consumers that reconstruct a sparse trie from the returned proof.
-fn encode_v2_proof_nodes(nodes: Vec<&ProofTrieNodeV2>) -> Vec<Bytes> {
-    let mut proof = Vec::with_capacity(nodes.len());
+fn encode_v2_proof_nodes<'a>(nodes: impl Iterator<Item = &'a ProofTrieNodeV2>) -> Vec<Bytes> {
+    let mut proof = Vec::new();
     for proof_node in nodes {
         let mut encoded = Vec::new();
         proof_node.node.encode(&mut encoded);
