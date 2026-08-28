@@ -7,7 +7,7 @@ use crate::{AccountRangeProgress, SnapGeneration, SnapPhase, SnapStateStore, Sna
 use alloy_primitives::{map::B256Set, Bytes, B256, KECCAK256_EMPTY};
 use reth_downloaders::snap::{
     AccountRangeDownloader, AccountRangeOutcome, BytecodeDownloader, BytecodeOutcome,
-    StorageRangeContinuation, StorageRangeDownloader, StorageRangeOutcome, VerifiedAccountRange,
+    StorageRangeDownloader, StorageRangeOutcome, VerifiedAccountBatch, VerifiedAccountRange,
 };
 use reth_eth_wire_types::snap::{
     GetAccountRangeMessage, GetByteCodesMessage, GetStorageRangesMessage,
@@ -25,6 +25,7 @@ use reth_storage_api::{
 };
 use reth_tasks::Runtime;
 use reth_trie_common::{HashedPostState, HashedStorage, TrieAccount, EMPTY_ROOT_HASH};
+use std::ops::Range;
 
 // Keeps account and storage requests inclusive through the full trie keyspace.
 const MAX_HASH: B256 = B256::new([0xff; B256::len_bytes()]);
@@ -123,8 +124,8 @@ impl<'a, C, F> StateDownloader<'a, C, F> {
             return Ok(RangeStep::Unavailable(generation))
         };
 
-        if range.accounts.is_empty() {
-            if range.has_more {
+        if range.accounts().is_empty() {
+            if range.has_more() {
                 return Err(SnapSyncError::InvalidRequest(
                     "account range requires continuation without advancing".to_string(),
                 ))
@@ -138,15 +139,14 @@ impl<'a, C, F> StateDownloader<'a, C, F> {
             return Ok(RangeStep::Committed(generation))
         }
 
-        let total = range.accounts.len();
-        for (index, accounts) in range.accounts.chunks(STATE_ACCOUNTS_PER_BATCH).enumerate() {
-            let Some((state, bytecodes)) =
-                self.download_batch(generation.state_root, accounts).await?
-            else {
+        let total = range.accounts().len();
+        for start in (0..total).step_by(STATE_ACCOUNTS_PER_BATCH) {
+            let end = (start + STATE_ACCOUNTS_PER_BATCH).min(total);
+            let accounts = &range.accounts()[start..end];
+            let Some((state, bytecodes)) = self.download_batch(&range, start..end).await? else {
                 return Ok(RangeStep::Unavailable(generation))
             };
-            let committed = (index + 1) * STATE_ACCOUNTS_PER_BATCH;
-            let progress = account_progress(accounts, committed >= total && !range.has_more)?;
+            let progress = account_progress(accounts, end >= total && !range.has_more())?;
             generation = self.store.commit_account_range(generation, state, bytecodes, progress)?;
         }
         Ok(RangeStep::Committed(generation))
@@ -156,13 +156,14 @@ impl<'a, C, F> StateDownloader<'a, C, F> {
     // must be retried rather than committed.
     async fn download_batch(
         &mut self,
-        root: B256,
-        accounts: &[AccountEntry],
+        range: &VerifiedAccountRange,
+        indices: Range<usize>,
     ) -> Result<Option<(HashedPostState, Vec<(B256, Bytes)>)>, SnapSyncError>
     where
         C: SnapClient,
     {
-        let Some(storages) = self.download_storages(root, accounts).await? else { return Ok(None) };
+        let accounts = &range.accounts()[indices.clone()];
+        let Some(storages) = self.download_storages(range, indices).await? else { return Ok(None) };
         let Some(bytecodes) = self.download_bytecodes(accounts).await? else { return Ok(None) };
         let state = HashedPostState::default()
             .with_accounts(
@@ -212,13 +213,13 @@ impl<'a, C, F> StateDownloader<'a, C, F> {
     // Completes every non-empty storage trie before its owning accounts become durable.
     async fn download_storages(
         &mut self,
-        root: B256,
-        accounts: &[AccountEntry],
+        range: &VerifiedAccountRange,
+        indices: Range<usize>,
     ) -> Result<Option<Vec<(B256, HashedStorage)>>, SnapSyncError>
     where
         C: SnapClient,
     {
-        let storage_accounts = accounts
+        let storage_accounts = range.accounts()[indices.clone()]
             .iter()
             .filter(|(_, account)| account.storage_root != EMPTY_ROOT_HASH)
             .copied()
@@ -229,24 +230,54 @@ impl<'a, C, F> StateDownloader<'a, C, F> {
 
         let mut storages = storage_accounts
             .iter()
-            .map(|(hash, _)| (*hash, HashedStorage::new(true)))
+            .map(|(hash, _)| (*hash, HashedStorage::default()))
             .collect::<Vec<_>>();
-        let mut pending = storage_accounts.as_slice();
-        let mut origin = B256::ZERO;
+        let mut start = indices.start;
+        while start < indices.end {
+            while start < indices.end && range.accounts()[start].1.storage_root == EMPTY_ROOT_HASH {
+                start += 1;
+            }
+            if start == indices.end {
+                break
+            }
+            let mut end = start + 1;
+            while end < indices.end && range.accounts()[end].1.storage_root != EMPTY_ROOT_HASH {
+                end += 1;
+            }
+            let batch = range
+                .batch_range(start..end)
+                .expect("storage run is inside the authenticated account range");
+            if self.download_storage_batch(batch, &mut storages).await?.is_none() {
+                return Ok(None)
+            }
+            start = end;
+        }
+        Ok(Some(storages))
+    }
+
+    // Drives one contiguous non-empty account batch through all authenticated follow-ups.
+    async fn download_storage_batch(
+        &mut self,
+        mut batch: VerifiedAccountBatch<'_>,
+        storages: &mut [(B256, HashedStorage)],
+    ) -> Result<Option<()>, SnapSyncError>
+    where
+        C: SnapClient,
+    {
+        let mut request = GetStorageRangesMessage {
+            request_id: self.next_request_id()?,
+            root_hash: batch.state_root(),
+            account_hashes: batch.accounts().iter().map(|(hash, _)| *hash).collect(),
+            starting_hash: B256::ZERO.into(),
+            limit_hash: MAX_HASH.into(),
+            response_bytes: STATE_RESPONSE_BYTES,
+        };
         let mut excluded = Vec::new();
-        while !pending.is_empty() {
-            let request = GetStorageRangesMessage {
-                request_id: self.next_request_id()?,
-                root_hash: root,
-                account_hashes: pending.iter().map(|(hash, _)| *hash).collect(),
-                starting_hash: origin.into(),
-                limit_hash: MAX_HASH.into(),
-                response_bytes: STATE_RESPONSE_BYTES,
-            };
+        loop {
             let downloader = StorageRangeDownloader::new_with_options(
                 self.client,
-                request,
-                pending,
+                request.clone(),
+                batch,
                 self.runtime.clone(),
                 request_options(&excluded),
             )
@@ -258,20 +289,30 @@ impl<'a, C, F> StateDownloader<'a, C, F> {
                 Err(RequestError::UnsupportedCapability) => return Ok(None),
                 Err(error) => return Err(error.into()),
                 Ok(StorageRangeOutcome::Verified(verified)) => {
-                    for range in verified.ranges {
+                    let follow_up_id = self.request_id.wrapping_add(1);
+                    let follow_up = verified
+                        .follow_up(follow_up_id, batch)
+                        .map_err(|error| SnapSyncError::InvalidRequest(error.to_string()))?;
+                    for range in verified.into_ranges() {
                         let storage = storages
                             .iter_mut()
                             .find(|(hash, _)| *hash == range.account_hash)
                             .expect("verified range belongs to a requested account");
                         storage.1.storage.extend(range.slots);
                     }
-                    (pending, origin) =
-                        storage_continuation(pending, origin, verified.continuation)?;
+                    let Some((next_request, next_batch)) = follow_up else { return Ok(Some(())) };
+                    if follow_up_id == 0 {
+                        return Err(SnapSyncError::InvalidRequest(
+                            "snap request id space exhausted".to_string(),
+                        ))
+                    }
+                    self.request_id = follow_up_id;
+                    request = next_request;
+                    batch = next_batch;
                     excluded.clear();
                 }
             }
         }
-        Ok(Some(storages))
     }
 
     // Preserves missing hashes across truncated responses until the batch is complete.
@@ -348,37 +389,6 @@ impl<'a, C, F> StateDownloader<'a, C, F> {
 
 /// A hashed account key with the trie value a range proof authenticated.
 type AccountEntry = (B256, TrieAccount);
-
-/// Where the next storage request resumes: the accounts still pending, and the slot to start at.
-type StorageCursor<'a> = (&'a [AccountEntry], B256);
-
-/// Resumes the next storage request, rejecting a continuation that would repeat this one.
-fn storage_continuation(
-    pending: &[AccountEntry],
-    origin: B256,
-    continuation: Option<StorageRangeContinuation>,
-) -> Result<StorageCursor<'_>, SnapSyncError> {
-    let (remaining, next_origin) = match continuation {
-        Some(StorageRangeContinuation::Partial { account_index, starting_hash, .. }) => {
-            (pending.get(account_index..), starting_hash)
-        }
-        Some(StorageRangeContinuation::NextAccount { account_index, .. }) => {
-            (pending.get(account_index..), B256::ZERO)
-        }
-        // Every requested account was served in full.
-        None => (Some(&[][..]), origin),
-    };
-    let remaining = remaining.ok_or_else(|| {
-        SnapSyncError::InvalidRequest("storage continuation exceeds the request".to_string())
-    })?;
-    // Neither consuming an account nor moving the slot cursor would reissue the same request.
-    if !remaining.is_empty() && remaining.len() == pending.len() && next_origin <= origin {
-        return Err(SnapSyncError::InvalidRequest(
-            "storage range continuation does not advance".to_string(),
-        ))
-    }
-    Ok((remaining, next_origin))
-}
 
 /// Resumes at the hash after the last committed account, unless the range exhausted the trie.
 fn account_progress(
@@ -654,6 +664,65 @@ mod tests {
         let mut cursor = provider.tx_ref().cursor_dup_read::<tables::HashedStorages>().unwrap();
         assert_eq!(
             cursor.seek_by_key_subkey(account_hash, slot_hash).unwrap().unwrap().value,
+            slot_value
+        );
+    }
+
+    #[tokio::test]
+    async fn skips_empty_storage_accounts_in_a_mixed_range() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let empty_hash = B256::repeat_byte(0x11);
+        let stored_hash = B256::repeat_byte(0x22);
+        let slot_hash = B256::repeat_byte(0x33);
+        let slot_value = U256::from(7);
+        let storage_root = trie_root([(slot_hash, alloy_rlp::encode(slot_value))]);
+        let empty = empty_account(1);
+        let stored = TrieAccount {
+            nonce: 2,
+            balance: U256::from(3),
+            storage_root,
+            code_hash: KECCAK256_EMPTY,
+        };
+        let state_root = trie_root([
+            (empty_hash, alloy_rlp::encode(empty)),
+            (stored_hash, alloy_rlp::encode(stored)),
+        ]);
+        let generation = SnapGeneration::new(10, B256::repeat_byte(1), state_root);
+        SnapStateStore::new(&factory).begin_generation(generation).unwrap();
+        let peer = PeerId::random();
+        let client = TestSnapClient::new([
+            response(
+                peer,
+                SnapResponse::AccountRange(AccountRangeMessage {
+                    request_id: 1,
+                    accounts: vec![
+                        AccountData::from_trie_account(empty_hash, &empty),
+                        AccountData::from_trie_account(stored_hash, &stored),
+                    ],
+                    proof: Vec::new(),
+                }),
+            ),
+            response(
+                peer,
+                SnapResponse::StorageRanges(StorageRangesMessage {
+                    request_id: 2,
+                    slots: vec![vec![StorageData::from_value(slot_hash, slot_value)]],
+                    proof: Vec::new(),
+                }),
+            ),
+        ]);
+
+        let outcome = StateDownloader::new(&client, &factory, Runtime::test())
+            .run(generation, RangeBudget::UNBOUNDED)
+            .await
+            .unwrap();
+
+        assert!(matches!(outcome, StateDownloadOutcome::Complete { .. }));
+        let provider = factory.database_provider_ro().unwrap();
+        let mut cursor = provider.tx_ref().cursor_dup_read::<tables::HashedStorages>().unwrap();
+        assert_eq!(
+            cursor.seek_by_key_subkey(stored_hash, slot_hash).unwrap().unwrap().value,
             slot_value
         );
     }

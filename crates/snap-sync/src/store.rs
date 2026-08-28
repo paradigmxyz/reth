@@ -313,7 +313,7 @@ impl<'a, F> SnapStateStore<'a, F> {
                 state.accounts.insert(hashed_address, (!account.is_empty()).then_some(account));
             }
             if !changes.storage_changes.is_empty() {
-                let mut storage = HashedStorage::new(false);
+                let mut storage = HashedStorage::default();
                 storage.storage.extend(hashed_storage_changes(changes));
                 state.storages.insert(hashed_address, storage);
             }

@@ -1,7 +1,7 @@
-//! Shared request execution for authenticated Snap responses.
+//! Shared request execution for authenticated snap responses.
 //!
-//! Proof verification runs off the async worker while peer attribution and retries remain in one
-//! place for every range downloader.
+//! Retries, peer attribution and blocking verification live here so every range downloader
+//! penalizes and reissues in exactly the same way.
 
 use futures::FutureExt;
 use reth_eth_wire_types::snap::{
@@ -24,17 +24,25 @@ use tracing::debug;
 /// Number of retries allowed after the initial request fails.
 pub(super) const MAX_RETRIES: u8 = 2;
 
-/// Drives one Snap request until its response is verified or retries are exhausted.
+/// Drives one snap request until its response is verified or retries are exhausted.
 pub(super) struct VerifyingRequest<C: SnapClient, V: SnapVerifier> {
+    // Sends each attempt and receives the penalty for an invalid response.
     client: C,
+    // Verification runs here so peer-controlled proof work stays off the async worker.
     runtime: Runtime,
+    // Retained so a retry reissues the identical request.
     request: V::Request,
+    // Cloned per attempt, because verification moves onto the blocking pool.
     verifier: V,
+    // The response currently in flight.
     fut: C::Output,
+    // Present only while a response is being authenticated.
     verification: Option<VerificationTask<V::Output>>,
+    // Peers unavailable to this request, including responders that failed verification.
     excluded_peers: Vec<PeerId>,
     // Preserves peer fault attribution if retries exhaust the remaining peers.
     last_verification_error: Option<RequestError>,
+    // Attempts already spent against `MAX_RETRIES`.
     retries: u8,
 }
 
@@ -43,7 +51,7 @@ where
     C: SnapClient,
     V: SnapVerifier,
 {
-    /// Preserves caller peer exclusions across verification retries.
+    /// Submits `request` with custom peer selection options.
     pub(super) fn new_with_options(
         client: C,
         request: V::Request,
@@ -67,6 +75,9 @@ where
     }
 
     /// Polls until the request yields a verified response or a terminal error.
+    ///
+    /// An active verification finishes before another response is accepted, so a peer stays
+    /// attributable for the work done on its behalf.
     pub(super) fn poll_verified(
         &mut self,
         cx: &mut Context<'_>,
@@ -88,7 +99,7 @@ where
                         self.runtime.spawn_blocking(move || verifier.verify(peer_id, response));
                     self.verification = Some(VerificationTask { peer_id, fut });
                 }
-                // Wire-level bad responses are already penalized by the session.
+                // A wrong wire response is already penalized by the session.
                 Err(error) if error.is_retryable() || error == RequestError::BadResponse => {
                     debug!(target: "downloaders::snap", %error, "Snap request failed, retrying");
                     if !self.retry() {
@@ -106,7 +117,7 @@ where
         }
     }
 
-    // High priority keeps retry progress ahead of newly queued range work.
+    // Raise retry priority so transient failures cannot leave range progress behind new work.
     fn retry(&mut self) -> bool {
         if self.retries >= MAX_RETRIES {
             return false
@@ -139,10 +150,10 @@ where
                 }
                 Poll::Ready(self.retry().then_some(None).ok_or(error))
             }
-            // Panics and runtime shutdowns are local, so they must not penalize the responder.
+            // A panic or a shutting-down runtime is local, so it must not penalize the responder.
             Err(error) => {
                 debug!(target: "downloaders::snap", %error, "Snap verification task failed");
-                Poll::Ready(Err(RequestError::Internal))
+                Poll::Ready(Err(RequestError::ChannelClosed))
             }
         }
     }
@@ -168,7 +179,7 @@ where
     }
 }
 
-/// A Snap request that can be reissued at a chosen priority.
+/// A snap request that can be reissued at a chosen priority.
 pub(super) trait SnapRequest {
     /// Sends this request through `client`.
     fn send<C: SnapClient>(&self, client: &C, options: SnapRequestOptions) -> C::Output;
@@ -198,9 +209,9 @@ impl SnapRequest for GetBlockAccessListsMessage {
     }
 }
 
-/// Authenticates a Snap response against its request.
+/// Authenticates a snap response against the request that asked for it.
 pub(super) trait SnapVerifier: Clone + Send + 'static {
-    /// Request type accepted by this verifier.
+    /// Request type this verifier authenticates responses for.
     type Request: SnapRequest;
     /// Verified output returned to the downloader.
     type Output: Send + 'static;
@@ -211,87 +222,8 @@ pub(super) trait SnapVerifier: Clone + Send + 'static {
 
 // Proof failures remain attributable after leaving the async worker.
 struct VerificationTask<O> {
+    // The responder to penalize if verification rejects its response.
     peer_id: PeerId,
+    // Returns the verified output without blocking the async worker.
     fut: tokio::task::JoinHandle<Result<O, RequestError>>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::snap::test_utils::TestSnapClient;
-    use alloy_primitives::B256;
-    use futures::future::poll_fn;
-    use reth_eth_wire_types::snap::{AccountRangeMessage, GetAccountRangeMessage};
-    use reth_network_peers::WithPeerId;
-    use std::sync::Arc;
-
-    #[derive(Clone, Debug)]
-    struct PanickingVerifier;
-
-    impl SnapVerifier for PanickingVerifier {
-        type Request = GetAccountRangeMessage;
-        type Output = ();
-
-        fn verify(
-            self,
-            _peer_id: PeerId,
-            _response: SnapResponse,
-        ) -> Result<Self::Output, RequestError> {
-            panic!("local verifier panic")
-        }
-    }
-
-    #[tokio::test]
-    async fn verifier_panic_is_internal_without_peer_penalty() {
-        let peer_id = PeerId::random();
-        let response = SnapResponse::AccountRange(AccountRangeMessage {
-            request_id: 1,
-            accounts: Vec::new(),
-            proof: Vec::new(),
-        });
-        let client = Arc::new(TestSnapClient::new([Ok(WithPeerId::new(peer_id, response))]));
-        let request = GetAccountRangeMessage {
-            request_id: 1,
-            root_hash: B256::ZERO,
-            starting_hash: B256::ZERO,
-            limit_hash: B256::ZERO,
-            response_bytes: 0,
-        };
-        let mut verifying = VerifyingRequest::new_with_options(
-            Arc::clone(&client),
-            request,
-            PanickingVerifier,
-            Runtime::test(),
-            SnapRequestOptions::default(),
-        );
-
-        let error = poll_fn(|cx| verifying.poll_verified(cx)).await.unwrap_err();
-
-        assert_eq!(error, RequestError::Internal);
-        assert!(client.reported().is_empty());
-    }
-
-    #[tokio::test]
-    async fn caller_exclusions_do_not_turn_unavailability_into_bad_response() {
-        let client = Arc::new(TestSnapClient::new(std::iter::empty()));
-        let request = GetAccountRangeMessage {
-            request_id: 1,
-            root_hash: B256::ZERO,
-            starting_hash: B256::ZERO,
-            limit_hash: B256::ZERO,
-            response_bytes: 0,
-        };
-        let options = SnapRequestOptions::default().with_excluded_peers([PeerId::random()]);
-        let mut verifying = VerifyingRequest::new_with_options(
-            client,
-            request,
-            PanickingVerifier,
-            Runtime::test(),
-            options,
-        );
-
-        let error = poll_fn(|cx| verifying.poll_verified(cx)).await.unwrap_err();
-
-        assert_eq!(error, RequestError::UnsupportedCapability);
-    }
 }

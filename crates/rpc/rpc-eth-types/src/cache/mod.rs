@@ -2,11 +2,11 @@
 
 use super::{EthStateCacheConfig, MultiConsumerLruCache};
 use crate::block::CachedTransaction;
-use alloy_consensus::{transaction::TxHashRef, BlockHeader};
+use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Address, Bytes, TxHash, B256};
-use futures::{stream::FuturesOrdered, Stream, StreamExt};
+use futures::{Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::Chain;
@@ -53,12 +53,6 @@ type CachedBalResponseSender = oneshot::Sender<Option<CachedRevmBal>>;
 type CachedBlockAndReceiptsResponseSender<B, R> =
     oneshot::Sender<(Option<Arc<RecoveredBlock<B>>>, Option<Arc<Vec<R>>>)>;
 
-/// The type that can send the response to a requested header
-type HeaderResponseSender<H> = oneshot::Sender<ProviderResult<H>>;
-
-/// The type that can send the response with a chain of cached blocks
-type CachedParentBlocksResponseSender<B> = oneshot::Sender<Vec<Arc<RecoveredBlock<B>>>>;
-
 /// The type that can send the response for a transaction hash lookup
 type TransactionHashResponseSender<B, R> = oneshot::Sender<Option<CachedTransaction<B, R>>>;
 
@@ -70,8 +64,6 @@ type BlockLruCache<B, L> =
 
 type ReceiptsLruCache<R, L> =
     MultiConsumerLruCache<B256, Arc<Vec<R>>, L, ReceiptsResponseSender<R>>;
-
-type HeaderLruCache<H, L> = MultiConsumerLruCache<B256, H, L, HeaderResponseSender<H>>;
 
 type BalLruCache<L> = MultiConsumerLruCache<B256, CachedRevmBal, L, BalResponseSender>;
 
@@ -103,7 +95,6 @@ impl<N: NodePrimitives> EthStateCache<N> {
         let EthStateCacheConfig {
             max_blocks,
             max_receipts,
-            max_headers,
             max_bals,
             max_concurrent_db_requests,
             max_cached_tx_hashes,
@@ -114,7 +105,6 @@ impl<N: NodePrimitives> EthStateCache<N> {
             provider,
             full_block_cache: BlockLruCache::new(max_blocks, "blocks"),
             receipts_cache: ReceiptsLruCache::new(max_receipts, "receipts"),
-            headers_cache: HeaderLruCache::new(max_headers, "headers"),
             bal_cache: BalLruCache::new(max_bals, "bals"),
             action_tx: to_service.clone(),
             action_rx: UnboundedReceiverStream::new(rx),
@@ -241,57 +231,6 @@ impl<N: NodePrimitives> EthStateCache<N> {
         rx.await.map_err(|_| CacheServiceUnavailable.into())
     }
 
-    /// Streams cached receipts and blocks for a list of block hashes, preserving input order.
-    #[expect(clippy::type_complexity)]
-    pub fn get_receipts_and_maybe_block_stream<'a>(
-        &'a self,
-        hashes: Vec<B256>,
-    ) -> impl Stream<
-        Item = ProviderResult<
-            Option<(Arc<Vec<N::Receipt>>, Option<Arc<RecoveredBlock<N::Block>>>)>,
-        >,
-    > + 'a {
-        let futures = hashes.into_iter().map(move |hash| self.get_receipts_and_maybe_block(hash));
-
-        futures.collect::<FuturesOrdered<_>>()
-    }
-
-    /// Requests the header for the given hash.
-    ///
-    /// Returns an error if the header is not found.
-    pub async fn get_header(&self, block_hash: B256) -> ProviderResult<N::BlockHeader> {
-        let (response_tx, rx) = oneshot::channel();
-        let _ = self.to_service.send(CacheAction::GetHeader { block_hash, response_tx });
-        rx.await.map_err(|_| CacheServiceUnavailable)?
-    }
-
-    /// Retrieves a chain of connected blocks from the cache, starting from the given block hash
-    /// and traversing down through parent hashes. Returns blocks in descending order (newest
-    /// first).
-    /// This is useful for efficiently retrieving a sequence of blocks that might already be in
-    /// cache without making separate database requests.
-    /// Returns `None` if no blocks are found in the cache, otherwise returns `Some(Vec<...>)`
-    /// with at least one block.
-    pub async fn get_cached_parent_blocks(
-        &self,
-        block_hash: B256,
-        max_blocks: usize,
-    ) -> Option<Vec<Arc<RecoveredBlock<N::Block>>>> {
-        let (response_tx, rx) = oneshot::channel();
-        let _ = self.to_service.send(CacheAction::GetCachedParentBlocks {
-            block_hash,
-            max_blocks,
-            response_tx,
-        });
-
-        let blocks = rx.await.unwrap_or_default();
-        if blocks.is_empty() {
-            None
-        } else {
-            Some(blocks)
-        }
-    }
-
     /// Looks up a transaction by its hash in the cache index.
     ///
     /// Returns the cached block, transaction index, and optionally receipts if the transaction
@@ -352,13 +291,11 @@ pub(crate) struct EthStateCacheService<
     Tasks,
     LimitBlocks = ByLength,
     LimitReceipts = ByLength,
-    LimitHeaders = ByLength,
     LimitBals = ByLength,
 > where
     Provider: BlockReader + BalProvider,
     LimitBlocks: Limiter<B256, Arc<RecoveredBlock<Provider::Block>>>,
     LimitReceipts: Limiter<B256, Arc<Vec<Provider::Receipt>>>,
-    LimitHeaders: Limiter<B256, Provider::Header>,
     LimitBals: Limiter<B256, CachedRevmBal>,
 {
     /// The type used to lookup data from disk
@@ -367,11 +304,6 @@ pub(crate) struct EthStateCacheService<
     full_block_cache: BlockLruCache<Provider::Block, LimitBlocks>,
     /// The LRU cache for block receipts grouped by the block hash.
     receipts_cache: ReceiptsLruCache<Provider::Receipt, LimitReceipts>,
-    /// The LRU cache for headers.
-    ///
-    /// Headers are cached because they are required to populate the environment for execution
-    /// (evm).
-    headers_cache: HeaderLruCache<Provider::Header, LimitHeaders>,
     /// The LRU cache for revm BALs grouped by the block hash.
     bal_cache: BalLruCache<LimitBals>,
     /// Sender half of the action channel.
@@ -481,15 +413,6 @@ where
         }
     }
 
-    fn on_reorg_header(&mut self, block_hash: B256, res: ProviderResult<Provider::Header>) {
-        if let Some(queued) = self.headers_cache.remove(&block_hash) {
-            // send the response to queued senders
-            for tx in queued {
-                let _ = tx.send(res.clone());
-            }
-        }
-    }
-
     fn on_reorg_bal(&mut self, block_hash: B256, res: ProviderResult<Option<CachedRevmBal>>) {
         if let Some(queued) = self.bal_cache.remove(&block_hash) {
             for tx in queued {
@@ -503,14 +426,12 @@ where
         let min_capacity = 2;
         self.full_block_cache.shrink_to(min_capacity);
         self.receipts_cache.shrink_to(min_capacity);
-        self.headers_cache.shrink_to(min_capacity);
         self.bal_cache.shrink_to(min_capacity);
     }
 
     fn update_cached_metrics(&self) {
         self.full_block_cache.update_cached_metrics();
         self.receipts_cache.update_cached_metrics();
-        self.headers_cache.update_cached_metrics();
         self.bal_cache.update_cached_metrics();
     }
 }
@@ -602,39 +523,6 @@ where
                                 });
                             }
                         }
-                        CacheAction::GetHeader { block_hash, response_tx } => {
-                            // check if the header is cached
-                            if let Some(header) = this.headers_cache.get(&block_hash).cloned() {
-                                let _ = response_tx.send(Ok(header));
-                                continue
-                            }
-
-                            // it's possible we have the entire block cached
-                            if let Some(block) = this.full_block_cache.get(&block_hash) {
-                                let _ = response_tx.send(Ok(block.clone_header()));
-                                continue
-                            }
-
-                            // header is not in the cache, request it if this is the first
-                            // consumer
-                            if this.headers_cache.queue(block_hash, response_tx) {
-                                let provider = this.provider.clone();
-                                let action_tx = this.action_tx.clone();
-                                let rate_limiter = this.rate_limiter.clone();
-                                let mut action_sender =
-                                    ActionSender::new(CacheKind::Header, block_hash, action_tx);
-                                this.action_task_spawner.spawn_blocking_task(async move {
-                                    // Acquire permit
-                                    let _permit = rate_limiter.acquire().await;
-                                    let header = provider.header(block_hash).and_then(|header| {
-                                        header.ok_or_else(|| {
-                                            ProviderError::HeaderNotFound(block_hash.into())
-                                        })
-                                    });
-                                    action_sender.send_header(header);
-                                });
-                            }
-                        }
                         CacheAction::GetBal { block_hash, response_tx } => {
                             if let Some(bal) = this.bal_cache.get(&block_hash).cloned() {
                                 let _ = response_tx.send(Ok(Some(bal)));
@@ -675,20 +563,6 @@ where
                                 this.on_new_block(block_hash, Err(e));
                             }
                         },
-                        CacheAction::HeaderResult { block_hash, res } => {
-                            let res = *res;
-                            if let Some(queued) = this.headers_cache.remove(&block_hash) {
-                                // send the response to queued senders
-                                for tx in queued {
-                                    let _ = tx.send(res.clone());
-                                }
-                            }
-
-                            // cache good header
-                            if let Ok(data) = res {
-                                this.headers_cache.insert(block_hash, data);
-                            }
-                        }
                         CacheAction::CacheNewCanonicalChain { chain_change } => {
                             for block in chain_change.blocks {
                                 // Index transactions before caching the block
@@ -706,11 +580,9 @@ where
                         CacheAction::RemoveReorgedChain { chain_change } => {
                             for block in chain_change.blocks {
                                 let block_hash = block.hash();
-                                let header = block.clone_header();
                                 // Remove transaction index entries for reorged blocks
                                 this.remove_block_transactions(&block);
                                 this.on_reorg_block(block_hash, Ok(Some(block)));
-                                this.on_reorg_header(block_hash, Ok(header));
                                 this.on_reorg_bal(block_hash, Ok(None));
                             }
 
@@ -720,30 +592,6 @@ where
                                     Ok(Some(block_receipts.receipts)),
                                 );
                             }
-                        }
-                        CacheAction::GetCachedParentBlocks {
-                            block_hash,
-                            max_blocks,
-                            response_tx,
-                        } => {
-                            let mut blocks = Vec::new();
-                            let mut current_hash = block_hash;
-
-                            // Start with the requested block
-                            while blocks.len() < max_blocks {
-                                if let Some(block) =
-                                    this.full_block_cache.get(&current_hash).cloned()
-                                {
-                                    // Get the parent hash for the next iteration
-                                    current_hash = block.header().parent_hash();
-                                    blocks.push(block);
-                                } else {
-                                    // Break the loop if we can't find the current block
-                                    break;
-                                }
-                            }
-
-                            let _ = response_tx.send(blocks);
                         }
                         CacheAction::GetTransactionByHash { tx_hash, response_tx } => {
                             let result =
@@ -767,10 +615,6 @@ enum CacheAction<B: Block, R> {
     GetBlockWithSenders {
         block_hash: B256,
         response_tx: BlockWithSendersResponseSender<B>,
-    },
-    GetHeader {
-        block_hash: B256,
-        response_tx: HeaderResponseSender<B::Header>,
     },
     GetReceipts {
         block_hash: B256,
@@ -800,10 +644,6 @@ enum CacheAction<B: Block, R> {
         block_hash: B256,
         res: ProviderResult<Option<Arc<Vec<R>>>>,
     },
-    HeaderResult {
-        block_hash: B256,
-        res: Box<ProviderResult<B::Header>>,
-    },
     BalResult {
         block_hash: B256,
         res: ProviderResult<Option<CachedRevmBal>>,
@@ -813,11 +653,6 @@ enum CacheAction<B: Block, R> {
     },
     RemoveReorgedChain {
         chain_change: ChainChange<B, R>,
-    },
-    GetCachedParentBlocks {
-        block_hash: B256,
-        max_blocks: usize,
-        response_tx: CachedParentBlocksResponseSender<B>,
     },
     /// Look up a transaction's cached data by its hash
     GetTransactionByHash {
@@ -861,7 +696,6 @@ impl<B: Block, R: Clone> ChainChange<B, R> {
 enum CacheKind {
     Block,
     Receipt,
-    Header,
     Bal,
 }
 
@@ -897,15 +731,6 @@ impl<R: Send + Sync, B: Block> ActionSender<B, R> {
         }
     }
 
-    fn send_header(&mut self, header: Result<<B as Block>::Header, ProviderError>) {
-        if let Some(tx) = self.tx.take() {
-            let _ = tx.send(CacheAction::HeaderResult {
-                block_hash: self.blockhash,
-                res: Box::new(header),
-            });
-        }
-    }
-
     fn send_bal(&mut self, bal: Result<Option<CachedRevmBal>, ProviderError>) {
         if let Some(tx) = self.tx.take() {
             let _ = tx.send(CacheAction::BalResult { block_hash: self.blockhash, res: bal });
@@ -923,10 +748,6 @@ impl<R: Send + Sync, B: Block> Drop for ActionSender<B, R> {
                 CacheKind::Receipt => CacheAction::ReceiptsResult {
                     block_hash: self.blockhash,
                     res: Err(CacheServiceUnavailable.into()),
-                },
-                CacheKind::Header => CacheAction::HeaderResult {
-                    block_hash: self.blockhash,
-                    res: Box::new(Err(CacheServiceUnavailable.into())),
                 },
                 CacheKind::Bal => CacheAction::BalResult {
                     block_hash: self.blockhash,
@@ -1065,7 +886,6 @@ mod tests {
             EthStateCacheConfig {
                 max_blocks: 4,
                 max_receipts: 4,
-                max_headers: 4,
                 max_bals: 4,
                 max_concurrent_db_requests: 1,
                 max_cached_tx_hashes: 16,
@@ -1092,38 +912,6 @@ mod tests {
             },
             vec![Address::ZERO],
         )
-    }
-
-    #[test]
-    fn reorg_evicts_cached_headers() {
-        let mut service = test_service();
-        let block_hash = B256::repeat_byte(0x11);
-
-        assert!(service
-            .headers_cache
-            .insert(block_hash, Header { number: 42, ..Default::default() }));
-        assert!(service.headers_cache.get(&block_hash).is_some());
-
-        service.on_reorg_header(block_hash, Ok(Header { number: 7, ..Default::default() }));
-
-        assert!(service.headers_cache.get(&block_hash).is_none());
-    }
-
-    #[test]
-    fn reorg_forwards_header_to_queued_requests() {
-        let mut service = test_service();
-        let block_hash = B256::repeat_byte(0x22);
-        let (response_tx, mut response_rx) = oneshot::channel();
-        let header = Header { number: 7, ..Default::default() };
-
-        assert!(service.headers_cache.queue(block_hash, response_tx));
-
-        service.on_reorg_header(block_hash, Ok(header));
-
-        let header =
-            response_rx.try_recv().expect("queued header response").expect("header result");
-
-        assert_eq!(header.number, 7);
     }
 
     #[test]
@@ -1206,7 +994,6 @@ mod tests {
             EthStateCacheConfig {
                 max_blocks: 0,
                 max_receipts: 0,
-                max_headers: 0,
                 max_bals: 4,
                 max_concurrent_db_requests: 1,
                 max_cached_tx_hashes: 0,
@@ -1232,7 +1019,6 @@ mod tests {
             EthStateCacheConfig {
                 max_blocks: 4,
                 max_receipts: 0,
-                max_headers: 0,
                 max_bals: 4,
                 max_concurrent_db_requests: 1,
                 max_cached_tx_hashes: 0,
@@ -1269,7 +1055,6 @@ mod tests {
             EthStateCacheConfig {
                 max_blocks: 0,
                 max_receipts: 0,
-                max_headers: 0,
                 max_bals: 4,
                 max_concurrent_db_requests: 1,
                 max_cached_tx_hashes: 0,

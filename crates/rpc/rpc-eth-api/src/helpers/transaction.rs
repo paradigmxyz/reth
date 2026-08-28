@@ -12,6 +12,7 @@ use alloy_consensus::{
     BlockHeader, Transaction,
 };
 use alloy_dyn_abi::TypedData;
+use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::{eip2718::Encodable2718, BlockId};
 use alloy_network::{TransactionBuilder, TransactionBuilder4844};
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
@@ -36,6 +37,7 @@ use reth_transaction_pool::{
     AddedTransactionOutcome, PoolPooledTx, PoolTransaction, PoolTx, TransactionOrigin,
     TransactionPool,
 };
+use revm::state::bal::Bal as RevmBal;
 use std::{sync::Arc, time::Duration};
 
 /// Transaction related functions for the [`EthApiServer`](crate::EthApiServer) trait in
@@ -808,6 +810,32 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
         >,
     > + Send {
         async move {
+            Ok(self
+                .transaction_and_block_and_maybe_bal(hash)
+                .await?
+                .map(|(transaction, block, _)| (transaction, block)))
+        }
+    }
+
+    /// Fetches the transaction and the transaction's block, together with the block's cached
+    /// block access list, if any.
+    ///
+    /// The BAL is only returned if it is already cached, it is never fetched from the BAL store.
+    #[expect(clippy::type_complexity)]
+    fn transaction_and_block_and_maybe_bal(
+        &self,
+        hash: B256,
+    ) -> impl Future<
+        Output = Result<
+            Option<(
+                TransactionSource<ProviderTx<Self::Provider>>,
+                Arc<RecoveredBlock<ProviderBlock<Self::Provider>>>,
+                Option<Arc<DecodedBal<Arc<RevmBal>>>>,
+            )>,
+            Self::Error,
+        >,
+    > + Send {
+        async move {
             let (transaction, at) = match self.transaction_by_hash_at(hash).await? {
                 None => return Ok(None),
                 Some(res) => res,
@@ -818,12 +846,12 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
                 BlockId::Hash(hash) => hash.block_hash,
                 _ => return Ok(None),
             };
-            let block = self
+            let block_and_bal = self
                 .cache()
-                .get_recovered_block(block_hash)
+                .get_recovered_block_and_maybe_bal(block_hash)
                 .await
                 .map_err(Self::Error::from_eth_err)?;
-            Ok(block.map(|block| (transaction, block)))
+            Ok(block_and_bal.map(|(block, bal)| (transaction, block, bal)))
         }
     }
 }

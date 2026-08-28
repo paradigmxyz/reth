@@ -401,7 +401,7 @@ impl ChangesetCache {
         let overlay = overlay_manager
             .overlay_builder(finish.hash)
             .with_no_reverts()
-            .build_overlay_at_frontiers(provider, partial_state_trie, finish)?;
+            .build_state_trie_overlay_at_frontiers(provider, partial_state_trie, finish)?;
         let state_trie_provider = OverlayStateProvider::new(
             provider,
             overlay,
@@ -615,7 +615,7 @@ impl ChangesetCacheInner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Overlay;
+    use crate::StateTrieOverlay;
     use alloy_consensus::Header;
     use alloy_primitives::{
         keccak256,
@@ -641,8 +641,8 @@ mod tests {
         Arc::new(TrieUpdatesSorted::new(vec![], B256Map::default()))
     }
 
-    fn empty_overlay() -> Overlay {
-        Overlay { trie_updates: Arc::default(), hashed_post_state: Arc::default() }
+    fn empty_overlay() -> StateTrieOverlay {
+        StateTrieOverlay { trie_updates: Arc::default(), hashed_post_state: Arc::default() }
     }
 
     fn insert_test_changesets(

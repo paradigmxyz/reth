@@ -2,6 +2,7 @@ use super::*;
 use crate::{
     persistence::PersistenceAction,
     tree::{
+        error::{BlockAccessListDecodeError, InsertBlockErrorKind},
         payload_validator::{BasicEngineValidator, TreeCtx, ValidationOutcome},
         persistence_state::CurrentPersistenceAction,
         PersistTarget, TreeConfig,
@@ -20,7 +21,7 @@ use alloy_rpc_types_engine::{
     ForkchoiceUpdateError,
 };
 use assert_matches::assert_matches;
-use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
+use reth_chain_state::test_utils::TestBlockBuilder;
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
 use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
 use reth_ethereum_consensus::EthBeaconConsensus;
@@ -272,8 +273,6 @@ impl TestHarness {
     fn with_blocks(mut self, blocks: Vec<ExecutedBlock>) -> Self {
         let mut blocks_by_hash = B256Map::default();
         let mut blocks_by_number = BTreeMap::new();
-        let mut state_by_hash = B256Map::default();
-        let mut hash_by_number = BTreeMap::new();
         let mut parent_to_child: B256Map<B256Set> = B256Map::default();
         let mut parent_hash = B256::ZERO;
 
@@ -283,8 +282,6 @@ impl TestHarness {
             let number = sealed_block.number;
             blocks_by_hash.insert(hash, block.clone());
             blocks_by_number.entry(number).or_insert_with(Vec::new).push(block.clone());
-            state_by_hash.insert(hash, Arc::new(BlockState::new(block.clone())));
-            hash_by_number.insert(number, hash);
             parent_to_child.entry(parent_hash).or_default().insert(hash);
             parent_hash = hash;
         }
@@ -303,10 +300,11 @@ impl TestHarness {
             overlay_manager,
         };
 
-        let last_executed_block = blocks.last().unwrap().clone();
-        let pending = Some(BlockState::new(last_executed_block));
-        self.tree.canonical_in_memory_state =
-            CanonicalInMemoryState::new(state_by_hash, hash_by_number, pending, None, None);
+        let canonical_in_memory_state = CanonicalInMemoryState::empty();
+        canonical_in_memory_state.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
+        canonical_in_memory_state
+            .set_canonical_head(blocks.last().unwrap().recovered_block().clone_sealed_header());
+        self.tree.canonical_in_memory_state = canonical_in_memory_state;
 
         self.blocks = blocks.clone();
 
@@ -564,6 +562,22 @@ fn test_tree_persist_block_batch() {
         }
         _ => panic!("unexpected message: {msg:#?}"),
     }
+}
+
+#[test]
+fn malformed_input_is_non_fatal_insert_outcome() {
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+    let block = test_harness.block_builder.generate_random_block(1, B256::ZERO);
+    let error = InsertBlockError::new(
+        block,
+        InsertBlockErrorKind::BlockAccessListDecode(BlockAccessListDecodeError::new(
+            alloy_rlp::Error::UnexpectedString,
+        )),
+    );
+    assert_matches!(
+        test_harness.tree.on_insert_block_error(error),
+        Err(InsertBlockProcessingError::MalformedInput(_))
+    );
 }
 
 #[tokio::test]
@@ -917,18 +931,16 @@ async fn test_in_memory_state_trait_impl() {
     for executed_block in blocks {
         let sealed_block = executed_block.recovered_block();
 
-        let expected_state = BlockState::new(executed_block.clone());
-
         let actual_state_by_hash =
             test_harness.tree.canonical_in_memory_state.state_by_hash(sealed_block.hash()).unwrap();
-        assert_eq!(expected_state, *actual_state_by_hash);
+        assert_eq!(executed_block, *actual_state_by_hash.block_ref());
 
         let actual_state_by_number = test_harness
             .tree
             .canonical_in_memory_state
             .state_by_number(sealed_block.number)
             .unwrap();
-        assert_eq!(expected_state, *actual_state_by_number);
+        assert_eq!(executed_block, *actual_state_by_number.block_ref());
     }
 }
 
@@ -1202,6 +1214,7 @@ async fn test_tree_state_on_new_head_reorg() {
         assert_eq!(new.len(), 2);
         assert_eq!(new[0].recovered_block().hash(), blocks[3].recovered_block().hash());
         assert_eq!(new[1].recovered_block().hash(), blocks[4].recovered_block().hash());
+        test_harness.tree.canonical_in_memory_state.update_chain(NewCanonicalChain::Commit { new });
     }
 
     // should be a None persistence action before we advance persistence
@@ -1418,6 +1431,27 @@ async fn test_get_canonical_blocks_to_persist() {
             highest: blocks_to_persist.last().unwrap().recovered_block().num_hash()
         })
     );
+}
+
+#[test]
+fn threshold_persistence_uses_canonical_in_memory_chain_length() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(0..10).collect();
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+    test_harness.tree.config = TreeConfig::default()
+        .with_persistence_threshold(3)
+        .with_memory_block_buffer_target(0)
+        .with_num_state_masking_blocks(2);
+    test_harness.tree.persistence_state.last_persisted_block =
+        blocks[7].recovered_block().num_hash();
+    test_harness.tree.persistence_state.last_state_trie_persisted_block =
+        blocks[5].recovered_block().num_hash();
+    test_harness.tree.canonical_in_memory_state.remove_persisted_blocks_until(
+        blocks[7].recovered_block().num_hash(),
+        blocks[5].recovered_block().number(),
+    );
+
+    assert_eq!(test_harness.tree.canonical_in_memory_state.canonical_chain().count(), 4);
+    assert!(test_harness.tree.get_save_blocks_input(PersistTarget::Threshold).is_some());
 }
 
 #[test]

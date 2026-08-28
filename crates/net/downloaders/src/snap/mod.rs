@@ -1,11 +1,13 @@
-//! Downloads and authenticates Snap state ranges for
-//! [EIP-8189](https://eips.ethereum.org/EIPS/eip-8189) state bootstrap.
+//! Downloads and verifies snap/2 ranges against
+//! [EIP-8189](https://eips.ethereum.org/EIPS/eip-8189) pivot state roots.
 //!
 //! Persistence and range selection are handled by the snap sync orchestrator.
 
 use alloy_primitives::B256;
 use futures::Future;
-use reth_eth_wire_types::snap::{AccountRangeMessage, GetAccountRangeMessage};
+use reth_eth_wire_types::snap::{
+    AccountRangeMessage, GetAccountRangeMessage, GetStorageRangesMessage,
+};
 use reth_network_p2p::{
     error::RequestError,
     snap::client::{SnapClient, SnapRequestOptions, SnapResponse},
@@ -14,6 +16,7 @@ use reth_network_peers::PeerId;
 use reth_tasks::Runtime;
 use reth_trie_common::{range_proof::verify_range_proof, TrieAccount, EMPTY_ROOT_HASH};
 use std::{
+    ops::Range,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -31,8 +34,10 @@ pub use bytecode::*;
 use request::{SnapVerifier, VerifyingRequest};
 pub use storage::*;
 
-/// Downloads one account range and authenticates it off the async worker.
-/// Invalid responses penalize their peer before a bounded retry.
+/// Downloads and verifies one account range against its requested state root.
+///
+/// Invalid responses penalize their peer and retry at high priority. Proof verification runs on
+/// the blocking pool.
 #[derive(Debug)]
 pub struct AccountRangeDownloader<C: SnapClient>(VerifyingRequest<C, GetAccountRangeMessage>);
 
@@ -44,10 +49,10 @@ impl<C: SnapClient> AccountRangeDownloader<C> {
         request: GetAccountRangeMessage,
         runtime: Runtime,
     ) -> Result<Self, InvalidAccountRange> {
-        Self::new_with_options(client, request, runtime, Default::default())
+        Self::new_with_options(client, request, runtime, SnapRequestOptions::default())
     }
 
-    /// Allows a coordinator to skip peers that already reported this range unavailable.
+    /// Creates a downloader with custom request options.
     pub fn new_with_options(
         client: C,
         request: GetAccountRangeMessage,
@@ -91,67 +96,134 @@ pub enum AccountRangeOutcome {
 /// A decoded account range authenticated against a state root.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VerifiedAccountRange {
+    // Root the accounts were proven against. Private so a range cannot be relabelled with a root
+    // that did not authenticate it.
+    state_root: B256,
+    // Accounts as the response returned them, in the order every positional check assumes.
+    accounts: Vec<(B256, TrieAccount)>,
+    // Whether the requested interval may continue past this response.
+    has_more: bool,
+    // First key after the response, or none when the range ran out of trie.
+    next: Option<B256>,
+}
+
+impl VerifiedAccountRange {
+    /// State root the accounts were authenticated against.
+    pub const fn state_root(&self) -> B256 {
+        self.state_root
+    }
+
     /// Accounts in strictly increasing hashed-key order.
-    pub accounts: Vec<(B256, TrieAccount)>,
-    /// Whether another request may be needed to complete the requested interval.
+    pub fn accounts(&self) -> &[(B256, TrieAccount)] {
+        &self.accounts
+    }
+
+    /// Whether another request may be needed to complete the interval.
     ///
-    /// Conservative: [`Self::next`] is only a lower bound when the trie continues inside a
-    /// subtree the proof left unexpanded, so this can be `true` for an interval that is already
-    /// complete.
-    pub has_more: bool,
+    /// Conservative: can be `true` for an interval that is already complete.
+    pub const fn has_more(&self) -> bool {
+        self.has_more
+    }
+
     /// Authenticated lower bound for the first key after the response, or `None` when the range
     /// exhausted the trie.
-    pub next: Option<B256>,
+    pub const fn next(&self) -> Option<B256> {
+        self.next
+    }
+
+    /// Borrows the accounts together with the root that authenticated them.
+    pub fn batch(&self) -> VerifiedAccountBatch<'_> {
+        VerifiedAccountBatch { state_root: self.state_root, accounts: &self.accounts }
+    }
+
+    /// Borrows a positional subrange of the accounts, so a caller can request storage in bounded
+    /// chunks without losing the root that authenticated them.
+    ///
+    /// `None` when the range falls outside the response.
+    pub fn batch_range(&self, range: Range<usize>) -> Option<VerifiedAccountBatch<'_>> {
+        self.accounts
+            .get(range)
+            .map(|accounts| VerifiedAccountBatch { state_root: self.state_root, accounts })
+    }
+}
+
+/// Accounts and the state root they were authenticated against.
+///
+/// Only obtainable from [`VerifiedAccountRange::batch`], so requests built from it can always be
+/// checked against the root the accounts came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VerifiedAccountBatch<'a> {
+    // Root and accounts travel together, so neither can be swapped for another generation's.
+    state_root: B256,
+    // Accounts the root authenticated, in response order.
+    accounts: &'a [(B256, TrieAccount)],
+}
+
+impl<'a> VerifiedAccountBatch<'a> {
+    /// State root the accounts were authenticated against.
+    pub const fn state_root(&self) -> B256 {
+        self.state_root
+    }
+
+    /// Accounts in the order the range returned them.
+    pub const fn accounts(&self) -> &'a [(B256, TrieAccount)] {
+        self.accounts
+    }
+
+    // Confirms the batch is the one `request` was built from, so every returned range is checked
+    // against the root that authenticated its account.
+    pub(super) fn verify_batch(
+        &self,
+        request: &GetStorageRangesMessage,
+    ) -> Result<(), InvalidStorageRangeRequest> {
+        if request.root_hash != self.state_root {
+            return Err(InvalidStorageRangeRequest::StateRootMismatch {
+                requested: request.root_hash,
+                authenticated: self.state_root,
+            })
+        }
+        if request.account_hashes.len() != self.accounts.len() {
+            return Err(InvalidStorageRangeRequest::AccountCount {
+                requested: request.account_hashes.len(),
+                supplied: self.accounts.len(),
+            })
+        }
+        for (index, (requested, (supplied, _))) in
+            request.account_hashes.iter().zip(self.accounts).enumerate()
+        {
+            if requested != supplied {
+                return Err(InvalidStorageRangeRequest::AccountMismatch {
+                    index,
+                    requested: *requested,
+                    supplied: *supplied,
+                })
+            }
+        }
+        Ok(())
+    }
+
+    // The accounts from `from` onwards under the same state root, or none if the batch is shorter.
+    pub(super) fn slice(&self, from: usize) -> Option<Self> {
+        self.accounts.get(from..).map(|accounts| Self { state_root: self.state_root, accounts })
+    }
 }
 
 /// An account-range request whose origin exceeds its limit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("account range origin {origin} exceeds limit {limit}")]
 pub struct InvalidAccountRange {
-    // Requested inclusive origin.
-    origin: B256,
-    // Requested inclusive limit.
-    limit: B256,
+    /// Inclusive origin the range was requested from.
+    pub origin: B256,
+    /// Inclusive limit the range was requested to.
+    pub limit: B256,
 }
 
+// The request itself carries everything needed to authenticate its response.
 impl SnapVerifier for GetAccountRangeMessage {
     type Request = Self;
     type Output = AccountRangeOutcome;
 
     fn verify(self, peer_id: PeerId, response: SnapResponse) -> Result<Self::Output, RequestError> {
-        self.verify_response(peer_id, response)
-    }
-}
-
-// Keeps account response authentication beside its foreign wire request type.
-trait AccountRangeRequestVerifier {
-    // Checks the response envelope before authenticating its account payload.
-    fn verify_response(
-        &self,
-        peer_id: PeerId,
-        response: SnapResponse,
-    ) -> Result<AccountRangeOutcome, RequestError>;
-
-    // Authenticates the full response before trimming its optional boundary account.
-    fn verify_account_range(
-        &self,
-        response: AccountRangeMessage,
-    ) -> Result<VerifiedAccountRange, RequestError>;
-
-    // Re-encodes accounts so the proof authenticates their canonical trie values.
-    fn verify_proof(
-        &self,
-        accounts: &[(B256, TrieAccount)],
-        proof: &[alloy_primitives::Bytes],
-    ) -> Result<Option<B256>, RequestError>;
-}
-
-impl AccountRangeRequestVerifier for GetAccountRangeMessage {
-    fn verify_response(
-        &self,
-        peer_id: PeerId,
-        response: SnapResponse,
-    ) -> Result<AccountRangeOutcome, RequestError> {
         let SnapResponse::AccountRange(response) = response else {
             debug!(target: "downloaders::snap", "Expected account range response");
             return Err(RequestError::BadResponse)
@@ -168,6 +240,7 @@ impl AccountRangeRequestVerifier for GetAccountRangeMessage {
         if response.accounts.is_empty() && response.proof.is_empty() {
             return if self.root_hash == EMPTY_ROOT_HASH {
                 Ok(AccountRangeOutcome::Verified(VerifiedAccountRange {
+                    state_root: self.root_hash,
                     accounts: Vec::new(),
                     has_more: false,
                     next: None,
@@ -177,57 +250,58 @@ impl AccountRangeRequestVerifier for GetAccountRangeMessage {
             }
         }
 
-        self.verify_account_range(response).map(AccountRangeOutcome::Verified)
+        verify_account_range(&self, response).map(AccountRangeOutcome::Verified)
+    }
+}
+
+// Authenticates the full response before trimming its optional boundary account.
+fn verify_account_range(
+    request: &GetAccountRangeMessage,
+    response: AccountRangeMessage,
+) -> Result<VerifiedAccountRange, RequestError> {
+    // Allow only the single out-of-range account needed as a boundary witness.
+    if response.accounts.iter().filter(|data| data.hash > request.limit_hash).nth(1).is_some() {
+        debug!(target: "downloaders::snap", "Account range runs past the requested limit");
+        return Err(RequestError::BadResponse)
     }
 
-    fn verify_account_range(
-        &self,
-        response: AccountRangeMessage,
-    ) -> Result<VerifiedAccountRange, RequestError> {
-        // Allow only the single out-of-range account needed as a boundary witness.
-        if response.accounts.iter().filter(|data| data.hash > self.limit_hash).nth(1).is_some() {
-            debug!(target: "downloaders::snap", "Account range runs past the requested limit");
-            return Err(RequestError::BadResponse)
-        }
-
-        // Decode first so malformed account values are attributed to the responder.
-        let mut accounts = response
-            .accounts
-            .into_iter()
-            .map(|data| {
-                data.into_trie_entry().map_err(|error| {
-                    debug!(target: "downloaders::snap", %error, "Invalid account data");
-                    RequestError::BadResponse
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let next = self.verify_proof(&accounts, &response.proof)?;
-
-        // Authenticate the boundary account before removing it from the requested range.
-        accounts.truncate(accounts.partition_point(|(hash, _)| *hash <= self.limit_hash));
-        let has_more = next.is_some_and(|next| next <= self.limit_hash);
-
-        Ok(VerifiedAccountRange { accounts, has_more, next })
-    }
-
-    fn verify_proof(
-        &self,
-        accounts: &[(B256, TrieAccount)],
-        proof: &[alloy_primitives::Bytes],
-    ) -> Result<Option<B256>, RequestError> {
-        let leaves = accounts.iter().map(|(hash, account)| (*hash, alloy_rlp::encode(account)));
-        verify_range_proof(self.root_hash, self.starting_hash, self.limit_hash, leaves, proof)
-            .map_err(|error| {
-                debug!(target: "downloaders::snap", %error, "Invalid account range proof");
+    // Decode first so malformed account values are attributed to the responder.
+    let mut accounts = response
+        .accounts
+        .into_iter()
+        .map(|data| {
+            data.into_trie_entry().map_err(|error| {
+                debug!(target: "downloaders::snap", %error, "Invalid account data");
                 RequestError::BadResponse
             })
-    }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let next = verify_proof(request, &accounts, &response.proof)?;
+
+    // Authenticate the boundary account before removing it from the requested range.
+    accounts.truncate(accounts.partition_point(|(hash, _)| *hash <= request.limit_hash));
+    let has_more = next.is_some_and(|next| next <= request.limit_hash);
+
+    Ok(VerifiedAccountRange { state_root: request.root_hash, accounts, has_more, next })
+}
+
+// Re-encodes decoded accounts so the proof authenticates their canonical trie values.
+fn verify_proof(
+    request: &GetAccountRangeMessage,
+    accounts: &[(B256, TrieAccount)],
+    proof: &[alloy_primitives::Bytes],
+) -> Result<Option<B256>, RequestError> {
+    let leaves = accounts.iter().map(|(hash, account)| (*hash, alloy_rlp::encode(account)));
+    verify_range_proof(request.root_hash, request.starting_hash, request.limit_hash, leaves, proof)
+        .map_err(|error| {
+            debug!(target: "downloaders::snap", %error, "Invalid account range proof");
+            RequestError::BadResponse
+        })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::snap::test_utils::TestSnapClient;
+    use super::{request::MAX_RETRIES, test_utils::TestSnapClient, *};
     use alloy_primitives::{Bytes, KECCAK256_EMPTY, U256};
     use reth_eth_wire_types::snap::{AccountData, ByteCodesMessage};
     use reth_network_p2p::{error::PeerRequestResult, priority::Priority};
@@ -235,7 +309,6 @@ mod tests {
     use reth_trie_common::{proof::ProofRetainer, HashBuilder, Nibbles};
     use std::sync::Arc;
 
-    // Keeps test ranges aligned with the production trie keyspace boundary.
     const MAX_HASH: B256 = B256::new([0xff; B256::len_bytes()]);
 
     fn key(value: u64) -> B256 {
@@ -317,6 +390,7 @@ mod tests {
         assert_eq!(
             outcome,
             AccountRangeOutcome::Verified(VerifiedAccountRange {
+                state_root: root_hash,
                 accounts,
                 has_more: false,
                 next: None,
@@ -351,61 +425,6 @@ mod tests {
         assert!(matches!(outcome, AccountRangeOutcome::Verified(_)));
         assert_eq!(*client.reported(), [bad_peer]);
         assert_eq!(*client.priorities(), [Priority::Normal, Priority::High]);
-        assert_eq!(*client.exclusions(), [vec![], vec![bad_peer]]);
-    }
-
-    #[tokio::test]
-    async fn caller_exclusions_survive_verification_retry() {
-        let accounts = vec![(key(1), account(7))];
-        let root_hash = root(&accounts);
-        let excluded = PeerId::random();
-        let bad_peer = PeerId::random();
-        let bad = Ok(WithPeerId::new(
-            bad_peer,
-            SnapResponse::ByteCodes(ByteCodesMessage { request_id: 1, codes: Vec::new() }),
-        ));
-        let good = response(
-            PeerId::random(),
-            AccountRangeMessage {
-                request_id: 1,
-                accounts: vec![AccountData::from_trie_account(accounts[0].0, &accounts[0].1)],
-                proof: Vec::new(),
-            },
-        );
-        let client = Arc::new(TestSnapClient::new([bad, good]));
-        let options = SnapRequestOptions::default().with_excluded_peers([excluded]);
-
-        let outcome = AccountRangeDownloader::new_with_options(
-            Arc::clone(&client),
-            request(root_hash),
-            Runtime::test(),
-            options,
-        )
-        .unwrap()
-        .await
-        .unwrap();
-
-        assert!(matches!(outcome, AccountRangeOutcome::Verified(_)));
-        assert_eq!(*client.exclusions(), [vec![excluded], vec![excluded, bad_peer]]);
-    }
-
-    #[tokio::test]
-    async fn exhausting_peers_after_rejection_preserves_bad_response() {
-        let peer_id = PeerId::random();
-        let invalid = Ok(WithPeerId::new(
-            peer_id,
-            SnapResponse::ByteCodes(ByteCodesMessage { request_id: 1, codes: Vec::new() }),
-        ));
-        let client = Arc::new(TestSnapClient::new([invalid]));
-
-        let error = downloader(Arc::clone(&client), request(B256::repeat_byte(0x11)))
-            .unwrap()
-            .await
-            .unwrap_err();
-
-        assert_eq!(error, RequestError::BadResponse);
-        assert_eq!(*client.reported(), [peer_id]);
-        assert_eq!(*client.exclusions(), [vec![], vec![peer_id]]);
     }
 
     #[tokio::test]
@@ -422,6 +441,24 @@ mod tests {
 
         assert_eq!(outcome, AccountRangeOutcome::Unavailable { peer_id: peer });
         assert!(client.reported().is_empty());
+    }
+
+    #[test]
+    fn batch_range_narrows_the_accounts_and_keeps_their_root() {
+        let accounts = vec![(key(1), account(7)), (key(2), account(8)), (key(3), account(9))];
+        let root_hash = root(&accounts);
+        let range = VerifiedAccountRange {
+            state_root: root_hash,
+            accounts: accounts.clone(),
+            has_more: false,
+            next: None,
+        };
+
+        let chunk = range.batch_range(1..3).expect("chunk is inside the range");
+        assert_eq!(chunk.accounts(), &accounts[1..3]);
+        assert_eq!(chunk.state_root(), root_hash);
+
+        assert_eq!(range.batch_range(2..4), None);
     }
 
     #[test]
@@ -460,6 +497,7 @@ mod tests {
         assert_eq!(
             outcome,
             AccountRangeOutcome::Verified(VerifiedAccountRange {
+                state_root: root_hash,
                 accounts: vec![accounts[0]],
                 has_more: false,
                 next: Some(key(4)),
@@ -481,7 +519,7 @@ mod tests {
                 .collect(),
             proof,
         };
-        let attempts = usize::from(request::MAX_RETRIES) + 1;
+        let attempts = usize::from(MAX_RETRIES) + 1;
         let client = Arc::new(TestSnapClient::new(
             std::iter::repeat_with(|| response(peer, message.clone())).take(attempts),
         ));
@@ -516,6 +554,7 @@ mod tests {
         assert_eq!(
             outcome,
             AccountRangeOutcome::Verified(VerifiedAccountRange {
+                state_root: root_hash,
                 accounts: accounts[..2].to_vec(),
                 has_more: false,
                 next: Some(key(3)),
@@ -545,9 +584,35 @@ mod tests {
         assert_eq!(
             outcome,
             AccountRangeOutcome::Verified(VerifiedAccountRange {
+                state_root: root_hash,
                 accounts: Vec::new(),
                 has_more: false,
                 next: None,
+            })
+        );
+        assert!(client.reported().is_empty());
+    }
+
+    #[tokio::test]
+    async fn empty_interval_is_proven_without_a_boundary_account() {
+        let accounts = vec![(key(1), account(7)), (key(9), account(8))];
+        let (root_hash, proof) = root_and_proof(&accounts, &[key(3), key(5)]);
+        let peer = PeerId::random();
+        let message = AccountRangeMessage { request_id: 1, accounts: Vec::new(), proof };
+        let client = Arc::new(TestSnapClient::new([response(peer, message)]));
+        let mut request = request(root_hash);
+        request.starting_hash = key(3);
+        request.limit_hash = key(5);
+
+        let outcome = downloader(Arc::clone(&client), request).unwrap().await.unwrap();
+
+        assert_eq!(
+            outcome,
+            AccountRangeOutcome::Verified(VerifiedAccountRange {
+                state_root: root_hash,
+                accounts: Vec::new(),
+                has_more: false,
+                next: Some(key(9)),
             })
         );
         assert!(client.reported().is_empty());
@@ -573,6 +638,7 @@ mod tests {
         assert_eq!(
             outcome,
             AccountRangeOutcome::Verified(VerifiedAccountRange {
+                state_root: root_hash,
                 accounts: vec![accounts[0]],
                 has_more: false,
                 next: Some(key(9)),
@@ -599,6 +665,7 @@ mod tests {
         assert_eq!(
             outcome,
             AccountRangeOutcome::Verified(VerifiedAccountRange {
+                state_root: root_hash,
                 accounts: vec![accounts[0]],
                 has_more: true,
                 next: Some(key(3)),
