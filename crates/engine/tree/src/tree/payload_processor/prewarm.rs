@@ -839,7 +839,7 @@ mod tests {
     };
     use alloy_primitives::{address, bytes};
     use reth_chainspec::ChainSpec;
-    use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
+    use reth_ethereum_primitives::TransactionSigned;
     use reth_evm::{execute::WithTxEnv, TxEnvFor};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_provider::test_utils::MockEthProvider;
