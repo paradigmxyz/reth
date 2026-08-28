@@ -143,7 +143,7 @@ where
     parent_header: &'a N::BlockHeader,
     timestamp: u64,
     state: &'a mut EngineApiTreeState<N>,
-    overlay_factory: OverlayStateProviderFactory<P, N>,
+    state_provider_factory: OverlayStateProviderFactory<P, N>,
     config: &'a TreeConfig,
 }
 
@@ -174,7 +174,7 @@ where
         parent_header: &'a N::BlockHeader,
         timestamp: u64,
         state: &'a mut EngineApiTreeState<N>,
-        overlay_factory: OverlayStateProviderFactory<P, N>,
+        state_provider_factory: OverlayStateProviderFactory<P, N>,
         config: &'a TreeConfig,
     ) -> Self {
         Self {
@@ -184,7 +184,7 @@ where
             parent_header,
             timestamp,
             state,
-            overlay_factory,
+            state_provider_factory,
             config,
         }
     }
@@ -238,7 +238,7 @@ where
     overlay_manager: &'a OverlayManager<N>,
     env: &'a ExecutionEnv<Evm>,
     parent_header: &'a SealedHeader<N::BlockHeader>,
-    overlay_factory: OverlayStateProviderFactory<P, N>,
+    state_provider_factory: OverlayStateProviderFactory<P, N>,
     config: &'a TreeConfig,
     parallel_bal_execution: bool,
     state: &'a mut EngineApiTreeState<N>,
@@ -269,7 +269,7 @@ where
         overlay_manager: &'a OverlayManager<N>,
         env: &'a ExecutionEnv<Evm>,
         parent_header: &'a SealedHeader<N::BlockHeader>,
-        overlay_factory: OverlayStateProviderFactory<P, N>,
+        state_provider_factory: OverlayStateProviderFactory<P, N>,
         config: &'a TreeConfig,
         parallel_bal_execution: bool,
         state: &'a mut EngineApiTreeState<N>,
@@ -279,7 +279,7 @@ where
             overlay_manager,
             env,
             parent_header,
-            overlay_factory,
+            state_provider_factory,
             config,
             parallel_bal_execution,
             state,
@@ -822,7 +822,9 @@ where
 
         if !ctx.config.use_state_root_task() {
             return Ok(PreparedStateRootJob::new(
-                Box::new(SynchronousStateRootJob { overlay_factory: ctx.overlay_factory }),
+                Box::new(SynchronousStateRootJob {
+                    state_provider_factory: ctx.state_provider_factory,
+                }),
                 None,
             ))
         }
@@ -833,27 +835,27 @@ where
             overlay_manager,
             env,
             parent_header,
-            overlay_factory,
+            state_provider_factory,
             config,
             parallel_bal_execution,
             state: _,
         } = ctx;
 
         let preserved_sparse_trie = overlay_manager.take_sparse_trie();
-        let overlay_factory = if let Some(anchor_hash) = preserved_sparse_trie
+        let state_provider_factory = if let Some(anchor_hash) = preserved_sparse_trie
             .as_ref()
             .filter(|trie| trie.state_root() == env.parent_state_root)
             .map(|trie| trie.anchor_hash())
         {
-            overlay_factory.with_skip_overlay_for_reused_sparse_trie(anchor_hash)
+            state_provider_factory.with_skip_overlay_for_reused_sparse_trie(anchor_hash)
         } else {
-            overlay_factory
+            state_provider_factory
         };
 
         let mut handle = self.spawn_state_root(
             executor,
             overlay_manager,
-            overlay_factory.clone(),
+            state_provider_factory.clone(),
             StateRootTaskOptions {
                 parent_header: parent_header.clone(),
                 preserved_sparse_trie,
@@ -880,7 +882,7 @@ where
         let mut prepared = PreparedStateRootJob::new(
             Box::new(SparseTrieStateRootJob {
                 handle,
-                overlay_factory,
+                state_provider_factory,
                 executor: executor.clone(),
                 timeout: config.state_root_task_timeout(),
                 compare_trie_updates: config.always_compare_trie_updates(),
@@ -915,20 +917,20 @@ where
         let parent_state_root = ctx.parent_state_root();
         let parent_header = SealedHeader::new(ctx.parent_header().clone(), ctx.parent_hash());
         let preserved_sparse_trie = ctx.overlay_manager.take_sparse_trie();
-        let overlay_factory = if let Some(anchor_hash) = preserved_sparse_trie
+        let state_provider_factory = if let Some(anchor_hash) = preserved_sparse_trie
             .as_ref()
             .filter(|trie| trie.state_root() == parent_state_root)
             .map(|trie| trie.anchor_hash())
         {
-            ctx.overlay_factory.clone().with_skip_overlay_for_reused_sparse_trie(anchor_hash)
+            ctx.state_provider_factory.clone().with_skip_overlay_for_reused_sparse_trie(anchor_hash)
         } else {
-            ctx.overlay_factory.clone()
+            ctx.state_provider_factory.clone()
         };
         Ok(Some(
             self.spawn_state_root(
                 ctx.executor,
                 ctx.overlay_manager,
-                overlay_factory,
+                state_provider_factory,
                 StateRootTaskOptions {
                     parent_header,
                     preserved_sparse_trie,
@@ -963,7 +965,7 @@ impl<N: NodePrimitives> StateRootJob<N> for SkippedStateRootJob {
 
 #[derive(Debug)]
 struct SynchronousStateRootJob<N: NodePrimitives, P> {
-    overlay_factory: OverlayStateProviderFactory<P, N>,
+    state_provider_factory: OverlayStateProviderFactory<P, N>,
 }
 
 impl<N, P> StateRootJob<N> for SynchronousStateRootJob<N, P>
@@ -989,7 +991,7 @@ where
         _output: Arc<BlockExecutionOutput<N::Receipt>>,
         hashed_state: &LazyHashedPostState,
     ) -> ProviderResult<StateRootJobOutcome> {
-        let provider = self.overlay_factory.database_provider_ro()?;
+        let provider = self.state_provider_factory.database_provider_ro()?;
         let (state_root, trie_updates) =
             provider.state_root_with_updates(hashed_state.get().as_ref().clone())?;
         Ok(StateRootJobOutcome::new(state_root, Arc::new(trie_updates)))
@@ -999,7 +1001,7 @@ where
 #[derive(Debug)]
 struct SparseTrieStateRootJob<N: NodePrimitives, P> {
     handle: StateRootHandle,
-    overlay_factory: OverlayStateProviderFactory<P, N>,
+    state_provider_factory: OverlayStateProviderFactory<P, N>,
     executor: reth_tasks::Runtime,
     timeout: Option<Duration>,
     compare_trie_updates: bool,
@@ -1028,10 +1030,10 @@ where
 {
     fn serial_fallback(
         executor: &reth_tasks::Runtime,
-        overlay_factory: OverlayStateProviderFactory<P, N>,
+        state_provider_factory: OverlayStateProviderFactory<P, N>,
         output: Arc<BlockExecutionOutput<N::Receipt>>,
     ) -> ProviderResult<SerialFallbackRx> {
-        let provider = overlay_factory.database_provider_ro()?;
+        let provider = state_provider_factory.database_provider_ro()?;
         let (fallback_tx, fallback_rx) = mpsc::channel();
         executor.spawn_blocking_named("serial-root", move || {
             let result = (|| {
@@ -1054,7 +1056,7 @@ where
         &self,
         output: &BlockExecutionOutput<N::Receipt>,
     ) -> ProviderResult<StateRootJobOutcome> {
-        let provider = self.overlay_factory.database_provider_ro()?;
+        let provider = self.state_provider_factory.database_provider_ro()?;
         let hashed_state = Arc::new(provider.hashed_post_state(&output.state)?);
         let (state_root, trie_updates) =
             provider.state_root_with_updates(hashed_state.as_ref().clone())?;
@@ -1102,7 +1104,7 @@ where
 
         if self.compare_trie_updates {
             let _has_diff = compare_trie_updates_with_serial(
-                self.overlay_factory.clone(),
+                self.state_provider_factory.clone(),
                 output,
                 trie_updates.as_ref().clone(),
             );
@@ -1167,16 +1169,28 @@ where
             Ok(Ok(outcome)) => return self.verified_sparse_outcome(block, &output, outcome),
             Ok(Err(err)) => {
                 debug!(target: "engine::tree::state_root_strategy", %err, "State root task failed, falling back to serial root");
-                Self::serial_fallback(&self.executor, self.overlay_factory.clone(), output.clone())?
+                Self::serial_fallback(
+                    &self.executor,
+                    self.state_provider_factory.clone(),
+                    output.clone(),
+                )?
             }
             Err(RecvTimeoutError::Timeout) => {
                 warn!(target: "engine::tree::state_root_strategy", ?timeout, "State root task timed out, racing serial fallback");
                 self.metrics.state_root_task_timeout_total.increment(1);
-                Self::serial_fallback(&self.executor, self.overlay_factory.clone(), output.clone())?
+                Self::serial_fallback(
+                    &self.executor,
+                    self.state_provider_factory.clone(),
+                    output.clone(),
+                )?
             }
             Err(RecvTimeoutError::Disconnected) => {
                 debug!(target: "engine::tree::state_root_strategy", "State root task dropped, falling back to serial root");
-                Self::serial_fallback(&self.executor, self.overlay_factory.clone(), output.clone())?
+                Self::serial_fallback(
+                    &self.executor,
+                    self.state_provider_factory.clone(),
+                    output.clone(),
+                )?
             }
         };
 
@@ -1216,7 +1230,7 @@ where
 }
 
 fn compare_trie_updates_with_serial<N, P>(
-    overlay_factory: OverlayStateProviderFactory<P, N>,
+    state_provider_factory: OverlayStateProviderFactory<P, N>,
     output: &BlockExecutionOutput<N::Receipt>,
     task_trie_updates: TrieUpdates,
 ) -> bool
@@ -1239,7 +1253,7 @@ where
 {
     debug!(target: "engine::tree::state_root_strategy", "Comparing trie updates with serial computation");
 
-    match overlay_factory.database_provider_ro().and_then(|provider| {
+    match state_provider_factory.database_provider_ro().and_then(|provider| {
         let hashed_state = provider.hashed_post_state(&output.state)?;
         provider.state_root_with_updates(hashed_state)
     }) {
@@ -1250,7 +1264,7 @@ where
                 "Serial state root computation finished for comparison"
             );
 
-            match overlay_factory.database_provider_ro() {
+            match state_provider_factory.database_provider_ro() {
                 Ok(provider) => match super::trie_updates::compare_trie_updates(
                     &provider,
                     task_trie_updates,

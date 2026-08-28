@@ -774,10 +774,10 @@ mod tests {
                 .into_sorted();
 
         let db_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref());
-        let overlay_factory =
+        let state_provider_factory =
             InMemoryTrieCursorFactory::new(db_cursor_factory, &cumulative_trie_updates_prev);
 
-        compute_trie_changesets(&overlay_factory, &trie_updates).unwrap()
+        compute_trie_changesets(&state_provider_factory, &trie_updates).unwrap()
     }
 
     fn seed_tip_trie_tables<Provider, A>(provider: &Provider)

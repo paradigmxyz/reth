@@ -188,7 +188,7 @@ where
             return BatchEnd::GoAgain
         }
 
-        let state_provider = match job.overlay_factory.database_provider_ro() {
+        let state_provider = match job.state_provider_factory.database_provider_ro() {
             Ok(provider) => provider,
             Err(err) => {
                 trace!(
@@ -379,7 +379,7 @@ mod tests {
             provider.add_stage_checkpoint(StageId::Finish, StageCheckpoint::new(0));
             let job = Job {
                 evm_env: Default::default(),
-                overlay_factory: OverlayStateProviderFactory::new(
+                state_provider_factory: OverlayStateProviderFactory::new(
                     provider,
                     reth_storage_overlay::OverlayManager::default().overlay_builder(parent_hash),
                 ),

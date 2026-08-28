@@ -88,9 +88,9 @@ where
         &self,
         parent_hash: B256,
         evm_env: EvmEnvFor<Evm>,
-        overlay_factory: OverlayStateProviderFactory<P, N>,
+        state_provider_factory: OverlayStateProviderFactory<P, N>,
     ) {
-        self.control.start(parent_hash, Job { evm_env, overlay_factory });
+        self.control.start(parent_hash, Job { evm_env, state_provider_factory });
     }
 }
 
@@ -124,5 +124,5 @@ pub trait Source<N: NodePrimitives>: Send + Sync + Debug {
 /// A request to warm txpool transactions against one fully validated parent state.
 struct Job<N: NodePrimitives, P, Evm: ConfigureEvm<Primitives = N>> {
     evm_env: EvmEnvFor<Evm>,
-    overlay_factory: OverlayStateProviderFactory<P, N>,
+    state_provider_factory: OverlayStateProviderFactory<P, N>,
 }

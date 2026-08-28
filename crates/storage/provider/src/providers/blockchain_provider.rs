@@ -154,12 +154,12 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         &self,
         state: &BlockState<N::Primitives>,
     ) -> ProviderResult<StateProviderBox> {
-        let overlay_factory = OverlayStateProviderFactory::new(
+        let state_provider_factory = OverlayStateProviderFactory::new(
             self.database.clone(),
             self.database.overlay_manager().overlay_builder(state.hash()),
         );
         Ok(Box::new(reth_storage_api::DatabaseProviderROFactory::database_provider_ro(
-            &overlay_factory,
+            &state_provider_factory,
         )?))
     }
 
@@ -188,14 +188,14 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
 
         // Anchor at the persisted block; the overlay reverts any db-tip advancement past it
         // via changesets, then the merged in-memory delta applies on top.
-        let overlay_factory = OverlayStateProviderFactory::new(
+        let state_provider_factory = OverlayStateProviderFactory::new(
             self.database.clone(),
             self.database
                 .overlay_manager()
                 .overlay_builder(matched.anchor().hash)
                 .with_immediate_state_trie_overlay(merged.state, merged.nodes),
         );
-        reth_storage_api::DatabaseProviderROFactory::database_provider_ro(&overlay_factory)
+        reth_storage_api::DatabaseProviderROFactory::database_provider_ro(&state_provider_factory)
             .map(Some)
     }
 
@@ -219,11 +219,11 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         drop(provider);
 
         let Some(block_hash) = block_hash else { return Ok(None) };
-        let overlay_factory = OverlayStateProviderFactory::new(
+        let state_provider_factory = OverlayStateProviderFactory::new(
             self.database.clone(),
             self.database.overlay_manager().overlay_builder(block_hash),
         );
-        reth_storage_api::DatabaseProviderROFactory::database_provider_ro(&overlay_factory)
+        reth_storage_api::DatabaseProviderROFactory::database_provider_ro(&state_provider_factory)
             .map(Some)
     }
 }

@@ -420,9 +420,11 @@ where
             // This runs side-by-side with the parallel transaction execution reducing the time it
             // spends blocking on the data.
             let caches = saved_cache.cache().clone();
-            let overlay_factory = ctx.provider.clone();
+            let state_provider_factory = ctx.provider.clone();
             let build = Arc::new(move || {
-                overlay_factory.database_provider_ro().map(|provider| Box::new(provider) as _)
+                state_provider_factory
+                    .database_provider_ro()
+                    .map(|provider| Box::new(provider) as _)
             });
 
             pool.begin_block(build, caches, ctx.env.txpool_snapshot.clone());

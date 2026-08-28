@@ -560,7 +560,7 @@ where
         trace!(target: "engine::tree::payload_validator", "Fetching block state provider");
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "state_provider").entered();
-        let Some(overlay_factory) =
+        let Some(state_provider_factory) =
             ensure_ok!(self.overlay_state_provider_factory(parent_hash, ctx.state()))
         else {
             // this is pre-validated in the tree
@@ -614,7 +614,7 @@ where
                 &self.overlay_manager,
                 &env,
                 &parent_block,
-                overlay_factory.clone(),
+                state_provider_factory.clone(),
                 &self.config,
                 parallel_bal_execution,
                 ctx.state_mut(),
@@ -639,7 +639,7 @@ where
         let mut handle = ensure_ok!(self.spawn_payload_processor(
             env.clone(),
             txs,
-            overlay_factory.clone(),
+            state_provider_factory.clone(),
             hint_stream,
             hashed_update_stream,
             parallel_bal_execution,
@@ -675,7 +675,7 @@ where
         // The second parameter `instrument_state_provider` controls whether we should
         // instrument the state provider with metrics.
         let make_state_provider = |fill_on_miss: bool| -> ProviderResult<StateProviderBox> {
-            let provider = overlay_factory.database_provider_ro()?;
+            let provider = state_provider_factory.database_provider_ro()?;
             let mut provider = if let Some((caches, cache_metrics)) = &execution_cache {
                 let fill_mode = if fill_on_miss {
                     CacheFillMode::FillOnMiss
@@ -814,7 +814,11 @@ where
                 || hashed_state.get(),
                 &block,
                 &parent_block,
-                || overlay_factory.database_provider_ro().map(|provider| Box::new(provider) as _),
+                || {
+                    state_provider_factory
+                        .database_provider_ro()
+                        .map(|provider| Box::new(provider) as _)
+                },
             )
         });
 
@@ -851,7 +855,7 @@ where
                     &block,
                     &parent_block,
                     || {
-                        overlay_factory
+                        state_provider_factory
                             .database_provider_ro()
                             .map(|provider| Box::new(provider) as _)
                     },
@@ -1385,7 +1389,7 @@ where
         &self,
         env: ExecutionEnv<Evm>,
         txs: T,
-        overlay_factory: OverlayStateProviderFactory<P, N>,
+        state_provider_factory: OverlayStateProviderFactory<P, N>,
         hint_stream: Option<StateRootHintStream>,
         hashed_update_stream: Option<StateRootUpdateStream>,
         parallel_bal_execution: bool,
@@ -1401,7 +1405,7 @@ where
         let handle = self.payload_processor.spawn_with_state_root_streams(
             env,
             txs,
-            overlay_factory,
+            state_provider_factory,
             hint_stream,
             hashed_update_stream,
             parallel_bal_execution,
@@ -1456,8 +1460,8 @@ where
         timestamp: u64,
         state: &mut EngineApiTreeState<N>,
     ) -> Option<PayloadStateRootHandle> {
-        let overlay_factory = match self.overlay_state_provider_factory(parent_hash, state) {
-            Ok(Some(overlay_factory)) => overlay_factory,
+        let state_provider_factory = match self.overlay_state_provider_factory(parent_hash, state) {
+            Ok(Some(state_provider_factory)) => state_provider_factory,
             Ok(None) => return None,
             Err(err) => {
                 warn!(
@@ -1476,7 +1480,7 @@ where
             parent_header,
             timestamp,
             state,
-            overlay_factory,
+            state_provider_factory,
             &self.config,
         )) {
             Ok(handle) => handle,
@@ -1899,8 +1903,9 @@ where
             }
         };
 
-        let overlay_factory = match self.overlay_state_provider_factory(parent.hash(), state) {
-            Ok(Some(overlay_factory)) => overlay_factory,
+        let state_provider_factory = match self.overlay_state_provider_factory(parent.hash(), state)
+        {
+            Ok(Some(state_provider_factory)) => state_provider_factory,
             Ok(None) => return,
             Err(err) => {
                 trace!(
@@ -1912,7 +1917,7 @@ where
                 return
             }
         };
-        txpool_prewarm.start(parent.hash(), evm_env, overlay_factory)
+        txpool_prewarm.start(parent.hash(), evm_env, state_provider_factory)
     }
 
     fn payload_builder_resources(
