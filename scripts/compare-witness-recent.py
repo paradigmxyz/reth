@@ -46,6 +46,8 @@ QUANTITY_FIELDS = {
     "excessBlobGas",
 }
 
+RETH_WITNESS_MODE = "canonical"
+
 
 def rpc(url, method, params, timeout):
     request = Request(
@@ -121,12 +123,12 @@ def header_set(witness, client):
     return {geth_header_rlp(header) for header in headers}
 
 
-def report_difference(label, expected, actual):
+def report_difference(label, expected, actual, severity="ERROR"):
     missing = expected - actual
     extra = actual - expected
     if not missing and not extra:
         return False
-    print(f"ERROR: {label} differs", file=sys.stderr)
+    print(f"{severity}: {label} differs", file=sys.stderr)
     for name, values in (("missing from Reth", missing), ("extra in Reth", extra)):
         if values:
             print(f"  {name}: {len(values)}", file=sys.stderr)
@@ -160,7 +162,7 @@ def compare_block(reth_url, geth_url, block, timeout):
                 f"block {block_id} differs: Reth={reth_block['hash']}, Geth={geth_block['hash']}"
             )
 
-        reth = rpc(reth_url, "debug_executionWitness", [block_id], timeout)
+        reth = rpc(reth_url, "debug_executionWitness", [block_id, RETH_WITNESS_MODE], timeout)
         geth = rpc(geth_url, "debug_executionWitness", [block_id], timeout)
 
         reth_state, geth_state = hex_set(reth, "state"), hex_set(geth, "state")
@@ -171,15 +173,18 @@ def compare_block(reth_url, geth_url, block, timeout):
         return 2
 
     print(f"block {block_id} ({reth_block['hash']})")
+    print(f"Reth witness mode: {RETH_WITNESS_MODE}; Geth uses its default mode")
     print(
         "state: Reth=%d Geth=%d; codes: Reth=%d Geth=%d; headers: Reth=%d Geth=%d"
         % (len(reth_state), len(geth_state), len(reth_codes), len(geth_codes), len(reth_headers), len(geth_headers))
     )
 
-    # Reth can include cache-derived trie nodes and code blobs Geth does not return. The required
-    # invariant is that every blob returned by Geth is also returned by Reth.
+    # Reth can include cache-derived trie nodes Geth does not return. The required invariant is
+    # that every Geth state node is also returned by Reth.
     failed = report_superset("state nodes", geth_state, reth_state)
-    failed |= report_superset("code blobs", geth_codes, reth_codes)
+    # Geth exposes only its default (legacy) mode, which includes created bytecode that canonical
+    # Reth intentionally omits. Report that difference without failing the state-node check.
+    report_difference("code blobs", geth_codes, reth_codes, severity="INFO")
     failed |= report_difference("RLP headers", geth_headers, reth_headers)
 
     if geth.get("keys") is None:
