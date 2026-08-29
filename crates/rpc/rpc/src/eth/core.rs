@@ -16,7 +16,9 @@ use reth_network_api::noop::NoopNetwork;
 use reth_node_api::{FullNodeComponents, FullNodeTypes};
 use reth_rpc_convert::{RpcConvert, RpcConverter};
 use reth_rpc_eth_api::{
-    helpers::{pending_block::PendingEnvBuilder, spec::SignersForRpc, SpawnBlocking},
+    helpers::{
+        pending_block::PendingEnvBuilder, spec::SignersForRpc, EthTransactionsConfig, SpawnBlocking,
+    },
     node::{RpcNodeCoreAdapter, RpcNodeCoreExt},
     EthApiTypes, RpcNodeCore,
 };
@@ -263,6 +265,9 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
     /// Raw transaction forwarder
     raw_tx_forwarder: Option<RpcClient>,
 
+    /// Configuration for transaction-related RPC methods.
+    transactions_config: EthTransactionsConfig,
+
     /// Converter for RPC types.
     converter: Rpc,
 
@@ -314,6 +319,7 @@ where
         max_blocking_io_requests: usize,
         pending_block_kind: PendingBlockKind,
         raw_tx_forwarder: Option<RpcClient>,
+        transactions_config: EthTransactionsConfig,
         send_raw_transaction_sync_timeout: Duration,
         evm_memory_limit: u64,
         force_blob_sidecar_upcasting: bool,
@@ -355,6 +361,7 @@ where
             blocking_io_request_semaphore: Arc::new(Semaphore::new(max_blocking_io_requests)),
             raw_tx_sender,
             raw_tx_forwarder,
+            transactions_config,
             converter,
             next_env_builder: Box::new(next_env),
             tx_batch_sender,
@@ -536,6 +543,12 @@ where
     #[inline]
     pub const fn raw_tx_forwarder(&self) -> Option<&RpcClient> {
         self.raw_tx_forwarder.as_ref()
+    }
+
+    /// Returns the transaction-related RPC configuration.
+    #[inline]
+    pub const fn transactions_config(&self) -> &EthTransactionsConfig {
+        &self.transactions_config
     }
 
     /// Returns the timeout duration for `send_raw_transaction_sync` RPC method.

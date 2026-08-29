@@ -42,7 +42,7 @@ pub use spec::EthApiSpec;
 pub use state::{EthState, LoadState};
 pub use subscriptions::EthSubscriptions;
 pub use trace::Trace;
-pub use transaction::{EthTransactions, LoadTransaction};
+pub use transaction::{EthTransactions, EthTransactionsConfig, LoadTransaction};
 
 use crate::FullEthApiTypes;
 

@@ -51,6 +51,7 @@ pub use net::NetApi;
 pub use otterscan::OtterscanApi;
 pub use reth::RethApi;
 pub use reth_rpc_convert::RpcTypes;
+pub use reth_rpc_eth_api::helpers::EthTransactionsConfig;
 pub use rpc::RPCApi;
 pub use testing::TestingApi;
 pub use trace::TraceApi;

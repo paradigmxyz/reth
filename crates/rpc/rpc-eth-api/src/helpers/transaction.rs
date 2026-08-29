@@ -8,6 +8,7 @@ use crate::{
     RpcTransaction,
 };
 use alloy_consensus::{
+    constants::EIP4844_TX_TYPE_ID,
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
     BlockHeader, Transaction,
 };
@@ -34,6 +35,7 @@ use reth_storage_api::{
     TransactionsProvider,
 };
 use reth_transaction_pool::{
+    error::InvalidPoolTransactionError, validate::DEFAULT_MAX_TX_INPUT_BYTES,
     AddedTransactionOutcome, PoolPooledTx, PoolTransaction, PoolTx, TransactionOrigin,
     TransactionPool,
 };
@@ -63,6 +65,9 @@ use std::{sync::Arc, time::Duration};
 ///
 /// This implementation follows the behaviour of Geth and disables the basefee check for tracing.
 pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
+    /// Returns the transaction-related RPC configuration.
+    fn transactions_config(&self) -> &EthTransactionsConfig;
+
     /// Returns a handle for signing data.
     ///
     /// Signer access in default (L1) trait method implementations.
@@ -84,6 +89,16 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         tx: Bytes,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
         async move {
+            let max_bytes = self.transactions_config().max_bytes;
+            // Blob transaction network encodings include the sidecar. The pool validator applies
+            // this limit to the executable transaction data after decoding instead.
+            let is_eip4844 = tx.first().copied() == Some(EIP4844_TX_TYPE_ID);
+            if tx.len() > max_bytes && !is_eip4844 {
+                let err =
+                    InvalidPoolTransactionError::OversizedData { size: tx.len(), limit: max_bytes };
+                return Err(Self::Error::from_eth_err(EthApiError::PoolError(err.into())));
+            }
+
             let pool_transaction =
                 <PoolTx<Self::Pool> as PoolTransaction>::recover_raw_transaction(&tx)
                     .map_err(Self::Error::from_eth_err)?;
@@ -708,6 +723,26 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             .find(|signer| signer.is_signer_for(account))
             .map(|signer| dyn_clone::clone_box(&**signer))
             .ok_or_else(|| SignError::NoAccount.into_eth_err())
+    }
+}
+
+/// Configuration for transaction-related RPC methods.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct EthTransactionsConfig {
+    /// Maximum encoded transaction size accepted by raw transaction RPC methods before decoding.
+    pub max_bytes: usize,
+}
+
+impl EthTransactionsConfig {
+    /// Creates a new transaction RPC configuration.
+    pub const fn new(max_bytes: usize) -> Self {
+        Self { max_bytes }
+    }
+}
+
+impl Default for EthTransactionsConfig {
+    fn default() -> Self {
+        Self::new(DEFAULT_MAX_TX_INPUT_BYTES)
     }
 }
 

@@ -10,7 +10,7 @@ use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_primitives_traits::{AlloyBlockHeader, WithEncoded};
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
-    helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction},
+    helpers::{spec::SignersForRpc, EthTransactions, EthTransactionsConfig, LoadTransaction},
     FromEvmError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{error::RpcPoolError, EthApiError};
@@ -26,6 +26,11 @@ where
     EthApiError: FromEvmError<N::Evm>,
     Rpc: RpcConvert<Primitives = N::Primitives, Error = EthApiError>,
 {
+    #[inline]
+    fn transactions_config(&self) -> &EthTransactionsConfig {
+        self.inner.transactions_config()
+    }
+
     #[inline]
     fn signers(&self) -> &SignersForRpc<Self::Provider, Self::NetworkTypes> {
         self.inner.signers()
