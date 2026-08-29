@@ -50,9 +50,9 @@ use reth_storage_overlay::OverlayManager;
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie::ComputedTrieData;
 use revm::{
-    context_interface::cfg::gas_params::Eip2780TxInfo,
+    context_interface::{cfg::gas_params::Eip2780TxInfo, Cfg},
     interpreter::{debug_unreachable, gas::calculate_initial_tx_gas},
-    primitives::hardfork::SpecId,
+    primitives::{eip3860::MAX_INITCODE_SIZE, hardfork::SpecId},
 };
 use state::TreeState;
 use std::{
@@ -186,13 +186,27 @@ where
     }
 }
 
-/// Performs the post-state eligibility portion of the EIP-7805 inclusion-list check.
+/// Block-scoped inputs for the EIP-7805 appendability check, taken from the payload's own EVM
+/// environment so the check follows the fork the block was executed under.
+#[derive(Debug, Clone, Copy)]
+struct InclusionListContext {
+    chain_id: u64,
+    spec_id: SpecId,
+    base_fee_per_gas: Option<u64>,
+    /// Gas still unspent at the end of the block.
+    available_gas: u64,
+    /// EIP-7825 cap on a single transaction's gas limit.
+    tx_gas_limit_cap: u64,
+}
+
+/// Returns whether the block satisfies its EIP-7805 inclusion list, i.e. no inclusion-list
+/// transaction missing from the block could have been validly appended to it.
 ///
-/// This check intentionally does not make an invalid payload invalid; it only reports its
-/// inclusion-list status.
+/// Reports status only: an unsatisfied inclusion list does not make a payload invalid.
 fn inclusion_list_satisfied<N: NodePrimitives>(
     block: &RecoveredBlock<N::Block>,
     state: &StateProviderBox,
+    ctx: &InclusionListContext,
     transactions: &[Bytes],
 ) -> ProviderResult<bool> {
     let included = block
@@ -200,76 +214,109 @@ fn inclusion_list_satisfied<N: NodePrimitives>(
         .transactions_iter()
         .map(SignedTransaction::recalculate_hash)
         .collect::<B256Set>();
-    let available_gas = block.gas_limit().saturating_sub(block.gas_used());
 
     for encoded in transactions {
         let Ok(transaction) = N::SignedTx::decode_2718_exact(encoded) else { continue };
-        // EIP-2681 reserves the maximum uint64 nonce. Such a transaction cannot be appended
-        // because execution would have to increment the sender nonce past the limit.
-        if transaction.nonce() == u64::MAX {
+        if included.contains(&transaction.recalculate_hash()) {
             continue
         }
-        if included.contains(&transaction.recalculate_hash()) ||
-            transaction.gas_limit() > available_gas
-        {
-            continue
-        }
-        let Ok(sender) = transaction.try_recover() else { continue };
-
-        // Transactions that cannot pass intrinsic gas or fee-cap validation cannot be appended
-        // and therefore do not make an otherwise valid payload fail its inclusion-list check.
-        if block
-            .base_fee_per_gas()
-            .is_some_and(|base_fee| transaction.max_fee_per_gas() < base_fee as u128) ||
-            transaction
-                .max_priority_fee_per_gas()
-                .is_some_and(|tip| tip > transaction.max_fee_per_gas())
-        {
-            continue
-        }
-        let intrinsic_gas = calculate_initial_tx_gas(
-            SpecId::BOGOTA,
-            transaction.input(),
-            transaction.is_create(),
-            transaction.access_list().map_or(0, |list| list.len()) as u64,
-            transaction
-                .access_list()
-                .map_or(0, |list| list.iter().map(|item| item.storage_keys.len()).sum())
-                as u64,
-            transaction.authorization_list().map_or(0, |list| list.len()) as u64,
-            Some(Eip2780TxInfo {
-                value: transaction.value(),
-                is_self_transfer: transaction.kind().to() == Some(&sender),
-            }),
-        );
-        if transaction.gas_limit() < intrinsic_gas.initial_total_gas() ||
-            transaction.gas_limit() < intrinsic_gas.floor_gas
-        {
-            continue
-        }
-        let account = state.basic_account(&sender)?.unwrap_or_default();
-        let max_gas_cost = U256::from(transaction.gas_limit())
-            .checked_mul(U256::from(transaction.max_fee_per_gas()))
-            .unwrap_or(U256::MAX);
-        let max_blob_gas_cost = transaction
-            .blob_count()
-            .zip(transaction.max_fee_per_blob_gas())
-            .map(|(blob_count, max_fee_per_blob_gas)| {
-                U256::from(blob_count)
-                    .checked_mul(U256::from(DATA_GAS_PER_BLOB))
-                    .and_then(|cost| cost.checked_mul(U256::from(max_fee_per_blob_gas)))
-                    .unwrap_or(U256::MAX)
-            })
-            .unwrap_or_default();
-        let max_cost = max_gas_cost
-            .checked_add(max_blob_gas_cost)
-            .and_then(|cost| cost.checked_add(transaction.value()))
-            .unwrap_or(U256::MAX);
-        if account.nonce == transaction.nonce() && account.balance >= max_cost {
+        if could_append_transaction::<N>(&transaction, state, ctx)? {
             return Ok(false)
         }
     }
     Ok(true)
+}
+
+/// Returns whether `transaction` could have been validly appended to the end of the block.
+///
+/// Mirrors `check_inclusion_list_transactions` in the execution spec
+/// (`src/ethereum/forks/amsterdam/fork.py`). Conditions rejected here must also be ones the
+/// payload builder rejects, otherwise reth reports its own blocks as unsatisfied.
+fn could_append_transaction<N: NodePrimitives>(
+    transaction: &N::SignedTx,
+    state: &StateProviderBox,
+    ctx: &InclusionListContext,
+) -> ProviderResult<bool> {
+    // EIP-2681 reserves the maximum nonce; execution could not increment past it.
+    if transaction.nonce() == u64::MAX {
+        return Ok(false)
+    }
+
+    // Block gas capacity, plus the EIP-7825 per-transaction cap.
+    if transaction.gas_limit() > ctx.available_gas || transaction.gas_limit() > ctx.tx_gas_limit_cap
+    {
+        return Ok(false)
+    }
+
+    // A legacy transaction without a chain id is replay-protected by omission, so only a
+    // mismatch disqualifies.
+    if transaction.chain_id().is_some_and(|chain_id| chain_id != ctx.chain_id) {
+        return Ok(false)
+    }
+
+    // EIP-3860 init code bound.
+    if transaction.is_create() && transaction.input().len() > MAX_INITCODE_SIZE {
+        return Ok(false)
+    }
+
+    // Base fee coverage and the EIP-1559 fee-cap ordering rule.
+    if ctx.base_fee_per_gas.is_some_and(|base_fee| transaction.max_fee_per_gas() < base_fee as u128) ||
+        transaction
+            .max_priority_fee_per_gas()
+            .is_some_and(|tip| tip > transaction.max_fee_per_gas())
+    {
+        return Ok(false)
+    }
+
+    let Ok(sender) = transaction.try_recover() else { return Ok(false) };
+
+    let intrinsic_gas = calculate_initial_tx_gas(
+        ctx.spec_id,
+        transaction.input(),
+        transaction.is_create(),
+        transaction.access_list().map_or(0, |list| list.len()) as u64,
+        transaction
+            .access_list()
+            .map_or(0, |list| list.iter().map(|item| item.storage_keys.len()).sum()) as u64,
+        transaction.authorization_list().map_or(0, |list| list.len()) as u64,
+        Some(Eip2780TxInfo {
+            value: transaction.value(),
+            is_self_transfer: transaction.kind().to() == Some(&sender),
+        }),
+    );
+    if transaction.gas_limit() < intrinsic_gas.initial_total_gas() ||
+        transaction.gas_limit() < intrinsic_gas.floor_gas
+    {
+        return Ok(false)
+    }
+
+    let account = state.basic_account(&sender)?.unwrap_or_default();
+
+    // An account carrying code is not an EOA unless the code is an EIP-7702 delegation.
+    if account.has_bytecode() && !state.account_code(&sender)?.is_some_and(|code| code.is_eip7702())
+    {
+        return Ok(false)
+    }
+
+    let max_gas_cost = U256::from(transaction.gas_limit())
+        .checked_mul(U256::from(transaction.max_fee_per_gas()))
+        .unwrap_or(U256::MAX);
+    let max_blob_gas_cost = transaction
+        .blob_count()
+        .zip(transaction.max_fee_per_blob_gas())
+        .map(|(blob_count, max_fee_per_blob_gas)| {
+            U256::from(blob_count)
+                .checked_mul(U256::from(DATA_GAS_PER_BLOB))
+                .and_then(|cost| cost.checked_mul(U256::from(max_fee_per_blob_gas)))
+                .unwrap_or(U256::MAX)
+        })
+        .unwrap_or_default();
+    let max_cost = max_gas_cost
+        .checked_add(max_blob_gas_cost)
+        .and_then(|cost| cost.checked_add(transaction.value()))
+        .unwrap_or(U256::MAX);
+
+    Ok(account.nonce == transaction.nonce() && account.balance >= max_cost)
 }
 
 /// Tracks the state of the engine api internals.
@@ -551,6 +598,8 @@ where
         + TryIntoHistoricalStateProvider
         + 'static,
     C: ConfigureEvm<Primitives = N> + 'static,
+    // The EIP-7805 appendability check prices intrinsic gas, which needs a concrete revm spec.
+    reth_evm::SpecFor<C>: Into<SpecId>,
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
     V: EngineValidator<T> + WaitForCaches,
 {
@@ -3632,7 +3681,26 @@ where
             return Ok(None)
         };
         let state = provider_builder.build()?;
-        let result = inclusion_list_satisfied::<N>(&block, &state, &transactions)?;
+
+        // The EVM environment supplies the chain id and the EIP-7825 gas cap the block was
+        // executed under. Failing to build it leaves the status unknown rather than guessing,
+        // since the spec permits a null result.
+        let evm_env = match self.evm_config.evm_env(block.header()) {
+            Ok(evm_env) => evm_env,
+            Err(err) => {
+                warn!(target: "engine::tree", %block_hash, %err, "Failed to build EVM env for inclusion-list check");
+                return Ok(None)
+            }
+        };
+        let ctx = InclusionListContext {
+            chain_id: evm_env.cfg_env.chain_id,
+            spec_id: evm_env.cfg_env.spec.into(),
+            base_fee_per_gas: block.base_fee_per_gas(),
+            available_gas: block.gas_limit().saturating_sub(block.gas_used()),
+            tx_gas_limit_cap: evm_env.cfg_env.tx_gas_limit_cap(),
+        };
+
+        let result = inclusion_list_satisfied::<N>(&block, &state, &ctx, &transactions)?;
         self.state.inclusion_list_results.insert(block_hash, result);
         Ok(Some(result))
     }
@@ -3891,4 +3959,169 @@ pub trait WaitForCaches {
     ///
     /// Returns the time spent waiting for each cache separately.
     fn wait_for_caches(&self) -> CacheWaitDurations;
+}
+
+#[cfg(test)]
+mod inclusion_list_tests {
+    use super::*;
+    use alloy_consensus::TxLegacy;
+    use alloy_primitives::{Address, TxKind};
+    use reth_ethereum_primitives::{
+        EthPrimitives, Transaction as EthTransaction, TransactionSigned,
+    };
+    use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
+    use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
+
+    const CHAIN_ID: u64 = 1;
+    const BASE_FEE: u64 = 7;
+
+    fn context() -> InclusionListContext {
+        InclusionListContext {
+            chain_id: CHAIN_ID,
+            spec_id: SpecId::BOGOTA,
+            base_fee_per_gas: Some(BASE_FEE),
+            available_gas: 1_000_000,
+            tx_gas_limit_cap: 500_000,
+        }
+    }
+
+    fn legacy_tx(chain_id: Option<u64>, nonce: u64, gas_limit: u64) -> EthTransaction {
+        EthTransaction::Legacy(TxLegacy {
+            chain_id,
+            nonce,
+            gas_price: BASE_FEE as u128,
+            gas_limit,
+            to: TxKind::Call(Address::ZERO),
+            value: U256::ZERO,
+            input: Default::default(),
+        })
+    }
+
+    /// Signs `tx` and seeds the recovered sender with `account`.
+    fn with_sender(
+        tx: EthTransaction,
+        account: ExtendedAccount,
+    ) -> (TransactionSigned, StateProviderBox) {
+        let mut rng = generators::rng();
+        let signed = sign_tx_with_key_pair(generate_key(&mut rng), tx);
+        let sender = signed.try_recover().expect("signature is valid");
+
+        let provider = MockEthProvider::default();
+        provider.add_account(sender, account);
+        let state = provider.latest().expect("mock provider always has a latest state");
+
+        (signed, state)
+    }
+
+    /// Funds the sender generously so that only the condition under test can reject.
+    fn funded(nonce: u64) -> ExtendedAccount {
+        ExtendedAccount::new(nonce, U256::from(10u64).pow(U256::from(20u64)))
+    }
+
+    fn could_append(
+        tx: EthTransaction,
+        account: ExtendedAccount,
+        ctx: InclusionListContext,
+    ) -> bool {
+        let (signed, state) = with_sender(tx, account);
+        could_append_transaction::<EthPrimitives>(&signed, &state, &ctx)
+            .expect("mock state provider does not fail")
+    }
+
+    #[test]
+    fn eligible_transaction_is_appendable() {
+        assert!(could_append(legacy_tx(Some(CHAIN_ID), 0, 100_000), funded(0), context()));
+    }
+
+    #[test]
+    fn legacy_transaction_without_chain_id_is_appendable() {
+        // A pre-EIP-155 transaction is replay-protected by omission, not by mismatch.
+        assert!(could_append(legacy_tx(None, 0, 100_000), funded(0), context()));
+    }
+
+    #[test]
+    fn foreign_chain_id_is_not_appendable() {
+        assert!(!could_append(legacy_tx(Some(CHAIN_ID + 1), 0, 100_000), funded(0), context()));
+    }
+
+    #[test]
+    fn nonce_mismatch_is_not_appendable() {
+        // Too high: the sender has not reached this nonce yet.
+        assert!(!could_append(legacy_tx(Some(CHAIN_ID), 5, 100_000), funded(0), context()));
+        // Too low: the nonce has already been consumed.
+        assert!(!could_append(legacy_tx(Some(CHAIN_ID), 0, 100_000), funded(5), context()));
+    }
+
+    #[test]
+    fn max_nonce_is_not_appendable() {
+        // EIP-2681 reserves the maximum uint64 nonce.
+        assert!(!could_append(
+            legacy_tx(Some(CHAIN_ID), u64::MAX, 100_000),
+            funded(u64::MAX),
+            context()
+        ));
+    }
+
+    #[test]
+    fn insufficient_balance_is_not_appendable() {
+        let account = ExtendedAccount::new(0, U256::from(1u64));
+        assert!(!could_append(legacy_tx(Some(CHAIN_ID), 0, 100_000), account, context()));
+    }
+
+    #[test]
+    fn exceeding_remaining_block_gas_is_not_appendable() {
+        let ctx = InclusionListContext { available_gas: 50_000, ..context() };
+        assert!(!could_append(legacy_tx(Some(CHAIN_ID), 0, 100_000), funded(0), ctx));
+    }
+
+    #[test]
+    fn exceeding_tx_gas_limit_cap_is_not_appendable() {
+        // Room in the block, but over the EIP-7825 per-transaction cap.
+        let ctx = InclusionListContext {
+            available_gas: 30_000_000,
+            tx_gas_limit_cap: 100_000,
+            ..context()
+        };
+        assert!(!could_append(legacy_tx(Some(CHAIN_ID), 0, 200_000), funded(0), ctx));
+    }
+
+    #[test]
+    fn below_intrinsic_gas_is_not_appendable() {
+        assert!(!could_append(legacy_tx(Some(CHAIN_ID), 0, 1), funded(0), context()));
+    }
+
+    #[test]
+    fn below_base_fee_is_not_appendable() {
+        let ctx = InclusionListContext { base_fee_per_gas: Some(BASE_FEE + 1), ..context() };
+        assert!(!could_append(legacy_tx(Some(CHAIN_ID), 0, 100_000), funded(0), ctx));
+    }
+
+    #[test]
+    fn blob_transaction_is_appendable() {
+        // execution-specs a7b894b removed the blob skip from
+        // `check_inclusion_list_transactions`: a blob transaction in an inclusion list is
+        // evaluated like any other, and omitting it fails the block's inclusion-list check.
+        // `engine_getInclusionListV1` is what keeps blob transactions out of inclusion lists.
+        let tx = EthTransaction::Eip4844(alloy_consensus::TxEip4844 {
+            chain_id: CHAIN_ID,
+            nonce: 0,
+            gas_limit: 100_000,
+            max_fee_per_gas: BASE_FEE as u128,
+            max_priority_fee_per_gas: 0,
+            to: Address::ZERO,
+            value: U256::ZERO,
+            access_list: Default::default(),
+            blob_versioned_hashes: vec![B256::ZERO],
+            max_fee_per_blob_gas: 1,
+            input: Default::default(),
+        });
+        assert!(could_append(tx, funded(0), context()));
+    }
+
+    #[test]
+    fn contract_sender_is_not_appendable() {
+        // An account carrying non-delegation code is not an EOA and cannot originate a tx.
+        let account = funded(0).with_bytecode(alloy_primitives::bytes!("60006000"));
+        assert!(!could_append(legacy_tx(Some(CHAIN_ID), 0, 100_000), account, context()));
+    }
 }
