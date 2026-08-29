@@ -344,6 +344,9 @@ impl ProofWorkerHandle {
         input: StorageProofInput,
         proof_result_sender: CrossbeamSender<StorageProofResultMessage>,
     ) -> Result<(), ProviderError> {
+        if input.is_cancelled() {
+            return Ok(())
+        }
         let hashed_address = input.hashed_address;
         self.storage_work_tx
             .send(StorageWorkerJob::StorageProof { input, proof_result_sender })
@@ -367,6 +370,9 @@ impl ProofWorkerHandle {
         &self,
         input: AccountMultiproofInput,
     ) -> Result<(), ProviderError> {
+        if input.is_cancelled() {
+            return Ok(())
+        }
         self.account_work_tx
             .send(AccountWorkerJob::AccountMultiproof { input: Box::new(input) })
             .map_err(|err| {
@@ -385,6 +391,25 @@ impl ProofWorkerHandle {
 
                 error
             })
+    }
+}
+
+/// Shared cancellation state for proof work belonging to one state-root computation.
+///
+/// Proof worker queues outlive the sparse-trie task that submitted to them. Carrying this token
+/// with every job lets workers discard buffered work once its consumer has gone away.
+#[derive(Clone, Debug, Default)]
+pub struct ProofCancellationToken(Arc<AtomicBool>);
+
+impl ProofCancellationToken {
+    /// Marks all work associated with this token as cancelled.
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+
+    /// Returns whether the associated state-root computation was cancelled.
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Relaxed)
     }
 }
 
@@ -446,7 +471,7 @@ where
         TC: TrieStorageCursor,
         HC: HashedStorageCursor<Value = U256>,
     {
-        let StorageProofInput { hashed_address, mut targets, needs_root } = input;
+        let StorageProofInput { hashed_address, mut targets, needs_root, cancellation: _ } = input;
 
         let span = debug_span!(
             target: "trie::proof_task",
@@ -696,6 +721,16 @@ where
 
             match job {
                 StorageWorkerJob::StorageProof { input, proof_result_sender } => {
+                    if input.is_cancelled() {
+                        trace!(
+                            target: "trie::proof_task",
+                            worker_id = self.worker_id,
+                            "Discarding cancelled storage proof"
+                        );
+                        self.availability.mark_idle(self.worker_id);
+                        idle_start = Instant::now();
+                        continue
+                    }
                     self.process_storage_proof(
                         &proof_tx,
                         &mut v2_calculator,
@@ -947,6 +982,16 @@ where
 
             match job {
                 AccountWorkerJob::AccountMultiproof { input } => {
+                    if input.is_cancelled() {
+                        trace!(
+                            target: "trie::proof_task",
+                            worker_id = self.worker_id,
+                            "Discarding cancelled account proof"
+                        );
+                        self.availability.mark_idle(self.worker_id);
+                        idle_start = Instant::now();
+                        continue
+                    }
                     let value_encoder_stats = self.process_account_multiproof::<Factory::Provider>(
                         &mut v2_account_calculator,
                         v2_storage_calculator.clone(),
@@ -991,6 +1036,7 @@ where
         v2_account_calculator: &mut V2AccountProofCalculator<'a, Provider>,
         v2_storage_calculator: Rc<RefCell<V2StorageProofCalculator<'a, Provider>>>,
         targets: MultiProofTargetsV2,
+        cancellation: &ProofCancellationToken,
     ) -> Result<(DecodedMultiProofV2, ValueEncoderStats), StateRootTaskError>
     where
         Provider: TrieCursorFactory + HashedCursorFactory + 'a,
@@ -1007,8 +1053,16 @@ where
 
         trace!(target: "trie::proof_task", "Processing V2 account multiproof");
 
-        let storage_proof_receivers =
-            dispatch_v2_storage_proofs(&self.storage_work_tx, &account_targets, storage_targets)?;
+        let storage_proof_receivers = dispatch_v2_storage_proofs(
+            &self.storage_work_tx,
+            &account_targets,
+            storage_targets,
+            cancellation,
+        )?;
+
+        if cancellation.is_cancelled() {
+            return Err(StateRootTaskError::Canceled)
+        }
 
         let mut value_encoder = AsyncAccountValueEncoder::new(
             storage_proof_receivers,
@@ -1041,11 +1095,12 @@ where
     {
         let proof_start = Instant::now();
 
-        let AccountMultiproofInput { targets, proof_result_sender } = input;
+        let AccountMultiproofInput { targets, proof_result_sender, cancellation } = input;
         let (result, value_encoder_stats) = match self.compute_v2_account_multiproof::<Provider>(
             v2_account_calculator,
             v2_storage_calculator,
             targets,
+            &cancellation,
         ) {
             Ok((proof, stats)) => (Ok(proof), stats),
             Err(e) => (Err(e), ValueEncoderStats::default()),
@@ -1091,6 +1146,7 @@ fn dispatch_v2_storage_proofs(
     storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
     account_targets: &[ProofV2Target],
     storage_targets: B256Map<Vec<ProofV2Target>>,
+    cancellation: &ProofCancellationToken,
 ) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, StateRootTaskError> {
     if storage_targets.is_empty() {
         return Ok(B256Map::default())
@@ -1110,10 +1166,14 @@ fn dispatch_v2_storage_proofs(
 
     // Dispatch all proofs for targeted storage slots
     for (hashed_address, targets) in sorted_storage_targets {
+        if cancellation.is_cancelled() {
+            return Err(StateRootTaskError::Canceled)
+        }
         // Create channel for receiving StorageProofResultMessage
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
         let needs_root = account_target_addresses.contains(&hashed_address);
-        let input = StorageProofInput::new(hashed_address, targets, needs_root);
+        let input = StorageProofInput::new(hashed_address, targets, needs_root)
+            .with_cancellation(cancellation.clone());
 
         storage_work_tx
             .send(StorageWorkerJob::StorageProof { input, proof_result_sender: result_tx })
@@ -1138,12 +1198,25 @@ pub struct StorageProofInput {
     pub targets: Vec<ProofV2Target>,
     /// Whether the account proof needs the storage root for leaf encoding.
     pub needs_root: bool,
+    /// Cancellation state for the state-root computation that requested this proof.
+    cancellation: ProofCancellationToken,
 }
 
 impl StorageProofInput {
     /// Creates a new [`StorageProofInput`] with the given hashed address and target slots.
-    pub const fn new(hashed_address: B256, targets: Vec<ProofV2Target>, needs_root: bool) -> Self {
-        Self { hashed_address, targets, needs_root }
+    pub fn new(hashed_address: B256, targets: Vec<ProofV2Target>, needs_root: bool) -> Self {
+        Self { hashed_address, targets, needs_root, cancellation: Default::default() }
+    }
+
+    /// Associates this input with a state-root cancellation token.
+    pub fn with_cancellation(mut self, cancellation: ProofCancellationToken) -> Self {
+        self.cancellation = cancellation;
+        self
+    }
+
+    /// Returns whether the requesting state-root computation was cancelled.
+    fn is_cancelled(&self) -> bool {
+        self.cancellation.is_cancelled()
     }
 }
 
@@ -1154,9 +1227,25 @@ pub struct AccountMultiproofInput {
     pub targets: MultiProofTargetsV2,
     /// Context for sending the proof result.
     pub proof_result_sender: ProofResultContext,
+    /// Cancellation state for the state-root computation that requested this proof.
+    cancellation: ProofCancellationToken,
 }
 
 impl AccountMultiproofInput {
+    /// Creates account multiproof input associated with a state-root cancellation token.
+    pub const fn new(
+        targets: MultiProofTargetsV2,
+        proof_result_sender: ProofResultContext,
+        cancellation: ProofCancellationToken,
+    ) -> Self {
+        Self { targets, proof_result_sender, cancellation }
+    }
+
+    /// Returns whether the requesting state-root computation was cancelled.
+    fn is_cancelled(&self) -> bool {
+        self.cancellation.is_cancelled()
+    }
+
     /// Returns the [`ProofResultContext`] for this input, consuming the input.
     fn into_proof_result_sender(self) -> ProofResultContext {
         self.proof_result_sender
@@ -1184,6 +1273,52 @@ mod tests {
         ProofTaskCtx::new(factory)
     }
 
+    #[derive(Clone, Default)]
+    struct NoopProofFactory;
+
+    impl DatabaseProviderROFactory for NoopProofFactory {
+        type Provider = NoopProofProvider;
+
+        fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
+            Ok(NoopProofProvider)
+        }
+    }
+
+    struct NoopProofProvider;
+
+    impl TrieCursorFactory for NoopProofProvider {
+        type AccountTrieCursor<'a> = reth_trie::trie_cursor::noop::NoopAccountTrieCursor;
+        type StorageTrieCursor<'a> = reth_trie::trie_cursor::noop::NoopStorageTrieCursor;
+
+        fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
+            Ok(Default::default())
+        }
+
+        fn storage_trie_cursor(
+            &self,
+            _hashed_address: B256,
+        ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
+            Ok(Default::default())
+        }
+    }
+
+    impl HashedCursorFactory for NoopProofProvider {
+        type AccountCursor<'a> =
+            reth_trie::hashed_cursor::noop::NoopHashedCursor<reth_primitives_traits::Account>;
+        type StorageCursor<'a> = reth_trie::hashed_cursor::noop::NoopHashedCursor<U256>;
+
+        fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
+            Ok(Default::default())
+        }
+
+        fn hashed_storage_cursor(
+            &self,
+            _hashed_address: B256,
+        ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
+            Ok(Default::default())
+        }
+    }
+
     /// Ensures `ProofWorkerHandle::new` spawns workers correctly.
     #[test]
     fn spawn_proof_workers_creates_handle() {
@@ -1208,5 +1343,67 @@ mod tests {
 
         // Workers shut down automatically when handle is dropped
         drop(proof_handle);
+    }
+
+    #[test]
+    fn cancelled_proofs_are_not_queued() {
+        let (storage_work_tx, _storage_work_rx) = unbounded();
+        let (account_work_tx, _account_work_rx) = unbounded();
+        let proof_handle = ProofWorkerHandle {
+            storage_work_tx,
+            account_work_tx,
+            storage_availability: Arc::new(AvailabilitySheet::new(1)),
+            account_availability: Arc::new(AvailabilitySheet::new(1)),
+            storage_worker_count: 1,
+            account_worker_count: 1,
+        };
+        let cancellation = ProofCancellationToken::default();
+        cancellation.cancel();
+
+        let (proof_result_tx, _) = unbounded();
+        let account_input = AccountMultiproofInput::new(
+            Default::default(),
+            ProofResultContext::new(proof_result_tx, HashedPostState::default(), Instant::now()),
+            cancellation.clone(),
+        );
+        proof_handle.dispatch_account_multiproof(account_input).unwrap();
+
+        let (storage_result_tx, _) = unbounded();
+        let storage_input =
+            StorageProofInput::new(B256::ZERO, Vec::new(), false).with_cancellation(cancellation);
+        proof_handle.dispatch_storage_proof(storage_input, storage_result_tx).unwrap();
+
+        assert_eq!(proof_handle.pending_account_tasks(), 0);
+        assert_eq!(proof_handle.pending_storage_tasks(), 0);
+    }
+
+    #[test]
+    fn storage_worker_discards_buffered_proof_after_cancellation() {
+        let (work_tx, work_rx) = unbounded();
+        let availability = Arc::new(AvailabilitySheet::new(1));
+        let worker = StorageProofWorker::new(
+            test_ctx(NoopProofFactory),
+            work_rx,
+            0,
+            availability,
+            Arc::new(DashMap::default()),
+            #[cfg(feature = "metrics")]
+            ProofTaskTrieMetrics::default(),
+            #[cfg(feature = "metrics")]
+            ProofTaskCursorMetrics::new(),
+        );
+        let cancellation = ProofCancellationToken::default();
+        let (result_tx, result_rx) = unbounded();
+        let input = StorageProofInput::new(B256::ZERO, Vec::new(), false)
+            .with_cancellation(cancellation.clone());
+        work_tx
+            .send(StorageWorkerJob::StorageProof { input, proof_result_sender: result_tx })
+            .unwrap();
+        cancellation.cancel();
+        drop(work_tx);
+
+        worker.run().unwrap();
+
+        assert!(result_rx.recv().is_err());
     }
 }

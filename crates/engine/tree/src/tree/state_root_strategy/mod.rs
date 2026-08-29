@@ -539,6 +539,7 @@ impl DefaultStateRootStrategy {
         } = options;
         let (updates_tx, from_multi_proof) = crossbeam_channel::unbounded();
         let (cancel_guard, cancel_rx) = StateRootTaskCancelGuard::channel();
+        let proof_cancellation = cancel_guard.cancellation_token();
         let (proof_result_tx, proof_result_rx) =
             crossbeam_channel::unbounded::<ProofResultMessage>();
 
@@ -564,6 +565,7 @@ impl DefaultStateRootStrategy {
             hashed_state_tx,
             from_multi_proof,
             cancel_rx,
+            proof_cancellation,
             SparseTrieTaskOptions {
                 parent_header,
                 preserved_sparse_trie,
@@ -598,6 +600,7 @@ impl DefaultStateRootStrategy {
         hashed_state_tx: mpsc::Sender<Arc<HashedPostState>>,
         from_multi_proof: CrossbeamReceiver<StateRootMessage>,
         cancel_rx: CrossbeamReceiver<()>,
+        proof_cancellation: reth_trie_parallel::proof_task::ProofCancellationToken,
         options: SparseTrieTaskOptions<N>,
     ) {
         let SparseTrieTaskOptions {
@@ -671,6 +674,7 @@ impl DefaultStateRootStrategy {
                 &executor,
                 from_multi_proof,
                 cancel_rx,
+                proof_cancellation,
                 hashed_state_tx,
                 proof_worker_handle,
                 proof_result_tx,

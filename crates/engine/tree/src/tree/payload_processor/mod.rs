@@ -370,6 +370,7 @@ where
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
         let executed_tx_index = Arc::new(AtomicUsize::new(0));
+        let cancelled = Arc::new(AtomicBool::new(false));
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             env,
@@ -381,6 +382,7 @@ where
             cache_metrics: self.cache_metrics.clone(),
             cache_state_metrics: self.cache_state_metrics.clone(),
             terminate_execution: Arc::new(AtomicBool::new(false)),
+            cancelled: Arc::clone(&cancelled),
             executed_tx_index: Arc::clone(&executed_tx_index),
             precompile_cache_disabled: self.precompile_cache_disabled,
             precompile_cache_map: self.precompile_cache_map.clone(),
@@ -401,6 +403,7 @@ where
             saved_cache,
             to_prewarm_task: Some(to_prewarm_task),
             executed_tx_index,
+            cancelled,
             cache_metrics: self.cache_metrics.clone(),
         }
     }
@@ -547,11 +550,12 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     /// bundle state. Using `Arc<ExecutionOutcome>` allows sharing with the main execution
     /// path without cloning the expensive `BundleState`.
     ///
-    /// Returns a sender for the channel that should be notified on block validation success.
+    /// Returns a guard that should be notified on block validation success. Dropping it cancels
+    /// remaining BAL work for an abandoned block.
     pub fn terminate_caching(
         &mut self,
         execution_outcome: Option<Arc<BlockExecutionOutput<R>>>,
-    ) -> Option<mpsc::Sender<()>> {
+    ) -> Option<CacheValidationGuard> {
         self.prewarm_handle.terminate_caching(execution_outcome)
     }
 
@@ -579,6 +583,8 @@ pub struct CacheTaskHandle<R> {
     /// Shared counter tracking the next transaction index to be executed by the main execution
     /// loop. Prewarm workers skip transactions below this index.
     executed_tx_index: Arc<AtomicUsize>,
+    /// Shared cancellation state for BAL prefetching and hashed-state streaming.
+    cancelled: Arc<AtomicBool>,
     /// Metrics for the execution cache.
     cache_metrics: Option<CachedStateMetrics>,
 }
@@ -597,19 +603,47 @@ impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
     ///
     /// If the [`BlockExecutionOutput`] is provided it will update the shared cache using its
     /// bundle state. Using `Arc<ExecutionOutcome>` avoids cloning the expensive `BundleState`.
-    #[must_use = "sender must be used and notified on block validation success"]
+    #[must_use = "guard must be notified on block validation success"]
     pub fn terminate_caching(
         &mut self,
         execution_outcome: Option<Arc<BlockExecutionOutput<R>>>,
-    ) -> Option<mpsc::Sender<()>> {
+    ) -> Option<CacheValidationGuard> {
         if let Some(tx) = self.to_prewarm_task.take() {
             let (valid_block_tx, valid_block_rx) = mpsc::channel();
             let event = PrewarmTaskEvent::Terminate { execution_outcome, valid_block_rx };
             let _ = tx.send(event);
 
-            Some(valid_block_tx)
+            Some(CacheValidationGuard {
+                valid_block_tx: Some(valid_block_tx),
+                cancelled: Arc::clone(&self.cancelled),
+            })
         } else {
             None
+        }
+    }
+}
+
+/// Keeps post-execution cancellation armed until a block passes every validation step.
+#[derive(Debug)]
+#[must_use = "dropping this guard marks the block's remaining prewarm work as cancelled"]
+pub struct CacheValidationGuard {
+    valid_block_tx: Option<mpsc::Sender<()>>,
+    cancelled: Arc<AtomicBool>,
+}
+
+impl CacheValidationGuard {
+    /// Confirms that the block is valid and allows its warmed cache to be published.
+    pub fn notify_valid(mut self) {
+        if let Some(valid_block_tx) = self.valid_block_tx.take() {
+            let _ = valid_block_tx.send(());
+        }
+    }
+}
+
+impl Drop for CacheValidationGuard {
+    fn drop(&mut self) {
+        if self.valid_block_tx.is_some() {
+            self.cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
         }
     }
 }
@@ -628,6 +662,7 @@ impl<R> Drop for CacheTaskHandle<R> {
 
 #[cfg(test)]
 mod tests {
+    use super::CacheValidationGuard;
     use crate::tree::{
         payload_processor::PayloadProcessor, precompile_cache::PrecompileCacheMap, ExecutionCache,
         PayloadExecutionCache, SavedCache, TreeConfig,
@@ -640,11 +675,44 @@ mod tests {
     use reth_execution_cache::CachedStatus;
     use reth_revm::db::BundleState;
     use revm::state::AccountInfo;
-    use std::sync::Arc;
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc,
+    };
 
     fn make_saved_cache(hash: B256) -> SavedCache {
         let execution_cache = ExecutionCache::new(1_000);
         SavedCache::new(hash, execution_cache)
+    }
+
+    #[test]
+    fn validation_guard_cancels_until_notified() {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let (valid_block_tx, valid_block_rx) = mpsc::channel();
+        let guard = CacheValidationGuard {
+            valid_block_tx: Some(valid_block_tx),
+            cancelled: Arc::clone(&cancelled),
+        };
+
+        drop(guard);
+
+        assert!(cancelled.load(Ordering::Relaxed));
+        assert!(valid_block_rx.recv().is_err());
+    }
+
+    #[test]
+    fn validation_guard_notification_disarms_cancellation() {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let (valid_block_tx, valid_block_rx) = mpsc::channel();
+        let guard = CacheValidationGuard {
+            valid_block_tx: Some(valid_block_tx),
+            cancelled: Arc::clone(&cancelled),
+        };
+
+        guard.notify_valid();
+
+        assert!(!cancelled.load(Ordering::Relaxed));
+        assert_eq!(valid_block_rx.recv(), Ok(()));
     }
 
     #[test]

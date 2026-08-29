@@ -7,7 +7,7 @@
 //! that await its result. The per-block strategy abstraction that decides whether and how the
 //! task runs lives in `reth-engine-tree` under `tree::state_root_strategy`.
 
-use crate::error::StateRootTaskError;
+use crate::{error::StateRootTaskError, proof_task::ProofCancellationToken};
 use alloy_evm::block::OnStateHook;
 use alloy_primitives::{keccak256, map::B256Map, B256};
 use reth_trie::{
@@ -196,13 +196,30 @@ impl StateRootHandle {
 /// dropping disconnects the channel, which the task treats as the consumer abandoning the
 /// computation (for example on a timeout fallback or when a payload job is dropped unused).
 #[derive(Debug)]
-pub struct StateRootTaskCancelGuard(#[allow(dead_code)] crossbeam_channel::Sender<()>);
+pub struct StateRootTaskCancelGuard {
+    #[allow(dead_code)]
+    sender: crossbeam_channel::Sender<()>,
+    cancellation: ProofCancellationToken,
+}
 
 impl StateRootTaskCancelGuard {
     /// Creates a guard and the receiver a task watches for cancellation.
     pub fn channel() -> (Self, crossbeam_channel::Receiver<()>) {
         let (tx, rx) = crossbeam_channel::bounded(0);
-        (Self(tx), rx)
+        (Self { sender: tx, cancellation: Default::default() }, rx)
+    }
+
+    /// Returns the cancellation token shared with work queued by this state-root task.
+    pub fn cancellation_token(&self) -> ProofCancellationToken {
+        self.cancellation.clone()
+    }
+}
+
+impl Drop for StateRootTaskCancelGuard {
+    fn drop(&mut self) {
+        // Set the token before `sender` is dropped so queued workers can observe cancellation by
+        // the time the sparse-trie task wakes on channel disconnection.
+        self.cancellation.cancel();
     }
 }
 
@@ -752,6 +769,7 @@ mod tests {
     fn payload_state_root_receiver_retains_cancellation() {
         let (updates_tx, _updates_rx) = crossbeam_channel::unbounded();
         let (cancel_guard, cancel_rx) = StateRootTaskCancelGuard::channel();
+        let cancellation = cancel_guard.cancellation_token();
         let (_state_root_tx, state_root_rx) = std::sync::mpsc::channel();
         let (_hashed_state_tx, hashed_state_rx) = std::sync::mpsc::channel();
         let mut handle = StateRootHandle::new(
@@ -769,8 +787,10 @@ mod tests {
             Err(std::sync::mpsc::RecvTimeoutError::Timeout)
         ));
         assert!(matches!(cancel_rx.try_recv(), Err(crossbeam_channel::TryRecvError::Empty)));
+        assert!(!cancellation.is_cancelled());
 
         drop(handle);
+        assert!(cancellation.is_cancelled());
         assert!(matches!(
             cancel_rx.recv_timeout(Duration::from_secs(1)),
             Err(crossbeam_channel::RecvTimeoutError::Disconnected)
