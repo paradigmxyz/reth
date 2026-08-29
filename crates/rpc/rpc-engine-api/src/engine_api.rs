@@ -25,8 +25,8 @@ use reth_engine_primitives::{
 use reth_network_api::{CellCustody, NetworkInfo};
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
-    validate_inclusion_list_size, validate_payload_timestamp, EngineApiMessageVersion,
-    MessageValidationKind, PayloadOrAttributes, PayloadTypes,
+    validate_payload_timestamp, EngineApiMessageVersion, MessageValidationKind,
+    PayloadOrAttributes, PayloadTypes,
 };
 use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
@@ -304,7 +304,6 @@ where
     ) -> EngineApiResult<PayloadStatusV2> {
         let inclusion_list_transactions =
             payload.inclusion_list_transactions().unwrap_or_default().to_vec();
-        validate_inclusion_list_size(&inclusion_list_transactions)?;
         let block_hash = payload.block_hash();
         let payload_or_attrs = PayloadOrAttributes::<
             '_,
@@ -2180,6 +2179,77 @@ mod tests {
         });
 
         assert_matches!(engine_rx.recv().await, Some(BeaconEngineMessage::NewPayload { .. }));
+    }
+
+    // The consensus layer passes the union of up to 16 committee inclusion lists, each
+    // individually bounded by `MAX_BYTES_PER_INCLUSION_LIST` but with no aggregate bound, so a
+    // legitimate list exceeds 8 KiB and must still reach the engine.
+    #[tokio::test]
+    async fn new_payload_v6_accepts_inclusion_list_over_single_list_limit() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().bogota_activated().build());
+        let provider = Arc::new(MockEthProvider::default());
+        let payload_store = spawn_test_payload_service::<EthEngineTypes>();
+        let (to_engine, mut engine_rx) = unbounded_channel();
+
+        let api = EngineApi::new(
+            provider,
+            chain_spec.clone(),
+            ConsensusEngineHandle::new(to_engine),
+            payload_store.into(),
+            NoopTransactionPool::default(),
+            Runtime::test(),
+            ClientVersionV1 {
+                code: ClientCode::RH,
+                name: "Reth".to_string(),
+                version: "v0.0.0-test".to_string(),
+                commit: "test".to_string(),
+            },
+            EngineCapabilities::default(),
+            EthereumEngineValidator::new(chain_spec),
+            false,
+            NoopNetwork::default(),
+        );
+
+        let inclusion_list_transactions =
+            vec![Bytes::from(vec![0u8; MAX_BYTES_PER_INCLUSION_LIST as usize]); 2];
+        let expected = inclusion_list_transactions.clone();
+
+        tokio::spawn(async move {
+            let payload_v1 = ExecutionPayloadV1::from_block_slow(&Block::default());
+            let payload = ExecutionPayloadV4 {
+                payload_inner: ExecutionPayloadV3 {
+                    payload_inner: ExecutionPayloadV2 {
+                        payload_inner: payload_v1,
+                        withdrawals: Vec::new(),
+                    },
+                    blob_gas_used: 0,
+                    excess_blob_gas: 0,
+                },
+                block_access_list: Bytes::from_static(b"bal"),
+                slot_number: 1,
+            };
+            let execution_data = ExecutionData {
+                payload: payload.into(),
+                sidecar: ExecutionPayloadSidecar::v6(
+                    CancunPayloadFields {
+                        versioned_hashes: Vec::new(),
+                        parent_beacon_block_root: B256::ZERO,
+                    },
+                    PraguePayloadFields { requests: RequestsOrHash::Requests(Requests::default()) },
+                    BogotaPayloadFields { inclusion_list_transactions },
+                ),
+            };
+
+            let _ = api.new_payload_v6(execution_data).await;
+        });
+
+        let Some(BeaconEngineMessage::NewPayload {
+            inclusion_list_transactions: forwarded, ..
+        }) = engine_rx.recv().await
+        else {
+            panic!("oversized inclusion list was not forwarded to the engine")
+        };
+        assert_eq!(forwarded, Some(expected));
     }
 
     #[derive(Clone)]

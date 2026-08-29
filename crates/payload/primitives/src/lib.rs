@@ -14,7 +14,6 @@
 extern crate alloc;
 
 use alloy_primitives::Bytes;
-use alloy_rpc_types_engine::MAX_BYTES_PER_INCLUSION_LIST;
 use reth_chainspec::EthereumHardforks;
 use reth_primitives_traits::{NodePrimitives, SealedBlock};
 
@@ -234,19 +233,6 @@ pub fn validate_payload_timestamp(
         return Err(EngineObjectValidationError::UnsupportedFork)
     }
 
-    Ok(())
-}
-
-/// Validates the encoded RLP size of an EIP-7805 inclusion list against
-/// `MAX_TRANSACTIONS_BYTES_PER_INCLUSION_LIST`.
-pub fn validate_inclusion_list_size(
-    transactions: &[Bytes],
-) -> Result<(), EngineObjectValidationError> {
-    if alloy_rlp::list_length::<Bytes, [u8]>(transactions) > MAX_BYTES_PER_INCLUSION_LIST as usize {
-        return Err(EngineObjectValidationError::InvalidParams(
-            "inclusion list exceeds 8 KiB".into(),
-        ))
-    }
     Ok(())
 }
 
@@ -989,17 +975,6 @@ mod tests {
         ];
         assert_matches!(
             validate_execution_requests(&duplicate_request_types),
-            Err(EngineObjectValidationError::InvalidParams(_))
-        );
-    }
-
-    #[test]
-    fn validate_inclusion_list_size_limit() {
-        assert_matches!(validate_inclusion_list_size(&[]), Ok(()));
-
-        let oversized = vec![Bytes::from(vec![0u8; MAX_BYTES_PER_INCLUSION_LIST as usize])];
-        assert_matches!(
-            validate_inclusion_list_size(&oversized),
             Err(EngineObjectValidationError::InvalidParams(_))
         );
     }
