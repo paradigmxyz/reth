@@ -40,6 +40,7 @@ alloy-genesis.workspace = true
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+serde_with = { workspace = true, features = ["base64"] }
 
 [features]
 client = [

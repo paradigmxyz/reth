@@ -589,7 +589,9 @@ mod tests {
         PruneCheckpointReader, StageCheckpointReader,
     };
     use reth_rpc_eth_api::{node::RpcNodeCoreAdapter, EthApiServer};
-    use reth_storage_api::{BalProvider, BlockReader, BlockReaderIdExt, StateProviderFactory};
+    use reth_storage_api::{
+        BalProvider, BlockReader, BlockReaderIdExt, StateProviderFactory, StateRangeProviderFactory,
+    };
     use reth_testing_utils::generators;
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
 
@@ -611,6 +613,7 @@ mod tests {
             + StageCheckpointReader
             + PruneCheckpointReader
             + BalProvider
+            + StateRangeProviderFactory
             + Unpin
             + Clone
             + 'static,
