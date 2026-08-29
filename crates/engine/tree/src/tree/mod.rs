@@ -11,7 +11,9 @@ use alloy_primitives::{map::B256Map, B256};
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
-use error::{InsertBlockError, InsertBlockFatalError, InsertBlockValidationError};
+use error::{
+    InsertBlockError, InsertBlockFatalError, InsertBlockProcessingError, InsertBlockValidationError,
+};
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, MemoryOverlayStateProvider,
     NewCanonicalChain,
@@ -837,7 +839,7 @@ where
     fn on_new_payload(
         &mut self,
         payload: T::ExecutionData,
-    ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError> {
+    ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockProcessingError> {
         let _thread_resource_usage =
             self.metrics.engine.new_payload.measure_thread_resource_usage();
         trace!(target: "engine::tree", "invoked new payload");
@@ -913,7 +915,7 @@ where
     fn try_insert_payload(
         &mut self,
         payload: T::ExecutionData,
-    ) -> Result<TryInsertPayloadResult, InsertBlockFatalError> {
+    ) -> Result<TryInsertPayloadResult, InsertBlockProcessingError> {
         let block_hash = payload.block_hash();
         let num_hash = payload.num_hash();
         let parent_hash = payload.parent_hash();
@@ -948,9 +950,9 @@ where
             Err(error) => {
                 let status = match error {
                     InsertPayloadError::Block(error) => self.on_insert_block_error(error)?,
-                    InsertPayloadError::Payload(error) => {
-                        self.on_new_payload_error(error, num_hash, parent_hash)?
-                    }
+                    InsertPayloadError::Payload(error) => self
+                        .on_new_payload_error(error, num_hash, parent_hash)
+                        .map_err(InsertBlockFatalError::from)?,
                 };
 
                 Ok(TryInsertPayloadResult { status, already_seen: false })
@@ -969,7 +971,7 @@ where
     fn try_buffer_payload(
         &mut self,
         payload: T::ExecutionData,
-    ) -> Result<PayloadStatus, InsertBlockFatalError> {
+    ) -> Result<PayloadStatus, InsertBlockProcessingError> {
         let parent_hash = payload.parent_hash();
         let num_hash = payload.num_hash();
 
@@ -977,12 +979,14 @@ where
             // if the block is well-formed, buffer it for later
             Ok(block) => {
                 if let Err(error) = self.buffer_block(block) {
-                    Ok(self.on_insert_block_error(error)?)
+                    self.on_insert_block_error(error)
                 } else {
                     Ok(PayloadStatus::from_status(PayloadStatusEnum::Syncing))
                 }
             }
-            Err(error) => Ok(self.on_new_payload_error(error, num_hash, parent_hash)?),
+            Err(error) => Ok(self
+                .on_new_payload_error(error, num_hash, parent_hash)
+                .map_err(InsertBlockFatalError::from)?),
         }
     }
 
@@ -2273,8 +2277,8 @@ where
                     return None
                 }
 
-                if canonical_head_number.saturating_sub(prev_db_tip) <=
-                    self.config.persistence_threshold()
+                if self.canonical_in_memory_state.canonical_chain().count() <=
+                    self.config.persistence_threshold() as usize
                 {
                     return None
                 }
@@ -2717,7 +2721,7 @@ where
                 Err(err) => {
                     if let InsertPayloadError::Block(err) = err {
                         debug!(target: "engine::tree", ?err, "failed to connect buffered block to tree");
-                        if let Err(fatal) = self.on_insert_block_error(err) {
+                        if let Err(fatal) = self.on_internal_insert_block_error(err) {
                             warn!(target: "engine::tree", %fatal, "fatal error occurred while connecting buffered blocks");
                             return Err(fatal)
                         }
@@ -3092,7 +3096,7 @@ where
             Err(err) => {
                 if let InsertPayloadError::Block(err) = err {
                     debug!(target: "engine::tree", err=%err.kind(), "failed to insert downloaded block");
-                    if let Err(fatal) = self.on_insert_block_error(err) {
+                    if let Err(fatal) = self.on_internal_insert_block_error(err) {
                         warn!(target: "engine::tree", %fatal, "fatal error occurred while inserting downloaded block");
                         return Err(fatal)
                     }
@@ -3294,11 +3298,9 @@ where
     fn on_insert_block_error(
         &mut self,
         error: InsertBlockError<N::Block>,
-    ) -> Result<PayloadStatus, InsertBlockFatalError> {
+    ) -> Result<PayloadStatus, InsertBlockProcessingError> {
         let (block, error) = error.split();
 
-        // if invalid block, we check the validation error. Otherwise return the fatal
-        // error.
         let validation_err = error.ensure_validation_error()?;
 
         // If the error was due to an invalid payload, the payload is added to the
@@ -3311,7 +3313,9 @@ where
             %validation_err,
             "Invalid block error on new payload",
         );
-        let latest_valid_hash = self.latest_valid_hash_for_invalid_payload(block.parent_hash())?;
+        let latest_valid_hash = self
+            .latest_valid_hash_for_invalid_payload(block.parent_hash())
+            .map_err(InsertBlockFatalError::from)?;
 
         // keep track of the invalid header unless the consensus impl considers it transient
         let is_transient = match &validation_err {
@@ -3338,6 +3342,17 @@ where
             PayloadStatusEnum::Invalid { validation_error: validation_err.to_string() },
             latest_valid_hash,
         ))
+    }
+
+    /// Handles an insertion error from a non-RPC source, where malformed input can be discarded.
+    fn on_internal_insert_block_error(
+        &mut self,
+        error: InsertBlockError<N::Block>,
+    ) -> Result<(), InsertBlockFatalError> {
+        match self.on_insert_block_error(error) {
+            Ok(_) | Err(InsertBlockProcessingError::MalformedInput(_)) => Ok(()),
+            Err(InsertBlockProcessingError::Fatal(error)) => Err(error),
+        }
     }
 
     /// Handles a [`NewPayloadError`] by converting it to a [`PayloadStatus`].

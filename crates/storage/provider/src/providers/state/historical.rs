@@ -18,7 +18,7 @@ use reth_storage_api::{
     StorageRootProvider, StorageSettingsCache,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_storage_overlay::{Overlay, OverlayManager};
+use reth_storage_overlay::{OverlayManager, StateTrieOverlay};
 use reth_trie::{
     hashed_cursor::{zero_destroyed_account_storage, HashedPostStateCursorFactory},
     proof::{Proof, StorageProof},
@@ -302,8 +302,8 @@ where
             .overlay_manager
             .overlay_builder(anchor_hash)
             .with_immediate_state_trie_overlay(state, nodes);
-        let Overlay { trie_updates, hashed_post_state } =
-            overlay_builder.build_overlay(self.provider)?;
+        let StateTrieOverlay { trie_updates, hashed_post_state, .. } =
+            overlay_builder.build_state_trie_overlay(self.provider)?;
 
         Ok(TrieInputSorted::new(trie_updates, hashed_post_state, prefix_sets))
     }

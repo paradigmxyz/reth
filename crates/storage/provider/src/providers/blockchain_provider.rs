@@ -23,7 +23,7 @@ use reth_chain_state::{
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::ExecutionOutcome;
-use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
+use reth_node_types::{BlockTy, HeaderTy, NodeTypes, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, RecoveredBlock, SealedHeader, SealedOrRecoveredBlock, StorageEntry,
 };
@@ -38,6 +38,7 @@ use reth_storage_api::{
 use reth_storage_errors::provider::ProviderResult;
 use reth_storage_overlay::{
     anchor_for_parent, AnchorForParent, OverlayStateProvider, OverlayStateProviderFactory,
+    OwnedProvider,
 };
 use reth_trie::{
     hashed_cursor::{HashedCursor, HashedCursorFactory},
@@ -57,7 +58,8 @@ use tracing::trace;
 pub const SNAPSHOT_STATE_RETENTION: u64 = 128;
 
 type StateRangeDbProvider<N> = <ProviderFactory<N> as DatabaseProviderFactory>::Provider;
-type HistoricalStateRangeProvider<N> = OverlayStateProvider<StateRangeDbProvider<N>>;
+type HistoricalStateRangeProvider<N> =
+    OverlayStateProvider<OwnedProvider<StateRangeDbProvider<N>>, <N as NodeTypes>::Primitives>;
 
 /// The main type for interacting with the blockchain.
 ///

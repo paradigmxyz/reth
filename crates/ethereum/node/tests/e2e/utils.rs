@@ -1,5 +1,5 @@
 use alloy_eips::{eip2930::AccessListItem, eip7702::Authorization, BlockId, BlockNumberOrTag};
-use alloy_primitives::{bytes, Address, B256, U256};
+use alloy_primitives::{bytes, U256};
 use alloy_provider::{
     network::{
         Ethereum, EthereumWallet, NetworkWallet, TransactionBuilder, TransactionBuilder7702,
@@ -10,7 +10,8 @@ use alloy_rpc_types_engine::PayloadAttributes;
 use alloy_rpc_types_eth::TransactionRequest;
 use alloy_signer::SignerSync;
 use rand::{seq::IndexedRandom, Rng};
-use reth_e2e_test_utils::{wallet::Wallet, NodeHelperType, TmpDB};
+use reth_chainspec::EthereumHardfork;
+use reth_e2e_test_utils::{eth_payload_attributes_for_fork, wallet::Wallet, NodeHelperType, TmpDB};
 use reth_ethereum_primitives::TxType;
 use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_ethereum::EthereumNode;
@@ -18,47 +19,17 @@ use reth_provider::FullProvider;
 
 /// Helper function to create a new eth payload attributes
 pub(crate) fn eth_payload_attributes(timestamp: u64) -> PayloadAttributes {
-    PayloadAttributes {
-        timestamp,
-        prev_randao: B256::ZERO,
-        suggested_fee_recipient: Address::ZERO,
-        withdrawals: Some(vec![]),
-        parent_beacon_block_root: Some(B256::ZERO),
-        slot_number: None,
-        ..Default::default()
-    }
+    eth_payload_attributes_for_fork(EthereumHardfork::Cancun, timestamp)
 }
 
 /// Helper function to create pre-Cancun (Shanghai) payload attributes.
-/// No `parent_beacon_block_root` field.
 pub(crate) fn eth_payload_attributes_shanghai(timestamp: u64) -> PayloadAttributes {
-    PayloadAttributes {
-        timestamp,
-        prev_randao: B256::ZERO,
-        suggested_fee_recipient: Address::ZERO,
-        withdrawals: Some(vec![]),
-        parent_beacon_block_root: None,
-        slot_number: None,
-        ..Default::default()
-    }
+    eth_payload_attributes_for_fork(EthereumHardfork::Shanghai, timestamp)
 }
 
 /// Helper function to create Amsterdam payload attributes.
-///
-/// Amsterdam payloads include block access lists, and the payload builder expects a
-/// `slot_number` in the attributes once Amsterdam is active. Tests use the timestamp as a
-/// deterministic dummy slot because the exact beacon slot is irrelevant for these local e2e
-/// payloads.
 pub(crate) fn eth_payload_attributes_amsterdam(timestamp: u64) -> PayloadAttributes {
-    PayloadAttributes {
-        timestamp,
-        prev_randao: B256::ZERO,
-        suggested_fee_recipient: Address::ZERO,
-        withdrawals: Some(vec![]),
-        parent_beacon_block_root: Some(B256::ZERO),
-        slot_number: Some(timestamp),
-        ..Default::default()
-    }
+    eth_payload_attributes_for_fork(EthereumHardfork::Amsterdam, timestamp)
 }
 
 /// Advances node by producing blocks with random transactions.
