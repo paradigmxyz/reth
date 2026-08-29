@@ -478,11 +478,28 @@ where
             self.inner.cell_custody.set_from_engine_api(custody_columns);
         }
 
-        // Todo: Validate IL and populate `inclusion_list_satisfied` properly and test.
-        Ok(self
+        let head_block_hash = state.head_block_hash;
+        let updated = self
             .validate_and_execute_forkchoice(EngineApiMessageVersion::V5, state, payload_attrs)
-            .await?
-            .into())
+            .await?;
+
+        // Only a VALID head carries a verdict, computed from the list `engine_newPayloadV6`
+        // retained for it. A head with no retained list leaves the field unset.
+        let inclusion_list_satisfied = if updated.is_valid() {
+            self.inner
+                .beacon_consensus
+                .inclusion_list_status(head_block_hash)
+                .await
+                .map_err(|error| EngineApiError::Internal(Box::new(error)))?
+        } else {
+            None
+        };
+
+        let response = ForkchoiceUpdatedResponseV2::from(updated);
+        Ok(match inclusion_list_satisfied {
+            Some(satisfied) => response.with_inclusion_list_satisfied(satisfied),
+            None => response,
+        })
     }
 
     /// Metrics version of `fork_choice_updated_v5`
