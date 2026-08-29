@@ -10,10 +10,11 @@ use reth_primitives_traits::{
     Account, NodePrimitives,
 };
 use reth_storage_api::{
-    AccountReader, BlockHashReader, BlockNumReader, BytecodeReader, ChangeSetReader, DBProvider,
-    DatabaseProviderFactory, DatabaseProviderROFactory, DbTxProvider, HashedPostStateProvider,
-    PruneCheckpointReader, StageCheckpointReader, StateProofProvider, StateProvider,
-    StateRootProvider, StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
+    AccountRangeEntry, AccountRangeProvider, AccountRangeResult, AccountReader, BlockHashReader,
+    BlockNumReader, BytecodeReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
+    DatabaseProviderROFactory, DbTxProvider, HashedPostStateProvider, PruneCheckpointReader,
+    StageCheckpointReader, StateProofProvider, StateProvider, StateRootProvider,
+    StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
 };
 use reth_trie::{
     hashed_cursor::{
@@ -691,6 +692,44 @@ where
             &mut hashed_state,
         )?;
         Ok(hashed_state)
+    }
+}
+
+impl<Provider, N: NodePrimitives> AccountRangeProvider for OverlayStateProvider<Provider, N>
+where
+    Provider: Deref,
+    Provider::Target: DBProvider
+        + StageCheckpointReader
+        + PruneCheckpointReader
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + BlockNumReader
+        + StorageSettingsCache,
+{
+    fn account_range_with_nodes(
+        &self,
+        input: TrieInputSorted,
+        start: B256,
+        limit: usize,
+    ) -> ProviderResult<AccountRangeResult> {
+        // This provider owns the hashed account cursor, so the execution overlay is layered on top
+        // of it here, the same way `state_root_from_nodes` does before walking the trie.
+        let overlay_state = self.build_overlay(input)?.state;
+        let (accounts, next_key) = reth_trie::hashed_cursor::account_range(
+            &HashedPostStateCursorFactory::new(
+                DatabaseHashedCursorFactory::new(self.provider().tx()),
+                overlay_state.as_ref(),
+            ),
+            start,
+            limit,
+        )?;
+        Ok(AccountRangeResult {
+            accounts: accounts
+                .into_iter()
+                .map(|(hash, account)| AccountRangeEntry { hash, account })
+                .collect(),
+            next_key,
+        })
     }
 }
 

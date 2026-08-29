@@ -78,6 +78,43 @@ pub trait HashedStorageCursor: HashedCursor {
     fn set_hashed_address(&mut self, hashed_address: B256);
 }
 
+/// Upper bound on the number of account entries reserved up front per page.
+///
+/// `limit` reaches this primitive straight from callers such as `debug_accountRange`, whose page
+/// size is client-supplied. Sizing the initial allocation directly from an unbounded `limit` would
+/// let a single request reserve (and, on failure, abort the process on) an arbitrarily large buffer
+/// before a single row is read. The reservation is therefore capped; the returned page is still
+/// bounded only by `limit`, with the vector growing on demand for legitimately large pages.
+const MAX_ACCOUNT_RANGE_PREALLOC: usize = 1024;
+
+/// Builds one account-range page by seeking and scanning the hashed account cursor.
+///
+/// Returns up to `limit` accounts whose hashed keys are greater than or equal to `start`, in
+/// hashed-key order, together with the first key of the next page when more accounts remain.
+pub fn account_range(
+    cursor_factory: &impl HashedCursorFactory,
+    start: B256,
+    limit: usize,
+) -> Result<(Vec<(B256, Account)>, Option<B256>), DatabaseError> {
+    if limit == 0 {
+        return Ok((Vec::new(), None))
+    }
+
+    let mut cursor = cursor_factory.hashed_account_cursor()?;
+    let mut entry = cursor.seek(start)?;
+
+    let mut accounts = Vec::with_capacity(limit.min(MAX_ACCOUNT_RANGE_PREALLOC));
+    while let Some((hash, account)) = entry {
+        if accounts.len() == limit {
+            return Ok((accounts, Some(hash)))
+        }
+        accounts.push((hash, account));
+        entry = cursor.next()?;
+    }
+
+    Ok((accounts, None))
+}
+
 /// Materializes storage deletions for destroyed accounts as explicit zero-valued slot updates.
 ///
 /// Accounts absent from the bundle pre-state are skipped because they cannot have parent storage.
