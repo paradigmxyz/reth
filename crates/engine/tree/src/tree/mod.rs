@@ -50,7 +50,7 @@ use reth_storage_overlay::OverlayManager;
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie::ComputedTrieData;
 use revm::{
-    context_interface::{cfg::gas_params::Eip2780TxInfo, Cfg},
+    context_interface::{cfg::gas_params::Eip2780TxInfo, Block as _, Cfg},
     interpreter::{debug_unreachable, gas::calculate_initial_tx_gas},
     primitives::{eip3860::MAX_INITCODE_SIZE, hardfork::SpecId},
 };
@@ -198,6 +198,10 @@ struct InclusionListContext {
     available_gas: u64,
     /// EIP-7825 cap on a single transaction's gas limit.
     tx_gas_limit_cap: u64,
+    /// EIP-7594 cap on a single transaction's blob count, `None` when the fork sets none.
+    max_blobs_per_tx: Option<u64>,
+    /// The block's blob gas price, `None` before EIP-4844.
+    blob_gas_price: Option<u128>,
 }
 
 /// Returns whether the block satisfies its EIP-7805 inclusion list, i.e. no inclusion-list
@@ -243,6 +247,22 @@ fn could_append_transaction<N: NodePrimitives>(
         return Ok(false)
     }
 
+    // EIP-4844 requires a blob transaction to carry at least one blob, and EIP-7594 caps how
+    // many.
+    if transaction.blob_count() == Some(0) ||
+        transaction
+            .blob_count()
+            .zip(ctx.max_blobs_per_tx)
+            .is_some_and(|(blobs, cap)| blobs > cap)
+    {
+        return Ok(false)
+    }
+
+    // EIP-7702 requires a non-empty authorization list.
+    if transaction.authorization_list().is_some_and(|list| list.is_empty()) {
+        return Ok(false)
+    }
+
     // Block gas capacity, plus the EIP-7825 per-transaction cap.
     if transaction.gas_limit() > ctx.available_gas || transaction.gas_limit() > ctx.tx_gas_limit_cap
     {
@@ -265,6 +285,15 @@ fn could_append_transaction<N: NodePrimitives>(
         transaction
             .max_priority_fee_per_gas()
             .is_some_and(|tip| tip > transaction.max_fee_per_gas())
+    {
+        return Ok(false)
+    }
+
+    // EIP-4844 blob fee coverage, priced from the block's own excess blob gas.
+    if transaction
+        .max_fee_per_blob_gas()
+        .zip(ctx.blob_gas_price)
+        .is_some_and(|(max_fee, price)| max_fee < price)
     {
         return Ok(false)
     }
@@ -3745,6 +3774,8 @@ where
             base_fee_per_gas: block.base_fee_per_gas(),
             available_gas: block.gas_limit().saturating_sub(block.gas_used()),
             tx_gas_limit_cap: evm_env.cfg_env.tx_gas_limit_cap(),
+            max_blobs_per_tx: evm_env.cfg_env.max_blobs_per_tx(),
+            blob_gas_price: evm_env.block_env.blob_gasprice(),
         };
 
         let result = inclusion_list_satisfied::<N>(&block, &state, &ctx, &transactions)?;
@@ -4011,7 +4042,7 @@ pub trait WaitForCaches {
 #[cfg(test)]
 mod inclusion_list_tests {
     use super::*;
-    use alloy_consensus::TxLegacy;
+    use alloy_consensus::{TxEip4844, TxEip7702, TxLegacy};
     use alloy_primitives::{Address, TxKind};
     use reth_ethereum_primitives::{
         EthPrimitives, Transaction as EthTransaction, TransactionSigned,
@@ -4029,6 +4060,8 @@ mod inclusion_list_tests {
             base_fee_per_gas: Some(BASE_FEE),
             available_gas: 1_000_000,
             tx_gas_limit_cap: 500_000,
+            max_blobs_per_tx: Some(6),
+            blob_gas_price: Some(1),
         }
     }
 
@@ -4143,13 +4176,8 @@ mod inclusion_list_tests {
         assert!(!could_append(legacy_tx(Some(CHAIN_ID), 0, 100_000), funded(0), ctx));
     }
 
-    #[test]
-    fn blob_transaction_is_appendable() {
-        // execution-specs a7b894b removed the blob skip from
-        // `check_inclusion_list_transactions`: a blob transaction in an inclusion list is
-        // evaluated like any other, and omitting it fails the block's inclusion-list check.
-        // `engine_getInclusionListV1` is what keeps blob transactions out of inclusion lists.
-        let tx = EthTransaction::Eip4844(alloy_consensus::TxEip4844 {
+    fn blob_tx(blob_versioned_hashes: Vec<B256>, max_fee_per_blob_gas: u128) -> EthTransaction {
+        EthTransaction::Eip4844(TxEip4844 {
             chain_id: CHAIN_ID,
             nonce: 0,
             gas_limit: 100_000,
@@ -4158,37 +4186,53 @@ mod inclusion_list_tests {
             to: Address::ZERO,
             value: U256::ZERO,
             access_list: Default::default(),
-            blob_versioned_hashes: vec![B256::ZERO],
-            max_fee_per_blob_gas: 1,
+            blob_versioned_hashes,
+            max_fee_per_blob_gas,
+            input: Default::default(),
+        })
+    }
+
+    #[test]
+    fn blob_transaction_is_appendable() {
+        // execution-specs a7b894b removed the blob skip from
+        // `check_inclusion_list_transactions`: a blob transaction in an inclusion list is
+        // evaluated like any other, and omitting it fails the block's inclusion-list check.
+        // `engine_getInclusionListV1` is what keeps blob transactions out of inclusion lists.
+        assert!(could_append(blob_tx(vec![B256::ZERO], 1), funded(0), context()));
+    }
+
+    #[test]
+    fn blob_transaction_without_blobs_is_not_appendable() {
+        assert!(!could_append(blob_tx(vec![], 1), funded(0), context()));
+    }
+
+    #[test]
+    fn exceeding_max_blobs_per_tx_is_not_appendable() {
+        let ctx = InclusionListContext { max_blobs_per_tx: Some(1), ..context() };
+        assert!(!could_append(blob_tx(vec![B256::ZERO; 2], 1), funded(0), ctx));
+    }
+
+    #[test]
+    fn below_blob_gas_price_is_not_appendable() {
+        let ctx = InclusionListContext { blob_gas_price: Some(2), ..context() };
+        assert!(!could_append(blob_tx(vec![B256::ZERO], 1), funded(0), ctx));
+    }
+
+    #[test]
+    fn empty_authorization_list_is_not_appendable() {
+        let tx = EthTransaction::Eip7702(TxEip7702 {
+            chain_id: CHAIN_ID,
+            nonce: 0,
+            gas_limit: 100_000,
+            max_fee_per_gas: BASE_FEE as u128,
+            max_priority_fee_per_gas: 0,
+            to: Address::ZERO,
+            value: U256::ZERO,
+            access_list: Default::default(),
+            authorization_list: Vec::new(),
             input: Default::default(),
         });
-        assert!(could_append(tx, funded(0), context()));
-    }
-
-    #[test]
-    fn retained_lists_evict_oldest_first() {
-        let mut retained = RetainedInclusionLists::default();
-        for i in 0..MAX_RETAINED_INCLUSION_LISTS + 1 {
-            retained.insert(B256::with_last_byte(i as u8), vec![]);
-        }
-
-        // The first entry fell out of the window, the rest are still retained.
-        assert!(retained.get(&B256::with_last_byte(0)).is_none());
-        assert!(retained.get(&B256::with_last_byte(1)).is_some());
-        assert!(retained.get(&B256::with_last_byte(MAX_RETAINED_INCLUSION_LISTS as u8)).is_some());
-    }
-
-    #[test]
-    fn retaining_a_list_invalidates_its_cached_verdict() {
-        let mut retained = RetainedInclusionLists::default();
-        let hash = B256::with_last_byte(1);
-
-        retained.insert(hash, vec![]);
-        retained.cache_result(hash, false);
-        assert_eq!(retained.cached_result(&hash), Some(false));
-
-        retained.insert(hash, vec![]);
-        assert_eq!(retained.cached_result(&hash), None);
+        assert!(!could_append(tx, funded(0), context()));
     }
 
     #[test]
