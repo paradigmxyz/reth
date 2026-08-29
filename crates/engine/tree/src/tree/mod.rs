@@ -56,6 +56,7 @@ use revm::{
 };
 use state::TreeState;
 use std::{
+    collections::VecDeque,
     fmt::Debug,
     ops,
     sync::{
@@ -319,6 +320,55 @@ fn could_append_transaction<N: NodePrimitives>(
     Ok(account.nonce == transaction.nonce() && account.balance >= max_cost)
 }
 
+/// Upper bound on the inclusion lists retained from `engine_newPayloadV6`.
+const MAX_RETAINED_INCLUSION_LISTS: usize = 64;
+
+/// Inclusion lists retained from `engine_newPayloadV6`, keyed by block hash, with the cached
+/// satisfaction verdict for each.
+///
+/// EIP-7805 requires retaining the list for an `ACCEPTED` payload and permits discarding it once
+/// the payload is no longer a branch tip, so a bounded FIFO window suffices: an evicted entry only
+/// leaves `inclusionListSatisfied` unreported.
+#[derive(Debug, Default)]
+struct RetainedInclusionLists {
+    lists: B256Map<Vec<Bytes>>,
+    results: B256Map<bool>,
+    order: VecDeque<B256>,
+}
+
+impl RetainedInclusionLists {
+    /// Retains `transactions` for `block_hash` and invalidates any cached verdict for it.
+    fn insert(&mut self, block_hash: B256, transactions: Vec<Bytes>) {
+        self.results.remove(&block_hash);
+        if self.lists.insert(block_hash, transactions).is_none() {
+            self.order.push_back(block_hash);
+        }
+        while self.order.len() > MAX_RETAINED_INCLUSION_LISTS {
+            if let Some(evicted) = self.order.pop_front() {
+                self.lists.remove(&evicted);
+                self.results.remove(&evicted);
+            }
+        }
+    }
+
+    fn get(&self, block_hash: &B256) -> Option<&Vec<Bytes>> {
+        self.lists.get(block_hash)
+    }
+
+    fn cached_result(&self, block_hash: &B256) -> Option<bool> {
+        self.results.get(block_hash).copied()
+    }
+
+    fn cache_result(&mut self, block_hash: B256, satisfied: bool) {
+        self.results.insert(block_hash, satisfied);
+    }
+
+    fn remove(&mut self, block_hash: &B256) {
+        self.lists.remove(block_hash);
+        self.results.remove(block_hash);
+    }
+}
+
 /// Tracks the state of the engine api internals.
 ///
 /// This type is not shareable.
@@ -335,10 +385,8 @@ pub struct EngineApiTreeState<N: NodePrimitives> {
     /// Tracks the header of invalid payloads that were rejected by the engine because they're
     /// invalid.
     invalid_headers: InvalidHeaderCache,
-    /// Inclusion lists supplied to `engine_newPayloadV6`, keyed by payload hash.
-    inclusion_lists: B256Map<Vec<Bytes>>,
-    /// Cached post-state compliance results.
-    inclusion_list_results: B256Map<bool>,
+    /// Inclusion lists supplied to `engine_newPayloadV6`.
+    inclusion_lists: RetainedInclusionLists,
 }
 
 impl<N: NodePrimitives> EngineApiTreeState<N> {
@@ -359,8 +407,7 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
             tree_state: TreeState::new(canonical_block, engine_kind, overlay_manager),
             pending_sparse_trie_prune: false,
             forkchoice_state_tracker: ForkchoiceStateTracker::default(),
-            inclusion_lists: B256Map::default(),
-            inclusion_list_results: B256Map::default(),
+            inclusion_lists: RetainedInclusionLists::default(),
         }
     }
 
@@ -1985,7 +2032,6 @@ where
                                 let gas_used = payload.gas_used();
                                 let num_hash = payload.num_hash();
                                 if let Some(transactions) = inclusion_list_transactions {
-                                    self.state.inclusion_list_results.remove(&payload.block_hash());
                                     self.state
                                         .inclusion_lists
                                         .insert(payload.block_hash(), transactions);
@@ -1993,7 +2039,6 @@ where
                                 let mut output = self.on_new_payload(payload);
                                 if output.as_ref().is_ok_and(|out| out.outcome.is_invalid()) {
                                     self.state.inclusion_lists.remove(&num_hash.hash);
-                                    self.state.inclusion_list_results.remove(&num_hash.hash);
                                 }
                                 self.metrics.engine.new_payload.update_response_metrics(
                                     start,
@@ -3660,11 +3705,13 @@ where
 
     /// Returns the cached EIP-7805 result, computing it against the payload post-state if needed.
     fn inclusion_list_status(&mut self, block_hash: B256) -> ProviderResult<Option<bool>> {
-        if let Some(result) = self.state.inclusion_list_results.get(&block_hash) {
-            return Ok(Some(*result))
+        if let Some(result) = self.state.inclusion_lists.cached_result(&block_hash) {
+            return Ok(Some(result))
         }
+        // A block whose list was never retained, or has since been evicted, reports nothing
+        // rather than guessing that it was satisfied.
         let Some(transactions) = self.state.inclusion_lists.get(&block_hash).cloned() else {
-            return Ok(Some(true))
+            return Ok(None)
         };
         let block = if let Some(block) = self.state.tree_state.executed_block_by_hash(block_hash) {
             block.recovered_block().clone()
@@ -3701,7 +3748,7 @@ where
         };
 
         let result = inclusion_list_satisfied::<N>(&block, &state, &ctx, &transactions)?;
-        self.state.inclusion_list_results.insert(block_hash, result);
+        self.state.inclusion_lists.cache_result(block_hash, result);
         Ok(Some(result))
     }
 
@@ -4116,6 +4163,32 @@ mod inclusion_list_tests {
             input: Default::default(),
         });
         assert!(could_append(tx, funded(0), context()));
+    }
+
+    #[test]
+    fn retained_lists_evict_oldest_first() {
+        let mut retained = RetainedInclusionLists::default();
+        for i in 0..MAX_RETAINED_INCLUSION_LISTS + 1 {
+            retained.insert(B256::with_last_byte(i as u8), vec![]);
+        }
+
+        // The first entry fell out of the window, the rest are still retained.
+        assert!(retained.get(&B256::with_last_byte(0)).is_none());
+        assert!(retained.get(&B256::with_last_byte(1)).is_some());
+        assert!(retained.get(&B256::with_last_byte(MAX_RETAINED_INCLUSION_LISTS as u8)).is_some());
+    }
+
+    #[test]
+    fn retaining_a_list_invalidates_its_cached_verdict() {
+        let mut retained = RetainedInclusionLists::default();
+        let hash = B256::with_last_byte(1);
+
+        retained.insert(hash, vec![]);
+        retained.cache_result(hash, false);
+        assert_eq!(retained.cached_result(&hash), Some(false));
+
+        retained.insert(hash, vec![]);
+        assert_eq!(retained.cached_result(&hash), None);
     }
 
     #[test]
