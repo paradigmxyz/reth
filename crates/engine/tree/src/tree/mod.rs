@@ -263,9 +263,9 @@ fn could_append_transaction<N: NodePrimitives>(
         return Ok(false)
     }
 
-    // Block gas capacity, plus the EIP-7825 per-transaction cap.
-    if transaction.gas_limit() > ctx.available_gas || transaction.gas_limit() > ctx.tx_gas_limit_cap
-    {
+    // Block gas capacity. The EIP-7825 cap is not a bound on the gas limit itself; it bounds
+    // regular gas only, and is checked against intrinsic gas below.
+    if transaction.gas_limit() > ctx.available_gas {
         return Ok(false)
     }
 
@@ -316,6 +316,14 @@ fn could_append_transaction<N: NodePrimitives>(
     );
     if transaction.gas_limit() < intrinsic_gas.initial_total_gas() ||
         transaction.gas_limit() < intrinsic_gas.floor_gas
+    {
+        return Ok(false)
+    }
+
+    // EIP-8037 caps regular gas, not the transaction's gas limit: a limit above the cap is legal
+    // as long as the intrinsic regular gas fits, since state gas draws on its own reservoir.
+    if ctx.spec_id >= SpecId::AMSTERDAM &&
+        intrinsic_gas.initial_regular_gas().max(intrinsic_gas.floor_gas) > ctx.tx_gas_limit_cap
     {
         return Ok(false)
     }
@@ -4155,11 +4163,23 @@ mod inclusion_list_tests {
     }
 
     #[test]
-    fn exceeding_tx_gas_limit_cap_is_not_appendable() {
-        // Room in the block, but over the EIP-7825 per-transaction cap.
+    fn gas_limit_over_the_cap_is_still_appendable() {
+        // EIP-8037 caps regular gas, not the gas limit. A simple transfer's intrinsic gas fits
+        // under the cap, so a limit above it stays appendable.
         let ctx = InclusionListContext {
             available_gas: 30_000_000,
             tx_gas_limit_cap: 100_000,
+            ..context()
+        };
+        assert!(could_append(legacy_tx(Some(CHAIN_ID), 0, 200_000), funded(0), ctx));
+    }
+
+    #[test]
+    fn intrinsic_regular_gas_over_the_cap_is_not_appendable() {
+        // A cap below the 21000 intrinsic floor cannot be satisfied by any transaction.
+        let ctx = InclusionListContext {
+            available_gas: 30_000_000,
+            tx_gas_limit_cap: 1_000,
             ..context()
         };
         assert!(!could_append(legacy_tx(Some(CHAIN_ID), 0, 200_000), funded(0), ctx));
