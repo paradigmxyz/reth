@@ -79,6 +79,7 @@ members = [
     "crates/payload/util/",
     "crates/prune/prune",
     "crates/prune/types",
+    "crates/pureth/withdrawal-root/",
     "crates/revm/",
     "crates/rpc/ipc/",
     "crates/rpc/rpc-api/",
@@ -314,6 +315,7 @@ codegen-units = 1
 incremental = false
 
 [workspace.dependencies]
+pureth-withdrawal-root = { path = "crates/pureth/withdrawal-root" }
 # reth
 reth = { path = "bin/reth" }
 reth-storage-rpc-provider = { path = "crates/storage/rpc-provider" }
@@ -632,6 +634,7 @@ test-case = "3"
 # ssz encoding
 ethereum_ssz = "0.10.4"
 ethereum_ssz_derive = "0.10.4"
+tree_hash = "0.12.1"
 
 # allocators
 jemalloc_pprof = { version = "0.8", default-features = false }
