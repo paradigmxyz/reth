@@ -159,10 +159,10 @@ async fn test_pipeline_v2_selfdestruct_changesets_use_plain_slots() -> eyre::Res
 
 /// Prefunding ensures the CREATE2 target has original account state, while its init code performs
 /// no `SSTORE`. This verifies that destruction alone does not create an otherwise-empty
-/// [`reth_trie::HashedStorage`] solely to carry `wiped = true`.
+/// [`reth_trie::HashedStorage`] update.
 #[tokio::test(flavor = "multi_thread")]
-async fn test_pipeline_v2_prefunded_create2_selfdestruct_does_not_wipe_storage() -> eyre::Result<()>
-{
+async fn test_pipeline_v2_prefunded_create2_selfdestruct_does_not_create_storage_update(
+) -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let scenario = setup_create2_selfdestruct_scenario()?;
@@ -193,8 +193,8 @@ async fn test_pipeline_v2_prefunded_create2_selfdestruct_does_not_wipe_storage()
 }
 
 /// Scenario coverage:
-/// 1. Single execution batch (`1..=2`) where block 1 writes and block 2 wipes.
-/// 2. Block-by-block storage changesets still contain plain keys for wipe entries.
+/// 1. Single execution batch (`1..=2`) where block 1 writes and block 2 destroys the account.
+/// 2. Block-by-block storage changesets still contain plain keys for destroyed entries.
 ///
 /// Regression coverage for single execution-batch behavior.
 #[tokio::test(flavor = "multi_thread")]
@@ -228,11 +228,11 @@ async fn test_pipeline_v2_single_batch_write_then_selfdestruct_changesets_plain_
 
 /// Scenario coverage:
 /// 1. A slot appears only in intermediate reverts (not final bundle state).
-/// 2. A later block in the same execution batch wipes the account.
-/// 3. Wipe changesets still contain the required plain slot key/value.
+/// 2. A later block in the same execution batch destroys the account.
+/// 3. Destroyed-storage changesets still contain the required plain slot key/value.
 ///
 /// Covers the edge case where a slot appears in intermediate block reverts but not in the final
-/// bundle state, then gets wiped by a later selfdestruct in the same execution batch.
+/// bundle state, then is destroyed by a later selfdestruct in the same execution batch.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_pipeline_v2_single_batch_reverted_slot_then_selfdestruct_changesets_plain_slots(
 ) -> eyre::Result<()> {

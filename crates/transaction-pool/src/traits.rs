@@ -1362,6 +1362,13 @@ pub trait PoolTransaction:
         self.clone().into_consensus()
     }
 
+    /// Returns the EIP-2718 encoded consensus transaction.
+    ///
+    /// Implementations that synthesize the consensus representation should override this method.
+    fn encoded_2718_consensus(&self) -> Bytes {
+        self.consensus_ref().encoded_2718().into()
+    }
+
     /// Returns a reference to the consensus transaction with the recovered sender.
     fn consensus_ref(&self) -> Recovered<&Self::Consensus>;
 
@@ -1968,13 +1975,23 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blobstore::BlobCellAvailability;
+    use crate::{blobstore::BlobCellAvailability, test_utils::MockTransaction};
     use alloy_consensus::{
         EthereumTxEnvelope, SignableTransaction, TxEip1559, TxEip2930, TxEip4844, TxEip7702,
         TxEnvelope, TxLegacy,
     };
     use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, eip7594::BlobCellMask};
     use alloy_primitives::Signature;
+
+    #[test]
+    fn test_mock_consensus_encoding() {
+        let transaction = MockTransaction::legacy();
+
+        assert_eq!(
+            transaction.encoded_2718_consensus(),
+            transaction.into_consensus().encoded_2718()
+        );
+    }
 
     #[test]
     fn test_pool_size_invariants() {
@@ -2016,7 +2033,7 @@ mod tests {
     #[test]
     fn test_eth_pooled_transaction_new_legacy() {
         // Create a legacy transaction with specific parameters
-        let tx = TxEnvelope::Legacy(
+        let tx = EthereumTxEnvelope::<TxEip4844>::Legacy(
             TxLegacy {
                 gas_price: 10,
                 gas_limit: 1000,
@@ -2035,6 +2052,7 @@ mod tests {
         assert!(pooled_tx.blob_cell_availability.is_none());
         assert_eq!(pooled_tx.blob_cell_availability().map(BlobCellAvailability::get), None);
         assert_eq!(pooled_tx.cost, U256::from(100) + U256::from(10 * 1000));
+        assert_eq!(pooled_tx.encoded_2718_consensus(), transaction.encoded_2718());
     }
 
     #[test]
