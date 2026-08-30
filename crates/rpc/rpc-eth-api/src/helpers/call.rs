@@ -8,7 +8,7 @@ use crate::{
     helpers::estimate::EstimateCall, FromEvmError, FullEthApiTypes, RpcBlock, RpcNodeCore,
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
-use alloy_eips::eip2930::AccessListResult;
+use alloy_eip2930::AccessListResult;
 use alloy_evm::overrides::{apply_block_overrides, apply_state_overrides, OverrideBlockHashes};
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{Bytes, B256, U256};
@@ -460,41 +460,57 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     where
         Self: Trace,
     {
-        self.spawn_with_state_at_block(at, |this, mut db| {
-            let initial = request.as_ref().access_list().cloned().unwrap_or_default();
-            let (evm_env, mut tx_env) = this.prepare_call_env(
-                evm_env,
-                request,
-                &mut db,
-                EvmOverrides::state(state_override),
-            )?;
+        async move {
+            let guard = CancelOnDrop::default();
+            let cancel = guard.clone();
+            let result = self
+                .spawn_with_state_at_block(at, move |this, mut db| {
+                    let mut access_list =
+                        request.as_ref().access_list().cloned().unwrap_or_default().normalized();
+                    let (evm_env, mut tx_env) = this.prepare_call_env(
+                        evm_env,
+                        request,
+                        &mut db,
+                        EvmOverrides::state(state_override),
+                    )?;
+                    tx_env.set_access_list(access_list.clone());
 
-            let mut evm = this.evm_config().evm_with_env_and_inspector(
-                &mut db,
-                evm_env,
-                AccessListInspector::new(initial),
-            );
+                    let mut evm = this.evm_config().evm_with_env_and_inspector(
+                        &mut db,
+                        evm_env,
+                        AccessListInspector::new(access_list.clone()),
+                    );
 
-            let result = evm.transact(tx_env.clone())?;
-            let access_list = core::mem::take(evm.inspector_mut()).into_access_list();
-            let gas_used = result.result.tx_gas_used();
-            tx_env.set_access_list(access_list.clone());
-            if let Err(err) = Self::Error::ensure_success(result.result) {
-                return Ok(AccessListResult {
-                    access_list,
-                    gas_used: U256::from(gas_used),
-                    error: Some(err.to_string()),
-                });
-            }
+                    loop {
+                        if cancel.is_cancelled() {
+                            return Err(EthApiError::InternalEthError.into())
+                        }
 
-            // transact again to get the exact gas used
-            evm.disable_inspector();
-            let result = evm.transact(tx_env)?;
-            let gas_used = result.result.tx_gas_used();
-            let error = Self::Error::ensure_success(result.result).err().map(|e| e.to_string());
+                        let result = evm.transact(tx_env.clone())?;
+                        let next_access_list =
+                            core::mem::take(evm.inspector_mut()).into_access_list().normalized();
 
-            Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
-        })
+                        if next_access_list == access_list {
+                            let gas_used = result.result.tx_gas_used();
+                            let error = Self::Error::ensure_success(result.result)
+                                .err()
+                                .map(|e| e.to_string());
+                            return Ok(AccessListResult {
+                                access_list,
+                                gas_used: U256::from(gas_used),
+                                error,
+                            })
+                        }
+
+                        access_list = next_access_list;
+                        tx_env.set_access_list(access_list.clone());
+                        *evm.inspector_mut() = AccessListInspector::new(access_list.clone());
+                    }
+                })
+                .await;
+            drop(guard);
+            result
+        }
     }
 }
 

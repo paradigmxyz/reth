@@ -1,7 +1,12 @@
 use crate::utils::{eth_payload_attributes, eth_payload_attributes_amsterdam};
-use alloy_eips::{eip2718::Encodable2718, eip7910::EthConfig, BlockNumberOrTag};
+use alloy_eips::{
+    eip2718::Encodable2718,
+    eip2930::{AccessList, AccessListItem, AccessListResult},
+    eip7910::EthConfig,
+    BlockNumberOrTag,
+};
 use alloy_genesis::Genesis;
-use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_primitives::{bytes, Address, Bytes, B256, U256};
 use alloy_provider::{
     ext::DebugApi, network::EthereumWallet, Provider, ProviderBuilder, SendableTx,
 };
@@ -14,7 +19,10 @@ use alloy_rpc_types_engine::{
     BlobsBundleV1, CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar,
     ExecutionPayloadV3, PraguePayloadFields,
 };
-use alloy_rpc_types_eth::TransactionRequest;
+use alloy_rpc_types_eth::{
+    state::{AccountOverride, StateOverride},
+    TransactionRequest,
+};
 use alloy_rpc_types_trace::geth::{ChainBlockTraceResult, GethDebugTracingOptions};
 use jsonrpsee::core::client::{Subscription, SubscriptionClientT};
 use rand::{rngs::StdRng, Rng, SeedableRng};
@@ -50,6 +58,70 @@ alloy_sol_types::sol! {
             }
         }
     }
+}
+
+#[tokio::test]
+async fn test_create_access_list_converges() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .cancun_activated()
+            .build(),
+    );
+
+    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
+        1,
+        chain_spec,
+        false,
+        Default::default(),
+        eth_payload_attributes,
+    )
+    .await?;
+    let node = nodes.pop().unwrap();
+    let provider = ProviderBuilder::new()
+        .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
+        .connect_http(node.rpc_url());
+
+    let contract = Address::with_last_byte(0xc0);
+    let first = Address::with_last_byte(0xa1);
+    let second = Address::with_last_byte(0xa2);
+    let third = Address::with_last_byte(0xa3);
+    let mut state_overrides = StateOverride::default();
+    // Adding `second` changes the intrinsic gas enough for the next trace to take the branch that
+    // touches `third`, so the access list needs multiple passes to converge.
+    state_overrides.insert(
+        contract,
+        AccountOverride::default().with_code(bytes!(
+            "7300000000000000000000000000000000000000a131505a620125c0106038577300000000000000000000000000000000000000a33150005b7300000000000000000000000000000000000000a2315000"
+        )),
+    );
+
+    let result: AccessListResult = provider
+        .raw_request(
+            "eth_createAccessList".into(),
+            (
+                TransactionRequest::default().to(contract).gas_limit(100_000),
+                BlockNumberOrTag::Latest,
+                state_overrides,
+            ),
+        )
+        .await?;
+
+    assert!(result.error.is_none(), "{:?}", result.error);
+    assert_eq!(result.gas_used, U256::from(28_431u64));
+    assert_eq!(
+        result.access_list,
+        AccessList(vec![
+            AccessListItem { address: first, storage_keys: vec![] },
+            AccessListItem { address: second, storage_keys: vec![] },
+            AccessListItem { address: third, storage_keys: vec![] },
+        ])
+    );
+
+    Ok(())
 }
 
 #[tokio::test]

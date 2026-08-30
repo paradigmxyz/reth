@@ -221,9 +221,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-eip2930"
-version = "0.2.3"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9441120fa82df73e8959ae0e4ab8ade03de2aaae61be313fbf5746277847ce25"
+checksum = "e64579d931b3f8eacc7c9ab0b220e87e9c4816e5c724ede1947b55c2f8e92ae5"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -10109,6 +10109,7 @@ version = "2.5.1"
 dependencies = [
  "alloy-consensus",
  "alloy-dyn-abi",
+ "alloy-eip2930",
  "alloy-eip7928",
  "alloy-eips",
  "alloy-evm",
