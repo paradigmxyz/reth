@@ -130,6 +130,10 @@ impl PayloadAttributes for EthPayloadAttributes {
     fn target_gas_limit(&self) -> Option<u64> {
         self.target_gas_limit
     }
+
+    fn inclusion_list_transactions(&self) -> Option<&[Bytes]> {
+        self.inclusion_list_transactions.as_deref()
+    }
 }
 
 /// Factory trait for creating payload attributes.

@@ -199,6 +199,14 @@ where
         }
     }
 
+    /// Returns the EIP-7805 inclusion-list transactions from either the payload or attributes.
+    pub fn inclusion_list_transactions(&self) -> Option<&[Bytes]> {
+        match self {
+            Self::ExecutionPayload(payload) => payload.inclusion_list_transactions(),
+            Self::PayloadAttributes(attributes) => attributes.inclusion_list_transactions(),
+        }
+    }
+
     /// Returns `target_gas_limit` from payload attributes.
     pub fn target_gas_limit(&self) -> Option<u64> {
         match self {

@@ -359,6 +359,48 @@ pub fn validate_slot_number_presence<T: EthereumHardforks>(
     Ok(())
 }
 
+/// Validates the presence of the EIP-7805 `inclusionListTransactions` field according to the
+/// engine method version.
+///
+/// The field is carried by [`PayloadAttributesV5`][attrs] for `engine_forkchoiceUpdatedV5` and by
+/// the fifth parameter of `engine_newPayloadV6`. Both methods are Bogota-only, so every earlier
+/// version that is handed the field fails to match its own structure and is rejected here rather
+/// than silently building against an inclusion list its fork does not define.
+///
+/// Only the attributes side is additionally required to carry the field: it is an object member
+/// that deserializes to `None` when a caller omits it, whereas the `engine_newPayloadV6`
+/// parameter is positional and a missing one never reaches this check. An empty list is well
+/// formed on both sides.
+///
+/// A version that requires the field but is called with a non-Bogota timestamp is left to
+/// [`validate_payload_timestamp`], which reports `-38005: Unsupported fork`. This mirrors the
+/// order of the checks in the Bogota spec, where the structural check precedes the fork check.
+///
+/// [attrs]: https://github.com/ethereum/execution-apis/blob/main/src/engine/bogota.md#payloadattributesv5
+pub fn validate_inclusion_list_presence(
+    version: EngineApiMessageVersion,
+    message_validation_kind: MessageValidationKind,
+    has_inclusion_list: bool,
+) -> Result<(), EngineObjectValidationError> {
+    match (version, message_validation_kind) {
+        (EngineApiMessageVersion::V5, MessageValidationKind::PayloadAttributes) => {
+            if !has_inclusion_list {
+                return Err(message_validation_kind
+                    .to_error(VersionSpecificValidationError::NoInclusionListPostBogota))
+            }
+        }
+        (EngineApiMessageVersion::V6, MessageValidationKind::Payload) => {}
+        _ => {
+            if has_inclusion_list {
+                return Err(message_validation_kind
+                    .to_error(VersionSpecificValidationError::InclusionListNotSupported))
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Validates the presence of the `withdrawals` field according to the payload timestamp.
 /// After Shanghai, withdrawals field must be [Some].
 /// Before Shanghai, withdrawals field must be [None];
@@ -576,6 +618,12 @@ where
         payload_or_attrs.message_validation_kind(),
         payload_or_attrs.timestamp(),
         payload_or_attrs.slot_number().is_some(),
+    )?;
+
+    validate_inclusion_list_presence(
+        version,
+        payload_or_attrs.message_validation_kind(),
+        payload_or_attrs.inclusion_list_transactions().is_some(),
     )?;
 
     validate_withdrawals_presence(
@@ -883,6 +931,87 @@ mod tests {
             MessageValidationKind::GetPayload,
         );
         assert_matches!(res, Ok(()));
+    }
+
+    #[test]
+    fn validate_inclusion_list_presence_by_version() {
+        // `PayloadAttributesV5` carries the inclusion list as an object member, so omitting it
+        // leaves the attributes not matching the structure `engine_forkchoiceUpdatedV5` expects.
+        assert_matches!(
+            validate_inclusion_list_presence(
+                EngineApiMessageVersion::V5,
+                MessageValidationKind::PayloadAttributes,
+                true,
+            ),
+            Ok(())
+        );
+        assert_matches!(
+            validate_inclusion_list_presence(
+                EngineApiMessageVersion::V5,
+                MessageValidationKind::PayloadAttributes,
+                false,
+            ),
+            Err(EngineObjectValidationError::PayloadAttributes(
+                VersionSpecificValidationError::NoInclusionListPostBogota
+            ))
+        );
+        assert_matches!(
+            validate_inclusion_list_presence(
+                EngineApiMessageVersion::V6,
+                MessageValidationKind::Payload,
+                true,
+            ),
+            Ok(())
+        );
+        // `engine_newPayloadV6` takes the list as a mandatory positional parameter, so its
+        // absence is caught before this check and is not an error here.
+        assert_matches!(
+            validate_inclusion_list_presence(
+                EngineApiMessageVersion::V6,
+                MessageValidationKind::Payload,
+                false,
+            ),
+            Ok(())
+        );
+
+        // Every pre-Bogota method version must reject the field. `engine_forkchoiceUpdatedV4`
+        // handed an inclusion list does not match `PayloadAttributesV4`.
+        assert_matches!(
+            validate_inclusion_list_presence(
+                EngineApiMessageVersion::V4,
+                MessageValidationKind::PayloadAttributes,
+                true,
+            ),
+            Err(EngineObjectValidationError::PayloadAttributes(
+                VersionSpecificValidationError::InclusionListNotSupported
+            ))
+        );
+        // `engine_newPayloadV5` takes no inclusion list parameter.
+        assert_matches!(
+            validate_inclusion_list_presence(
+                EngineApiMessageVersion::V5,
+                MessageValidationKind::Payload,
+                true,
+            ),
+            Err(EngineObjectValidationError::Payload(
+                VersionSpecificValidationError::InclusionListNotSupported
+            ))
+        );
+        for version in [
+            EngineApiMessageVersion::V1,
+            EngineApiMessageVersion::V2,
+            EngineApiMessageVersion::V3,
+            EngineApiMessageVersion::V4,
+        ] {
+            assert_matches!(
+                validate_inclusion_list_presence(
+                    version,
+                    MessageValidationKind::PayloadAttributes,
+                    false,
+                ),
+                Ok(())
+            );
+        }
     }
 
     #[test]
