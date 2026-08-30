@@ -363,9 +363,8 @@ const MAX_RETAINED_INCLUSION_LISTS: usize = 64;
 /// Inclusion lists retained from `engine_newPayloadV6`, keyed by block hash, with the cached
 /// satisfaction verdict for each.
 ///
-/// EIP-7805 requires retaining the list for an `ACCEPTED` payload and permits discarding it once
-/// the payload is no longer a branch tip, so a bounded FIFO window suffices: an evicted entry only
-/// leaves `inclusionListSatisfied` unreported.
+/// EIP-7805 permits discarding a list once its payload is no longer a branch tip, so a bounded
+/// FIFO window suffices: an evicted entry only leaves `inclusionListSatisfied` unreported.
 #[derive(Debug, Default)]
 struct RetainedInclusionLists {
     lists: B256Map<Vec<Bytes>>,
@@ -3745,8 +3744,8 @@ where
         if let Some(result) = self.state.inclusion_lists.cached_result(&block_hash) {
             return Ok(Some(result))
         }
-        // A block whose list was never retained, or has since been evicted, reports nothing
-        // rather than guessing that it was satisfied.
+        // A list that was never retained, or has been evicted, reports nothing rather than
+        // guessing.
         let Some(transactions) = self.state.inclusion_lists.get(&block_hash).cloned() else {
             return Ok(None)
         };
@@ -3767,8 +3766,7 @@ where
         let state = provider_builder.build()?;
 
         // The EVM environment supplies the chain id and the EIP-7825 gas cap the block was
-        // executed under. Failing to build it leaves the status unknown rather than guessing,
-        // since the spec permits a null result.
+        // executed under. The spec permits a null result, so a failure here reports nothing.
         let evm_env = match self.evm_config.evm_env(block.header()) {
             Ok(evm_env) => evm_env,
             Err(err) => {
@@ -4101,7 +4099,7 @@ mod inclusion_list_tests {
         (signed, state)
     }
 
-    /// Funds the sender generously so that only the condition under test can reject.
+    /// Funds the sender so that only the condition under test can reject.
     fn funded(nonce: u64) -> ExtendedAccount {
         ExtendedAccount::new(nonce, U256::from(10u64).pow(U256::from(20u64)))
     }
@@ -4215,8 +4213,7 @@ mod inclusion_list_tests {
     #[test]
     fn blob_transaction_is_appendable() {
         // execution-specs a7b894b removed the blob skip from
-        // `check_inclusion_list_transactions`: a blob transaction in an inclusion list is
-        // evaluated like any other, and omitting it fails the block's inclusion-list check.
+        // `check_inclusion_list_transactions`, so a blob transaction is evaluated like any other.
         // `engine_getInclusionListV1` is what keeps blob transactions out of inclusion lists.
         assert!(could_append(blob_tx(vec![B256::ZERO], 1), funded(0), context()));
     }

@@ -361,22 +361,11 @@ pub fn validate_slot_number_presence<T: EthereumHardforks>(
 
 /// Validates the presence of the EIP-7805 `inclusionListTransactions` field according to the
 /// engine method version.
+/// `engine_forkchoiceUpdatedV5` payload attributes must carry the field.
+/// Before Bogota, no version may carry it.
 ///
-/// The field is carried by [`PayloadAttributesV5`][attrs] for `engine_forkchoiceUpdatedV5` and by
-/// the fifth parameter of `engine_newPayloadV6`. Both methods are Bogota-only, so every earlier
-/// version that is handed the field fails to match its own structure and is rejected here rather
-/// than silently building against an inclusion list its fork does not define.
-///
-/// Only the attributes side is additionally required to carry the field: it is an object member
-/// that deserializes to `None` when a caller omits it, whereas the `engine_newPayloadV6`
-/// parameter is positional and a missing one never reaches this check. An empty list is well
-/// formed on both sides.
-///
-/// A version that requires the field but is called with a non-Bogota timestamp is left to
-/// [`validate_payload_timestamp`], which reports `-38005: Unsupported fork`. This mirrors the
-/// order of the checks in the Bogota spec, where the structural check precedes the fork check.
-///
-/// [attrs]: https://github.com/ethereum/execution-apis/blob/main/src/engine/bogota.md#payloadattributesv5
+/// `engine_newPayloadV6` is exempt from the requirement: the field is a positional parameter
+/// there, so a missing one is rejected before this check.
 pub fn validate_inclusion_list_presence(
     version: EngineApiMessageVersion,
     message_validation_kind: MessageValidationKind,
@@ -935,8 +924,8 @@ mod tests {
 
     #[test]
     fn validate_inclusion_list_presence_by_version() {
-        // `PayloadAttributesV5` carries the inclusion list as an object member, so omitting it
-        // leaves the attributes not matching the structure `engine_forkchoiceUpdatedV5` expects.
+        // `PayloadAttributesV5` carries the list as an object member, so omitting it does not
+        // match the structure.
         assert_matches!(
             validate_inclusion_list_presence(
                 EngineApiMessageVersion::V5,
@@ -963,8 +952,7 @@ mod tests {
             ),
             Ok(())
         );
-        // `engine_newPayloadV6` takes the list as a mandatory positional parameter, so its
-        // absence is caught before this check and is not an error here.
+        // The V6 parameter is positional, so a missing one never reaches this check.
         assert_matches!(
             validate_inclusion_list_presence(
                 EngineApiMessageVersion::V6,
@@ -974,8 +962,7 @@ mod tests {
             Ok(())
         );
 
-        // Every pre-Bogota method version must reject the field. `engine_forkchoiceUpdatedV4`
-        // handed an inclusion list does not match `PayloadAttributesV4`.
+        // An inclusion list does not match `PayloadAttributesV4`.
         assert_matches!(
             validate_inclusion_list_presence(
                 EngineApiMessageVersion::V4,

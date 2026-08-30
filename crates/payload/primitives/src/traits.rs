@@ -225,8 +225,7 @@ pub fn payload_id(
     }
 
     // Two forkchoice updates differing only in their inclusion list must start distinct build
-    // processes, otherwise the second collides with the first and keeps building against a stale
-    // list.
+    // processes, otherwise the second builds against a stale list.
     if let Some(inclusion_list) = &attributes.inclusion_list_transactions {
         let mut buf = Vec::new();
         inclusion_list.encode(&mut buf);

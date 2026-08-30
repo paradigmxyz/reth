@@ -270,8 +270,8 @@ where
             continue
         };
         let Ok(transaction) = transaction.try_into_recovered() else { continue };
-        // The V1 FOCIL endpoint deliberately does not produce blob transactions, and payload
-        // building cannot source a sidecar from an inclusion-list byte string.
+        // `engine_getInclusionListV1` excludes blob transactions, and a sidecar cannot be
+        // recovered from an inclusion-list byte string.
         if transaction.is_eip4844() {
             continue
         }
@@ -560,10 +560,9 @@ where
 
 /// Executes valid EIP-7805 inclusion-list transactions after pool transactions have been tried.
 ///
-/// Inclusion-list transactions are retried until a full pass makes no progress. This allows a
-/// transaction whose nonce or balance was established by an earlier inclusion-list transaction to
-/// execute in the same payload. Transactions already executed by the pool or an earlier pass are
-/// skipped by hash.
+/// Retried until a pass makes no progress, so a transaction whose nonce or balance is established
+/// by an earlier inclusion-list transaction still executes. Already-executed ones are skipped by
+/// hash.
 #[allow(clippy::too_many_arguments)]
 fn execute_inclusion_list_transactions<B>(
     builder: &mut B,

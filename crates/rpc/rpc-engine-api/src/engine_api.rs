@@ -482,8 +482,8 @@ where
             .validate_and_execute_forkchoice(EngineApiMessageVersion::V5, state, payload_attrs)
             .await?;
 
-        // Only a VALID head carries a verdict, computed from the list `engine_newPayloadV6`
-        // retained for it. A head with no retained list leaves the field unset.
+        // Only a VALID head carries a verdict, computed from the retained list. A head with no
+        // retained list leaves the field unset.
         let inclusion_list_satisfied = if updated.is_valid() {
             self.inner
                 .beacon_consensus
@@ -2181,9 +2181,8 @@ mod tests {
         assert_matches!(engine_rx.recv().await, Some(BeaconEngineMessage::NewPayload { .. }));
     }
 
-    // The consensus layer passes the union of up to 16 committee inclusion lists, each
-    // individually bounded by `MAX_BYTES_PER_INCLUSION_LIST` but with no aggregate bound, so a
-    // legitimate list exceeds 8 KiB and must still reach the engine.
+    // The union of up to 16 committee lists has no aggregate bound, so a legitimate list
+    // exceeds 8 KiB and must still reach the engine.
     #[tokio::test]
     async fn new_payload_v6_accepts_inclusion_list_over_single_list_limit() {
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().bogota_activated().build());
