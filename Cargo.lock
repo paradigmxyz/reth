@@ -7190,6 +7190,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "pureth-withdrawal-root"
+version = "2.5.1"
+dependencies = [
+ "alloy-eips",
+ "alloy-primitives",
+ "tree_hash",
+]
+
+[[package]]
 name = "quanta"
 version = "0.12.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
