@@ -13,13 +13,16 @@ use alloy_rpc_types_engine::{
     ExecutionPayloadBodiesV1, ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1,
     ExecutionPayloadBodyV2, ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1,
     ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated,
-    ForkchoiceUpdatedResponseV2, PayloadId, PayloadStatus, PayloadStatusV2, PraguePayloadFields,
-    MAX_BYTES_PER_INCLUSION_LIST,
+    ForkchoiceUpdatedResponseV2, PayloadId, PayloadStatus, PayloadStatusEnum, PayloadStatusV2,
+    PraguePayloadFields, MAX_BYTES_PER_INCLUSION_LIST,
 };
 use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
 use reth_chainspec::EthereumHardforks;
-use reth_engine_primitives::{ConsensusEngineHandle, EngineApiValidator, EngineTypes};
+use reth_engine_primitives::{
+    BeaconOnNewPayloadError, BlockAccessListDecodeError, ConsensusEngineHandle, EngineApiValidator,
+    EngineTypes,
+};
 use reth_network_api::{CellCustody, NetworkInfo};
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
@@ -140,6 +143,23 @@ where
             .payload_timestamp(payload_id)
             .await
             .ok_or(EngineApiError::UnknownPayload)??)
+    }
+
+    async fn new_payload_post_amsterdam(
+        &self,
+        payload: PayloadT::ExecutionData,
+    ) -> EngineApiResult<PayloadStatus> {
+        match self.inner.beacon_consensus.new_payload(payload).await {
+            Ok(status) => Ok(status),
+            Err(BeaconOnNewPayloadError::InvalidParams(error))
+                if error.is::<BlockAccessListDecodeError>() =>
+            {
+                Ok(PayloadStatus::from_status(PayloadStatusEnum::Invalid {
+                    validation_error: error.to_string(),
+                }))
+            }
+            Err(error) => Err(error.into()),
+        }
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_newpayloadv1>
@@ -278,7 +298,7 @@ where
         self.inner
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V5, payload_or_attrs)?;
-        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
+        self.new_payload_post_amsterdam(payload).await
     }
 
     /// Metrics version of `new_payload_v5`
@@ -309,7 +329,7 @@ where
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V6, payload_or_attrs)?;
 
-        Ok(self.inner.beacon_consensus.new_payload(payload).await?.into())
+        Ok(self.new_payload_post_amsterdam(payload).await?.into())
     }
 
     /// Metrics version of `new_payload_v6`.

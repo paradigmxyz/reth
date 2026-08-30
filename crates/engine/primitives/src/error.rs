@@ -14,8 +14,7 @@ pub enum BeaconOnNewPayloadError {
     EngineUnavailable,
     /// Thrown when the payload params are malformed, e.g. a field's raw bytes cannot be decoded.
     ///
-    /// Per the engine API spec this must be rejected with an invalid params error instead of an
-    /// `INVALID` payload status.
+    /// The RPC handler maps this to the response required by the method version.
     #[error(transparent)]
     InvalidParams(Box<dyn core::error::Error + Send + Sync>),
     /// An internal error occurred, not necessarily related to the payload.
