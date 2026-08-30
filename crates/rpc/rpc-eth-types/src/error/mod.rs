@@ -381,7 +381,7 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 )
             }
             EthApiError::BlockAccessListNotAvailablePreAmsterdam => {
-                rpc_error_with_code(4445, error.to_string())
+                rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
             }
         }
     }
