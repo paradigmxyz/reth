@@ -168,12 +168,12 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
     /// prioritizing those with the lowest timeout/latency and those that recently responded with
     /// adequate data. Additionally, if full blocks are required this prioritizes peers that have
     /// full history available
-    fn next_best_peer(&self, requirement: BestPeerRequirements) -> Option<PeerId> {
+    fn next_best_peer(&self, requirement: BestPeerRequirements<'_>) -> Option<PeerId> {
         // filter out peers that aren't idle or don't meet the requirement
         let mut idle = self
             .peers
             .iter()
-            .filter(|(_, peer)| peer.state.is_idle() && peer.satisfies(&requirement));
+            .filter(|(id, peer)| peer.state.is_idle() && peer.satisfies(id, &requirement));
 
         let mut best_peer = idle.next()?;
 
@@ -285,18 +285,23 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
         }
     }
 
-    /// Returns whether any connected peer negotiated `snap/2`.
-    fn has_snap_peer(&self) -> bool {
-        self.peers
-            .values()
-            .any(|peer| !matches!(peer.state, PeerState::Closing) && peer.supports_snap)
+    /// Returns whether any connected peer outside `excluded` negotiated `snap/2`.
+    fn has_snap_peer(&self, excluded: &[PeerId]) -> bool {
+        self.peers.iter().any(|(peer_id, peer)| {
+            !matches!(peer.state, PeerState::Closing) &&
+                peer.supports_snap &&
+                !excluded.contains(peer_id)
+        })
     }
 
     /// Returns `true` if `request` cannot be served by any currently connected peer and should
     /// fail immediately instead of waiting for future peer churn.
     fn should_fail_fast(&self, request: &DownloadRequest<N>) -> bool {
-        (request.is_optional_bal() && !self.has_eth71_peer()) ||
-            (request.is_snap() && !self.has_snap_peer())
+        match request {
+            // No currently eligible peer: every capable one is excluded.
+            DownloadRequest::GetSnap { excluded_peers, .. } => !self.has_snap_peer(excluded_peers),
+            _ => request.is_optional_bal() && !self.has_eth71_peer(),
+        }
     }
 
     /// Handles a new request to a peer.
@@ -363,7 +368,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
         let peer = self.peers.get_mut(&peer_id)?;
         let req_idx = self.queued_requests.iter().position(|req| {
             // Find the first queued request this peer can serve.
-            peer.satisfies(&req.best_peer_requirements())
+            peer.satisfies(&peer_id, &req.best_peer_requirements())
         })?;
         let req = self.queued_requests.remove(req_idx).expect("valid request index");
 
@@ -582,11 +587,14 @@ impl Peer {
         self.range_info.as_ref().map(|info| info.range())
     }
 
-    /// Returns whether this peer can serve requests with the given hard requirements.
-    fn satisfies(&self, requirement: &BestPeerRequirements) -> bool {
+    /// Returns whether the peer identified by `peer_id` can serve requests with the given hard
+    /// requirements.
+    fn satisfies(&self, peer_id: &PeerId, requirement: &BestPeerRequirements<'_>) -> bool {
         match requirement {
             BestPeerRequirements::EthVersion(ver) => self.capabilities.supports_eth_at_least(ver),
-            BestPeerRequirements::SupportsSnap => self.supports_snap,
+            BestPeerRequirements::SupportsSnap { excluded_peers } => {
+                self.supports_snap && !excluded_peers.contains(peer_id)
+            }
             BestPeerRequirements::None |
             BestPeerRequirements::FullBlock |
             BestPeerRequirements::FullBlockRange(_) => true,
@@ -637,7 +645,7 @@ impl Peer {
     }
 
     /// Returns true if this peer is better than the other peer based on the given requirements.
-    fn is_better(&self, other: &Self, requirement: &BestPeerRequirements) -> bool {
+    fn is_better(&self, other: &Self, requirement: &BestPeerRequirements<'_>) -> bool {
         match requirement {
             BestPeerRequirements::FullBlockRange(range) => self.has_better_range(other, range),
             BestPeerRequirements::FullBlock => self.has_full_history() && !other.has_full_history(),
@@ -645,7 +653,7 @@ impl Peer {
             // get here both peers already satisfy the requirement.
             BestPeerRequirements::None |
             BestPeerRequirements::EthVersion(_) |
-            BestPeerRequirements::SupportsSnap => false,
+            BestPeerRequirements::SupportsSnap { .. } => false,
         }
     }
 }
@@ -736,6 +744,9 @@ pub(crate) enum DownloadRequest<N: NetworkPrimitives> {
         request: SnapProtocolMessage,
         response: oneshot::Sender<PeerRequestResult<SnapResponse>>,
         priority: Priority,
+        /// Peers that must not serve this request, e.g. because they already answered it with a
+        /// response that failed verification.
+        excluded_peers: Vec<PeerId>,
     },
 }
 
@@ -774,11 +785,6 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
         matches!(self, Self::GetBlockAccessLists { requirement: BalRequirement::Optional, .. })
     }
 
-    /// Returns `true` if this is a `snap/2` request.
-    const fn is_snap(&self) -> bool {
-        matches!(self, Self::GetSnap { .. })
-    }
-
     /// Sends an error response to the waiting caller.
     fn send_err_response(self, err: RequestError) {
         let _ = match self {
@@ -791,7 +797,7 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
     }
 
     /// Returns the best peer requirements for this request.
-    fn best_peer_requirements(&self) -> BestPeerRequirements {
+    fn best_peer_requirements(&self) -> BestPeerRequirements<'_> {
         match self {
             Self::GetBlockHeaders { .. } => BestPeerRequirements::None,
             Self::GetBlockAccessLists { .. } => BestPeerRequirements::EthVersion(EthVersion::Eth71),
@@ -803,7 +809,9 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
                 }
             }
             Self::GetReceipts { .. } => BestPeerRequirements::FullBlock,
-            Self::GetSnap { .. } => BestPeerRequirements::SupportsSnap,
+            Self::GetSnap { excluded_peers, .. } => {
+                BestPeerRequirements::SupportsSnap { excluded_peers }
+            }
         }
     }
 }
@@ -831,7 +839,7 @@ pub(crate) enum BlockResponseOutcome {
 }
 
 /// Additional requirements for how to rank peers during selection.
-enum BestPeerRequirements {
+enum BestPeerRequirements<'a> {
     /// No additional requirements
     None,
     /// Peer must have this block range available.
@@ -840,8 +848,11 @@ enum BestPeerRequirements {
     FullBlock,
     /// Peer must support at least this eth protocol version.
     EthVersion(EthVersion),
-    /// Peer must have negotiated `snap/2`.
-    SupportsSnap,
+    /// Peer must have negotiated `snap/2` and must not be excluded by the request.
+    SupportsSnap {
+        /// Peers the request refuses to be served by.
+        excluded_peers: &'a [PeerId],
+    },
 }
 
 #[cfg(test)]
@@ -2059,7 +2070,10 @@ mod tests {
             supports_snap: false,
         });
 
-        assert_eq!(fetcher.next_best_peer(BestPeerRequirements::SupportsSnap), None);
+        assert_eq!(
+            fetcher.next_best_peer(BestPeerRequirements::SupportsSnap { excluded_peers: &[] }),
+            None
+        );
     }
 
     #[tokio::test]
@@ -2079,7 +2093,10 @@ mod tests {
             supports_snap: true,
         });
 
-        assert_eq!(fetcher.next_best_peer(BestPeerRequirements::SupportsSnap), Some(peer));
+        assert_eq!(
+            fetcher.next_best_peer(BestPeerRequirements::SupportsSnap { excluded_peers: &[] }),
+            Some(peer)
+        );
     }
 
     #[tokio::test]
@@ -2112,9 +2129,137 @@ mod tests {
 
         // Even though peer_no_snap has a lower timeout, it must NOT be selected.
         assert_eq!(
-            fetcher.next_best_peer(BestPeerRequirements::SupportsSnap),
+            fetcher.next_best_peer(BestPeerRequirements::SupportsSnap { excluded_peers: &[] }),
             Some(peer_with_snap)
         );
+    }
+
+    #[tokio::test]
+    async fn test_next_best_peer_snap_skips_excluded_peers() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+
+        let excluded = B512::random();
+        let available = B512::random();
+        // The excluded peer has the lower timeout, so it would win selection on merit alone.
+        for (peer_id, timeout) in [(excluded, 5), (available, 50)] {
+            fetcher.new_active_peer(NewPeerInfo {
+                peer_id,
+                best_hash: B256::random(),
+                best_number: 100,
+                capabilities: Arc::new(Capabilities::new(vec![])),
+                timeout: Arc::new(AtomicU64::new(timeout)),
+                range_info: None,
+                supports_snap: true,
+            });
+        }
+
+        assert_eq!(
+            fetcher
+                .next_best_peer(BestPeerRequirements::SupportsSnap { excluded_peers: &[excluded] }),
+            Some(available)
+        );
+        assert_eq!(
+            fetcher.next_best_peer(BestPeerRequirements::SupportsSnap {
+                excluded_peers: &[excluded, available]
+            }),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn test_snap_request_rejected_when_all_snap_peers_are_excluded() {
+        use futures::task::noop_waker;
+        use std::task::{Context, Poll};
+
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+
+        let peer = B512::random();
+        fetcher.new_active_peer(NewPeerInfo {
+            peer_id: peer,
+            best_hash: B256::random(),
+            best_number: 100,
+            capabilities: Arc::new(Capabilities::new(vec![])),
+            timeout: Arc::new(AtomicU64::new(10)),
+            range_info: None,
+            supports_snap: true,
+        });
+
+        let (tx, rx) = oneshot::channel();
+        fetcher
+            .download_requests_tx
+            .send(DownloadRequest::GetSnap {
+                request: SnapProtocolMessage::GetAccountRange(GetAccountRangeMessage {
+                    request_id: 0,
+                    root_hash: B256::ZERO,
+                    starting_hash: B256::ZERO,
+                    limit_hash: B256::ZERO,
+                    response_bytes: 0,
+                }),
+                response: tx,
+                priority: Priority::Normal,
+                excluded_peers: vec![peer],
+            })
+            .unwrap();
+
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        // The only capable peer is excluded, so waiting for peer churn cannot help.
+        assert!(matches!(fetcher.poll(&mut cx), Poll::Pending));
+        assert!(fetcher.queued_requests.is_empty());
+        assert_eq!(rx.await.unwrap().unwrap_err(), RequestError::UnsupportedCapability);
+    }
+
+    #[tokio::test]
+    async fn test_snap_followup_skips_a_request_that_excludes_the_peer() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+
+        let peer_id = B512::random();
+        fetcher.new_active_peer(NewPeerInfo {
+            peer_id,
+            best_hash: B256::random(),
+            best_number: 100,
+            capabilities: Arc::new(Capabilities::new(vec![])),
+            timeout: Arc::new(AtomicU64::new(10)),
+            range_info: None,
+            supports_snap: true,
+        });
+
+        // The queued retry excludes the peer that is about to finish its request.
+        let (followup_tx, _followup_rx) = oneshot::channel();
+        fetcher.queued_requests.push_back(DownloadRequest::GetSnap {
+            request: SnapProtocolMessage::GetAccountRange(GetAccountRangeMessage {
+                request_id: 0,
+                root_hash: B256::ZERO,
+                starting_hash: B256::ZERO,
+                limit_hash: B256::ZERO,
+                response_bytes: 0,
+            }),
+            response: followup_tx,
+            priority: Priority::Normal,
+            excluded_peers: vec![peer_id],
+        });
+
+        let (tx, mut rx) = oneshot::channel();
+        fetcher.inflight_snap_requests.insert(peer_id, Request { request: (), response: tx });
+        fetcher.peers.get_mut(&peer_id).unwrap().state = PeerState::GetSnap;
+
+        let resp = SnapResponse::AccountRange(AccountRangeMessage {
+            request_id: 1,
+            accounts: vec![],
+            proof: vec![],
+        });
+        let outcome = fetcher.on_snap_response(peer_id, Ok(resp));
+
+        assert!(outcome.is_none());
+        assert_eq!(fetcher.queued_requests.len(), 1);
+        assert!(rx.try_recv().is_ok());
     }
 
     #[tokio::test]
@@ -2150,6 +2295,7 @@ mod tests {
                 }),
                 response: tx,
                 priority: Priority::Normal,
+                excluded_peers: Vec::new(),
             })
             .unwrap();
 
@@ -2190,6 +2336,7 @@ mod tests {
             }),
             response: followup_tx,
             priority: Priority::Normal,
+            excluded_peers: Vec::new(),
         });
 
         let (tx, mut rx) = oneshot::channel();
@@ -2242,6 +2389,7 @@ mod tests {
                 }),
                 response: tx,
                 priority: Priority::Normal,
+                excluded_peers: Vec::new(),
             })
             .unwrap();
 

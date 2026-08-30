@@ -4,11 +4,13 @@
 //! penalizes and reissues in exactly the same way.
 
 use futures::FutureExt;
-use reth_eth_wire_types::snap::{GetAccountRangeMessage, GetStorageRangesMessage};
+use reth_eth_wire_types::snap::{
+    GetAccountRangeMessage, GetStorageRangesMessage, SnapProtocolMessage,
+};
 use reth_network_p2p::{
     error::RequestError,
     priority::Priority,
-    snap::client::{SnapClient, SnapResponse},
+    snap::client::{SnapClient, SnapRequestOptions, SnapResponse},
 };
 use reth_network_peers::PeerId;
 use reth_tasks::Runtime;
@@ -31,10 +33,16 @@ pub(super) struct VerifyingRequest<C: SnapClient, V: SnapVerifier> {
     request: V::Request,
     // Cloned per attempt, because verification moves onto the blocking pool.
     verifier: V,
+    // Carried across attempts so every peer caught misbehaving stays excluded for the rest of
+    // this request, and so the caller's own exclusions are never dropped by a retry.
+    options: SnapRequestOptions,
     // The response currently in flight.
     fut: C::Output,
     // Present only while a response is being authenticated.
     verification: Option<VerificationTask<V::Output>>,
+    // The most recent verification failure, kept so running out of peers locally does not hide
+    // that a peer answered with an unauthenticated response.
+    last_verification_error: Option<RequestError>,
     // Attempts already spent against `MAX_RETRIES`.
     retries: u8,
 }
@@ -44,10 +52,27 @@ where
     C: SnapClient,
     V: SnapVerifier,
 {
-    /// Submits `request` and prepares to authenticate its response with `verifier`.
-    pub(super) fn new(client: C, request: V::Request, verifier: V, runtime: Runtime) -> Self {
-        let fut = request.send(&client, Priority::Normal);
-        Self { client, runtime, request, verifier, fut, verification: None, retries: 0 }
+    // Submits `request` under `options` and prepares to authenticate its response with
+    // `verifier`.
+    pub(super) fn new(
+        client: C,
+        request: V::Request,
+        verifier: V,
+        runtime: Runtime,
+        options: SnapRequestOptions,
+    ) -> Self {
+        let fut = request.send(&client, options.clone());
+        Self {
+            client,
+            runtime,
+            request,
+            verifier,
+            options,
+            fut,
+            verification: None,
+            last_verification_error: None,
+            retries: 0,
+        }
     }
 
     /// Polls until the request yields a verified response or a terminal error.
@@ -75,12 +100,21 @@ where
                         self.runtime.spawn_blocking(move || verifier.verify(peer_id, response));
                     self.verification = Some(VerificationTask { peer_id, fut });
                 }
-                // A wrong wire response is already penalized by the session.
+                // A wrong wire response is already penalized by the session. Transport failures
+                // say nothing about the responder's data, so no peer is excluded here.
                 Err(error) if error.is_retryable() || error == RequestError::BadResponse => {
                     debug!(target: "downloaders::snap", %error, "Snap request failed, retrying");
                     if !self.retry() {
                         return Poll::Ready(Err(error))
                     }
+                }
+                // Exhausting the peers this request may still use is a local outcome, so the
+                // verification failure that excluded them is the more useful error to surface.
+                Err(RequestError::UnsupportedCapability) => {
+                    return Poll::Ready(Err(self
+                        .last_verification_error
+                        .take()
+                        .unwrap_or(RequestError::UnsupportedCapability)))
                 }
                 Err(error) => return Poll::Ready(Err(error)),
             }
@@ -93,7 +127,8 @@ where
             return false
         }
         self.retries += 1;
-        self.fut = self.request.send(&self.client, Priority::High);
+        self.options.priority = Priority::High;
+        self.fut = self.request.send(&self.client, self.options.clone());
         true
     }
 
@@ -112,6 +147,10 @@ where
             Ok(Err(error)) => {
                 debug!(target: "downloaders::snap", ?peer_id, %error, "Invalid snap response");
                 self.client.report_bad_message(peer_id);
+                // The response was authenticated against this request, so the peer that returned
+                // it cannot answer the retry.
+                self.options.exclude_peer(peer_id);
+                self.last_verification_error = Some(error.clone());
                 Poll::Ready(self.retry().then_some(None).ok_or(error))
             }
             // A panic or a shutting-down runtime is local, so it must not penalize the responder.
@@ -135,27 +174,29 @@ where
             .field("client", &self.client)
             .field("request", &self.request)
             .field("verifier", &self.verifier)
+            .field("options", &self.options)
+            .field("last_verification_error", &self.last_verification_error)
             .field("verifying", &self.verification.is_some())
             .field("retries", &self.retries)
             .finish_non_exhaustive()
     }
 }
 
-/// A snap request that can be reissued at a chosen priority.
+/// A snap request that can be reissued under different options.
 pub(super) trait SnapRequest {
-    /// Sends this request through `client`.
-    fn send<C: SnapClient>(&self, client: &C, priority: Priority) -> C::Output;
+    /// Sends this request through `client` under `options`.
+    fn send<C: SnapClient>(&self, client: &C, options: SnapRequestOptions) -> C::Output;
 }
 
 impl SnapRequest for GetAccountRangeMessage {
-    fn send<C: SnapClient>(&self, client: &C, priority: Priority) -> C::Output {
-        client.get_account_range_with_priority(self.clone(), priority)
+    fn send<C: SnapClient>(&self, client: &C, options: SnapRequestOptions) -> C::Output {
+        client.request_snap(SnapProtocolMessage::GetAccountRange(self.clone()), options)
     }
 }
 
 impl SnapRequest for GetStorageRangesMessage {
-    fn send<C: SnapClient>(&self, client: &C, priority: Priority) -> C::Output {
-        client.get_storage_ranges_with_priority(self.clone(), priority)
+    fn send<C: SnapClient>(&self, client: &C, options: SnapRequestOptions) -> C::Output {
+        client.request_snap(SnapProtocolMessage::GetStorageRanges(self.clone()), options)
     }
 }
 

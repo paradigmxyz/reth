@@ -10,7 +10,7 @@ use reth_eth_wire_types::snap::{
 };
 use reth_network_p2p::{
     error::RequestError,
-    snap::client::{SnapClient, SnapResponse},
+    snap::client::{SnapClient, SnapRequestOptions, SnapResponse},
 };
 use reth_network_peers::PeerId;
 use reth_tasks::Runtime;
@@ -45,6 +45,19 @@ impl<C: SnapClient> AccountRangeDownloader<C> {
         request: GetAccountRangeMessage,
         runtime: Runtime,
     ) -> Result<Self, InvalidAccountRange> {
+        Self::new_with_options(client, request, runtime, SnapRequestOptions::default())
+    }
+
+    /// Same as [`Self::new`], but dispatches the request under `options`.
+    ///
+    /// Peers already excluded by `options` never answer this download, and peers caught returning
+    /// an unauthenticated response join them for its remaining retries.
+    pub fn new_with_options(
+        client: C,
+        request: GetAccountRangeMessage,
+        runtime: Runtime,
+        options: SnapRequestOptions,
+    ) -> Result<Self, InvalidAccountRange> {
         if request.starting_hash > request.limit_hash {
             return Err(InvalidAccountRange {
                 origin: request.starting_hash,
@@ -52,7 +65,7 @@ impl<C: SnapClient> AccountRangeDownloader<C> {
             })
         }
         let verifier = request.clone();
-        Ok(Self(VerifyingRequest::new(client, request, verifier, runtime)))
+        Ok(Self(VerifyingRequest::new(client, request, verifier, runtime, options)))
     }
 }
 
@@ -313,7 +326,9 @@ mod tests {
     use super::{request::MAX_RETRIES, test_utils::TestSnapClient, *};
     use alloy_primitives::{Bytes, KECCAK256_EMPTY, U256};
     use reth_eth_wire_types::snap::{AccountData, ByteCodesMessage};
-    use reth_network_p2p::{error::PeerRequestResult, priority::Priority};
+    use reth_network_p2p::{
+        error::PeerRequestResult, priority::Priority, snap::client::SnapRequestOptions,
+    };
     use reth_network_peers::WithPeerId;
     use reth_trie_common::{proof::ProofRetainer, HashBuilder, Nibbles};
     use std::sync::Arc;
@@ -378,6 +393,27 @@ mod tests {
         AccountRangeDownloader::new(client, request, Runtime::test())
     }
 
+    fn downloader_excluding(
+        client: Arc<TestSnapClient>,
+        request: GetAccountRangeMessage,
+        excluded_peers: Vec<PeerId>,
+    ) -> Result<AccountRangeDownloader<Arc<TestSnapClient>>, InvalidAccountRange> {
+        AccountRangeDownloader::new_with_options(
+            client,
+            request,
+            Runtime::test(),
+            SnapRequestOptions { priority: Priority::Normal, excluded_peers },
+        )
+    }
+
+    // A response that cannot be an account range, so verification rejects it whatever was asked.
+    fn unverifiable(peer: PeerId) -> PeerRequestResult<SnapResponse> {
+        Ok(WithPeerId::new(
+            peer,
+            SnapResponse::ByteCodes(ByteCodesMessage { request_id: 1, codes: Vec::new() }),
+        ))
+    }
+
     #[test]
     fn verifies_and_decodes_without_an_ambient_runtime() {
         let accounts = vec![(key(1), account(7)), (key(2), account(8))];
@@ -406,7 +442,7 @@ mod tests {
             })
         );
         assert!(client.reported().is_empty());
-        assert_eq!(*client.priorities(), [Priority::Normal]);
+        assert_eq!(client.priorities(), [Priority::Normal]);
     }
 
     #[tokio::test]
@@ -415,10 +451,7 @@ mod tests {
         let root_hash = root(&accounts);
         let bad_peer = PeerId::random();
         let good_peer = PeerId::random();
-        let bad = Ok(WithPeerId::new(
-            bad_peer,
-            SnapResponse::ByteCodes(ByteCodesMessage { request_id: 1, codes: Vec::new() }),
-        ));
+        let bad = unverifiable(bad_peer);
         let good = response(
             good_peer,
             AccountRangeMessage {
@@ -433,7 +466,8 @@ mod tests {
 
         assert!(matches!(outcome, AccountRangeOutcome::Verified(_)));
         assert_eq!(*client.reported(), [bad_peer]);
-        assert_eq!(*client.priorities(), [Priority::Normal, Priority::High]);
+        assert_eq!(client.priorities(), [Priority::Normal, Priority::High]);
+        assert_eq!(client.exclusions(), [vec![], vec![bad_peer]]);
     }
 
     #[tokio::test]
@@ -735,18 +769,15 @@ mod tests {
         downloader(Arc::clone(&client), request(root_hash)).unwrap().await.unwrap();
 
         assert!(client.reported().is_empty());
-        assert_eq!(*client.priorities(), [Priority::Normal, Priority::High, Priority::High]);
+        assert_eq!(client.priorities(), [Priority::Normal, Priority::High, Priority::High]);
+        // A timeout or a wire-level rejection says nothing about the responder's data.
+        assert!(client.exclusions().iter().all(Vec::is_empty));
     }
 
     #[tokio::test]
     async fn stops_after_the_retry_budget_is_exhausted() {
         let peers = [PeerId::random(), PeerId::random(), PeerId::random()];
-        let responses = peers.map(|peer| {
-            Ok(WithPeerId::new(
-                peer,
-                SnapResponse::ByteCodes(ByteCodesMessage { request_id: 1, codes: Vec::new() }),
-            ))
-        });
+        let responses = peers.map(unverifiable);
         let client = Arc::new(TestSnapClient::new(responses));
 
         let error = downloader(Arc::clone(&client), request(B256::repeat_byte(0x11)))
@@ -756,6 +787,63 @@ mod tests {
 
         assert_eq!(error, RequestError::BadResponse);
         assert_eq!(*client.reported(), peers);
-        assert_eq!(*client.priorities(), [Priority::Normal, Priority::High, Priority::High]);
+        assert_eq!(client.priorities(), [Priority::Normal, Priority::High, Priority::High]);
+    }
+
+    #[tokio::test]
+    async fn exclusions_accumulate_across_retries() {
+        let known_bad = PeerId::random();
+        let peers = [PeerId::random(), PeerId::random(), PeerId::random()];
+        let client = Arc::new(TestSnapClient::new(peers.map(unverifiable)));
+
+        let error = downloader_excluding(
+            Arc::clone(&client),
+            request(B256::repeat_byte(0x11)),
+            vec![known_bad],
+        )
+        .unwrap()
+        .await
+        .unwrap_err();
+
+        assert_eq!(error, RequestError::BadResponse);
+        // The caller's exclusion is never dropped, and each invalid responder joins it once.
+        assert_eq!(
+            client.exclusions(),
+            [vec![known_bad], vec![known_bad, peers[0]], vec![known_bad, peers[0], peers[1]],]
+        );
+    }
+
+    #[tokio::test]
+    async fn excluding_every_snap_peer_fails_without_a_request() {
+        let peer = PeerId::random();
+        let client = Arc::new(TestSnapClient::new(std::iter::empty()).with_snap_peers([peer]));
+
+        let error =
+            downloader_excluding(Arc::clone(&client), request(B256::repeat_byte(0x11)), vec![peer])
+                .unwrap()
+                .await
+                .unwrap_err();
+
+        assert_eq!(error, RequestError::UnsupportedCapability);
+        // No peer was left to try, so the request is not reissued.
+        assert_eq!(client.exclusions(), [vec![peer]]);
+        assert!(client.reported().is_empty());
+    }
+
+    // Running out of peers is local, so it must not replace the peer's own failure.
+    #[tokio::test]
+    async fn peer_exhaustion_preserves_the_verification_error() {
+        let bad_peer = PeerId::random();
+        let client =
+            Arc::new(TestSnapClient::new([unverifiable(bad_peer)]).with_snap_peers([bad_peer]));
+
+        let error = downloader(Arc::clone(&client), request(B256::repeat_byte(0x11)))
+            .unwrap()
+            .await
+            .unwrap_err();
+
+        assert_eq!(error, RequestError::BadResponse);
+        assert_eq!(*client.reported(), [bad_peer]);
+        assert_eq!(client.exclusions(), [vec![], vec![bad_peer]]);
     }
 }

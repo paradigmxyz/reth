@@ -14,7 +14,7 @@ use reth_eth_wire_types::snap::{
 };
 use reth_network_p2p::{
     error::RequestError,
-    snap::client::{SnapClient, SnapResponse},
+    snap::client::{SnapClient, SnapRequestOptions, SnapResponse},
 };
 use reth_network_peers::PeerId;
 use reth_tasks::Runtime;
@@ -48,6 +48,20 @@ impl<C: SnapClient> StorageRangeDownloader<C> {
         batch: &VerifiedAccountBatch<'_>,
         runtime: Runtime,
     ) -> Result<Self, InvalidStorageRangeRequest> {
+        Self::new_with_options(client, request, batch, runtime, SnapRequestOptions::default())
+    }
+
+    /// Same as [`Self::new`], but dispatches the request under `options`.
+    ///
+    /// Peers already excluded by `options` never answer this download, and peers caught returning
+    /// an unauthenticated response join them for its remaining retries.
+    pub fn new_with_options(
+        client: C,
+        request: GetStorageRangesMessage,
+        batch: &VerifiedAccountBatch<'_>,
+        runtime: Runtime,
+        options: SnapRequestOptions,
+    ) -> Result<Self, InvalidStorageRangeRequest> {
         let origin = request.starting_hash.unwrap_or(B256::ZERO);
         let limit = request.limit_hash.unwrap_or(MAX_HASH);
         if origin > limit {
@@ -76,7 +90,7 @@ impl<C: SnapClient> StorageRangeDownloader<C> {
         }
 
         let verifier = StorageRangeVerifier { request: request.clone(), storage_roots };
-        Ok(Self(VerifyingRequest::new(client, request, verifier, runtime)))
+        Ok(Self(VerifyingRequest::new(client, request, verifier, runtime, options)))
     }
 }
 
@@ -453,6 +467,7 @@ mod tests {
         *,
     };
     use alloy_primitives::{Bytes, KECCAK256_EMPTY};
+    use reth_eth_wire_types::snap::ByteCodesMessage;
     use reth_network_p2p::{error::PeerRequestResult, priority::Priority};
     use reth_network_peers::WithPeerId;
     use reth_trie_common::{
@@ -547,6 +562,47 @@ mod tests {
     ) -> Result<StorageRangeDownloader<C>, InvalidStorageRangeRequest> {
         let range = verified_range(accounts);
         StorageRangeDownloader::new(client, request, &range.batch(), Runtime::test())
+    }
+
+    #[tokio::test]
+    async fn storage_exclusions_reach_peer_selection_and_grow_on_a_retry() {
+        let slots = slots(&[(key(1), 11)]);
+        let (root, _) = storage_root(&slots, &[]);
+        let accounts = vec![(key(100), account(root))];
+        let excluded = PeerId::random();
+        let bad_peers = [PeerId::random(), PeerId::random(), PeerId::random()];
+        // A bytecode response can never authenticate a storage range, so each attempt is rejected.
+        let responses = bad_peers.map(|peer| {
+            Ok(WithPeerId::new(
+                peer,
+                SnapResponse::ByteCodes(ByteCodesMessage { request_id: 1, codes: Vec::new() }),
+            ))
+        });
+        let client = Arc::new(TestSnapClient::new(responses));
+
+        let range = verified_range(&accounts);
+        let error = StorageRangeDownloader::new_with_options(
+            Arc::clone(&client),
+            request(&accounts),
+            &range.batch(),
+            Runtime::test(),
+            SnapRequestOptions { priority: Priority::Normal, excluded_peers: vec![excluded] },
+        )
+        .unwrap()
+        .await
+        .unwrap_err();
+
+        assert_eq!(error, RequestError::BadResponse);
+        assert_eq!(*client.reported(), bad_peers);
+        // The caller's exclusion leads, and each rejected responder is appended to it.
+        assert_eq!(
+            client.exclusions(),
+            [
+                vec![excluded],
+                vec![excluded, bad_peers[0]],
+                vec![excluded, bad_peers[0], bad_peers[1]],
+            ]
+        );
     }
 
     #[tokio::test]

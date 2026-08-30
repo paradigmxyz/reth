@@ -13,6 +13,7 @@ use reth_eth_wire_types::{
     },
     NetworkPrimitives,
 };
+use reth_network_peers::PeerId;
 
 /// Response types for snap sync requests
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,6 +62,17 @@ pub trait SnapClient: DownloadClient {
     /// The output future type for snap requests
     type Output: Future<Output = PeerRequestResult<SnapResponse>> + Send + Sync + Unpin;
 
+    /// Sends `request` to the p2p network under `options` and returns the response received from
+    /// a peer.
+    ///
+    /// Fails with [`RequestError::UnsupportedCapability`] when no peer can serve the request,
+    /// which includes the case where every capable peer is excluded.
+    fn request_snap(
+        &self,
+        request: SnapProtocolMessage,
+        options: SnapRequestOptions,
+    ) -> Self::Output;
+
     /// Sends the account range request to the p2p network and returns the account range
     /// response received from a peer.
     fn get_account_range(&self, request: GetAccountRangeMessage) -> Self::Output {
@@ -73,11 +85,18 @@ pub trait SnapClient: DownloadClient {
         &self,
         request: GetAccountRangeMessage,
         priority: Priority,
-    ) -> Self::Output;
+    ) -> Self::Output {
+        self.request_snap(
+            SnapProtocolMessage::GetAccountRange(request),
+            SnapRequestOptions::with_priority(priority),
+        )
+    }
 
     /// Sends the storage ranges request to the p2p network and returns the storage ranges
     /// response received from a peer.
-    fn get_storage_ranges(&self, request: GetStorageRangesMessage) -> Self::Output;
+    fn get_storage_ranges(&self, request: GetStorageRangesMessage) -> Self::Output {
+        self.get_storage_ranges_with_priority(request, Priority::Normal)
+    }
 
     /// Sends the storage ranges request to the p2p network with priority set and returns
     /// the storage ranges response received from a peer.
@@ -85,11 +104,18 @@ pub trait SnapClient: DownloadClient {
         &self,
         request: GetStorageRangesMessage,
         priority: Priority,
-    ) -> Self::Output;
+    ) -> Self::Output {
+        self.request_snap(
+            SnapProtocolMessage::GetStorageRanges(request),
+            SnapRequestOptions::with_priority(priority),
+        )
+    }
 
     /// Sends the byte codes request to the p2p network and returns the byte codes
     /// response received from a peer.
-    fn get_byte_codes(&self, request: GetByteCodesMessage) -> Self::Output;
+    fn get_byte_codes(&self, request: GetByteCodesMessage) -> Self::Output {
+        self.get_byte_codes_with_priority(request, Priority::Normal)
+    }
 
     /// Sends the byte codes request to the p2p network with priority set and returns
     /// the byte codes response received from a peer.
@@ -97,7 +123,12 @@ pub trait SnapClient: DownloadClient {
         &self,
         request: GetByteCodesMessage,
         priority: Priority,
-    ) -> Self::Output;
+    ) -> Self::Output {
+        self.request_snap(
+            SnapProtocolMessage::GetByteCodes(request),
+            SnapRequestOptions::with_priority(priority),
+        )
+    }
 
     /// Sends the block access lists request to the p2p network and returns the block
     /// access lists response received from a peer.
@@ -115,7 +146,36 @@ pub trait SnapClient: DownloadClient {
         &self,
         request: GetBlockAccessListsMessage,
         priority: Priority,
-    ) -> Self::Output;
+    ) -> Self::Output {
+        self.request_snap(
+            SnapProtocolMessage::GetBlockAccessLists(request),
+            SnapRequestOptions::with_priority(priority),
+        )
+    }
+}
+
+/// How a snap request is dispatched to a peer.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SnapRequestOptions {
+    /// Queue position the request is dispatched at.
+    pub priority: Priority,
+    /// Peers that must not receive this logical request.
+    pub excluded_peers: Vec<PeerId>,
+}
+
+impl SnapRequestOptions {
+    /// Dispatches at `priority` without excluding any peer.
+    pub const fn with_priority(priority: Priority) -> Self {
+        Self { priority, excluded_peers: Vec::new() }
+    }
+
+    /// Excludes `peer_id`, keeping the exclusions free of duplicates so a peer caught twice does
+    /// not grow the list a retry has to carry.
+    pub fn exclude_peer(&mut self, peer_id: PeerId) {
+        if !self.excluded_peers.contains(&peer_id) {
+            self.excluded_peers.push(peer_id);
+        }
+    }
 }
 
 /// Fails every snap request with [`RequestError::UnsupportedCapability`], so the noop client can
@@ -126,56 +186,14 @@ where
 {
     type Output = futures::future::Ready<PeerRequestResult<SnapResponse>>;
 
-    /// Fails the account range request as unsupported.
-    fn get_account_range_with_priority(
+    /// Fails every snap request as unsupported, whatever the options ask for.
+    fn request_snap(
         &self,
-        _request: GetAccountRangeMessage,
-        _priority: Priority,
+        _request: SnapProtocolMessage,
+        _options: SnapRequestOptions,
     ) -> Self::Output {
-        unsupported()
+        futures::future::ready(Err(RequestError::UnsupportedCapability))
     }
-
-    /// Fails the storage ranges request as unsupported.
-    fn get_storage_ranges(&self, _request: GetStorageRangesMessage) -> Self::Output {
-        unsupported()
-    }
-
-    /// Fails the prioritized storage ranges request as unsupported.
-    fn get_storage_ranges_with_priority(
-        &self,
-        _request: GetStorageRangesMessage,
-        _priority: Priority,
-    ) -> Self::Output {
-        unsupported()
-    }
-
-    /// Fails the bytecode request as unsupported.
-    fn get_byte_codes(&self, _request: GetByteCodesMessage) -> Self::Output {
-        unsupported()
-    }
-
-    /// Fails the prioritized bytecode request as unsupported.
-    fn get_byte_codes_with_priority(
-        &self,
-        _request: GetByteCodesMessage,
-        _priority: Priority,
-    ) -> Self::Output {
-        unsupported()
-    }
-
-    /// Fails the block access lists request as unsupported.
-    fn get_block_access_lists_with_priority(
-        &self,
-        _request: GetBlockAccessListsMessage,
-        _priority: Priority,
-    ) -> Self::Output {
-        unsupported()
-    }
-}
-
-/// The noop answer to any snap request: immediately ready, no capability.
-fn unsupported() -> futures::future::Ready<PeerRequestResult<SnapResponse>> {
-    futures::future::ready(Err(RequestError::UnsupportedCapability))
 }
 
 #[cfg(test)]
