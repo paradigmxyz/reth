@@ -9849,6 +9849,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-pureth-query"
+version = "2.5.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+]
+
+[[package]]
 name = "reth-revm"
 version = "2.5.1"
 dependencies = [

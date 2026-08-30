@@ -79,6 +79,7 @@ members = [
     "crates/payload/util/",
     "crates/prune/prune",
     "crates/prune/types",
+    "crates/pureth/query",
     "crates/pureth/withdrawal-root/",
     "crates/revm/",
     "crates/rpc/ipc/",

@@ -1,0 +1,9 @@
+{
+  "case_id": "progressive_boundary",
+  "five_fixture_sha256": "0x1546ed5982a3e03c0d077468dd6f5bee29f1a8fb70705368f31d9a86c7a79531",
+  "five_root": "0x78c6231596d81ac08248cab98c233101652fad4d216945bd34ae0d23e7b05aaf",
+  "format_version": "pureth_receipt_proof_vectors_v0",
+  "six_fixture_sha256": "0xeb20da8b70eff3af1098daa559553eec795f038bd487556596b457c211c3dddb",
+  "six_root": "0x123e20ae7ab335da6b065c1b668af1670bde8f68bfe66963c1b13e32ea02aa46",
+  "transition": "sixth receipt starts the 16-item progressive subtree group"
+}

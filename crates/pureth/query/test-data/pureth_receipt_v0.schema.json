@@ -1,0 +1,40 @@
+{
+  "schema_id": "pureth-receipt-v0",
+  "root_type": "ReceiptsSSZ",
+  "types": {
+    "ExecutionAddress": { "kind": "byte_vector", "length": 20 },
+    "Hash32": { "kind": "byte_vector", "length": 32 },
+    "LogSSZ": {
+      "kind": "container",
+      "fields": [
+        ["address", "ExecutionAddress"],
+        ["topics", { "kind": "list", "element": "Hash32", "limit": 4 }],
+        ["data", { "kind": "progressive_byte_list" }]
+      ]
+    },
+    "OptionalAddress": {
+      "kind": "union",
+      "options": [null, "ExecutionAddress"]
+    },
+    "ReceiptSSZ": {
+      "kind": "container",
+      "fields": [
+        ["tx_type", "uint8"],
+        ["success", "boolean"],
+        ["gas_used", "uint64"],
+        ["contract_address", "OptionalAddress"],
+        ["logs", { "kind": "progressive_list", "element": "LogSSZ" }]
+      ]
+    },
+    "ReceiptsSSZ": {
+      "kind": "progressive_list",
+      "element": "ReceiptSSZ"
+    }
+  },
+  "conversion": {
+    "tx_type": "EIP-2718 transaction type; legacy is 0",
+    "gas_used": "current cumulative gas used minus previous cumulative gas used",
+    "contract_address": "selector 1 with address only for a successful create result; selector 0 otherwise",
+    "ordering": "receipt and log order exactly follows block execution order"
+  }
+}

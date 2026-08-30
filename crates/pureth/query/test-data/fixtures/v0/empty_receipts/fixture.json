@@ -1,0 +1,7 @@
+{
+  "receipt_count": 0,
+  "receipts": [],
+  "root_type": "ReceiptsSSZ",
+  "schema_id": "pureth-receipt-v0",
+  "source_scenario": "empty receipt list"
+}
