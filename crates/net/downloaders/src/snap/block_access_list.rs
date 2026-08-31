@@ -6,7 +6,7 @@
 
 use super::request::{SnapVerifier, VerifyingRequest};
 use alloy_consensus::BlockHeader;
-use alloy_eips::eip7928::bal::DecodedBal;
+use alloy_eips::eip7928::bal::{DecodedBal, RawBal};
 use alloy_primitives::{Bytes, Sealable, B256};
 use futures::Future;
 use reth_eth_wire_types::snap::{BlockAccessListsMessage, GetBlockAccessListsMessage};
@@ -106,7 +106,7 @@ pub struct VerifiedBlockAccessLists {
     peer_id: PeerId,
     // Each list stays bound to the block whose header commitment authenticated it.
     block_access_lists: Vec<(B256, Option<DecodedBal>)>,
-    // First requested position the response omitted, or none when it covered every request.
+    // First requested position still to fetch, or none when the peer answered all of them.
     next_index: Option<usize>,
 }
 
@@ -126,10 +126,10 @@ impl VerifiedBlockAccessLists {
         self.block_access_lists
     }
 
-    /// First requested position left unanswered, or `None` once every request is covered.
+    /// First requested position still to fetch, or `None` once every request is answered.
     ///
-    /// A truncated response is not a fault: peers cut responses at their own soft byte limit, so
-    /// a follow-up resumes from here.
+    /// Neither an omitted list nor a truncated response is a fault: a peer serves what it holds
+    /// and cuts at its own soft byte limit, so a follow-up resumes from here.
     pub const fn next_index(&self) -> Option<usize> {
         self.next_index
     }
@@ -227,20 +227,23 @@ impl BlockAccessListVerifier {
                 block_access_lists.push((block_hash, None));
                 continue
             };
-            let decoded = DecodedBal::from_rlp_bytes(raw).map_err(|error| {
-                debug!(target: "downloaders::snap", %block_hash, %error, "Invalid block access list");
-                RequestError::BadResponse
-            })?;
-            if decoded.hash() != commitment {
+            // Hashing the raw bytes settles authenticity without decoding, so a peer cannot
+            // charge us the decode of a list it was never able to serve.
+            let raw = RawBal::new(raw);
+            if raw.hash() != commitment {
                 debug!(
                     target: "downloaders::snap",
                     %block_hash,
                     expected = %commitment,
-                    got = %decoded.hash(),
+                    got = %raw.hash(),
                     "Block access list does not match its header commitment"
                 );
                 return Err(RequestError::BadResponse)
             }
+            let decoded = DecodedBal::from_raw_bal(raw).map_err(|error| {
+                debug!(target: "downloaders::snap", %block_hash, %error, "Invalid block access list");
+                RequestError::BadResponse
+            })?;
             block_access_lists.push((block_hash, Some(decoded)));
         }
 
@@ -260,8 +263,12 @@ impl SnapVerifier for BlockAccessListVerifier {
             return Ok(BlockAccessListOutcome::Unavailable { peer_id })
         }
 
-        let next_index = (entries.len() < self.blocks.len()).then_some(entries.len());
+        let truncated = (entries.len() < self.blocks.len()).then_some(entries.len());
         let block_access_lists = self.authenticate_entries(entries)?;
+        // An omitted entry leaves its block as unanswered as a cut-short response does, so both
+        // resume at the same place instead of the two encodings of "I have none" diverging.
+        let next_index =
+            block_access_lists.iter().position(|(_, list)| list.is_none()).or(truncated);
 
         Ok(BlockAccessListOutcome::Verified(VerifiedBlockAccessLists {
             peer_id,
@@ -381,7 +388,7 @@ mod tests {
 
         let verified = verified(outcome);
         assert_eq!(verified.peer_id(), peer);
-        assert_eq!(verified.next_index(), None);
+        assert_eq!(verified.next_index(), Some(1));
         assert_eq!(
             verified
                 .block_access_lists()
@@ -412,6 +419,20 @@ mod tests {
         assert_eq!(verified.block_access_lists().len(), 2);
         assert_eq!(verified.block_access_lists()[0].0, headers[0].hash());
         assert_eq!(verified.block_access_lists()[1].0, headers[1].hash());
+        assert!(client.reported().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_response_of_only_omitted_entries_still_points_at_the_first_block() {
+        let headers = headers(&[None, None]);
+        let peer = PeerId::random();
+        let client = Arc::new(TestSnapClient::new([response(peer, 1, vec![None, None])]));
+
+        let outcome =
+            downloader(Arc::clone(&client), request(&headers), &headers).unwrap().await.unwrap();
+
+        // Answering nothing must push the caller elsewhere however the peer spells it.
+        assert_eq!(verified(outcome).next_index(), Some(0));
         assert!(client.reported().is_empty());
     }
 
@@ -453,6 +474,23 @@ mod tests {
             Header { block_access_list_hash: Some(B256::repeat_byte(0xab)), ..Default::default() },
             B256::repeat_byte(1),
         )];
+        let peer = PeerId::random();
+        let client = Arc::new(TestSnapClient::new(always(peer, 1, vec![Some(bal())])));
+
+        let error = downloader(Arc::clone(&client), request(&headers), &headers)
+            .unwrap()
+            .await
+            .unwrap_err();
+
+        assert_eq!(error, RequestError::BadResponse);
+        assert_eq!(client.reported().len(), usize::from(MAX_RETRIES) + 1);
+    }
+
+    #[tokio::test]
+    async fn dropping_an_entry_instead_of_omitting_it_in_place_is_rejected() {
+        // The peer holds no list for the first block and drops the slot rather than sending
+        // `None`, so the second block's list lands on the first block's commitment.
+        let headers = headers(&[None, Some(bal())]);
         let peer = PeerId::random();
         let client = Arc::new(TestSnapClient::new(always(peer, 1, vec![Some(bal())])));
 
