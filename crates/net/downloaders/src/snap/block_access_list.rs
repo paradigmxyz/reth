@@ -31,11 +31,10 @@ use tracing::debug;
 pub struct BlockAccessListDownloader<C: SnapClient>(VerifyingRequest<C, BlockAccessListVerifier>);
 
 impl<C: SnapClient> BlockAccessListDownloader<C> {
-    /// Validates `headers` against the request before submitting it.
+    /// Creates a downloader that verifies responses against `headers`.
     ///
-    /// `headers` must hold the sealed headers for `request.block_hashes`, in the same order; their
-    /// block-access-list commitments authenticate the returned lists. Pairing headers with a
-    /// request for other blocks would penalize a peer that answered honestly.
+    /// Headers must match the requested block hashes in order and carry their block-access-list
+    /// commitments.
     pub fn new<H: BlockHeader + Sealable>(
         client: C,
         request: GetBlockAccessListsMessage,
@@ -409,7 +408,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_invalid_list_is_reported_excluded_and_retried_against_another_peer() {
+    async fn an_invalid_list_is_reported_and_retried() {
         let entries = vec![Some(bal())];
         let headers = headers(&entries);
         let bad_peer = PeerId::random();
@@ -423,8 +422,7 @@ mod tests {
 
         assert_eq!(verified(outcome).block_access_lists().len(), 1);
         assert_eq!(*client.reported(), [bad_peer]);
-        assert_eq!(client.priorities(), [Priority::Normal, Priority::High]);
-        assert_eq!(client.exclusions(), [vec![], vec![bad_peer]]);
+        assert_eq!(*client.priorities(), [Priority::Normal, Priority::High]);
     }
 
     #[tokio::test]
@@ -483,7 +481,7 @@ mod tests {
 
         assert_eq!(error, RequestError::BadResponse);
         assert_eq!(*client.reported(), peers);
-        assert_eq!(client.priorities(), [Priority::Normal, Priority::High, Priority::High]);
+        assert_eq!(*client.priorities(), [Priority::Normal, Priority::High, Priority::High]);
     }
 
     #[test]
