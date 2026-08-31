@@ -25,6 +25,7 @@ use alloy_evm::{
 };
 use alloy_primitives::Address;
 use crossbeam_channel::{Receiver, Sender};
+use reth_engine_primitives::BlockAccessListDecodeError;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor};
 use reth_primitives_traits::ReceiptTy;
 use reth_provider::BlockExecutionOutput;
@@ -193,11 +194,8 @@ fn convert_alloy_to_revm_bal(alloy_bal: &AlloyBal) -> Result<Arc<RevmBal>, BalEx
     // is triggered then the execution is reverted, and as such no actual code change event takes
     // place. Therefore, if we do observe such a bytecode in a BAL then that means the BAL is
     // invalid as no legal execution should've led to this bytecode deployment.
-    let received_bal_revm = RevmBal::clone_from_alloy(alloy_bal.as_vec()).map_err(|e| {
-        BalExecutionError::Consensus(reth_consensus::ConsensusError::BlockAccessListInvalid(
-            format!("{e:?}"),
-        ))
-    })?;
+    let received_bal_revm =
+        RevmBal::clone_from_alloy(alloy_bal.as_vec()).map_err(BlockAccessListDecodeError::new)?;
     Ok(Arc::new(received_bal_revm))
 }
 
@@ -239,7 +237,7 @@ impl AbortGuard {
     }
 }
 
-/// Mirrors `EthBlockExecutor`'s cumulative gas admission check in the ordered BAL commit loop.
+/// Mirrors `EthBlockExecutor`'s gas admission checks in the ordered BAL commit loop.
 #[derive(Debug)]
 struct BlockGasTracker {
     block_gas_limit: u64,
@@ -247,6 +245,7 @@ struct BlockGasTracker {
     tx_gas_limit_cap: Option<u64>,
     cumulative_tx_gas_used: u64,
     block_regular_gas_used: u64,
+    block_state_gas_used: u64,
 }
 
 impl BlockGasTracker {
@@ -261,9 +260,26 @@ impl BlockGasTracker {
             tx_gas_limit_cap,
             cumulative_tx_gas_used: 0,
             block_regular_gas_used: 0,
+            block_state_gas_used: 0,
         }
     }
 
+    /// Verifies that the transaction's gas limit fits the block's remaining gas budget(s): the
+    /// admission check `EthBlockExecutor::execute_transaction_without_commit` performs before
+    /// executing a transaction.
+    ///
+    /// The commit loop never calls that entry point — workers execute speculatively and their
+    /// results are committed directly via `commit_transaction` — so the check must be replayed
+    /// here for BAL and serial execution to reach the same block validity verdict.
+    ///
+    /// Pre-Amsterdam there is one budget: the tx gas limit, capped by `tx_gas_limit_cap`
+    /// (EIP-7825), must fit `block_gas_limit - cumulative_tx_gas_used`.
+    ///
+    /// Amsterdam (EIP-8037) splits gas into two lanes, each budgeted at `block_gas_limit`:
+    /// - regular: the capped tx gas limit must fit the remaining regular budget
+    /// - state: the full, uncapped tx gas limit must fit the remaining state budget, since state
+    ///   gas is drawn from the reservoir above `tx_gas_limit_cap` (execution-specs
+    ///   `check_block_gas_capacity`)
     fn validate_tx_limit(&self, tx_gas_limit: u64) -> Result<(), BlockExecutionError> {
         let block_gas_used = if self.enable_amsterdam_eip8037 {
             self.block_regular_gas_used
@@ -282,6 +298,18 @@ impl BlockGasTracker {
             .into());
         }
 
+        if self.enable_amsterdam_eip8037 {
+            let state_gas_available =
+                self.block_gas_limit.saturating_sub(self.block_state_gas_used);
+            if tx_gas_limit > state_gas_available {
+                return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                    transaction_gas_limit: tx_gas_limit,
+                    block_available_gas: state_gas_available,
+                }
+                .into());
+            }
+        }
+
         Ok(())
     }
 
@@ -290,14 +318,19 @@ impl BlockGasTracker {
         self.cumulative_tx_gas_used = self.cumulative_tx_gas_used.saturating_add(gas.tx_gas_used());
         self.block_regular_gas_used =
             self.block_regular_gas_used.saturating_add(gas.block_regular_gas_used());
+        self.block_state_gas_used =
+            self.block_state_gas_used.saturating_add(gas.block_state_gas_used());
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tree::error::{InsertBlockErrorKind, InsertBlockProcessingError};
     use alloy_consensus::{BlockHeader, Header};
-    use alloy_eip7928::{bal::Bal as AlloyBal, BlockAccessList};
+    use alloy_eip7928::{
+        bal::Bal as AlloyBal, AccountChanges, BlockAccessIndex, BlockAccessList, CodeChange,
+    };
     use alloy_eips::{
         eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE},
@@ -415,6 +448,28 @@ mod tests {
             executor.apply_post_execution_changes().expect("post-exec");
         }
         state.take_built_alloy_bal().expect("with_bal_builder was set")
+    }
+
+    #[test]
+    fn invalid_bal_bytecode_is_malformed_input() {
+        let alloy_bal = vec![AccountChanges {
+            address: Address::ZERO,
+            code_changes: vec![CodeChange::new(
+                BlockAccessIndex::new(1),
+                vec![0xef, 0x01, 0xde].into(),
+            )],
+            ..Default::default()
+        }]
+        .into();
+
+        let error = convert_alloy_to_revm_bal(&alloy_bal).unwrap_err();
+        assert!(matches!(&error, BalExecutionError::BlockAccessListDecode(_)));
+        let error = InsertBlockErrorKind::from(error);
+        assert!(matches!(&error, InsertBlockErrorKind::BlockAccessListDecode(_)));
+        assert!(matches!(
+            error.ensure_validation_error(),
+            Err(InsertBlockProcessingError::MalformedInput(_))
+        ));
     }
 
     #[test]
@@ -1144,7 +1199,8 @@ mod tests {
 
     #[test]
     fn gas_tracker_non_amsterdam_uses_cumulative_gas() {
-        // All-state-gas results keep block_regular_gas_used at 0, so a second tx that fits
+        // A half-state-gas result keeps both Amsterdam budgets (regular and state) at
+        // 300_000 used while cumulative_tx_gas_used is 600_000, so a second tx that fits
         // within the block limit but not the remaining cumulative budget proves that
         // non-Amsterdam reads cumulative_tx_gas_used while Amsterdam does not.
         use revm::{
@@ -1156,9 +1212,10 @@ mod tests {
 
         let block_gas_limit = 1_000_000u64;
         let first_tx_gas = 600_000u64;
-        let second_tx_gas_limit = 500_000u64; // fits in total limit but not after cumulative deduction
+        let second_tx_gas_limit = 500_000u64; // fits in total limit but not after cumulative
+                                              // deduction
 
-        let gas = ResultGas::new_with_state_gas(first_tx_gas, 0, 0, first_tx_gas);
+        let gas = ResultGas::new_with_state_gas(first_tx_gas, 0, 0, first_tx_gas / 2);
         let fake_result: ResultAndState<revm::context::result::HaltReason> =
             ExecResultAndState::new(
                 ExecutionResult::Success {
@@ -1178,12 +1235,63 @@ mod tests {
             "non-Amsterdam tracker must reject tx that exceeds remaining cumulative gas",
         );
 
-        // Amsterdam: block_available_gas = 1_000_000 - 0 = 1_000_000 → accept 500_000.
+        // Amsterdam: both regular and state budgets have 700_000 left → accept 500_000.
         let mut amsterdam = BlockGasTracker::new(block_gas_limit, true, None);
         amsterdam.record_result(&fake_result);
         assert!(
             amsterdam.validate_tx_limit(second_tx_gas_limit).is_ok(),
-            "Amsterdam tracker must accept the same tx since block_regular_gas_used stays 0",
+            "Amsterdam tracker must accept the same tx since per-dimension budgets still fit",
+        );
+    }
+
+    #[test]
+    fn gas_tracker_amsterdam_enforces_state_gas_budget() {
+        // An all-state-gas result leaves the regular budget untouched, so only the
+        // state-gas admission check can reject the second transaction. The tx's full gas
+        // limit counts against the state budget — tx_gas_limit_cap does not bound it.
+        use revm::{
+            context::result::{
+                ExecResultAndState, ExecutionResult, Output, ResultGas, SuccessReason,
+            },
+            state::EvmState,
+        };
+
+        let block_gas_limit = 1_000_000u64;
+        let first_tx_state_gas = 600_000u64;
+        let second_tx_gas_limit = 500_000u64; // exceeds the remaining 400_000 state budget
+
+        let gas = ResultGas::new_with_state_gas(first_tx_state_gas, 0, 0, first_tx_state_gas);
+        let fake_result: ResultAndState<revm::context::result::HaltReason> =
+            ExecResultAndState::new(
+                ExecutionResult::Success {
+                    reason: SuccessReason::Return,
+                    gas,
+                    logs: vec![],
+                    output: Output::Call(Default::default()),
+                },
+                EvmState::default(),
+            );
+
+        // Regular budget is full (block_regular_gas_used = 0) but the state budget has
+        // only 400_000 left → reject 500_000.
+        let mut amsterdam = BlockGasTracker::new(block_gas_limit, true, None);
+        amsterdam.record_result(&fake_result);
+        assert!(
+            amsterdam.validate_tx_limit(second_tx_gas_limit).is_err(),
+            "Amsterdam tracker must reject tx whose gas limit exceeds the remaining state budget",
+        );
+        assert!(
+            amsterdam.validate_tx_limit(400_000).is_ok(),
+            "Amsterdam tracker must accept tx whose gas limit exactly fits the state budget",
+        );
+
+        // With a cap of 400_000 the capped regular check passes, but the full 500_000
+        // limit still counts against the state budget → reject.
+        let mut capped = BlockGasTracker::new(block_gas_limit, true, Some(400_000));
+        capped.record_result(&fake_result);
+        assert!(
+            capped.validate_tx_limit(second_tx_gas_limit).is_err(),
+            "tx_gas_limit_cap must not bound the state-gas admission check",
         );
     }
 

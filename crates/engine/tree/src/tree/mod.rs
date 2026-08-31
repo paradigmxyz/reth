@@ -11,15 +11,17 @@ use alloy_primitives::{map::B256Map, B256};
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
-use error::{InsertBlockError, InsertBlockFatalError, InsertBlockValidationError};
+use error::{
+    InsertBlockError, InsertBlockFatalError, InsertBlockProcessingError, InsertBlockValidationError,
+};
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, MemoryOverlayStateProvider,
     NewCanonicalChain,
 };
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
-    BeaconEngineMessage, BeaconOnNewPayloadError, ConsensusEngineEvent, ExecutionPayload,
-    ForkchoiceStateTracker, NewPayloadTimings, OnForkChoiceUpdated, SlowBlockInfo,
+    BeaconEngineMessage, ConsensusEngineEvent, ExecutionPayload, ForkchoiceStateTracker,
+    NewPayloadTimings, OnForkChoiceUpdated, SlowBlockInfo,
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
@@ -710,17 +712,24 @@ where
 
     /// Blocks until the next event that can safely be processed is ready.
     ///
-    /// A pending persisted handoff only accepts the notification that all active payload builds
-    /// have finished. This keeps queued engine messages from starting replacement payload jobs
-    /// before the handoff can reclaim the in-memory overlay. Otherwise, uses biased selection to
-    /// prioritize persistence completion to update in-memory state and unblock further writes.
+    /// A pending persisted handoff keeps processing engine messages while prioritizing the
+    /// notification that all active payload builds have finished. This keeps the engine responsive
+    /// without reclaiming the in-memory overlay while a payload job may still access it. Otherwise,
+    /// uses biased selection to prioritize persistence completion to update in-memory state and
+    /// unblock further writes.
     fn wait_for_event(&mut self) -> LoopEvent<T, N> {
         if self.pending_persisted_handoff.is_some() {
             self.metrics.engine.backpressure_active.set(0.0);
-            return match self.payload_build_finished.recv() {
-                Ok(()) => LoopEvent::PayloadBuildFinished,
-                Err(_) => LoopEvent::Disconnected,
-            };
+            return crossbeam_channel::select_biased! {
+                recv(self.payload_build_finished) -> result => match result {
+                    Ok(()) => LoopEvent::PayloadBuildFinished,
+                    Err(_) => LoopEvent::Disconnected,
+                },
+                recv(self.incoming) -> msg => match msg {
+                    Ok(m) => LoopEvent::EngineMessage(m),
+                    Err(_) => LoopEvent::Disconnected,
+                },
+            }
         }
 
         // Take ownership of persistence rx if present
@@ -830,7 +839,7 @@ where
     fn on_new_payload(
         &mut self,
         payload: T::ExecutionData,
-    ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError> {
+    ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockProcessingError> {
         let _thread_resource_usage =
             self.metrics.engine.new_payload.measure_thread_resource_usage();
         trace!(target: "engine::tree", "invoked new payload");
@@ -906,7 +915,7 @@ where
     fn try_insert_payload(
         &mut self,
         payload: T::ExecutionData,
-    ) -> Result<TryInsertPayloadResult, InsertBlockFatalError> {
+    ) -> Result<TryInsertPayloadResult, InsertBlockProcessingError> {
         let block_hash = payload.block_hash();
         let num_hash = payload.num_hash();
         let parent_hash = payload.parent_hash();
@@ -941,9 +950,9 @@ where
             Err(error) => {
                 let status = match error {
                     InsertPayloadError::Block(error) => self.on_insert_block_error(error)?,
-                    InsertPayloadError::Payload(error) => {
-                        self.on_new_payload_error(error, num_hash, parent_hash)?
-                    }
+                    InsertPayloadError::Payload(error) => self
+                        .on_new_payload_error(error, num_hash, parent_hash)
+                        .map_err(InsertBlockFatalError::from)?,
                 };
 
                 Ok(TryInsertPayloadResult { status, already_seen: false })
@@ -962,7 +971,7 @@ where
     fn try_buffer_payload(
         &mut self,
         payload: T::ExecutionData,
-    ) -> Result<PayloadStatus, InsertBlockFatalError> {
+    ) -> Result<PayloadStatus, InsertBlockProcessingError> {
         let parent_hash = payload.parent_hash();
         let num_hash = payload.num_hash();
 
@@ -970,12 +979,14 @@ where
             // if the block is well-formed, buffer it for later
             Ok(block) => {
                 if let Err(error) = self.buffer_block(block) {
-                    Ok(self.on_insert_block_error(error)?)
+                    self.on_insert_block_error(error)
                 } else {
                     Ok(PayloadStatus::from_status(PayloadStatusEnum::Syncing))
                 }
             }
-            Err(error) => Ok(self.on_new_payload_error(error, num_hash, parent_hash)?),
+            Err(error) => Ok(self
+                .on_new_payload_error(error, num_hash, parent_hash)
+                .map_err(InsertBlockFatalError::from)?),
         }
     }
 
@@ -1830,9 +1841,7 @@ where
 
                                 // emit response
                                 if let Err(err) =
-                                    tx.send(output.map(|o| o.outcome).map_err(|e| {
-                                        BeaconOnNewPayloadError::Internal(Box::new(e))
-                                    }))
+                                    tx.send(output.map(|o| o.outcome).map_err(Into::into))
                                 {
                                     warn!(target: "engine::tree", payload=?num_hash, elapsed=?start.elapsed(), "Failed to deliver newPayload response, receiver dropped (request cancelled): {err:?}");
                                     self.metrics
@@ -1916,10 +1925,8 @@ where
                                         .map(|wait| wait.execution_cache),
                                     sparse_trie_wait: cache_wait.map(|wait| wait.sparse_trie),
                                 };
-                                if let Err(err) =
-                                    tx.send(output.map(|o| (o.outcome, timings)).map_err(|e| {
-                                        BeaconOnNewPayloadError::Internal(Box::new(e))
-                                    }))
+                                if let Err(err) = tx
+                                    .send(output.map(|o| (o.outcome, timings)).map_err(Into::into))
                                 {
                                     error!(
                                         target: "engine::tree",
@@ -2270,8 +2277,8 @@ where
                     return None
                 }
 
-                if canonical_head_number.saturating_sub(prev_db_tip) <=
-                    self.config.persistence_threshold()
+                if self.canonical_in_memory_state.canonical_chain().count() <=
+                    self.config.persistence_threshold() as usize
                 {
                     return None
                 }
@@ -2714,7 +2721,7 @@ where
                 Err(err) => {
                     if let InsertPayloadError::Block(err) = err {
                         debug!(target: "engine::tree", ?err, "failed to connect buffered block to tree");
-                        if let Err(fatal) = self.on_insert_block_error(err) {
+                        if let Err(fatal) = self.on_internal_insert_block_error(err) {
                             warn!(target: "engine::tree", %fatal, "fatal error occurred while connecting buffered blocks");
                             return Err(fatal)
                         }
@@ -3089,7 +3096,7 @@ where
             Err(err) => {
                 if let InsertPayloadError::Block(err) = err {
                     debug!(target: "engine::tree", err=%err.kind(), "failed to insert downloaded block");
-                    if let Err(fatal) = self.on_insert_block_error(err) {
+                    if let Err(fatal) = self.on_internal_insert_block_error(err) {
                         warn!(target: "engine::tree", %fatal, "fatal error occurred while inserting downloaded block");
                         return Err(fatal)
                     }
@@ -3291,11 +3298,9 @@ where
     fn on_insert_block_error(
         &mut self,
         error: InsertBlockError<N::Block>,
-    ) -> Result<PayloadStatus, InsertBlockFatalError> {
+    ) -> Result<PayloadStatus, InsertBlockProcessingError> {
         let (block, error) = error.split();
 
-        // if invalid block, we check the validation error. Otherwise return the fatal
-        // error.
         let validation_err = error.ensure_validation_error()?;
 
         // If the error was due to an invalid payload, the payload is added to the
@@ -3308,7 +3313,9 @@ where
             %validation_err,
             "Invalid block error on new payload",
         );
-        let latest_valid_hash = self.latest_valid_hash_for_invalid_payload(block.parent_hash())?;
+        let latest_valid_hash = self
+            .latest_valid_hash_for_invalid_payload(block.parent_hash())
+            .map_err(InsertBlockFatalError::from)?;
 
         // keep track of the invalid header unless the consensus impl considers it transient
         let is_transient = match &validation_err {
@@ -3335,6 +3342,17 @@ where
             PayloadStatusEnum::Invalid { validation_error: validation_err.to_string() },
             latest_valid_hash,
         ))
+    }
+
+    /// Handles an insertion error from a non-RPC source, where malformed input can be discarded.
+    fn on_internal_insert_block_error(
+        &mut self,
+        error: InsertBlockError<N::Block>,
+    ) -> Result<(), InsertBlockFatalError> {
+        match self.on_insert_block_error(error) {
+            Ok(_) | Err(InsertBlockProcessingError::MalformedInput(_)) => Ok(()),
+            Err(InsertBlockProcessingError::Fatal(error)) => Err(error),
+        }
     }
 
     /// Handles a [`NewPayloadError`] by converting it to a [`PayloadStatus`].
@@ -3667,7 +3685,11 @@ impl Drop for PayloadBuildLease {
 /// is valid or not.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BlockStatus {
-    /// The block is valid and block extends canonical chain.
+    /// The block is valid: its parent state was available, so it was executed and inserted into
+    /// the tree.
+    ///
+    /// Note: this does not imply the block extends the canonical chain. Blocks on a fork are
+    /// executed and inserted the same way and report this status as well.
     Valid,
     /// The block may be valid and has an unknown missing ancestor.
     Disconnected {

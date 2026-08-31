@@ -115,14 +115,22 @@ const DEFAULT_BLOCK_SIZE: usize = 16 * 1024;
 /// Default max background jobs for `RocksDB` compaction and flushing.
 const DEFAULT_MAX_BACKGROUND_JOBS: i32 = 6;
 
-/// Default max open file descriptors for `RocksDB`.
+/// Max open file descriptors for `RocksDB` when the process limit is low.
 ///
 /// Caps the number of SST file handles `RocksDB` keeps open simultaneously.
 /// Set to 512 to stay within the common default OS `ulimit -n` of 1024,
 /// leaving headroom for MDBX, static files, and other I/O.
-/// `RocksDB` uses an internal table cache and re-opens files on demand,
-/// so this has negligible performance impact on read-heavy workloads.
-const DEFAULT_MAX_OPEN_FILES: i32 = 512;
+const LIMITED_MAX_OPEN_FILES: i32 = 512;
+
+/// Keeps all `RocksDB` files open and avoids table cache lookups.
+const KEEP_ALL_FILES_OPEN: i32 = -1;
+
+/// Minimum process file descriptor limit for keeping all `RocksDB` files open.
+///
+/// Mature archive databases can use tens of thousands of file descriptors. This threshold keeps
+/// unlimited mode for hosts configured for that workload while retaining a bounded table cache on
+/// systems with low limits.
+const HIGH_FILE_DESCRIPTOR_LIMIT: u64 = 128 * 1024;
 
 /// Default bytes per sync for `RocksDB` WAL writes (1 MB).
 const DEFAULT_BYTES_PER_SYNC: u64 = 1_048_576;
@@ -234,7 +242,7 @@ impl RocksDBBuilder {
 
         options.set_log_level(log_level);
 
-        options.set_max_open_files(DEFAULT_MAX_OPEN_FILES);
+        options.set_max_open_files(select_max_open_files());
 
         // Delete obsolete WAL files immediately after all column families have flushed.
         // Both set to 0 means "delete ASAP, no archival".
@@ -315,14 +323,10 @@ impl RocksDBBuilder {
     /// - [`tables::TransactionHashNumbers`] - Transaction hash to number mapping
     /// - [`tables::AccountsHistory`] - Account history index
     /// - [`tables::StoragesHistory`] - Storage history index
-    /// - [`tables::BlockAccessLists`] - Block access list payloads
-    /// - [`tables::BlockAccessListBlockNumbers`] - Block access list hash index
     pub fn with_default_tables(self) -> Self {
         self.with_table::<tables::TransactionHashNumbers>()
             .with_table::<tables::AccountsHistory>()
             .with_table::<tables::StoragesHistory>()
-            .with_table::<tables::BlockAccessLists>()
-            .with_table::<tables::BlockAccessListBlockNumbers>()
     }
 
     /// Enables metrics.
@@ -419,7 +423,7 @@ impl RocksDBBuilder {
             // Open as secondary instance for catch-up capability.
             // Secondary needs max_open_files = -1 to keep all FDs open.
             let mut options = options;
-            options.set_max_open_files(-1);
+            options.set_max_open_files(KEEP_ALL_FILES_OPEN);
 
             let secondary_path = self
                 .path
@@ -2883,6 +2887,60 @@ const fn convert_log_level(level: LogLevel) -> rocksdb::LogLevel {
     }
 }
 
+/// Selects the `RocksDB` `max_open_files` setting from the current file descriptor limit
+/// balancing performance vs. compatibility.
+///
+/// A mature database can use tens of thousands of file descriptors. With a
+/// finite `max_open_files` value, `RocksDB` performs additional table-cache checks
+/// even when enough capacity is available. The value `-1` keeps all table files
+/// open and avoids this overhead.
+///
+/// During normal startup, Reth raises the soft file descriptor limit to the
+/// system hard limit before it opens `RocksDB`. Therefore, we expect the current
+/// limit to be the hard limit. A survey of modern Linux distributions shows
+/// common default limits of `1024:524288`.
+///
+/// We use `-1` only when the current limit is above a conservative threshold.
+/// This keeps enough file descriptors for other parts of the process. When the
+/// limit is lower or cannot be read, we use a stricter fixed limit.
+fn select_max_open_files() -> i32 {
+    let file_descriptor_limit = current_file_descriptor_limit();
+    let max_open_files = max_open_files_for_limit(file_descriptor_limit);
+
+    if max_open_files == LIMITED_MAX_OPEN_FILES {
+        tracing::warn!(
+            target: "providers::rocksdb",
+            ?file_descriptor_limit,
+            threshold = HIGH_FILE_DESCRIPTOR_LIMIT,
+            max_open_files,
+            "RocksDB will not keep all files open; performance may be reduced"
+        );
+    }
+
+    max_open_files
+}
+
+const fn max_open_files_for_limit(file_descriptor_limit: Option<u64>) -> i32 {
+    match file_descriptor_limit {
+        Some(limit) if limit >= HIGH_FILE_DESCRIPTOR_LIMIT => KEEP_ALL_FILES_OPEN,
+        _ => LIMITED_MAX_OPEN_FILES,
+    }
+}
+
+#[cfg(unix)]
+#[allow(clippy::useless_conversion)]
+fn current_file_descriptor_limit() -> Option<u64> {
+    let mut limit = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+    // SAFETY: `limit` points to initialized writable memory for the kernel to populate.
+    let result = unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &raw mut limit) };
+    (result == 0).then(|| limit.rlim_cur.into())
+}
+
+#[cfg(not(unix))]
+const fn current_file_descriptor_limit() -> Option<u64> {
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2898,6 +2956,16 @@ mod tests {
         tables,
     };
     use tempfile::TempDir;
+
+    #[test]
+    fn max_open_files_adapts_to_file_descriptor_limit() {
+        assert_eq!(max_open_files_for_limit(Some(HIGH_FILE_DESCRIPTOR_LIMIT)), KEEP_ALL_FILES_OPEN);
+        assert_eq!(
+            max_open_files_for_limit(Some(HIGH_FILE_DESCRIPTOR_LIMIT - 1)),
+            LIMITED_MAX_OPEN_FILES
+        );
+        assert_eq!(max_open_files_for_limit(None), LIMITED_MAX_OPEN_FILES);
+    }
 
     #[test]
     fn test_with_default_tables_registers_required_column_families() {
@@ -2922,25 +2990,22 @@ mod tests {
         provider.put::<tables::StoragesHistory>(key.clone(), &value).unwrap();
         assert!(provider.get::<tables::StoragesHistory>(key).unwrap().is_some());
 
-        let bal_key =
-            reth_db_api::models::StoredBlockAccessListKey::new(1, B256::with_last_byte(1));
-        let bal_value =
-            reth_db_api::models::StoredBlockAccessList::new(Bytes::from_static(&[0xc0]));
-        provider.put::<tables::BlockAccessLists>(bal_key, &bal_value).unwrap();
-        assert_eq!(provider.get::<tables::BlockAccessLists>(bal_key).unwrap(), Some(bal_value));
-        provider
-            .put::<tables::BlockAccessListBlockNumbers>(bal_key.hash(), &bal_key.number())
-            .unwrap();
-        assert_eq!(
-            provider.get::<tables::BlockAccessListBlockNumbers>(bal_key.hash()).unwrap(),
-            Some(bal_key.number())
-        );
+        drop(provider);
+
+        let column_families = DB::list_cf(&Options::default(), temp_dir.path()).unwrap();
+        assert!(!column_families.iter().any(|name| name == tables::BlockAccessLists::NAME));
+        assert!(!column_families
+            .iter()
+            .any(|name| name == tables::BlockAccessListBlockNumbers::NAME));
     }
 
     #[test]
     fn block_access_lists_store_large_payloads_in_blob_files() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path())
+            .with_table::<tables::BlockAccessLists>()
+            .build()
+            .unwrap();
         let bal_key =
             reth_db_api::models::StoredBlockAccessListKey::new(1, B256::with_last_byte(1));
         let bal_value = reth_db_api::models::StoredBlockAccessList::new(Bytes::from(vec![
@@ -2996,7 +3061,12 @@ mod tests {
                 1
         ]));
 
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path())
+            .with_default_tables()
+            .with_table::<tables::BlockAccessLists>()
+            .with_table::<tables::BlockAccessListBlockNumbers>()
+            .build()
+            .unwrap();
         provider.put::<tables::BlockAccessLists>(bal_key, &bal_value).unwrap();
         provider
             .put::<tables::BlockAccessListBlockNumbers>(bal_key.hash(), &bal_key.number())
@@ -3004,12 +3074,7 @@ mod tests {
         provider.flush(&[tables::BlockAccessLists::NAME]).unwrap();
         drop(provider);
 
-        let provider = RocksDBBuilder::new(temp_dir.path())
-            .with_table::<tables::TransactionHashNumbers>()
-            .with_table::<tables::AccountsHistory>()
-            .with_table::<tables::StoragesHistory>()
-            .build()
-            .unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
         assert_eq!(provider.get::<tables::BlockAccessLists>(bal_key).unwrap(), Some(bal_value));
         assert_eq!(
             provider.get::<tables::BlockAccessListBlockNumbers>(bal_key.hash()).unwrap(),

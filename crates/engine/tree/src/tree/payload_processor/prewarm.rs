@@ -487,6 +487,9 @@ where
                 }
                 PrewarmTaskEvent::Terminate { execution_outcome, valid_block_rx } => {
                     trace!(target: "engine::tree::payload_processor::prewarm", "Received termination signal");
+                    // `Terminate` can arrive without `TerminateTransactionExecution` when the
+                    // handle is dropped on an execution error, so stop workers before waiting.
+                    self.ctx.stop();
                     final_execution_outcome =
                         Some(execution_outcome.map(|outcome| (outcome, valid_block_rx)));
 
@@ -677,7 +680,7 @@ where
         // changes to start processing them before potentially hitting the db in the next step.
         if !account_changes.storage_changes.is_empty() {
             let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
-            let mut storage_map = reth_trie::HashedStorage::new(false);
+            let mut storage_map = reth_trie::HashedStorage::default();
 
             for slot_changes in &account_changes.storage_changes {
                 let hashed_slot = keccak256(slot_changes.slot.to_be_bytes::<32>());
@@ -824,11 +827,58 @@ fn multiproof_targets_from_withdrawals(withdrawals: &[Withdrawal]) -> MultiProof
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::transaction::Recovered;
     use alloy_eip7928::{
         AccountChanges, BalanceChange, BlockAccessIndex, CodeChange, NonceChange, SlotChanges,
         StorageChange,
     };
     use alloy_primitives::{address, bytes};
+    use reth_chainspec::ChainSpec;
+    use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
+    use reth_evm::{execute::WithTxEnv, TxEnvFor};
+    use reth_evm_ethereum::EthEvmConfig;
+    use reth_provider::test_utils::MockEthProvider;
+    use reth_storage_overlay::OverlayManager;
+
+    #[test]
+    fn terminate_event_stops_transaction_execution() {
+        let terminate_execution = Arc::new(AtomicBool::new(false));
+        let ctx = PrewarmContext {
+            env: ExecutionEnv::test_default(),
+            evm_config: EthEvmConfig::new(Arc::new(ChainSpec::default())),
+            saved_cache: None,
+            provider: StateProviderBuilder::<EthPrimitives, _>::new(
+                MockEthProvider::default(),
+                B256::ZERO,
+                OverlayManager::default(),
+            ),
+            bal_prewarm_pool: None,
+            metrics: PrewarmMetrics::default(),
+            cache_metrics: None,
+            cache_state_metrics: None,
+            terminate_execution: Arc::clone(&terminate_execution),
+            executed_tx_index: Arc::new(AtomicUsize::new(0)),
+            precompile_cache_disabled: false,
+            precompile_cache_map: PrecompileCacheMap::default(),
+            disable_bal_parallel_state_root: false,
+            disable_bal_batch_io: false,
+        };
+        let (task, actions_tx) =
+            PrewarmCacheTask::new(Runtime::test(), PayloadExecutionCache::default(), ctx);
+        actions_tx
+            .send(PrewarmTaskEvent::Terminate {
+                execution_outcome: None,
+                valid_block_rx: mpsc::channel().1,
+            })
+            .unwrap();
+
+        task.run::<WithTxEnv<TxEnvFor<EthEvmConfig>, Recovered<TransactionSigned>>>(
+            PrewarmMode::Skipped,
+            actions_tx,
+        );
+
+        assert!(terminate_execution.load(Ordering::Relaxed));
+    }
 
     #[test]
     fn bal_read_only_account_does_not_change_state_root() {
@@ -888,13 +938,23 @@ mod tests {
 /// execution path without cloning the expensive `BundleState`.
 #[derive(Debug)]
 pub enum PrewarmTaskEvent<R> {
-    /// Forcefully terminate all remaining transaction execution.
+    /// Signals the prewarm workers to stop executing further transactions.
+    ///
+    /// This only sets the termination flag the workers poll; the task keeps running to save the
+    /// cache. Sent once the authoritative execution no longer needs prewarming, so the workers do
+    /// not race ahead on transactions that will never be used.
     TerminateTransactionExecution,
-    /// Forcefully terminate the task on demand and update the shared cache with the given output
-    /// before exiting.
+    /// Tears the whole task down: stops the workers, optionally saves the warmed cache from the
+    /// final output, and exits.
+    ///
+    /// Sent when execution completed successfully (carrying the output to save) or when the task
+    /// handle is dropped (carrying no output, e.g. after an execution error). Handling this event
+    /// also stops the workers, since a teardown may arrive without a preceding
+    /// [`TerminateTransactionExecution`](Self::TerminateTransactionExecution).
     Terminate {
-        /// The final execution outcome. Using `Arc` allows sharing with the main execution
-        /// path without cloning the expensive `BundleState`.
+        /// The final execution outcome, or `None` when the task is torn down without one (e.g. a
+        /// dropped handle). Using `Arc` allows sharing with the main execution path without
+        /// cloning the expensive `BundleState`.
         execution_outcome: Option<Arc<BlockExecutionOutput<R>>>,
         /// Receiver for the block validation result.
         ///
@@ -902,7 +962,8 @@ pub enum PrewarmTaskEvent<R> {
         /// updated cache but only save it once we know the block is valid.
         valid_block_rx: mpsc::Receiver<()>,
     },
-    /// Finished executing all transactions
+    /// Emitted by the worker-dispatch side once every dispatched transaction has finished or been
+    /// cancelled, reporting how many were executed.
     FinishedTxExecution {
         /// Number of transactions executed
         executed_transactions: usize,

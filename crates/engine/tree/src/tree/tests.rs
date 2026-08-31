@@ -2,6 +2,7 @@ use super::*;
 use crate::{
     persistence::PersistenceAction,
     tree::{
+        error::{BlockAccessListDecodeError, InsertBlockErrorKind},
         payload_validator::{BasicEngineValidator, TreeCtx, ValidationOutcome},
         persistence_state::CurrentPersistenceAction,
         PersistTarget, TreeConfig,
@@ -20,7 +21,7 @@ use alloy_rpc_types_engine::{
     ForkchoiceUpdateError,
 };
 use assert_matches::assert_matches;
-use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
+use reth_chain_state::test_utils::TestBlockBuilder;
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
 use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
 use reth_ethereum_consensus::EthBeaconConsensus;
@@ -272,8 +273,6 @@ impl TestHarness {
     fn with_blocks(mut self, blocks: Vec<ExecutedBlock>) -> Self {
         let mut blocks_by_hash = B256Map::default();
         let mut blocks_by_number = BTreeMap::new();
-        let mut state_by_hash = B256Map::default();
-        let mut hash_by_number = BTreeMap::new();
         let mut parent_to_child: B256Map<B256Set> = B256Map::default();
         let mut parent_hash = B256::ZERO;
 
@@ -283,8 +282,6 @@ impl TestHarness {
             let number = sealed_block.number;
             blocks_by_hash.insert(hash, block.clone());
             blocks_by_number.entry(number).or_insert_with(Vec::new).push(block.clone());
-            state_by_hash.insert(hash, Arc::new(BlockState::new(block.clone())));
-            hash_by_number.insert(number, hash);
             parent_to_child.entry(parent_hash).or_default().insert(hash);
             parent_hash = hash;
         }
@@ -303,10 +300,11 @@ impl TestHarness {
             overlay_manager,
         };
 
-        let last_executed_block = blocks.last().unwrap().clone();
-        let pending = Some(BlockState::new(last_executed_block));
-        self.tree.canonical_in_memory_state =
-            CanonicalInMemoryState::new(state_by_hash, hash_by_number, pending, None, None);
+        let canonical_in_memory_state = CanonicalInMemoryState::empty();
+        canonical_in_memory_state.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
+        canonical_in_memory_state
+            .set_canonical_head(blocks.last().unwrap().recovered_block().clone_sealed_header());
+        self.tree.canonical_in_memory_state = canonical_in_memory_state;
 
         self.blocks = blocks.clone();
 
@@ -566,6 +564,22 @@ fn test_tree_persist_block_batch() {
     }
 }
 
+#[test]
+fn malformed_input_is_non_fatal_insert_outcome() {
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+    let block = test_harness.block_builder.generate_random_block(1, B256::ZERO);
+    let error = InsertBlockError::new(
+        block,
+        InsertBlockErrorKind::BlockAccessListDecode(BlockAccessListDecodeError::new(
+            alloy_rlp::Error::UnexpectedString,
+        )),
+    );
+    assert_matches!(
+        test_harness.tree.on_insert_block_error(error),
+        Err(InsertBlockProcessingError::MalformedInput(_))
+    );
+}
+
 #[tokio::test]
 async fn test_tree_persist_blocks() {
     let tree_config = TreeConfig::default();
@@ -709,7 +723,7 @@ fn persistence_handoff_waits_for_active_payload_jobs() {
 }
 
 #[test]
-fn pending_persisted_handoff_blocks_engine_messages_until_payload_build_finishes() {
+fn pending_persisted_handoff_keeps_engine_messages_responsive() {
     let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
     let mut test_harness = TestHarness::with_config(
         MAINNET.clone(),
@@ -732,34 +746,23 @@ fn pending_persisted_handoff_blocks_engine_messages_until_payload_build_finishes
         .unwrap();
     assert!(test_harness.tree.pending_persisted_handoff.is_some());
 
-    // Forkchoice updates received while the handoff is pending could start replacement payload
-    // builds and keep the final completion notification from reaching the tree. Queue a generic
-    // engine message to prove the gate leaves every message upstream until then.
+    // Engine messages remain processable while the handoff waits for the active payload build.
     test_harness.to_tree_tx.send(FromEngine::Event(FromOrchestrator::BackfillSyncStarted)).unwrap();
+    assert_matches!(
+        test_harness.tree.wait_for_event(),
+        super::LoopEvent::EngineMessage(FromEngine::Event(FromOrchestrator::BackfillSyncStarted))
+    );
+    assert!(test_harness.tree.pending_persisted_handoff.is_some());
+    assert!(test_harness.tree.state.tree_state.contains_hash(&persisted.hash));
 
-    let (started_tx, started_rx) = std::sync::mpsc::sync_channel(0);
-    let (event_tx, event_rx) = std::sync::mpsc::sync_channel(1);
-    std::thread::scope(|scope| {
-        let tree = &mut test_harness.tree;
-        scope.spawn(move || {
-            started_tx.send(()).unwrap();
-            event_tx
-                .send(matches!(tree.wait_for_event(), super::LoopEvent::PayloadBuildFinished))
-                .unwrap();
-        });
-
-        started_rx.recv().unwrap();
-        assert!(
-            event_rx.recv_timeout(Duration::from_millis(100)).is_err(),
-            "a pending handoff must prevent queued engine messages from being processed"
-        );
-
-        drop(payload_build);
-        assert_eq!(event_rx.recv_timeout(Duration::from_secs(1)), Ok(true));
-    });
-
+    // Once the final lease drops, its completion is prioritized over queued engine messages so the
+    // handoff gets the first opportunity to reclaim the overlay.
+    test_harness.to_tree_tx.send(FromEngine::Event(FromOrchestrator::BackfillSyncStarted)).unwrap();
+    drop(payload_build);
+    assert_matches!(test_harness.tree.wait_for_event(), super::LoopEvent::PayloadBuildFinished);
     test_harness.tree.on_payload_build_finished().unwrap();
     assert!(test_harness.tree.pending_persisted_handoff.is_none());
+    assert!(!test_harness.tree.state.tree_state.contains_hash(&persisted.hash));
     assert_matches!(
         test_harness.tree.wait_for_event(),
         super::LoopEvent::EngineMessage(FromEngine::Event(FromOrchestrator::BackfillSyncStarted))
@@ -900,7 +903,7 @@ fn process_payload_attributes_shares_sparse_trie_during_validation_fallback() {
             withdrawals: None,
             parent_beacon_block_root: None,
             slot_number: None,
-            target_gas_limit: None,
+            ..Default::default()
         },
         &head,
         state,
@@ -928,18 +931,16 @@ async fn test_in_memory_state_trait_impl() {
     for executed_block in blocks {
         let sealed_block = executed_block.recovered_block();
 
-        let expected_state = BlockState::new(executed_block.clone());
-
         let actual_state_by_hash =
             test_harness.tree.canonical_in_memory_state.state_by_hash(sealed_block.hash()).unwrap();
-        assert_eq!(expected_state, *actual_state_by_hash);
+        assert_eq!(executed_block, *actual_state_by_hash.block_ref());
 
         let actual_state_by_number = test_harness
             .tree
             .canonical_in_memory_state
             .state_by_number(sealed_block.number)
             .unwrap();
-        assert_eq!(expected_state, *actual_state_by_number);
+        assert_eq!(executed_block, *actual_state_by_number.block_ref());
     }
 }
 
@@ -1213,6 +1214,7 @@ async fn test_tree_state_on_new_head_reorg() {
         assert_eq!(new.len(), 2);
         assert_eq!(new[0].recovered_block().hash(), blocks[3].recovered_block().hash());
         assert_eq!(new[1].recovered_block().hash(), blocks[4].recovered_block().hash());
+        test_harness.tree.canonical_in_memory_state.update_chain(NewCanonicalChain::Commit { new });
     }
 
     // should be a None persistence action before we advance persistence
@@ -1429,6 +1431,27 @@ async fn test_get_canonical_blocks_to_persist() {
             highest: blocks_to_persist.last().unwrap().recovered_block().num_hash()
         })
     );
+}
+
+#[test]
+fn threshold_persistence_uses_canonical_in_memory_chain_length() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(0..10).collect();
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+    test_harness.tree.config = TreeConfig::default()
+        .with_persistence_threshold(3)
+        .with_memory_block_buffer_target(0)
+        .with_num_state_masking_blocks(2);
+    test_harness.tree.persistence_state.last_persisted_block =
+        blocks[7].recovered_block().num_hash();
+    test_harness.tree.persistence_state.last_state_trie_persisted_block =
+        blocks[5].recovered_block().num_hash();
+    test_harness.tree.canonical_in_memory_state.remove_persisted_blocks_until(
+        blocks[7].recovered_block().num_hash(),
+        blocks[5].recovered_block().number(),
+    );
+
+    assert_eq!(test_harness.tree.canonical_in_memory_state.canonical_chain().count(), 4);
+    assert!(test_harness.tree.get_save_blocks_input(PersistTarget::Threshold).is_some());
 }
 
 #[test]
@@ -1682,7 +1705,7 @@ async fn test_fcu_with_canonical_ancestor_below_finalized_is_rejected() {
         withdrawals: None,
         parent_beacon_block_root: None,
         slot_number: None,
-        target_gas_limit: None,
+        ..Default::default()
     };
     for attrs in [Some(payload_attributes), None] {
         let err = test_harness
@@ -1716,7 +1739,7 @@ async fn test_fcu_with_canonical_ancestor_below_finalized_is_rejected() {
         withdrawals: None,
         parent_beacon_block_root: None,
         slot_number: None,
-        target_gas_limit: None,
+        ..Default::default()
     };
     let outcome = test_harness
         .tree
@@ -1759,7 +1782,7 @@ async fn test_fcu_with_canonical_ancestor_above_finalized_starts_payload_build()
         withdrawals: None,
         parent_beacon_block_root: None,
         slot_number: None,
-        target_gas_limit: None,
+        ..Default::default()
     };
     let outcome = test_harness
         .tree

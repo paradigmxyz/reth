@@ -96,7 +96,9 @@
 //! `INVALID_PAYLOAD_ATTRIBUTES` without rolling back the forkchoice update.
 
 use crate::tree::{
-    error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
+    error::{
+        BlockAccessListDecodeError, InsertBlockError, InsertBlockErrorKind, InsertPayloadError,
+    },
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
     payload_processor::PayloadProcessor,
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
@@ -106,7 +108,10 @@ use crate::tree::{
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
-use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};
+use alloy_eip7928::{
+    bal::{Bal, DecodedBal},
+    BlockAccessList,
+};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::{
@@ -295,6 +300,8 @@ where
     /// None if txpool prewarming is disabled.
     #[debug(skip)]
     txpool_prewarm: Option<txpool_prewarm::Handle<Evm::Primitives, P, Evm>>,
+    /// Scratch buffer reused for BAL hash encoding across validated blocks.
+    bal_hash_buf: Vec<u8>,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
@@ -354,6 +361,7 @@ where
             overlay_manager,
             state_root_strategy: Arc::new(DefaultStateRootStrategy::default()),
             txpool_prewarm: None,
+            bal_hash_buf: Vec::new(),
         }
     }
 
@@ -562,11 +570,11 @@ where
             .in_scope(|| self.evm_env_for(&input))
             .map_err(NewPayloadError::other)?;
 
-        // Extract the decoded BAL, if valid and available.
-        let decoded_bal = ensure_ok!(input
-            .try_decoded_access_list()
-            .map_err(|err| ConsensusError::BlockAccessListInvalid(err.to_string())))
-        .map(Arc::new);
+        // Extract the decoded BAL, if present. Undecodable block access list bytes are malformed
+        // request params, not an invalid block.
+        let decoded_bal =
+            ensure_ok!(input.try_decoded_access_list().map_err(BlockAccessListDecodeError::new))
+                .map(Arc::new);
 
         if let Some(decoded_bal) = decoded_bal.as_deref() {
             // Reject oversized BAL sidecars before executing the block.
@@ -1006,7 +1014,7 @@ where
     {
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
-        let has_bal = env.decoded_bal.is_some();
+        let has_bal = input.has_block_access_list();
         let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
             State::builder()
                 .with_database(StateProviderDatabase::new(state_provider))
@@ -1303,7 +1311,7 @@ where
     /// The `hashed_state` handle wraps the background hashed post state computation.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     fn validate_post_execution<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
-        &self,
+        &mut self,
         block: &RecoveredBlock<N::Block>,
         parent_block: &SealedHeader<N::BlockHeader>,
         output: &BlockExecutionOutput<N::Receipt>,
@@ -1322,15 +1330,24 @@ where
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
                 .entered();
+        let built_bal = built_bal.map(Bal::from);
         let block_access_list_hash =
-            built_bal.as_ref().map(|bal| compute_block_access_list_hash(bal));
+            built_bal.as_ref().map(|bal| bal.compute_hash_with_buf(&mut self.bal_hash_buf));
 
-        if let Err(err) = self.consensus.validate_block_post_execution(
-            block,
-            output,
-            receipt_root_bloom,
-            block_access_list_hash,
-        ) {
+        let validation_result = built_bal
+            .as_ref()
+            .map(|bal| bal.validate_gas_limit(block.gas_limit()).map_err(ConsensusError::from))
+            .transpose()
+            .and_then(|_| {
+                self.consensus.validate_block_post_execution(
+                    block,
+                    output,
+                    receipt_root_bloom,
+                    block_access_list_hash,
+                )
+            });
+
+        if let Err(err) = validation_result {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
             return Err(err.into())
@@ -2022,6 +2039,14 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
                 .map(|block_access_list| DecodedBal::from_rlp_bytes(block_access_list.clone()))
                 .transpose(),
             Self::Block(_) => Ok(None),
+        }
+    }
+
+    /// Returns whether execution must build a block access list.
+    pub fn has_block_access_list(&self) -> bool {
+        match self {
+            Self::Payload(payload) => payload.block_access_list().is_some(),
+            Self::Block(block) => block.block_access_list_hash().is_some(),
         }
     }
 

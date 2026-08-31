@@ -83,7 +83,10 @@ impl EthStreamError {
                         P2PStreamError::Snap(_) |
                         P2PStreamError::MessageTooBig { .. } |
                         P2PStreamError::UnknownReservedMessageId(_) |
+                        P2PStreamError::UnknownSubprotocolMessageId(_) |
                         P2PStreamError::EmptyProtocolMessage |
+                        P2PStreamError::InvalidPingPongPayload(_) |
+                        P2PStreamError::TooManyPings |
                         P2PStreamError::UnknownDisconnectReason(_)
                 )
         )

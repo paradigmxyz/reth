@@ -774,14 +774,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // This reduces cursor open/close overhead from N calls to 1.
             if save_mode.with_state() && !state_trie_blocks.is_empty() {
                 let start = Instant::now();
-                let batch = state_trie_blocks
-                    .iter()
-                    .map(|block| block.trie_data.get().sorted.hashed_state.as_ref())
-                    .collect::<Vec<_>>();
-                let mask = state_trie_masking_blocks
-                    .iter()
-                    .map(|block| block.trie_data.get().sorted.hashed_state.as_ref())
-                    .collect::<Vec<_>>();
+                let batch = ExecutedBlock::hashed_state_refs(state_trie_blocks);
+                let mask = ExecutedBlock::hashed_state_refs(state_trie_masking_blocks);
                 let merged_hashed_state =
                     HashedPostStateSorted::disjointed_merge_batch(&batch, &mask);
                 if !merged_hashed_state.is_empty() {
@@ -790,15 +784,10 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 timings.write_hashed_state += start.elapsed();
 
                 let start = Instant::now();
-                let batch = state_trie_blocks
-                    .iter()
-                    .map(|block| block.trie_data.get().sorted.trie_updates.as_ref())
-                    .collect::<Vec<_>>();
-                let mask = state_trie_masking_blocks
-                    .iter()
-                    .map(|block| block.trie_data.get().sorted.trie_updates.as_ref())
-                    .collect::<Vec<_>>();
-                let merged_trie = TrieUpdatesSorted::disjointed_merge_batch(&batch, &mask);
+                let batch = ExecutedBlock::trie_updates_refs(state_trie_blocks);
+                let mask = ExecutedBlock::trie_updates_refs(state_trie_masking_blocks);
+                let merged_trie =
+                    Arc::new(TrieUpdatesSorted::disjointed_merge_batch(&batch, &mask));
                 if !merged_trie.is_empty() {
                     self.write_trie_updates_sorted(&merged_trie)?;
                 }
@@ -2826,10 +2815,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let mut hashed_storage_cursor =
             self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
         for (hashed_address, storage) in sorted_storages {
-            if storage.is_wiped() && hashed_storage_cursor.seek_exact(*hashed_address)?.is_some() {
-                hashed_storage_cursor.delete_current_duplicates()?;
-            }
-
             for (hashed_slot, value) in storage.storage_slots_ref() {
                 let entry = StorageEntry { key: *hashed_slot, value: *value };
 
@@ -4083,9 +4068,7 @@ mod tests {
         map::{AddressMap, B256Map},
         U256,
     };
-    #[cfg(feature = "partial-persistence")]
-    use reth_chain_state::test_utils::TestBlockBuilder;
-    use reth_chain_state::ExecutedBlock;
+    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
     use reth_db_api::models::StorageSettings;
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
@@ -4229,14 +4212,10 @@ mod tests {
                 StateWriteConfig::default(),
             )
             .unwrap();
-        for i in 0..3 {
-            provider_rw.insert_block(&data.blocks[i].0).unwrap();
+        for (block, outcome) in data.blocks.iter().take(3) {
+            provider_rw.insert_block(block).unwrap();
             provider_rw
-                .write_state(
-                    &data.blocks[i].1,
-                    crate::OriginalValuesKnown::No,
-                    StateWriteConfig::default(),
-                )
+                .write_state(outcome, crate::OriginalValuesKnown::No, StateWriteConfig::default())
                 .unwrap();
         }
         provider_rw.commit().unwrap();
@@ -4268,14 +4247,10 @@ mod tests {
             .unwrap();
 
         // insert blocks 1-3 with receipts
-        for i in 0..3 {
-            provider_rw.insert_block(&data.blocks[i].0).unwrap();
+        for (block, outcome) in data.blocks.iter().take(3) {
+            provider_rw.insert_block(block).unwrap();
             provider_rw
-                .write_state(
-                    &data.blocks[i].1,
-                    crate::OriginalValuesKnown::No,
-                    StateWriteConfig::default(),
-                )
+                .write_state(outcome, crate::OriginalValuesKnown::No, StateWriteConfig::default())
                 .unwrap();
         }
         provider_rw.commit().unwrap();
@@ -4304,14 +4279,10 @@ mod tests {
                 StateWriteConfig::default(),
             )
             .unwrap();
-        for i in 0..3 {
-            provider_rw.insert_block(&data.blocks[i].0).unwrap();
+        for (block, outcome) in data.blocks.iter().take(3) {
+            provider_rw.insert_block(block).unwrap();
             provider_rw
-                .write_state(
-                    &data.blocks[i].1,
-                    crate::OriginalValuesKnown::No,
-                    StateWriteConfig::default(),
-                )
+                .write_state(outcome, crate::OriginalValuesKnown::No, StateWriteConfig::default())
                 .unwrap();
         }
         provider_rw.commit().unwrap();
@@ -4374,14 +4345,10 @@ mod tests {
                 StateWriteConfig::default(),
             )
             .unwrap();
-        for i in 0..3 {
-            provider_rw.insert_block(&data.blocks[i].0).unwrap();
+        for (block, outcome) in data.blocks.iter().take(3) {
+            provider_rw.insert_block(block).unwrap();
             provider_rw
-                .write_state(
-                    &data.blocks[i].1,
-                    crate::OriginalValuesKnown::No,
-                    StateWriteConfig::default(),
-                )
+                .write_state(outcome, crate::OriginalValuesKnown::No, StateWriteConfig::default())
                 .unwrap();
         }
         provider_rw.commit().unwrap();
@@ -4486,14 +4453,14 @@ mod tests {
                 )
                 .unwrap();
 
-            // Add storage nodes for address2 (will be wiped)
+            // Add storage nodes for address2.
             storage_cursor
                 .upsert(
                     storage_address2,
                     &StorageTrieEntry {
                         nibbles: StoredNibblesSubKey(Nibbles::from_nibbles([0xa, 0xb])),
                         node: BranchNodeCompact::new(
-                            0b1100_1100_1100_1100, // will be wiped
+                            0b1100_1100_1100_1100,
                             0b0000_0000_0000_0000,
                             0b0000_0000_0000_0000,
                             vec![],
@@ -4508,7 +4475,7 @@ mod tests {
                     &StorageTrieEntry {
                         nibbles: StoredNibblesSubKey(Nibbles::from_nibbles([0xc, 0xd])),
                         node: BranchNodeCompact::new(
-                            0b0011_1100_0011_1100, // will be wiped
+                            0b0011_1100_0011_1100,
                             0b0000_0000_0000_0000,
                             0b0000_0000_0000_0000,
                             vec![],
@@ -4546,7 +4513,6 @@ mod tests {
 
         // Create sorted storage trie updates
         let storage_trie1 = StorageTrieUpdatesSorted {
-            is_deleted: false,
             storage_nodes: vec![
                 (
                     Nibbles::from_nibbles([0x1, 0x0]),
@@ -4563,8 +4529,10 @@ mod tests {
         };
 
         let storage_trie2 = StorageTrieUpdatesSorted {
-            is_deleted: true, // Wipe all storage for this address
-            storage_nodes: vec![],
+            storage_nodes: vec![
+                (Nibbles::from_nibbles([0xa, 0xb]), None),
+                (Nibbles::from_nibbles([0xc, 0xd]), None),
+            ],
         };
 
         let mut storage_tries = B256Map::default();
@@ -4576,9 +4544,9 @@ mod tests {
         // Write the sorted trie updates
         let num_entries = provider_rw.write_trie_updates_sorted(&trie_updates).unwrap();
 
-        // We should have 2 account insertions + 1 account deletion + 1 storage insertion + 1
-        // storage deletion = 5
-        assert_eq!(num_entries, 5);
+        // We should have 2 account insertions + 1 account deletion + 1 storage insertion + 3
+        // storage deletions = 7
+        assert_eq!(num_entries, 7);
 
         // Verify account trie updates were written correctly
         let tx = provider_rw.tx_ref();
@@ -4625,18 +4593,17 @@ mod tests {
             "Remaining entry should be [0x1, 0x0]"
         );
 
-        // Check storage for address2 was wiped
+        // Check storage for address2 was removed
         let storage_entries2: Vec<_> = storage_cursor
             .walk_dup(Some(storage_address2), None)
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(storage_entries2.len(), 0, "Storage address2 should be empty after wipe");
+        assert_eq!(storage_entries2.len(), 0, "Storage address2 should be empty after removal");
 
         provider_rw.commit().unwrap();
     }
 
-    #[cfg(feature = "partial-persistence")]
     #[test]
     fn test_save_blocks_only_masks_trie_with_deferred_blocks() {
         use reth_trie::{
@@ -4680,17 +4647,11 @@ mod tests {
             B256Map::from_iter([
                 (
                     kept_storage,
-                    HashedStorageSorted {
-                        wiped: false,
-                        storage_slots: vec![(kept_slot, U256::from(1))],
-                    },
+                    HashedStorageSorted { storage_slots: vec![(kept_slot, U256::from(1))] },
                 ),
                 (
                     masked_storage,
-                    HashedStorageSorted {
-                        wiped: false,
-                        storage_slots: vec![(masked_slot, U256::from(2))],
-                    },
+                    HashedStorageSorted { storage_slots: vec![(masked_slot, U256::from(2))] },
                 ),
             ]),
         );
@@ -4703,14 +4664,12 @@ mod tests {
                 (
                     kept_storage,
                     StorageTrieUpdatesSorted {
-                        is_deleted: false,
                         storage_nodes: vec![(kept_storage_node, Some(branch(0b1010)))],
                     },
                 ),
                 (
                     masked_storage,
                     StorageTrieUpdatesSorted {
-                        is_deleted: false,
                         storage_nodes: vec![(masked_storage_node, Some(branch(0b0101)))],
                     },
                 ),
@@ -4730,10 +4689,7 @@ mod tests {
             vec![(masked_account, Some(Account { nonce: 3, ..Default::default() }))],
             B256Map::from_iter([(
                 masked_storage,
-                HashedStorageSorted {
-                    wiped: false,
-                    storage_slots: vec![(masked_slot, U256::from(4))],
-                },
+                HashedStorageSorted { storage_slots: vec![(masked_slot, U256::from(4))] },
             )]),
         );
         let deferred_trie_updates = TrieUpdatesSorted::new(
@@ -4741,7 +4697,6 @@ mod tests {
             B256Map::from_iter([(
                 masked_storage,
                 StorageTrieUpdatesSorted {
-                    is_deleted: false,
                     storage_nodes: vec![(masked_storage_node, Some(branch(0b1100)))],
                 },
             )]),
@@ -4858,7 +4813,6 @@ mod tests {
         assert_eq!(masked_entries[0].1.nibbles.0, masked_storage_node);
     }
 
-    #[cfg(feature = "partial-persistence")]
     #[test]
     fn test_save_blocks_partial_cycles_do_not_duplicate_static_file_writes() {
         let factory = create_test_provider_factory();
@@ -4907,7 +4861,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "partial-persistence")]
     #[test]
     fn remove_block_and_execution_above_returns_persistence_frontiers() {
         let factory = create_test_provider_factory();
@@ -4919,6 +4872,10 @@ mod tests {
         let provider_rw = factory.provider_rw().unwrap();
         save_genesis(&provider_rw, &genesis).unwrap();
         provider_rw.commit().unwrap();
+
+        for block in &blocks[2..] {
+            factory.overlay_manager().insert_block(block.clone());
+        }
 
         let provider_rw = factory.provider_rw().unwrap();
         let input = SaveBlocksInput::new(blocks, 0, 0, 4, 2);

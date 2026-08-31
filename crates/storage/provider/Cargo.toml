@@ -69,6 +69,9 @@ rayon.workspace = true
 
 rocksdb.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
 [dev-dependencies]
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-primitives-traits = { workspace = true, features = ["arbitrary", "test-utils"] }
@@ -88,10 +91,6 @@ tokio-stream = { workspace = true, features = ["sync"] }
 
 [features]
 jemalloc = ["rocksdb/jemalloc"]
-partial-persistence = [
-    "reth-stages-types/partial-persistence",
-    "reth-storage-overlay/partial-persistence",
-]
 test-utils = [
     "reth-db/test-utils",
     "reth-nippy-jar/test-utils",
