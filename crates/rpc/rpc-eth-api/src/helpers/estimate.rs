@@ -120,7 +120,8 @@ pub trait EstimateCall: Call {
         let is_basic_transfer = if tx_env.input().is_empty() &&
             let TxKind::Call(to) = tx_env.kind()
         {
-            // Check the account after applying state overrides, since an override may add bytecode.
+            // Fetch the account through `Database::basic` so the state overrides applied above
+            // are visible.
             match db.basic(to) {
                 Ok(Some(account)) => account.is_empty_code_hash(),
                 Ok(None) => true,
