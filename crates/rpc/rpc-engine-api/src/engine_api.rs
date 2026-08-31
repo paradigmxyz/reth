@@ -7,7 +7,7 @@ use alloy_eips::{
     eip4895::Withdrawals,
     eip7685::RequestsOrHash,
 };
-use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes, Sealable, B128, B256, U64};
+use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealable, B128, B256, U64};
 use alloy_rpc_types_engine::{
     BogotaPayloadFields, CancunPayloadFields, ClientVersionV1, ExecutionData,
     ExecutionPayloadBodiesV1, ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1,
@@ -32,9 +32,8 @@ use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
 use reth_storage_api::{BalProvider, BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::Runtime;
-use reth_transaction_pool::{BestTransactions, TransactionPool};
+use reth_transaction_pool::TransactionPool;
 use std::{
-    collections::HashMap,
     sync::Arc,
     time::{Instant, SystemTime},
 };
@@ -49,9 +48,6 @@ const MAX_PAYLOAD_BODIES_LIMIT: u64 = 1024;
 
 /// The upper limit for blobs in `engine_getBlobsVx`.
 const MAX_BLOB_LIMIT: usize = 128;
-
-/// Upper bound on how many transactions one sender contributes to an inclusion list.
-const MAX_INCLUSION_LIST_TXS_PER_SENDER: usize = 2;
 
 /// The Engine API implementation that grants the Consensus layer access to data and
 /// functions in the Execution layer that are crucial for the consensus process.
@@ -520,33 +516,7 @@ where
 
     /// Builds an EIP-7805 inclusion list from the local transaction pool.
     pub fn get_inclusion_list_v1(&self) -> EngineApiResult<Vec<Bytes>> {
-        let mut total_size = 0;
-        let mut inclusion_list = Vec::new();
-        let mut per_sender: HashMap<Address, usize> = HashMap::new();
-
-        for pool_tx in self.inner.tx_pool.best_transactions().without_blobs().without_updates() {
-            // Only a sender's next nonce is appendable, so a run of consecutive nonces from one
-            // sender spends the byte budget without constraining the proposer. Keeping two leaves
-            // the follow-up that becomes appendable once the first lands.
-            let taken = per_sender.entry(pool_tx.sender()).or_default();
-            if *taken >= MAX_INCLUSION_LIST_TXS_PER_SENDER {
-                continue
-            }
-
-            let encoded = pool_tx.encoded_2718_consensus();
-            let new_size = total_size + alloy_rlp::Encodable::length(&encoded);
-            if new_size + alloy_rlp::length_of_length(new_size) >
-                MAX_BYTES_PER_INCLUSION_LIST as usize
-            {
-                break
-            }
-
-            *taken += 1;
-            total_size = new_size;
-            inclusion_list.push(encoded);
-        }
-
-        Ok(inclusion_list)
+        Ok(self.inner.tx_pool.build_inclusion_list(MAX_BYTES_PER_INCLUSION_LIST as usize))
     }
 
     /// Metrics version of `get_inclusion_list_v1`.
@@ -1963,52 +1933,6 @@ mod tests {
         assert!(
             alloy_rlp::list_length::<Bytes, [u8]>(&res) <= MAX_BYTES_PER_INCLUSION_LIST as usize
         );
-    }
-
-    // A sender's next nonce is the only one that is appendable, so a run of consecutive nonces
-    // from one sender would spend the byte budget without constraining the proposer.
-    #[tokio::test]
-    async fn get_inclusion_list_v1_caps_transactions_per_sender() {
-        let pool = eth_test_pool();
-        let busy = B256::repeat_byte(0x11);
-        let other = B256::repeat_byte(0x22);
-
-        for nonce in 0..5u64 {
-            let tx = pooled_transaction(
-                TransactionBuilder::default()
-                    .signer(busy)
-                    .nonce(nonce)
-                    .max_fee_per_gas(3_000_000_000u128)
-                    .into_legacy(),
-            );
-            pool.add_transaction(TransactionOrigin::External, tx).await.unwrap();
-        }
-        let single = pooled_transaction(
-            TransactionBuilder::default()
-                .signer(other)
-                .nonce(0)
-                .max_fee_per_gas(1_000_000_000u128)
-                .into_legacy(),
-        );
-        pool.add_transaction(TransactionOrigin::External, single).await.unwrap();
-
-        let (_, api) = setup_engine_api_with_pool(pool);
-        let res = EngineApiServer::get_inclusion_list_v1(&api).await.unwrap();
-
-        let mut per_sender: HashMap<Address, usize> = HashMap::new();
-        for raw in &res {
-            let tx = alloy_eips::eip2718::Decodable2718::decode_2718_exact(raw.as_ref())
-                .map(|t: TransactionSigned| t)
-                .unwrap();
-            *per_sender.entry(tx.try_recover().unwrap()).or_default() += 1;
-        }
-        assert_eq!(per_sender.len(), 2, "both senders should be represented");
-        for (sender, count) in per_sender {
-            assert!(
-                count <= MAX_INCLUSION_LIST_TXS_PER_SENDER,
-                "sender {sender} contributed {count} transactions"
-            );
-        }
     }
 
     #[tokio::test]
