@@ -30,10 +30,6 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                 return Ok(None);
             };
 
-            if block.block_access_list_hash().is_none() {
-                return Err(EthApiError::BlockAccessListNotAvailablePreAmsterdam.into())
-            }
-
             if let Some(cached_bal) =
                 self.cache().get_bal(block.hash()).await.map_err(Self::Error::from_eth_err)?
             {
@@ -91,10 +87,6 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                 .recovered_block(block_id)
                 .await?
                 .ok_or_else(|| EthApiError::HeaderNotFound(block_id))?;
-
-            if block.block_access_list_hash().is_none() {
-                return Err(EthApiError::BlockAccessListNotAvailablePreAmsterdam.into())
-            }
 
             if let Some(cached_bal) =
                 self.cache().get_bal(block.hash()).await.map_err(Self::Error::from_eth_err)?
