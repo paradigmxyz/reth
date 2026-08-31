@@ -469,14 +469,11 @@ pub trait EngineEthApi<TxReq: RpcObject, B: RpcObject, R: RpcObject, L: RpcObjec
     ) -> RpcResult<EIP1186AccountProofResponse>;
 
     /// Returns the account and storage values of the specified targets including Merkle proofs.
-    ///
-    /// When `use_v2` is true, child branches of extension nodes are included in the proofs.
     #[method(name = "getMultiProof")]
     async fn get_multi_proof(
         &self,
         targets: Vec<(Address, Vec<B256>)>,
         block_number: Option<BlockId>,
-        use_v2: Option<bool>,
     ) -> RpcResult<Vec<EIP1186AccountProofResponse>>;
 
     /// Returns the EIP-7928 block access list for a block by hash.

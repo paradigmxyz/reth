@@ -416,14 +416,11 @@ pub trait EthApi<
     ) -> RpcResult<EIP1186AccountProofResponse>;
 
     /// Returns the account and storage values of the specified targets including Merkle proofs.
-    ///
-    /// When `use_v2` is true, child branches of extension nodes are included in the proofs.
     #[method(name = "getMultiProof")]
     async fn get_multi_proof(
         &self,
         targets: Vec<(Address, Vec<B256>)>,
         block_number: Option<BlockId>,
-        use_v2: Option<bool>,
     ) -> RpcResult<Vec<EIP1186AccountProofResponse>>;
 
     /// Returns the account's balance, nonce, and code.
@@ -970,10 +967,9 @@ where
         &self,
         targets: Vec<(Address, Vec<B256>)>,
         block_number: Option<BlockId>,
-        use_v2: Option<bool>,
     ) -> RpcResult<Vec<EIP1186AccountProofResponse>> {
-        trace!(target: "rpc::eth", ?targets, ?block_number, ?use_v2, "Serving eth_getMultiProof");
-        Ok(EthState::get_multi_proof(self, targets, block_number, use_v2)?.await?)
+        trace!(target: "rpc::eth", ?targets, ?block_number, "Serving eth_getMultiProof");
+        Ok(EthState::get_multi_proof(self, targets, block_number)?.await?)
     }
 
     /// Handler for: `eth_getAccountInfo`

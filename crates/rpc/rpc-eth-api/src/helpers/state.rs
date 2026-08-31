@@ -22,7 +22,7 @@ use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, StateProvider, StateProviderBox, StateProviderFactory,
 };
 use reth_transaction_pool::TransactionPool;
-use reth_trie_common::{MultiProofTargets, MultiProofTargetsV2, ProofV2Target};
+use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use std::{collections::HashMap, sync::Arc};
 
 /// Helper methods for `eth_` methods relating to state (accounts).
@@ -188,13 +188,10 @@ pub trait EthState: LoadState + SpawnBlocking {
     }
 
     /// Returns account and storage proofs for multiple targets at the given block number.
-    ///
-    /// When `use_v2` is true, child branches of extension nodes are included in the proofs.
     fn get_multi_proof(
         &self,
         targets: Vec<(Address, Vec<B256>)>,
         block_id: Option<BlockId>,
-        use_v2: Option<bool>,
     ) -> Result<
         impl Future<Output = Result<Vec<EIP1186AccountProofResponse>, Self::Error>> + Send,
         Self::Error,
@@ -214,47 +211,21 @@ pub trait EthState: LoadState + SpawnBlocking {
 
             self.spawn_blocking_io_fut(async move |this| {
                 let state = this.state_at_block_id(block_id).await?;
-                if use_v2.unwrap_or_default() {
-                    let mut proof_targets = MultiProofTargetsV2::default();
-                    proof_targets.account_targets.reserve(targets.len());
-                    proof_targets.storage_targets.reserve(targets.len());
-                    for (address, slots) in &targets {
-                        let hashed_address = keccak256(address);
-                        proof_targets.account_targets.push(ProofV2Target::new(hashed_address));
-                        proof_targets
-                            .storage_targets
-                            .entry(hashed_address)
-                            .or_default()
-                            .extend(slots.iter().map(|slot| ProofV2Target::new(keccak256(slot))));
-                    }
-                    let multiproof = state
-                        .multiproof_v2(Default::default(), proof_targets)
-                        .map_err(Self::Error::from_eth_err)?;
-
-                    return targets
-                        .into_iter()
-                        .map(|(address, slots)| {
-                            let proof = multiproof
-                                .account_proof(address, &slots)
-                                .map_err(RethError::other)
-                                .map_err(Self::Error::from_eth_err)?;
-                            let storage_keys =
-                                slots.into_iter().map(JsonStorageKey::from).collect::<Vec<_>>();
-                            Ok(proof.into_eip1186_response(storage_keys))
-                        })
-                        .collect::<Result<Vec<_>, Self::Error>>()
-                }
-
-                let mut proof_targets = MultiProofTargets::with_capacity(targets.len());
+                let mut proof_targets = MultiProofTargetsV2::default();
+                proof_targets.account_targets.reserve(targets.len());
+                proof_targets.storage_targets.reserve(targets.len());
                 for (address, slots) in &targets {
+                    let hashed_address = keccak256(address);
+                    proof_targets.account_targets.push(ProofV2Target::new(hashed_address));
                     proof_targets
-                        .entry(keccak256(address))
+                        .storage_targets
+                        .entry(hashed_address)
                         .or_default()
-                        .extend(slots.iter().map(keccak256));
+                        .extend(slots.iter().map(|slot| ProofV2Target::new(keccak256(slot))));
                 }
 
                 let multiproof = state
-                    .multiproof(Default::default(), proof_targets)
+                    .multiproof_v2(Default::default(), proof_targets)
                     .map_err(Self::Error::from_eth_err)?;
 
                 targets
