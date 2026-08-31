@@ -412,6 +412,39 @@ mod inclusion_list_tests {
         assert!(could_append(blob_tx(vec![B256::ZERO], 1), funded(0), context()));
     }
 
+    // The structural guards in `could_append_transaction` exist because decoding does not enforce
+    // them: a non-conforming consensus layer can hand us these and they decode cleanly. Without
+    // the guards an invalid transaction could be judged appendable, wrongly reporting an honest
+    // block as unsatisfied.
+    #[test]
+    fn decoding_accepts_an_empty_authorization_list() {
+        use alloy_eips::eip2718::Encodable2718;
+        let mut rng = generators::rng();
+        let tx = EthTransaction::Eip7702(TxEip7702 {
+            chain_id: CHAIN_ID,
+            nonce: 0,
+            gas_limit: 100_000,
+            max_fee_per_gas: BASE_FEE as u128,
+            max_priority_fee_per_gas: 0,
+            to: Address::ZERO,
+            value: U256::ZERO,
+            access_list: Default::default(),
+            authorization_list: Vec::new(),
+            input: Default::default(),
+        });
+        let encoded = sign_tx_with_key_pair(generate_key(&mut rng), tx).encoded_2718();
+        assert!(TransactionSigned::decode_2718_exact(encoded.as_ref()).is_ok());
+    }
+
+    #[test]
+    fn decoding_accepts_a_blob_transaction_without_blobs() {
+        use alloy_eips::eip2718::Encodable2718;
+        let mut rng = generators::rng();
+        let encoded =
+            sign_tx_with_key_pair(generate_key(&mut rng), blob_tx(Vec::new(), 1)).encoded_2718();
+        assert!(TransactionSigned::decode_2718_exact(encoded.as_ref()).is_ok());
+    }
+
     #[test]
     fn blob_transaction_without_blobs_is_not_appendable() {
         assert!(!could_append(blob_tx(vec![], 1), funded(0), context()));
