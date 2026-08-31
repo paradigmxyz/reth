@@ -42,11 +42,7 @@ use reth_stages_api::ControlFlow;
 use reth_storage_overlay::OverlayManager;
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie::ComputedTrieData;
-use revm::{
-    context_interface::{Block as _, Cfg},
-    interpreter::debug_unreachable,
-    primitives::hardfork::SpecId,
-};
+use revm::{context_interface::Cfg, interpreter::debug_unreachable, primitives::hardfork::SpecId};
 use state::TreeState;
 use std::{
     fmt::Debug,
@@ -3556,8 +3552,6 @@ where
             base_fee_per_gas: block.base_fee_per_gas(),
             available_gas: block.gas_limit().saturating_sub(block.gas_used()),
             tx_gas_limit_cap: evm_env.cfg_env.tx_gas_limit_cap(),
-            max_blobs_per_tx: evm_env.cfg_env.max_blobs_per_tx(),
-            blob_gas_price: evm_env.block_env.blob_gasprice(),
         };
 
         let result = inclusion_list_satisfied::<N>(&block, &state, &ctx, &transactions)?;
