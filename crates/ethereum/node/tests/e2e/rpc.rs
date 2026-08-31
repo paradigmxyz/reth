@@ -14,9 +14,9 @@ use alloy_rpc_types_engine::{
     BlobsBundleV1, CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar,
     ExecutionPayloadV3, PraguePayloadFields,
 };
-use alloy_rpc_types_eth::TransactionRequest;
+use alloy_rpc_types_eth::{error::EthRpcErrorCode, TransactionRequest};
 use alloy_rpc_types_trace::geth::{ChainBlockTraceResult, GethDebugTracingOptions};
-use jsonrpsee::core::client::{Subscription, SubscriptionClientT};
+use jsonrpsee::core::client::{ClientT, Subscription, SubscriptionClientT};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::{ChainSpecBuilder, EthChainSpec, MAINNET};
 use reth_e2e_test_utils::{setup_engine, E2ETestSetupBuilder};
@@ -50,6 +50,47 @@ alloy_sol_types::sol! {
             }
         }
     }
+}
+
+#[tokio::test]
+async fn test_block_access_list_lookup_semantics() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .cancun_activated()
+            .build(),
+    );
+
+    let (mut nodes, _) = setup_engine::<EthereumNode>(
+        1,
+        chain_spec,
+        false,
+        Default::default(),
+        eth_payload_attributes,
+    )
+    .await?;
+    let node = nodes.pop().unwrap();
+    let client = node.rpc_client().unwrap();
+
+    let pending: Option<serde_json::Value> =
+        client.request("eth_getBlockAccessList", (BlockNumberOrTag::Pending,)).await?;
+    assert_eq!(pending, None);
+
+    for method in ["eth_getBlockAccessList", "debug_getRawBlockAccessList"] {
+        let error = client
+            .request::<serde_json::Value, _>(method, (BlockNumberOrTag::Latest,))
+            .await
+            .unwrap_err();
+        let jsonrpsee::core::client::Error::Call(error) = error else {
+            panic!("expected a resource not found error, got {error:?}")
+        };
+        assert_eq!(error.code(), EthRpcErrorCode::ResourceNotFound.code());
+    }
+
+    Ok(())
 }
 
 #[tokio::test]
