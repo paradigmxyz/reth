@@ -205,6 +205,9 @@ impl RetainedInclusionLists {
     pub(super) fn remove(&mut self, block_hash: &B256) {
         self.lists.remove(block_hash);
         self.results.remove(block_hash);
+        // The FIFO must stay in sync with `lists`: a hash left here would be pushed a second time
+        // by a re-insert of the same block, and the stale copy would later evict the live entry.
+        self.order.retain(|hash| hash != block_hash);
     }
 }
 #[cfg(test)]
@@ -436,5 +439,24 @@ mod inclusion_list_tests {
         // An account carrying non-delegation code is not an EOA and cannot originate a tx.
         let account = funded(0).with_bytecode(alloy_primitives::bytes!("60006000"));
         assert!(!could_append(legacy_tx(Some(CHAIN_ID), 0, 100_000), account, context()));
+    }
+
+    #[test]
+    fn reinserting_a_removed_hash_does_not_evict_it_early() {
+        let mut retained = RetainedInclusionLists::default();
+        let hash = B256::with_last_byte(1);
+
+        // A payload that came back INVALID is removed, then the same block hash is submitted
+        // again with a fresh list.
+        retained.insert(hash, Vec::new());
+        retained.remove(&hash);
+        retained.insert(hash, vec![Bytes::from_static(b"tx")]);
+
+        // The re-inserted list survives a full window of other hashes: it is the newest entry,
+        // so only a 65th distinct hash may evict it.
+        for i in 0..MAX_RETAINED_INCLUSION_LISTS - 1 {
+            retained.insert(B256::with_last_byte(i as u8 + 2), Vec::new());
+        }
+        assert_eq!(retained.get(&hash), Some(&vec![Bytes::from_static(b"tx")]));
     }
 }
