@@ -982,12 +982,12 @@ mod tests {
         for block in &blocks[2..=3] {
             manager.insert_block(block.clone());
         }
-        let overlay_factory = OverlayStateProviderFactory::new(
+        let state_provider_factory = OverlayStateProviderFactory::new(
             factory.clone(),
             manager.overlay_builder(blocks[3].recovered_block().hash()),
         );
 
-        let provider = overlay_factory.database_provider_ro().unwrap();
+        let provider = state_provider_factory.database_provider_ro().unwrap();
         let first = provider.state_trie_overlay().unwrap().clone();
         assert_eq!(account_keys(&first), vec![B256::with_last_byte(3), B256::with_last_byte(4)]);
         drop(provider);
@@ -1003,11 +1003,11 @@ mod tests {
             .unwrap();
         provider_rw.commit().unwrap();
 
-        let provider = overlay_factory.database_provider_ro().unwrap();
+        let provider = state_provider_factory.database_provider_ro().unwrap();
         let second = provider.state_trie_overlay().unwrap().clone();
         assert_eq!(account_keys(&second), vec![B256::with_last_byte(4)]);
         assert_eq!(account_node_paths(&second), vec![Nibbles::from_nibbles([4])]);
-        assert_eq!(overlay_factory.state_trie_overlay_cache.len(), 2);
+        assert_eq!(state_provider_factory.state_trie_overlay_cache.len(), 2);
     }
 
     #[test]
@@ -1017,30 +1017,30 @@ mod tests {
         for block in &blocks[2..=3] {
             manager.insert_block(block.clone());
         }
-        let overlay_factory = OverlayStateProviderFactory::new(
+        let state_provider_factory = OverlayStateProviderFactory::new(
             factory,
             manager.overlay_builder(blocks[3].recovered_block().hash()),
         );
 
-        let provider = overlay_factory.database_provider_ro().unwrap();
+        let provider = state_provider_factory.database_provider_ro().unwrap();
 
         assert!(provider.state_trie_overlay.get().is_none());
         assert!(provider.execution_overlay.get().is_none());
-        assert!(overlay_factory.state_trie_overlay_cache.is_empty());
-        assert!(overlay_factory.execution_overlay_cache.is_empty());
+        assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
+        assert!(state_provider_factory.execution_overlay_cache.is_empty());
 
         provider.basic_account(&Address::ZERO).unwrap();
         let execution_overlay = Arc::clone(provider.execution_overlay.get().unwrap());
         assert!(provider.state_trie_overlay.get().is_none());
         assert!(provider.execution_overlay.get().is_some());
-        assert!(overlay_factory.state_trie_overlay_cache.is_empty());
-        assert_eq!(overlay_factory.execution_overlay_cache.len(), 1);
-        let cached_overlay = overlay_factory.execution_overlay_cache.iter().next().unwrap();
+        assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
+        assert_eq!(state_provider_factory.execution_overlay_cache.len(), 1);
+        let cached_overlay = state_provider_factory.execution_overlay_cache.iter().next().unwrap();
         assert!(Arc::ptr_eq(&execution_overlay, cached_overlay.value()));
 
         provider.account_trie_cursor().unwrap();
-        assert_eq!(overlay_factory.state_trie_overlay_cache.len(), 1);
-        assert_eq!(overlay_factory.execution_overlay_cache.len(), 1);
+        assert_eq!(state_provider_factory.state_trie_overlay_cache.len(), 1);
+        assert_eq!(state_provider_factory.execution_overlay_cache.len(), 1);
     }
 
     #[test]

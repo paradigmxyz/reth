@@ -3,7 +3,9 @@ use alloy_eips::{eip2718::Encodable2718, eip7910::EthConfig, BlockNumberOrTag};
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_provider::{
-    ext::DebugApi, network::EthereumWallet, Provider, ProviderBuilder, SendableTx,
+    ext::DebugApi,
+    network::{EthereumWallet, TransactionBuilder},
+    Provider, ProviderBuilder, SendableTx,
 };
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
@@ -14,12 +16,16 @@ use alloy_rpc_types_engine::{
     BlobsBundleV1, CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar,
     ExecutionPayloadV3, PraguePayloadFields,
 };
-use alloy_rpc_types_eth::TransactionRequest;
+use alloy_rpc_types_eth::{
+    error::EthRpcErrorCode,
+    state::{AccountOverride, StateOverride},
+    TransactionRequest,
+};
 use alloy_rpc_types_trace::geth::{ChainBlockTraceResult, GethDebugTracingOptions};
-use jsonrpsee::core::client::{Subscription, SubscriptionClientT};
+use jsonrpsee::core::client::{ClientT, Subscription, SubscriptionClientT};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::{ChainSpecBuilder, EthChainSpec, MAINNET};
-use reth_e2e_test_utils::{setup_engine, E2ETestSetupBuilder};
+use reth_e2e_test_utils::{setup_engine, wallet::Wallet, E2ETestSetupBuilder};
 use reth_network::{types::NatResolver, PeersInfo};
 use reth_node_builder::{NodeBuilder, NodeHandle};
 use reth_node_core::{
@@ -50,6 +56,47 @@ alloy_sol_types::sol! {
             }
         }
     }
+}
+
+#[tokio::test]
+async fn test_block_access_list_lookup_semantics() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .cancun_activated()
+            .build(),
+    );
+
+    let (mut nodes, _) = setup_engine::<EthereumNode>(
+        1,
+        chain_spec,
+        false,
+        Default::default(),
+        eth_payload_attributes,
+    )
+    .await?;
+    let node = nodes.pop().unwrap();
+    let client = node.rpc_client().unwrap();
+
+    let pending: Option<serde_json::Value> =
+        client.request("eth_getBlockAccessList", (BlockNumberOrTag::Pending,)).await?;
+    assert_eq!(pending, None);
+
+    for method in ["eth_getBlockAccessList", "debug_getRawBlockAccessList"] {
+        let error = client
+            .request::<serde_json::Value, _>(method, (BlockNumberOrTag::Latest,))
+            .await
+            .unwrap_err();
+        let jsonrpsee::core::client::Error::Call(error) = error else {
+            panic!("expected a resource not found error, got {error:?}")
+        };
+        assert_eq!(error.code(), EthRpcErrorCode::ResourceNotFound.code());
+    }
+
+    Ok(())
 }
 
 #[tokio::test]
@@ -495,6 +542,91 @@ async fn test_flashbots_validate_v6() -> eyre::Result<()> {
         .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV6".into(), (&request,))
         .await
         .is_err());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_estimate_gas_basic_transfers_post_amsterdam() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .amsterdam_activated()
+            .build(),
+    );
+
+    let (mut nodes, _) = setup_engine::<EthereumNode>(
+        1,
+        chain_spec,
+        false,
+        Default::default(),
+        eth_payload_attributes_amsterdam,
+    )
+    .await?;
+    let node = nodes.pop().unwrap();
+    let provider = ProviderBuilder::new().connect_http(node.rpc_url());
+
+    let mut signers = Wallet::new(2).wallet_gen();
+    let from = signers.remove(0).address();
+    let existing_recipient = signers.remove(0).address();
+
+    let self_send_gas = provider
+        .estimate_gas(
+            TransactionRequest::default().with_from(from).with_to(from).with_value(U256::from(1)),
+        )
+        .await?;
+    assert_eq!(self_send_gas, 12_000);
+
+    let zero_value_existing_gas = provider
+        .estimate_gas(TransactionRequest::default().with_from(from).with_to(existing_recipient))
+        .await?;
+    assert_eq!(zero_value_existing_gas, 15_000);
+
+    let value_existing_gas = provider
+        .estimate_gas(
+            TransactionRequest::default()
+                .with_from(from)
+                .with_to(existing_recipient)
+                .with_value(U256::from(1)),
+        )
+        .await?;
+    assert_eq!(value_existing_gas, 21_000);
+
+    let fresh_recipient = Address::repeat_byte(0xfe);
+    let zero_value_fresh_gas = provider
+        .estimate_gas(TransactionRequest::default().with_from(from).with_to(fresh_recipient))
+        .await?;
+    assert_eq!(zero_value_fresh_gas, 15_000);
+
+    // Creating the recipient requires additional state gas, so the 21_000-gas run fails and
+    // estimation falls back to binary search.
+    let value_fresh_gas = provider
+        .estimate_gas(
+            TransactionRequest::default()
+                .with_from(from)
+                .with_to(fresh_recipient)
+                .with_value(U256::from(1)),
+        )
+        .await?;
+    assert!(value_fresh_gas > 21_000);
+
+    // The override installs code that needs more than 4_000 gas at entry. If the estimator
+    // mistakes this for a basic transfer, it returns too little gas for the code to run.
+    let gas_gate = Address::repeat_byte(0xaa);
+    let mut overrides = StateOverride::default();
+    overrides.insert(
+        gas_gate,
+        AccountOverride {
+            code: Some("0x5a610fa010600957fe5b00".parse::<Bytes>()?),
+            ..Default::default()
+        },
+    );
+    let gated_tx = TransactionRequest::default().with_from(from).with_to(gas_gate);
+    let gated_gas = provider.estimate_gas(gated_tx.clone()).overrides(overrides.clone()).await?;
+    provider.call(gated_tx.with_gas_limit(gated_gas)).overrides(overrides).await?;
 
     Ok(())
 }

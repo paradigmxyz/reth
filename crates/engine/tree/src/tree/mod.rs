@@ -2277,8 +2277,9 @@ where
                     return None
                 }
 
-                if self.canonical_in_memory_state.canonical_chain().count() <=
-                    self.config.persistence_threshold() as usize
+                let persistence_threshold =
+                    usize::try_from(self.config.persistence_threshold()).unwrap_or(usize::MAX);
+                if self.canonical_in_memory_state.canonical_chain().count() <= persistence_threshold
                 {
                     return None
                 }
