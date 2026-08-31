@@ -356,8 +356,7 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
 
         if let Some(block_index) = block_index {
             // Find first block range that contains the requested block
-            if let Some((_, range)) = block_index.iter().find(|(max_block, _)| block <= **max_block)
-            {
+            if let Some((_, range)) = block_index.range(block..).next() {
                 // Found matching range for an existing file using block index
                 return *range;
             } else if let Some((_, range)) = block_index.last_key_value() {
@@ -2408,6 +2407,7 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
         let range = offset.changeset_range();
         let mut low = range.start;
         let mut high = range.end;
+        let mut candidate = None;
 
         while low < high {
             let mid = low + (high - low) / 2;
@@ -2418,6 +2418,7 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
                     low = mid + 1;
                 } else {
                     high = mid;
+                    candidate = Some((mid, change));
                 }
             } else {
                 // This is not expected but means we are out of the range / file somehow, and can't
@@ -2437,10 +2438,14 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
             }
         }
 
-        if low < range.end &&
-            let Some(change) = cursor
-                .get_one::<reth_db::static_file::AccountChangesetMask>(low.into())?
-                .filter(|change| change.address == address)
+        let change = match candidate {
+            Some((index, change)) if index == low => Some(change),
+            _ if low < range.end => {
+                cursor.get_one::<reth_db::static_file::AccountChangesetMask>(low.into())?
+            }
+            _ => None,
+        };
+        if let Some(change) = change.filter(|change| change.address == address)
         {
             return Ok(Some(change));
         }
@@ -2513,13 +2518,17 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
         let range = offset.changeset_range();
         let mut low = range.start;
         let mut high = range.end;
+        let mut candidate = None;
 
         while low < high {
             let mid = low + (high - low) / 2;
             if let Some(change) = cursor.get_one::<StorageChangesetMask>(mid.into())? {
                 match (change.address, change.key).cmp(&(address, storage_key)) {
                     std::cmp::Ordering::Less => low = mid + 1,
-                    _ => high = mid,
+                    _ => {
+                        high = mid;
+                        candidate = Some((mid, change));
+                    }
                 }
             } else {
                 debug!(
@@ -2538,10 +2547,13 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
             }
         }
 
-        if low < range.end &&
-            let Some(change) = cursor
-                .get_one::<StorageChangesetMask>(low.into())?
-                .filter(|change| change.address == address && change.key == storage_key)
+        let change = match candidate {
+            Some((index, change)) if index == low => Some(change),
+            _ if low < range.end => cursor.get_one::<StorageChangesetMask>(low.into())?,
+            _ => None,
+        };
+        if let Some(change) =
+            change.filter(|change| change.address == address && change.key == storage_key)
         {
             return Ok(Some(StorageEntry { key: change.key, value: change.value }));
         }
