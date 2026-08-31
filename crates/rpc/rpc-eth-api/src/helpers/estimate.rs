@@ -145,9 +145,10 @@ pub trait EstimateCall: Call {
         // Create EVM instance once and reuse it throughout the entire estimation process
         let mut evm = self.evm_config().evm_with_env(&mut db, evm_env);
 
+        // For basic transfers, try 21_000 gas before running the full binary search.
         if is_basic_transfer {
-            // Run the transfer with 21_000 gas. Since it executes no bytecode and receives no
-            // refunds, the amount consumed is the exact gas required. EIP-2780 can make that less
+            // A basic transfer executes no bytecode and receives no refunds, so the amount
+            // consumed by a successful run is the exact gas required. EIP-2780 can make that less
             // than 21_000.
             let mut min_tx_env = tx_env.clone();
             min_tx_env.set_gas_limit(MIN_TRANSACTION_GAS);
