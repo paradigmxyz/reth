@@ -116,11 +116,11 @@ pub trait EstimateCall: Call {
 
         let mut tx_env = self.create_txn_env(&evm_env, request, &mut db)?;
 
-        // A state override may add bytecode to the recipient, so check the overridden account
-        // before treating an empty-input call as a basic transfer.
+        // Check whether this is a basic transfer: empty input to an account without bytecode.
         let is_basic_transfer = if tx_env.input().is_empty() &&
             let TxKind::Call(to) = tx_env.kind()
         {
+            // Check the account after applying state overrides, since an override may add bytecode.
             match db.basic(to) {
                 Ok(Some(account)) => account.is_empty_code_hash(),
                 Ok(None) => true,
