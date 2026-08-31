@@ -290,7 +290,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.39.0"
-source = "git+https://github.com/Rimeeeeee/evm?branch=bogota#bd27cd6efd8b25a63c41227213c60ce3828e975d"
+source = "git+https://github.com/Rimeeeeee/evm?rev=bd27cd6efd8b25a63c41227213c60ce3828e975d#bd27cd6efd8b25a63c41227213c60ce3828e975d"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -10770,7 +10770,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "43.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota#049a3fef61119f5dd3e0cf9f4375ec063d6714a3"
+source = "git+https://github.com/Rimeeeeee/revm?rev=049a3fef61119f5dd3e0cf9f4375ec063d6714a3#049a3fef61119f5dd3e0cf9f4375ec063d6714a3"
 dependencies = [
  "revm-bytecode",
  "revm-context",
@@ -10788,7 +10788,7 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "43.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota#049a3fef61119f5dd3e0cf9f4375ec063d6714a3"
+source = "git+https://github.com/Rimeeeeee/revm?rev=049a3fef61119f5dd3e0cf9f4375ec063d6714a3#049a3fef61119f5dd3e0cf9f4375ec063d6714a3"
 dependencies = [
  "bitvec",
  "paste",
@@ -10800,7 +10800,7 @@ dependencies = [
 [[package]]
 name = "revm-context"
 version = "43.0.1"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota#049a3fef61119f5dd3e0cf9f4375ec063d6714a3"
+source = "git+https://github.com/Rimeeeeee/revm?rev=049a3fef61119f5dd3e0cf9f4375ec063d6714a3#049a3fef61119f5dd3e0cf9f4375ec063d6714a3"
 dependencies = [
  "bitvec",
  "cfg-if",
@@ -10816,7 +10816,7 @@ dependencies = [
 [[package]]
 name = "revm-context-interface"
 version = "43.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota#049a3fef61119f5dd3e0cf9f4375ec063d6714a3"
+source = "git+https://github.com/Rimeeeeee/revm?rev=049a3fef61119f5dd3e0cf9f4375ec063d6714a3#049a3fef61119f5dd3e0cf9f4375ec063d6714a3"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -10831,7 +10831,7 @@ dependencies = [
 [[package]]
 name = "revm-database"
 version = "43.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota#049a3fef61119f5dd3e0cf9f4375ec063d6714a3"
+source = "git+https://github.com/Rimeeeeee/revm?rev=049a3fef61119f5dd3e0cf9f4375ec063d6714a3#049a3fef61119f5dd3e0cf9f4375ec063d6714a3"
 dependencies = [
  "alloy-eips",
  "derive_more",
@@ -10846,7 +10846,7 @@ dependencies = [
 [[package]]
 name = "revm-database-interface"
 version = "43.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota#049a3fef61119f5dd3e0cf9f4375ec063d6714a3"
+source = "git+https://github.com/Rimeeeeee/revm?rev=049a3fef61119f5dd3e0cf9f4375ec063d6714a3#049a3fef61119f5dd3e0cf9f4375ec063d6714a3"
 dependencies = [
  "auto_impl",
  "either",
@@ -10859,7 +10859,7 @@ dependencies = [
 [[package]]
 name = "revm-handler"
 version = "43.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota#049a3fef61119f5dd3e0cf9f4375ec063d6714a3"
+source = "git+https://github.com/Rimeeeeee/revm?rev=049a3fef61119f5dd3e0cf9f4375ec063d6714a3#049a3fef61119f5dd3e0cf9f4375ec063d6714a3"
 dependencies = [
  "auto_impl",
  "derive-where",
@@ -10877,7 +10877,7 @@ dependencies = [
 [[package]]
 name = "revm-inspector"
 version = "43.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota#049a3fef61119f5dd3e0cf9f4375ec063d6714a3"
+source = "git+https://github.com/Rimeeeeee/revm?rev=049a3fef61119f5dd3e0cf9f4375ec063d6714a3#049a3fef61119f5dd3e0cf9f4375ec063d6714a3"
 dependencies = [
  "auto_impl",
  "either",
@@ -10914,7 +10914,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "43.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota#049a3fef61119f5dd3e0cf9f4375ec063d6714a3"
+source = "git+https://github.com/Rimeeeeee/revm?rev=049a3fef61119f5dd3e0cf9f4375ec063d6714a3#049a3fef61119f5dd3e0cf9f4375ec063d6714a3"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -10926,7 +10926,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "43.0.1"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota#049a3fef61119f5dd3e0cf9f4375ec063d6714a3"
+source = "git+https://github.com/Rimeeeeee/revm?rev=049a3fef61119f5dd3e0cf9f4375ec063d6714a3#049a3fef61119f5dd3e0cf9f4375ec063d6714a3"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -10952,7 +10952,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "43.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota#049a3fef61119f5dd3e0cf9f4375ec063d6714a3"
+source = "git+https://github.com/Rimeeeeee/revm?rev=049a3fef61119f5dd3e0cf9f4375ec063d6714a3#049a3fef61119f5dd3e0cf9f4375ec063d6714a3"
 dependencies = [
  "alloy-primitives",
  "once_cell",
@@ -10962,7 +10962,7 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "43.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota#049a3fef61119f5dd3e0cf9f4375ec063d6714a3"
+source = "git+https://github.com/Rimeeeeee/revm?rev=049a3fef61119f5dd3e0cf9f4375ec063d6714a3#049a3fef61119f5dd3e0cf9f4375ec063d6714a3"
 dependencies = [
  "alloy-eip7928",
  "bitflags 2.13.0",
