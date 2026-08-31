@@ -366,7 +366,7 @@ pub fn validate_slot_number_presence<T: EthereumHardforks>(
 ///
 /// `engine_newPayloadV6` is exempt from the requirement: the field is a positional parameter
 /// there, so a missing one is rejected before this check.
-pub fn validate_inclusion_list_presence(
+pub const fn validate_inclusion_list_presence(
     version: EngineApiMessageVersion,
     message_validation_kind: MessageValidationKind,
     has_inclusion_list: bool,
