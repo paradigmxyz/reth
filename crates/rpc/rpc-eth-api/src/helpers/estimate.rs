@@ -116,9 +116,8 @@ pub trait EstimateCall: Call {
 
         let mut tx_env = self.create_txn_env(&evm_env, request, &mut db)?;
 
-        // Check if this is a basic transfer (no input data to account with no code)
-        // Read through the `State` so state overrides that install code at `to` are visible;
-        // the probe must never execute code, or its used gas is not a proven gas limit.
+        // A state override may add bytecode to the recipient, so check the overridden account
+        // before treating an empty-input call as a basic transfer.
         let is_basic_transfer = if tx_env.input().is_empty() &&
             let TxKind::Call(to) = tx_env.kind()
         {
@@ -146,13 +145,10 @@ pub trait EstimateCall: Call {
         // Create EVM instance once and reuse it throughout the entire estimation process
         let mut evm = self.evm_config().evm_with_env(&mut db, evm_env);
 
-        // For basic transfers, try using minimum gas before running full binary search
         if is_basic_transfer {
-            // If the tx is a simple transfer (call to an account with no code) we can
-            // shortcircuit by probing at the minimum gas limit. A transfer runs no code and
-            // gets no refunds, so on success its used gas is the lowest gas limit that
-            // succeeds. EIP-2780 prices some transfers below 21_000, so returning
-            // `MIN_TRANSACTION_GAS` itself would over-estimate post-Amsterdam.
+            // Run the transfer with 21_000 gas. Since it executes no bytecode and receives no
+            // refunds, the amount consumed is the exact gas required. EIP-2780 can make that less
+            // than 21_000.
             let mut min_tx_env = tx_env.clone();
             min_tx_env.set_gas_limit(MIN_TRANSACTION_GAS);
 

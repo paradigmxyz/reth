@@ -601,8 +601,8 @@ async fn test_estimate_gas_basic_transfers_post_amsterdam() -> eyre::Result<()> 
         .await?;
     assert_eq!(zero_value_fresh_gas, 15_000);
 
-    // Account creation costs state gas beyond 21_000, so this must miss the shortcut and fall
-    // through to the binary search.
+    // Creating the recipient requires additional state gas, so the 21_000-gas run fails and
+    // estimation falls back to binary search.
     let value_fresh_gas = provider
         .estimate_gas(
             TransactionRequest::default()
@@ -613,9 +613,8 @@ async fn test_estimate_gas_basic_transfers_post_amsterdam() -> eyre::Result<()> 
         .await?;
     assert!(value_fresh_gas > 21_000);
 
-    // GAS PUSH2 4000 LT PUSH1 9 JUMPI INVALID JUMPDEST STOP: succeeds only with more than
-    // 4_000 gas left at entry. The 21_000 probe satisfies that while its used gas does not,
-    // so a shortcut that misses override-installed code returns an inexecutable estimate.
+    // The override installs code that needs more than 4_000 gas at entry. If the estimator
+    // mistakes this for a basic transfer, it returns too little gas for the code to run.
     let gas_gate = Address::repeat_byte(0xaa);
     let mut overrides = StateOverride::default();
     overrides.insert(
