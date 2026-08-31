@@ -63,15 +63,13 @@ where
     // done.
     let last_changeset_pruned_block = last_pruned_block.unwrap_or(range_end);
 
-    // Sort highest deleted block numbers and turn them into sharded keys.
+    // Sort the keys so the shard walk follows on-disk order.
     // We use `sorted_unstable` because no equal keys exist in the map.
-    let highest_sharded_keys =
-        highest_deleted.into_iter().sorted_unstable().map(|(key, block_number)| {
-            to_sharded_key(key, block_number.min(last_changeset_pruned_block))
-        });
+    let prune_targets = highest_deleted.into_iter().sorted_unstable().map(|(key, block_number)| {
+        (to_sharded_key(key, 0), block_number.min(last_changeset_pruned_block))
+    });
 
-    let outcomes =
-        prune_history_indices::<Provider, T, _>(provider, highest_sharded_keys, key_matches)?;
+    let outcomes = prune_history_indices::<Provider, T, _>(provider, prune_targets, key_matches)?;
 
     let progress = limiter.progress(done);
 
@@ -85,12 +83,13 @@ where
     })
 }
 
-/// Prune history indices according to the provided list of highest sharded keys.
+/// Prune history indices according to the provided targets, each pairing a key's first shard with
+/// the highest block number to remove for that key.
 ///
 /// Returns total number of deleted, updated and unchanged entities.
 pub(crate) fn prune_history_indices<Provider, T, SK>(
     provider: &Provider,
-    highest_sharded_keys: impl IntoIterator<Item = T::Key>,
+    prune_targets: impl IntoIterator<Item = (T::Key, BlockNumber)>,
     key_matches: impl Fn(&T::Key, &T::Key) -> bool,
 ) -> Result<PrunedIndices, DatabaseError>
 where
@@ -101,13 +100,10 @@ where
     let mut outcomes = PrunedIndices::default();
     let mut cursor = provider.tx_ref().cursor_write::<RawTable<T>>()?;
 
-    for sharded_key in highest_sharded_keys {
-        // Seek to the shard that has the key >= the given sharded key
-        // TODO: optimize
-        let mut shard = cursor.seek(RawKey::new(sharded_key.clone()))?;
-
-        // Get the highest block number that needs to be deleted for this sharded key
-        let to_block = sharded_key.as_ref().highest_block_number;
+    for (first_shard_key, to_block) in prune_targets {
+        // Start at the key's first shard rather than at `to_block`: a shard trimmed by an earlier
+        // run keeps its original, higher key, so seeking past it would orphan it permanently.
+        let mut shard = cursor.seek(RawKey::new(first_shard_key.clone()))?;
 
         'shard: loop {
             let Some((key, block_nums)) =
@@ -116,11 +112,16 @@ where
                 break
             };
 
-            if key_matches(&key, &sharded_key) {
+            if key_matches(&key, &first_shard_key) {
                 match prune_shard(&mut cursor, key, block_nums, to_block, &key_matches)? {
                     PruneShardOutcome::Deleted => outcomes.deleted += 1,
                     PruneShardOutcome::Updated => outcomes.updated += 1,
-                    PruneShardOutcome::Unchanged => outcomes.unchanged += 1,
+                    // Shards are ordered by their highest block number, so every later shard for
+                    // this key holds only higher blocks and is unchanged too.
+                    PruneShardOutcome::Unchanged => {
+                        outcomes.unchanged += 1;
+                        break 'shard
+                    }
                 }
             } else {
                 // If such shard doesn't exist, skip to the next sharded key
@@ -218,5 +219,67 @@ where
             )?;
             Ok(PruneShardOutcome::Updated)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{Address, B256};
+    use reth_db_api::{models::storage_sharded_key::StorageShardedKey, tables, transaction::DbTx};
+    use reth_provider::DatabaseProviderFactory;
+    use reth_stages::test_utils::TestStageDB;
+
+    fn storage_key_matches(a: &StorageShardedKey, b: &StorageShardedKey) -> bool {
+        a.address == b.address && a.sharded_key.key == b.sharded_key.key
+    }
+
+    /// Two runs whose targets straddle a shard boundary. The first trims the lower shard without
+    /// changing its key, so a walk starting at the second target would never see it again.
+    #[test]
+    fn prune_history_indices_revisits_shard_trimmed_by_earlier_run() {
+        let db = TestStageDB::default();
+        let address = Address::from([0x42; 20]);
+        let storage_key = B256::from([0x01; 32]);
+
+        let provider = db.factory.database_provider_rw().unwrap();
+        let mut cursor = provider.tx_ref().cursor_write::<tables::StoragesHistory>().unwrap();
+        cursor
+            .upsert(
+                StorageShardedKey::new(address, storage_key, 100),
+                &BlockNumberList::new_pre_sorted([10, 50, 100]),
+            )
+            .unwrap();
+        cursor
+            .upsert(
+                StorageShardedKey::last(address, storage_key),
+                &BlockNumberList::new_pre_sorted([150, 200]),
+            )
+            .unwrap();
+        drop(cursor);
+
+        for to_block in [50, 150] {
+            prune_history_indices::<_, tables::StoragesHistory, _>(
+                &provider,
+                [(StorageShardedKey::new(address, storage_key, 0), to_block)],
+                storage_key_matches,
+            )
+            .unwrap();
+        }
+
+        // After the first run the lower shard holds only block 100, which the second run's target
+        // of 150 covers, so nothing below the sentinel may survive.
+        let remaining = provider
+            .tx_ref()
+            .cursor_read::<tables::StoragesHistory>()
+            .unwrap()
+            .walk(None)
+            .unwrap()
+            .map(|row| {
+                let (key, list) = row.unwrap();
+                (key.sharded_key.highest_block_number, list.iter().collect::<Vec<_>>())
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(remaining, vec![(u64::MAX, vec![200])]);
     }
 }
