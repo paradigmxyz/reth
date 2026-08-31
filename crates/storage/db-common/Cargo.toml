@@ -44,7 +44,14 @@ tracing.workspace = true
 [dev-dependencies]
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-chain-state = { workspace = true, features = ["test-utils"] }
 reth-tasks.workspace = true
+
+criterion.workspace = true
+
+[[bench]]
+name = "historical_reads"
+harness = false
 
 [lints]
 workspace = true
