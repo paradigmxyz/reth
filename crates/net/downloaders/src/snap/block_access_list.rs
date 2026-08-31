@@ -7,9 +7,9 @@
 use super::request::{SnapVerifier, VerifyingRequest};
 use alloy_consensus::BlockHeader;
 use alloy_eips::eip7928::bal::DecodedBal;
-use alloy_primitives::{Sealable, B256};
+use alloy_primitives::{Bytes, Sealable, B256};
 use futures::Future;
-use reth_eth_wire_types::snap::GetBlockAccessListsMessage;
+use reth_eth_wire_types::snap::{BlockAccessListsMessage, GetBlockAccessListsMessage};
 use reth_network_p2p::{
     error::RequestError,
     snap::client::{SnapClient, SnapResponse},
@@ -181,11 +181,12 @@ struct BlockAccessListVerifier {
     blocks: Vec<(B256, B256)>,
 }
 
-impl SnapVerifier for BlockAccessListVerifier {
-    type Request = GetBlockAccessListsMessage;
-    type Output = BlockAccessListOutcome;
-
-    fn verify(self, peer_id: PeerId, response: SnapResponse) -> Result<Self::Output, RequestError> {
+impl BlockAccessListVerifier {
+    // Checks that the response can be paired with this request before its entries are decoded.
+    fn validate_response(
+        &self,
+        response: SnapResponse,
+    ) -> Result<BlockAccessListsMessage, RequestError> {
         let SnapResponse::BlockAccessLists(response) = response else {
             debug!(target: "downloaders::snap", "Expected block access lists response");
             return Err(RequestError::BadResponse)
@@ -199,23 +200,24 @@ impl SnapVerifier for BlockAccessListVerifier {
             );
             return Err(RequestError::BadResponse)
         }
-
-        let entries = response.block_access_lists.0;
-        if entries.len() > self.blocks.len() {
+        if response.block_access_lists.0.len() > self.blocks.len() {
             debug!(
                 target: "downloaders::snap",
                 requested = self.blocks.len(),
-                got = entries.len(),
+                got = response.block_access_lists.0.len(),
                 "Block access lists response is longer than the request"
             );
             return Err(RequestError::BadResponse)
         }
-        // Serving nothing is a valid answer from a peer that does not have these blocks.
-        if entries.is_empty() {
-            return Ok(BlockAccessListOutcome::Unavailable { peer_id })
-        }
 
-        let next_index = (entries.len() < self.blocks.len()).then_some(entries.len());
+        Ok(response)
+    }
+
+    // Keeps each decoded entry tied to the commitment at the same request position.
+    fn authenticate_entries(
+        &self,
+        entries: Vec<Option<Bytes>>,
+    ) -> Result<Vec<(B256, Option<DecodedBal>)>, RequestError> {
         let mut block_access_lists = Vec::with_capacity(entries.len());
         for (index, entry) in entries.into_iter().enumerate() {
             let (block_hash, commitment) = self.blocks[index];
@@ -241,6 +243,25 @@ impl SnapVerifier for BlockAccessListVerifier {
             }
             block_access_lists.push((block_hash, Some(decoded)));
         }
+
+        Ok(block_access_lists)
+    }
+}
+
+impl SnapVerifier for BlockAccessListVerifier {
+    type Request = GetBlockAccessListsMessage;
+    type Output = BlockAccessListOutcome;
+
+    // Validates the response identity and authenticates every supplied block access list.
+    fn verify(self, peer_id: PeerId, response: SnapResponse) -> Result<Self::Output, RequestError> {
+        let entries = self.validate_response(response)?.block_access_lists.0;
+        // Serving nothing is a valid answer from a peer that does not have these blocks.
+        if entries.is_empty() {
+            return Ok(BlockAccessListOutcome::Unavailable { peer_id })
+        }
+
+        let next_index = (entries.len() < self.blocks.len()).then_some(entries.len());
+        let block_access_lists = self.authenticate_entries(entries)?;
 
         Ok(BlockAccessListOutcome::Verified(VerifiedBlockAccessLists {
             peer_id,
