@@ -1212,7 +1212,8 @@ mod tests {
 
         let block_gas_limit = 1_000_000u64;
         let first_tx_gas = 600_000u64;
-        let second_tx_gas_limit = 500_000u64; // fits in total limit but not after cumulative deduction
+        let second_tx_gas_limit = 500_000u64; // fits in total limit but not after cumulative
+                                              // deduction
 
         let gas = ResultGas::new_with_state_gas(first_tx_gas, 0, 0, first_tx_gas / 2);
         let fake_result: ResultAndState<revm::context::result::HaltReason> =

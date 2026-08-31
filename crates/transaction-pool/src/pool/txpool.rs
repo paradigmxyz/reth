@@ -3515,7 +3515,8 @@ mod tests {
 
         // Now decrease basefee to trigger the zero-allocation optimization
         let mut block_info = pool.block_info();
-        block_info.pending_basefee = 450; // tx1 (500) and tx2 (600) can now afford it, tx3 (400) cannot
+        block_info.pending_basefee = 450; // tx1 (500) and tx2 (600) can now afford it, tx3 (400)
+                                          // cannot
         pool.set_block_info(block_info);
 
         // Verify the optimization worked correctly:
