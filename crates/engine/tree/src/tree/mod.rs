@@ -1480,9 +1480,9 @@ where
                 self.persistence_state.last_state_trie_persisted_block !=
                     self.persistence_state.last_persisted_block
             {
-                let input = self
-                    .get_save_blocks_input(PersistTarget::Persisted)
-                    .expect("split persistence frontiers require state/trie catch-up");
+                let Some(input) = self.get_save_blocks_input(PersistTarget::Persisted) else {
+                    return Err(AdvancePersistenceError::StateTrieCatchupUnavailable)
+                };
                 self.persist_blocks(input);
             } else if self.pending_backfill_revalidation && !self.payload_builds.is_active() {
                 self.revalidate_pending_backfill()?;
