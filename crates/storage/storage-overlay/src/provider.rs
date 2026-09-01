@@ -1,4 +1,6 @@
-use crate::{database_state_frontiers, ExecutionOverlay, OverlayBuilder, StateTrieOverlay};
+use crate::{
+    database_state_frontiers, AnchorForParent, ExecutionOverlay, OverlayBuilder, StateTrieOverlay,
+};
 use alloy_primitives::{Address, BlockHash, BlockNumber, B256, U256};
 use metrics::{Counter, Histogram};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx, DatabaseError};
@@ -9,11 +11,13 @@ use reth_primitives_traits::{
     dashmap::{self, DashMap},
     Account, NodePrimitives,
 };
+use reth_prune_types::PruneSegment;
 use reth_storage_api::{
     AccountReader, BlockHashReader, BlockNumReader, BytecodeReader, ChangeSetReader, DBProvider,
     DatabaseProviderFactory, DatabaseProviderROFactory, DbTxProvider, HashedPostStateProvider,
-    PruneCheckpointReader, StageCheckpointReader, StateProofProvider, StateProvider,
-    StateRootProvider, StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
+    HistoryInfo, HistoryReader, PruneCheckpointReader, StageCheckpointReader, StateProofProvider,
+    StateProvider, StateRootProvider, StorageChangeSetReader, StorageRootProvider,
+    StorageSettingsCache,
 };
 use reth_trie::{
     hashed_cursor::{
@@ -132,7 +136,7 @@ pub struct OverlayStateProvider<Provider, N: NodePrimitives = EthPrimitives> {
     execution_overlay_cache: ExecutionOverlayCache,
     metrics: OverlayStateProviderFactoryMetrics,
     state_trie_overlay: OnceCell<StateTrieOverlay>,
-    execution_overlay: OnceCell<Arc<ExecutionOverlay>>,
+    execution_overlay: OnceCell<(Arc<ExecutionOverlay>, bool)>,
     is_v2: bool,
 }
 
@@ -170,7 +174,7 @@ impl<Provider, N: NodePrimitives> OverlayStateProvider<OwnedProvider<Provider>, 
             execution_overlay_cache: Default::default(),
             metrics: Default::default(),
             state_trie_overlay: OnceCell::new(),
-            execution_overlay: OnceCell::from(execution_overlay),
+            execution_overlay: OnceCell::from((execution_overlay, false)),
             is_v2,
         }
     }
@@ -273,7 +277,7 @@ where
         Ok(TrieInputSorted::new(nodes, state, prefix_sets))
     }
 
-    fn execution_overlay(&self) -> ProviderResult<&Arc<ExecutionOverlay>>
+    fn execution_overlay(&self) -> ProviderResult<(&Arc<ExecutionOverlay>, bool)>
     where
         Provider::Target: StageCheckpointReader
             + PruneCheckpointReader
@@ -283,7 +287,7 @@ where
             + BlockNumReader,
     {
         if let Some(overlay) = self.execution_overlay.get() {
-            return Ok(overlay)
+            return Ok((&overlay.0, overlay.1))
         }
 
         let (state_trie_tip_block, finish_tip_block) = database_state_frontiers(self.provider())?;
@@ -298,7 +302,7 @@ where
                     .overlay_builder
                     .as_ref()
                     .expect("execution overlay must be initialized or lazily resolvable")
-                    .build_execution_overlay_at_frontiers(
+                    .execution_overlay_at_frontiers(
                         self.provider(),
                         state_trie_tip_block,
                         finish_tip_block,
@@ -308,7 +312,29 @@ where
             }
         };
         let _ = self.execution_overlay.set(overlay);
-        Ok(self.execution_overlay.get().expect("execution overlay was just initialized"))
+        let overlay = self.execution_overlay.get().expect("execution overlay was just initialized");
+        Ok((&overlay.0, overlay.1))
+    }
+
+    fn historical_fallback_block_number(&self) -> ProviderResult<BlockNumber>
+    where
+        Provider::Target: StageCheckpointReader + PruneCheckpointReader + BlockNumReader,
+    {
+        let (state_trie_tip_block, finish_tip_block) = database_state_frontiers(self.provider())?;
+        match self
+            .overlay_builder
+            .as_ref()
+            .expect("execution overlay must be initialized or lazily resolvable")
+            .anchor_at_parent_with_frontiers(
+                self.provider(),
+                state_trie_tip_block,
+                finish_tip_block,
+            )? {
+            AnchorForParent::RevertsRequired { anchor, .. } => Ok(anchor.number + 1),
+            AnchorForParent::NoReverts { .. } => {
+                unreachable!("historical fallback requires reverts")
+            }
+        }
     }
 }
 
@@ -331,6 +357,7 @@ impl<Provider, N: NodePrimitives> AccountReader for OverlayStateProvider<Provide
 where
     Provider: Deref,
     Provider::Target: DBProvider
+        + HistoryReader
         + StorageSettingsCache
         + StageCheckpointReader
         + PruneCheckpointReader
@@ -339,10 +366,49 @@ where
         + BlockNumReader,
 {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        let overlay = self.execution_overlay()?;
+        let (overlay, fallback_is_historical) = self.execution_overlay()?;
         if let Some(account) = overlay.accounts().get(address) {
             return Ok(account.as_ref().map(Account::from))
         }
+        if fallback_is_historical {
+            let block_number = self.historical_fallback_block_number()?;
+            let lowest_available_block_number = self
+                .provider()
+                .get_prune_checkpoint(PruneSegment::AccountHistory)?
+                .and_then(|checkpoint| checkpoint.block_number)
+                .map(|block_number| block_number + 1);
+            if lowest_available_block_number.is_some_and(|lowest| block_number < lowest) {
+                return Err(ProviderError::StateAtBlockPruned(block_number))
+            }
+            return match self.provider().account_history_info(
+                *address,
+                block_number,
+                lowest_available_block_number,
+            )? {
+                HistoryInfo::NotYetWritten => Ok(None),
+                HistoryInfo::InChangeset(changeset_block_number) => self
+                    .provider()
+                    .get_account_before_block(changeset_block_number, *address)?
+                    .ok_or(ProviderError::AccountChangesetNotFound {
+                        block_number: changeset_block_number,
+                        address: *address,
+                    })
+                    .map(|account_before| account_before.info),
+                HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
+                    self.basic_account_from_db(address)
+                }
+            }
+        }
+        self.basic_account_from_db(address)
+    }
+}
+
+impl<Provider, N: NodePrimitives> OverlayStateProvider<Provider, N>
+where
+    Provider: Deref,
+    Provider::Target: DBProvider + StorageSettingsCache,
+{
+    fn basic_account_from_db(&self, address: &Address) -> ProviderResult<Option<Account>> {
         if self.provider().cached_storage_settings().use_hashed_state() {
             let hashed_address = alloy_primitives::keccak256(address);
             self.provider()
@@ -371,7 +437,7 @@ where
         + BlockNumReader,
 {
     fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>> {
-        let overlay = self.execution_overlay()?;
+        let (overlay, _) = self.execution_overlay()?;
         if let Some(block) = overlay.block_hashes().iter().find(|block| block.number == number) {
             return Ok(Some(block.hash))
         }
@@ -383,7 +449,7 @@ where
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        let overlay = self.execution_overlay()?;
+        let (overlay, _) = self.execution_overlay()?;
         let mut block_hashes =
             overlay.block_hashes().iter().filter(|block| (start..end).contains(&block.number));
         let Some(first_block) = block_hashes.next() else {
@@ -411,7 +477,7 @@ where
         &self,
         code_hash: &B256,
     ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>> {
-        let overlay = self.execution_overlay()?;
+        let (overlay, _) = self.execution_overlay()?;
         if let Some(bytecode) = overlay.code_hashes().get(code_hash) {
             return Ok(Some(reth_primitives_traits::Bytecode(bytecode.clone())));
         }
@@ -698,6 +764,7 @@ impl<Provider, N: NodePrimitives> StateProvider for OverlayStateProvider<Provide
 where
     Provider: Deref,
     Provider::Target: DBProvider
+        + HistoryReader
         + BlockHashReader
         + StorageSettingsCache
         + StageCheckpointReader
@@ -711,18 +778,65 @@ where
         address: Address,
         storage_key: alloy_primitives::StorageKey,
     ) -> ProviderResult<Option<alloy_primitives::StorageValue>> {
-        let overlay = self.execution_overlay()?;
+        let (overlay, fallback_is_historical) = self.execution_overlay()?;
         if let Some(value) = overlay.storage_value(address, U256::from_be_bytes(storage_key.0)) {
             return Ok(Some(value));
         }
+        if fallback_is_historical {
+            let block_number = self.historical_fallback_block_number()?;
+            let lowest_available_block_number = self
+                .provider()
+                .get_prune_checkpoint(PruneSegment::StorageHistory)?
+                .and_then(|checkpoint| checkpoint.block_number)
+                .map(|block_number| block_number + 1);
+            if lowest_available_block_number.is_some_and(|lowest| block_number < lowest) {
+                return Err(ProviderError::StateAtBlockPruned(block_number))
+            }
+            return match self.provider().storage_history_info(
+                address,
+                storage_key,
+                block_number,
+                lowest_available_block_number,
+            )? {
+                HistoryInfo::NotYetWritten => Ok(None),
+                HistoryInfo::InChangeset(changeset_block_number) => self
+                    .provider()
+                    .get_storage_before_block(changeset_block_number, address, storage_key)?
+                    .ok_or_else(|| ProviderError::StorageChangesetNotFound {
+                        block_number: changeset_block_number,
+                        address,
+                        storage_key: Box::new(storage_key),
+                    })
+                    .map(|entry| Some(entry.value)),
+                HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
+                    self.storage_from_db(address, storage_key, true)
+                }
+            }
+        }
+        self.storage_from_db(address, storage_key, false)
+    }
+}
+
+impl<Provider, N: NodePrimitives> OverlayStateProvider<Provider, N>
+where
+    Provider: Deref,
+    Provider::Target: DBProvider + StorageSettingsCache,
+{
+    fn storage_from_db(
+        &self,
+        address: Address,
+        storage_key: alloy_primitives::StorageKey,
+        zero_if_missing: bool,
+    ) -> ProviderResult<Option<alloy_primitives::StorageValue>> {
         if self.provider().cached_storage_settings().use_hashed_state() {
             let hashed_address = alloy_primitives::keccak256(address);
             let hashed_slot = alloy_primitives::keccak256(storage_key);
             let mut cursor = self.provider().tx().cursor_dup_read::<tables::HashedStorages>()?;
-            Ok(cursor
+            let value = cursor
                 .seek_by_key_subkey(hashed_address, hashed_slot)?
                 .filter(|entry| entry.key == hashed_slot)
-                .map(|entry| entry.value))
+                .map(|entry| entry.value);
+            Ok(value.or(zero_if_missing.then_some(U256::ZERO)))
         } else {
             let mut cursor = self.provider().tx().cursor_dup_read::<tables::PlainStorageState>()?;
             if let Some(entry) = cursor.seek_by_key_subkey(address, storage_key)? &&
@@ -730,7 +844,7 @@ where
             {
                 return Ok(Some(entry.value))
             }
-            Ok(None)
+            Ok(zero_if_missing.then_some(U256::ZERO))
         }
     }
 }
@@ -854,7 +968,7 @@ pub(crate) struct OverlayStateProviderFactoryMetrics {
 }
 
 type StateTrieOverlayCache = Arc<DashMap<(BlockHash, BlockHash), StateTrieOverlay>>;
-type ExecutionOverlayCache = Arc<DashMap<(BlockHash, BlockHash), Arc<ExecutionOverlay>>>;
+type ExecutionOverlayCache = Arc<DashMap<(BlockHash, BlockHash), (Arc<ExecutionOverlay>, bool)>>;
 
 type DbStateRoot<'a, TX, A> =
     StateRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
@@ -894,6 +1008,14 @@ mod tests {
     use alloy_eips::BlockNumHash;
     use alloy_primitives::{Address, U256};
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
+    use reth_db_api::{
+        models::{
+            storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress, ShardedKey,
+        },
+        tables,
+        transaction::DbTxMut,
+        BlockNumberList,
+    };
     use reth_primitives_traits::Account;
     use reth_provider::{
         test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
@@ -1030,13 +1152,13 @@ mod tests {
         assert!(state_provider_factory.execution_overlay_cache.is_empty());
 
         provider.basic_account(&Address::ZERO).unwrap();
-        let execution_overlay = Arc::clone(provider.execution_overlay.get().unwrap());
+        let execution_overlay = Arc::clone(&provider.execution_overlay.get().unwrap().0);
         assert!(provider.state_trie_overlay.get().is_none());
         assert!(provider.execution_overlay.get().is_some());
         assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
         assert_eq!(state_provider_factory.execution_overlay_cache.len(), 1);
         let cached_overlay = state_provider_factory.execution_overlay_cache.iter().next().unwrap();
-        assert!(Arc::ptr_eq(&execution_overlay, cached_overlay.value()));
+        assert!(Arc::ptr_eq(&execution_overlay, &cached_overlay.value().0));
 
         provider.account_trie_cursor().unwrap();
         assert_eq!(state_provider_factory.state_trie_overlay_cache.len(), 1);
@@ -1099,5 +1221,68 @@ mod tests {
             provider.bytecode_by_hash(&code_hash).unwrap(),
             Some(reth_primitives_traits::Bytecode(bytecode))
         );
+    }
+
+    #[test]
+    fn historical_execution_reads_use_history_indexes() {
+        let (factory, blocks) = setup_frontiers(1, 3);
+        let address = Address::with_last_byte(1);
+        let storage_key = B256::with_last_byte(2);
+        let account = Account { balance: U256::from(10), ..Default::default() };
+        let storage = U256::from(10);
+        let provider_rw = factory.provider_rw().unwrap();
+
+        provider_rw
+            .tx_ref()
+            .put::<tables::AccountsHistory>(
+                ShardedKey { key: address, highest_block_number: u64::MAX },
+                BlockNumberList::new([2]).unwrap(),
+            )
+            .unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::AccountChangeSets>(2, AccountBeforeTx { address, info: Some(account) })
+            .unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::PlainAccountState>(
+                address,
+                Account { balance: U256::from(20), ..Default::default() },
+            )
+            .unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey {
+                    address,
+                    sharded_key: ShardedKey { key: storage_key, highest_block_number: u64::MAX },
+                },
+                BlockNumberList::new([2]).unwrap(),
+            )
+            .unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::StorageChangeSets>(
+                BlockNumberAddress((2, address)),
+                reth_primitives_traits::StorageEntry { key: storage_key, value: storage },
+            )
+            .unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::PlainStorageState>(
+                address,
+                reth_primitives_traits::StorageEntry { key: storage_key, value: U256::from(20) },
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        let state_provider_factory = OverlayStateProviderFactory::<_, EthPrimitives>::new(
+            factory,
+            OverlayManager::default().overlay_builder(blocks[1].recovered_block().hash()),
+        );
+        let provider = state_provider_factory.database_provider_ro().unwrap();
+
+        assert_eq!(provider.basic_account(&address).unwrap(), Some(account));
+        assert_eq!(provider.storage(address, storage_key).unwrap(), Some(storage));
     }
 }
