@@ -3314,9 +3314,15 @@ where
             %validation_err,
             "Invalid block error on new payload",
         );
-        let latest_valid_hash = self
-            .latest_valid_hash_for_invalid_payload(block.parent_hash())
-            .map_err(InsertBlockFatalError::from)?;
+        // The Amsterdam Engine API requires `latestValidHash: null` for an undecodable BAL.
+        // <https://github.com/ethereum/execution-apis/blob/df75e230befef0de56ee8833322ed714bacb479c/src/engine/amsterdam.md?plain=1#L129>
+        let latest_valid_hash =
+            if matches!(&validation_err, InsertBlockValidationError::BlockAccessListDecode(_)) {
+                None
+            } else {
+                self.latest_valid_hash_for_invalid_payload(block.parent_hash())
+                    .map_err(InsertBlockFatalError::from)?
+            };
 
         // keep track of the invalid header unless the consensus impl considers it transient
         let is_transient = match &validation_err {
