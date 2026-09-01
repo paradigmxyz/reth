@@ -690,8 +690,8 @@ where
         // changes to start processing them before potentially hitting the db in the next step.
         if !account_changes.storage_changes.is_empty() {
             let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
-            let mut storage_map = reth_trie::HashedStorage::new(false);
-            storage_map.storage.extend(hashed_storage_updates(account_changes));
+            let storage_map =
+                reth_trie::HashedStorage::from_iter(hashed_storage_updates(account_changes));
 
             let mut hashed_state = reth_trie::HashedPostState::default();
             hashed_state.storages.insert(hashed_address, storage_map);
