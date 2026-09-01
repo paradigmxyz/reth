@@ -14,6 +14,9 @@ use tracing::error;
 /// Default max cache size for [`PrecompileCache`]
 const MAX_CACHE_SIZE: u32 = 1024 * 1024;
 
+/// Maximum calldata size to cache for a precompile.
+const MAX_PRECOMPILE_CACHE_INPUT_SIZE: usize = 2 * 1024;
+
 /// Stores caches for each precompile.
 #[derive(Debug, Clone, Default)]
 pub struct PrecompileCacheMap<S>(Arc<DashMap<Address, PrecompileCache<S>, FbBuildHasher<20>>>)
@@ -179,7 +182,9 @@ where
     }
 
     fn call(&self, input: PrecompileInput<'_>) -> PrecompileResult {
-        if let Some(entry) = &self.cache.get(input.data, self.spec_id.clone()) &&
+        let cacheable_input = input.data.len() <= MAX_PRECOMPILE_CACHE_INPUT_SIZE;
+        if cacheable_input &&
+            let Some(entry) = &self.cache.get(input.data, self.spec_id.clone()) &&
             input.gas >= entry.gas_used()
         {
             self.increment_by_one_precompile_cache_hits();
@@ -193,7 +198,7 @@ where
         match &result {
             // Only successful outputs are cacheable. Non-success statuses and errors must execute
             // again instead of poisoning the cache for subsequent calls.
-            Ok(output) if output.is_success() => {
+            Ok(output) if cacheable_input && output.is_success() => {
                 // Sanity-check precompile output to ensure that it does not affect state gas in any
                 // way.
                 //
