@@ -510,12 +510,12 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         Ok(StateTrieOverlay::new(trie_updates, hashed_post_state))
     }
 
-    /// Returns the in-memory execution overlay and whether database reads must use history.
+    /// Returns the in-memory execution overlay and the block for historical fallback reads.
     #[instrument(level = "debug", target = "storage::overlay", skip_all)]
     pub fn execution_overlay<Provider>(
         &self,
         provider: &Provider,
-    ) -> ProviderResult<(Arc<ExecutionOverlay>, bool)>
+    ) -> ProviderResult<(Arc<ExecutionOverlay>, Option<BlockNumber>)>
     where
         Provider: StageCheckpointReader
             + PruneCheckpointReader
@@ -540,7 +540,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         provider: &Provider,
         state_trie_tip_block: BlockNumHash,
         finish_tip_block: BlockNumHash,
-    ) -> ProviderResult<(Arc<ExecutionOverlay>, bool)>
+    ) -> ProviderResult<(Arc<ExecutionOverlay>, Option<BlockNumber>)>
     where
         Provider: ChangeSetReader
             + StorageChangeSetReader
@@ -550,11 +550,13 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     {
         let anchor_for_parent =
             self.anchor_at_parent_with_frontiers(provider, state_trie_tip_block, finish_tip_block)?;
-        let fallback_is_historical =
-            matches!(anchor_for_parent, AnchorForParent::RevertsRequired { .. });
+        let fallback_block_number = match &anchor_for_parent {
+            AnchorForParent::RevertsRequired { anchor, .. } => Some(anchor.number + 1),
+            AnchorForParent::NoReverts { .. } => None,
+        };
         Ok((
             self.resolve_execution_overlay(anchor_for_parent.anchor().hash)?,
-            fallback_is_historical,
+            fallback_block_number,
         ))
     }
 
@@ -1178,12 +1180,12 @@ mod tests {
         provider_rw.commit().unwrap();
 
         let provider = factory.provider().unwrap();
-        let (overlay, fallback_is_historical) = OverlayManager::<EthPrimitives>::default()
+        let (overlay, fallback_block_number) = OverlayManager::<EthPrimitives>::default()
             .overlay_builder(blocks[1].recovered_block().hash())
             .execution_overlay(&provider)
             .unwrap();
 
-        assert!(fallback_is_historical);
+        assert_eq!(fallback_block_number, Some(2));
         assert!(overlay.accounts.is_empty());
         assert!(overlay.storage.is_empty());
         assert!(overlay.code_hashes.is_empty());
@@ -1211,12 +1213,12 @@ mod tests {
         }
         let provider = factory.provider().unwrap();
 
-        let (overlay, fallback_is_historical) = manager
+        let (overlay, fallback_block_number) = manager
             .overlay_builder(blocks[3].recovered_block().hash())
             .execution_overlay(&provider)
             .unwrap();
 
-        assert!(!fallback_is_historical);
+        assert_eq!(fallback_block_number, None);
 
         for id in [3, 4] {
             let address = Address::with_last_byte(id);
@@ -1284,12 +1286,12 @@ mod tests {
         manager.insert_block(side_block_three.clone());
         let provider = factory.provider().unwrap();
 
-        let (overlay, fallback_is_historical) = manager
+        let (overlay, fallback_block_number) = manager
             .overlay_builder(side_block_three.recovered_block().hash())
             .execution_overlay(&provider)
             .unwrap();
 
-        assert!(fallback_is_historical);
+        assert_eq!(fallback_block_number, Some(2));
 
         assert_eq!(overlay.accounts[&address].as_ref().unwrap().balance, U256::from(1));
         assert_eq!(overlay.accounts[&address].as_ref().unwrap().account_id, None);
@@ -1312,12 +1314,12 @@ mod tests {
         }
         let provider = factory.provider().unwrap();
 
-        let (overlay, fallback_is_historical) = manager
+        let (overlay, fallback_block_number) = manager
             .overlay_builder(blocks[3].recovered_block().hash())
             .execution_overlay(&provider)
             .unwrap();
 
-        assert!(!fallback_is_historical);
+        assert_eq!(fallback_block_number, None);
         assert_eq!(overlay.accounts.len(), 2);
         assert!(overlay.accounts.values().flatten().all(|account| account.account_id.is_none()));
     }

@@ -1,6 +1,4 @@
-use crate::{
-    database_state_frontiers, AnchorForParent, ExecutionOverlay, OverlayBuilder, StateTrieOverlay,
-};
+use crate::{database_state_frontiers, ExecutionOverlay, OverlayBuilder, StateTrieOverlay};
 use alloy_primitives::{Address, BlockHash, BlockNumber, B256, U256};
 use metrics::{Counter, Histogram};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx, DatabaseError};
@@ -136,7 +134,7 @@ pub struct OverlayStateProvider<Provider, N: NodePrimitives = EthPrimitives> {
     execution_overlay_cache: ExecutionOverlayCache,
     metrics: OverlayStateProviderFactoryMetrics,
     state_trie_overlay: OnceCell<StateTrieOverlay>,
-    execution_overlay: OnceCell<(Arc<ExecutionOverlay>, bool)>,
+    execution_overlay: OnceCell<(Arc<ExecutionOverlay>, Option<BlockNumber>)>,
     is_v2: bool,
 }
 
@@ -174,7 +172,7 @@ impl<Provider, N: NodePrimitives> OverlayStateProvider<OwnedProvider<Provider>, 
             execution_overlay_cache: Default::default(),
             metrics: Default::default(),
             state_trie_overlay: OnceCell::new(),
-            execution_overlay: OnceCell::from((execution_overlay, false)),
+            execution_overlay: OnceCell::from((execution_overlay, None)),
             is_v2,
         }
     }
@@ -277,7 +275,7 @@ where
         Ok(TrieInputSorted::new(nodes, state, prefix_sets))
     }
 
-    fn execution_overlay(&self) -> ProviderResult<(&Arc<ExecutionOverlay>, bool)>
+    fn execution_overlay(&self) -> ProviderResult<(&Arc<ExecutionOverlay>, Option<BlockNumber>)>
     where
         Provider::Target: StageCheckpointReader
             + PruneCheckpointReader
@@ -315,27 +313,6 @@ where
         let overlay = self.execution_overlay.get().expect("execution overlay was just initialized");
         Ok((&overlay.0, overlay.1))
     }
-
-    fn historical_fallback_block_number(&self) -> ProviderResult<BlockNumber>
-    where
-        Provider::Target: StageCheckpointReader + PruneCheckpointReader + BlockNumReader,
-    {
-        let (state_trie_tip_block, finish_tip_block) = database_state_frontiers(self.provider())?;
-        match self
-            .overlay_builder
-            .as_ref()
-            .expect("execution overlay must be initialized or lazily resolvable")
-            .anchor_at_parent_with_frontiers(
-                self.provider(),
-                state_trie_tip_block,
-                finish_tip_block,
-            )? {
-            AnchorForParent::RevertsRequired { anchor, .. } => Ok(anchor.number + 1),
-            AnchorForParent::NoReverts { .. } => {
-                unreachable!("historical fallback requires reverts")
-            }
-        }
-    }
 }
 
 impl<Provider, N: NodePrimitives> fmt::Debug for OverlayStateProvider<Provider, N>
@@ -366,12 +343,11 @@ where
         + BlockNumReader,
 {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        let (overlay, fallback_is_historical) = self.execution_overlay()?;
+        let (overlay, fallback_block_number) = self.execution_overlay()?;
         if let Some(account) = overlay.accounts().get(address) {
             return Ok(account.as_ref().map(Account::from))
         }
-        if fallback_is_historical {
-            let block_number = self.historical_fallback_block_number()?;
+        if let Some(block_number) = fallback_block_number {
             let lowest_available_block_number = self
                 .provider()
                 .get_prune_checkpoint(PruneSegment::AccountHistory)?
@@ -778,12 +754,11 @@ where
         address: Address,
         storage_key: alloy_primitives::StorageKey,
     ) -> ProviderResult<Option<alloy_primitives::StorageValue>> {
-        let (overlay, fallback_is_historical) = self.execution_overlay()?;
+        let (overlay, fallback_block_number) = self.execution_overlay()?;
         if let Some(value) = overlay.storage_value(address, U256::from_be_bytes(storage_key.0)) {
             return Ok(Some(value));
         }
-        if fallback_is_historical {
-            let block_number = self.historical_fallback_block_number()?;
+        if let Some(block_number) = fallback_block_number {
             let lowest_available_block_number = self
                 .provider()
                 .get_prune_checkpoint(PruneSegment::StorageHistory)?
@@ -968,7 +943,8 @@ pub(crate) struct OverlayStateProviderFactoryMetrics {
 }
 
 type StateTrieOverlayCache = Arc<DashMap<(BlockHash, BlockHash), StateTrieOverlay>>;
-type ExecutionOverlayCache = Arc<DashMap<(BlockHash, BlockHash), (Arc<ExecutionOverlay>, bool)>>;
+type ExecutionOverlayCache =
+    Arc<DashMap<(BlockHash, BlockHash), (Arc<ExecutionOverlay>, Option<BlockNumber>)>>;
 
 type DbStateRoot<'a, TX, A> =
     StateRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
