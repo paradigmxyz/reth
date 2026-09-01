@@ -1,11 +1,11 @@
 use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::{Address, Bytes, B256, U256};
 use reth_primitives_traits::Account;
-use reth_storage_errors::provider::ProviderResult;
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie_common::{
     updates::{StorageTrieUpdatesSorted, TrieUpdates, TrieUpdatesSorted},
-    AccountProof, ExecutionWitnessMode, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    AccountProof, DecodedMultiProofV2, ExecutionWitnessMode, HashedPostState, HashedStorage,
+    MultiProof, MultiProofTargets, MultiProofTargetsV2, StorageMultiProof, StorageProof, TrieInput,
 };
 
 /// A type that can compute the state root of a given post state.
@@ -161,6 +161,15 @@ pub trait StateProofProvider {
         input: TrieInput,
         targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof>;
+
+    /// Generate a V2 decoded multiproof for target hashed accounts and storage slots.
+    fn multiproof_v2(
+        &self,
+        _input: TrieInput,
+        _targets: MultiProofTargetsV2,
+    ) -> ProviderResult<DecodedMultiProofV2> {
+        Err(ProviderError::UnsupportedProvider)
+    }
 
     /// Get trie witness for provided state using the given witness generation mode.
     fn witness(
