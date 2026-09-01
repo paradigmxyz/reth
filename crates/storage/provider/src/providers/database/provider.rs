@@ -62,10 +62,10 @@ use reth_prune_types::{
 use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, BlockBodyReader, HistoryInfo as ApiHistoryInfo, HistoryReader,
-    MetadataProvider, MetadataWriter, NodePrimitivesProvider, StateProvider, StateReader,
-    StateWriteConfig, StorageChangeSetReader, StoragePath, StorageSettingsCache,
-    TryIntoHistoricalStateProvider, WriteStateInput,
+    BlockBodyIndicesProvider, BlockBodyReader, HistoryInfo, HistoryReader, MetadataProvider,
+    MetadataWriter, NodePrimitivesProvider, StateProvider, StateReader, StateWriteConfig,
+    StorageChangeSetReader, StoragePath, StorageSettingsCache, TryIntoHistoricalStateProvider,
+    WriteStateInput,
 };
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_storage_overlay::OverlayManager;
@@ -1739,26 +1739,15 @@ impl<TX: DbTx + 'static, N: NodeTypes> HistoryReader for DatabaseProvider<TX, N>
         address: Address,
         block_number: BlockNumber,
         lowest_available_block_number: Option<BlockNumber>,
-    ) -> ProviderResult<ApiHistoryInfo> {
+    ) -> ProviderResult<HistoryInfo> {
         let visible_tip = self.best_block_number()?;
         self.with_rocksdb_snapshot(|rocksdb_ref| {
             let mut reader = EitherReader::new_accounts_history(self, rocksdb_ref)?;
-            Ok(
-                match reader.account_history_info(
-                    address,
-                    block_number,
-                    lowest_available_block_number,
-                    visible_tip,
-                )? {
-                    crate::providers::HistoryInfo::NotYetWritten => ApiHistoryInfo::NotYetWritten,
-                    crate::providers::HistoryInfo::InChangeset(block_number) => {
-                        ApiHistoryInfo::InChangeset(block_number)
-                    }
-                    crate::providers::HistoryInfo::InPlainState => ApiHistoryInfo::InPlainState,
-                    crate::providers::HistoryInfo::MaybeInPlainState => {
-                        ApiHistoryInfo::MaybeInPlainState
-                    }
-                },
+            reader.account_history_info(
+                address,
+                block_number,
+                lowest_available_block_number,
+                visible_tip,
             )
         })
     }
@@ -1769,27 +1758,16 @@ impl<TX: DbTx + 'static, N: NodeTypes> HistoryReader for DatabaseProvider<TX, N>
         storage_key: B256,
         block_number: BlockNumber,
         lowest_available_block_number: Option<BlockNumber>,
-    ) -> ProviderResult<ApiHistoryInfo> {
+    ) -> ProviderResult<HistoryInfo> {
         let visible_tip = self.best_block_number()?;
         self.with_rocksdb_snapshot(|rocksdb_ref| {
             let mut reader = EitherReader::new_storages_history(self, rocksdb_ref)?;
-            Ok(
-                match reader.storage_history_info(
-                    address,
-                    storage_key,
-                    block_number,
-                    lowest_available_block_number,
-                    visible_tip,
-                )? {
-                    crate::providers::HistoryInfo::NotYetWritten => ApiHistoryInfo::NotYetWritten,
-                    crate::providers::HistoryInfo::InChangeset(block_number) => {
-                        ApiHistoryInfo::InChangeset(block_number)
-                    }
-                    crate::providers::HistoryInfo::InPlainState => ApiHistoryInfo::InPlainState,
-                    crate::providers::HistoryInfo::MaybeInPlainState => {
-                        ApiHistoryInfo::MaybeInPlainState
-                    }
-                },
+            reader.storage_history_info(
+                address,
+                storage_key,
+                block_number,
+                lowest_available_block_number,
+                visible_tip,
             )
         })
     }
