@@ -71,7 +71,11 @@ impl<C: SnapClient> BlockAccessListDownloader<C> {
             blocks.push((*requested, commitment));
         }
 
-        let verifier = BlockAccessListVerifier { request_id: request.request_id, blocks };
+        let verifier = BlockAccessListVerifier {
+            request_id: request.request_id,
+            response_bytes: request.response_bytes,
+            blocks,
+        };
         Ok(Self(VerifyingRequest::new(client, request, verifier, runtime)))
     }
 }
@@ -106,8 +110,10 @@ pub struct VerifiedBlockAccessLists {
     peer_id: PeerId,
     // Each list stays bound to the block whose header commitment authenticated it.
     block_access_lists: Vec<(B256, Option<DecodedBal>)>,
-    // First requested position still to fetch, or none when the peer answered all of them.
-    next_index: Option<usize>,
+    // Requested blocks the response left unanswered, in request order.
+    missing: Vec<B256>,
+    // Soft byte limit of the answered request, so a follow-up is bounded the same way.
+    response_bytes: u64,
 }
 
 impl VerifiedBlockAccessLists {
@@ -126,12 +132,25 @@ impl VerifiedBlockAccessLists {
         self.block_access_lists
     }
 
-    /// First requested position still to fetch, or `None` once every request is answered.
+    /// Request for the blocks left unanswered, or `None` once the response answered all of them.
+    ///
+    /// Asks for exactly the blocks this response did not authenticate, so resuming with it
+    /// neither drops nor duplicates a list already returned here.
+    pub fn follow_up(&self, request_id: u64) -> Option<GetBlockAccessListsMessage> {
+        (!self.missing.is_empty()).then(|| GetBlockAccessListsMessage {
+            request_id,
+            block_hashes: self.missing.clone(),
+            response_bytes: self.response_bytes,
+        })
+    }
+
+    /// Requested blocks this response left unanswered, in request order.
     ///
     /// Neither an omitted list nor a truncated response is a fault: a peer serves what it holds
-    /// and cuts at its own soft byte limit, so a follow-up resumes from here.
-    pub const fn next_index(&self) -> Option<usize> {
-        self.next_index
+    /// and cuts at its own soft byte limit. An omission can sit between answered blocks, so
+    /// these are not a suffix of the request and the entries after them stay authenticated.
+    pub fn missing(&self) -> &[B256] {
+        &self.missing
     }
 }
 
@@ -177,6 +196,8 @@ pub enum InvalidBlockAccessListRequest {
 struct BlockAccessListVerifier {
     // Matches the response to the request that asked for it.
     request_id: u64,
+    // Soft byte limit the request was sent with, carried into any follow-up.
+    response_bytes: u64,
     // Requested hashes paired with their header commitments, in wire order.
     blocks: Vec<(B256, B256)>,
 }
@@ -263,17 +284,22 @@ impl SnapVerifier for BlockAccessListVerifier {
             return Ok(BlockAccessListOutcome::Unavailable { peer_id })
         }
 
-        let truncated = (entries.len() < self.blocks.len()).then_some(entries.len());
         let block_access_lists = self.authenticate_entries(entries)?;
-        // An omitted entry leaves its block as unanswered as a cut-short response does, so both
-        // resume at the same place instead of the two encodings of "I have none" diverging.
-        let next_index =
-            block_access_lists.iter().position(|(_, list)| list.is_none()).or(truncated);
+        // Omitted entries and a cut at the peer's soft byte limit both leave blocks unanswered,
+        // and neither invalidates the entries around them.
+        let missing = block_access_lists
+            .iter()
+            .filter_map(|(block_hash, list)| list.is_none().then_some(*block_hash))
+            .chain(
+                self.blocks[block_access_lists.len()..].iter().map(|(block_hash, _)| *block_hash),
+            )
+            .collect();
 
         Ok(BlockAccessListOutcome::Verified(VerifiedBlockAccessLists {
             peer_id,
             block_access_lists,
-            next_index,
+            missing,
+            response_bytes: self.response_bytes,
         }))
     }
 }
@@ -388,7 +414,6 @@ mod tests {
 
         let verified = verified(outcome);
         assert_eq!(verified.peer_id(), peer);
-        assert_eq!(verified.next_index(), Some(1));
         assert_eq!(
             verified
                 .block_access_lists()
@@ -401,11 +426,35 @@ mod tests {
                 (headers[2].hash(), Some(commitment(bal()))),
             ]
         );
+        // The list after the omission stays authenticated, so only the gap is asked for again.
+        assert_eq!(verified.missing(), [headers[1].hash()]);
+        assert_eq!(
+            verified.follow_up(2),
+            Some(GetBlockAccessListsMessage {
+                request_id: 2,
+                block_hashes: vec![headers[1].hash()],
+                response_bytes: request(&headers).response_bytes,
+            })
+        );
         assert!(client.reported().is_empty());
     }
 
     #[tokio::test]
-    async fn a_truncated_response_reports_the_first_omitted_position() {
+    async fn a_complete_response_needs_no_follow_up() {
+        let entries = vec![Some(bal()), Some(bal())];
+        let headers = headers(&entries);
+        let client = Arc::new(TestSnapClient::new([response(PeerId::random(), 1, entries)]));
+
+        let outcome =
+            downloader(Arc::clone(&client), request(&headers), &headers).unwrap().await.unwrap();
+
+        let verified = verified(outcome);
+        assert!(verified.missing().is_empty());
+        assert_eq!(verified.follow_up(2), None);
+    }
+
+    #[tokio::test]
+    async fn a_truncated_response_leaves_the_rest_of_the_request_unanswered() {
         let entries = vec![Some(bal()), Some(bal()), Some(bal())];
         let headers = headers(&entries);
         let client =
@@ -415,7 +464,7 @@ mod tests {
             downloader(Arc::clone(&client), request(&headers), &headers).unwrap().await.unwrap();
 
         let verified = verified(outcome);
-        assert_eq!(verified.next_index(), Some(2));
+        assert_eq!(verified.missing(), [headers[2].hash()]);
         assert_eq!(verified.block_access_lists().len(), 2);
         assert_eq!(verified.block_access_lists()[0].0, headers[0].hash());
         assert_eq!(verified.block_access_lists()[1].0, headers[1].hash());
@@ -423,7 +472,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_response_of_only_omitted_entries_still_points_at_the_first_block() {
+    async fn a_response_of_only_omitted_entries_leaves_every_block_unanswered() {
         let headers = headers(&[None, None]);
         let peer = PeerId::random();
         let client = Arc::new(TestSnapClient::new([response(peer, 1, vec![None, None])]));
@@ -432,7 +481,8 @@ mod tests {
             downloader(Arc::clone(&client), request(&headers), &headers).unwrap().await.unwrap();
 
         // Answering nothing must push the caller elsewhere however the peer spells it.
-        assert_eq!(verified(outcome).next_index(), Some(0));
+        let verified = verified(outcome);
+        assert_eq!(verified.missing(), [headers[0].hash(), headers[1].hash()]);
         assert!(client.reported().is_empty());
     }
 
@@ -581,6 +631,7 @@ mod tests {
     fn a_response_of_another_kind_is_rejected() {
         let verifier = BlockAccessListVerifier {
             request_id: 1,
+            response_bytes: 512 * 1024,
             blocks: vec![(B256::repeat_byte(1), commitment(bal()))],
         };
         let wrong = SnapResponse::AccountRange(AccountRangeMessage {
