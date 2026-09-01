@@ -8,9 +8,7 @@ use crate::{
     error::db_error,
     BlockAccessListProgress, SnapGeneration, SnapPhase, SnapStateStore, SnapSyncError,
 };
-use reth_downloaders::snap::{
-    BlockAccessListDownloader, BlockAccessListOutcome, VerifiedBlockAccessLists,
-};
+use reth_downloaders::snap::{BlockAccessListDownloader, BlockAccessListOutcome};
 use reth_eth_wire_types::snap::GetBlockAccessListsMessage;
 use reth_network_p2p::{error::RequestError, snap::client::SnapClient};
 use reth_network_peers::PeerId;
@@ -169,9 +167,10 @@ impl<'a, C, F> BlockAccessListCatchUp<'a, C, F> {
                 }
                 Err(error) => return Err(error.into()),
                 Ok(BlockAccessListOutcome::Verified(verified)) => {
-                    let unavailable = Self::first_unavailable_peer(&verified);
+                    let unavailable =
+                        (!verified.missing().is_empty()).then_some(verified.peer_id());
                     for (header, (_, block_access_list)) in
-                        headers.iter().zip(verified.block_access_lists)
+                        headers.iter().zip(verified.into_block_access_lists())
                     {
                         let Some(block_access_list) = block_access_list else { break };
                         let complete = header.number() == target_block;
@@ -254,15 +253,6 @@ impl<'a, C, F> BlockAccessListCatchUp<'a, C, F> {
             return Err(SnapSyncError::MissingHeader(generation.next_block + headers.len() as u64))
         }
         Ok(headers)
-    }
-
-    // A positional gap makes the responder ineligible for the next contiguous request.
-    fn first_unavailable_peer(verified: &VerifiedBlockAccessLists) -> Option<PeerId> {
-        verified
-            .block_access_lists
-            .iter()
-            .any(|(_, block_access_list)| block_access_list.is_none())
-            .then_some(verified.peer_id)
     }
 
     // Failing on wrap prevents a stale response from matching a new logical request.

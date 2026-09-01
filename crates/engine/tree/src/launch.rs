@@ -19,7 +19,7 @@ use futures::Stream;
 use reth_consensus::FullConsensus;
 use reth_engine_primitives::BeaconEngineMessage;
 use reth_evm::ConfigureEvm;
-use reth_network_p2p::BlockClient;
+use reth_network_p2p::{BlockAccessListsClient, BlockClient};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
@@ -96,7 +96,9 @@ pub fn build_engine_orchestrator<N, Client, S, V, C>(
 ) -> EngineOrchestrator<N::Payload, N::Primitives, S, Client, PipelineSync<N>>
 where
     N: ProviderNodeTypes,
-    Client: BlockClient<Block = <N::Primitives as NodePrimitives>::Block> + 'static,
+    Client: BlockClient<Block = <N::Primitives as NodePrimitives>::Block>
+        + BlockAccessListsClient
+        + 'static,
     S: Stream<Item = BeaconEngineMessage<N::Payload>> + Send + Sync + Unpin + 'static,
     V: EngineValidator<N::Payload> + WaitForCaches,
     C: ConfigureEvm<Primitives = N::Primitives> + 'static,

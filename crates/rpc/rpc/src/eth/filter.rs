@@ -583,13 +583,6 @@ where
                     });
                 }
 
-                if let Some(f) = from &&
-                    f > info.best_number
-                {
-                    // start block higher than local head, can return empty
-                    return Ok(Vec::new());
-                }
-
                 let (from_block_number, to_block_number) =
                     logs_utils::get_filter_block_range(from, to, start_block, info)?;
 
@@ -1426,6 +1419,20 @@ mod tests {
             EthEvmConfig::new(provider.chain_spec()),
         )
         .build()
+    }
+
+    #[tokio::test]
+    async fn test_logs_for_filter_from_block_beyond_head() {
+        let provider = MockEthProvider::default();
+        provider.add_header(FixedBytes::random(), alloy_consensus::Header::default());
+        let eth_api = build_test_eth_api(provider);
+
+        let eth_filter =
+            super::EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
+
+        let filter = Filter::new().from_block(100u64).to_block(BlockNumberOrTag::Latest);
+        let result = eth_filter.inner.clone().logs_for_filter(filter, QueryLimits::default()).await;
+        assert!(matches!(result, Err(EthFilterError::InvalidBlockRangeParams)), "{result:?}");
     }
 
     #[tokio::test]

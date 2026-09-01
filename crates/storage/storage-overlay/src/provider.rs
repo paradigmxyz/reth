@@ -26,9 +26,10 @@ use reth_trie::{
     },
     updates::TrieUpdates,
     witness::TrieWitness,
-    AccountProof, ExecutionWitnessMode, HashedPostState, HashedPostStateSorted, HashedStorage,
-    KeccakKeyHasher, MultiProof, MultiProofTargets, StateRoot, StorageMultiProof, StorageProof,
-    StorageRoot, TrieInput, TrieInputSorted,
+    AccountProof, DecodedMultiProofV2, ExecutionWitnessMode, HashedPostState,
+    HashedPostStateSorted, HashedStorage, KeccakKeyHasher, MultiProof, MultiProofTargets,
+    MultiProofTargetsV2, StateRoot, StorageMultiProof, StorageProof, StorageRoot, TrieInput,
+    TrieInputSorted,
 };
 use reth_trie_db::{
     DatabaseAccountTrieCursor, DatabaseHashedCursorFactory, DatabaseProof, DatabaseStateRoot,
@@ -624,6 +625,24 @@ where
         })
     }
 
+    fn multiproof_v2(
+        &self,
+        input: TrieInput,
+        targets: MultiProofTargetsV2,
+    ) -> ProviderResult<DecodedMultiProofV2> {
+        reth_trie_db::with_adapter!(self.provider(), |A| {
+            let TrieInputSorted { nodes, state, prefix_sets } =
+                self.build_overlay(TrieInputSorted::from_unsorted(input))?;
+            let input = TrieInput::new(
+                Arc::unwrap_or_clone(nodes).into(),
+                Arc::unwrap_or_clone(state).into(),
+                prefix_sets,
+            );
+            let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.provider().tx());
+            proof.overlay_multiproof_v2(input, targets).map_err(ProviderError::from)
+        })
+    }
+
     fn witness(
         &self,
         input: TrieInput,
@@ -712,12 +731,8 @@ where
         storage_key: alloy_primitives::StorageKey,
     ) -> ProviderResult<Option<alloy_primitives::StorageValue>> {
         let overlay = self.execution_overlay()?;
-        if let Some(value) = overlay
-            .storage()
-            .get(&address)
-            .and_then(|storage| storage.get(&U256::from_be_bytes(storage_key.0)))
-        {
-            return Ok(Some(*value));
+        if let Some(value) = overlay.storage_value(address, U256::from_be_bytes(storage_key.0)) {
+            return Ok(Some(value));
         }
         if self.provider().cached_storage_settings().use_hashed_state() {
             let hashed_address = alloy_primitives::keccak256(address);
@@ -986,12 +1001,12 @@ mod tests {
         for block in &blocks[2..=3] {
             manager.insert_block(block.clone());
         }
-        let overlay_factory = OverlayStateProviderFactory::new(
+        let state_provider_factory = OverlayStateProviderFactory::new(
             factory.clone(),
             manager.overlay_builder(blocks[3].recovered_block().hash()),
         );
 
-        let provider = overlay_factory.database_provider_ro().unwrap();
+        let provider = state_provider_factory.database_provider_ro().unwrap();
         let first = provider.state_trie_overlay().unwrap().clone();
         assert_eq!(account_keys(&first), vec![B256::with_last_byte(3), B256::with_last_byte(4)]);
         drop(provider);
@@ -1007,11 +1022,11 @@ mod tests {
             .unwrap();
         provider_rw.commit().unwrap();
 
-        let provider = overlay_factory.database_provider_ro().unwrap();
+        let provider = state_provider_factory.database_provider_ro().unwrap();
         let second = provider.state_trie_overlay().unwrap().clone();
         assert_eq!(account_keys(&second), vec![B256::with_last_byte(4)]);
         assert_eq!(account_node_paths(&second), vec![Nibbles::from_nibbles([4])]);
-        assert_eq!(overlay_factory.state_trie_overlay_cache.len(), 2);
+        assert_eq!(state_provider_factory.state_trie_overlay_cache.len(), 2);
     }
 
     #[test]
@@ -1021,30 +1036,30 @@ mod tests {
         for block in &blocks[2..=3] {
             manager.insert_block(block.clone());
         }
-        let overlay_factory = OverlayStateProviderFactory::new(
+        let state_provider_factory = OverlayStateProviderFactory::new(
             factory,
             manager.overlay_builder(blocks[3].recovered_block().hash()),
         );
 
-        let provider = overlay_factory.database_provider_ro().unwrap();
+        let provider = state_provider_factory.database_provider_ro().unwrap();
 
         assert!(provider.state_trie_overlay.get().is_none());
         assert!(provider.execution_overlay.get().is_none());
-        assert!(overlay_factory.state_trie_overlay_cache.is_empty());
-        assert!(overlay_factory.execution_overlay_cache.is_empty());
+        assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
+        assert!(state_provider_factory.execution_overlay_cache.is_empty());
 
         provider.basic_account(&Address::ZERO).unwrap();
         let execution_overlay = Arc::clone(provider.execution_overlay.get().unwrap());
         assert!(provider.state_trie_overlay.get().is_none());
         assert!(provider.execution_overlay.get().is_some());
-        assert!(overlay_factory.state_trie_overlay_cache.is_empty());
-        assert_eq!(overlay_factory.execution_overlay_cache.len(), 1);
-        let cached_overlay = overlay_factory.execution_overlay_cache.iter().next().unwrap();
+        assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
+        assert_eq!(state_provider_factory.execution_overlay_cache.len(), 1);
+        let cached_overlay = state_provider_factory.execution_overlay_cache.iter().next().unwrap();
         assert!(Arc::ptr_eq(&execution_overlay, cached_overlay.value()));
 
         provider.account_trie_cursor().unwrap();
-        assert_eq!(overlay_factory.state_trie_overlay_cache.len(), 1);
-        assert_eq!(overlay_factory.execution_overlay_cache.len(), 1);
+        assert_eq!(state_provider_factory.state_trie_overlay_cache.len(), 1);
+        assert_eq!(state_provider_factory.execution_overlay_cache.len(), 1);
     }
 
     #[test]
