@@ -8,7 +8,7 @@ use crate::{
     CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
     DatabaseProviderFactory, HeaderProvider, ProviderError, ProviderFactory, PruneCheckpointReader,
     ReceiptProvider, ReceiptProviderIdExt, RocksDBProviderFactory, StageCheckpointReader,
-    StateProviderBox, StateProviderFactory, StateReader, StaticFileProviderFactory,
+    StateProvider, StateProviderBox, StateProviderFactory, StateReader, StaticFileProviderFactory,
     TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
@@ -994,7 +994,42 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
         &self,
         block: BlockNumber,
     ) -> ProviderResult<Option<ExecutionOutcome<Self::Receipt>>> {
-        self.consistent_provider()?.get_state(block)
+        if let Some(head) = self.canonical_in_memory_state.head_state() &&
+            let Some(state) = head.block_on_chain(block.into())
+        {
+            return Ok(Some(ExecutionOutcome::from((
+                state.block_ref().execution_outcome().clone(),
+                block,
+            ))))
+        }
+
+        let provider = self.database.provider()?;
+        let Some(block_body) = provider.block_body_indices(block)? else { return Ok(None) };
+
+        let from_transaction_num = block_body.first_tx_num();
+        let to_transaction_num = block_body.last_tx_num();
+        let account_changeset = provider.account_changesets_range(block..=block)?;
+        let storage_changeset = provider.storage_changeset(block)?;
+
+        let Some(block_hash) = provider.block_hash(block)? else { return Ok(None) };
+        let state_provider = self.history_by_block_hash(block_hash)?;
+        let (state, reverts) = provider.populate_bundle_state(
+            account_changeset,
+            storage_changeset,
+            |address| state_provider.basic_account(&address),
+            |address, storage_key| state_provider.storage(address, storage_key),
+        )?;
+        let receipts = provider.receipts_by_tx_range(from_transaction_num..=to_transaction_num)?;
+
+        Ok(Some(ExecutionOutcome::new_init(
+            state,
+            reverts,
+            // We skip new contracts since we never delete them from the database
+            Vec::new(),
+            vec![receipts],
+            block,
+            Vec::new(),
+        )))
     }
 }
 

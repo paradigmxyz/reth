@@ -62,8 +62,8 @@ use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, BlockBodyReader, MetadataProvider, MetadataWriter,
-    NodePrimitivesProvider, StateProvider, StateReader, StateWriteConfig, StorageChangeSetReader,
-    StoragePath, StorageSettingsCache, WriteStateInput,
+    NodePrimitivesProvider, StateProvider, StateWriteConfig, StorageChangeSetReader, StoragePath,
+    StorageSettingsCache, WriteStateInput,
 };
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_storage_overlay::OverlayManager;
@@ -1285,7 +1285,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     /// Populate a [`BundleStateInit`] and [`RevertsInit`] using cursors over the
     /// [`tables::PlainAccountState`] and [`tables::PlainStorageState`] tables, based on the given
     /// storage and account changesets.
-    fn populate_bundle_state(
+    pub(crate) fn populate_bundle_state(
         &self,
         account_changeset: Vec<(u64, AccountBeforeTx)>,
         storage_changeset: Vec<(BlockNumberAddress, StorageEntry)>,
@@ -1400,20 +1400,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
                     .filter(|s| s.key == hashed_storage_key)
                     .map(|s| s.value))
             },
-        )
-    }
-
-    fn populate_bundle_state_with_provider(
-        &self,
-        account_changeset: Vec<(u64, AccountBeforeTx)>,
-        storage_changeset: Vec<(BlockNumberAddress, StorageEntry)>,
-        state_provider: impl StateProvider,
-    ) -> ProviderResult<(BundleStateInit, RevertsInit)> {
-        self.populate_bundle_state(
-            account_changeset,
-            storage_changeset,
-            |address| state_provider.basic_account(&address),
-            |address, storage_key| state_provider.storage(address, storage_key),
         )
     }
 }
@@ -1676,43 +1662,6 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
                 .map(|r| r.map_err(Into::into))
                 .collect()
         }
-    }
-}
-
-impl<Tx: DbTx + 'static, N: NodeTypesForProvider> StateReader for DatabaseProvider<Tx, N> {
-    type Receipt = ReceiptTy<N>;
-
-    fn get_state(
-        &self,
-        block: BlockNumber,
-    ) -> ProviderResult<Option<ExecutionOutcome<Self::Receipt>>> {
-        let Some(block_body) = self.block_body_indices(block)? else { return Ok(None) };
-
-        let from_transaction_num = block_body.first_tx_num();
-        let to_transaction_num = block_body.last_tx_num();
-
-        let account_changeset = self.account_changesets_range(block..=block)?;
-        let storage_changeset = self.storage_changeset(block)?;
-
-        let Some(block_hash) = self.block_hash(block)? else { return Ok(None) };
-        let state_provider = self.history_by_block_hash(block_hash)?;
-        let (state, reverts) = self.populate_bundle_state_with_provider(
-            account_changeset,
-            storage_changeset,
-            state_provider,
-        )?;
-
-        let receipts = self.receipts_by_tx_range(from_transaction_num..=to_transaction_num)?;
-
-        Ok(Some(ExecutionOutcome::new_init(
-            state,
-            reverts,
-            // We skip new contracts since we never delete them from the database
-            Vec::new(),
-            vec![receipts],
-            block,
-            Vec::new(),
-        )))
     }
 }
 
