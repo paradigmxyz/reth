@@ -72,6 +72,13 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         Ok(Self { storage_provider, head_block, canonical_in_memory_state: state })
     }
 
+    /// Consumes this consistent view and returns its database provider snapshot.
+    pub(crate) fn into_database_provider(
+        self,
+    ) -> <ProviderFactory<N> as DatabaseProviderFactory>::Provider {
+        self.storage_provider
+    }
+
     // Helper function to convert range bounds
     fn convert_range_bounds<T>(
         &self,

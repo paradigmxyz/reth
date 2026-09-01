@@ -113,7 +113,7 @@ where
 
         let is_v2 = provider.cached_storage_settings().is_v2();
         self.metrics.database_provider_ro_duration.record(overall_start.elapsed());
-        Ok(OverlayStateProvider::new(
+        Ok(OverlayStateProvider::new_with_caches(
             provider,
             self.overlay_builder.clone(),
             Arc::clone(&self.state_trie_overlay_cache),
@@ -137,7 +137,23 @@ pub struct OverlayStateProvider<Provider, N: NodePrimitives = EthPrimitives> {
 }
 
 impl<Provider, N: NodePrimitives> OverlayStateProvider<OwnedProvider<Provider>, N> {
-    const fn new(
+    /// Creates an overlay state provider over an already-open database provider.
+    pub fn new(provider: Provider, overlay_builder: OverlayBuilder<N>) -> Self
+    where
+        Provider: StorageSettingsCache,
+    {
+        let is_v2 = provider.cached_storage_settings().is_v2();
+        Self::new_with_caches(
+            provider,
+            overlay_builder,
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            is_v2,
+        )
+    }
+
+    const fn new_with_caches(
         provider: Provider,
         overlay_builder: OverlayBuilder<N>,
         state_trie_overlay_cache: StateTrieOverlayCache,
