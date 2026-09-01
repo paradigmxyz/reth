@@ -42,7 +42,7 @@ use std::{
 use tracing::{debug, instrument, trace, warn, Span};
 
 pub mod bal;
-pub(crate) mod bal_prewarm_pool;
+pub mod bal_prewarm_pool;
 pub mod prewarm;
 pub mod receipt_root_task;
 
