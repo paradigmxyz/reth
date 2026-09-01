@@ -807,7 +807,7 @@ mod tests {
         );
 
         // Verify historical state at block 1 is still accessible after the reorg.
-        let secondary_blockchain = BlockchainProvider::new(secondary.clone()).unwrap();
+        let secondary_blockchain = BlockchainProvider::new(secondary).unwrap();
         let state_at_1 = secondary_blockchain.history_by_block_number(1).unwrap();
         let account_at_1 = state_at_1.basic_account(&signer).unwrap();
         assert!(account_at_1.is_some(), "signer account must exist at block 1 after reorg");
