@@ -1146,7 +1146,7 @@ mod tests {
             address,
             Some(Account { balance: U256::from(100), nonce: 1, bytecode_hash: None }),
         );
-        let mut storage = reth_trie::HashedStorage::new(false);
+        let mut storage = reth_trie::HashedStorage::default();
         storage.storage.insert(slot, value);
         hashed_state.storages.insert(address, storage);
 
@@ -1230,7 +1230,7 @@ mod tests {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
         let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
-        let overlay_factory = OverlayStateProviderFactory::new(
+        let state_provider_factory = OverlayStateProviderFactory::new(
             provider_factory,
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
                 .overlay_builder(anchor_hash),
@@ -1238,7 +1238,7 @@ mod tests {
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
-            ProofTaskCtx::new(overlay_factory),
+            ProofTaskCtx::new(state_provider_factory),
             false,
             proof_result_tx.clone(),
         );
@@ -1285,7 +1285,7 @@ mod tests {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
         let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
-        let overlay_factory = OverlayStateProviderFactory::new(
+        let state_provider_factory = OverlayStateProviderFactory::new(
             provider_factory,
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
                 .overlay_builder(anchor_hash),
@@ -1293,7 +1293,7 @@ mod tests {
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
-            ProofTaskCtx::new(overlay_factory),
+            ProofTaskCtx::new(state_provider_factory),
             false,
             proof_result_tx.clone(),
         );
@@ -1373,7 +1373,7 @@ mod tests {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
         let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
-        let overlay_factory = OverlayStateProviderFactory::new(
+        let state_provider_factory = OverlayStateProviderFactory::new(
             provider_factory,
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
                 .overlay_builder(anchor_hash),
@@ -1381,7 +1381,7 @@ mod tests {
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
-            ProofTaskCtx::new(overlay_factory),
+            ProofTaskCtx::new(state_provider_factory),
             false,
             proof_result_tx.clone(),
         );
@@ -1426,7 +1426,7 @@ mod tests {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
         let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
-        let overlay_factory = OverlayStateProviderFactory::new(
+        let state_provider_factory = OverlayStateProviderFactory::new(
             provider_factory,
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
                 .overlay_builder(anchor_hash),
@@ -1434,7 +1434,7 @@ mod tests {
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
-            ProofTaskCtx::new(overlay_factory),
+            ProofTaskCtx::new(state_provider_factory),
             false,
             proof_result_tx.clone(),
         );

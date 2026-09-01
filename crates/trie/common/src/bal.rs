@@ -14,17 +14,13 @@ pub struct BalAccountState {
     /// Post-block nonce, when the block changed it.
     pub nonce: Option<u64>,
     /// Post-block code hash, when the block changed the code.
-    ///
     /// The inner `None` means the code was removed or set empty.
     pub code_hash: Option<Option<B256>>,
 }
 
 impl BalAccountState {
-    /// Extracts the post-block value of every changed account-level field: the change with the
-    /// highest block access index.
-    ///
-    /// Canonical lists are sorted, but RLP decoding does not enforce it, so entries off the wire
-    /// cannot be assumed ordered.
+    /// Extracts changed account-level values at their highest block access index.
+    /// Decoded lists need not be ordered.
     pub fn from_changes(changes: &AccountChanges) -> Self {
         Self {
             balance: changes

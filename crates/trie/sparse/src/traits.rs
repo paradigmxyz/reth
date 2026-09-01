@@ -206,15 +206,6 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// The accumulated updates, or an empty set if updates weren't being tracked.
     fn take_updates(&mut self) -> SparseTrieUpdates;
 
-    /// Removes all nodes and values from the trie, resetting it to a blank state
-    /// with only an empty root node. This is used when a storage root is deleted.
-    ///
-    /// This should not be used when intending to reuse the trie for a fresh account/storage root;
-    /// use `clear` for that.
-    ///
-    /// Note: All previously tracked changes to the trie are also removed.
-    fn wipe(&mut self);
-
     /// This clears all data structures in the sparse trie, keeping the backing data structures
     /// allocated. An empty root node is inserted at the root.
     ///
@@ -277,8 +268,6 @@ pub struct SparseTrieUpdates {
     pub updated_nodes: HashMap<Nibbles, BranchNodeCompact>,
     /// Collection of removed intermediate nodes indexed by full path.
     pub removed_nodes: HashSet<Nibbles>,
-    /// Flag indicating whether the trie was wiped.
-    pub wiped: bool,
 }
 
 impl SparseTrieUpdates {
@@ -287,7 +276,6 @@ impl SparseTrieUpdates {
         Self {
             updated_nodes: HashMap::with_capacity_and_hasher(num_updated_nodes, Default::default()),
             removed_nodes: HashSet::with_capacity_and_hasher(num_removed_nodes, Default::default()),
-            wiped: false,
         }
     }
 }
