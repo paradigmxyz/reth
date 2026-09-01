@@ -5,17 +5,17 @@ pub use crate::bal::NoopBalStore;
 use crate::{
     AccountReader, BalProvider, BalStoreHandle, BlockBodyIndicesProvider, BlockHashReader,
     BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader,
-    ChangeSetReader, HashedPostStateProvider, HeaderProvider, HistoryInfo, HistoryReader,
-    NodePrimitivesProvider, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
-    StageCheckpointReader, StateProofProvider, StateProvider, StateProviderBox,
-    StateProviderFactory, StateRangeProviderFactory, StateRangeView, StateReader,
-    StateRootProvider, StorageRootProvider, TransactionVariant, TransactionsProvider,
-    TryIntoHistoricalStateProvider,
+    ChangeSetReader, HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider,
+    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader,
+    StateProofProvider, StateProvider, StateProviderBox, StateProviderFactory,
+    StateRangeProviderFactory, StateRangeView, StateReader, StateRootProvider, StorageRootProvider,
+    TransactionVariant, TransactionsProvider, TryIntoHistoricalStateProvider,
 };
 
 #[cfg(feature = "db-api")]
 use crate::{
-    DBProvider, DatabaseProviderFactory, DbTxProvider, StorageChangeSetReader, StorageSettingsCache,
+    DBProvider, DatabaseProviderFactory, DbTxProvider, HistoryInfo, HistoryReader,
+    StorageChangeSetReader, StorageSettingsCache,
 };
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use alloy_consensus::transaction::TransactionMeta;
@@ -427,6 +427,7 @@ impl<C: Send + Sync, N: NodePrimitives> ChangeSetReader for NoopProvider<C, N> {
     }
 }
 
+#[cfg(feature = "db-api")]
 impl<C: Send + Sync, N: NodePrimitives> HistoryReader for NoopProvider<C, N> {
     fn account_history_info(
         &self,
