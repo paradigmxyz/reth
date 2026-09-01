@@ -26,9 +26,10 @@ use reth_trie::{
     },
     updates::TrieUpdates,
     witness::TrieWitness,
-    AccountProof, ExecutionWitnessMode, HashedPostState, HashedPostStateSorted, HashedStorage,
-    KeccakKeyHasher, MultiProof, MultiProofTargets, StateRoot, StorageMultiProof, StorageProof,
-    StorageRoot, TrieInput, TrieInputSorted,
+    AccountProof, DecodedMultiProofV2, ExecutionWitnessMode, HashedPostState,
+    HashedPostStateSorted, HashedStorage, KeccakKeyHasher, MultiProof, MultiProofTargets,
+    MultiProofTargetsV2, StateRoot, StorageMultiProof, StorageProof, StorageRoot, TrieInput,
+    TrieInputSorted,
 };
 use reth_trie_db::{
     DatabaseAccountTrieCursor, DatabaseHashedCursorFactory, DatabaseProof, DatabaseStateRoot,
@@ -621,6 +622,24 @@ where
             );
             let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.provider().tx());
             proof.overlay_multiproof(input, targets).map_err(ProviderError::from)
+        })
+    }
+
+    fn multiproof_v2(
+        &self,
+        input: TrieInput,
+        targets: MultiProofTargetsV2,
+    ) -> ProviderResult<DecodedMultiProofV2> {
+        reth_trie_db::with_adapter!(self.provider(), |A| {
+            let TrieInputSorted { nodes, state, prefix_sets } =
+                self.build_overlay(TrieInputSorted::from_unsorted(input))?;
+            let input = TrieInput::new(
+                Arc::unwrap_or_clone(nodes).into(),
+                Arc::unwrap_or_clone(state).into(),
+                prefix_sets,
+            );
+            let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.provider().tx());
+            proof.overlay_multiproof_v2(input, targets).map_err(ProviderError::from)
         })
     }
 
