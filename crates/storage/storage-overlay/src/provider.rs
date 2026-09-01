@@ -830,7 +830,7 @@ where
                 .seek_by_key_subkey(hashed_address, hashed_slot)?
                 .filter(|entry| entry.key == hashed_slot)
                 .map(|entry| entry.value);
-            Ok(value.or(zero_if_missing.then_some(U256::ZERO)))
+            Ok(value.or_else(|| zero_if_missing.then_some(U256::ZERO)))
         } else {
             let mut cursor = self.provider().tx().cursor_dup_read::<tables::PlainStorageState>()?;
             if let Some(entry) = cursor.seek_by_key_subkey(address, storage_key)? &&
