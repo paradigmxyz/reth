@@ -119,7 +119,9 @@ pub fn build_engine_orchestrator_with_backfill<N, Client, S, V, C, B>(
 ) -> EngineOrchestrator<N::Payload, N::Primitives, S, Client, B>
 where
     N: ProviderNodeTypes,
-    Client: BlockClient<Block = <N::Primitives as NodePrimitives>::Block> + 'static,
+    Client: BlockClient<Block = <N::Primitives as NodePrimitives>::Block>
+        + BlockAccessListsClient
+        + 'static,
     S: Stream<Item = BeaconEngineMessage<N::Payload>> + Send + Sync + Unpin + 'static,
     V: EngineValidator<N::Payload> + WaitForCaches,
     C: ConfigureEvm<Primitives = N::Primitives> + 'static,

@@ -11,7 +11,6 @@ use crate::{
 use reth_downloaders::snap::{BlockAccessListDownloader, BlockAccessListOutcome};
 use reth_eth_wire_types::snap::GetBlockAccessListsMessage;
 use reth_network_p2p::{error::RequestError, snap::client::SnapClient};
-use reth_network_peers::PeerId;
 use reth_primitives_traits::AlloyBlockHeader;
 use reth_provider::DatabaseProviderFactory;
 use reth_storage_api::{
@@ -321,7 +320,7 @@ mod tests {
     use reth_downloaders::snap::test_utils::TestSnapClient;
     use reth_eth_wire_types::{snap::BlockAccessListsMessage, BlockAccessLists};
     use reth_network_p2p::{error::PeerRequestResult, snap::client::SnapResponse};
-    use reth_network_peers::WithPeerId;
+    use reth_network_peers::{PeerId, WithPeerId};
     use reth_primitives_traits::Account;
     use reth_provider::{
         test_utils::create_test_provider_factory, StaticFileProviderFactory, StaticFileWriter,
