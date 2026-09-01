@@ -3367,7 +3367,7 @@ mod tests {
 
     /// Tests the edge case where block < `lowest_available_block_number`.
     ///
-    /// State queries reject this before the RocksDB lookup, so this verifies the low-level
+    /// State queries reject this before the `RocksDB` lookup, so this verifies the low-level
     /// behavior directly.
     #[test]
     fn test_account_history_info_pruned_before_first_entry() {
