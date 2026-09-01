@@ -333,6 +333,8 @@ where
     /// A durable persistence completion whose destructive in-memory handoff is deferred until
     /// payload jobs finish.
     pending_persisted_handoff: Option<PersistenceResult>,
+    /// A backfill action deferred until partially persisted state is fully flushed.
+    pending_backfill_action: Option<BackfillAction>,
     /// Task runtime for spawning blocking work on named, reusable threads.
     runtime: reth_tasks::Runtime,
 }
@@ -362,6 +364,7 @@ where
             .field("execution_timing_stats", &self.execution_timing_stats.len())
             .field("payload_builds_active", &self.payload_builds.is_active())
             .field("pending_persisted_handoff", &self.pending_persisted_handoff)
+            .field("pending_backfill_action", &self.pending_backfill_action)
             .field("runtime", &self.runtime)
             .finish()
     }
@@ -430,6 +433,7 @@ where
             payload_builds,
             payload_build_finished,
             pending_persisted_handoff: None,
+            pending_backfill_action: None,
             runtime,
         }
     }
@@ -1472,12 +1476,36 @@ where
             return Ok(())
         }
 
-        if !self.persistence_state.in_progress() {
-            if let Some(new_tip_num) = self.find_disk_reorg()? {
-                self.remove_blocks(new_tip_num)
-            } else if let Some(input) = self.get_save_blocks_input(PersistTarget::Threshold) {
-                self.persist_blocks(input);
+        if self.persistence_state.in_progress() {
+            return Ok(())
+        }
+
+        if let Some(new_tip_num) = self.find_disk_reorg()? {
+            self.remove_blocks(new_tip_num);
+            return Ok(())
+        }
+
+        if self.pending_backfill_action.is_some() {
+            if self.persistence_state.last_state_trie_persisted_block !=
+                self.persistence_state.last_persisted_block
+            {
+                if let Some(input) = self.get_save_blocks_input(PersistTarget::Head) {
+                    self.persist_blocks(input);
+                }
+                return Ok(())
             }
+
+            if self.payload_builds.is_active() {
+                return Ok(())
+            }
+
+            let action = self.pending_backfill_action.take().expect("checked above");
+            self.emit_event(EngineApiEvent::BackfillAction(action));
+            return Ok(())
+        }
+
+        if let Some(input) = self.get_save_blocks_input(PersistTarget::Threshold) {
+            self.persist_blocks(input);
         }
 
         Ok(())
@@ -2181,6 +2209,23 @@ where
                 // Backfill can remove the same in-memory blocks as an active payload job or a
                 // persisted handoff, so it must not start until the next sync trigger.
                 debug!(target: "engine::tree", "skipping backfill while in-memory overlay is in use");
+                return
+            }
+
+            if self.persistence_state.last_state_trie_persisted_block !=
+                self.persistence_state.last_persisted_block
+            {
+                let EngineApiEvent::BackfillAction(action) = &event else { unreachable!() };
+                debug!(
+                    target: "engine::tree",
+                    last_persisted_block = self.persistence_state.last_persisted_block.number,
+                    last_state_trie_persisted_block = self
+                        .persistence_state
+                        .last_state_trie_persisted_block
+                        .number,
+                    "deferring backfill until partially persisted state is fully flushed"
+                );
+                self.pending_backfill_action = Some(action.clone());
                 return
             }
 

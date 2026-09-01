@@ -862,6 +862,52 @@ fn backfill_action_skips_while_persisted_handoff_is_pending() {
 }
 
 #[test]
+fn backfill_action_flushes_partial_persistence_before_emitting() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(0..4).collect();
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+    let persisted_tip = blocks[2].recovered_block().num_hash();
+    let state_trie_tip = blocks[1].recovered_block().num_hash();
+    test_harness.tree.persistence_state.last_persisted_block = persisted_tip;
+    test_harness.tree.persistence_state.last_state_trie_persisted_block = state_trie_tip;
+
+    let target = B256::random();
+    test_harness
+        .tree
+        .emit_event(EngineApiEvent::BackfillAction(BackfillAction::Start(target.into())));
+
+    assert!(test_harness.tree.backfill_sync_state.is_idle());
+    assert!(test_harness.tree.pending_backfill_action.is_some());
+    assert!(test_harness.from_tree_rx.try_recv().is_err());
+
+    test_harness.tree.advance_persistence().unwrap();
+    let action = test_harness.action_rx.recv().unwrap();
+    let PersistenceAction::SaveBlocks(input, sender) = action else {
+        panic!("expected save blocks action, got {action:?}")
+    };
+    let canonical_head = blocks[3].recovered_block().num_hash();
+    assert_eq!(input.new_db_tip(), canonical_head.number);
+    assert_eq!(input.new_partial_state_trie(), canonical_head.number);
+
+    sender
+        .send(PersistenceResult {
+            last_block: canonical_head,
+            last_state_trie_block: canonical_head,
+            commit_duration: Some(Duration::ZERO),
+        })
+        .unwrap();
+    assert!(test_harness.tree.try_poll_persistence().unwrap());
+    test_harness.tree.advance_persistence().unwrap();
+
+    assert!(test_harness.tree.pending_backfill_action.is_none());
+    assert!(test_harness.tree.backfill_sync_state.is_pending());
+    assert_matches!(
+        test_harness.from_tree_rx.try_recv(),
+        Ok(EngineApiEvent::BackfillAction(BackfillAction::Start(actual)))
+            if actual == target.into()
+    );
+}
+
+#[test]
 fn configured_persistence_suppression_tracks_payload_job_lifetime() {
     let config = TreeConfig::default()
         .with_has_enough_parallelism(true)
