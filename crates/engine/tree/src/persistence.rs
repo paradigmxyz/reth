@@ -701,14 +701,16 @@ mod tests {
 
         // Check the primary can read its own historical state.
         {
-            let primary_state_at_1 = provider_factory.history_by_block_number(1).unwrap();
+            let provider = provider_factory.provider().unwrap();
+            let primary_state_at_1 = provider.history_by_block_number(1).unwrap();
             let primary_account = primary_state_at_1.basic_account(&signer).unwrap();
             assert!(primary_account.is_some(), "primary: signer must exist at block 1");
         }
 
         // Verify historical state at block 1 is accessible via changesets on the secondary.
         {
-            let state_at_1 = secondary.history_by_block_number(1).unwrap();
+            let provider = secondary.provider().unwrap();
+            let state_at_1 = provider.history_by_block_number(1).unwrap();
             let account_at_1 = state_at_1.basic_account(&signer).unwrap();
             assert!(account_at_1.is_some(), "signer account must exist at block 1");
             let account_at_1 = account_at_1.unwrap();
@@ -803,7 +805,8 @@ mod tests {
         );
 
         // Verify historical state at block 1 is still accessible after the reorg.
-        let state_at_1 = secondary.history_by_block_number(1).unwrap();
+        let provider = secondary.provider().unwrap();
+        let state_at_1 = provider.history_by_block_number(1).unwrap();
         let account_at_1 = state_at_1.basic_account(&signer).unwrap();
         assert!(account_at_1.is_some(), "signer account must exist at block 1 after reorg");
         let account_at_1 = account_at_1.unwrap();
@@ -817,7 +820,8 @@ mod tests {
         );
 
         // Verify the latest state (at block 2) reflects the reorged execution.
-        let state_at_2 = secondary.history_by_block_number(2).unwrap();
+        let provider = secondary.provider().unwrap();
+        let state_at_2 = provider.history_by_block_number(2).unwrap();
         let account_at_2 = state_at_2.basic_account(&signer).unwrap();
         assert!(account_at_2.is_some(), "signer account must exist at block 2 after reorg");
         let account_at_2 = account_at_2.unwrap();
