@@ -132,10 +132,8 @@ impl VerifiedBlockAccessLists {
         self.block_access_lists
     }
 
-    /// Request for the blocks left unanswered, or `None` once the response answered all of them.
-    ///
-    /// Asks for exactly the blocks this response did not authenticate, so resuming with it
-    /// neither drops nor duplicates a list already returned here.
+    /// Request the blocks left unanswered, or `None` once every list is authenticated.
+    /// The returned request contains only unanswered hashes, preserving authenticated lists.
     pub fn follow_up(&self, request_id: u64) -> Option<GetBlockAccessListsMessage> {
         (!self.missing.is_empty()).then(|| GetBlockAccessListsMessage {
             request_id,
@@ -145,10 +143,7 @@ impl VerifiedBlockAccessLists {
     }
 
     /// Requested blocks this response left unanswered, in request order.
-    ///
-    /// Neither an omitted list nor a truncated response is a fault: a peer serves what it holds
-    /// and cuts at its own soft byte limit. An omission can sit between answered blocks, so
-    /// these are not a suffix of the request and the entries after them stay authenticated.
+    /// This includes in-place omissions and any truncated suffix.
     pub fn missing(&self) -> &[B256] {
         &self.missing
     }
@@ -279,7 +274,7 @@ impl SnapVerifier for BlockAccessListVerifier {
     // Validates the response identity and authenticates every supplied block access list.
     fn verify(self, peer_id: PeerId, response: SnapResponse) -> Result<Self::Output, RequestError> {
         let entries = self.validate_response(response)?.block_access_lists.0;
-        // Serving nothing is a valid answer from a peer that does not have these blocks.
+        // An empty response is the peer's explicit statement that it has none of these lists.
         if entries.is_empty() {
             return Ok(BlockAccessListOutcome::Unavailable { peer_id })
         }
@@ -293,7 +288,12 @@ impl SnapVerifier for BlockAccessListVerifier {
             .chain(
                 self.blocks[block_access_lists.len()..].iter().map(|(block_hash, _)| *block_hash),
             )
-            .collect();
+            .collect::<Vec<_>>();
+        // A full response of omitted entries is unavailable, a shorter one can be byte-limited.
+        // Preserve the latter's omitted suffix for resumption.
+        if block_access_lists.len() == self.blocks.len() && missing.len() == self.blocks.len() {
+            return Ok(BlockAccessListOutcome::Unavailable { peer_id })
+        }
 
         Ok(BlockAccessListOutcome::Verified(VerifiedBlockAccessLists {
             peer_id,
@@ -472,30 +472,41 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_response_of_only_omitted_entries_leaves_every_block_unanswered() {
-        let headers = headers(&[None, None]);
+    async fn an_empty_or_complete_response_holding_no_lists_is_unavailable() {
+        let headers = headers(&[Some(bal()), Some(bal())]);
         let peer = PeerId::random();
-        let client = Arc::new(TestSnapClient::new([response(peer, 1, vec![None, None])]));
+        for entries in [Vec::new(), vec![None, None]] {
+            let client = Arc::new(TestSnapClient::new([response(peer, 1, entries)]));
 
-        let outcome =
-            downloader(Arc::clone(&client), request(&headers), &headers).unwrap().await.unwrap();
+            let outcome = downloader(Arc::clone(&client), request(&headers), &headers)
+                .unwrap()
+                .await
+                .unwrap();
 
-        // Answering nothing must push the caller elsewhere however the peer spells it.
-        let verified = verified(outcome);
-        assert_eq!(verified.missing(), [headers[0].hash(), headers[1].hash()]);
-        assert!(client.reported().is_empty());
+            assert_eq!(outcome, BlockAccessListOutcome::Unavailable { peer_id: peer });
+            assert!(client.reported().is_empty());
+        }
     }
 
     #[tokio::test]
-    async fn an_empty_response_is_unavailable_and_not_a_peer_fault() {
-        let headers = headers(&[Some(bal())]);
+    async fn a_truncated_response_after_an_omission_stays_resumable() {
+        let headers = headers(&[Some(bal()), Some(bal())]);
         let peer = PeerId::random();
-        let client = Arc::new(TestSnapClient::new([response(peer, 1, Vec::new())]));
+        let client = Arc::new(TestSnapClient::new([response(peer, 1, vec![None])]));
 
         let outcome =
             downloader(Arc::clone(&client), request(&headers), &headers).unwrap().await.unwrap();
 
-        assert_eq!(outcome, BlockAccessListOutcome::Unavailable { peer_id: peer });
+        let verified = verified(outcome);
+        assert_eq!(verified.missing(), [headers[0].hash(), headers[1].hash()]);
+        assert_eq!(
+            verified.follow_up(2),
+            Some(GetBlockAccessListsMessage {
+                request_id: 2,
+                block_hashes: headers.iter().map(SealedHeader::hash).collect(),
+                response_bytes: request(&headers).response_bytes,
+            })
+        );
         assert!(client.reported().is_empty());
     }
 
