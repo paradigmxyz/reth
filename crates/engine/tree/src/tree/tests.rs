@@ -574,19 +574,19 @@ fn test_tree_persist_block_batch() {
 }
 
 #[test]
-fn malformed_input_is_non_fatal_insert_outcome() {
+fn block_access_list_decode_returns_invalid_with_null_latest_valid_hash() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
-    let block = test_harness.block_builder.generate_random_block(1, B256::ZERO);
+    let parent_hash = test_harness.tree.state.tree_state.canonical_block_hash();
+    let block = test_harness.block_builder.generate_random_block(1, parent_hash);
     let error = InsertBlockError::new(
         block,
         InsertBlockErrorKind::BlockAccessListDecode(BlockAccessListDecodeError::new(
             alloy_rlp::Error::UnexpectedString,
         )),
     );
-    assert_matches!(
-        test_harness.tree.on_insert_block_error(error),
-        Err(InsertBlockProcessingError::MalformedInput(_))
-    );
+    let status = test_harness.tree.on_insert_block_error(error).unwrap();
+    assert!(status.is_invalid());
+    assert_eq!(status.latest_valid_hash, None);
 }
 
 #[tokio::test]
