@@ -19,27 +19,6 @@ pub enum HistoryInfo {
     MaybeInPlainState,
 }
 
-impl HistoryInfo {
-    /// Resolves a history-index lookup to its storage location.
-    pub const fn from_lookup(
-        found_block: Option<BlockNumber>,
-        is_before_first_write: bool,
-        lowest_available: Option<BlockNumber>,
-    ) -> Self {
-        if is_before_first_write {
-            if let (Some(_), Some(block_number)) = (lowest_available, found_block) {
-                return Self::InChangeset(block_number)
-            }
-            return Self::NotYetWritten
-        }
-
-        match found_block {
-            Some(block_number) => Self::InChangeset(block_number),
-            None => Self::InPlainState,
-        }
-    }
-}
-
 /// Reads account and storage history indices.
 #[auto_impl(&, Arc, Box)]
 pub trait HistoryReader: Send {

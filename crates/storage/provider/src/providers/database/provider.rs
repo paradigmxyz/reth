@@ -1743,12 +1743,14 @@ impl<TX: DbTx + 'static, N: NodeTypes> HistoryReader for DatabaseProvider<TX, N>
         let visible_tip = self.best_block_number()?;
         self.with_rocksdb_snapshot(|rocksdb_ref| {
             let mut reader = EitherReader::new_accounts_history(self, rocksdb_ref)?;
-            reader.account_history_info(
-                address,
-                block_number,
-                lowest_available_block_number,
-                visible_tip,
-            )
+            reader
+                .account_history_info(
+                    address,
+                    block_number,
+                    lowest_available_block_number,
+                    visible_tip,
+                )
+                .map(Into::into)
         })
     }
 
@@ -1762,13 +1764,15 @@ impl<TX: DbTx + 'static, N: NodeTypes> HistoryReader for DatabaseProvider<TX, N>
         let visible_tip = self.best_block_number()?;
         self.with_rocksdb_snapshot(|rocksdb_ref| {
             let mut reader = EitherReader::new_storages_history(self, rocksdb_ref)?;
-            reader.storage_history_info(
-                address,
-                storage_key,
-                block_number,
-                lowest_available_block_number,
-                visible_tip,
-            )
+            reader
+                .storage_history_info(
+                    address,
+                    storage_key,
+                    block_number,
+                    lowest_available_block_number,
+                    visible_tip,
+                )
+                .map(Into::into)
         })
     }
 }
