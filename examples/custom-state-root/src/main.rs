@@ -48,7 +48,7 @@ use reth_ethereum::{
 };
 use reth_evm::{revm::context::Block as _, ConfigureEvm};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
-use reth_provider::{BlockExecutionOutput, DatabaseProviderFactory, HistoryReader, ProviderResult};
+use reth_provider::{BlockExecutionOutput, ProviderResult};
 use reth_storage_overlay::OverlayManager;
 use reth_trie::updates::TrieUpdates;
 
@@ -137,7 +137,6 @@ where
             alloy_rpc_types_engine::ExecutionData,
         >,
     >,
-    N::Provider: DatabaseProviderFactory<Provider: HistoryReader>,
 {
     type EngineValidator = BasicEngineValidator<
         N::Provider,
