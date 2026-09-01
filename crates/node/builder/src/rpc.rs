@@ -32,6 +32,7 @@ use reth_node_core::{
     version::{version_metadata, CLIENT_CODE},
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
+use reth_provider::{DatabaseProviderFactory, HistoryReader};
 use reth_rpc::{
     eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer},
     AdminApi,
@@ -1448,6 +1449,7 @@ where
             <<Node::Types as NodeTypes>::Payload as PayloadTypes>::ExecutionData,
         >,
     >,
+    Node::Provider: DatabaseProviderFactory<Provider: HistoryReader>,
     EV: PayloadValidatorBuilder<Node>,
     EV::Validator: reth_engine_primitives::PayloadValidator<
             <Node::Types as NodeTypes>::Payload,
