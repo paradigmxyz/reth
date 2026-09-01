@@ -4,7 +4,13 @@ use crate::{
 };
 use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
-use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
+use reth_db_api::{
+    cursor::{DbCursorRO, DbDupCursorRO},
+    table::Table,
+    tables,
+    transaction::DbTx,
+    BlockNumberList,
+};
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives};
 use reth_storage_api::{
     BlockNumReader, BytecodeReader, DBProvider, HistoryReader, NodePrimitivesProvider,
@@ -27,9 +33,7 @@ use reth_trie_db::{DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, Datab
 
 use std::{fmt::Debug, sync::Arc};
 
-pub use reth_storage_api::{
-    compute_history_rank, history_info, needs_prev_shard_check, HistoryInfo,
-};
+pub use reth_storage_api::HistoryInfo;
 
 type DbStateRoot<'a, TX, A> = StateRoot<
     reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
@@ -755,6 +759,57 @@ impl LowestAvailableBlocks {
     /// block number for storage history is less than or equal to the provided block number.
     pub fn is_storage_history_available(&self, at: BlockNumber) -> bool {
         self.storage_history_block_number.map(|block_number| block_number <= at).unwrap_or(true)
+    }
+}
+
+/// Computes the position of the first history entry at or after `block_number`.
+#[inline]
+pub fn compute_history_rank(
+    chunk: &BlockNumberList,
+    block_number: BlockNumber,
+) -> (u64, Option<u64>) {
+    let mut rank = chunk.rank(block_number);
+    if rank.checked_sub(1).and_then(|rank| chunk.select(rank)) == Some(block_number) {
+        rank -= 1;
+    }
+    (rank, chunk.select(rank))
+}
+
+/// Returns whether a history lookup needs to inspect the preceding shard.
+#[inline]
+pub fn needs_prev_shard_check(
+    rank: u64,
+    found_block: Option<BlockNumber>,
+    block_number: BlockNumber,
+) -> bool {
+    rank == 0 && found_block != Some(block_number)
+}
+
+/// Looks up a key in a sharded history table.
+pub fn history_info<T, K, C>(
+    cursor: &mut C,
+    key: K,
+    block_number: BlockNumber,
+    key_filter: impl Fn(&K) -> bool,
+    lowest_available_block_number: Option<BlockNumber>,
+) -> ProviderResult<HistoryInfo>
+where
+    T: Table<Key = K, Value = BlockNumberList>,
+    C: DbCursorRO<T>,
+{
+    if let Some(chunk) = cursor.seek(key)?.filter(|(key, _)| key_filter(key)).map(|entry| entry.1) {
+        let (rank, found_block) = compute_history_rank(&chunk, block_number);
+        let is_before_first_write = needs_prev_shard_check(rank, found_block, block_number) &&
+            !cursor.prev()?.is_some_and(|(key, _)| key_filter(&key));
+        Ok(HistoryInfo::from_lookup(
+            found_block,
+            is_before_first_write,
+            lowest_available_block_number,
+        ))
+    } else if lowest_available_block_number.is_some() {
+        Ok(HistoryInfo::MaybeInPlainState)
+    } else {
+        Ok(HistoryInfo::NotYetWritten)
     }
 }
 
