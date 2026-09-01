@@ -22,6 +22,10 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
         block_id: BlockId,
     ) -> impl Future<Output = Result<Option<BlockAccessList>, Self::Error>> + Send {
         async move {
+            if block_id.is_pending() {
+                return Ok(None)
+            }
+
             let Some(block) = self.recovered_block(block_id).await? else {
                 return Ok(None);
             };
@@ -35,6 +39,8 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                     .split();
                 return Ok(Some(Vec::from(bal)))
             }
+
+            let _permit = self.acquire_owned_blocking_io().await;
 
             self.spawn_blocking_io(move |eth_api| {
                 let state = eth_api

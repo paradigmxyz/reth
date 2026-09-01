@@ -90,23 +90,28 @@ pub enum InsertBlockErrorKind {
 }
 
 impl InsertBlockErrorKind {
-    /// Returns whether the error was caused by an invalid block.
+    /// Returns whether the error must be reported as an invalid payload.
     pub const fn is_validation_error(&self) -> bool {
-        matches!(self, Self::Consensus(_) | Self::Execution(BlockExecutionError::Validation(_)))
+        matches!(
+            self,
+            Self::Consensus(_) |
+                Self::BlockAccessListDecode(_) |
+                Self::Execution(BlockExecutionError::Validation(_))
+        )
     }
 
-    /// Returns an [`InsertBlockValidationError`] if the failure invalidates the block, or an
-    /// [`InsertBlockProcessingError`] if the failure is not attributable to the block itself.
+    /// Returns an [`InsertBlockValidationError`] if the failure must be reported as an invalid
+    /// payload, or an [`InsertBlockProcessingError`] if block processing itself failed.
     ///
-    /// This distinction controls whether the block may be returned as `INVALID` and its hash cached
-    /// as invalid. Because `INVALID` has consensus meaning, malformed supplemental input and
-    /// internal failures must remain processing errors instead.
+    /// This distinction controls whether the payload may be returned as `INVALID`. Errors
+    /// classified as invalid payloads by the Engine API are validation errors; malformed request
+    /// parameters and internal failures remain processing errors instead.
     pub fn ensure_validation_error(
         self,
     ) -> Result<InsertBlockValidationError, InsertBlockProcessingError> {
         match self {
             Self::BlockAccessListDecode(error) => {
-                Err(InsertBlockProcessingError::MalformedInput(Box::new(error)))
+                Ok(InsertBlockValidationError::BlockAccessListDecode(error))
             }
             Self::Consensus(err) => Ok(InsertBlockValidationError::Consensus(err)),
             Self::Execution(err) => match err {
@@ -176,6 +181,9 @@ pub enum InsertBlockValidationError {
     /// Block violated consensus rules.
     #[error(transparent)]
     Consensus(#[from] ConsensusError),
+    /// Block access list bytes could not be decoded.
+    #[error(transparent)]
+    BlockAccessListDecode(#[from] BlockAccessListDecodeError),
     /// Validation error, transparently wrapping [`BlockValidationError`].
     #[error(transparent)]
     Validation(#[from] BlockValidationError),
@@ -185,16 +193,15 @@ pub enum InsertBlockValidationError {
 mod tests {
     use super::*;
 
-    // Undecodable block access list bytes are malformed request params and must not be treated
-    // as a block validation error.
     #[test]
     fn ensure_insert_block_validation_error() {
         let err = InsertBlockErrorKind::BlockAccessListDecode(BlockAccessListDecodeError::new(
             alloy_rlp::Error::UnexpectedString,
         ));
+        assert!(err.is_validation_error());
         assert!(matches!(
             err.ensure_validation_error(),
-            Err(InsertBlockProcessingError::MalformedInput(_))
+            Ok(InsertBlockValidationError::BlockAccessListDecode(_))
         ));
 
         assert!(matches!(

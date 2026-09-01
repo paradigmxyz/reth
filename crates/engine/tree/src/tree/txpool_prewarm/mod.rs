@@ -4,15 +4,17 @@ mod control;
 mod worker;
 
 use self::control::Control;
-use crate::tree::{StateProviderBuilder, TxPoolPrewarmCacheSnapshot};
+use crate::tree::TxPoolPrewarmCacheSnapshot;
 use alloy_consensus::transaction::Recovered;
 use alloy_primitives::{Address, B256};
 use reth_evm::{ConfigureEvm, EvmEnvFor};
 use reth_primitives_traits::{NodePrimitives, TxTy};
 use reth_provider::{
-    BlockNumReader, DatabaseProviderFactory, PruneCheckpointReader, StageCheckpointReader,
-    StorageSettingsCache, TryIntoHistoricalStateProvider,
+    BlockNumReader, ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory,
+    PruneCheckpointReader, StageCheckpointReader, StateProvider, StorageChangeSetReader,
+    StorageSettingsCache,
 };
+use reth_storage_overlay::OverlayStateProviderFactory;
 use std::{fmt::Debug, sync::Arc};
 
 /// Coordinates a long-lived worker and the latest completed immutable snapshot.
@@ -41,9 +43,11 @@ where
     P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
+        + ChangeSetReader
+        + StorageChangeSetReader
         + StorageSettingsCache
-        + TryIntoHistoricalStateProvider
         + 'static,
+    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: StateProvider> + Send,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Spawns the long-lived worker, which owns its mutable read cache and starts a fresh one for
@@ -84,9 +88,9 @@ where
         &self,
         parent_hash: B256,
         evm_env: EvmEnvFor<Evm>,
-        provider_builder: StateProviderBuilder<N, P>,
+        state_provider_factory: OverlayStateProviderFactory<P, N>,
     ) {
-        self.control.start(parent_hash, Job { evm_env, provider_builder });
+        self.control.start(parent_hash, Job { evm_env, state_provider_factory });
     }
 }
 
@@ -120,5 +124,5 @@ pub trait Source<N: NodePrimitives>: Send + Sync + Debug {
 /// A request to warm txpool transactions against one fully validated parent state.
 struct Job<N: NodePrimitives, P, Evm: ConfigureEvm<Primitives = N>> {
     evm_env: EvmEnvFor<Evm>,
-    provider_builder: StateProviderBuilder<N, P>,
+    state_provider_factory: OverlayStateProviderFactory<P, N>,
 }

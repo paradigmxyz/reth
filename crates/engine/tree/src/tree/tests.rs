@@ -44,6 +44,13 @@ use std::{
 };
 use tokio::sync::oneshot;
 
+/// Wraps blocks as if they had been downloaded without any access list data.
+fn downloaded_blocks<B: reth_primitives_traits::Block>(
+    blocks: Vec<reth_primitives_traits::SealedBlock<B>>,
+) -> Vec<SealedBlockWithAccessList<B>> {
+    blocks.into_iter().map(SealedBlockWithAccessList::from_block).collect()
+}
+
 /// Mock engine validator for tests
 #[derive(Debug, Clone)]
 struct MockEngineValidator;
@@ -58,7 +65,8 @@ impl reth_engine_primitives::PayloadValidator<EthEngineTypes> for MockEngineVali
         reth_primitives_traits::SealedBlock<Self::Block>,
         reth_payload_primitives::NewPayloadError,
     > {
-        let block = reth_ethereum_primitives::Block::try_from(payload.payload).map_err(|e| {
+        let ExecutionData { payload, sidecar } = payload;
+        let block = payload.try_into_block_with_sidecar(&sidecar).map_err(|e| {
             reth_payload_primitives::NewPayloadError::Other(format!("{e:?}").into())
         })?;
         Ok(block.seal_slow())
@@ -475,7 +483,8 @@ impl ValidatorTestHarness {
             &mut self.harness.tree.state,
             &self.harness.tree.canonical_in_memory_state,
         );
-        let result = self.validator.validate_block(block, ctx);
+        let result =
+            self.validator.validate_block(SealedBlockWithAccessList::from_block(block), ctx);
         self.metrics.record_validation(result.is_ok());
         result
     }
@@ -542,7 +551,7 @@ fn test_tree_persist_block_batch() {
         blocks.push(test_block_builder.generate_random_block(idx as u64, B256::random()));
     }
 
-    test_harness.to_tree_tx.send(FromEngine::DownloadedBlocks(blocks)).unwrap();
+    test_harness.to_tree_tx.send(FromEngine::DownloadedBlocks(downloaded_blocks(blocks))).unwrap();
 
     // process the message
     let msg = match test_harness.tree.wait_for_event() {
@@ -565,19 +574,19 @@ fn test_tree_persist_block_batch() {
 }
 
 #[test]
-fn malformed_input_is_non_fatal_insert_outcome() {
+fn block_access_list_decode_returns_invalid_with_null_latest_valid_hash() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
-    let block = test_harness.block_builder.generate_random_block(1, B256::ZERO);
+    let parent_hash = test_harness.tree.state.tree_state.canonical_block_hash();
+    let block = test_harness.block_builder.generate_random_block(1, parent_hash);
     let error = InsertBlockError::new(
         block,
         InsertBlockErrorKind::BlockAccessListDecode(BlockAccessListDecodeError::new(
             alloy_rlp::Error::UnexpectedString,
         )),
     );
-    assert_matches!(
-        test_harness.tree.on_insert_block_error(error),
-        Err(InsertBlockProcessingError::MalformedInput(_))
-    );
+    let status = test_harness.tree.on_insert_block_error(error).unwrap();
+    assert!(status.is_invalid());
+    assert_eq!(status.latest_valid_hash, None);
 }
 
 #[tokio::test]
@@ -1011,7 +1020,10 @@ fn test_disconnected_block() {
 
     let mut test_harness = TestHarness::new(HOLESKY.clone());
 
-    let outcome = test_harness.tree.insert_block(sealed.clone()).unwrap();
+    let outcome = test_harness
+        .tree
+        .insert_block(SealedBlockWithAccessList::from_block(sealed.clone()))
+        .unwrap();
     assert_eq!(
         outcome,
         InsertPayloadOk::Inserted(BlockStatus::Disconnected {
@@ -1045,7 +1057,7 @@ fn test_validated_payload_bal_is_inserted_into_store() {
                         .with_raw_bal(Some(RawBal::from(raw_bal.clone()))),
                 )
             },
-            |_, executed| Ok(executed.recovered_block().clone_sealed_block()),
+            |_, executed| Ok(executed.recovered_block().clone_sealed_block().into()),
         )
         .unwrap();
 
@@ -1520,7 +1532,9 @@ async fn test_engine_tree_fcu_missing_head() {
     // after FCU we receive an EngineApiEvent::Download event to get the missing block.
     let event = test_harness.from_tree_rx.recv().await.unwrap();
     match event {
-        EngineApiEvent::Download(DownloadRequest::BlockSet(actual_block_set)) => {
+        EngineApiEvent::Download(DownloadRequest::BlockSet {
+            hashes: actual_block_set, ..
+        }) => {
             let expected_block_set = B256Set::from_iter([missing_block.hash()]);
             assert_eq!(actual_block_set, expected_block_set);
         }
@@ -1565,7 +1579,7 @@ async fn test_engine_tree_live_sync_transition_required_blocks_requested() {
 
     let event = test_harness.from_tree_rx.recv().await.unwrap();
     match event {
-        EngineApiEvent::Download(DownloadRequest::BlockSet(hash_set)) => {
+        EngineApiEvent::Download(DownloadRequest::BlockSet { hashes: hash_set, .. }) => {
             assert_eq!(hash_set, B256Set::from_iter([main_chain_last_hash]));
         }
         _ => panic!("Unexpected event: {event:#?}"),
@@ -1574,7 +1588,7 @@ async fn test_engine_tree_live_sync_transition_required_blocks_requested() {
     // After backfill completes with head not buffered, we also request head download
     let event = test_harness.from_tree_rx.recv().await.unwrap();
     match event {
-        EngineApiEvent::Download(DownloadRequest::BlockSet(hash_set)) => {
+        EngineApiEvent::Download(DownloadRequest::BlockSet { hashes: hash_set, .. }) => {
             assert_eq!(hash_set, B256Set::from_iter([main_chain_last_hash]));
         }
         _ => panic!("Unexpected event: {event:#?}"),
@@ -1582,15 +1596,19 @@ async fn test_engine_tree_live_sync_transition_required_blocks_requested() {
 
     let _ = test_harness
         .tree
-        .on_engine_message(FromEngine::DownloadedBlocks(vec![main_chain
+        .on_engine_message(FromEngine::DownloadedBlocks(downloaded_blocks(vec![main_chain
             .last()
             .unwrap()
-            .clone_sealed_block()]))
+            .clone_sealed_block()])))
         .unwrap();
 
     let event = test_harness.from_tree_rx.recv().await.unwrap();
     match event {
-        EngineApiEvent::Download(DownloadRequest::BlockRange(initial_hash, total_blocks)) => {
+        EngineApiEvent::Download(DownloadRequest::BlockRange {
+            hash: initial_hash,
+            count: total_blocks,
+            ..
+        }) => {
             assert_eq!(
                 total_blocks,
                 (main_chain.len() - backfill_finished_block_number as usize - 1) as u64
@@ -2560,7 +2578,7 @@ mod forkchoice_updated_tests {
 
         if let Some(TreeEvent::Download(download_request)) = result.event {
             match download_request {
-                DownloadRequest::BlockSet(block_set) => {
+                DownloadRequest::BlockSet { hashes: block_set, .. } => {
                     assert_eq!(block_set.len(), 1);
                 }
                 _ => panic!("Expected single block download request"),
@@ -2834,7 +2852,7 @@ fn test_on_valid_downloaded_non_head_sync_target_continues_to_head() {
     // With the fix: the engine makes safe canonical inline, then emits Download for head.
     // Without the fix: it would return MakeCanonical{safe_hash} and never download head.
     match result {
-        Some(TreeEvent::Download(DownloadRequest::BlockSet(hashes))) => {
+        Some(TreeEvent::Download(DownloadRequest::BlockSet { hashes, .. })) => {
             assert!(
                 hashes.contains(&head_hash),
                 "Expected download for head block {head_hash}, got {hashes:?}"
@@ -3172,7 +3190,7 @@ async fn assert_post_backfill_recheck_retriggers_to_buffered_target(engine_kind:
 
     // Buffer the target block — the recheck looks up the helper's resolved hash in the buffer
     // to decide whether to retrigger.
-    test_harness.tree.state.buffer.insert_block(target_block.clone_sealed_block());
+    test_harness.tree.state.buffer.insert_block(target_block.clone_sealed_block().into());
 
     // Place the buffered hash in the FCU slot the helper picks for this chain type, and put
     // an unrelated hash (not in buffer) in the other slot to keep the two slots distinct.

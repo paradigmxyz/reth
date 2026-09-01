@@ -4,7 +4,9 @@
 //! penalizes and reissues in exactly the same way.
 
 use futures::FutureExt;
-use reth_eth_wire_types::snap::{GetAccountRangeMessage, GetStorageRangesMessage};
+use reth_eth_wire_types::snap::{
+    GetAccountRangeMessage, GetBlockAccessListsMessage, GetStorageRangesMessage,
+};
 use reth_network_p2p::{
     error::RequestError,
     priority::Priority,
@@ -156,6 +158,12 @@ impl SnapRequest for GetAccountRangeMessage {
 impl SnapRequest for GetStorageRangesMessage {
     fn send<C: SnapClient>(&self, client: &C, priority: Priority) -> C::Output {
         client.get_storage_ranges_with_priority(self.clone(), priority)
+    }
+}
+
+impl SnapRequest for GetBlockAccessListsMessage {
+    fn send<C: SnapClient>(&self, client: &C, priority: Priority) -> C::Output {
+        client.get_block_access_lists_with_priority(self.clone(), priority)
     }
 }
 
