@@ -584,7 +584,7 @@ mod tests {
     use super::*;
     use crate::{ArenaParallelSparseTrie, LeafLookup, LeafUpdate};
     use alloy_primitives::{
-        b256,
+        b256, keccak256,
         map::{HashMap, HashSet},
         U256,
     };
@@ -595,8 +595,8 @@ mod tests {
     use reth_trie::{updates::StorageTrieUpdates, HashBuilder, MultiProof, EMPTY_ROOT_HASH};
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
-        BranchNodeMasks, BranchNodeMasksMap, BranchNodeV2, LeafNode, RlpNode, StorageMultiProof,
-        TrieAccount, TrieMask, TrieNodeV2,
+        BranchNodeMasks, BranchNodeMasksMap, BranchNodeV2, ExtensionNode, LeafNode, RlpNode,
+        StorageMultiProof, TrieAccount, TrieMask, TrieNodeV2,
     };
 
     const fn epoch(value: u64) -> TrieNodeEpoch {
@@ -615,6 +615,210 @@ mod tests {
         let mut updates = B256Map::from_iter([(address, update)]);
         sparse.trie_mut().update_leaves(&mut updates, |_, _| {}).unwrap();
         assert!(updates.is_empty());
+    }
+
+    #[test]
+    fn terminal_extension_proves_exclusion_and_supports_insert() {
+        let blinded_child = B256::repeat_byte(0x11);
+        let extension = TrieNodeV2::Extension(ExtensionNode::new(
+            Nibbles::from_nibbles([0x3]),
+            RlpNode::word_rlp(&blinded_child),
+        ));
+        let extension_rlp = RlpNode::from_rlp(&alloy_rlp::encode(&extension));
+        let root_node = TrieNodeV2::Branch(BranchNodeV2::new(
+            Nibbles::default(),
+            vec![extension_rlp],
+            TrieMask::from_nibble(0xb),
+            None,
+        ));
+        let root = keccak256(alloy_rlp::encode(&root_node));
+
+        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
+        sparse
+            .reveal_decoded_multiproof_v2(reth_trie_common::DecodedMultiProofV2 {
+                account_proofs: vec![
+                    ProofTrieNodeV2 {
+                        path: Nibbles::from_nibbles([0xb]),
+                        node: extension,
+                        masks: None,
+                    },
+                    ProofTrieNodeV2 { path: Nibbles::default(), node: root_node, masks: None },
+                ],
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert_eq!(sparse.root(epoch(0)).unwrap(), root);
+
+        let absent_path = leaf_key([0xb, 0x8], 64);
+        assert_eq!(
+            sparse.state_trie_ref().unwrap().find_leaf(&absent_path, None),
+            Ok(LeafLookup::NonExistent)
+        );
+
+        let blinded_path = leaf_key([0xb, 0x3], 64);
+        assert!(matches!(
+            sparse.state_trie_ref().unwrap().find_leaf(&blinded_path, None),
+            Err(crate::LeafLookupError::BlindedNode { path, hash })
+                if path == Nibbles::from_nibbles([0xb, 0x3]) && hash == blinded_child
+        ));
+
+        let value = alloy_rlp::encode_fixed_size(&U256::from(1)).to_vec();
+        let mut updates = B256Map::from_iter([(
+            B256::from_slice(&absent_path.pack()),
+            LeafUpdate::Changed(value.clone()),
+        )]);
+        sparse.trie_mut().update_leaves(&mut updates, |_, _| {}).unwrap();
+        assert!(updates.is_empty());
+        assert_eq!(sparse.state_trie_ref().unwrap().get_leaf_value(&absent_path), Some(&value));
+
+        let new_leaf = RlpNode::from_rlp(&alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
+            leaf_key([], 62),
+            value,
+        ))));
+        let split_branch =
+            RlpNode::from_rlp(&alloy_rlp::encode(TrieNodeV2::Branch(BranchNodeV2::new(
+                Nibbles::default(),
+                vec![RlpNode::word_rlp(&blinded_child), new_leaf],
+                TrieMask::from_nibble(0x3) | TrieMask::from_nibble(0x8),
+                None,
+            ))));
+        let expected_root = keccak256(alloy_rlp::encode(TrieNodeV2::Branch(BranchNodeV2::new(
+            Nibbles::default(),
+            vec![split_branch],
+            TrieMask::from_nibble(0xb),
+            None,
+        ))));
+        assert_eq!(sparse.root(epoch(1)).unwrap(), expected_root);
+    }
+
+    #[test]
+    fn insert_at_extension_divergence_preserves_remaining_key() {
+        let blinded_child = B256::repeat_byte(0x22);
+        let extension = TrieNodeV2::Extension(ExtensionNode::new(
+            Nibbles::from_nibbles([0x3, 0x4]),
+            RlpNode::word_rlp(&blinded_child),
+        ));
+        let initial_root = keccak256(alloy_rlp::encode(&extension));
+        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
+        sparse
+            .reveal_decoded_multiproof_v2(reth_trie_common::DecodedMultiProofV2 {
+                account_proofs: vec![ProofTrieNodeV2 {
+                    path: Nibbles::default(),
+                    node: extension,
+                    masks: None,
+                }],
+                ..Default::default()
+            })
+            .unwrap();
+
+        let inserted_path = leaf_key([0x8], 64);
+        let value = alloy_rlp::encode_fixed_size(&U256::from(2)).to_vec();
+        let mut updates = B256Map::from_iter([(
+            B256::from_slice(&inserted_path.pack()),
+            LeafUpdate::Changed(value.clone()),
+        )]);
+        sparse.trie_mut().update_leaves(&mut updates, |_, _| {}).unwrap();
+        assert!(updates.is_empty());
+
+        let remaining_extension = RlpNode::from_rlp(&alloy_rlp::encode(TrieNodeV2::Extension(
+            ExtensionNode::new(Nibbles::from_nibbles([0x4]), RlpNode::word_rlp(&blinded_child)),
+        )));
+        let new_leaf = RlpNode::from_rlp(&alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
+            leaf_key([], 63),
+            value,
+        ))));
+        let expected_root = keccak256(alloy_rlp::encode(TrieNodeV2::Branch(BranchNodeV2::new(
+            Nibbles::default(),
+            vec![remaining_extension, new_leaf],
+            TrieMask::from_nibble(0x3) | TrieMask::from_nibble(0x8),
+            None,
+        ))));
+        assert_eq!(sparse.root(epoch(1)).unwrap(), expected_root);
+
+        let mut updates = B256Map::from_iter([(
+            B256::from_slice(&inserted_path.pack()),
+            LeafUpdate::Changed(Vec::new()),
+        )]);
+        sparse.trie_mut().update_leaves(&mut updates, |_, _| {}).unwrap();
+        assert!(updates.is_empty());
+        assert_eq!(sparse.root(epoch(2)).unwrap(), initial_root);
+    }
+
+    #[test]
+    fn terminal_extension_can_be_revealed_later() {
+        let value_0 = alloy_rlp::encode_fixed_size(&U256::from(3)).to_vec();
+        let value_1 = alloy_rlp::encode_fixed_size(&U256::from(4)).to_vec();
+        let leaf_0_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 61), value_0.clone()));
+        let leaf_1_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 61), value_1));
+        let leaf_0 = RlpNode::from_rlp(&alloy_rlp::encode(&leaf_0_node));
+        let leaf_1 = RlpNode::from_rlp(&alloy_rlp::encode(&leaf_1_node));
+        let child_branch =
+            RlpNode::from_rlp(&alloy_rlp::encode(TrieNodeV2::Branch(BranchNodeV2::new(
+                Nibbles::default(),
+                vec![leaf_0.clone(), leaf_1.clone()],
+                TrieMask::from_nibble(0x4) | TrieMask::from_nibble(0x5),
+                None,
+            ))));
+        let extension = TrieNodeV2::Extension(ExtensionNode::new(
+            Nibbles::from_nibbles([0x3]),
+            child_branch.clone(),
+        ));
+        let root_node = TrieNodeV2::Branch(BranchNodeV2::new(
+            Nibbles::default(),
+            vec![RlpNode::from_rlp(&alloy_rlp::encode(&extension))],
+            TrieMask::from_nibble(0xb),
+            None,
+        ));
+        let root = keccak256(alloy_rlp::encode(&root_node));
+
+        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
+        sparse
+            .reveal_decoded_multiproof_v2(reth_trie_common::DecodedMultiProofV2 {
+                account_proofs: vec![
+                    ProofTrieNodeV2 {
+                        path: Nibbles::from_nibbles([0xb]),
+                        node: extension,
+                        masks: None,
+                    },
+                    ProofTrieNodeV2 { path: Nibbles::default(), node: root_node, masks: None },
+                ],
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(sparse.root(epoch(0)).unwrap(), root);
+
+        sparse
+            .reveal_decoded_multiproof_v2(reth_trie_common::DecodedMultiProofV2 {
+                account_proofs: vec![
+                    ProofTrieNodeV2 {
+                        path: Nibbles::from_nibbles([0xb, 0x3, 0x4]),
+                        node: leaf_0_node,
+                        masks: None,
+                    },
+                    ProofTrieNodeV2 {
+                        path: Nibbles::from_nibbles([0xb, 0x3, 0x5]),
+                        node: leaf_1_node,
+                        masks: None,
+                    },
+                    ProofTrieNodeV2 {
+                        path: Nibbles::from_nibbles([0xb]),
+                        node: TrieNodeV2::Branch(BranchNodeV2::new(
+                            Nibbles::from_nibbles([0x3]),
+                            vec![leaf_0, leaf_1],
+                            TrieMask::from_nibble(0x4) | TrieMask::from_nibble(0x5),
+                            Some(child_branch),
+                        )),
+                        masks: None,
+                    },
+                ],
+                ..Default::default()
+            })
+            .unwrap();
+
+        let revealed_path = leaf_key([0xb, 0x3, 0x4], 64);
+        assert_eq!(sparse.state_trie_ref().unwrap().get_leaf_value(&revealed_path), Some(&value_0));
+        assert_eq!(sparse.root(epoch(0)).unwrap(), root);
     }
 
     #[test]

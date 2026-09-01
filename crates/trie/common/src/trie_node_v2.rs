@@ -80,13 +80,13 @@ impl ProofTrieNodeV2 {
                         branch_v2.key = ext.key;
                         branch_v2.branch_rlp_node = Some(ext.child);
                         last.path = path;
+                        continue
                     }
 
-                    // If we reach here, the extension's child is not a branch in the
-                    // result. This happens when the child branch is hashed (not revealed
-                    // in the proof). In V2 format, extension nodes are always combined
-                    // with their child branch, so we skip extension nodes whose child
-                    // isn't revealed.
+                    // An exclusion proof can terminate at an extension whose key diverges from
+                    // the target. In that case the child is intentionally not revealed, but the
+                    // extension itself must be retained to prove non-membership.
+                    result.push(Self { path, node: TrieNodeV2::Extension(ext), masks });
                 }
             }
         }

@@ -1063,9 +1063,39 @@ pub mod triehash {
 mod tests {
     use super::*;
     use alloy_trie::{
-        nodes::{BranchNode, LeafNode, RlpNode},
+        nodes::{BranchNode, ExtensionNode, LeafNode, RlpNode},
         TrieMask,
     };
+
+    #[test]
+    fn witness_preserves_terminal_extension_node() {
+        fn insert_node(witness: &mut B256Map<Bytes>, node: impl alloy_rlp::Encodable) -> RlpNode {
+            let encoded = alloy_rlp::encode(node);
+            witness.insert(keccak256(&encoded), encoded.clone().into());
+            RlpNode::from_rlp(&encoded)
+        }
+
+        let mut witness = B256Map::default();
+        let extension_path = Nibbles::from_nibbles([0xb]);
+        let extension = ExtensionNode::new(
+            Nibbles::from_nibbles([0x3]),
+            RlpNode::word_rlp(&B256::repeat_byte(0x11)),
+        );
+        let extension_rlp = insert_node(&mut witness, extension.clone());
+        let state_root = insert_node(
+            &mut witness,
+            BranchNode::new(vec![extension_rlp], TrieMask::from(1 << 0xb)),
+        )
+        .as_hash()
+        .expect("state root is hashed");
+
+        let proof = DecodedMultiProofV2::from_witness(state_root, &witness).unwrap();
+
+        assert!(proof.account_proofs.iter().any(|node| {
+            node.path == extension_path &&
+                matches!(&node.node, crate::TrieNodeV2::Extension(actual) if actual == &extension)
+        }));
+    }
 
     #[test]
     fn witness_nodes_are_depth_first_ordered() {
