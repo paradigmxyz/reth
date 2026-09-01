@@ -14,12 +14,12 @@ use crate::{
     AccountReader, BlockBodyWriter, BlockExecutionWriter, BlockHashReader, BlockNumReader,
     BlockReader, BlockWriter, BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter,
     DBProvider, DbTxProvider, EitherReader, EitherWriter, EitherWriterDestination, HashingWriter,
-    HeaderProvider, HeaderSyncGapProvider, HistoricalStateProviderRef, HistoryWriter,
-    LatestStateProviderRef, OriginalValuesKnown, PersistenceFrontiers, ProviderError,
-    PruneCheckpointReader, PruneCheckpointWriter, RawRocksDBBatch, RevertsInit, RocksBatchArg,
-    RocksDBProviderFactory, StageCheckpointReader, StateWriter, StaticFileProviderFactory,
-    StatsReader, StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
-    TransactionsProviderExt, TrieWriter,
+    HeaderProvider, HeaderSyncGapProvider, HistoryWriter, LatestStateProviderRef,
+    OriginalValuesKnown, PersistenceFrontiers, ProviderError, PruneCheckpointReader,
+    PruneCheckpointWriter, RawRocksDBBatch, RevertsInit, RocksBatchArg, RocksDBProviderFactory,
+    StageCheckpointReader, StateWriter, StaticFileProviderFactory, StatsReader, StorageReader,
+    StorageTrieWriter, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
+    TrieWriter,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
@@ -296,57 +296,6 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     pub fn latest<'a>(&'a self) -> Box<dyn StateProvider + 'a> {
         trace!(target: "providers::db", "Returning latest state provider");
         Box::new(LatestStateProviderRef::new(self))
-    }
-
-    /// Storage provider for state at that given block hash
-    pub fn history_by_block_hash<'a>(
-        &'a self,
-        block_hash: BlockHash,
-    ) -> ProviderResult<Box<dyn StateProvider + 'a>> {
-        let block_number =
-            self.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-        self.history_by_block_number(block_number)
-    }
-
-    /// Storage provider for state at that given block number
-    pub fn history_by_block_number<'a>(
-        &'a self,
-        mut block_number: BlockNumber,
-    ) -> ProviderResult<Box<dyn StateProvider + 'a>> {
-        if block_number == self.best_block_number().unwrap_or_default() &&
-            block_number == self.last_block_number().unwrap_or_default()
-        {
-            return Ok(Box::new(LatestStateProviderRef::new(self)))
-        }
-
-        // +1 as the changeset that we want is the one that was applied after this block.
-        block_number += 1;
-
-        let account_history_prune_checkpoint =
-            self.get_prune_checkpoint(PruneSegment::AccountHistory)?;
-        let storage_history_prune_checkpoint =
-            self.get_prune_checkpoint(PruneSegment::StorageHistory)?;
-
-        let mut state_provider =
-            HistoricalStateProviderRef::new(self, block_number, self.overlay_manager.clone());
-        // If we pruned account or storage history, we can't return state on every historical block.
-        // Instead, we should cap it at the latest prune checkpoint for corresponding prune segment.
-        if let Some(prune_checkpoint_block_number) =
-            account_history_prune_checkpoint.and_then(|checkpoint| checkpoint.block_number)
-        {
-            state_provider = state_provider.with_lowest_available_account_history_block_number(
-                prune_checkpoint_block_number + 1,
-            );
-        }
-        if let Some(prune_checkpoint_block_number) =
-            storage_history_prune_checkpoint.and_then(|checkpoint| checkpoint.block_number)
-        {
-            state_provider = state_provider.with_lowest_available_storage_history_block_number(
-                prune_checkpoint_block_number + 1,
-            );
-        }
-
-        Ok(Box::new(state_provider))
     }
 
     #[cfg(feature = "test-utils")]
@@ -5188,8 +5137,7 @@ mod tests {
     }
 
     #[test]
-    fn test_write_state_and_historical_read_hashed() {
-        use reth_storage_api::StateProvider;
+    fn test_write_state_hashed() {
         use reth_trie::{HashedPostState, KeccakKeyHasher};
         use revm::{database::BundleState, state::AccountInfo};
 
@@ -5288,12 +5236,6 @@ mod tests {
         let account_cs = sf.account_block_changeset(1).unwrap();
         assert!(!account_cs.is_empty());
         assert_eq!(account_cs[0].address, address);
-
-        let historical_value =
-            HistoricalStateProviderRef::new(&*provider_rw, 0, OverlayManager::default())
-                .storage(address, slot_key)
-                .unwrap();
-        assert_eq!(historical_value, None);
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]

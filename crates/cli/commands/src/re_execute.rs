@@ -17,8 +17,9 @@ use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_node_core::args::JitArgs;
 use reth_primitives_traits::{format_gas_throughput, Account, BlockBody, GotExpected};
 use reth_provider::{
-    BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory, ReceiptProvider,
-    StaticFileProviderFactory, TransactionVariant,
+    providers::BlockchainProvider, BlockNumReader, BlockReader, ChainSpecProvider,
+    DatabaseProviderFactory, ReceiptProvider, StateProviderFactory, StaticFileProviderFactory,
+    TransactionVariant,
 };
 use reth_revm::{
     database::StateProviderDatabase,
@@ -150,13 +151,14 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 let evm_config = evm_config.with_jit_support();
                 let executor_lifetime = Duration::from_secs(600);
                 let provider = provider_factory.database_provider_ro()?.disable_long_read_transaction_safety();
+                let state_provider_factory = BlockchainProvider::new(provider_factory.clone())?;
                 // Reused across blocks for BAL hash encoding.
                 let mut bal_buf = Vec::new();
 
                 let db_at = {
                     |block_number: u64| {
                         StateProviderDatabase(
-                            provider
+                            state_provider_factory
                                 .history_by_block_number(block_number)
                                 .unwrap(),
                         )
