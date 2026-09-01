@@ -818,6 +818,63 @@ fn backfill_action_skips_while_payload_build_is_active() {
 }
 
 #[test]
+fn backfill_action_catches_up_state_trie_before_starting_pipeline() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..7).collect();
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+    let state_trie_tip = blocks[2].recovered_block().num_hash();
+    let database_tip = blocks[4].recovered_block().num_hash();
+    let action = BackfillAction::Start(B256::random().into());
+    test_harness.tree.persistence_state.last_state_trie_persisted_block = state_trie_tip;
+    test_harness.tree.persistence_state.last_persisted_block = database_tip;
+
+    test_harness.tree.emit_event(EngineApiEvent::BackfillAction(action.clone()));
+
+    assert_eq!(test_harness.tree.pending_backfill_action, Some(action.clone()));
+    assert!(test_harness.tree.backfill_sync_state.is_idle());
+    assert!(test_harness.from_tree_rx.try_recv().is_err());
+
+    test_harness.tree.advance_persistence().unwrap();
+    let persistence_action = test_harness.action_rx.recv().unwrap();
+    let PersistenceAction::SaveBlocks(input, sender) = persistence_action else {
+        panic!("expected state/trie catch-up save, got {persistence_action:?}")
+    };
+    assert_eq!(input.prev_db_tip(), database_tip.number);
+    assert_eq!(input.new_db_tip(), database_tip.number);
+    assert_eq!(input.prev_partial_state_trie(), state_trie_tip.number);
+    assert_eq!(input.new_partial_state_trie(), database_tip.number);
+    assert!(input.persist_rest_blocks().is_empty());
+    assert_eq!(
+        input
+            .state_trie_blocks()
+            .iter()
+            .map(|block| block.recovered_block().number())
+            .collect::<Vec<_>>(),
+        (state_trie_tip.number + 1..=database_tip.number).collect::<Vec<_>>()
+    );
+    assert!(input.state_trie_masking_blocks().is_empty());
+
+    sender
+        .send(PersistenceResult {
+            last_block: database_tip,
+            last_state_trie_block: database_tip,
+            commit_duration: Some(Duration::ZERO),
+        })
+        .unwrap();
+    assert!(test_harness.tree.try_poll_persistence().unwrap());
+    assert!(test_harness.from_tree_rx.try_recv().is_err());
+
+    test_harness.tree.advance_persistence().unwrap();
+
+    assert!(test_harness.tree.pending_backfill_action.is_none());
+    assert!(test_harness.tree.backfill_sync_state.is_pending());
+    let emitted = test_harness.from_tree_rx.try_recv().unwrap();
+    let EngineApiEvent::BackfillAction(emitted_action) = emitted else {
+        panic!("expected backfill action, got {emitted:?}")
+    };
+    assert_eq!(emitted_action, action);
+}
+
+#[test]
 fn backfill_action_skips_while_persisted_handoff_is_pending() {
     let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
     let mut test_harness = TestHarness::with_config(

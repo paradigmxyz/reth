@@ -307,6 +307,8 @@ where
     persistence_state: PersistenceState,
     /// Flag indicating the state of the node's backfill synchronization process.
     backfill_sync_state: BackfillSyncState,
+    /// A backfill action waiting for the state/trie frontier to reach the persisted block.
+    pending_backfill_action: Option<BackfillAction>,
     /// Keeps track of the state of the canonical chain that isn't persisted yet.
     /// This is intended to be accessed from external sources, such as rpc.
     canonical_in_memory_state: CanonicalInMemoryState<N>,
@@ -352,6 +354,7 @@ where
             .field("persistence", &self.persistence)
             .field("persistence_state", &self.persistence_state)
             .field("backfill_sync_state", &self.backfill_sync_state)
+            .field("pending_backfill_action", &self.pending_backfill_action)
             .field("canonical_in_memory_state", &self.canonical_in_memory_state)
             .field("payload_builder", &self.payload_builder)
             .field("config", &self.config)
@@ -417,6 +420,7 @@ where
             persistence,
             persistence_state,
             backfill_sync_state: BackfillSyncState::Idle,
+            pending_backfill_action: None,
             state,
             canonical_in_memory_state,
             payload_builder,
@@ -1471,6 +1475,17 @@ where
         if !self.persistence_state.in_progress() {
             if let Some(new_tip_num) = self.find_disk_reorg()? {
                 self.remove_blocks(new_tip_num)
+            } else if self.pending_backfill_action.is_some() &&
+                self.persistence_state.last_state_trie_persisted_block !=
+                    self.persistence_state.last_persisted_block
+            {
+                let input = self
+                    .get_save_blocks_input(PersistTarget::Persisted)
+                    .expect("split persistence frontiers require state/trie catch-up");
+                self.persist_blocks(input);
+            } else if self.pending_backfill_action.is_some() && !self.payload_builds.is_active() {
+                let action = self.pending_backfill_action.take().expect("checked above");
+                self.emit_event(EngineApiEvent::BackfillAction(action));
             } else if let Some(input) = self.get_save_blocks_input(PersistTarget::Threshold) {
                 self.persist_blocks(input);
             }
@@ -2162,7 +2177,7 @@ where
     fn emit_event(&mut self, event: impl Into<EngineApiEvent<N>>) {
         let event = event.into();
 
-        if event.is_backfill_action() {
+        if let EngineApiEvent::BackfillAction(action) = &event {
             debug_assert_eq!(
                 self.backfill_sync_state,
                 BackfillSyncState::Idle,
@@ -2179,6 +2194,22 @@ where
                 return
             }
 
+            if self.persistence_state.last_state_trie_persisted_block !=
+                self.persistence_state.last_persisted_block
+            {
+                debug!(
+                    target: "engine::tree",
+                    last_persisted_block = self.persistence_state.last_persisted_block.number,
+                    last_state_trie_persisted_block = self
+                        .persistence_state
+                        .last_state_trie_persisted_block
+                        .number,
+                    "deferring backfill until state/trie persistence catches up"
+                );
+                self.pending_backfill_action = Some(action.clone());
+                return
+            }
+
             self.backfill_sync_state = BackfillSyncState::Pending;
             self.metrics.engine.pipeline_runs.increment(1);
             debug!(target: "engine::tree", "emitting backfill action event");
@@ -2192,8 +2223,9 @@ where
     /// Returns the blocks and frontiers for the next persistence cycle, if one should start.
     ///
     /// Threshold persistence honors the normal scheduling gates and retains the configured
-    /// in-memory block buffer. Head persistence bypasses those gates during shutdown and returns
-    /// `None` once both persistence frontiers have reached the canonical head.
+    /// in-memory block buffer. Persisted-target persistence catches the state/trie frontier up to
+    /// the existing database tip. Head persistence bypasses those gates during shutdown and
+    /// returns `None` once both persistence frontiers have reached the canonical head.
     fn get_save_blocks_input(&self, target: PersistTarget) -> Option<SaveBlocksInput<N>> {
         // We will calculate the state root using the database, so we need to be sure there are no
         // changes
@@ -2205,6 +2237,7 @@ where
 
         let (new_db_tip, new_partial_state_trie) = match target {
             PersistTarget::Head => (canonical_head_number, canonical_head_number),
+            PersistTarget::Persisted => (prev_db_tip, prev_db_tip),
             PersistTarget::Threshold => {
                 if (self.config.suppress_persistence_during_build() &&
                     self.payload_builds.is_active()) ||
@@ -3632,6 +3665,8 @@ enum PersistTarget {
     Threshold,
     /// Persist all blocks up to and including the canonical head.
     Head,
+    /// Persist state/trie updates through the persisted block frontier.
+    Persisted,
 }
 
 /// Result of waiting for caches to become available.
