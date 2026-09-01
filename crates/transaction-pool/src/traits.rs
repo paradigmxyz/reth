@@ -76,6 +76,14 @@ use alloy_primitives::{
     Address, Bytes, TxHash, TxKind, B128, B256, U256,
 };
 use futures_util::{ready, Stream};
+
+/// Upper bound on how many transactions one sender contributes to an inclusion list.
+///
+/// Only a sender's next nonce is appendable against the parent state, so a longer run of
+/// consecutive nonces would fill the byte budget without constraining the proposer. Two keeps the
+/// follow-up that becomes appendable once the first lands.
+pub const MAX_INCLUSION_LIST_TXS_PER_SENDER: usize = 2;
+
 use reth_eth_wire_types::HandleMempoolData;
 use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
 use reth_execution_types::ChangedAccount;
@@ -408,6 +416,18 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         &self,
         best_transactions_attributes: BestTransactionsAttributes,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>>;
+
+    /// Builds an EIP-7805 (FOCIL) inclusion list from the pool's local view.
+    ///
+    /// The returned transactions are EIP-2718 encoded and their RLP list encoding is at most
+    /// `max_size` bytes. Blob transactions are excluded, as EIP-7805 requires.
+    ///
+    /// At most [`MAX_INCLUSION_LIST_TXS_PER_SENDER`] transactions come from any one sender: only a
+    /// sender's next nonce is appendable, so a longer run would spend the byte budget without
+    /// constraining the proposer.
+    ///
+    /// Consumer: Engine API
+    fn build_inclusion_list(&self, max_size: usize) -> Vec<Bytes>;
 
     /// Returns all transactions that can be included in the next block.
     ///

@@ -255,7 +255,15 @@ where
     // FOCIL transactions are retried after ordinary pool transactions. This lets a transaction
     // become executable when an earlier transaction establishes its nonce or funds its sender.
     let mut inclusion_list = Vec::new();
-    for raw_transaction in attributes.inclusion_list_transactions.as_deref().unwrap_or_default() {
+    // EIP-7805 is only in force from Bogota, so an inclusion list attached to an earlier
+    // timestamp is ignored rather than built against.
+    let inclusion_list_transactions = attributes
+        .inclusion_list_transactions
+        .as_deref()
+        .filter(|_| chain_spec.is_bogota_active_at_timestamp(attributes.timestamp))
+        .unwrap_or_default();
+
+    for raw_transaction in inclusion_list_transactions {
         let Ok(transaction) = TransactionSigned::decode_2718_exact(raw_transaction) else {
             continue
         };
