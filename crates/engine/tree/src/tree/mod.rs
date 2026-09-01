@@ -2722,9 +2722,10 @@ where
                 Err(err) => {
                     if let InsertPayloadError::Block(err) = err {
                         debug!(target: "engine::tree", ?err, "failed to connect buffered block to tree");
-                        if let Err(fatal) = self.on_internal_insert_block_error(err) {
+                        if let Err(InsertBlockProcessingError::Fatal(fatal)) =
+                            self.on_insert_block_error(err)
+                        {
                             warn!(target: "engine::tree", %fatal, "fatal error occurred while connecting buffered blocks");
-                            return Err(fatal)
                         }
                     }
                 }
@@ -3097,9 +3098,10 @@ where
             Err(err) => {
                 if let InsertPayloadError::Block(err) = err {
                     debug!(target: "engine::tree", err=%err.kind(), "failed to insert downloaded block");
-                    if let Err(fatal) = self.on_internal_insert_block_error(err) {
+                    if let Err(InsertBlockProcessingError::Fatal(fatal)) =
+                        self.on_insert_block_error(err)
+                    {
                         warn!(target: "engine::tree", %fatal, "fatal error occurred while inserting downloaded block");
-                        return Err(fatal)
                     }
                 }
             }
@@ -3343,17 +3345,6 @@ where
             PayloadStatusEnum::Invalid { validation_error: validation_err.to_string() },
             latest_valid_hash,
         ))
-    }
-
-    /// Handles an insertion error from a non-RPC source, where malformed input can be discarded.
-    fn on_internal_insert_block_error(
-        &mut self,
-        error: InsertBlockError<N::Block>,
-    ) -> Result<(), InsertBlockFatalError> {
-        match self.on_insert_block_error(error) {
-            Ok(_) | Err(InsertBlockProcessingError::MalformedInput(_)) => Ok(()),
-            Err(InsertBlockProcessingError::Fatal(error)) => Err(error),
-        }
     }
 
     /// Handles a [`NewPayloadError`] by converting it to a [`PayloadStatus`].
