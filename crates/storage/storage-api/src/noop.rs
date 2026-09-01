@@ -5,11 +5,12 @@ pub use crate::bal::NoopBalStore;
 use crate::{
     AccountReader, BalProvider, BalStoreHandle, BlockBodyIndicesProvider, BlockHashReader,
     BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader,
-    ChangeSetReader, HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider,
-    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader,
-    StateProofProvider, StateProvider, StateProviderBox, StateProviderFactory,
-    StateRangeProviderFactory, StateRangeView, StateReader, StateRootProvider, StorageRootProvider,
-    TransactionVariant, TransactionsProvider, TryIntoHistoricalStateProvider,
+    ChangeSetReader, HashedPostStateProvider, HeaderProvider, HistoryInfo, HistoryReader,
+    NodePrimitivesProvider, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
+    StageCheckpointReader, StateProofProvider, StateProvider, StateProviderBox,
+    StateProviderFactory, StateRangeProviderFactory, StateRangeView, StateReader,
+    StateRootProvider, StorageRootProvider, TransactionVariant, TransactionsProvider,
+    TryIntoHistoricalStateProvider,
 };
 
 #[cfg(feature = "db-api")]
@@ -423,6 +424,27 @@ impl<C: Send + Sync, N: NodePrimitives> ChangeSetReader for NoopProvider<C, N> {
         _range: impl core::ops::RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
         Ok(Vec::default())
+    }
+}
+
+impl<C: Send + Sync, N: NodePrimitives> HistoryReader for NoopProvider<C, N> {
+    fn account_history_info(
+        &self,
+        _address: Address,
+        _block_number: BlockNumber,
+        _lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo> {
+        Ok(HistoryInfo::NotYetWritten)
+    }
+
+    fn storage_history_info(
+        &self,
+        _address: Address,
+        _storage_key: B256,
+        _block_number: BlockNumber,
+        _lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo> {
+        Ok(HistoryInfo::NotYetWritten)
     }
 }
 
