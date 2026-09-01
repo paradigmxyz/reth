@@ -722,84 +722,6 @@ where
     }
 }
 
-/// State provider for a given block number.
-/// For more detailed description, see [`HistoricalStateProviderRef`].
-#[derive(Debug)]
-pub struct HistoricalStateProvider<Provider: NodePrimitivesProvider> {
-    /// Database provider.
-    provider: Provider,
-    /// Manager for state trie overlays and cached changesets.
-    overlay_manager: OverlayManager<Provider::Primitives>,
-    /// State at the block number is the main indexer of the state.
-    block_number: BlockNumber,
-    /// Lowest blocks at which different parts of the state are available.
-    lowest_available_blocks: LowestAvailableBlocks,
-}
-
-impl<
-        Provider: DBProvider
-            + ChangeSetReader
-            + StorageChangeSetReader
-            + BlockNumReader
-            + NodePrimitivesProvider,
-    > HistoricalStateProvider<Provider>
-{
-    /// Create new `StateProvider` for historical block number
-    pub fn new(
-        provider: Provider,
-        block_number: BlockNumber,
-        overlay_manager: OverlayManager<Provider::Primitives>,
-    ) -> Self {
-        Self {
-            provider,
-            overlay_manager,
-            block_number,
-            lowest_available_blocks: Default::default(),
-        }
-    }
-
-    /// Set the lowest block number at which the account history is available.
-    pub const fn with_lowest_available_account_history_block_number(
-        mut self,
-        block_number: BlockNumber,
-    ) -> Self {
-        self.lowest_available_blocks.account_history_block_number = Some(block_number);
-        self
-    }
-
-    /// Set the lowest block number at which the storage history is available.
-    pub const fn with_lowest_available_storage_history_block_number(
-        mut self,
-        block_number: BlockNumber,
-    ) -> Self {
-        self.lowest_available_blocks.storage_history_block_number = Some(block_number);
-        self
-    }
-}
-
-impl<
-        Provider: DBProvider
-            + ChangeSetReader
-            + StorageChangeSetReader
-            + BlockNumReader
-            + NodePrimitivesProvider,
-    > HistoricalStateProvider<Provider>
-{
-    /// Returns a new provider that takes the `TX` as reference
-    #[inline(always)]
-    fn as_ref(&self) -> HistoricalStateProviderRef<'_, Provider> {
-        HistoricalStateProviderRef::new_with_lowest_available_blocks(
-            &self.provider,
-            self.block_number,
-            self.lowest_available_blocks,
-            self.overlay_manager.clone(),
-        )
-    }
-}
-
-// Delegates all provider impls to [HistoricalStateProviderRef]
-reth_storage_api::macros::delegate_provider_impls!(HistoricalStateProvider<Provider> where [Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader + StorageChangeSetReader + PruneCheckpointReader + StageCheckpointReader + StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider]);
-
 /// Lowest blocks at which different parts of the state are available.
 /// They may be [Some] if pruning is enabled.
 #[derive(Clone, Copy, Debug, Default)]
@@ -918,8 +840,7 @@ mod tests {
     use crate::{
         providers::state::historical::{HistoryInfo, LowestAvailableBlocks},
         test_utils::create_test_provider_factory,
-        AccountReader, HistoricalStateProvider, HistoricalStateProviderRef, RocksDBProviderFactory,
-        StateProvider,
+        AccountReader, HistoricalStateProviderRef, StateProvider,
     };
     use alloy_primitives::{address, b256, Address, B256, U256};
     use reth_db_api::{
@@ -929,11 +850,7 @@ mod tests {
         BlockNumberList,
     };
     use reth_primitives_traits::{Account, StorageEntry};
-    use reth_storage_api::{
-        BlockHashReader, BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-        NodePrimitivesProvider, PruneCheckpointReader, StageCheckpointReader,
-        StorageChangeSetReader, StorageSettingsCache,
-    };
+    use reth_storage_api::{DatabaseProviderFactory, StorageSettingsCache};
     use reth_storage_errors::provider::ProviderError;
     use reth_storage_overlay::OverlayManager;
 
@@ -941,23 +858,6 @@ mod tests {
     const HIGHER_ADDRESS: Address = address!("0x0000000000000000000000000000000000000005");
     const STORAGE: B256 =
         b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
-
-    const fn assert_state_provider<T: StateProvider>() {}
-    #[expect(dead_code)]
-    const fn assert_historical_state_provider<
-        T: DBProvider
-            + BlockNumReader
-            + BlockHashReader
-            + ChangeSetReader
-            + StorageChangeSetReader
-            + PruneCheckpointReader
-            + StageCheckpointReader
-            + StorageSettingsCache
-            + RocksDBProviderFactory
-            + NodePrimitivesProvider,
-    >() {
-        assert_state_provider::<HistoricalStateProvider<T>>();
-    }
 
     #[test]
     fn history_provider_get_account() {

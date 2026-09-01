@@ -14,13 +14,12 @@ use crate::{
     AccountReader, BlockBodyWriter, BlockExecutionWriter, BlockHashReader, BlockNumReader,
     BlockReader, BlockWriter, BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter,
     DBProvider, DbTxProvider, EitherReader, EitherWriter, EitherWriterDestination, HashingWriter,
-    HeaderProvider, HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef,
-    HistoryWriter, LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown,
-    PersistenceFrontiers, ProviderError, PruneCheckpointReader, PruneCheckpointWriter,
-    RawRocksDBBatch, RevertsInit, RocksBatchArg, RocksDBProviderFactory, StageCheckpointReader,
-    StateProviderBox, StateWriter, StaticFileProviderFactory, StatsReader, StorageReader,
-    StorageTrieWriter, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
-    TrieWriter,
+    HeaderProvider, HeaderSyncGapProvider, HistoricalStateProviderRef, HistoryWriter,
+    LatestStateProviderRef, OriginalValuesKnown, PersistenceFrontiers, ProviderError,
+    PruneCheckpointReader, PruneCheckpointWriter, RawRocksDBBatch, RevertsInit, RocksBatchArg,
+    RocksDBProviderFactory, StageCheckpointReader, StateWriter, StaticFileProviderFactory,
+    StatsReader, StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
+    TransactionsProviderExt, TrieWriter,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
@@ -64,7 +63,7 @@ use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, BlockBodyReader, MetadataProvider, MetadataWriter,
     NodePrimitivesProvider, StateProvider, StateReader, StateWriteConfig, StorageChangeSetReader,
-    StoragePath, StorageSettingsCache, TryIntoHistoricalStateProvider, WriteStateInput,
+    StoragePath, StorageSettingsCache, WriteStateInput,
 };
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_storage_overlay::OverlayManager;
@@ -988,58 +987,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             bytecodes_cursor.upsert(hash, &bytecode)?;
         }
         Ok(())
-    }
-}
-
-impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for DatabaseProvider<TX, N> {
-    fn try_into_history_at_block(
-        self,
-        mut block_number: BlockNumber,
-    ) -> ProviderResult<StateProviderBox> {
-        let best_block = self.best_block_number().unwrap_or_default();
-
-        // Reject requests for blocks beyond the best block
-        if block_number > best_block {
-            return Err(ProviderError::BlockNotExecuted {
-                requested: block_number,
-                executed: best_block,
-            });
-        }
-
-        // If requesting state at the best block, use the latest state provider
-        if block_number == best_block {
-            return Ok(Box::new(LatestStateProvider::new(self)));
-        }
-
-        // +1 as the changeset that we want is the one that was applied after this block.
-        block_number += 1;
-
-        let account_history_prune_checkpoint =
-            self.get_prune_checkpoint(PruneSegment::AccountHistory)?;
-        let storage_history_prune_checkpoint =
-            self.get_prune_checkpoint(PruneSegment::StorageHistory)?;
-        let overlay_manager = self.overlay_manager.clone();
-
-        let mut state_provider = HistoricalStateProvider::new(self, block_number, overlay_manager);
-
-        // If we pruned account or storage history, we can't return state on every historical block.
-        // Instead, we should cap it at the latest prune checkpoint for corresponding prune segment.
-        if let Some(prune_checkpoint_block_number) =
-            account_history_prune_checkpoint.and_then(|checkpoint| checkpoint.block_number)
-        {
-            state_provider = state_provider.with_lowest_available_account_history_block_number(
-                prune_checkpoint_block_number + 1,
-            );
-        }
-        if let Some(prune_checkpoint_block_number) =
-            storage_history_prune_checkpoint.and_then(|checkpoint| checkpoint.block_number)
-        {
-            state_provider = state_provider.with_lowest_available_storage_history_block_number(
-                prune_checkpoint_block_number + 1,
-            );
-        }
-
-        Ok(Box::new(state_provider))
     }
 }
 
@@ -5033,44 +4980,6 @@ mod tests {
                     assert!(receipt.is_none());
                 }
             }
-        }
-    }
-
-    #[test]
-    fn test_try_into_history_rejects_unexecuted_blocks() {
-        use reth_storage_api::TryIntoHistoricalStateProvider;
-
-        let factory = create_test_provider_factory();
-
-        // Insert genesis block to have some data
-        let data = BlockchainTestData::default();
-        let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
-        provider_rw
-            .write_state(
-                &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
-                crate::OriginalValuesKnown::No,
-                StateWriteConfig::default(),
-            )
-            .unwrap();
-        provider_rw.commit().unwrap();
-
-        // Get a fresh provider - Execution checkpoint is 0, no receipts written beyond genesis
-        let provider = factory.provider().unwrap();
-
-        // Requesting historical state for block 0 (executed) should succeed
-        let result = provider.try_into_history_at_block(0);
-        assert!(result.is_ok(), "Block 0 should be available");
-
-        // Get another provider and request state for block 100 (not executed)
-        let provider = factory.provider().unwrap();
-        let result = provider.try_into_history_at_block(100);
-
-        // Should fail with BlockNotExecuted error
-        match result {
-            Err(ProviderError::BlockNotExecuted { requested: 100, .. }) => {}
-            Err(e) => panic!("Expected BlockNotExecuted error, got: {e:?}"),
-            Ok(_) => panic!("Expected error, got Ok"),
         }
     }
 

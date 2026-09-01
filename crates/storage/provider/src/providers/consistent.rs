@@ -24,8 +24,8 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, DatabaseProviderFactory, NodePrimitivesProvider, StateProviderBox,
-    StorageChangeSetReader, TryIntoHistoricalStateProvider,
+    BlockBodyIndicesProvider, DatabaseProviderFactory, NodePrimitivesProvider,
+    StorageChangeSetReader,
 };
 use reth_storage_errors::provider::ProviderResult;
 use revm::database::states::PlainStorageRevert;
@@ -397,36 +397,12 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         }
         fetch_from_db(&self.storage_provider)
     }
-
-    /// Consumes the provider and returns a state provider for the specific block hash.
-    pub(crate) fn into_state_provider_at_block_hash(
-        self,
-        block_hash: BlockHash,
-    ) -> ProviderResult<StateProviderBox> {
-        // Resolve block number and verify it's canonical before destructuring self
-        let block_number =
-            self.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-        self.ensure_canonical_block(block_number)?;
-
-        let Self { storage_provider, head_block, .. } = self;
-        if let Some(Some(block_state)) =
-            head_block.as_ref().map(|b| b.block_on_chain(block_hash.into()))
-        {
-            let anchor_hash = block_state.anchor().hash;
-            let block_number = storage_provider
-                .block_number(anchor_hash)?
-                .ok_or(ProviderError::BlockHashNotFound(anchor_hash))?;
-            let latest_historical = storage_provider.try_into_history_at_block(block_number)?;
-            return Ok(Box::new(block_state.state_provider(latest_historical)));
-        }
-        storage_provider.try_into_history_at_block(block_number)
-    }
 }
 
 impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     /// Ensures that the given block number is canonical (synced)
     ///
-    /// This is a helper for guarding the `HistoricalStateProvider` against block numbers that are
+    /// This is a helper for guarding historical state queries against block numbers that are
     /// out of range and would lead to invalid results, mainly during initial sync.
     ///
     /// Verifying the `block_number` would be expensive since we need to lookup sync table

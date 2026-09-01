@@ -422,7 +422,7 @@ mod tests {
         test_utils::{create_test_provider_factory, MockNodeTypes},
         AccountReader, BalConfig, BalNotificationStream, BalStore, BalStoreHandle,
         ChainSpecProvider, HeaderProvider, InMemoryBalStore, ProviderError, ProviderResult, RawBal,
-        StorageSettingsCache, TryIntoHistoricalStateProvider,
+        StorageSettingsCache,
     };
     use reth_prune::Pruner;
     use reth_prune_types::PruneMode;
@@ -769,8 +769,7 @@ mod tests {
 
         // The held RO tx must still be able to read historical state at block 1 via
         // changesets, even though the reorg thread is about to rewrite block 2's data.
-        // Consuming pre_reorg_provider here also unblocks the reorg commit.
-        let state_at_1 = pre_reorg_provider.try_into_history_at_block(1).unwrap();
+        let state_at_1 = pre_reorg_provider.history_by_block_number(1).unwrap();
         let account = state_at_1.basic_account(&signer).unwrap();
         assert!(
             account.is_some(),
@@ -786,6 +785,7 @@ mod tests {
             "pre-reorg RO tx: signer nonce at block 1 during reorg"
         );
         drop(state_at_1);
+        drop(pre_reorg_provider);
         reorg_handle.join().expect("reorg thread panicked");
 
         // A new provider catches up and sees the reorged chain.
