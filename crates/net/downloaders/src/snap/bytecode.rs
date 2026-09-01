@@ -69,12 +69,19 @@ pub enum BytecodeOutcome {
 /// Contract code authenticated against the hashes that were requested for it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VerifiedBytecode {
+    // Identifies the peer that omitted any missing code.
+    peer_id: PeerId,
     // Code paired with the requested hash it answers, in requested order. Private so a blob
     // cannot be relabelled with a hash that did not authenticate it.
     codes: Vec<(B256, Bytes)>,
 }
 
 impl VerifiedBytecode {
+    /// Peer that returned this code.
+    pub const fn peer_id(&self) -> PeerId {
+        self.peer_id
+    }
+
     /// Code with the hash it authenticated against, in requested order.
     pub fn codes(&self) -> &[(B256, Bytes)] {
         &self.codes
@@ -159,7 +166,7 @@ impl SnapVerifier for BytecodeVerifier {
             codes.push((hash, code));
         }
 
-        Ok(BytecodeOutcome::Verified(VerifiedBytecode { codes }))
+        Ok(BytecodeOutcome::Verified(VerifiedBytecode { peer_id, codes }))
     }
 }
 
@@ -240,11 +247,13 @@ mod tests {
         let request = request(&codes);
         // The peer serves only the first and last of the three.
         let served = vec![codes[0].clone(), codes[2].clone()];
-        let client = Arc::new(TestSnapClient::new([response(PeerId::random(), 1, served)]));
+        let peer = PeerId::random();
+        let client = Arc::new(TestSnapClient::new([response(peer, 1, served)]));
 
         let outcome = downloader(Arc::clone(&client), request.clone()).unwrap().await.unwrap();
 
         let verified = verified(outcome);
+        assert_eq!(verified.peer_id(), peer);
         assert_eq!(
             verified.codes().iter().map(|(hash, _)| *hash).collect::<Vec<_>>(),
             [keccak256(&codes[0]), keccak256(&codes[2])]
