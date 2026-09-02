@@ -191,7 +191,7 @@ pub struct CustomBlockExecutor<'a, Evm> {
 
 impl<E> BlockExecutor for CustomBlockExecutor<'_, E>
 where
-    E: Evm<DB: StateDB, Tx = TxEnv>,
+    E: Evm<DB: StateDB, Spec: Into<SpecId> + Clone, Tx = TxEnv>,
 {
     type Transaction = TransactionSigned;
     type Receipt = Receipt;

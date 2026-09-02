@@ -11,10 +11,11 @@ use alloy_primitives::{map::B256Map, B256};
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
-use error::{InsertBlockError, InsertBlockFatalError, InsertBlockValidationError};
+use error::{
+    InsertBlockError, InsertBlockFatalError, InsertBlockProcessingError, InsertBlockValidationError,
+};
 use reth_chain_state::{
-    CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, MemoryOverlayStateProvider,
-    NewCanonicalChain,
+    CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, NewCanonicalChain,
 };
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
@@ -23,17 +24,17 @@ use reth_engine_primitives::{
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
+use reth_network_p2p::full_block::SealedBlockWithAccessList;
 use reth_payload_builder::{BuildNewPayload, PayloadBuilderHandle, PayloadBuilderLease};
 use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadAttributes, PayloadTypes};
 use reth_primitives_traits::{
     FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
 use reth_provider::{
-    BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockNumReader, BlockReader,
-    ChangeSetReader, DatabaseProviderFactory, LatestStateProvider, ProviderError,
-    PruneCheckpointReader, SaveBlocksInput, StageCheckpointReader, StateProviderBox,
-    StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
-    TransactionVariant, TryIntoHistoricalStateProvider,
+    BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
+    DatabaseProviderFactory, ProviderError, PruneCheckpointReader, SaveBlocksInput,
+    StageCheckpointReader, StateProviderFactory, StateReader, StorageChangeSetReader,
+    StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
@@ -111,67 +112,6 @@ pub(crate) const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 /// This ensures that recent changesets are kept in memory for potential reorgs,
 /// even when the finalized block is not set (e.g., on L2s like Optimism).
 const CHANGESET_CACHE_RETENTION_BLOCKS: u64 = 64;
-
-/// A builder for creating state providers that can be used across threads.
-#[derive(Clone, Debug)]
-pub struct StateProviderBuilder<N: NodePrimitives, P> {
-    /// The provider factory used to create providers.
-    provider_factory: P,
-    /// Hash of the block whose state to provide.
-    parent_hash: B256,
-    /// Tracks the in-memory parent chain and its overlays.
-    overlay_manager: OverlayManager<N>,
-}
-
-impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
-    /// Creates a new state provider builder for `parent_hash`.
-    pub const fn new(
-        provider_factory: P,
-        parent_hash: B256,
-        overlay_manager: OverlayManager<N>,
-    ) -> Self {
-        Self { provider_factory, parent_hash, overlay_manager }
-    }
-}
-
-impl<N: NodePrimitives, P> StateProviderBuilder<N, P>
-where
-    P: DatabaseProviderFactory,
-    P::Provider: BlockNumReader
-        + PruneCheckpointReader
-        + StageCheckpointReader
-        + StorageSettingsCache
-        + TryIntoHistoricalStateProvider
-        + 'static,
-{
-    /// Creates a new state provider from this builder.
-    pub fn build(&self) -> ProviderResult<StateProviderBox> {
-        let overlay_builder = self.overlay_manager.overlay_builder(self.parent_hash);
-        let provider = self.provider_factory.database_provider_ro()?;
-        let anchor = overlay_builder.anchor_at_parent(&provider)?;
-        let (provider, overlay): (StateProviderBox, _) = match anchor {
-            reth_storage_overlay::AnchorForParent::NoReverts { anchor, overlay } => {
-                debug!(
-                    target: "engine::tree",
-                    parent_hash = %self.parent_hash,
-                    ?anchor,
-                    "creating state provider from latest state"
-                );
-                (Box::new(LatestStateProvider::new(provider)), overlay)
-            }
-            reth_storage_overlay::AnchorForParent::RevertsRequired { anchor, overlay, .. } => {
-                debug!(
-                    target: "engine::tree",
-                    parent_hash = %self.parent_hash,
-                    ?anchor,
-                    "creating state provider from historical state"
-                );
-                (provider.try_into_history_at_block(anchor.number)?, overlay)
-            }
-        };
-        Ok(Box::new(MemoryOverlayStateProvider::new(provider, overlay)))
-    }
-}
 
 /// Tracks the state of the engine api internals.
 ///
@@ -443,7 +383,6 @@ where
         + ChangeSetReader
         + StorageChangeSetReader
         + StorageSettingsCache
-        + TryIntoHistoricalStateProvider
         + 'static,
     C: ConfigureEvm<Primitives = N> + 'static,
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
@@ -786,7 +725,7 @@ where
     /// block request processing isn't blocked for a long time.
     fn on_downloaded(
         &mut self,
-        mut blocks: Vec<SealedBlock<N::Block>>,
+        mut blocks: Vec<SealedBlockWithAccessList<N::Block>>,
     ) -> Result<Option<TreeEvent>, InsertBlockFatalError> {
         if blocks.is_empty() {
             // nothing to execute
@@ -837,7 +776,7 @@ where
     fn on_new_payload(
         &mut self,
         payload: T::ExecutionData,
-    ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError> {
+    ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockProcessingError> {
         let _thread_resource_usage =
             self.metrics.engine.new_payload.measure_thread_resource_usage();
         trace!(target: "engine::tree", "invoked new payload");
@@ -913,7 +852,7 @@ where
     fn try_insert_payload(
         &mut self,
         payload: T::ExecutionData,
-    ) -> Result<TryInsertPayloadResult, InsertBlockFatalError> {
+    ) -> Result<TryInsertPayloadResult, InsertBlockProcessingError> {
         let block_hash = payload.block_hash();
         let num_hash = payload.num_hash();
         let parent_hash = payload.parent_hash();
@@ -948,9 +887,9 @@ where
             Err(error) => {
                 let status = match error {
                     InsertPayloadError::Block(error) => self.on_insert_block_error(error)?,
-                    InsertPayloadError::Payload(error) => {
-                        self.on_new_payload_error(error, num_hash, parent_hash)?
-                    }
+                    InsertPayloadError::Payload(error) => self
+                        .on_new_payload_error(error, num_hash, parent_hash)
+                        .map_err(InsertBlockFatalError::from)?,
                 };
 
                 Ok(TryInsertPayloadResult { status, already_seen: false })
@@ -969,7 +908,7 @@ where
     fn try_buffer_payload(
         &mut self,
         payload: T::ExecutionData,
-    ) -> Result<PayloadStatus, InsertBlockFatalError> {
+    ) -> Result<PayloadStatus, InsertBlockProcessingError> {
         let parent_hash = payload.parent_hash();
         let num_hash = payload.num_hash();
 
@@ -977,12 +916,14 @@ where
             // if the block is well-formed, buffer it for later
             Ok(block) => {
                 if let Err(error) = self.buffer_block(block) {
-                    Ok(self.on_insert_block_error(error)?)
+                    self.on_insert_block_error(error)
                 } else {
                     Ok(PayloadStatus::from_status(PayloadStatusEnum::Syncing))
                 }
             }
-            Err(error) => Ok(self.on_new_payload_error(error, num_hash, parent_hash)?),
+            Err(error) => Ok(self
+                .on_new_payload_error(error, num_hash, parent_hash)
+                .map_err(InsertBlockFatalError::from)?),
         }
     }
 
@@ -1489,7 +1430,10 @@ where
         Ok(TreeOutcome::new(OnForkChoiceUpdated::valid(PayloadStatus::from_status(
             PayloadStatusEnum::Syncing,
         )))
-        .with_event(TreeEvent::Download(DownloadRequest::single_block(target))))
+        .with_event(TreeEvent::Download(
+            DownloadRequest::single_block(target)
+                .with_access_lists(self.should_download_access_lists()),
+        )))
     }
 
     /// Helper method to remove blocks and set the persistence state. This ensures we keep track of
@@ -2088,10 +2032,10 @@ where
                     "Backfill complete, downloading remaining blocks to reach FCU target"
                 );
 
-                self.emit_event(EngineApiEvent::Download(DownloadRequest::BlockRange(
-                    lowest_buffered.parent_hash(),
-                    distance,
-                )));
+                self.emit_event(EngineApiEvent::Download(
+                    DownloadRequest::block_range(lowest_buffered.parent_hash(), distance)
+                        .with_access_lists(self.should_download_access_lists()),
+                ));
                 return Ok(());
             }
         } else {
@@ -2102,9 +2046,10 @@ where
                 head_hash = %sync_target_state.head_block_hash,
                 "Backfill complete but head block not buffered, requesting download"
             );
-            self.emit_event(EngineApiEvent::Download(DownloadRequest::single_block(
-                sync_target_state.head_block_hash,
-            )));
+            self.emit_event(EngineApiEvent::Download(
+                DownloadRequest::single_block(sync_target_state.head_block_hash)
+                    .with_access_lists(self.should_download_access_lists()),
+            ));
             return Ok(());
         }
 
@@ -2273,8 +2218,9 @@ where
                     return None
                 }
 
-                if canonical_head_number.saturating_sub(prev_db_tip) <=
-                    self.config.persistence_threshold()
+                let persistence_threshold =
+                    usize::try_from(self.config.persistence_threshold()).unwrap_or(usize::MAX);
+                if self.canonical_in_memory_state.canonical_chain().count() <= persistence_threshold
                 {
                     return None
                 }
@@ -2478,6 +2424,18 @@ where
             .lowest_ancestor(&hash)
             .map(|block| block.parent_hash())
             .unwrap_or_else(|| hash)
+    }
+
+    /// Returns whether block downloads should also attempt to fetch the blocks' access lists.
+    ///
+    /// This is the case once Amsterdam is active at the current canonical head, indicated by the
+    /// head header carrying a block access list hash.
+    ///
+    /// This is a coarse gate: a download issued while the head is still pre-Amsterdam won't ask
+    /// for access lists of blocks past the fork. Access list downloads are best-effort anyway, so
+    /// those blocks simply take the regular execution path.
+    fn should_download_access_lists(&self) -> bool {
+        self.canonical_in_memory_state.get_canonical_head().block_access_list_hash().is_some()
     }
 
     /// If validation fails, the response MUST contain the latest valid hash:
@@ -2717,9 +2675,10 @@ where
                 Err(err) => {
                     if let InsertPayloadError::Block(err) = err {
                         debug!(target: "engine::tree", ?err, "failed to connect buffered block to tree");
-                        if let Err(fatal) = self.on_insert_block_error(err) {
+                        if let Err(InsertBlockProcessingError::Fatal(fatal)) =
+                            self.on_insert_block_error(err)
+                        {
                             warn!(target: "engine::tree", %fatal, "fatal error occurred while connecting buffered blocks");
-                            return Err(fatal)
                         }
                     }
                 }
@@ -2738,7 +2697,7 @@ where
         if let Err(err) = self.validate_block(&block) {
             return Err(InsertBlockError::consensus_error(err, block))
         }
-        self.state.buffer.insert_block(block);
+        self.state.buffer.insert_block(block.into());
         Ok(())
     }
 
@@ -2996,7 +2955,7 @@ where
             self.distance_from_local_tip(head.number, missing_parent.number)
         {
             trace!(target: "engine::tree", %distance, missing=?missing_parent, "downloading missing parent block range");
-            DownloadRequest::BlockRange(missing_parent.hash, distance)
+            DownloadRequest::block_range(missing_parent.hash, distance)
         } else {
             trace!(target: "engine::tree", missing=?missing_parent, "downloading missing parent block");
             // This happens when the missing parent is on an outdated
@@ -3004,7 +2963,7 @@ where
             DownloadRequest::single_block(missing_parent.hash)
         };
 
-        Some(TreeEvent::Download(request))
+        Some(TreeEvent::Download(request.with_access_lists(self.should_download_access_lists())))
     }
 
     /// Handles a downloaded block that was successfully inserted as valid.
@@ -3042,7 +3001,10 @@ where
             if self.state.tree_state.canonical_block_hash() != sync_target.head_block_hash {
                 let target = self.lowest_buffered_ancestor_or(sync_target.head_block_hash);
                 trace!(target: "engine::tree", %target, "sync target head not yet reached, downloading head block");
-                return Ok(Some(TreeEvent::Download(DownloadRequest::single_block(target))))
+                return Ok(Some(TreeEvent::Download(
+                    DownloadRequest::single_block(target)
+                        .with_access_lists(self.should_download_access_lists()),
+                )))
             }
 
             return Ok(None)
@@ -3060,7 +3022,7 @@ where
     #[instrument(level = "debug", target = "engine::tree", skip_all, fields(block_hash = %block.hash(), block_num = %block.number()))]
     fn on_downloaded_block(
         &mut self,
-        block: SealedBlock<N::Block>,
+        block: SealedBlockWithAccessList<N::Block>,
     ) -> Result<Option<TreeEvent>, InsertBlockFatalError> {
         let block_num_hash = block.num_hash();
         let lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_num_hash.hash);
@@ -3092,9 +3054,10 @@ where
             Err(err) => {
                 if let InsertPayloadError::Block(err) = err {
                     debug!(target: "engine::tree", err=%err.kind(), "failed to insert downloaded block");
-                    if let Err(fatal) = self.on_insert_block_error(err) {
+                    if let Err(InsertBlockProcessingError::Fatal(fatal)) =
+                        self.on_insert_block_error(err)
+                    {
                         warn!(target: "engine::tree", %fatal, "fatal error occurred while inserting downloaded block");
-                        return Err(fatal)
                     }
                 }
             }
@@ -3118,13 +3081,13 @@ where
             payload.block_with_parent(),
             payload,
             |validator, payload, ctx| validator.validate_payload(payload, ctx),
-            |this, payload| Ok(this.payload_validator.convert_payload_to_block(payload)?),
+            |this, payload| Ok(this.payload_validator.convert_payload_to_block(payload)?.into()),
         )
     }
 
     fn insert_block(
         &mut self,
-        block: SealedBlock<N::Block>,
+        block: SealedBlockWithAccessList<N::Block>,
     ) -> Result<InsertPayloadOk, InsertPayloadError<N::Block>> {
         self.insert_block_or_payload(
             block.block_with_parent(),
@@ -3156,7 +3119,10 @@ where
         block_id: BlockWithParent,
         input: Input,
         execute: impl FnOnce(&mut V, Input, TreeCtx<'_, N>) -> Result<ValidationOutput<N>, Err>,
-        convert_to_block: impl FnOnce(&mut Self, Input) -> Result<SealedBlock<N::Block>, Err>,
+        convert_to_block: impl FnOnce(
+            &mut Self,
+            Input,
+        ) -> Result<SealedBlockWithAccessList<N::Block>, Err>,
     ) -> Result<InsertPayloadOk, Err>
     where
         Err: From<InsertBlockError<N::Block>>,
@@ -3177,7 +3143,7 @@ where
             match self.provider.sealed_header_by_hash(block_num_hash.hash) {
                 Err(err) => {
                     let block = convert_to_block(self, input)?;
-                    return Err(InsertBlockError::new(block, err.into()).into());
+                    return Err(InsertBlockError::new(block.split().0, err.into()).into());
                 }
                 Ok(Some(_)) => {
                     convert_to_block(self, input)?;
@@ -3188,14 +3154,17 @@ where
         }
 
         // Ensure that the parent state is available.
-        match self.state_provider_builder(block_id.parent) {
-            Err(err) => {
-                let block = convert_to_block(self, input)?;
-                return Err(InsertBlockError::new(block, err.into()).into());
-            }
-            Ok(None) => {
-                let block = convert_to_block(self, input)?;
+        if !self.state.tree_state.contains_hash(&block_id.parent) {
+            let parent_exists = match self.provider.header(block_id.parent) {
+                Ok(header) => header.is_some(),
+                Err(err) => {
+                    let block = convert_to_block(self, input)?;
+                    return Err(InsertBlockError::new(block.split().0, err.into()).into());
+                }
+            };
 
+            if !parent_exists {
+                let block = convert_to_block(self, input)?;
                 // we don't have the state required to execute this block, buffering it and find the
                 // missing parent block
                 let missing_ancestor = self
@@ -3212,7 +3181,6 @@ where
                     missing_ancestor,
                 }))
             }
-            Ok(Some(_)) => {}
         }
 
         // determine whether we are on a fork chain by comparing the block number with the
@@ -3294,11 +3262,9 @@ where
     fn on_insert_block_error(
         &mut self,
         error: InsertBlockError<N::Block>,
-    ) -> Result<PayloadStatus, InsertBlockFatalError> {
+    ) -> Result<PayloadStatus, InsertBlockProcessingError> {
         let (block, error) = error.split();
 
-        // if invalid block, we check the validation error. Otherwise return the fatal
-        // error.
         let validation_err = error.ensure_validation_error()?;
 
         // If the error was due to an invalid payload, the payload is added to the
@@ -3311,7 +3277,15 @@ where
             %validation_err,
             "Invalid block error on new payload",
         );
-        let latest_valid_hash = self.latest_valid_hash_for_invalid_payload(block.parent_hash())?;
+        // The Amsterdam Engine API requires `latestValidHash: null` for an undecodable BAL.
+        // <https://github.com/ethereum/execution-apis/blob/df75e230befef0de56ee8833322ed714bacb479c/src/engine/amsterdam.md?plain=1#L129>
+        let latest_valid_hash =
+            if matches!(&validation_err, InsertBlockValidationError::BlockAccessListDecode(_)) {
+                None
+            } else {
+                self.latest_valid_hash_for_invalid_payload(block.parent_hash())
+                    .map_err(InsertBlockFatalError::from)?
+            };
 
         // keep track of the invalid header unless the consensus impl considers it transient
         let is_transient = match &validation_err {
@@ -3566,29 +3540,6 @@ where
             num,
         );
         Ok(())
-    }
-
-    /// Returns a builder for creating state providers for the given hash.
-    ///
-    /// This is an optimization for parallel execution contexts where we want to avoid
-    /// creating state providers in the critical path.
-    pub fn state_provider_builder(
-        &self,
-        hash: B256,
-    ) -> ProviderResult<Option<StateProviderBuilder<N, P>>>
-    where
-        P: BlockReader + StateProviderFactory + StateReader + Clone,
-    {
-        if !self.state.tree_state.contains_hash(&hash) && self.provider.header(hash)?.is_none() {
-            debug!(target: "engine::tree", %hash, "no canonical state found for block");
-            return Ok(None)
-        }
-
-        Ok(Some(StateProviderBuilder::new(
-            self.provider.clone(),
-            hash,
-            self.state.tree_state.overlay_manager.clone(),
-        )))
     }
 }
 

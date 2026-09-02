@@ -12,7 +12,7 @@
 //! - [`root`]: Tests for `root()` hash computation
 //! - [`take_updates`]: Tests for `take_updates`
 //! - [`prune`]: Tests for `prune`
-//! - [`wipe_clear`]: Tests for `wipe` and `clear`
+//! - [`wipe_clear`]: Tests for `clear`
 //! - [`get_leaf_value`]: Tests for `get_leaf_value`
 //! - [`find_leaf`]: Tests for `find_leaf`
 //! - [`lifecycle`]: Integration tests exercising multiple methods together
@@ -285,10 +285,8 @@ sparse_trie_tests! {
     test_prune_only_descends_into_branch_root,
     test_prune_handles_small_subtrie_root_nodes,
 
-    // wipe / clear
-    test_wipe_resets_to_empty_root,
+    // clear
     test_clear_resets_trie_but_preserves_update_tracking,
-    test_wipe_produces_wiped_updates,
     test_clear_then_reuse_trie,
 
     // get_leaf_value
