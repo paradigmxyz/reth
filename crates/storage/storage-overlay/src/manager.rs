@@ -42,14 +42,12 @@ use tracing::{debug, trace};
 #[derive(Clone)]
 pub struct OverlayManager<N: NodePrimitives = EthPrimitives> {
     blocks: Arc<DashMap<B256, ExecutedBlock<N>>>,
-    state_trie_overlays: OverlayCache<TrieInputSorted>,
-    execution_overlays: OverlayCache<ExecutionOverlay>,
+    state_trie_overlays: OverlayCache<TrieInputSorted, StateTrieOverlayMetrics>,
+    execution_overlays: OverlayCache<ExecutionOverlay, ExecutionOverlayMetrics>,
     changeset_cache: ChangesetCache,
     preserved_sparse_trie: Arc<Mutex<Option<PreservedSparseTrie>>>,
     #[cfg(feature = "rayon")]
     worker_pool: Option<Arc<WorkerPool>>,
-    metrics: StateTrieOverlayMetrics,
-    execution_metrics: ExecutionOverlayMetrics,
 }
 
 impl<N: NodePrimitives> Default for OverlayManager<N> {
@@ -62,8 +60,6 @@ impl<N: NodePrimitives> Default for OverlayManager<N> {
             preserved_sparse_trie: Default::default(),
             #[cfg(feature = "rayon")]
             worker_pool: None,
-            metrics: Default::default(),
-            execution_metrics: Default::default(),
         }
     }
 }
@@ -89,8 +85,6 @@ impl<N: NodePrimitives> OverlayManager<N> {
             changeset_cache: Default::default(),
             preserved_sparse_trie: Default::default(),
             worker_pool: Some(worker_pool),
-            metrics: Default::default(),
-            execution_metrics: Default::default(),
         }
     }
 
@@ -366,10 +360,10 @@ impl<N: NodePrimitives> OverlayManager<N> {
         let input = self
             .get_or_compute_overlay(
                 &self.state_trie_overlays,
-                &self.metrics,
                 parent_hash,
                 anchor_hash,
-                OverlayRequest { blocks, wait_for_pending: true },
+                blocks,
+                true,
                 |input, span| self.compute_state_trie_overlay(input, anchor_hash, span),
             )?
             .expect("required overlay lookup cannot skip an in-progress computation");
@@ -390,11 +384,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
         blocks: &[ExecutedBlock<N>],
     ) -> Result<Arc<ExecutionOverlay>, StateTrieOverlayError> {
         Ok(self
-            .execution_overlay_for_blocks_inner(
-                parent_hash,
-                anchor_hash,
-                OverlayRequest { blocks, wait_for_pending: true },
-            )?
+            .execution_overlay_for_blocks_inner(parent_hash, anchor_hash, blocks, true)?
             .expect("required overlay lookup cannot skip an in-progress computation"))
     }
 
@@ -435,28 +425,25 @@ impl<N: NodePrimitives> OverlayManager<N> {
         }
 
         let blocks = parent_state.chain().map(BlockState::block).collect::<Vec<_>>();
-        self.execution_overlay_for_blocks_inner(
-            parent_hash,
-            anchor_hash,
-            OverlayRequest { blocks: &blocks, wait_for_pending: false },
-        )
+        self.execution_overlay_for_blocks_inner(parent_hash, anchor_hash, &blocks, false)
     }
 
     fn execution_overlay_for_blocks_inner(
         &self,
         parent_hash: B256,
         anchor_hash: B256,
-        request: OverlayRequest<'_, N>,
+        blocks: &[ExecutedBlock<N>],
+        wait_for_pending: bool,
     ) -> Result<Option<Arc<ExecutionOverlay>>, StateTrieOverlayError> {
         if parent_hash == anchor_hash {
             return Ok(Some(Arc::new(ExecutionOverlay::default())))
         }
         self.get_or_compute_overlay(
             &self.execution_overlays,
-            &self.execution_metrics,
             parent_hash,
             anchor_hash,
-            request,
+            blocks,
+            wait_for_pending,
             |input, span| self.compute_execution_overlay(input, anchor_hash, span),
         )
     }
@@ -475,11 +462,11 @@ impl<N: NodePrimitives> OverlayManager<N> {
     )]
     fn get_or_compute_overlay<T, M>(
         &self,
-        cache: &OverlayCache<T>,
-        metrics: &M,
+        cache: &OverlayCache<T, M>,
         tip_hash: B256,
         anchor_hash: B256,
-        request: OverlayRequest<'_, N>,
+        blocks: &[ExecutedBlock<N>],
+        wait_for_pending: bool,
         compute: impl FnOnce(ComputeOverlayInput<N, T>, tracing::Span) -> T,
     ) -> Result<Option<Arc<T>>, StateTrieOverlayError>
     where
@@ -487,10 +474,8 @@ impl<N: NodePrimitives> OverlayManager<N> {
     {
         let key = OverlayCacheKey { anchor_hash, tip_hash };
         let span = tracing::Span::current();
-        let wait_for_pending = request.wait_for_pending;
-
         if let Some(entry) = cache.entries.get(&key).map(|entry| entry.value().clone()) {
-            metrics.record_cache_reuse();
+            cache.metrics.record_cache_reuse();
             span.record("cache_reused", true);
             return match entry {
                 OverlayCacheEntry::Ready(input) => Ok(Some(input)),
@@ -501,7 +486,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
         span.record("cache_reused", false);
 
         // Resolve the block path and any cached parent overlay before locking the child entry.
-        let mut blocks = Self::provided_blocks_for_parent(tip_hash, anchor_hash, request.blocks)?;
+        let mut blocks = Self::provided_blocks_for_parent(tip_hash, anchor_hash, blocks)?;
         span.record("block_count", blocks.len());
         enum CacheAction<T> {
             Ready(Arc<T>),
@@ -512,7 +497,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
         let action = match cache.entries.entry(key) {
             Entry::Occupied(entry) => {
                 let entry = entry.get().clone();
-                metrics.record_cache_reuse();
+                cache.metrics.record_cache_reuse();
                 span.record("cache_reused", true);
                 match entry {
                     OverlayCacheEntry::Ready(input) => CacheAction::Ready(input),
@@ -521,7 +506,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
                 }
             }
             Entry::Vacant(entry) => {
-                metrics.record_cache_fill();
+                cache.metrics.record_cache_fill();
                 let waiter = Arc::new(OverlayWaiter::new());
                 entry.insert(OverlayCacheEntry::Computing(Arc::clone(&waiter)));
                 CacheAction::Compute(waiter)
@@ -651,7 +636,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
         {
             if let Some(worker_pool) = &self.worker_pool {
                 let compute_span = _span;
-                let metrics = self.metrics.clone();
+                let metrics = self.state_trie_overlays.metrics.clone();
                 return worker_pool.spawn_and_wait(move || {
                     let _guard = compute_span.enter();
                     compute_overlay(compute_input, anchor_hash, &metrics)
@@ -659,7 +644,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
             }
         }
 
-        compute_overlay(compute_input, anchor_hash, &self.metrics)
+        compute_overlay(compute_input, anchor_hash, &self.state_trie_overlays.metrics)
     }
 
     fn compute_execution_overlay(
@@ -672,7 +657,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
         {
             if let Some(worker_pool) = &self.worker_pool {
                 let compute_span = _span;
-                let metrics = self.execution_metrics.clone();
+                let metrics = self.execution_overlays.metrics.clone();
                 return worker_pool.spawn_and_wait(move || {
                     let _guard = compute_span.enter();
                     compute_execution_overlay_inner(compute_input, anchor_hash, &metrics)
@@ -680,7 +665,11 @@ impl<N: NodePrimitives> OverlayManager<N> {
             }
         }
 
-        compute_execution_overlay_inner(compute_input, anchor_hash, &self.execution_metrics)
+        compute_execution_overlay_inner(
+            compute_input,
+            anchor_hash,
+            &self.execution_overlays.metrics,
+        )
     }
 }
 
@@ -711,23 +700,24 @@ struct OverlayCacheKey {
     tip_hash: B256,
 }
 
-struct OverlayCache<T> {
+struct OverlayCache<T, M> {
     entries: Arc<DashMap<OverlayCacheKey, OverlayCacheEntry<T>>>,
+    metrics: M,
 }
 
-impl<T> Default for OverlayCache<T> {
+impl<T, M: Default> Default for OverlayCache<T, M> {
     fn default() -> Self {
-        Self { entries: Default::default() }
+        Self { entries: Default::default(), metrics: Default::default() }
     }
 }
 
-impl<T> Clone for OverlayCache<T> {
+impl<T, M: Clone> Clone for OverlayCache<T, M> {
     fn clone(&self) -> Self {
-        Self { entries: Arc::clone(&self.entries) }
+        Self { entries: Arc::clone(&self.entries), metrics: self.metrics.clone() }
     }
 }
 
-impl<T> OverlayCache<T> {
+impl<T, M> OverlayCache<T, M> {
     fn len(&self) -> usize {
         self.entries.len()
     }
@@ -778,11 +768,6 @@ impl<T> OverlayWaiter<T> {
     fn finish(&self, computed: Arc<T>) {
         let _ = self.input.set(computed);
     }
-}
-
-struct OverlayRequest<'a, N: NodePrimitives> {
-    blocks: &'a [ExecutedBlock<N>],
-    wait_for_pending: bool,
 }
 
 enum ComputeOverlayInput<N: NodePrimitives, T> {
