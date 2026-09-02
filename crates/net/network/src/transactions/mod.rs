@@ -1318,24 +1318,26 @@ where
             return
         }
 
-        // Early return if we don't have capacity for any imports
-        if !self.has_capacity_for_pending_pool_imports() {
-            return
-        }
-
         let mut transactions = transactions.0;
 
-        // Truncate to remaining capacity early to bound work on all subsequent processing.
-        // Well-behaved peers follow the 4096 soft limit, so oversized payloads are likely
-        // malicious and we avoid wasting CPU on them.
-        let capacity = self.remaining_pool_import_capacity();
-        if transactions.len() > capacity {
-            let skipped = transactions.len() - capacity;
-            transactions.truncate(capacity);
-            self.metrics
-                .skipped_transactions_pending_pool_imports_at_capacity
-                .increment(skipped as u64);
-            trace!(target: "net::tx", skipped, capacity, "Truncated transactions batch to capacity");
+        // Unsolicited transactions are cut down to the remaining import capacity, to bound the
+        // work on all subsequent processing. Well-behaved peers follow the 4096 soft limit, so
+        // oversized payloads are likely malicious and we avoid wasting CPU on them. Requested
+        // transactions always go through: the fetcher sized its requests by that capacity and
+        // has already stopped tracking them, so dropping them here would lose them.
+        if source.is_broadcast() {
+            if !self.has_capacity_for_pending_pool_imports() {
+                return
+            }
+            let capacity = self.remaining_pool_import_capacity();
+            if transactions.len() > capacity {
+                let skipped = transactions.len() - capacity;
+                transactions.truncate(capacity);
+                self.metrics
+                    .skipped_transactions_pending_pool_imports_at_capacity
+                    .increment(skipped as u64);
+                trace!(target: "net::tx", skipped, capacity, "Truncated transactions batch to capacity");
+            }
         }
 
         let Some(peer) = self.peers.get_mut(&peer_id) else { return };

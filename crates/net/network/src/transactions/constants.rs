@@ -96,7 +96,8 @@ pub mod tx_fetcher {
     pub const DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER: u8 = 1;
 
     /// Default maximum number of announced transaction hashes to keep track of, pending and
-    /// inflight. Once reached, the oldest pending hash is evicted for a newly announced one.
+    /// inflight. Once reached, the peer tracking the most hashes gives up its oldest pending
+    /// hash for a newly announced one.
     ///
     /// Default is 100 times the [`SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST`],
     /// which is 256 hashes, so 25 600 hashes.

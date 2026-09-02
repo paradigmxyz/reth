@@ -27,6 +27,7 @@ use reth_network_peers::PeerId;
 use reth_transaction_pool::test_utils::TestPool;
 use std::{
     fmt,
+    future::{poll_fn, Future},
     pin::Pin,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -109,11 +110,17 @@ impl TxFetchHarness {
     ///
     /// Returns the number of polls.
     pub fn poll_until_idle(&mut self) -> usize {
+        // Polled outside of tokio's cooperative budget: inside a tokio task the manager's channels
+        // stop making progress after a number of polls and defer a wake that this loop would
+        // never see, leaving responses unprocessed.
+        let manager = &mut self.manager;
+        let mut manager =
+            tokio::task::unconstrained(poll_fn(|cx| Pin::new(&mut *manager).poll(cx)));
         let mut polls = 0;
         loop {
             self.wake_flag.0.store(false, Ordering::Relaxed);
             let mut cx = Context::from_waker(&self.waker);
-            let _ = Pin::new(&mut self.manager).poll(&mut cx);
+            let _ = Pin::new(&mut manager).poll(&mut cx);
             polls += 1;
             if !self.wake_flag.0.load(Ordering::Relaxed) {
                 return polls
@@ -308,6 +315,40 @@ mod tests {
         // no peer is left to fetch the hashes from
         assert_eq!(harness.num_tracked_hashes(), 0);
         assert!(harness.take_requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn responses_are_processed_beyond_the_cooperative_budget() {
+        // tokio's channels stop making progress after 128 successful polls within one task poll,
+        // the harness must not be fooled by that into reporting an idle manager
+        let txs = pooled_txs(200);
+        let hashes = txs.iter().map(|tx| *tx.tx_hash()).collect::<Vec<_>>();
+        let by_hash = txs.iter().map(|tx| (*tx.tx_hash(), tx.clone())).collect::<B256Map<_>>();
+        let peers = (1..=200).map(peer).collect::<Vec<_>>();
+        let mut harness = TxFetchHarness::new(peers.iter().copied(), EthVersion::Eth68).await;
+
+        // every peer announces one hash, so every hash needs its own response
+        for (peer_id, hash) in peers.iter().zip(&hashes) {
+            harness.announce(*peer_id, announcement(std::slice::from_ref(hash)));
+        }
+        harness.poll_until_idle();
+        let mut responses = 0;
+        loop {
+            let requests = harness.take_requests();
+            if requests.is_empty() {
+                break
+            }
+            for request in requests {
+                let txs = request.request.0.iter().map(|hash| by_hash[hash].clone()).collect();
+                request.response.send(Ok(PooledTransactions(txs))).unwrap();
+                responses += 1;
+                harness.poll_until_idle();
+            }
+        }
+
+        assert_eq!(responses, 200);
+        assert_eq!(harness.num_tracked_hashes(), 0);
+        assert_eq!(harness.pool().get_all(hashes).len(), 200, "all transactions are imported");
     }
 
     #[tokio::test]
