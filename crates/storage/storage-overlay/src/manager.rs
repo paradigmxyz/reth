@@ -13,7 +13,7 @@ use crate::{
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockNumber, B256};
 use parking_lot::Mutex;
-use reth_chain_state::{ExecutedBlock, PreservedSparseTrie};
+use reth_chain_state::{BlockState, ExecutedBlock, PreservedSparseTrie};
 use reth_errors::ProviderResult;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{
@@ -96,7 +96,13 @@ impl<N: NodePrimitives> OverlayManager<N> {
 
     /// Creates an overlay builder for `parent_hash`.
     pub fn overlay_builder(&self, parent_hash: B256) -> OverlayBuilder<N> {
-        OverlayBuilder::new(parent_hash, self.clone())
+        let parent_state = self
+            .parent_chain(parent_hash)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .fold(None, |parent, block| Some(Arc::new(BlockState::with_parent(block, parent))));
+        OverlayBuilder::new(parent_hash, parent_state, self.clone())
     }
 
     pub(crate) const fn changeset_cache(&self) -> &ChangesetCache {
@@ -342,10 +348,37 @@ impl<N: NodePrimitives> OverlayManager<N> {
         skip_all,
         fields(tip_hash = %parent_hash, anchor_hash = %anchor_hash)
     )]
+    #[cfg(test)]
     pub(crate) fn overlay_for_parent(
         &self,
         parent_hash: B256,
         anchor_hash: B256,
+    ) -> Result<(Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>), StateTrieOverlayError> {
+        self.overlay_for_parent_inner(
+            parent_hash,
+            anchor_hash,
+            OverlayBlockSource::Managed { wait_for_pending: true },
+        )
+    }
+
+    pub(crate) fn overlay_for_parent_with_blocks(
+        &self,
+        parent_hash: B256,
+        anchor_hash: B256,
+        blocks: &[ExecutedBlock<N>],
+    ) -> Result<(Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>), StateTrieOverlayError> {
+        self.overlay_for_parent_inner(
+            parent_hash,
+            anchor_hash,
+            OverlayBlockSource::Provided(blocks),
+        )
+    }
+
+    fn overlay_for_parent_inner(
+        &self,
+        parent_hash: B256,
+        anchor_hash: B256,
+        block_source: OverlayBlockSource<'_, N>,
     ) -> Result<(Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>), StateTrieOverlayError> {
         debug!(
             target: "storage::overlay::manager",
@@ -359,7 +392,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
                 &self.metrics,
                 parent_hash,
                 anchor_hash,
-                true,
+                block_source,
                 |input, span| self.compute_state_trie_overlay(input, anchor_hash, span),
             )?
             .expect("required overlay lookup cannot skip an in-progress computation");
@@ -379,7 +412,26 @@ impl<N: NodePrimitives> OverlayManager<N> {
         anchor_hash: B256,
     ) -> Result<Arc<ExecutionOverlay>, StateTrieOverlayError> {
         Ok(self
-            .execution_overlay_for_parent_inner(parent_hash, anchor_hash, true)?
+            .execution_overlay_for_parent_inner(
+                parent_hash,
+                anchor_hash,
+                OverlayBlockSource::Managed { wait_for_pending: true },
+            )?
+            .expect("required overlay lookup cannot skip an in-progress computation"))
+    }
+
+    pub(crate) fn execution_overlay_for_parent_with_blocks(
+        &self,
+        parent_hash: B256,
+        anchor_hash: B256,
+        blocks: &[ExecutedBlock<N>],
+    ) -> Result<Arc<ExecutionOverlay>, StateTrieOverlayError> {
+        Ok(self
+            .execution_overlay_for_parent_inner(
+                parent_hash,
+                anchor_hash,
+                OverlayBlockSource::Provided(blocks),
+            )?
             .expect("required overlay lookup cannot skip an in-progress computation"))
     }
 
@@ -389,14 +441,19 @@ impl<N: NodePrimitives> OverlayManager<N> {
         parent_hash: B256,
         anchor_hash: B256,
     ) -> Result<(), StateTrieOverlayError> {
-        self.execution_overlay_for_parent_inner(parent_hash, anchor_hash, false).map(drop)
+        self.execution_overlay_for_parent_inner(
+            parent_hash,
+            anchor_hash,
+            OverlayBlockSource::Managed { wait_for_pending: false },
+        )
+        .map(drop)
     }
 
     fn execution_overlay_for_parent_inner(
         &self,
         parent_hash: B256,
         anchor_hash: B256,
-        wait_for_pending: bool,
+        block_source: OverlayBlockSource<'_, N>,
     ) -> Result<Option<Arc<ExecutionOverlay>>, StateTrieOverlayError> {
         if parent_hash == anchor_hash {
             return Ok(Some(Arc::new(ExecutionOverlay::default())))
@@ -407,7 +464,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
             &self.execution_metrics,
             parent_hash,
             anchor_hash,
-            wait_for_pending,
+            block_source,
             |input, span| self.compute_execution_overlay(input, anchor_hash, span),
         )
     }
@@ -430,7 +487,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
         metrics: &M,
         tip_hash: B256,
         anchor_hash: B256,
-        wait_for_pending: bool,
+        block_source: OverlayBlockSource<'_, N>,
         compute: impl FnOnce(ComputeOverlayInput<N, T>, tracing::Span) -> T,
     ) -> Result<Option<Arc<T>>, StateTrieOverlayError>
     where
@@ -438,6 +495,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
     {
         let key = OverlayCacheKey { anchor_hash, tip_hash };
         let span = tracing::Span::current();
+        let wait_for_pending = block_source.wait_for_pending();
 
         if let Some(entry) = cache.entries.get(&key).map(|entry| entry.value().clone()) {
             metrics.record_cache_reuse();
@@ -451,19 +509,12 @@ impl<N: NodePrimitives> OverlayManager<N> {
         span.record("cache_reused", false);
 
         // Resolve the block path and any cached parent overlay before locking the child entry.
-        let mut hash = tip_hash;
-        let mut blocks = Vec::new();
-        loop {
-            let block =
-                self.blocks.get(&hash).ok_or(StateTrieOverlayError { tip_hash, anchor_hash })?;
-            let parent_hash = block.recovered_block().parent_hash();
-            blocks.push(block.clone());
-
-            if parent_hash == anchor_hash {
-                break
+        let mut blocks = match block_source {
+            OverlayBlockSource::Managed { .. } => self.blocks_for_parent(tip_hash, anchor_hash)?,
+            OverlayBlockSource::Provided(blocks) => {
+                Self::provided_blocks_for_parent(tip_hash, anchor_hash, blocks)?
             }
-            hash = parent_hash;
-        }
+        };
         span.record("block_count", blocks.len());
         enum CacheAction<T> {
             Ready(Arc<T>),
@@ -529,6 +580,46 @@ impl<N: NodePrimitives> OverlayManager<N> {
                 Ok(Some(input))
             }
         }
+    }
+
+    fn blocks_for_parent(
+        &self,
+        tip_hash: B256,
+        anchor_hash: B256,
+    ) -> Result<Vec<ExecutedBlock<N>>, StateTrieOverlayError> {
+        let mut hash = tip_hash;
+        let mut blocks = Vec::new();
+        loop {
+            let block =
+                self.blocks.get(&hash).ok_or(StateTrieOverlayError { tip_hash, anchor_hash })?;
+            let parent_hash = block.recovered_block().parent_hash();
+            blocks.push(block.clone());
+
+            if parent_hash == anchor_hash {
+                return Ok(blocks)
+            }
+            hash = parent_hash;
+        }
+    }
+
+    fn provided_blocks_for_parent(
+        tip_hash: B256,
+        anchor_hash: B256,
+        blocks: &[ExecutedBlock<N>],
+    ) -> Result<Vec<ExecutedBlock<N>>, StateTrieOverlayError> {
+        let mut hash = tip_hash;
+        let mut resolved = Vec::with_capacity(blocks.len());
+        for block in blocks {
+            if block.recovered_block().hash() != hash {
+                return Err(StateTrieOverlayError { tip_hash, anchor_hash })
+            }
+            hash = block.recovered_block().parent_hash();
+            resolved.push(block.clone());
+            if hash == anchor_hash {
+                return Ok(resolved)
+            }
+        }
+        Err(StateTrieOverlayError { tip_hash, anchor_hash })
     }
 
     /// Returns every in-memory block in the chain whose tip is `parent_hash`.
@@ -698,6 +789,20 @@ impl<T> OverlayWaiter<T> {
 
     fn finish(&self, computed: Arc<T>) {
         let _ = self.input.set(computed);
+    }
+}
+
+enum OverlayBlockSource<'a, N: NodePrimitives> {
+    Managed { wait_for_pending: bool },
+    Provided(&'a [ExecutedBlock<N>]),
+}
+
+impl<N: NodePrimitives> OverlayBlockSource<'_, N> {
+    const fn wait_for_pending(&self) -> bool {
+        match self {
+            Self::Managed { wait_for_pending } => *wait_for_pending,
+            Self::Provided(_) => true,
+        }
     }
 }
 
