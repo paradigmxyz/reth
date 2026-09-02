@@ -388,19 +388,6 @@ impl<N: NodePrimitives> OverlayManager<N> {
             .expect("required overlay lookup cannot skip an in-progress computation"))
     }
 
-    #[cfg(test)]
-    fn execution_overlay_for_parent(
-        &self,
-        parent_hash: B256,
-        anchor_hash: B256,
-    ) -> Result<Arc<ExecutionOverlay>, StateTrieOverlayError> {
-        let blocks = (parent_hash != anchor_hash)
-            .then(|| self.blocks_for_parent(parent_hash, anchor_hash))
-            .transpose()?
-            .unwrap_or_default();
-        self.execution_overlay_for_blocks(parent_hash, anchor_hash, &blocks)
-    }
-
     #[cfg(feature = "rayon")]
     fn precompute_execution_overlay_for_parent(
         &self,
@@ -551,27 +538,6 @@ impl<N: NodePrimitives> OverlayManager<N> {
 
                 Ok(Some(input))
             }
-        }
-    }
-
-    #[cfg(test)]
-    fn blocks_for_parent(
-        &self,
-        tip_hash: B256,
-        anchor_hash: B256,
-    ) -> Result<Vec<ExecutedBlock<N>>, StateTrieOverlayError> {
-        let mut hash = tip_hash;
-        let mut blocks = Vec::new();
-        loop {
-            let block =
-                self.blocks.get(&hash).ok_or(StateTrieOverlayError { tip_hash, anchor_hash })?;
-            let parent_hash = block.recovered_block().parent_hash();
-            blocks.push(block.clone());
-
-            if parent_hash == anchor_hash {
-                return Ok(blocks)
-            }
-            hash = parent_hash;
         }
     }
 
@@ -1011,12 +977,46 @@ mod tests {
             .collect()
     }
 
+    fn blocks_for_parent(
+        manager: &OverlayManager,
+        tip_hash: B256,
+        anchor_hash: B256,
+    ) -> Result<Vec<ExecutedBlock<EthPrimitives>>, StateTrieOverlayError> {
+        let mut hash = tip_hash;
+        let mut blocks = Vec::new();
+        loop {
+            let block =
+                manager.blocks.get(&hash).ok_or(StateTrieOverlayError { tip_hash, anchor_hash })?;
+            let parent_hash = block.recovered_block().parent_hash();
+            blocks.push(block.clone());
+
+            if parent_hash == anchor_hash {
+                return Ok(blocks)
+            }
+            hash = parent_hash;
+        }
+    }
+
+    impl OverlayManager {
+        fn execution_overlay_for_parent(
+            &self,
+            parent_hash: B256,
+            anchor_hash: B256,
+        ) -> Result<Arc<ExecutionOverlay>, StateTrieOverlayError> {
+            let blocks = (parent_hash != anchor_hash)
+                .then(|| blocks_for_parent(self, parent_hash, anchor_hash))
+                .transpose()?
+                .unwrap_or_default();
+            self.execution_overlay_for_blocks(parent_hash, anchor_hash, &blocks)
+        }
+    }
+
     fn overlay_for_parent(
         manager: &OverlayManager,
         parent_hash: B256,
         anchor_hash: B256,
     ) -> Result<(Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>), StateTrieOverlayError> {
-        let blocks = manager.blocks_for_parent(parent_hash, anchor_hash)?;
+        let blocks = blocks_for_parent(manager, parent_hash, anchor_hash)?;
         manager.overlay_for_blocks(parent_hash, anchor_hash, &blocks)
     }
 
