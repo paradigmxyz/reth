@@ -15,8 +15,8 @@ use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
 use reth_network::{
     test_utils::transactions::new_mock_session_with_capacity,
     transactions::{
-        constants::tx_fetcher::MAX_COUNT_CANDIDATE_PEERS_PER_HASH, fetcher::TransactionFetcher,
-        PeerMetadata,
+        constants::tx_fetcher::MAX_COUNT_EAGER_CANDIDATE_PEERS_PER_HASH,
+        fetcher::TransactionFetcher, PeerMetadata,
     },
 };
 use reth_network_api::PeerRequest;
@@ -179,11 +179,11 @@ fn bench_dispatch(c: &mut Criterion) {
     let mut group = c.benchmark_group("tx_fetcher/dispatch");
     group.throughput(Throughput::Elements(TXS as u64));
 
-    // sanity check the workload: only the first peers that announced a hash are candidates for
-    // it, so one dispatch sends a request of 256 hashes to each of them
+    // sanity check the workload: a hash is only queued for the first peers that announced it, so
+    // one dispatch sends a request of 256 hashes to each of them
     let mut rig = Rig::new(PEERS);
     rig.announce_gossip(&fixtures.announcement);
-    assert_eq!(rig.dispatch(), MAX_COUNT_CANDIDATE_PEERS_PER_HASH);
+    assert_eq!(rig.dispatch(), MAX_COUNT_EAGER_CANDIDATE_PEERS_PER_HASH);
 
     group.bench_function("gossip", |b| {
         b.iter_batched_ref(

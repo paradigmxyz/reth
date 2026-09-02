@@ -111,12 +111,20 @@ pub mod tx_fetcher {
     pub const DEFAULT_MAX_COUNT_ANNOUNCED_HASHES_PER_PEER: u32 =
         SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE as u32;
 
-    /// Maximum number of peers remembered as candidates for a single hash. These are the most
-    /// recent peers to announce the hash, plus the peer that is currently fetching it. This also
-    /// bounds the number of peers a hash is requested from before it is given up on.
+    /// Maximum number of peers remembered as candidates for a single hash, in the order they
+    /// announced it. Announcements from further peers are ignored. This also bounds the number of
+    /// peers a hash is requested from before it is given up on.
     ///
-    /// Default is 8 peers.
-    pub const MAX_COUNT_CANDIDATE_PEERS_PER_HASH: usize = 8;
+    /// Default is 16 peers.
+    pub const MAX_COUNT_CANDIDATE_PEERS_PER_HASH: usize = 16;
+
+    /// Number of candidates a hash is queued for right away. The remaining candidates only get
+    /// the hash queued once one of these failed to deliver it, which keeps late announcements
+    /// cheap while a hash is not given up on when its first announcers fail.
+    ///
+    /// Default is half of [`MAX_COUNT_CANDIDATE_PEERS_PER_HASH`], so 8 peers.
+    pub const MAX_COUNT_EAGER_CANDIDATE_PEERS_PER_HASH: usize =
+        MAX_COUNT_CANDIDATE_PEERS_PER_HASH / 2;
 
     /// Minimum number of hashes in a
     /// [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) request while the number of

@@ -10,22 +10,22 @@
 //! - _pending_: waiting for one of the peers that announced it, its _candidates_, to become idle
 //! - _fetching_: part of exactly one inflight request
 //!
-//! A hash remembers the most recent peers that announced it as candidates, and the peer that is
-//! fetching it is never forgotten. Each peer keeps a FIFO queue of the hashes it announced. A
-//! request for an idle peer is built by draining its queue in the order the announcements were
-//! processed, skipping hashes that are being fetched from another peer or are not tracked anymore,
-//! until the request is full. Packing a request is therefore proportional to the request size and
-//! independent of the total number of pending hashes. Hashes that are skipped because they are
-//! being fetched elsewhere stay candidates of the peer and are queued for it again if that fetch
-//! fails.
+//! A hash remembers the peers that announced it as candidates. Each peer keeps a FIFO queue of
+//! hashes to request, and the first peers to announce a hash get it queued right away. Later
+//! announcers are only remembered, so that a hash is not given up on when the first announcers
+//! fail to deliver it, without costing a queue entry per announcement. A request for an idle peer
+//! is built by draining its queue in the order the announcements were processed, skipping hashes
+//! that are being fetched from another peer or are not tracked anymore, until the request is
+//! full. Packing a request is therefore proportional to the request size and independent of the
+//! total number of pending hashes.
 //!
 //! When a request resolves, delivered hashes are dropped from tracking. Undelivered hashes go back
-//! to pending and are queued for their remaining candidates, or are dropped if none remain. The
-//! responding peer is dropped as a candidate for every undelivered hash that precedes the last
-//! delivered hash of the request, since the peer skipped it on purpose, and for all requested
-//! hashes if the response was empty or the request failed. Undelivered hashes after the last
-//! delivered hash keep the peer as a candidate, since the response was most likely truncated
-//! because it hit the response size limit.
+//! to pending and are queued for their remaining candidates, most recent announcers first, or are
+//! dropped if none remain. The responding peer is dropped as a candidate for every undelivered
+//! hash that precedes the last delivered hash of the request, since the peer skipped it on
+//! purpose, and for all requested hashes if the response was empty or the request failed.
+//! Undelivered hashes after the last delivered hash keep the peer as a candidate, since the
+//! response was most likely truncated because it hit the response size limit.
 //!
 //! Request timeouts are enforced by the peer's session, which resolves the request with
 //! [`RequestError::Timeout`], so the fetcher does not run any timers.
@@ -44,6 +44,7 @@ use super::{
     constants::{
         tx_fetcher::{
             AVERAGE_BYTE_SIZE_TX_ENCODED, MAX_COUNT_CANDIDATE_PEERS_PER_HASH,
+            MAX_COUNT_EAGER_CANDIDATE_PEERS_PER_HASH,
             MIN_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST,
         },
         SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
@@ -103,6 +104,12 @@ pub struct TransactionFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
     inflight: FuturesUnordered<InflightRequest<N::PooledTransaction>>,
     /// Number of tracked hashes that are part of an inflight request.
     num_fetching: usize,
+    /// Reused when verifying responses, so no sets are allocated per response.
+    scratch_requested: B256Set,
+    /// Reused when verifying responses, so no sets are allocated per response.
+    scratch_delivered: B256Set,
+    /// Reused when processing announcements, so no vector is allocated per announcement.
+    scratch_queue: Vec<TxHash>,
     /// Configured limits.
     config: TransactionFetcherConfig,
     metrics: TransactionFetcherMetrics,
@@ -123,6 +130,9 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             ready: Default::default(),
             inflight: Default::default(),
             num_fetching: 0,
+            scratch_requested: Default::default(),
+            scratch_delivered: Default::default(),
+            scratch_queue: Default::default(),
             config,
             metrics,
         }
@@ -176,57 +186,59 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         let max_per_peer = self.config.max_announced_hashes_per_peer as usize;
         let max_total = self.config.max_capacity_cache_txns_pending_fetch as usize;
 
-        let mut queued = 0usize;
         let mut dropped_peer_limit = 0u64;
         let mut evicted_at_capacity = 0u64;
         let mut dropped_at_capacity = 0u64;
 
+        // The peer's count of tracked hashes and the hashes to queue for it are kept locally and
+        // applied once at the end, so every announced hash costs a single map lookup.
+        let Some(peer) = self.peers.get(&key) else { return };
+        let mut tracked = peer.tracked;
+        let mut queue = std::mem::take(&mut self.scratch_queue);
+        queue.clear();
+
         for (hash, metadata) in announcement {
             let size = announced_size(metadata);
-            let Some(peer) = self.peers.get(&key) else { return };
-            let at_peer_limit = peer.tracked >= max_per_peer;
 
-            // a candidate that had to make room for this peer
-            let mut replaced = None;
-            match self.hashes.get_mut(&hash) {
+            // whether the hash is queued for the peer right away
+            let eager = match self.hashes.get_mut(&hash) {
                 Some(entry) => {
                     if let Some(candidate) = entry.candidate_mut(key) {
                         // announced before by this peer, keep the latest size
-                        candidate.size = size;
-                        continue
-                    }
-                    if at_peer_limit {
-                        dropped_peer_limit += 1;
+                        candidate.set_size(size);
                         continue
                     }
                     if entry.candidates.len() >= MAX_COUNT_CANDIDATE_PEERS_PER_HASH {
-                        // Replace a candidate that disconnected, or else the oldest one that
-                        // isn't fetching the hash, so later announcers get a turn should the
-                        // earlier ones fail to deliver.
-                        let fetching = entry.fetching_by;
-                        let peers = &self.peers;
-                        let Some(idx) = entry
-                            .candidates
-                            .iter()
-                            .position(|c| !peers.contains_key(&c.peer))
-                            .or_else(|| {
-                                entry.candidates.iter().position(|c| Some(c.peer) != fetching)
-                            })
-                        else {
-                            continue
-                        };
-                        replaced = Some(entry.candidates.remove(idx).peer);
+                        continue
                     }
-                    entry.candidates.push(Candidate::new(key, size));
+                    if tracked >= max_per_peer {
+                        dropped_peer_limit += 1;
+                        continue
+                    }
+                    // The first announcers get the hash queued right away, later ones are only
+                    // remembered and asked once the earlier ones failed to deliver.
+                    let eager = entry.candidates.len() < MAX_COUNT_EAGER_CANDIDATE_PEERS_PER_HASH;
+                    let candidate = if eager {
+                        Candidate::queued(key, size)
+                    } else {
+                        Candidate::unqueued(key, size)
+                    };
+                    entry.candidates.push(candidate);
+                    eager
                 }
                 None => {
-                    if at_peer_limit {
+                    if tracked >= max_per_peer {
                         dropped_peer_limit += 1;
                         continue
                     }
                     if self.hashes.len() >= max_total {
+                        // the evicted hash may be one of this peer's, so its count is synced
+                        if let Some(peer) = self.peers.get_mut(&key) {
+                            peer.tracked = tracked;
+                        }
                         if self.evict_oldest_pending() {
                             evicted_at_capacity += 1;
+                            tracked = self.peers.get(&key).map_or(tracked, |peer| peer.tracked);
                         } else {
                             dropped_at_capacity += 1;
                             continue
@@ -234,21 +246,25 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                     }
                     self.hashes.insert(hash, TxEntry::new(key, size));
                     self.record_order(hash);
+                    true
                 }
-            }
+            };
 
-            if let Some(replaced) = replaced &&
-                let Some(other) = self.peers.get_mut(&replaced)
-            {
-                other.tracked = other.tracked.saturating_sub(1);
+            tracked += 1;
+            if eager {
+                queue.push(hash);
             }
-
-            self.enqueue(key, hash, false);
-            if let Some(peer) = self.peers.get_mut(&key) {
-                peer.tracked += 1;
-            }
-            queued += 1;
         }
+
+        let queued = queue.len();
+        if let Some(peer) = self.peers.get_mut(&key) {
+            peer.tracked = tracked;
+            for hash in &queue {
+                peer.push_queue(&self.hashes, key, *hash, false, max_per_peer);
+            }
+        }
+        queue.clear();
+        self.scratch_queue = queue;
 
         if dropped_peer_limit > 0 {
             self.metrics.announced_hashes_dropped_peer_limit.increment(dropped_peer_limit);
@@ -269,7 +285,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 dropped_at_capacity,
                 "queued announced hashes"
             );
-            self.mark_ready(key);
+            self.mark_ready(key, false);
         }
     }
 
@@ -341,7 +357,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                     });
                     sent += 1;
                     // the peer may be allowed more than one inflight request
-                    self.mark_ready(key);
+                    self.mark_ready(key, false);
                 }
                 Err(err) => {
                     self.metrics.egress_peer_channel_full.increment(1);
@@ -355,7 +371,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         }
 
         for key in retry {
-            self.mark_ready(key);
+            self.mark_ready(key, false);
         }
 
         sent
@@ -382,17 +398,31 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         let Some(peer) = self.peers.remove(&key) else { return };
 
         let mut dropped = 0u64;
+        let mut requeued = SmallVec::<[PeerKey; MAX_COUNT_CANDIDATE_PEERS_PER_HASH]>::new();
         for hash in peer.queue {
             let Some(entry) = self.hashes.get_mut(&hash) else { continue };
             entry.candidates.retain(|candidate| candidate.peer != key);
-            if entry.candidates.is_empty() && entry.fetching_by.is_none() {
+            if entry.fetching_by.is_some() {
+                continue
+            }
+            if entry.candidates.is_empty() {
                 self.hashes.remove(&hash);
                 dropped += 1;
+                continue
+            }
+            // the hash must stay queued for at least one candidate
+            if !entry.candidates.iter().any(|candidate| candidate.is_queued()) {
+                let targets = entry.unqueued_candidates();
+                self.requeue(hash, targets, &mut requeued);
             }
         }
 
         if dropped > 0 {
             self.metrics.hashes_dropped_no_candidate_peers.increment(dropped);
+        }
+        // retried hashes go to the most recent announcers first
+        for key in requeued {
+            self.mark_ready(key, true);
         }
     }
 
@@ -413,45 +443,34 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         })
     }
 
-    /// Marks the peer as ready to receive a request if it is idle and has queued hashes.
-    fn mark_ready(&mut self, key: PeerKey) {
+    /// Marks the peer as ready for a request if it is idle and has hashes queued, either behind
+    /// the other ready peers or ahead of them.
+    fn mark_ready(&mut self, key: PeerKey, first: bool) {
         if let Some(peer) = self.peers.get_mut(&key) &&
             !peer.ready &&
             !peer.queue.is_empty() &&
             peer.inflight < self.config.max_inflight_requests_per_peer
         {
             peer.ready = true;
-            self.ready.push_back(key);
+            if first {
+                self.ready.push_front(key);
+            } else {
+                self.ready.push_back(key);
+            }
         }
     }
 
     /// Queues the hash for the peer, at the back or the front of its queue, and marks it as
     /// queued in the hash's candidate entry.
-    ///
-    /// Queues are bounded: once a queue holds twice the number of hashes the peer may be a
-    /// candidate for, entries the peer is no longer a candidate for and duplicates are removed. A
-    /// duplicate can occur when a peer was replaced as a candidate and announces the hash again.
     fn enqueue(&mut self, key: PeerKey, hash: TxHash, front: bool) {
+        let max_per_peer = self.config.max_announced_hashes_per_peer as usize;
+        let Some(peer) = self.peers.get_mut(&key) else { return };
         if let Some(candidate) =
             self.hashes.get_mut(&hash).and_then(|entry| entry.candidate_mut(key))
         {
-            candidate.queued = true;
+            candidate.set_queued(true);
         }
-
-        let max_len = 2 * self.config.max_announced_hashes_per_peer as usize;
-        let Some(peer) = self.peers.get_mut(&key) else { return };
-        if peer.queue.len() >= max_len {
-            let hashes = &self.hashes;
-            let mut seen = B256Set::with_capacity_and_hasher(peer.tracked, Default::default());
-            peer.queue.retain(|hash| {
-                hashes.get(hash).is_some_and(|entry| entry.has_candidate(key)) && seen.insert(*hash)
-            });
-        }
-        if front {
-            peer.queue.push_front(hash);
-        } else {
-            peer.queue.push_back(hash);
-        }
+        peer.push_queue(&self.hashes, key, hash, front, max_per_peer);
     }
 
     /// Records a newly tracked hash in the eviction order.
@@ -504,7 +523,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             // candidate for
             let Some(entry) = self.hashes.get_mut(&hash) else { continue };
             let Some(candidate) = entry.candidate_mut(key) else { continue };
-            candidate.queued = false;
+            candidate.set_queued(false);
             let size = candidate.request_size();
 
             // hashes that are being fetched elsewhere are queued again if that fetch fails
@@ -514,7 +533,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
 
             if !hashes.is_empty() && bytes.saturating_add(size) > max_bytes {
                 if let Some(candidate) = entry.candidate_mut(key) {
-                    candidate.queued = true;
+                    candidate.set_queued(true);
                 }
                 peer.queue.push_front(hash);
                 break
@@ -547,6 +566,22 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         }
     }
 
+    /// Queues a pending hash for the given candidates, the ones that don't have it queued, and
+    /// records those peers in `requeued`.
+    fn requeue(
+        &mut self,
+        hash: TxHash,
+        targets: SmallVec<[PeerKey; MAX_COUNT_CANDIDATE_PEERS_PER_HASH]>,
+        requeued: &mut SmallVec<[PeerKey; MAX_COUNT_CANDIDATE_PEERS_PER_HASH]>,
+    ) {
+        for key in targets {
+            self.enqueue(key, hash, true);
+            if !requeued.contains(&key) {
+                requeued.push(key);
+            }
+        }
+    }
+
     /// Stops tracking the hash.
     fn remove_hash(&mut self, hash: &TxHash) {
         let Some(entry) = self.hashes.remove(hash) else { return };
@@ -571,11 +606,30 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             peer.inflight = peer.inflight.saturating_sub(1);
         }
 
-        let event = match result {
-            Ok(Ok(transactions)) if !transactions.is_empty() => {
-                let (transactions, delivered, unsolicited) =
-                    verify_response(transactions, &requested);
+        let mut delivered = std::mem::take(&mut self.scratch_delivered);
+        delivered.clear();
 
+        let outcome = match result {
+            Ok(Ok(mut transactions)) => {
+                let mut requested_set = std::mem::take(&mut self.scratch_requested);
+                requested_set.clear();
+                requested_set.extend(requested.iter().copied());
+                let unsolicited =
+                    verify_response(&mut transactions, &requested_set, &mut delivered);
+                self.scratch_requested = requested_set;
+                Ok((transactions, unsolicited))
+            }
+            Ok(Err(error)) => Err(error),
+            // the session dropped the request
+            Err(_) => Err(RequestError::ChannelClosed),
+        };
+
+        self.on_delivery(key, &requested, &delivered);
+        self.scratch_delivered = delivered;
+        self.mark_ready(key, false);
+
+        match outcome {
+            Ok((transactions, unsolicited)) => {
                 if unsolicited > 0 {
                     self.metrics.unsolicited_transactions.increment(unsolicited as u64);
                     trace!(target: "net::tx",
@@ -584,44 +638,27 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                         "received transactions in `PooledTransactions` response that weren't requested"
                     );
                 }
-
-                self.on_delivery(key, &requested, &delivered);
-
-                if transactions.is_empty() {
-                    // the peer only sent transactions we didn't ask for
-                    FetchEvent::FetchError { peer_id, error: RequestError::BadResponse }
-                } else {
+                if !transactions.is_empty() {
                     self.metrics.fetched_transactions.increment(transactions.len() as u64);
                     FetchEvent::TransactionsFetched {
                         peer_id,
-                        transactions: PooledTransactions(transactions),
+                        transactions,
                         report_peer: unsolicited > 0,
                     }
+                } else if unsolicited > 0 {
+                    // the peer only sent transactions we didn't ask for
+                    FetchEvent::FetchError { peer_id, error: RequestError::BadResponse }
+                } else {
+                    trace!(target: "net::tx",
+                        peer_id=format!("{peer_id:#}"),
+                        requested=requested.len(),
+                        "received empty `PooledTransactions` response, peer failed to serve hashes it announced"
+                    );
+                    FetchEvent::EmptyResponse { peer_id }
                 }
             }
-            Ok(Ok(_)) => {
-                trace!(target: "net::tx",
-                    peer_id=format!("{peer_id:#}"),
-                    requested=requested.len(),
-                    "received empty `PooledTransactions` response, peer failed to serve hashes it announced"
-                );
-                self.on_delivery(key, &requested, &B256Set::default());
-                FetchEvent::EmptyResponse { peer_id }
-            }
-            Ok(Err(error)) => {
-                self.on_delivery(key, &requested, &B256Set::default());
-                FetchEvent::FetchError { peer_id, error }
-            }
-            Err(_) => {
-                // the session dropped the request
-                self.on_delivery(key, &requested, &B256Set::default());
-                FetchEvent::FetchError { peer_id, error: RequestError::ChannelClosed }
-            }
-        };
-
-        self.mark_ready(key);
-
-        event
+            Err(error) => FetchEvent::FetchError { peer_id, error },
+        }
     }
 
     /// Settles the requested hashes of a resolved request: delivered hashes are dropped and
@@ -637,7 +674,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             .map_or(requested.len(), |idx| idx + 1);
 
         let mut dropped = 0u64;
-        let mut requeued = SmallVec::<[PeerKey; 8]>::new();
+        let mut requeued = SmallVec::<[PeerKey; MAX_COUNT_CANDIDATE_PEERS_PER_HASH]>::new();
 
         // iterate in reverse so that queueing at the front of a queue preserves the request order
         for (idx, hash) in requested.iter().enumerate().rev() {
@@ -672,19 +709,8 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 continue
             }
 
-            // queue the hash for the candidates that don't have it queued anymore
-            let targets = entry
-                .candidates
-                .iter()
-                .filter(|candidate| !candidate.queued)
-                .map(|candidate| candidate.peer)
-                .collect::<SmallVec<[PeerKey; MAX_COUNT_CANDIDATE_PEERS_PER_HASH]>>();
-            for candidate in targets {
-                self.enqueue(candidate, *hash, true);
-                if !requeued.contains(&candidate) {
-                    requeued.push(candidate);
-                }
-            }
+            let targets = entry.unqueued_candidates();
+            self.requeue(*hash, targets, &mut requeued);
         }
 
         if dropped > 0 {
@@ -692,8 +718,9 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             trace!(target: "net::tx", dropped, "dropped hashes that no peer is left to fetch from");
         }
 
+        // retried hashes go to the most recent announcers first
         for key in requeued {
-            self.mark_ready(key);
+            self.mark_ready(key, true);
         }
     }
 }
@@ -763,8 +790,8 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             assert!(ordered.contains(hash), "{hash} is missing from the eviction order");
         }
 
-        // a hash flagged as queued is in the peer's queue, and a pending hash is queued for every
-        // connected candidate, otherwise it could starve
+        // a hash flagged as queued is in the peer's queue, and a pending hash is queued for at
+        // least one connected candidate, otherwise it could starve
         let queued = self
             .peers
             .iter()
@@ -778,18 +805,19 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             })
             .collect::<HashMap<_, _>>();
         for (hash, entry) in &self.hashes {
+            let mut fetchable = entry.fetching_by.is_some();
             for candidate in &entry.candidates {
                 let Some(queue) = queued.get(&candidate.peer) else { continue };
-                if candidate.queued || entry.fetching_by.is_none() {
+                if candidate.is_queued() {
                     assert!(
                         queue.contains(hash),
-                        "{hash} is not queued for {:?}, queued flag {}, pending {}",
-                        candidate.peer,
-                        candidate.queued,
-                        entry.fetching_by.is_none()
+                        "{hash} is flagged but not queued for {:?}",
+                        candidate.peer
                     );
+                    fetchable = true;
                 }
             }
+            assert!(fetchable, "pending {hash} is not queued for any connected candidate");
         }
 
         for (key, peer) in &self.peers {
@@ -897,14 +925,24 @@ struct TxEntry {
 }
 
 impl TxEntry {
+    /// A new entry for a hash that is queued for the announcing peer.
     fn new(peer: PeerKey, size: u32) -> Self {
         let mut candidates = SmallVec::new();
-        candidates.push(Candidate::new(peer, size));
+        candidates.push(Candidate::queued(peer, size));
         Self { candidates, fetching_by: None }
     }
 
     fn has_candidate(&self, key: PeerKey) -> bool {
         self.candidates.iter().any(|candidate| candidate.peer == key)
+    }
+
+    /// Returns the candidates that don't have the hash queued, in the order they announced it.
+    fn unqueued_candidates(&self) -> SmallVec<[PeerKey; MAX_COUNT_CANDIDATE_PEERS_PER_HASH]> {
+        self.candidates
+            .iter()
+            .filter(|candidate| !candidate.is_queued())
+            .map(|candidate| candidate.peer)
+            .collect()
     }
 
     fn candidate_mut(&mut self, key: PeerKey) -> Option<&mut Candidate> {
@@ -916,23 +954,48 @@ impl TxEntry {
 #[derive(Debug, Clone, Copy)]
 struct Candidate {
     peer: PeerKey,
-    /// The size the peer announced for the transaction, 0 if unknown.
-    size: u32,
-    /// Whether the hash is currently in the peer's queue.
-    queued: bool,
+    /// The size the peer announced for the transaction, 0 if unknown, with
+    /// [`Self::QUEUED`] set while the hash is in the peer's queue.
+    size_and_queued: u32,
 }
 
 impl Candidate {
-    const fn new(peer: PeerKey, size: u32) -> Self {
-        Self { peer, size, queued: false }
+    /// Marks the hash as queued for the peer. Announced sizes are capped well below this bit.
+    const QUEUED: u32 = 1 << 31;
+
+    /// A candidate that has the hash queued.
+    const fn queued(peer: PeerKey, size: u32) -> Self {
+        Self { peer, size_and_queued: size | Self::QUEUED }
+    }
+
+    /// A candidate that doesn't have the hash queued.
+    const fn unqueued(peer: PeerKey, size: u32) -> Self {
+        Self { peer, size_and_queued: size }
+    }
+
+    const fn is_queued(&self) -> bool {
+        self.size_and_queued & Self::QUEUED != 0
+    }
+
+    const fn set_queued(&mut self, queued: bool) {
+        if queued {
+            self.size_and_queued |= Self::QUEUED;
+        } else {
+            self.size_and_queued &= !Self::QUEUED;
+        }
+    }
+
+    const fn set_size(&mut self, size: u32) {
+        self.size_and_queued = (self.size_and_queued & Self::QUEUED) | size;
     }
 
     /// Returns the size to account for when packing the hash into a request to this peer.
     const fn request_size(&self) -> usize {
-        if self.size == 0 {
+        let size = self.size_and_queued & !Self::QUEUED;
+        if size == 0 {
             AVERAGE_BYTE_SIZE_TX_ENCODED
         } else {
-            self.size as usize
+            size as usize
         }
     }
 }
@@ -955,6 +1018,33 @@ struct PeerState {
 impl PeerState {
     const fn new(peer_id: PeerId) -> Self {
         Self { peer_id, queue: VecDeque::new(), tracked: 0, inflight: 0, ready: false }
+    }
+
+    /// Queues the hash at the back or the front of the queue.
+    ///
+    /// Queues are bounded: once a queue holds twice `max_tracked` hashes, entries the peer is no
+    /// longer a candidate for and duplicates are removed. A duplicate can occur when a hash is
+    /// tracked again after it was delivered or evicted, while its old entry still lingers in the
+    /// queue. Duplicates are skipped when the queue is drained, so they only cost memory.
+    fn push_queue(
+        &mut self,
+        hashes: &B256Map<TxEntry>,
+        key: PeerKey,
+        hash: TxHash,
+        front: bool,
+        max_tracked: usize,
+    ) {
+        if self.queue.len() >= 2 * max_tracked {
+            let mut seen = B256Set::with_capacity_and_hasher(self.tracked, Default::default());
+            self.queue.retain(|hash| {
+                hashes.get(hash).is_some_and(|entry| entry.has_candidate(key)) && seen.insert(*hash)
+            });
+        }
+        if front {
+            self.queue.push_front(hash);
+        } else {
+            self.queue.push_back(hash);
+        }
     }
 }
 
@@ -1001,30 +1091,23 @@ fn announced_size(metadata: Eth68TxMetadata) -> u32 {
 
 /// Filters a response down to the transactions that were requested, dropping duplicates.
 ///
-/// Returns the verified transactions, the set of delivered hashes and the number of unsolicited
-/// transactions that were dropped.
+/// Records the delivered hashes in `delivered` and returns the number of unsolicited transactions
+/// that were dropped.
 fn verify_response<T: SignedTransaction>(
-    transactions: PooledTransactions<T>,
-    requested: &[TxHash],
-) -> (Vec<T>, B256Set, usize) {
-    let requested = requested.iter().copied().collect::<B256Set>();
-    let mut delivered = B256Set::default();
-    let mut verified = Vec::with_capacity(transactions.len());
+    transactions: &mut PooledTransactions<T>,
+    requested: &B256Set,
+    delivered: &mut B256Set,
+) -> usize {
     let mut unsolicited = 0;
-
-    for tx in transactions.0 {
+    transactions.0.retain(|tx| {
         let hash = *tx.tx_hash();
         if !requested.contains(&hash) {
             unsolicited += 1;
-            continue
+            return false
         }
-        if !delivered.insert(hash) {
-            continue
-        }
-        verified.push(tx);
-    }
-
-    (verified, delivered, unsolicited)
+        delivered.insert(hash)
+    });
+    unsolicited
 }
 
 #[cfg(test)]
@@ -1841,7 +1924,7 @@ mod tests {
     }
 
     #[test]
-    fn candidates_are_the_most_recent_announcers() {
+    fn later_announcers_are_asked_after_the_first_ones_failed() {
         let mut rig = Rig::new();
         let hash = hash(1);
         let peers =
@@ -1851,21 +1934,25 @@ mod tests {
             rig.announce(*peer_id, &[hash]);
         }
 
-        // the first two announcers were replaced, their queue entries are cleaned up lazily
-        assert_eq!(rig.fetcher.candidate_peers(&hash), peers[2..]);
-        assert!(rig.fetcher.queued_hashes(&peers[0]).contains(&hash));
+        // the first announcers get the hash queued, the following ones are only remembered and
+        // announcements beyond the candidate limit are ignored
+        let candidates = &peers[..MAX_COUNT_CANDIDATE_PEERS_PER_HASH];
+        assert_eq!(rig.fetcher.candidate_peers(&hash), candidates);
+        for (i, peer_id) in candidates.iter().enumerate() {
+            let eager = i < MAX_COUNT_EAGER_CANDIDATE_PEERS_PER_HASH;
+            assert_eq!(rig.fetcher.queued_hashes(peer_id).contains(&hash), eager, "peer {i}");
+        }
+        assert!(rig.fetcher.queued_hashes(&peers[MAX_COUNT_CANDIDATE_PEERS_PER_HASH]).is_empty());
 
-        // the peer fetching the hash is never replaced
+        // the first announcer fetches the hash, retries go to the most recent announcers first
         assert_eq!(rig.dispatch(), 1);
-        assert_eq!(rig.fetcher.fetching_peer(&hash), Some(peers[2]));
-        let newcomer = peer(42);
-        rig.add_peer(newcomer);
-        rig.announce(newcomer, &[hash]);
-        let expected = [&peers[2..3], &peers[4..], &[newcomer]].concat();
-        assert_eq!(rig.fetcher.candidate_peers(&hash), expected);
+        assert_eq!(rig.fetcher.fetching_peer(&hash), Some(peers[0]));
+        rig.fail(peers[0], RequestError::Timeout);
+        assert_eq!(rig.dispatch(), 1);
+        assert_eq!(rig.fetcher.fetching_peer(&hash), Some(*candidates.last().unwrap()));
 
         // the hash is given up on once all candidates failed
-        let mut attempts = 0;
+        let mut attempts = 1;
         while let Some(fetching) = rig.fetcher.fetching_peer(&hash) {
             rig.fail(fetching, RequestError::Timeout);
             attempts += 1;
@@ -1873,6 +1960,29 @@ mod tests {
         }
         assert_eq!(attempts, MAX_COUNT_CANDIDATE_PEERS_PER_HASH);
         assert_eq!(rig.fetcher.num_hashes(), 0);
+    }
+
+    #[test]
+    fn remembered_candidates_take_over_when_queued_ones_disconnect() {
+        let mut rig = Rig::new();
+        let hash = hash(1);
+        let peers =
+            (1..=MAX_COUNT_EAGER_CANDIDATE_PEERS_PER_HASH as u8 + 1).map(peer).collect::<Vec<_>>();
+        for peer_id in &peers {
+            rig.add_peer(*peer_id);
+            rig.announce(*peer_id, &[hash]);
+        }
+        let last = *peers.last().unwrap();
+        assert!(rig.fetcher.queued_hashes(&last).is_empty());
+
+        // all peers that had the hash queued disconnect before fetching it
+        for peer_id in &peers[..peers.len() - 1] {
+            rig.disconnect(*peer_id);
+        }
+        assert_eq!(rig.fetcher.candidate_peers(&hash), vec![last]);
+        assert_eq!(rig.fetcher.queued_hashes(&last), vec![hash]);
+        assert_eq!(rig.dispatch(), 1);
+        assert_eq!(rig.fetcher.fetching_peer(&hash), Some(last));
     }
 
     #[test]
@@ -2062,12 +2172,12 @@ mod tests {
         let txs = pooled_txs(2);
         let requested = [hash(1), *txs[0].tx_hash(), hash(2)];
 
-        let (verified, delivered, unsolicited) = verify_response(
-            PooledTransactions(vec![txs[0].clone(), txs[1].clone(), txs[0].clone()]),
-            &requested,
-        );
+        let mut response = PooledTransactions(vec![txs[0].clone(), txs[1].clone(), txs[0].clone()]);
+        let mut delivered = B256Set::default();
+        let unsolicited =
+            verify_response(&mut response, &requested.into_iter().collect(), &mut delivered);
 
-        assert_eq!(verified, txs[..1]);
+        assert_eq!(response.0, txs[..1]);
         assert_eq!(delivered.into_iter().collect::<Vec<_>>(), vec![*txs[0].tx_hash()]);
         assert_eq!(unsolicited, 1);
     }
@@ -2361,20 +2471,26 @@ mod tests {
             rig.announce(*peer_id, &hashes);
         }
 
-        // only the most recent announcers of a hash are its candidates
-        let candidates = &peers[peers.len() - MAX_COUNT_CANDIDATE_PEERS_PER_HASH..];
+        // only the first announcers of a hash are its candidates
+        let candidates = &peers[..MAX_COUNT_CANDIDATE_PEERS_PER_HASH];
         assert_eq!(rig.fetcher.num_hashes(), 100);
         assert_eq!(rig.fetcher.candidate_peers(&hashes[0]), candidates);
         rig.fetcher.assert_invariants();
 
         // one request at a time, retried with the next candidate until all are exhausted
-        for peer_id in candidates {
+        let mut order = Vec::new();
+        for _ in candidates {
             assert_eq!(rig.dispatch(), 1);
-            let (requested, response) = rig.take_request(*peer_id).unwrap();
+            let fetching = rig.fetcher.fetching_peer(&hashes[0]).unwrap();
+            let (requested, response) = rig.take_request(fetching).unwrap();
             assert_eq!(requested.len(), 100);
             response.send(Err(RequestError::Timeout)).unwrap();
             rig.next_event().unwrap();
+            order.push(fetching);
         }
+        let expected =
+            [&candidates[..1], &candidates[1..].iter().rev().copied().collect::<Vec<_>>()].concat();
+        assert_eq!(order, expected, "the first announcer is asked first, then the most recent");
         assert_eq!(rig.fetcher.num_hashes(), 0);
         assert_eq!(rig.dispatch(), 0);
         rig.fetcher.assert_invariants();
