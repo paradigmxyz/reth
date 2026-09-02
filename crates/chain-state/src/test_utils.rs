@@ -1,6 +1,6 @@
 use crate::{
     in_memory::ExecutedBlock, CanonStateNotification, CanonStateNotifications,
-    CanonStateSubscriptions, NodePrimitivesProvider,
+    CanonStateSubscriptions,
 };
 use alloy_consensus::{Header, SignableTransaction, TxEip1559, TxReceipt, EMPTY_ROOT_HASH};
 use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, INITIAL_BASE_FEE};
@@ -444,11 +444,9 @@ impl TestCanonStateSubscriptions {
     }
 }
 
-impl NodePrimitivesProvider for TestCanonStateSubscriptions {
-    type Primitives = EthPrimitives;
-}
-
 impl CanonStateSubscriptions for TestCanonStateSubscriptions {
+    type Primitives = EthPrimitives;
+
     /// Sets up a broadcast channel with a buffer size of 100.
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
         let (canon_notif_tx, canon_notif_rx) = broadcast::channel(100);

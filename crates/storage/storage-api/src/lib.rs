@@ -82,7 +82,8 @@ mod stats;
 #[cfg(feature = "db-api")]
 pub use stats::*;
 
-pub use reth_chain_state::NodePrimitivesProvider;
+mod primitives;
+pub use primitives::*;
 
 mod block_indices;
 pub use block_indices::*;

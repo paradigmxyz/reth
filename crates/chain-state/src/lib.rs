@@ -28,9 +28,6 @@ pub use notifications::{
     WatchValueStream,
 };
 
-mod primitives;
-pub use primitives::NodePrimitivesProvider;
-
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers
 pub mod test_utils;

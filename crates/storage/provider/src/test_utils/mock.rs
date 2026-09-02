@@ -1350,6 +1350,8 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StateReader for MockEthProvider<
 impl<T: NodePrimitives, ChainSpec: Send + Sync> CanonStateSubscriptions
     for MockEthProvider<T, ChainSpec>
 {
+    type Primitives = T;
+
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<T> {
         broadcast::channel(1).1
     }

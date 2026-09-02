@@ -7784,7 +7784,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-signer",
  "alloy-signer-local",
- "auto_impl",
  "derive_more",
  "metrics",
  "parking_lot",

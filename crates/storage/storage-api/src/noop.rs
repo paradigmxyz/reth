@@ -668,6 +668,8 @@ impl<C: Send + Sync + 'static, N: NodePrimitives> StateProviderFactory for NoopP
 }
 
 impl<C: Send + Sync, N: NodePrimitives> CanonStateSubscriptions for NoopProvider<C, N> {
+    type Primitives = N;
+
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<N> {
         tokio::sync::broadcast::channel(1).1
     }

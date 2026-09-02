@@ -881,6 +881,8 @@ where
     N: Network,
     Node: NodeTypes,
 {
+    type Primitives = PrimitivesTy<Node>;
+
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<PrimitivesTy<Node>> {
         trace!(target: "alloy-provider", "Subscribing to canonical state notifications");
         self.canon_state_notification.subscribe()
