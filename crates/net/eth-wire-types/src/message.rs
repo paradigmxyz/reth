@@ -946,8 +946,7 @@ impl RawResponse {
     /// The id is read from within the list's declared payload, so an id that merely follows an
     /// under-declared list is rejected instead of being taken at face value.
     pub fn request_id(&self) -> alloy_rlp::Result<u64> {
-        let mut list = Header::decode_bytes(&mut self.payload.as_ref(), true)?;
-        u64::decode(&mut list)
+        decode_request_id(&self.payload)
     }
 
     /// Decodes the response into its typed [`EthMessage`] variant according to the given
@@ -986,6 +985,16 @@ impl Debug for RawResponse {
             .field("payload_len", &self.payload.len())
             .finish()
     }
+}
+
+/// Decodes the request id of an RLP encoded `[request-id, payload...]` list without decoding the
+/// rest of the payload.
+///
+/// The id is read from within the list's declared payload, so an id that merely follows an
+/// under-declared list is rejected instead of being taken at face value.
+pub(crate) fn decode_request_id(mut payload: &[u8]) -> alloy_rlp::Result<u64> {
+    let mut list = Header::decode_bytes(&mut payload, true)?;
+    u64::decode(&mut list)
 }
 
 /// Deserializes the id of a [`RawResponse`], upholding that it is a response id.

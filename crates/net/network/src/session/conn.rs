@@ -137,8 +137,9 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
         }
     }
 
-    /// Sets whether to defer decoding of `eth` response messages, which are then yielded as
-    /// [`EthMessage::RawResponse`] so the request id can be checked before paying for the decode.
+    /// Sets whether to defer decoding of response messages, which are then yielded as
+    /// [`EthMessage::RawResponse`] and [`EthSnapMessage::RawSnapResponse`] so the request id can
+    /// be checked before paying for the decode.
     pub fn set_lazy_responses(&mut self, lazy: bool) {
         match self {
             Self::EthOnly(conn) => conn.set_lazy_responses(lazy),
