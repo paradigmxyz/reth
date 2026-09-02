@@ -647,9 +647,12 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         };
         let client = peer.client_version.clone();
 
-        // keep track of the transactions the peer knows
+        // Keep track of the transactions the peer knows. The cache only holds the most recent
+        // hashes, so of an announcement larger than the cache only the tail that fits is
+        // inserted, the rest would be evicted again by the same announcement.
         let mut count_txns_already_seen_by_peer = 0;
-        for tx in msg.iter_hashes().copied() {
+        let skip = msg.len().saturating_sub(peer.seen_transactions.limit() as usize);
+        for tx in msg.iter_hashes().skip(skip).copied() {
             if !peer.seen_transactions.insert(tx) {
                 count_txns_already_seen_by_peer += 1;
             }
@@ -706,8 +709,8 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             .expect("partially valid announcement should have a version")
             .has_eth68_metadata();
 
-        partially_valid_msg.retain(|tx_hash, metadata_ref_mut| {
-            let (ty_byte, size_val) = match *metadata_ref_mut {
+        partially_valid_msg.retain(|(tx_hash, metadata)| {
+            let (ty_byte, size_val) = match *metadata {
                 Some((ty, size)) => {
                     if !has_eth68_metadata {
                         should_report_peer = true;
@@ -723,7 +726,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
                 }
             };
 
-            if has_eth68_metadata && let Some((actual_ty_byte, _)) = *metadata_ref_mut {
+            if has_eth68_metadata && let Some((actual_ty_byte, _)) = *metadata {
                 match TxType::try_from(actual_ty_byte) {
                     Ok(parsed_tx_type) => tx_types_counter.increase_by_tx_type(parsed_tx_type),
                     Err(_) => tx_types_counter.increase_other(),
@@ -3276,6 +3279,33 @@ mod tests {
             PropagationMode::Basic,
         );
         assert!(propagated.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_announced_hashes_are_queued_in_announcement_order() {
+        let (mut tx_manager, _network) = new_tx_manager().await;
+        let peer_id = PeerId::new([1; 64]);
+        let (peer, _to_mock_session_rx) = new_mock_session(peer_id, EthVersion::Eth68);
+        tx_manager.peers.insert(peer_id, peer);
+
+        let hashes = [
+            B256::from([3u8; 32]),
+            B256::from([1u8; 32]),
+            B256::from([2u8; 32]),
+            B256::from([1u8; 32]),
+        ];
+        tx_manager.on_network_tx_event(NetworkTransactionEvent::IncomingPooledTransactionHashes {
+            peer_id,
+            msg: reth_eth_wire::NewPooledTransactionHashes68 {
+                types: vec![2; hashes.len()],
+                sizes: vec![100; hashes.len()],
+                hashes: hashes.to_vec(),
+            }
+            .into(),
+        });
+
+        // the duplicate is dropped and the rest is queued in the order it was announced
+        assert_eq!(tx_manager.transaction_fetcher.queued_hashes(&peer_id), hashes[..3]);
     }
 
     #[test]

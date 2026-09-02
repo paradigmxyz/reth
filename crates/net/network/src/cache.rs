@@ -104,6 +104,11 @@ impl<T: Hash + Eq + fmt::Debug, S: BuildHasher> LruCache<T, S> {
         self.inner.iter().map(|(k, ())| k)
     }
 
+    /// Returns the maximum number of elements the cache holds.
+    pub const fn limit(&self) -> u32 {
+        self.limit
+    }
+
     /// Returns number of elements currently in cache.
     pub fn len(&self) -> usize {
         self.inner.len()
