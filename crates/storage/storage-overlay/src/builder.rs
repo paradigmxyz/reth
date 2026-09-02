@@ -239,7 +239,7 @@ pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
     /// Manager used for cached changesets and overlays.
     overlay_manager: OverlayManager<N>,
     /// Snapshot of the in-memory chain ending at the requested parent.
-    parent_state: Option<Arc<BlockState<N>>>,
+    parent_state: Option<BlockState<N>>,
     /// Anchor hash of the reused sparse trie, if this task reused one.
     reused_sparse_trie_anchor_hash: Option<B256>,
     /// Whether building the overlay may query revert changesets.
@@ -252,7 +252,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     /// Create a new manager-backed overlay builder.
     pub(crate) fn new(
         parent_hash: B256,
-        parent_state: Option<Arc<BlockState<N>>>,
+        parent_state: Option<BlockState<N>>,
         overlay_manager: OverlayManager<N>,
     ) -> Self {
         Self {

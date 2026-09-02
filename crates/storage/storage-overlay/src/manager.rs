@@ -96,12 +96,12 @@ impl<N: NodePrimitives> OverlayManager<N> {
 
     /// Creates an overlay builder for `parent_hash`.
     pub fn overlay_builder(&self, parent_hash: B256) -> OverlayBuilder<N> {
-        let parent_state = self
-            .parent_chain(parent_hash)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .fold(None, |parent, block| Some(Arc::new(BlockState::with_parent(block, parent))));
+        let mut blocks = self.parent_chain(parent_hash).collect::<Vec<_>>();
+        let parent_state = blocks.pop().map(|oldest| {
+            blocks.into_iter().rev().fold(BlockState::new(oldest), |parent, block| {
+                BlockState::with_parent(block, Some(Arc::new(parent)))
+            })
+        });
         OverlayBuilder::new(parent_hash, parent_state, self.clone())
     }
 
