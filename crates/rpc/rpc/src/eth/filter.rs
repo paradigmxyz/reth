@@ -512,6 +512,10 @@ where
                     .into());
                 }
 
+                if !filter.matches_bloom(header.logs_bloom()) {
+                    return Ok(Vec::new())
+                }
+
                 let mut all_logs = Vec::new();
                 append_matching_block_logs(
                     &mut all_logs,
