@@ -438,26 +438,6 @@ where
             "Finished executing block range"
         );
 
-        // Prepare the input for post execute commit hook, where an `ExExNotification` will be sent.
-        //
-        // Note: Since we only write to `blocks` if there are any ExExes, we don't need to perform
-        // the `has_exexs` check here as well
-        if !blocks.is_empty() {
-            let previous_input = self.post_execute_commit_input.replace(Chain::new(
-                blocks,
-                state.clone(),
-                BTreeMap::new(),
-            ));
-
-            if previous_input.is_some() {
-                // Not processing the previous post execute commit input is a critical error, as it
-                // means that we didn't send the notification to ExExes
-                return Err(StageError::PostExecuteCommit(
-                    "Previous post execute commit input wasn't processed",
-                ))
-            }
-        }
-
         let time = Instant::now();
 
         if self.can_prune_changesets(provider, start_block, max_block)? {
@@ -525,6 +505,23 @@ where
             write = ?db_write_duration,
             "Execution time"
         );
+
+        // Prepare the input for post execute commit hook, where an `ExExNotification` will be sent.
+        //
+        // Note: Since we only write to `blocks` if there are any ExExes, we don't need to perform
+        // the `has_exexs` check here as well
+        if !blocks.is_empty() {
+            let previous_input =
+                self.post_execute_commit_input.replace(Chain::new(blocks, state, BTreeMap::new()));
+
+            if previous_input.is_some() {
+                // Not processing the previous post execute commit input is a critical error, as it
+                // means that we didn't send the notification to ExExes
+                return Err(StageError::PostExecuteCommit(
+                    "Previous post execute commit input wasn't processed",
+                ))
+            }
+        }
 
         let done = stage_progress == max_block;
         Ok(ExecOutput {
