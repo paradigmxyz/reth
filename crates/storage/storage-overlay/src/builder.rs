@@ -269,7 +269,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     }
 
     /// Returns the durable anchor to use for this builder's parent using known frontiers.
-    pub fn anchor_at_parent_with_frontiers<Provider>(
+    fn anchor_at_parent_with_frontiers<Provider>(
         &self,
         provider: &Provider,
         partial_state_trie: BlockNumHash,
@@ -278,13 +278,75 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     where
         Provider: BlockNumReader + PruneCheckpointReader,
     {
-        anchor_for_parent_with_frontiers(
-            self.parent_hash,
-            self.parent_state.iter().flat_map(|state| state.chain()).map(BlockState::block),
-            partial_state_trie,
-            finish,
-            provider,
-        )
+        use std::io::Error;
+
+        let persisted_parent = provider
+            .block_number(self.parent_hash)?
+            .filter(|&parent_number| parent_number <= partial_state_trie.number);
+
+        let mut finish_seen = self.parent_hash == finish.hash;
+        let anchor = if let Some(parent_number) = persisted_parent {
+            BlockNumHash::new(parent_number, self.parent_hash)
+        } else {
+            let mut in_mem_chain = self
+                .parent_state
+                .iter()
+                .flat_map(|state| state.chain())
+                .map(BlockState::block)
+                .inspect(|block| finish_seen |= block.recovered_block().hash() == finish.hash);
+
+            let anchor_hash =
+                anchor_for_parent_in(self.parent_hash, &mut in_mem_chain, partial_state_trie.hash);
+            if anchor_hash == partial_state_trie.hash {
+                BlockNumHash::new(partial_state_trie.number, anchor_hash)
+            } else {
+                let anchor_number = provider
+                    .convert_hash_or_number(anchor_hash.into())?
+                    .ok_or(ProviderError::BlockHashNotFound(anchor_hash))?;
+                BlockNumHash::new(anchor_number, anchor_hash)
+            }
+        };
+
+        finish_seen |= anchor.hash == finish.hash;
+
+        if anchor.number > partial_state_trie.number {
+            return Err(ProviderError::other(Error::other(format!(
+                "overlay anchor #{} ({}) is after partial state trie frontier #{} ({}); missing trie updates for blocks #{}..=#{}",
+                anchor.number,
+                anchor.hash,
+                partial_state_trie.number,
+                partial_state_trie.hash,
+                partial_state_trie.number + 1,
+                anchor.number,
+            ))))
+        }
+
+        // If the Finish block (db tip) was seen in the in-memory chain then we know that anchor is
+        // on the same chain as partial_state_trie as well. Given that anchor <= partial_state_trie,
+        // we can be sure that the in-memory chain is a superset of partial_state_trie+1..finish,
+        // and therefore can be used without reverts.
+        if finish_seen {
+            return Ok(AnchorForParent::NoReverts { anchor })
+        }
+
+        // Otherwise reverts are required; we check the changesets to make sure they are actually
+        // available before signaling that they are required.
+        let account_history = provider
+            .get_prune_checkpoint(PruneSegment::AccountHistory)?
+            .and_then(|checkpoint| checkpoint.block_number);
+        let storage_history = provider
+            .get_prune_checkpoint(PruneSegment::StorageHistory)?
+            .and_then(|checkpoint| checkpoint.block_number);
+        let lower_bound = account_history.max(storage_history).unwrap_or_default();
+        let available_range = lower_bound..=finish.number;
+        if !available_range.contains(&anchor.number) {
+            return Err(ProviderError::InsufficientChangesets {
+                requested: anchor.number,
+                available: available_range,
+            })
+        }
+
+        Ok(AnchorForParent::RevertsRequired { anchor, finish })
     }
 
     /// Builds the effective state trie overlay for the given provider.
@@ -699,119 +761,6 @@ impl AnchorForParent {
             Self::NoReverts { anchor, .. } | Self::RevertsRequired { anchor, .. } => *anchor,
         }
     }
-}
-
-/// Returns the anchor block to use for the target parent and a chain of in-memory blocks.
-///
-/// # Arguments
-/// * `parent`: The block whose post-state is being targeted.
-/// * `in_mem_chain`: Yields the in-memory blocks in the chain, starting at `parent_hash`.
-/// * `provider`: Used to resolve the durable frontiers and check changeset availability.
-pub fn anchor_for_parent<N, Provider>(
-    parent_hash: B256,
-    in_mem_chain: impl Iterator<Item = ExecutedBlock<N>>,
-    provider: &Provider,
-) -> ProviderResult<AnchorForParent>
-where
-    N: NodePrimitives,
-    Provider: StageCheckpointReader + BlockNumReader + PruneCheckpointReader,
-{
-    let (partial_state_trie, finish) = database_state_frontiers(provider)?;
-    anchor_for_parent_with_frontiers(
-        parent_hash,
-        in_mem_chain,
-        partial_state_trie,
-        finish,
-        provider,
-    )
-}
-
-/// Returns the anchor block to use for the target parent and a chain of in-memory blocks using
-/// known durable frontiers.
-///
-/// # Arguments
-/// * `parent`: The block whose post-state is being targeted.
-/// * `in_mem_chain`: Yields the in-memory blocks in the chain, starting at `parent_hash`.
-/// * `partial_state_trie`: The durable state/trie frontier.
-/// * `finish`: The durable Finish frontier.
-/// * `provider`: Used to resolve the parent and check changeset availability.
-pub fn anchor_for_parent_with_frontiers<N, Provider>(
-    parent_hash: B256,
-    in_mem_chain: impl Iterator<Item = ExecutedBlock<N>>,
-    partial_state_trie: BlockNumHash,
-    finish: BlockNumHash,
-    provider: &Provider,
-) -> ProviderResult<AnchorForParent>
-where
-    N: NodePrimitives,
-    Provider: BlockNumReader + PruneCheckpointReader,
-{
-    use std::io::Error;
-
-    let persisted_parent = provider
-        .block_number(parent_hash)?
-        .filter(|&parent_number| parent_number <= partial_state_trie.number);
-
-    let mut finish_seen = parent_hash == finish.hash;
-    let anchor = if let Some(parent_number) = persisted_parent {
-        BlockNumHash::new(parent_number, parent_hash)
-    } else {
-        let mut in_mem_chain = in_mem_chain.inspect(|block| {
-            finish_seen |= block.recovered_block().hash() == finish.hash;
-        });
-
-        let anchor_hash =
-            anchor_for_parent_in(parent_hash, &mut in_mem_chain, partial_state_trie.hash);
-        if anchor_hash == partial_state_trie.hash {
-            BlockNumHash::new(partial_state_trie.number, anchor_hash)
-        } else {
-            let anchor_number = provider
-                .convert_hash_or_number(anchor_hash.into())?
-                .ok_or(ProviderError::BlockHashNotFound(anchor_hash))?;
-            BlockNumHash::new(anchor_number, anchor_hash)
-        }
-    };
-
-    finish_seen |= anchor.hash == finish.hash;
-
-    if anchor.number > partial_state_trie.number {
-        return Err(ProviderError::other(Error::other(format!(
-                "overlay anchor #{} ({}) is after partial state trie frontier #{} ({}); missing trie updates for blocks #{}..=#{}",
-                anchor.number,
-                anchor.hash,
-                partial_state_trie.number,
-                partial_state_trie.hash,
-                partial_state_trie.number + 1,
-                anchor.number,
-            ))))
-    }
-
-    // If the Finish block (db tip) was seen in the in-memory chain then we know that anchor is on
-    // the same chain as partial_state_trie as well. Given that anchor <= partial_state_trie, we can
-    // be sure that the in-memory chain is a superset of partial_state_trie+1..finish, and therefore
-    // can be used without reverts.
-    if finish_seen {
-        return Ok(AnchorForParent::NoReverts { anchor })
-    }
-
-    // Otherwise reverts are required; we check the changesets to make sure they are actually
-    // available before signaling that they are required.
-    let account_history = provider
-        .get_prune_checkpoint(PruneSegment::AccountHistory)?
-        .and_then(|checkpoint| checkpoint.block_number);
-    let storage_history = provider
-        .get_prune_checkpoint(PruneSegment::StorageHistory)?
-        .and_then(|checkpoint| checkpoint.block_number);
-    let lower_bound = account_history.max(storage_history).unwrap_or_default();
-    let available_range = lower_bound..=finish.number;
-    if !available_range.contains(&anchor.number) {
-        return Err(ProviderError::InsufficientChangesets {
-            requested: anchor.number,
-            available: available_range,
-        })
-    }
-
-    Ok(AnchorForParent::RevertsRequired { anchor, finish })
 }
 
 #[cfg(test)]
