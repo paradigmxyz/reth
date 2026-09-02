@@ -235,7 +235,12 @@ impl<R: Resolver> DnsDiscoveryService<R> {
                 }
             },
             Err((err, link)) => {
-                debug!(target: "disc::dns",%err, ?link, "Failed to lookup root")
+                debug!(target: "disc::dns",%err, ?link, "Failed to lookup root");
+                // an already synced tree asked for this lookup and is waiting on it, so it has to
+                // be released even though the lookup failed
+                if let Some(tree) = self.trees.get_mut(&link) {
+                    tree.root_update_failed();
+                }
             }
         }
     }
@@ -413,6 +418,7 @@ mod tests {
     use std::{
         future::poll_fn,
         net::{IpAddr, Ipv4Addr},
+        num::NonZeroUsize,
     };
 
     fn entry_hash(entry_txt: &str) -> String {
@@ -609,6 +615,59 @@ mod tests {
             Poll::Ready(())
         })
         .await;
+    }
+
+    #[tokio::test]
+    async fn test_recheck_tree_survives_unchanged_root() {
+        reth_tracing::init_test_tracing();
+
+        let config = DnsDiscoveryConfig {
+            recheck_interval: Duration::from_millis(100),
+            // the default 3/s would leave the recheck lookup queued behind the initial tree walk
+            max_requests_per_sec: NonZeroUsize::new(50).unwrap(),
+            ..Default::default()
+        };
+
+        let secret_key = SecretKey::new(&mut thread_rng());
+        let resolver = Arc::new(MapResolver::default());
+        let s = "enrtree-root:v1 e=QFT4PBCRX4XQCV3VUYJ6BTCEPU l=JGUFMSAGI7KZYB3P7IZW4S5Y3A seq=3 sig=3FmXuVwpa8Y7OstZTx9PIb1mt8FrW7VpDOFv4AaGCsZ2EIHmhraWhe4NxYhQDlw5MjeFXYMbJjsPeKlHzmJREQE";
+        let mut root: TreeRootEntry = s.parse().unwrap();
+        root.sign(&secret_key).unwrap();
+
+        let link =
+            LinkEntry { domain: "nodes.example.org".to_string(), pubkey: secret_key.public() };
+        resolver.insert(link.domain.clone(), root.to_string());
+
+        let mut service = DnsDiscoveryService::new(Arc::clone(&resolver), config.clone());
+        service.sync_tree_with_link(link.clone());
+
+        // first recheck sees the very same root, which must not take the tree out of rotation
+        for _ in 0..10 {
+            poll_fn(|cx| {
+                let _ = service.poll(cx);
+                Poll::Ready(())
+            })
+            .await;
+            tokio::time::sleep(config.recheck_interval / 2).await;
+        }
+
+        // now publish a change and expect the tree to still pick it up
+        let mut new_root = root.clone();
+        new_root.sequence_number = new_root.sequence_number.saturating_add(1);
+        let enr = Enr::empty(&secret_key).unwrap();
+        let enr_txt = enr.to_base64();
+        new_root.enr_root = entry_hash(&enr_txt);
+        new_root.sign(&secret_key).unwrap();
+        resolver.insert(link.domain.clone(), new_root.to_string());
+        resolver.insert(format!("{}.{}", new_root.enr_root.clone(), link.domain), enr_txt);
+
+        let event = tokio::time::timeout(Duration::from_secs(10), poll_fn(|cx| service.poll(cx)))
+            .await
+            .expect("tree stopped rechecking after an unchanged root");
+
+        match event {
+            DnsDiscoveryEvent::Enr(discovered) => assert_eq!(discovered, enr),
+        }
     }
 
     #[tokio::test]

@@ -90,6 +90,16 @@ impl<K: EnrKeyUnambiguous> SyncTree<K> {
         Some(SyncAction::Enr(enr))
     }
 
+    /// Records that the scheduled root lookup failed.
+    ///
+    /// Without this the tree would stay in [`SyncState::RootUpdate`] and stop polling entirely,
+    /// so one failed lookup would take the tree out of rotation permanently. It retries at the
+    /// next recheck instead.
+    pub(crate) fn root_update_failed(&mut self) {
+        self.root_updated = Instant::now();
+        self.sync_state = SyncState::Active;
+    }
+
     /// Updates the root and returns what changed
     pub(crate) fn update_root(&mut self, root: TreeRootEntry) {
         let enr_unchanged = root.enr_root == self.root.enr_root;
@@ -99,8 +109,13 @@ impl<K: EnrKeyUnambiguous> SyncTree<K> {
         self.root_updated = Instant::now();
 
         let state = match (enr_unchanged, link_unchanged) {
-            // both unchanged — no resync needed
-            (true, true) => return,
+            // both unchanged, nothing to resync, but the tree still has to go back to waiting for
+            // the next recheck: staying in `RootUpdate` would park `poll` on `None` forever and
+            // the tree would never pick up a later change
+            // both unchanged, nothing to resync, but the tree still has to go back to waiting for
+            // the next recheck: staying in `RootUpdate` would park `poll` on `None` forever and
+            // the tree would never pick up a later change
+            (true, true) => SyncState::Active,
             // only ENR changed
             (false, true) => {
                 self.unresolved_nodes.clear();
@@ -191,6 +206,48 @@ mod tests {
         let same = base_root();
         tree.update_root(same);
         assert!(tree.poll(now, timeout).is_none());
+    }
+
+    #[test]
+    fn update_root_unchanged_still_rechecks_later() {
+        let mut tree = make_tree();
+        let timeout = Duration::from_secs(60);
+        advance_to_active(&mut tree);
+
+        // the recheck interval elapses and the root is looked up again
+        let due = Instant::now() + timeout * 2;
+        assert!(matches!(tree.poll(due, timeout), Some(SyncAction::UpdateRoot)));
+
+        // it comes back unchanged, so there is nothing to resync right now
+        tree.update_root(base_root());
+        assert!(tree.poll(Instant::now(), timeout).is_none());
+
+        // but the tree has to keep rechecking, otherwise it never picks up later changes
+        let later = Instant::now() + timeout * 4;
+        assert!(
+            matches!(tree.poll(later, timeout), Some(SyncAction::UpdateRoot)),
+            "tree stopped rechecking its root after an unchanged update"
+        );
+    }
+
+    #[test]
+    fn failed_root_update_still_rechecks_later() {
+        let mut tree = make_tree();
+        let timeout = Duration::from_secs(60);
+        advance_to_active(&mut tree);
+
+        let due = Instant::now() + timeout * 2;
+        assert!(matches!(tree.poll(due, timeout), Some(SyncAction::UpdateRoot)));
+
+        // the lookup failed, which must not take the tree out of rotation for good
+        tree.root_update_failed();
+        assert!(tree.poll(Instant::now(), timeout).is_none());
+
+        let later = Instant::now() + timeout * 4;
+        assert!(
+            matches!(tree.poll(later, timeout), Some(SyncAction::UpdateRoot)),
+            "tree stopped rechecking its root after a failed lookup"
+        );
     }
 
     #[test]
