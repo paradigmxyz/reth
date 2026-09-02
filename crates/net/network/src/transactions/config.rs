@@ -142,8 +142,8 @@ pub struct TransactionFetcherConfig {
     /// [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) request with hashes.
     pub soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
     /// Max number of announced transaction hashes to keep track of, i.e. hashes that were
-    /// announced but not fetched yet, both pending and inflight. Once reached, the oldest pending
-    /// hash is evicted for a newly announced one.
+    /// announced but not fetched yet, both pending and inflight. Once reached, the peer tracking
+    /// the most hashes gives up its oldest pending hash for a newly announced one.
     pub max_capacity_cache_txns_pending_fetch: u32,
     /// Max number of tracked hashes a single peer can be a candidate for. Announcements from a
     /// peer that exceed this limit are dropped.
