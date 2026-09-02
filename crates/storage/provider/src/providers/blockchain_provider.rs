@@ -158,18 +158,6 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         Ok(Box::new(state_provider_factory.database_provider_ro()?))
     }
 
-    /// Returns an overlay state provider using the database snapshot captured by `provider`.
-    fn state_provider_from_consistent(
-        &self,
-        provider: ConsistentProvider<N>,
-        block_hash: B256,
-    ) -> StateProviderBox {
-        Box::new(OverlayStateProvider::new(
-            provider.into_database_provider(),
-            self.database.overlay_manager().overlay_builder(block_hash),
-        ))
-    }
-
     /// Returns a cursor-backed state view for a state root still only in canonical in-memory
     /// blocks, overlaying their merged trie state on the persisted anchor.
     fn block_state_range_provider(
@@ -791,18 +779,20 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         let hash = provider
             .block_hash(block_number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        provider.ensure_canonical_block(block_number)?;
-        Ok(self.state_provider_from_consistent(provider, hash))
+        Ok(Box::new(OverlayStateProvider::new(
+            provider.into_database_provider(),
+            self.database.overlay_manager().overlay_builder(hash),
+        )))
     }
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
         let provider = self.consistent_provider()?;
-        let block_number = provider
-            .block_number(block_hash)?
-            .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-        provider.ensure_canonical_block(block_number)?;
-        Ok(self.state_provider_from_consistent(provider, block_hash))
+        provider.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
+        Ok(Box::new(OverlayStateProvider::new(
+            provider.into_database_provider(),
+            self.database.overlay_manager().overlay_builder(block_hash),
+        )))
     }
 
     fn state_by_block_hash(&self, hash: BlockHash) -> ProviderResult<StateProviderBox> {
