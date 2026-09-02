@@ -23,12 +23,14 @@ use std::{
 use tracing::debug;
 
 mod block_access_list;
+mod bytecode;
 mod request;
 mod storage;
 #[cfg(test)]
 mod test_utils;
 
 pub use block_access_list::*;
+pub use bytecode::*;
 use request::{SnapVerifier, VerifyingRequest};
 pub use storage::*;
 
