@@ -411,7 +411,6 @@ impl<N: NodePrimitives> OverlayManager<N> {
         self.execution_overlay_for_parent_inner(&parent_state, anchor_hash, false).map(drop)
     }
 
-    #[cfg(feature = "rayon")]
     fn execution_overlay_for_parent_inner(
         &self,
         parent_state: &BlockState<N>,
