@@ -262,6 +262,16 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         self
     }
 
+    /// Appends an executed block to this builder's in-memory parent state.
+    pub fn with_appended_block(mut self, block: ExecutedBlock<N>) -> Self {
+        debug_assert_eq!(block.recovered_block().parent_hash(), self.parent_hash);
+        self.parent_hash = block.recovered_block().hash();
+        self.parent_state =
+            Some(BlockState::with_parent(block, self.parent_state.take().map(Arc::new)));
+        self.reused_sparse_trie_anchor_hash = None;
+        self
+    }
+
     /// Returns the durable anchor to use for this builder's parent.
     #[cfg(test)]
     fn anchor_at_parent<Provider>(&self, provider: &Provider) -> ProviderResult<AnchorForParent>
@@ -1240,6 +1250,32 @@ mod tests {
                 .rev()
                 .map(|block| block.recovered_block().hash())
                 .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn builder_appends_block_to_parent_state() {
+        let manager = OverlayManager::default();
+        let blocks = test_blocks();
+        for block in &blocks[2..=4] {
+            manager.insert_block(block.clone());
+        }
+
+        let block = TestBlockBuilder::eth().get_executed_block_with_number(
+            blocks[4].recovered_block().number() + 1,
+            blocks[4].recovered_block().hash(),
+        );
+        let builder = manager
+            .overlay_builder(block.recovered_block().parent_hash())
+            .with_appended_block(block.clone());
+
+        assert_eq!(builder.parent_hash, block.recovered_block().hash());
+        assert_eq!(
+            builder.parent_state.unwrap().chain().map(BlockState::hash).collect::<Vec<_>>(),
+            std::iter::once(&block)
+                .chain(blocks[2..=4].iter().rev())
+                .map(|block| block.recovered_block().hash())
+                .collect::<Vec<_>>(),
         );
     }
 

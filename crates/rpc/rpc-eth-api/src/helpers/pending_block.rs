@@ -8,7 +8,7 @@ use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types_eth::{BlockNumberOrTag, BlockOverrides};
 use futures::Future;
-use reth_chain_state::{BlockState, ExecutedBlock};
+use reth_chain_state::{ExecutedBlock, StateProviderWithAppendedBlock};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
 use reth_evm::{
@@ -119,14 +119,11 @@ pub trait LoadPendingBlock:
                 return Ok(None);
             };
 
-            let latest_historical = self
-                .provider()
-                .history_by_block_hash(pending_block.block().parent_hash())
-                .map_err(Self::Error::from_eth_err)?;
-
-            let state = BlockState::from(pending_block);
-
-            Ok(Some(Box::new(state.state_provider(latest_historical)) as StateProviderBox))
+            Ok(Some(
+                self.provider()
+                    .state_provider_with_appended_block(pending_block.executed_block)
+                    .map_err(Self::Error::from_eth_err)?,
+            ))
         }
     }
 

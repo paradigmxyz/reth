@@ -1,6 +1,6 @@
 //! Helper trait for interfacing with [`FullNodeComponents`].
 
-use reth_chain_state::CanonStateSubscriptions;
+use reth_chain_state::{CanonStateSubscriptions, StateProviderWithAppendedBlock};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
@@ -36,6 +36,7 @@ pub trait RpcNodeCore: Clone + Send + Sync + Unpin + 'static {
                            + Hardforks
                            + EthereumHardforks,
         > + StateProviderFactory
+        + StateProviderWithAppendedBlock<Self::Primitives>
         + CanonStateSubscriptions<Primitives = Self::Primitives>
         + StageCheckpointReader
         + PruneCheckpointReader
@@ -67,7 +68,10 @@ pub trait RpcNodeCore: Clone + Send + Sync + Unpin + 'static {
 
 impl<T> RpcNodeCore for T
 where
-    T: FullNodeComponents<Provider: ChainSpecProvider<ChainSpec: Hardforks + EthereumHardforks>>,
+    T: FullNodeComponents<
+        Provider: ChainSpecProvider<ChainSpec: Hardforks + EthereumHardforks>
+                      + StateProviderWithAppendedBlock<PrimitivesTy<T::Types>>,
+    >,
 {
     type Primitives = PrimitivesTy<T::Types>;
     type Provider = T::Provider;
@@ -131,6 +135,7 @@ where
                            + Hardforks
                            + EthereumHardforks,
         > + StateProviderFactory
+        + StateProviderWithAppendedBlock<Evm::Primitives>
         + CanonStateSubscriptions<Primitives = Evm::Primitives>
         + StageCheckpointReader
         + PruneCheckpointReader

@@ -16,8 +16,8 @@ use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes, TxHash, TxNumber, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chain_state::{
-    CanonicalInMemoryState, ForkChoiceNotifications, ForkChoiceSubscriptions,
-    PersistedBlockNotifications, PersistedBlockSubscriptions,
+    CanonicalInMemoryState, ExecutedBlock, ForkChoiceNotifications, ForkChoiceSubscriptions,
+    PersistedBlockNotifications, PersistedBlockSubscriptions, StateProviderWithAppendedBlock,
 };
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
@@ -837,6 +837,22 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         }
 
         Ok(None)
+    }
+}
+
+impl<N: ProviderNodeTypes> StateProviderWithAppendedBlock<N::Primitives> for BlockchainProvider<N> {
+    fn state_provider_with_appended_block(
+        &self,
+        block: ExecutedBlock<N::Primitives>,
+    ) -> ProviderResult<StateProviderBox> {
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            self.database.clone(),
+            self.database
+                .overlay_manager()
+                .overlay_builder(block.recovered_block().parent_hash())
+                .with_appended_block(block),
+        );
+        Ok(Box::new(state_provider_factory.database_provider_ro()?))
     }
 }
 

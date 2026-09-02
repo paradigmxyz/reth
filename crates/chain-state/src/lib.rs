@@ -11,6 +11,9 @@
 mod execution_stats;
 pub use execution_stats::ExecutionTimingStats;
 
+mod appended_block;
+pub use appended_block::StateProviderWithAppendedBlock;
+
 mod in_memory;
 pub use in_memory::*;
 
@@ -29,9 +32,6 @@ pub use notifications::{
     ForkChoiceSubscriptions, PersistedBlockNotifications, PersistedBlockSubscriptions,
     WatchValueStream,
 };
-
-mod memory_overlay;
-pub use memory_overlay::{MemoryOverlayStateProvider, MemoryOverlayStateProviderRef};
 
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers
