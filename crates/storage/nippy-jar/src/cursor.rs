@@ -2,6 +2,7 @@ use crate::{
     compression::{Compression, Compressors, Zstd},
     DataReader, NippyJar, NippyJarError, NippyJarHeader, RefRow,
 };
+use smallvec::SmallVec;
 use std::{ops::Range, sync::Arc};
 use zstd::bulk::Decompressor;
 
@@ -83,7 +84,7 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
             return Ok(None)
         }
 
-        let mut row = Vec::with_capacity(self.jar.columns);
+        let mut row = ValueRanges::with_capacity(self.jar.columns);
 
         // Retrieve all column values from the row
         for column in 0..self.jar.columns {
@@ -124,7 +125,7 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
         }
 
         let columns = self.jar.columns;
-        let mut row = Vec::with_capacity(columns);
+        let mut row = ValueRanges::with_capacity(columns);
 
         for column in 0..columns {
             if mask & (1 << column) != 0 {
@@ -144,11 +145,7 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
     }
 
     /// Takes the column index and reads the range value for the corresponding column.
-    fn read_value(
-        &mut self,
-        column: usize,
-        row: &mut Vec<ValueRange>,
-    ) -> Result<(), NippyJarError> {
+    fn read_value(&mut self, column: usize, row: &mut ValueRanges) -> Result<(), NippyJarError> {
         // Find out the offset of the column value
         let offset_pos = self.row as usize * self.jar.columns + column;
         let value_offset = self.reader.offset(offset_pos)? as usize;
@@ -205,3 +202,11 @@ enum ValueRange {
     Mmap(Range<usize>),
     Internal(Range<usize>),
 }
+
+/// The column value ranges of a single row, mirroring the inline capacity of [`RefRow`].
+///
+/// The ranges are collected before they are resolved into slices because [`read_value`] borrows the
+/// internal buffer mutably while filling it.
+///
+/// [`read_value`]: NippyJarCursor::read_value
+type ValueRanges = SmallVec<[ValueRange; 4]>;
