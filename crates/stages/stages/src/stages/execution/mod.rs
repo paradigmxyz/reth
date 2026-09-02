@@ -438,10 +438,22 @@ where
             "Finished executing block range"
         );
 
+        // The ExEx notification must carry the outcome as executed, so a copy is only taken if the
+        // state is modified below before it is written.
+        let mut exex_state = None;
+
         let time = Instant::now();
 
         if self.can_prune_changesets(provider, start_block, max_block)? {
             let prune_modes = provider.prune_modes_ref();
+
+            if !blocks.is_empty() &&
+                exex_state.is_none() &&
+                prune_modes.account_history.is_some() &&
+                prune_modes.storage_history.is_some()
+            {
+                exex_state = Some(state.clone());
+            }
 
             // Iterate over all reverts and clear them if pruning is configured.
             for block_number in start_block..=max_block {
@@ -478,6 +490,9 @@ where
 
             let path = provider.storage_path().join("preimage");
             if !provider.chain_spec().is_cancun_active_at_timestamp(start_header.timestamp()) {
+                if !blocks.is_empty() && exex_state.is_none() {
+                    exex_state = Some(state.clone());
+                }
                 slot_preimages::inject_plain_wipe_slots(&path, provider, &mut state)?;
             } else if path.exists() {
                 // Post-Cancun: no more self-destructs, preimage db is no longer needed.
@@ -511,8 +526,11 @@ where
         // Note: Since we only write to `blocks` if there are any ExExes, we don't need to perform
         // the `has_exexs` check here as well
         if !blocks.is_empty() {
-            let previous_input =
-                self.post_execute_commit_input.replace(Chain::new(blocks, state, BTreeMap::new()));
+            let previous_input = self.post_execute_commit_input.replace(Chain::new(
+                blocks,
+                exex_state.unwrap_or(state),
+                BTreeMap::new(),
+            ));
 
             if previous_input.is_some() {
                 // Not processing the previous post execute commit input is a critical error, as it
