@@ -1082,8 +1082,9 @@ impl DedupPayload for NewPooledTransactionHashes66 {
     fn dedup(self) -> PartiallyValidData<Self::Value> {
         let Self(hashes) = self;
         let mut seen = B256Set::with_capacity_and_hasher(hashes.len(), Default::default());
-        let data = hashes.into_iter().filter(|hash| seen.insert(*hash)).map(|hash| (hash, None));
-        PartiallyValidData::from_raw_data_eth66(data.collect())
+        let mut data = Vec::with_capacity(hashes.len());
+        data.extend(hashes.into_iter().filter(|hash| seen.insert(*hash)).map(|hash| (hash, None)));
+        PartiallyValidData::from_raw_data_eth66(data)
     }
 }
 
@@ -1095,13 +1096,16 @@ fn dedup_announcement(
     sizes: Vec<usize>,
 ) -> Vec<(TxHash, Eth68TxMetadata)> {
     let mut seen = B256Set::with_capacity_and_hasher(hashes.len(), Default::default());
-    hashes
-        .into_iter()
-        .zip(types)
-        .zip(sizes)
-        .filter(|((hash, _), _)| seen.insert(*hash))
-        .map(|((hash, ty), size)| (hash, Some((ty, size))))
-        .collect()
+    let mut data = Vec::with_capacity(hashes.len());
+    data.extend(
+        hashes
+            .into_iter()
+            .zip(types)
+            .zip(sizes)
+            .filter(|((hash, _), _)| seen.insert(*hash))
+            .map(|((hash, ty), size)| (hash, Some((ty, size)))),
+    );
+    data
 }
 
 /// Interface for handling mempool message data. Used in various filters in pipelines in
