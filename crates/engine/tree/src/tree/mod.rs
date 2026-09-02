@@ -308,6 +308,8 @@ where
     persistence_state: PersistenceState,
     /// Flag indicating the state of the node's backfill synchronization process.
     backfill_sync_state: BackfillSyncState,
+    /// Whether a backfill request must be re-evaluated after persistence and payload jobs drain.
+    pending_backfill_revalidation: bool,
     /// Keeps track of the state of the canonical chain that isn't persisted yet.
     /// This is intended to be accessed from external sources, such as rpc.
     canonical_in_memory_state: CanonicalInMemoryState<N>,
@@ -353,6 +355,7 @@ where
             .field("persistence", &self.persistence)
             .field("persistence_state", &self.persistence_state)
             .field("backfill_sync_state", &self.backfill_sync_state)
+            .field("pending_backfill_revalidation", &self.pending_backfill_revalidation)
             .field("canonical_in_memory_state", &self.canonical_in_memory_state)
             .field("payload_builder", &self.payload_builder)
             .field("config", &self.config)
@@ -418,6 +421,7 @@ where
             persistence,
             persistence_state,
             backfill_sync_state: BackfillSyncState::Idle,
+            pending_backfill_revalidation: false,
             state,
             canonical_in_memory_state,
             payload_builder,
@@ -1475,6 +1479,17 @@ where
         if !self.persistence_state.in_progress() {
             if let Some(new_tip_num) = self.find_disk_reorg()? {
                 self.remove_blocks(new_tip_num)
+            } else if self.pending_backfill_revalidation &&
+                !self.payload_builds.is_active() &&
+                self.persistence_state.last_state_trie_persisted_block !=
+                    self.persistence_state.last_persisted_block
+            {
+                let Some(input) = self.get_save_blocks_input(PersistTarget::Persisted) else {
+                    return Err(AdvancePersistenceError::StateTrieCatchupUnavailable)
+                };
+                self.persist_blocks(input);
+            } else if self.pending_backfill_revalidation && !self.payload_builds.is_active() {
+                self.revalidate_pending_backfill()?;
             } else if let Some(input) = self.get_save_blocks_input(PersistTarget::Threshold) {
                 self.persist_blocks(input);
             }
@@ -1665,6 +1680,7 @@ where
             FromEngine::Event(event) => match event {
                 FromOrchestrator::BackfillSyncStarted => {
                     debug!(target: "engine::tree", "received backfill sync started event");
+                    self.pending_backfill_revalidation = false;
                     self.backfill_sync_state = BackfillSyncState::Active;
                 }
                 FromOrchestrator::BackfillSyncFinished(ctrl) => {
@@ -1913,6 +1929,7 @@ where
         ctrl: ControlFlow,
     ) -> Result<(), InsertBlockFatalError> {
         debug!(target: "engine::tree", "received backfill sync finished event");
+        self.pending_backfill_revalidation = false;
         self.backfill_sync_state = BackfillSyncState::Idle;
 
         // Pipeline unwound, memorize the invalid block and wait for CL for next sync target.
@@ -2163,11 +2180,59 @@ where
         }
     }
 
+    /// Re-evaluates whether a deferred backfill is still required after persistence catches up.
+    fn revalidate_pending_backfill(&mut self) -> ProviderResult<()> {
+        debug_assert!(self.pending_backfill_revalidation);
+        debug_assert!(self.backfill_sync_state.is_pending());
+
+        let sync_target_state = self.state.forkchoice_state_tracker.sync_target_state();
+        let backfill_target = if let Some(state) = sync_target_state {
+            let configured_target = self.backfill_target_hash(state);
+            let target_hash =
+                if configured_target.is_zero() { state.head_block_hash } else { configured_target };
+            let target_number = if let Some(block) = self.state.buffer.block(&target_hash) {
+                Some(block.number())
+            } else {
+                self.sealed_header_by_hash(target_hash)?.map(|header| header.number())
+            };
+
+            target_number.and_then(|target_number| {
+                self.backfill_sync_target(
+                    self.state.tree_state.canonical_block_number(),
+                    target_number,
+                    None,
+                )
+            })
+        } else {
+            None
+        };
+
+        self.pending_backfill_revalidation = false;
+        if let Some(target) = backfill_target {
+            self.dispatch_backfill_action(BackfillAction::Start(target.into()));
+            return Ok(())
+        }
+
+        self.backfill_sync_state = BackfillSyncState::Idle;
+        debug!(target: "engine::tree", "dropping deferred backfill after re-evaluation");
+
+        // The target may have changed while persistence was draining. Resume the live-sync
+        // download flow so a newer target can produce a fresh backfill decision.
+        if let Some(state) = sync_target_state &&
+            state.head_block_hash != self.state.tree_state.canonical_block_hash()
+        {
+            let target = self.lowest_buffered_ancestor_or(state.head_block_hash);
+            self.send_event(EngineApiEvent::Download(DownloadRequest::single_block(target)));
+        }
+
+        Ok(())
+    }
+
     /// Emits an outgoing event to the engine.
     fn emit_event(&mut self, event: impl Into<EngineApiEvent<N>>) {
         let event = event.into();
 
-        if event.is_backfill_action() {
+        if let EngineApiEvent::BackfillAction(action) = event {
             debug_assert_eq!(
                 self.backfill_sync_state,
                 BackfillSyncState::Idle,
@@ -2176,19 +2241,49 @@ where
 
             if self.payload_builds.is_active() ||
                 self.persistence_state.in_progress() ||
-                self.pending_persisted_handoff.is_some()
+                self.pending_persisted_handoff.is_some() ||
+                self.persistence_state.last_state_trie_persisted_block !=
+                    self.persistence_state.last_persisted_block
             {
                 // Backfill can remove the same in-memory blocks as an active payload job or a
-                // persisted handoff, so it must not start until the next sync trigger.
-                debug!(target: "engine::tree", "skipping backfill while in-memory overlay is in use");
+                // persistence handoff. Enter pending mode to prevent new payload jobs and
+                // re-evaluate the current sync target after all readers and writes drain.
+                debug!(
+                    target: "engine::tree",
+                    last_persisted_block = self.persistence_state.last_persisted_block.number,
+                    last_state_trie_persisted_block = self
+                        .persistence_state
+                        .last_state_trie_persisted_block
+                        .number,
+                    "deferring backfill until persistence and payload jobs drain"
+                );
+                self.pending_backfill_revalidation = true;
+                self.backfill_sync_state = BackfillSyncState::Pending;
                 return
             }
 
-            self.backfill_sync_state = BackfillSyncState::Pending;
-            self.metrics.engine.pipeline_runs.increment(1);
-            debug!(target: "engine::tree", "emitting backfill action event");
+            self.dispatch_backfill_action(action);
+            return
         }
 
+        self.send_event(event);
+    }
+
+    /// Dispatches a validated backfill action to the orchestrator.
+    fn dispatch_backfill_action(&mut self, action: BackfillAction) {
+        debug_assert!(
+            self.backfill_sync_state.is_idle() || self.backfill_sync_state.is_pending(),
+            "backfill action can only be dispatched while idle or pending"
+        );
+        self.pending_backfill_revalidation = false;
+        self.backfill_sync_state = BackfillSyncState::Pending;
+        self.metrics.engine.pipeline_runs.increment(1);
+        debug!(target: "engine::tree", "emitting backfill action event");
+        self.send_event(EngineApiEvent::BackfillAction(action));
+    }
+
+    /// Sends an event to the orchestrator.
+    fn send_event(&self, event: EngineApiEvent<N>) {
         let _ = self.outgoing.send(event).inspect_err(
             |err| error!(target: "engine::tree", "Failed to send internal event: {err:?}"),
         );
@@ -2197,8 +2292,9 @@ where
     /// Returns the blocks and frontiers for the next persistence cycle, if one should start.
     ///
     /// Threshold persistence honors the normal scheduling gates and retains the configured
-    /// in-memory block buffer. Head persistence bypasses those gates during shutdown and returns
-    /// `None` once both persistence frontiers have reached the canonical head.
+    /// in-memory block buffer. Persisted-target persistence catches the state/trie frontier up to
+    /// the existing database tip. Head persistence bypasses those gates during shutdown and
+    /// returns `None` once both persistence frontiers have reached the canonical head.
     fn get_save_blocks_input(&self, target: PersistTarget) -> Option<SaveBlocksInput<N>> {
         // We will calculate the state root using the database, so we need to be sure there are no
         // changes
@@ -2210,6 +2306,14 @@ where
 
         let (new_db_tip, new_partial_state_trie) = match target {
             PersistTarget::Head => (canonical_head_number, canonical_head_number),
+            PersistTarget::Persisted => {
+                // Catch-up persistence is the transition into pipeline sync, so it deliberately
+                // runs while backfill is pending and bypasses the normal threshold gates.
+                debug_assert!(self.pending_backfill_revalidation);
+                debug_assert!(self.backfill_sync_state.is_pending());
+                debug_assert!(!self.payload_builds.is_active());
+                (prev_db_tip, prev_db_tip)
+            }
             PersistTarget::Threshold => {
                 if (self.config.suppress_persistence_during_build() &&
                     self.payload_builds.is_active()) ||
@@ -3655,6 +3759,8 @@ enum PersistTarget {
     Threshold,
     /// Persist all blocks up to and including the canonical head.
     Head,
+    /// Persist state/trie updates through the persisted block frontier.
+    Persisted,
 }
 
 /// Result of waiting for caches to become available.
