@@ -73,6 +73,12 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         Ok(Self { storage_provider, head_block, canonical_in_memory_state: state })
     }
 
+    /// Returns a valid non-canonical block retained by the engine tree for a hash lookup.
+    fn fork_block(&self, id: BlockHashOrNumber) -> Option<Arc<RecoveredBlock<BlockTy<N>>>> {
+        let BlockHashOrNumber::Hash(hash) = id else { return None };
+        self.canonical_in_memory_state.fork_block(hash)
+    }
+
     // Helper function to convert range bounds
     fn convert_range_bounds<T>(
         &self,
@@ -465,11 +471,12 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
     type Header = HeaderTy<N>;
 
     fn header(&self, block_hash: BlockHash) -> ProviderResult<Option<Self::Header>> {
-        self.get_in_memory_or_storage_by_block(
+        let header = self.get_in_memory_or_storage_by_block(
             block_hash.into(),
             |db_provider| db_provider.header(block_hash),
             |block_state| Ok(Some(block_state.block_ref().recovered_block().clone_header())),
-        )
+        )?;
+        Ok(header.or_else(|| self.fork_block(block_hash.into()).map(|b| b.clone_header())))
     }
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::Header>> {
@@ -573,11 +580,12 @@ impl<N: ProviderNodeTypes> BlockNumReader for ConsistentProvider<N> {
     }
 
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
-        self.get_in_memory_or_storage_by_block(
+        let number = self.get_in_memory_or_storage_by_block(
             hash.into(),
             |db_provider| db_provider.block_number(hash),
             |block_state| Ok(Some(block_state.number())),
-        )
+        )?;
+        Ok(number.or_else(|| self.fork_block(hash.into()).map(|b| b.number())))
     }
 }
 
@@ -614,11 +622,18 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         }
 
         if matches!(source, BlockSource::Pending | BlockSource::Any) {
-            return Ok(self
+            let pending = self
                 .canonical_in_memory_state
                 .pending_block()
                 .filter(|b| b.hash() == hash)
-                .map(|b| b.into_block()))
+                .map(|b| b.into_block());
+            if pending.is_some() {
+                return Ok(pending)
+            }
+        }
+
+        if matches!(source, BlockSource::Any) {
+            return Ok(self.fork_block(hash.into()).map(|b| b.clone_block()))
         }
 
         Ok(None)
@@ -654,15 +669,20 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
             }
         }
 
+        if matches!(source, BlockSource::Any) {
+            return Ok(self.fork_block(hash.into()).map(SealedOrRecoveredBlock::recovered_arc))
+        }
+
         Ok(None)
     }
 
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
-        self.get_in_memory_or_storage_by_block(
+        let block = self.get_in_memory_or_storage_by_block(
             id,
             |db_provider| db_provider.block(id),
             |block_state| Ok(Some(block_state.block_ref().recovered_block().clone_block())),
-        )
+        )?;
+        Ok(block.or_else(|| self.fork_block(id).map(|b| b.clone_block())))
     }
 
     fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
@@ -686,11 +706,12 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        self.get_in_memory_or_storage_by_block(
+        let block = self.get_in_memory_or_storage_by_block(
             id,
             |db_provider| db_provider.recovered_block(id, transaction_kind),
             |block_state| Ok(Some(block_state.block().recovered_block().clone())),
-        )
+        )?;
+        Ok(block.or_else(|| self.fork_block(id).map(|b| (*b).clone())))
     }
 
     fn sealed_block_with_senders(
@@ -698,11 +719,12 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        self.get_in_memory_or_storage_by_block(
+        let block = self.get_in_memory_or_storage_by_block(
             id,
             |db_provider| db_provider.sealed_block_with_senders(id, transaction_kind),
             |block_state| Ok(Some(block_state.block().recovered_block().clone())),
-        )
+        )?;
+        Ok(block.or_else(|| self.fork_block(id).map(|b| (*b).clone())))
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Self::Block>> {
@@ -1487,8 +1509,11 @@ mod tests {
     use reth_db_api::models::AccountBeforeTx;
     use reth_ethereum_primitives::Block;
     use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, ExecutionOutcome};
-    use reth_primitives_traits::{RecoveredBlock, SealedBlock};
-    use reth_storage_api::{BlockReader, BlockSource, ChangeSetReader, StateReader};
+    use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
+    use reth_storage_api::{
+        BlockNumReader, BlockReader, BlockSource, ChangeSetReader, HeaderProvider, StateReader,
+        TransactionVariant,
+    };
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_eoa_accounts, BlockRangeParams,
     };
@@ -1673,6 +1698,56 @@ mod tests {
             .expect("pending block should be found");
         assert_eq!(block.sealed_block(), last_in_mem_block);
         assert!(block.recovered_block().is_some());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_block_reader_finds_engine_tree_fork_by_hash() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let factory = create_test_provider_factory();
+        let provider = BlockchainProvider::with_latest(factory, SealedHeader::default())?;
+        let block = random_block_range(
+            &mut rng,
+            1..=1,
+            BlockRangeParams { parent: Some(B256::random()), tx_count: 0..1, ..Default::default() },
+        )
+        .pop()
+        .unwrap();
+        let recovered = Arc::new(RecoveredBlock::new_sealed(
+            block.clone(),
+            block.senders().expect("failed to recover senders"),
+        ));
+
+        provider.canonical_in_memory_state.insert_fork_block(recovered.clone());
+        let consistent_provider = provider.consistent_provider()?;
+
+        assert_eq!(
+            consistent_provider.find_block_by_hash(block.hash(), BlockSource::Any)?,
+            Some(block.clone().into_block())
+        );
+        assert_eq!(
+            consistent_provider.find_block_by_hash(block.hash(), BlockSource::Canonical)?,
+            None
+        );
+        assert_eq!(
+            consistent_provider.find_block_by_hash(block.hash(), BlockSource::Pending)?,
+            None
+        );
+        assert_eq!(
+            consistent_provider.block(block.hash().into())?,
+            Some(block.clone().into_block())
+        );
+        assert_eq!(
+            consistent_provider
+                .sealed_block_with_senders(block.hash().into(), TransactionVariant::WithHash)?,
+            Some((*recovered).clone())
+        );
+        assert_eq!(consistent_provider.header(block.hash())?, Some(block.header().clone()));
+        assert_eq!(consistent_provider.block_number(block.hash())?, Some(block.number));
+
+        provider.canonical_in_memory_state.remove_fork_blocks([block.hash()]);
+        assert!(consistent_provider.block(block.hash().into())?.is_none());
 
         Ok(())
     }
