@@ -5,6 +5,7 @@ use crate::{
     metrics::{DatabaseEnvMetrics, Operation, TransactionMode, TransactionOutcome},
     DatabaseError,
 };
+use quanta::Instant;
 use reth_db_api::{
     table::{Compress, DupSort, Encode, IntoVec, Table, TableImporter},
     transaction::{DbTx, DbTxMut},
@@ -20,7 +21,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 /// Duration after which we emit the log about long-lived database transactions.
@@ -177,6 +178,10 @@ struct MetricsHandler<K: TransactionKind> {
     /// Cached internal transaction ID provided by libmdbx.
     txn_id: u64,
     /// The time when transaction has started.
+    ///
+    /// This is a TSC-backed [`quanta::Instant`] rather than [`std::time::Instant`] because
+    /// [`MetricsHandler::log_backtrace_on_long_read_transaction`] reads it on every database
+    /// operation.
     start: Instant,
     /// Duration after which we emit the log about long-lived database transactions.
     long_transaction_duration: Duration,
