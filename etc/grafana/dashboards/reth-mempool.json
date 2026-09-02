@@ -2853,7 +2853,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Duration of one call to `TransactionFetcher::on_fetch_pending_hashes`.\n\nFind Peer - find an idle fallback peer for a hash pending fetch.\n\nFill Request - fill `GetPooledTransactions` request, for the found peer, with more hashes from cache of hashes pending fetch. ",
+      "description": "Rate of announced transaction hashes the fetcher drops.\n\nAt Capacity - the fetcher already tracks the maximum number of hashes.\n\nPeer Limit - the announcing peer is already a candidate for the maximum number of hashes.\n\nNo Peer Left - all peers that announced the hash failed to deliver it or disconnected.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2906,7 +2906,7 @@
               }
             ]
           },
-          "unit": "s"
+          "unit": "short"
         },
         "overrides": []
       },
@@ -2936,15 +2936,15 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_network_duration_find_idle_fallback_peer_for_any_pending_hash{$instance_label=\"$instance\"}",
+          "editorMode": "code",
+          "expr": "rate(reth_network_announced_hashes_dropped_at_capacity{$instance_label=\"$instance\"}[$__rate_interval])",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
           "instant": false,
-          "legendFormat": "Find Idle Peer",
+          "legendFormat": "At Capacity",
           "range": true,
-          "refId": "C",
+          "refId": "A",
           "useBackend": false
         },
         {
@@ -2953,19 +2953,36 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_network_duration_fill_request_from_hashes_pending_fetch{$instance_label=\"$instance\"}",
+          "editorMode": "code",
+          "expr": "rate(reth_network_announced_hashes_dropped_peer_limit{$instance_label=\"$instance\"}[$__rate_interval])",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
           "instant": false,
-          "legendFormat": "Fill Request",
+          "legendFormat": "Peer Limit",
           "range": true,
           "refId": "B",
           "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "code",
+          "expr": "rate(reth_network_hashes_dropped_no_candidate_peers{$instance_label=\"$instance\"}[$__rate_interval])",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "No Peer Left",
+          "range": true,
+          "refId": "C",
+          "useBackend": false
         }
       ],
-      "title": "Fetch Hashes Pending Fetch Duration",
+      "title": "Transaction Fetcher Dropped Hashes",
       "type": "timeseries"
     },
     {

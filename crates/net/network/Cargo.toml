@@ -101,6 +101,7 @@ alloy-genesis.workspace = true
 alloy-trie.workspace = true
 
 # misc
+criterion.workspace = true
 test-case.workspace = true
 url.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }
@@ -153,3 +154,13 @@ test-utils = [
     "reth-trie/test-utils",
     "reth-evm/test-utils",
 ]
+
+[[bench]]
+name = "tx_fetcher"
+harness = false
+required-features = ["test-utils"]
+
+[[bench]]
+name = "tx_manager_fetching"
+harness = false
+required-features = ["test-utils"]
