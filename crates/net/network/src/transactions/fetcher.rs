@@ -234,9 +234,9 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
 
     /// Sends `GetPooledTransactions` requests to idle peers that have queued hashes.
     ///
-    /// Stops when the global inflight request limit is reached, or when at least
-    /// `max_fetching_hashes` hashes are inflight, which lets the caller bound the number of
-    /// transactions it may have to process at once.
+    /// Stops when the global inflight request limit is reached, or when `max_fetching_hashes`
+    /// hashes are inflight. Requests are cut down to what that budget leaves, which lets the
+    /// caller bound the number of transactions it may have to process at once.
     ///
     /// Returns the number of requests sent. New requests are only polled by the next call to
     /// [`Stream::poll_next`], so the caller must poll the fetcher again if any were sent.
@@ -261,7 +261,9 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             // the session is gone if the manager doesn't know the peer anymore
             let Some(session) = peers.get(&peer_id) else { continue };
 
-            let hashes = self.pack_request(key);
+            let limit = (max_fetching_hashes - self.num_fetching)
+                .min(SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST);
+            let hashes = self.pack_request(key, limit);
             if hashes.is_empty() {
                 continue
             }
@@ -375,19 +377,16 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     }
 
     /// Drains the peer's queue into a request, in announcement order, until the request holds
-    /// [`SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST`] hashes or the expected
-    /// response size reaches the configured soft limit. A transaction that on its own exceeds the
-    /// limit is requested alone.
+    /// `max_hashes` hashes or the expected response size reaches the configured soft limit. A
+    /// transaction that on its own exceeds the size limit is requested alone.
     ///
     /// The returned hashes are marked as being fetched by the peer.
-    fn pack_request(&mut self, key: PeerKey) -> Vec<TxHash> {
+    fn pack_request(&mut self, key: PeerKey, max_hashes: usize) -> Vec<TxHash> {
         let max_bytes =
             self.config.soft_limit_byte_size_pooled_transactions_response_on_pack_request;
         let Some(peer) = self.peers.get_mut(&key) else { return Vec::new() };
 
-        let mut hashes = Vec::with_capacity(
-            peer.queue.len().min(SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST),
-        );
+        let mut hashes = Vec::with_capacity(peer.queue.len().min(max_hashes));
         let mut bytes = 0;
 
         while let Some(hash) = peer.queue.pop_front() {
@@ -409,7 +408,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             bytes += size;
             hashes.push(hash);
 
-            if hashes.len() >= SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST {
+            if hashes.len() >= max_hashes {
                 break
             }
         }
@@ -670,8 +669,30 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             assert!(self.peers.contains_key(key), "{peer_id:#} maps to an unknown key");
         }
 
+        // a pending hash is queued for every connected candidate, otherwise it could starve
+        let queued = self
+            .peers
+            .iter()
+            .map(|(key, peer)| (*key, peer.queue.iter().copied().collect::<B256Set>()))
+            .collect::<HashMap<_, _>>();
+        for (hash, entry) in &self.hashes {
+            if entry.fetching_by.is_some() {
+                continue
+            }
+            for candidate in &entry.candidates {
+                if let Some(queue) = queued.get(candidate) {
+                    assert!(queue.contains(hash), "pending {hash} is not queued for {candidate:?}");
+                }
+            }
+        }
+
         let inflight = self.peers.values().map(|peer| peer.inflight as usize).sum::<usize>();
         assert!(inflight <= self.inflight.len(), "peers claim more inflight requests than exist");
+    }
+
+    /// Returns the number of peers the fetcher tracks.
+    pub fn num_peers(&self) -> usize {
+        self.peers.len()
     }
 }
 
@@ -760,8 +781,9 @@ impl TxEntry {
 #[derive(Debug)]
 struct PeerState {
     peer_id: PeerId,
-    /// Hashes the peer announced, oldest first. Entries are removed lazily, so the queue may
-    /// contain hashes that are not tracked anymore or are being fetched from another peer.
+    /// Hashes the peer announced, oldest first. Entries are removed lazily and a hash that is
+    /// rescheduled after a failed request is queued again, so the queue may contain hashes that
+    /// are not tracked anymore, are being fetched from another peer, or duplicates.
     queue: VecDeque<TxHash>,
     /// Number of tracked hashes that list this peer as a candidate.
     tracked: usize,
@@ -845,11 +867,15 @@ mod tests {
     use crate::test_utils::transactions::new_mock_session_with_capacity;
     use alloy_consensus::transaction::Recovered;
     use alloy_primitives::B256;
-    use futures::task::noop_waker_ref;
+    use futures::task::{noop_waker_ref, waker, ArcWake};
     use rand::{rngs::StdRng, seq::IndexedRandom, Rng, SeedableRng};
     use reth_eth_wire::EthVersion;
     use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
     use reth_transaction_pool::test_utils::MockTransactionFactory;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
     use tokio::sync::mpsc;
 
     type Fetcher = TransactionFetcher<EthNetworkPrimitives>;
@@ -870,6 +896,29 @@ mod tests {
 
     fn hashes(range: std::ops::Range<u64>) -> Vec<TxHash> {
         range.map(hash).collect()
+    }
+
+    /// A peer id for tests that need more than 255 peers.
+    fn peer_n(n: u64) -> PeerId {
+        let mut bytes = [0u8; 64];
+        bytes[..8].copy_from_slice(&n.to_be_bytes());
+        PeerId::new(bytes)
+    }
+
+    /// Counts how often a task is woken.
+    #[derive(Default)]
+    struct WakeCounter(AtomicUsize);
+
+    impl ArcWake for WakeCounter {
+        fn wake_by_ref(arc_self: &Arc<Self>) {
+            arc_self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    impl WakeCounter {
+        fn wakes(&self) -> usize {
+            self.0.load(Ordering::SeqCst)
+        }
     }
 
     fn pooled_txs(count: usize) -> Vec<PooledTransactionVariant> {
@@ -893,6 +942,9 @@ mod tests {
         fetcher: Fetcher,
         peers: HashMap<PeerId, PeerMetadata<EthNetworkPrimitives>, FbBuildHasher<64>>,
         sessions: HashMap<PeerId, mpsc::Receiver<PeerRequest>, FbBuildHasher<64>>,
+        /// Whether every operation checks the fetcher's invariants, which is too slow for large
+        /// workloads.
+        check_invariants: bool,
     }
 
     impl Rig {
@@ -905,6 +957,13 @@ mod tests {
                 fetcher: Fetcher::new(config),
                 peers: Default::default(),
                 sessions: Default::default(),
+                check_invariants: true,
+            }
+        }
+
+        fn verify(&self) {
+            if self.check_invariants {
+                self.fetcher.assert_invariants();
             }
         }
 
@@ -931,12 +990,12 @@ mod tests {
                 peer_id,
                 entries.into_iter().map(|(h, size)| (h, Some((2, size)))),
             );
-            self.fetcher.assert_invariants();
+            self.verify();
         }
 
         fn announce_unsized(&mut self, peer_id: PeerId, hashes: &[TxHash]) {
             self.fetcher.on_announcement(peer_id, hashes.iter().map(|hash| (*hash, None)));
-            self.fetcher.assert_invariants();
+            self.verify();
         }
 
         fn dispatch(&mut self) -> usize {
@@ -945,7 +1004,7 @@ mod tests {
 
         fn dispatch_with_budget(&mut self, max_fetching_hashes: usize) -> usize {
             let sent = self.fetcher.dispatch(&self.peers, max_fetching_hashes);
-            self.fetcher.assert_invariants();
+            self.verify();
             sent
         }
 
@@ -965,7 +1024,7 @@ mod tests {
                 Poll::Ready(event) => event,
                 Poll::Pending => None,
             };
-            self.fetcher.assert_invariants();
+            self.verify();
             event
         }
 
@@ -997,7 +1056,7 @@ mod tests {
             self.peers.remove(&peer_id);
             self.sessions.remove(&peer_id);
             self.fetcher.on_peer_disconnected(&peer_id);
-            self.fetcher.assert_invariants();
+            self.verify();
         }
     }
 
@@ -1647,12 +1706,27 @@ mod tests {
         rig.announce(peer_b, &hashes(10..20));
 
         assert_eq!(rig.dispatch_with_budget(0), 0);
-        // the budget is soft, a request is packed fully once there is any budget left
+
+        // requests are cut down to what the budget leaves
         assert_eq!(rig.dispatch_with_budget(5), 1);
-        assert_eq!(rig.fetcher.num_fetching_hashes(), 10);
-        assert_eq!(rig.dispatch_with_budget(10), 0);
-        assert_eq!(rig.dispatch_with_budget(11), 1);
-        assert_eq!(rig.fetcher.num_fetching_hashes(), 20);
+        let (requested, response_a) = rig.take_request(peer_a).unwrap();
+        assert_eq!(requested, hashes(0..5));
+        assert_eq!(rig.fetcher.num_fetching_hashes(), 5);
+        assert_eq!(rig.dispatch_with_budget(5), 0);
+
+        // peer_a is busy, so the next budget goes to peer_b
+        assert_eq!(rig.dispatch_with_budget(12), 1);
+        let (requested, _) = rig.take_request(peer_b).unwrap();
+        assert_eq!(requested, hashes(10..17));
+        assert_eq!(rig.fetcher.num_fetching_hashes(), 12);
+
+        // resolved requests free budget again
+        response_a.send(Err(RequestError::Timeout)).unwrap();
+        rig.next_event().unwrap();
+        assert_eq!(rig.fetcher.num_fetching_hashes(), 7);
+        assert_eq!(rig.dispatch_with_budget(12), 1);
+        let (requested, _) = rig.take_request(peer_a).unwrap();
+        assert_eq!(requested, hashes(5..10));
     }
 
     #[test]
@@ -1898,5 +1972,294 @@ mod tests {
         rig.drain_events();
         assert_eq!(rig.fetcher.num_inflight_requests(), 0);
         assert_eq!(rig.fetcher.num_fetching_hashes(), 0);
+    }
+    #[test]
+    fn stream_is_pending_without_requests_and_never_terminates() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        rig.add_peer(peer_a);
+        let txs = pooled_txs(1);
+        let mut cx = Context::from_waker(noop_waker_ref());
+
+        assert!(rig.fetcher.poll_next_unpin(&mut cx).is_pending());
+
+        rig.announce(peer_a, &hashes_of(&txs));
+        rig.dispatch();
+        rig.respond(peer_a, txs);
+
+        // the stream stays open once all requests resolved
+        assert!(rig.fetcher.poll_next_unpin(&mut cx).is_pending());
+        assert_eq!(rig.fetcher.num_inflight_requests(), 0);
+    }
+
+    #[test]
+    fn resolved_requests_are_yielded_one_per_poll() {
+        let mut rig = Rig::new();
+        let peers = (1..=3).map(peer).collect::<Vec<_>>();
+        for (i, peer_id) in peers.iter().enumerate() {
+            rig.add_peer(*peer_id);
+            rig.announce(*peer_id, &hashes(i as u64..i as u64 + 1));
+        }
+        assert_eq!(rig.dispatch(), 3);
+        for peer_id in &peers {
+            let (_, response) = rig.take_request(*peer_id).unwrap();
+            response.send(Err(RequestError::Timeout)).unwrap();
+        }
+
+        let events = rig.drain_events();
+        assert_eq!(events.len(), 3);
+        assert!(events.iter().all(|event| matches!(event, FetchEvent::FetchError { .. })));
+        assert!(rig.next_event().is_none());
+        assert_eq!(rig.fetcher.num_inflight_requests(), 0);
+    }
+
+    #[test]
+    fn response_wakes_the_polling_task() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        rig.add_peer(peer_a);
+        rig.announce(peer_a, &hashes(0..1));
+        rig.dispatch();
+
+        let counter = Arc::new(WakeCounter::default());
+        let waker = waker(counter.clone());
+        let mut cx = Context::from_waker(&waker);
+        assert!(rig.fetcher.poll_next_unpin(&mut cx).is_pending());
+        // `FuturesUnordered` wakes the task once itself after polling newly added requests, so
+        // only the change matters
+        let wakes = counter.wakes();
+
+        let (_, response) = rig.take_request(peer_a).unwrap();
+        response.send(Err(RequestError::Timeout)).unwrap();
+        assert_eq!(
+            counter.wakes(),
+            wakes + 1,
+            "the response wakes the task that polled the fetcher"
+        );
+        assert!(matches!(
+            rig.fetcher.poll_next_unpin(&mut cx),
+            Poll::Ready(Some(FetchEvent::FetchError { .. }))
+        ));
+        rig.fetcher.assert_invariants();
+    }
+
+    #[test]
+    fn requests_sent_after_a_poll_register_wakers_on_the_next_poll() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        rig.add_peer(peer_a);
+        let counter = Arc::new(WakeCounter::default());
+        let waker = waker(counter.clone());
+        let mut cx = Context::from_waker(&waker);
+
+        assert!(rig.fetcher.poll_next_unpin(&mut cx).is_pending());
+        rig.announce(peer_a, &hashes(0..1));
+        assert_eq!(rig.dispatch(), 1);
+
+        // the caller has to poll again after dispatching, only then the request is polled and
+        // registers the waker that its response wakes
+        assert!(rig.fetcher.poll_next_unpin(&mut cx).is_pending());
+        let wakes = counter.wakes();
+        let (_, response) = rig.take_request(peer_a).unwrap();
+        response.send(Err(RequestError::Timeout)).unwrap();
+        assert_eq!(counter.wakes(), wakes + 1);
+        assert!(matches!(
+            rig.fetcher.poll_next_unpin(&mut cx),
+            Poll::Ready(Some(FetchEvent::FetchError { .. }))
+        ));
+    }
+
+    #[test]
+    fn announcement_flood_from_one_peer_is_bounded() {
+        let mut rig = Rig::new();
+        rig.check_invariants = false;
+        let peer_a = peer(1);
+        rig.add_peer(peer_a);
+        let limit = rig.fetcher.config().max_announced_hashes_per_peer as usize;
+
+        // 50 full announcements of unique hashes
+        for batch in 0..50u64 {
+            rig.announce_unsized(peer_a, &hashes(batch * 4096..(batch + 1) * 4096));
+        }
+        assert_eq!(rig.fetcher.num_hashes(), limit);
+        assert!(rig.fetcher.queued_hashes(&peer_a).len() <= 2 * limit);
+        rig.fetcher.assert_invariants();
+
+        // settled hashes free the peer's budget again
+        assert_eq!(rig.dispatch(), 1);
+        let (requested, response) = rig.take_request(peer_a).unwrap();
+        assert_eq!(requested.len(), 256);
+        response.send(Err(RequestError::Timeout)).unwrap();
+        rig.next_event().unwrap();
+        assert_eq!(rig.fetcher.num_hashes(), limit - 256);
+
+        rig.announce_unsized(peer_a, &hashes(1_000_000..1_000_300));
+        assert_eq!(rig.fetcher.num_hashes(), limit);
+        rig.fetcher.assert_invariants();
+    }
+
+    #[test]
+    fn global_capacity_bounds_tracked_hashes_across_peers() {
+        let config = TransactionFetcherConfig {
+            max_capacity_cache_txns_pending_fetch: 1000,
+            ..Default::default()
+        };
+        let mut rig = Rig::with_config(config);
+        rig.check_invariants = false;
+        let peers = (1..=4).map(peer).collect::<Vec<_>>();
+        for (i, peer_id) in peers.iter().enumerate() {
+            rig.add_peer(*peer_id);
+            rig.announce_unsized(*peer_id, &hashes(i as u64 * 400..(i as u64 + 1) * 400));
+        }
+
+        // 1000 of the 1600 announced hashes are tracked, the rest was dropped
+        assert_eq!(rig.fetcher.num_hashes(), 1000);
+        assert!(rig.fetcher.queued_hashes(&peers[3]).is_empty());
+        rig.fetcher.assert_invariants();
+
+        // tracked hashes still accept new candidates
+        rig.announce_unsized(peers[3], &hashes(0..400));
+        assert_eq!(rig.fetcher.candidate_peers(&hash(0)), vec![peers[0], peers[3]]);
+        assert_eq!(rig.fetcher.num_hashes(), 1000);
+
+        // capacity is freed as hashes are received
+        rig.fetcher.on_transactions_received(&hashes(0..500));
+        assert_eq!(rig.fetcher.num_hashes(), 500);
+        rig.announce_unsized(peers[3], &hashes(1200..1600));
+        assert_eq!(rig.fetcher.num_hashes(), 900);
+        assert_eq!(rig.fetcher.candidate_peers(&hash(1200)), vec![peers[3]]);
+        rig.fetcher.assert_invariants();
+    }
+
+    #[test]
+    fn many_peers_announcing_the_same_hashes() {
+        let mut rig = Rig::new();
+        rig.check_invariants = false;
+        let hashes = hashes(0..100);
+        let peers = (0..200).map(peer_n).collect::<Vec<_>>();
+        for peer_id in &peers {
+            rig.add_peer_with_capacity(*peer_id, 1);
+            rig.announce(*peer_id, &hashes);
+        }
+
+        // only the first peers to announce a hash are its candidates
+        assert_eq!(rig.fetcher.num_hashes(), 100);
+        assert_eq!(
+            rig.fetcher.candidate_peers(&hashes[0]),
+            peers[..MAX_COUNT_CANDIDATE_PEERS_PER_HASH]
+        );
+        assert!(peers[MAX_COUNT_CANDIDATE_PEERS_PER_HASH..]
+            .iter()
+            .all(|peer_id| rig.fetcher.queued_hashes(peer_id).is_empty()));
+        rig.fetcher.assert_invariants();
+
+        // one request at a time, retried with the next candidate until all are exhausted
+        for peer_id in &peers[..MAX_COUNT_CANDIDATE_PEERS_PER_HASH] {
+            assert_eq!(rig.dispatch(), 1);
+            let (requested, response) = rig.take_request(*peer_id).unwrap();
+            assert_eq!(requested.len(), 100);
+            response.send(Err(RequestError::Timeout)).unwrap();
+            rig.next_event().unwrap();
+        }
+        assert_eq!(rig.fetcher.num_hashes(), 0);
+        assert_eq!(rig.dispatch(), 0);
+        rig.fetcher.assert_invariants();
+    }
+
+    #[test]
+    fn global_inflight_limit_serves_peers_in_announcement_order() {
+        let mut rig = Rig::new();
+        rig.check_invariants = false;
+        let max_inflight = rig.fetcher.config().max_inflight_requests as usize;
+        let peers = (0..max_inflight as u64 + 20).map(peer_n).collect::<Vec<_>>();
+        for (i, peer_id) in peers.iter().enumerate() {
+            rig.add_peer(*peer_id);
+            rig.announce(*peer_id, &hashes(i as u64 * 10..(i as u64 + 1) * 10));
+        }
+
+        assert_eq!(rig.dispatch(), max_inflight);
+        assert!(peers[..max_inflight].iter().all(|peer_id| !rig.fetcher.is_idle(peer_id)));
+        assert!(peers[max_inflight..].iter().all(|peer_id| rig.fetcher.is_idle(peer_id)));
+        assert_eq!(rig.fetcher.num_fetching_hashes(), max_inflight * 10);
+        rig.fetcher.assert_invariants();
+
+        // the remaining peers are served once requests resolve
+        for peer_id in &peers[..max_inflight] {
+            rig.fail(*peer_id, RequestError::Timeout);
+        }
+        assert_eq!(rig.dispatch(), 20);
+        assert_eq!(rig.fetcher.num_inflight_requests(), 20);
+        rig.fetcher.assert_invariants();
+    }
+
+    #[test]
+    fn huge_unsolicited_response_is_filtered() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        rig.add_peer(peer_a);
+        let txs = pooled_txs(4097);
+
+        rig.announce(peer_a, &hashes_of(&txs[..1]));
+        rig.dispatch();
+
+        let FetchEvent::TransactionsFetched { transactions, report_peer, .. } =
+            rig.respond(peer_a, txs.clone())
+        else {
+            panic!("expected fetched transactions")
+        };
+        assert_eq!(transactions.0, txs[..1]);
+        assert!(report_peer);
+        assert_eq!(rig.fetcher.num_hashes(), 0);
+    }
+
+    #[test]
+    fn peer_churn_leaves_no_state_behind() {
+        let mut rig = Rig::new();
+        let txs = pooled_txs(40);
+        let all = hashes_of(&txs);
+        let by_hash = txs.iter().map(|tx| (*tx.tx_hash(), tx.clone())).collect::<B256Map<_>>();
+        let peers = (1..=6).map(peer).collect::<Vec<_>>();
+        for peer_id in &peers {
+            rig.add_peer_with_capacity(*peer_id, 4);
+        }
+
+        for round in 0..30usize {
+            // every peer announces a window of the hashes
+            for (i, peer_id) in peers.iter().enumerate() {
+                let start = (round + i) % 20;
+                rig.announce(*peer_id, &all[start..start + 20]);
+            }
+            rig.dispatch();
+
+            // a rotating peer disconnects with its request inflight and comes back
+            let churned = peers[round % peers.len()];
+            rig.disconnect(churned);
+            rig.add_peer_with_capacity(churned, 4);
+            rig.drain_events();
+
+            // the others deliver or fail
+            for (i, peer_id) in peers.iter().enumerate() {
+                if *peer_id == churned {
+                    continue
+                }
+                if let Some((requested, response)) = rig.take_request(*peer_id) {
+                    let delivered = if i % 2 == 0 {
+                        requested.iter().map(|hash| by_hash[hash].clone()).collect()
+                    } else {
+                        vec![]
+                    };
+                    response.send(Ok(PooledTransactions(delivered))).unwrap();
+                }
+            }
+            rig.drain_events();
+        }
+
+        for peer_id in &peers {
+            rig.disconnect(*peer_id);
+        }
+        rig.drain_events();
+        assert_eq!(rig.fetcher.num_hashes(), 0);
+        assert_eq!(rig.fetcher.num_inflight_requests(), 0);
+        assert_eq!(rig.fetcher.num_peers(), 0);
     }
 }

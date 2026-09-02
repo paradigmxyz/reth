@@ -53,9 +53,18 @@ pub struct TxFetchHarness {
 impl TxFetchHarness {
     /// Creates a manager with a mock session for every peer.
     pub async fn new(peers: impl IntoIterator<Item = PeerId>, version: EthVersion) -> Self {
+        Self::with_config(TransactionsManagerConfig::default(), peers, version).await
+    }
+
+    /// Creates a manager with the given config and a mock session for every peer.
+    pub async fn with_config(
+        config: TransactionsManagerConfig,
+        peers: impl IntoIterator<Item = PeerId>,
+        version: EthVersion,
+    ) -> Self {
         let config = TransactionsManagerConfig {
             propagation_mode: TransactionPropagationMode::Max(0),
-            ..Default::default()
+            ..config
         };
         let (mut manager, network) = new_tx_manager_with_config(config).await;
         manager.network.update_sync_state(SyncState::Idle);
@@ -110,6 +119,17 @@ impl TxFetchHarness {
                 return polls
             }
         }
+    }
+
+    /// Returns `true` if the manager asked to be polled again since the last poll, e.g. because
+    /// a response arrived.
+    pub fn was_woken(&self) -> bool {
+        self.wake_flag.0.load(Ordering::Relaxed)
+    }
+
+    /// Returns the number of hashes the transaction fetcher is tracking.
+    pub fn num_tracked_hashes(&self) -> usize {
+        self.manager.transaction_fetcher.num_hashes()
     }
 
     /// Takes all `GetPooledTransactions` requests that are queued for the mock sessions.
@@ -167,13 +187,23 @@ impl Wake for WakeFlag {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{map::B256Set, TxHash};
+    use alloy_primitives::map::{B256Map, B256Set};
     use reth_eth_wire::NewPooledTransactionHashes68;
     use reth_network_p2p::error::RequestError;
     use reth_transaction_pool::{test_utils::TransactionGenerator, TransactionPool};
 
     const PEER_A: PeerId = PeerId::new([1; 64]);
     const PEER_B: PeerId = PeerId::new([2; 64]);
+
+    fn peer(n: u8) -> PeerId {
+        PeerId::new([n; 64])
+    }
+
+    fn hash(n: u64) -> TxHash {
+        let mut bytes = [0u8; 32];
+        bytes[24..].copy_from_slice(&n.to_be_bytes());
+        TxHash::from(bytes)
+    }
 
     /// Signed transactions from distinct senders that can be imported into the pool.
     fn pooled_txs(count: usize) -> Vec<PooledTransactionVariant> {
@@ -228,5 +258,112 @@ mod tests {
         harness.poll_until_idle();
         assert!(harness.take_requests().is_empty());
         assert_eq!(harness.pool().get_all(hashes).len(), 3, "delivered transactions are imported");
+    }
+
+    #[tokio::test]
+    async fn response_wakes_the_manager() {
+        let txs = pooled_txs(2);
+        let hashes = txs.iter().map(|tx| *tx.tx_hash()).collect::<Vec<_>>();
+        let mut harness = TxFetchHarness::new([PEER_A], EthVersion::Eth68).await;
+
+        harness.announce(PEER_A, announcement(&hashes));
+        harness.poll_until_idle();
+        let mut requests = harness.take_requests();
+        assert_eq!(requests.len(), 1);
+        assert!(!harness.was_woken(), "nothing happened since the last poll");
+
+        // the inflight request registered its waker while the manager was polled, so the
+        // response wakes the manager without any other event
+        requests.pop().unwrap().response.send(Ok(PooledTransactions(txs))).unwrap();
+        assert!(harness.was_woken(), "the response must wake the manager");
+
+        harness.poll_until_idle();
+        assert_eq!(harness.num_tracked_hashes(), 0);
+        assert_eq!(harness.pool().get_all(hashes).len(), 2);
+    }
+
+    #[tokio::test]
+    async fn responses_are_processed_across_polls() {
+        // one request per peer, more than the manager processes per poll iteration
+        let peers = (1..=64).map(peer).collect::<Vec<_>>();
+        let mut harness = TxFetchHarness::new(peers.iter().copied(), EthVersion::Eth68).await;
+        for (i, peer_id) in peers.iter().enumerate() {
+            let hashes = (i as u64 * 64..(i as u64 + 1) * 64).map(hash).collect::<Vec<_>>();
+            harness.announce(*peer_id, announcement(&hashes));
+        }
+        harness.poll_until_idle();
+        let requests = harness.take_requests();
+        assert_eq!(requests.len(), 64);
+        assert_eq!(harness.num_tracked_hashes(), 64 * 64);
+
+        for request in requests {
+            request.response.send(Err(RequestError::Timeout)).unwrap();
+        }
+        let polls = harness.poll_until_idle();
+        assert!(
+            polls > 1,
+            "the fetch events exceed the budget of a single poll, got {polls} polls"
+        );
+        // no peer is left to fetch the hashes from
+        assert_eq!(harness.num_tracked_hashes(), 0);
+        assert!(harness.take_requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn fetching_is_bounded_by_pool_import_capacity() {
+        let txs = pooled_txs(1000);
+        let hashes = txs.iter().map(|tx| *tx.tx_hash()).collect::<Vec<_>>();
+        let by_hash = txs.iter().map(|tx| (*tx.tx_hash(), tx.clone())).collect::<B256Map<_>>();
+        let config =
+            TransactionsManagerConfig { max_pending_pool_imports: 300, ..Default::default() };
+        let peers = (1..=4).map(peer).collect::<Vec<_>>();
+        let mut harness =
+            TxFetchHarness::with_config(config, peers.iter().copied(), EthVersion::Eth68).await;
+
+        // every peer announces its own quarter
+        for (i, peer_id) in peers.iter().enumerate() {
+            harness.announce(*peer_id, announcement(&hashes[i * 250..(i + 1) * 250]));
+        }
+
+        let mut total_requests = 0;
+        loop {
+            harness.poll_until_idle();
+            let requests = harness.take_requests();
+            if requests.is_empty() {
+                break
+            }
+            // never more hashes inflight than the pool can import at once
+            let inflight = requests.iter().map(|r| r.request.0.len()).sum::<usize>();
+            assert!(inflight <= 300, "requested {inflight} hashes with an import capacity of 300");
+            total_requests += requests.len();
+            for request in requests {
+                let txs = request.request.0.iter().map(|hash| by_hash[hash].clone()).collect();
+                request.response.send(Ok(PooledTransactions(txs))).unwrap();
+            }
+        }
+
+        assert!(total_requests >= 4, "the hashes are fetched in several rounds");
+        assert_eq!(harness.num_tracked_hashes(), 0);
+        assert_eq!(harness.pool().get_all(hashes).len(), 1000, "all transactions are imported");
+    }
+
+    #[tokio::test]
+    async fn announcement_flood_is_bounded() {
+        let mut harness = TxFetchHarness::new([PEER_A], EthVersion::Eth68).await;
+        let limit = TransactionsManagerConfig::default()
+            .transaction_fetcher_config
+            .max_announced_hashes_per_peer as usize;
+
+        // ten full announcements of unique hashes, far more than one peer may have tracked
+        for batch in 0..10u64 {
+            let hashes = (batch * 4096..(batch + 1) * 4096).map(hash).collect::<Vec<_>>();
+            harness.announce(PEER_A, announcement(&hashes));
+        }
+        assert_eq!(harness.num_tracked_hashes(), limit);
+
+        harness.poll_until_idle();
+        let requests = harness.take_requests();
+        assert_eq!(requests.len(), 1, "one request at a time per peer");
+        assert_eq!(requests[0].request.0.len(), 256);
     }
 }
