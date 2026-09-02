@@ -132,10 +132,8 @@ test-utils = [
     "reth-evm-ethereum/test-utils",
 ]
 trie-debug = [
-    "reth-trie-sparse/trie-debug",
     "reth-trie-parallel/trie-debug",
     "reth-engine-primitives/trie-debug",
-    "dep:serde_json",
 ]
 
 [[test]]
