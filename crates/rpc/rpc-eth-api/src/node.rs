@@ -1,6 +1,6 @@
 //! Helper trait for interfacing with [`FullNodeComponents`].
 
-use reth_chain_state::{CanonStateSubscriptions, StateProviderWithAppendedBlock};
+use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
@@ -8,8 +8,8 @@ use reth_node_api::{FullNodeComponents, NodePrimitives, PrimitivesTy};
 use reth_primitives_traits::{BlockTy, HeaderTy, ReceiptTy, TxTy};
 use reth_rpc_eth_types::EthStateCache;
 use reth_storage_api::{
-    BalProvider, BlockReader, BlockReaderIdExt, PruneCheckpointReader, StageCheckpointReader,
-    StateProviderFactory,
+    BalProvider, BlockReader, BlockReaderIdExt, NodePrimitivesProvider, PruneCheckpointReader,
+    StageCheckpointReader, StateProviderFactory,
 };
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
@@ -35,8 +35,8 @@ pub trait RpcNodeCore: Clone + Send + Sync + Unpin + 'static {
             ChainSpec: EthChainSpec<Header = HeaderTy<Self::Primitives>>
                            + Hardforks
                            + EthereumHardforks,
-        > + StateProviderFactory
-        + StateProviderWithAppendedBlock<Self::Primitives>
+        > + StateProviderFactory<Primitives = Self::Primitives>
+        + NodePrimitivesProvider<Primitives = Self::Primitives>
         + CanonStateSubscriptions<Primitives = Self::Primitives>
         + StageCheckpointReader
         + PruneCheckpointReader
@@ -70,7 +70,9 @@ impl<T> RpcNodeCore for T
 where
     T: FullNodeComponents<
         Provider: ChainSpecProvider<ChainSpec: Hardforks + EthereumHardforks>
-                      + StateProviderWithAppendedBlock<PrimitivesTy<T::Types>>,
+                      + NodePrimitivesProvider<Primitives = PrimitivesTy<T::Types>>
+                      + StateProviderFactory<Primitives = PrimitivesTy<T::Types>>
+                      + CanonStateSubscriptions<Primitives = PrimitivesTy<T::Types>>,
     >,
 {
     type Primitives = PrimitivesTy<T::Types>;
@@ -134,8 +136,8 @@ where
             ChainSpec: EthChainSpec<Header = HeaderTy<Evm::Primitives>>
                            + Hardforks
                            + EthereumHardforks,
-        > + StateProviderFactory
-        + StateProviderWithAppendedBlock<Evm::Primitives>
+        > + StateProviderFactory<Primitives = Evm::Primitives>
+        + NodePrimitivesProvider<Primitives = Evm::Primitives>
         + CanonStateSubscriptions<Primitives = Evm::Primitives>
         + StageCheckpointReader
         + PruneCheckpointReader

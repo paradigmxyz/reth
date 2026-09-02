@@ -11,16 +11,11 @@
 mod execution_stats;
 pub use execution_stats::ExecutionTimingStats;
 
-mod appended_block;
-pub use appended_block::StateProviderWithAppendedBlock;
-
 mod in_memory;
 pub use in_memory::*;
 
 mod preserved_sparse_trie;
 pub use preserved_sparse_trie::*;
-
-mod noop;
 
 mod chain_info;
 pub use chain_info::ChainInfoTracker;
@@ -32,6 +27,9 @@ pub use notifications::{
     ForkChoiceSubscriptions, PersistedBlockNotifications, PersistedBlockSubscriptions,
     WatchValueStream,
 };
+
+mod primitives;
+pub use primitives::NodePrimitivesProvider;
 
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers

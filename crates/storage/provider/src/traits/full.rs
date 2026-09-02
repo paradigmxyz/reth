@@ -35,7 +35,7 @@ pub trait FullProvider<N: NodeTypesWithDB>:
         Receipt = ReceiptTy<N>,
         Header = HeaderTy<N>,
     > + BalProvider
-    + StateProviderFactory
+    + StateProviderFactory<Primitives = N::Primitives>
     + StateRangeProviderFactory
     + StateReader
     + ChainSpecProvider<ChainSpec = N::ChainSpec>
@@ -73,7 +73,7 @@ impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
             Receipt = ReceiptTy<N>,
             Header = HeaderTy<N>,
         > + BalProvider
-        + StateProviderFactory
+        + StateProviderFactory<Primitives = N::Primitives>
         + StateRangeProviderFactory
         + StateReader
         + ChainSpecProvider<ChainSpec = N::ChainSpec>

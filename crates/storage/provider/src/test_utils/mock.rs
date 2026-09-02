@@ -19,9 +19,7 @@ use alloy_primitives::{
     Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
 use parking_lot::Mutex;
-use reth_chain_state::{
-    CanonStateNotifications, CanonStateSubscriptions, ExecutedBlock, StateProviderWithAppendedBlock,
-};
+use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions};
 use reth_chainspec::{ChainInfo, EthChainSpec};
 use reth_db::transaction::DbTx;
 use reth_db_api::{
@@ -1213,6 +1211,8 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StorageSettingsCache
 impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> StateProviderFactory
     for MockEthProvider<T, ChainSpec>
 {
+    type Primitives = T;
+
     fn latest(&self) -> ProviderResult<StateProviderBox> {
         self.ensure_snap_state_reads_succeed()?;
         Ok(Box::new(self.clone()))
@@ -1268,17 +1268,6 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> StatePr
 
     fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox>> {
         Ok(Some(Box::new(self.clone())))
-    }
-}
-
-impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static>
-    StateProviderWithAppendedBlock<T> for MockEthProvider<T, ChainSpec>
-{
-    fn state_provider_with_appended_block(
-        &self,
-        _block: ExecutedBlock<T>,
-    ) -> ProviderResult<StateProviderBox> {
-        self.latest()
     }
 }
 

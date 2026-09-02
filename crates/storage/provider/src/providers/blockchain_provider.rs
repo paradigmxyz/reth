@@ -17,7 +17,7 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes, TxHash, TxNumber,
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ForkChoiceNotifications, ForkChoiceSubscriptions,
-    PersistedBlockNotifications, PersistedBlockSubscriptions, StateProviderWithAppendedBlock,
+    PersistedBlockNotifications, PersistedBlockSubscriptions,
 };
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
@@ -723,6 +723,8 @@ impl<N: NodeTypesWithDB> ChainSpecProvider for BlockchainProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
+    type Primitives = N::Primitives;
+
     /// Storage provider for latest block
     fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", "Getting latest block state provider");
@@ -734,6 +736,18 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
             trace!(target: "providers::blockchain", "Using database state for latest state provider");
             self.database.latest()
         }
+    }
+
+    fn state_with_block_appended(
+        &self,
+        parent_hash: BlockHash,
+        block: ExecutedBlock<N::Primitives>,
+    ) -> ProviderResult<StateProviderBox> {
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            self.database.clone(),
+            self.database.overlay_manager().overlay_builder(parent_hash).with_appended_block(block),
+        );
+        Ok(Box::new(state_provider_factory.database_provider_ro()?))
     }
 
     /// Returns a [`StateProviderBox`] indexed by the given block number or tag.
@@ -837,22 +851,6 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         }
 
         Ok(None)
-    }
-}
-
-impl<N: ProviderNodeTypes> StateProviderWithAppendedBlock<N::Primitives> for BlockchainProvider<N> {
-    fn state_provider_with_appended_block(
-        &self,
-        block: ExecutedBlock<N::Primitives>,
-    ) -> ProviderResult<StateProviderBox> {
-        let state_provider_factory = OverlayStateProviderFactory::new(
-            self.database.clone(),
-            self.database
-                .overlay_manager()
-                .overlay_builder(block.recovered_block().parent_hash())
-                .with_appended_block(block),
-        );
-        Ok(Box::new(state_provider_factory.database_provider_ro()?))
     }
 }
 

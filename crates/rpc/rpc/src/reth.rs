@@ -17,7 +17,8 @@ use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_api::{RethApiServer, RethJitAction};
 use reth_rpc_eth_types::{EthApiError, EthResult};
 use reth_storage_api::{
-    BlockReader, BlockReaderIdExt, ChangeSetReader, StateProviderFactory, TransactionVariant,
+    BlockReader, BlockReaderIdExt, ChangeSetReader, NodePrimitivesProvider, StateProviderFactory,
+    TransactionVariant,
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use serde::Serialize;
@@ -190,13 +191,16 @@ impl<Provider, EvmConfig> RethApiServer for RethApi<Provider, EvmConfig>
 where
     Provider: BlockReaderIdExt
         + ChangeSetReader
+        + NodePrimitivesProvider
         + StateProviderFactory
-        + BlockReader<Block = <Provider::Primitives as NodePrimitives>::Block>
+        + BlockReader<Block = <<Provider as NodePrimitivesProvider>::Primitives as NodePrimitives>::Block>
         + CanonStateSubscriptions
-        + ForkChoiceSubscriptions<Header = <Provider::Primitives as NodePrimitives>::BlockHeader>
+        + ForkChoiceSubscriptions<
+            Header = <<Provider as NodePrimitivesProvider>::Primitives as NodePrimitives>::BlockHeader,
+        >
         + PersistedBlockSubscriptions
         + 'static,
-    EvmConfig: ConfigureEvm<Primitives = Provider::Primitives> + 'static,
+    EvmConfig: ConfigureEvm<Primitives = <Provider as NodePrimitivesProvider>::Primitives> + 'static,
 {
     /// Handler for `reth_getBalanceChangesInBlock`
     async fn reth_get_balance_changes_in_block(

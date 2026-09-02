@@ -1,10 +1,10 @@
 //! Canonical chain state notification trait and types.
 
+use crate::NodePrimitivesProvider;
 use alloy_eips::BlockNumHash;
 use derive_more::{Deref, DerefMut};
 use reth_execution_types::{BlockReceipts, Chain};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
-use reth_storage_api::NodePrimitivesProvider;
 use std::{
     pin::Pin,
     sync::Arc,
