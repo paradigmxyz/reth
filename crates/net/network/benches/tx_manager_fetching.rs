@@ -7,8 +7,9 @@
 //! implementations.
 
 use alloy_primitives::{
+    keccak256,
     map::{B256Map, B256Set},
-    TxHash, B256,
+    TxHash,
 };
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion, Throughput};
 use reth_eth_wire::{
@@ -31,10 +32,9 @@ fn peer_id(index: usize) -> PeerId {
     PeerId::new(bytes)
 }
 
+/// A distinct hash per index that is distributed like a real transaction hash.
 fn hash(index: usize) -> TxHash {
-    let mut bytes = [0u8; 32];
-    bytes[24..].copy_from_slice(&(index as u64 + 1).to_be_bytes());
-    B256::from(bytes)
+    keccak256((index as u64).to_be_bytes())
 }
 
 fn announcement(hashes: &[TxHash]) -> NewPooledTransactionHashes {
