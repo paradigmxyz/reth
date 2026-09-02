@@ -55,7 +55,7 @@ use super::{
 use crate::metrics::TransactionFetcherMetrics;
 use alloy_consensus::transaction::PooledTransaction;
 use alloy_primitives::{
-    map::{B256Map, B256Set, FbBuildHasher, HashMap},
+    map::{B256Map, B256Set, Entry, FbBuildHasher, HashMap},
     TxHash,
 };
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
@@ -199,10 +199,12 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
 
         for (hash, metadata) in announcement {
             let size = announced_size(metadata);
+            let at_capacity = self.hashes.len() >= max_total;
 
             // whether the hash is queued for the peer right away
-            let eager = match self.hashes.get_mut(&hash) {
-                Some(entry) => {
+            let eager = match self.hashes.entry(hash) {
+                Entry::Occupied(mut occupied) => {
+                    let entry = occupied.get_mut();
                     if let Some(candidate) = entry.candidate_mut(key) {
                         // announced before by this peer, keep the latest size
                         candidate.set_size(size);
@@ -226,12 +228,12 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                     entry.candidates.push(candidate);
                     eager
                 }
-                None => {
+                Entry::Vacant(vacant) => {
                     if tracked >= max_per_peer {
                         dropped_peer_limit += 1;
                         continue
                     }
-                    if self.hashes.len() >= max_total {
+                    if at_capacity {
                         // the evicted hash may be one of this peer's, so its count is synced
                         if let Some(peer) = self.peers.get_mut(&key) {
                             peer.tracked = tracked;
@@ -243,8 +245,10 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                             dropped_at_capacity += 1;
                             continue
                         }
+                        self.hashes.insert(hash, TxEntry::new(key, size));
+                    } else {
+                        vacant.insert(TxEntry::new(key, size));
                     }
-                    self.hashes.insert(hash, TxEntry::new(key, size));
                     self.record_order(hash);
                     true
                 }
