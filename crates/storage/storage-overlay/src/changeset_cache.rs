@@ -7,7 +7,7 @@
 //! - **Reorg support**: Quickly access changesets to revert blocks during chain reorganizations
 //! - **Memory efficiency**: Explicit eviction releases persisted changesets
 
-use crate::{database_state_frontiers, OverlayBuilder, OverlayManager, OverlayStateProvider};
+use crate::{database_state_frontiers, OverlayManager, OverlayStateProvider};
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{map::B256Map, BlockNumber, B256};
 use parking_lot::RwLock;
@@ -115,7 +115,7 @@ where
 
     // Step 2: Get the trie reverts for the state after the target block using the cache
     let reverts = cache.get_or_compute_range(
-        overlay_manager.overlay_builder(finish.hash),
+        overlay_manager,
         provider,
         (block_number + 1)..=finish.number,
         partial_state_trie,
@@ -230,7 +230,7 @@ impl ChangesetCache {
             + StorageSettingsCache,
     {
         self.get_or_compute_range(
-            overlay_manager.overlay_builder(finish.hash),
+            overlay_manager,
             provider,
             block_number..=block_number,
             partial_state_trie,
@@ -266,7 +266,7 @@ impl ChangesetCache {
     /// - Changeset computation fails
     pub(crate) fn get_or_compute_range<N, P>(
         &self,
-        overlay_builder: OverlayBuilder<N>,
+        overlay_manager: &OverlayManager<N>,
         provider: &P,
         range: RangeInclusive<BlockNumber>,
         partial_state_trie: BlockNumHash,
@@ -400,11 +400,10 @@ impl ChangesetCache {
             "Changeset cache MISS in range, falling back to aggregate DB-based computation"
         );
 
-        let overlay = overlay_builder.with_no_reverts().build_state_trie_overlay_at_frontiers(
-            provider,
-            partial_state_trie,
-            finish,
-        )?;
+        let overlay = overlay_manager
+            .overlay_builder(finish.hash)
+            .with_no_reverts()
+            .build_state_trie_overlay_at_frontiers(provider, partial_state_trie, finish)?;
         let state_trie_provider = OverlayStateProvider::<&P, N>::new_with_state_trie(
             provider,
             overlay,
@@ -832,13 +831,7 @@ mod tests {
         let overlay_manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
         let (partial_state_trie, finish) = database_state_frontiers(&*provider).unwrap();
         let accumulated = cache
-            .get_or_compute_range(
-                overlay_manager.overlay_builder(finish.hash),
-                &*provider,
-                1..=2,
-                partial_state_trie,
-                finish,
-            )
+            .get_or_compute_range(&overlay_manager, &*provider, 1..=2, partial_state_trie, finish)
             .unwrap();
         assert_eq!(accumulated.account_nodes_ref(), &[(path, Some(older_node))]);
     }
@@ -928,13 +921,7 @@ mod tests {
         let overlay_manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
         let (partial_state_trie, finish) = database_state_frontiers(&*provider).unwrap();
         let from_cache_api = cache
-            .get_or_compute_range(
-                overlay_manager.overlay_builder(finish.hash),
-                &*provider,
-                1..=3,
-                partial_state_trie,
-                finish,
-            )
+            .get_or_compute_range(&overlay_manager, &*provider, 1..=3, partial_state_trie, finish)
             .unwrap();
         assert_eq!(*from_cache_api, actual);
         assert_eq!(cache.inner.read().entries.len(), 1);
