@@ -13,10 +13,10 @@ use crate::{
     Capability, EthMessage, EthNetworkPrimitives, EthStreamInner, EthVersion, NetworkPrimitives,
     P2PStream, UnifiedStatus, HANDSHAKE_TIMEOUT,
 };
-use alloy_primitives::bytes::{Bytes, BytesMut};
+use alloy_primitives::bytes::{BufMut, Bytes, BytesMut};
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use reth_eth_wire_types::{
-    snap::{SnapProtocolMessage, SnapVersion},
+    snap::{RawSnapResponse, SnapMessageId, SnapProtocolError, SnapProtocolMessage, SnapVersion},
     RawCapabilityMessage, RawResponse,
 };
 use reth_ethereum_forks::ForkFilter;
@@ -87,8 +87,9 @@ impl<St, N: NetworkPrimitives> EthSnapStream<St, N> {
         self.eth.set_reject_block_announcements(reject);
     }
 
-    /// Sets whether to defer decoding of `eth` response messages, see
-    /// [`EthStreamInner::set_lazy_responses`].
+    /// Sets whether to defer decoding of response messages of both protocols: `eth` responses are
+    /// then yielded as [`EthMessage::RawResponse`] and `snap/2` responses as
+    /// [`EthSnapMessage::RawSnapResponse`], see [`EthStreamInner::set_lazy_responses`].
     #[inline]
     pub const fn set_lazy_responses(&mut self, lazy: bool) {
         self.eth.set_lazy_responses(lazy);
@@ -149,6 +150,11 @@ pub enum EthSnapMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     Eth(EthMessage<N>),
     /// A `snap/2` (EIP-8189) protocol message.
     Snap(SnapProtocolMessage),
+    /// A `snap/2` response whose payload is still RLP encoded.
+    ///
+    /// Only yielded when response decoding is deferred, see
+    /// [`EthSnapStream::set_lazy_responses`].
+    RawSnapResponse(RawSnapResponse),
 }
 
 impl<St, N> Stream for EthSnapStream<St, N>
@@ -177,6 +183,25 @@ where
             return Poll::Ready(Some(this.eth.decode_message(bytes).map(EthSnapMessage::Eth)))
         };
         bytes[0] = snap_id;
+
+        if this.eth.lazy_responses() &&
+            let Some(message_id) = SnapMessageId::from_u8(snap_id) &&
+            message_id.is_response()
+        {
+            if !SnapVersion::V2.supports_message_id(snap_id) {
+                return Poll::Ready(Some(Err(SnapProtocolError::UnsupportedMessageId(
+                    snap_id,
+                    SnapVersion::V2,
+                )
+                .into())))
+            }
+            let payload = bytes.split_off(1).freeze();
+            return Poll::Ready(Some(Ok(EthSnapMessage::RawSnapResponse(RawSnapResponse::new(
+                message_id,
+                payload.into(),
+            )))))
+        }
+
         Poll::Ready(Some(
             SnapProtocolMessage::decode_versioned(SnapVersion::V2, &bytes)
                 .map(EthSnapMessage::Snap)
@@ -205,6 +230,13 @@ where
                 // rebase the snap-relative id into the combined message space.
                 let mut buf =
                     msg.encode().0.try_into_mut().unwrap_or_else(|b| BytesMut::from(b.as_ref()));
+                mask_snap(&mut buf, this.snap_offset)?;
+                buf.freeze()
+            }
+            EthSnapMessage::RawSnapResponse(resp) => {
+                let mut buf = BytesMut::with_capacity(1 + resp.payload().len());
+                buf.put_u8(resp.message_id() as u8);
+                buf.extend_from_slice(resp.payload());
                 mask_snap(&mut buf, this.snap_offset)?;
                 buf.freeze()
             }
@@ -472,5 +504,84 @@ mod tests {
                 "unexpected error for removed snap id {removed_snap_id:#x}: {error}"
             );
         }
+    }
+
+    /// End-to-end with deferred response decoding on both sides: the request still arrives
+    /// decoded, while the response arrives as a [`RawSnapResponse`] that decodes on demand.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn lazy_snap_responses_defer_decoding() {
+        reth_tracing::init_test_tracing();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+        let (status, fork_filter) = eth_handshake();
+        let server_status = status;
+        let server_fork_filter = fork_filter.clone();
+
+        let server = tokio::spawn(async move {
+            let (incoming, _) = listener.accept().await.unwrap();
+            let stream = crate::PassthroughCodec::default().framed(incoming);
+            let (conn, _) =
+                UnauthedP2PStream::new(stream).handshake(eth_snap_hello()).await.unwrap();
+            let (mut stream, _) = EthSnapStream::<_, EthNetworkPrimitives>::handshake(
+                conn,
+                server_status,
+                server_fork_filter,
+                Arc::new(EthHandshake::default()),
+                MAX_MESSAGE_SIZE,
+            )
+            .await
+            .unwrap();
+            stream.set_lazy_responses(true);
+
+            while let Some(Ok(msg)) = stream.next().await {
+                if let EthSnapMessage::Snap(SnapProtocolMessage::GetBlockAccessLists(req)) = msg {
+                    let response = SnapProtocolMessage::BlockAccessLists(BlockAccessListsMessage {
+                        request_id: req.request_id,
+                        block_access_lists: reth_eth_wire_types::BlockAccessLists(vec![None]),
+                    });
+                    stream.send(EthSnapMessage::Snap(response)).await.unwrap();
+                }
+            }
+        });
+
+        let conn = connect_passthrough(local_addr, eth_snap_hello()).await;
+        let (mut stream, _) = EthSnapStream::<_, EthNetworkPrimitives>::handshake(
+            conn,
+            status,
+            fork_filter,
+            Arc::new(EthHandshake::default()),
+            MAX_MESSAGE_SIZE,
+        )
+        .await
+        .unwrap();
+        stream.set_lazy_responses(true);
+
+        stream
+            .send(EthSnapMessage::Snap(SnapProtocolMessage::GetBlockAccessLists(
+                GetBlockAccessListsMessage {
+                    request_id: 7,
+                    block_hashes: Vec::new(),
+                    response_bytes: u64::MAX,
+                },
+            )))
+            .await
+            .unwrap();
+
+        let raw = loop {
+            if let EthSnapMessage::RawSnapResponse(raw) = stream.next().await.unwrap().unwrap() {
+                break raw;
+            }
+        };
+        assert_eq!(raw.message_id(), SnapMessageId::BlockAccessLists);
+        assert_eq!(raw.request_id().unwrap(), 7);
+        assert_eq!(
+            raw.decode().unwrap(),
+            SnapProtocolMessage::BlockAccessLists(BlockAccessListsMessage {
+                request_id: 7,
+                block_access_lists: reth_eth_wire_types::BlockAccessLists(vec![None]),
+            })
+        );
+
+        server.abort();
     }
 }

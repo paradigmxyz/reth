@@ -33,8 +33,9 @@ use reth_eth_wire::{
     NewBlockPayload,
 };
 use reth_eth_wire_types::{
-    message::RequestPair, snap::SnapProtocolMessage, NewPooledTransactionHashes,
-    RawCapabilityMessage, RawResponse,
+    message::RequestPair,
+    snap::{RawSnapResponse, SnapProtocolError, SnapProtocolMessage},
+    NewPooledTransactionHashes, RawCapabilityMessage, RawResponse,
 };
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_api::{PeerRequest, RequestMessage};
@@ -318,9 +319,8 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
         }
 
         match msg {
-            message @ EthMessage::Status(_) => OnIncomingMessageOutcome::BadMessage {
+            EthMessage::Status(_) => OnIncomingMessageOutcome::BadMessage {
                 error: EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake),
-                message,
             },
             EthMessage::NewBlockHashes(msg) => {
                 self.try_emit_broadcast(PeerMessage::NewBlockHashes(msg)).into()
@@ -404,7 +404,6 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                             "invalid block range: earliest ({}) > latest ({})",
                             msg.earliest, msg.latest
                         ))),
-                        message: EthMessage::BlockRangeUpdate(msg),
                     };
                 }
 
@@ -414,7 +413,6 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                         error: EthStreamError::InvalidMessage(MessageError::Other(
                             "invalid block range: latest_hash cannot be zero".to_string(),
                         )),
-                        message: EthMessage::BlockRangeUpdate(msg),
                     };
                 }
 
@@ -434,61 +432,102 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
 
     /// Handles a response whose payload is still RLP encoded, see [`EthMessage::RawResponse`].
     ///
-    /// The response is correlated with its in-flight request first: unsolicited, late (already
-    /// timed out internally) and mismatched responses are settled on the request id alone, so a
-    /// peer can't make the session decode payloads it never asked for. Only a response the session
-    /// is still waiting for is decoded, and then delivered through the typed response handling in
+    /// The response is correlated with its in-flight request first, see
+    /// [`Self::correlate_raw_response`], so only a response the session is still waiting for is
+    /// decoded, and then delivered through the typed response handling in
     /// [`Self::on_incoming_message`].
     fn on_raw_response(&mut self, resp: RawResponse) -> OnIncomingMessageOutcome<N> {
         let request_id = match resp.request_id() {
             Ok(request_id) => request_id,
             Err(err) => {
+                debug!(target: "net::session", ?resp, remote_peer_id=?self.remote_peer_id, "received response with undecodable request id");
                 return OnIncomingMessageOutcome::BadMessage {
                     error: EthStreamError::InvalidMessage(err.into()),
-                    message: EthMessage::RawResponse(resp),
                 }
             }
         };
 
-        let expected = match self.inflight_requests.get(&request_id).map(|req| &req.request) {
-            Some(RequestState::Waiting(request)) => request.response_message_id(),
-            Some(RequestState::TimedOut) => {
-                // request was already timed out internally, the late response only updates the
-                // timeout estimate
-                if let Some(req) = self.inflight_requests.remove(&request_id) {
-                    self.update_request_timeout(req.timestamp, Instant::now());
-                }
-                return OnIncomingMessageOutcome::Ok
-            }
-            None => {
-                trace!(peer_id=?self.remote_peer_id, ?request_id, "received response to unknown request");
-                // we received a response to a request we never sent
-                self.on_bad_message();
-                return OnIncomingMessageOutcome::Ok
-            }
-        };
-
-        if expected != Some(resp.message_id()) {
-            // The peer replied to a request id we handed out, but with the wrong response type.
-            // This cancels the pending request, so it must cost the peer reputation. Without the
-            // penalty the peer can kill any request we send it, repeatedly and for free.
-            debug!(target: "net::session", ?request_id, msg_id=?resp.message_id(), remote_peer_id=?self.remote_peer_id, "received response of wrong type");
-            self.on_bad_message();
-            if let Some(InflightRequest { request: RequestState::Waiting(request), .. }) =
-                self.inflight_requests.remove(&request_id)
-            {
-                request.send_bad_response();
-            }
+        if !self.correlate_raw_response(request_id, |pending| {
+            pending.response_message_id() == Some(resp.message_id())
+        }) {
             return OnIncomingMessageOutcome::Ok
         }
 
         match self.conn.decode_raw_response(&resp) {
             Ok(msg) => self.on_incoming_message(msg),
-            Err(error) => OnIncomingMessageOutcome::BadMessage {
-                error,
-                message: EthMessage::RawResponse(resp),
-            },
+            Err(error) => OnIncomingMessageOutcome::BadMessage { error },
         }
+    }
+
+    /// Handles a `snap/2` response whose payload is still RLP encoded, see
+    /// [`EthSnapMessage::RawSnapResponse`].
+    ///
+    /// Same as [`Self::on_raw_response`]: correlated first, decoded only if the session is still
+    /// waiting for it, and then delivered through [`Self::on_incoming_snap_message`].
+    fn on_raw_snap_response(&mut self, resp: RawSnapResponse) -> OnIncomingMessageOutcome<N> {
+        let request_id = match resp.request_id() {
+            Ok(request_id) => request_id,
+            Err(err) => {
+                debug!(target: "net::session", ?resp, remote_peer_id=?self.remote_peer_id, "received snap response with undecodable request id");
+                return OnIncomingMessageOutcome::BadMessage {
+                    error: SnapProtocolError::from(err).into(),
+                }
+            }
+        };
+
+        if !self.correlate_raw_response(request_id, |pending| {
+            matches!(
+                pending,
+                PeerRequest::GetSnap { request, .. }
+                    if request.message_id().response() == Some(resp.message_id())
+            )
+        }) {
+            return OnIncomingMessageOutcome::Ok
+        }
+
+        match resp.decode() {
+            Ok(msg) => self.on_incoming_snap_message(msg),
+            Err(err) => OnIncomingMessageOutcome::BadMessage { error: err.into() },
+        }
+    }
+
+    /// Correlates a response with the in-flight request `request_id` before its payload is
+    /// decoded.
+    ///
+    /// Returns `true` if that request is still waiting and `expects` the response, the only case
+    /// worth decoding the payload for. Otherwise the response is settled here, without the peer
+    /// being able to make the session decode anything it never asked for: an unknown request id
+    /// is penalized, a late response to a request that already timed out internally only updates
+    /// the timeout estimate, and a response of the wrong type cancels the request and is
+    /// penalized, since without the penalty the peer could kill any request we send it,
+    /// repeatedly and for free.
+    fn correlate_raw_response(
+        &mut self,
+        request_id: u64,
+        expects: impl FnOnce(&PeerRequest<N>) -> bool,
+    ) -> bool {
+        match self.inflight_requests.get(&request_id).map(|req| &req.request) {
+            Some(RequestState::Waiting(pending)) if expects(pending) => return true,
+            Some(RequestState::Waiting(_)) => {
+                debug!(target: "net::session", ?request_id, remote_peer_id=?self.remote_peer_id, "received response of wrong type");
+                self.on_bad_message();
+                if let Some(InflightRequest { request: RequestState::Waiting(request), .. }) =
+                    self.inflight_requests.remove(&request_id)
+                {
+                    request.send_bad_response();
+                }
+            }
+            Some(RequestState::TimedOut) => {
+                if let Some(req) = self.inflight_requests.remove(&request_id) {
+                    self.update_request_timeout(req.timestamp, Instant::now());
+                }
+            }
+            None => {
+                trace!(peer_id=?self.remote_peer_id, ?request_id, "received response to unknown request");
+                self.on_bad_message();
+            }
+        }
+        false
     }
 
     /// Handles an inbound `snap/2` message.
@@ -497,6 +536,10 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     /// with eth requests in [`Self::inflight_requests`]) and type-checked against the originally
     /// sent request kind; unsolicited or mismatched ones count as bad messages. Inbound requests
     /// are routed upward as [`PeerRequest::GetSnap`], same as any other eth request.
+    ///
+    /// The connection yields responses as [`EthSnapMessage::RawSnapResponse`], which are
+    /// correlated in [`Self::on_raw_snap_response`] before they are decoded; decoded responses
+    /// only arrive here from there.
     fn on_incoming_snap_message(
         &mut self,
         mut msg: SnapProtocolMessage,
@@ -1007,14 +1050,17 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                                         this.on_incoming_message(msg)
                                     }
                                     EthSnapMessage::Snap(msg) => this.on_incoming_snap_message(msg),
+                                    EthSnapMessage::RawSnapResponse(resp) => {
+                                        this.on_raw_snap_response(resp)
+                                    }
                                 };
                                 match outcome {
                                     OnIncomingMessageOutcome::Ok => {
                                         // handled successfully
                                         progress = true;
                                     }
-                                    OnIncomingMessageOutcome::BadMessage { error, message } => {
-                                        debug!(target: "net::session", %error, msg=?message, remote_peer_id=?this.remote_peer_id, "received invalid protocol message");
+                                    OnIncomingMessageOutcome::BadMessage { error } => {
+                                        debug!(target: "net::session", %error, remote_peer_id=?this.remote_peer_id, "received invalid protocol message");
                                         this.on_bad_message();
                                         return this
                                             .try_disconnect(DisconnectReason::ProtocolBreach, cx)
@@ -1156,7 +1202,7 @@ enum OnIncomingMessageOutcome<N: NetworkPrimitives> {
     /// Message successfully handled.
     Ok,
     /// Message is considered to be in violation of the protocol
-    BadMessage { error: EthStreamError, message: EthMessage<N> },
+    BadMessage { error: EthStreamError },
     /// Currently no capacity to handle the message
     NoCapacity(ActiveSessionMessage<N>),
 }
@@ -1400,7 +1446,7 @@ mod tests {
         message::MAX_MESSAGE_SIZE,
         snap::{
             AccountRangeMessage, BlockAccessListsMessage, GetAccountRangeMessage,
-            GetBlockAccessListsMessage,
+            GetBlockAccessListsMessage, SnapMessageId,
         },
         BlockAccessLists, EthMessageID, NewPooledTransactionHashes72,
     };
@@ -2015,21 +2061,35 @@ mod tests {
         builder.connect_incoming(incoming).await
     }
 
-    /// Builds a [`RawResponse`] carrying `request_id` followed by `body`, the raw RLP of the
-    /// response payload.
-    fn raw_response(message_id: EthMessageID, request_id: u64, body: &[u8]) -> RawResponse {
+    /// Encodes the `[request_id, body...]` list of a response payload, where `body` is the raw
+    /// RLP following the request id.
+    fn response_payload(request_id: u64, body: &[u8]) -> alloy_primitives::Bytes {
         let mut payload = Vec::new();
         alloy_rlp::Header { list: true, payload_length: request_id.length() + body.len() }
             .encode(&mut payload);
         request_id.encode(&mut payload);
         payload.extend_from_slice(body);
-        RawResponse::new(message_id, payload.into())
+        payload.into()
     }
 
-    /// Not a valid `BlockBodies` payload: decoding it is a protocol breach.
+    /// Builds a [`RawResponse`] carrying `request_id` followed by `body`.
+    fn raw_response(message_id: EthMessageID, request_id: u64, body: &[u8]) -> RawResponse {
+        RawResponse::new(message_id, response_payload(request_id, body))
+    }
+
+    /// Builds a [`RawSnapResponse`] carrying `request_id` followed by `body`.
+    fn raw_snap_response(
+        message_id: SnapMessageId,
+        request_id: u64,
+        body: &[u8],
+    ) -> RawSnapResponse {
+        RawSnapResponse::new(message_id, response_payload(request_id, body))
+    }
+
+    /// Not a valid `BlockBodies` or `BlockAccessLists` payload: decoding it is a protocol breach.
     const UNDECODABLE_BODY: &[u8] = &[0x01];
-    /// An empty `BlockBodies` payload.
-    const EMPTY_BODIES: &[u8] = &[alloy_rlp::EMPTY_LIST_CODE];
+    /// An empty `BlockBodies` or `BlockAccessLists` payload.
+    const EMPTY_LIST_BODY: &[u8] = &[alloy_rlp::EMPTY_LIST_CODE];
 
     #[tokio::test(flavor = "multi_thread")]
     async fn unsolicited_raw_response_is_penalized_without_decoding() {
@@ -2088,7 +2148,7 @@ mod tests {
         let mut session = idle_session(&mut builder).await;
         let (id, rx) = dispatch_block_bodies_request(&mut session);
 
-        let resp = raw_response(EthMessageID::BlockBodies, id, EMPTY_BODIES);
+        let resp = raw_response(EthMessageID::BlockBodies, id, EMPTY_LIST_BODY);
         let outcome = session.on_incoming_message(EthMessage::RawResponse(resp));
         assert!(matches!(outcome, OnIncomingMessageOutcome::Ok));
         assert!(!session.inflight_requests.contains_key(&id));
@@ -2112,6 +2172,82 @@ mod tests {
         // The response is expected, but its payload doesn't decode.
         let resp = raw_response(EthMessageID::BlockBodies, id, UNDECODABLE_BODY);
         let outcome = session.on_incoming_message(EthMessage::RawResponse(resp));
+        assert!(matches!(outcome, OnIncomingMessageOutcome::BadMessage { .. }));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn wrong_type_raw_snap_response_is_penalized_without_decoding() {
+        let mut builder = snap_session_builder();
+        let mut session = idle_session(&mut builder).await;
+        let (id, rx) = dispatch_snap_request(&mut session, 0);
+
+        // Answering the GetBlockAccessLists with an AccountRange is settled on the ids alone.
+        let resp = raw_snap_response(SnapMessageId::AccountRange, id, UNDECODABLE_BODY);
+        let outcome = session.on_raw_snap_response(resp);
+        assert!(matches!(outcome, OnIncomingMessageOutcome::Ok));
+        assert!(!session.inflight_requests.contains_key(&id));
+        assert_eq!(rx.await.unwrap().unwrap_err(), RequestError::BadResponse);
+        assert!(matches!(
+            futures::FutureExt::now_or_never(builder.active_session_rx.next()).flatten(),
+            Some(ActiveSessionMessage::BadMessage { .. })
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn raw_snap_response_to_eth_request_is_penalized_without_decoding() {
+        let mut builder = snap_session_builder();
+        let mut session = idle_session(&mut builder).await;
+        let (id, rx) = dispatch_block_bodies_request(&mut session);
+
+        let resp = raw_snap_response(SnapMessageId::BlockAccessLists, id, UNDECODABLE_BODY);
+        let outcome = session.on_raw_snap_response(resp);
+        assert!(matches!(outcome, OnIncomingMessageOutcome::Ok));
+        assert!(!session.inflight_requests.contains_key(&id));
+        assert_eq!(rx.await.unwrap().unwrap_err(), RequestError::BadResponse);
+        assert!(matches!(
+            futures::FutureExt::now_or_never(builder.active_session_rx.next()).flatten(),
+            Some(ActiveSessionMessage::BadMessage { .. })
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn expected_raw_snap_response_is_decoded_and_delivered() {
+        let mut builder = snap_session_builder();
+        let mut session = idle_session(&mut builder).await;
+        let (id, rx) = dispatch_snap_request(&mut session, u64::MAX);
+
+        let resp = raw_snap_response(SnapMessageId::BlockAccessLists, id, EMPTY_LIST_BODY);
+        let outcome = session.on_raw_snap_response(resp);
+        assert!(matches!(outcome, OnIncomingMessageOutcome::Ok));
+        assert!(!session.inflight_requests.contains_key(&id));
+
+        // Delivered decoded, with the caller's original request id restored.
+        let response = rx.await.unwrap().unwrap();
+        assert!(matches!(
+            response,
+            SnapResponse::BlockAccessLists(m)
+                if m.request_id == u64::MAX && m.block_access_lists == BlockAccessLists(Vec::new())
+        ));
+        assert!(futures::FutureExt::now_or_never(builder.active_session_rx.next())
+            .flatten()
+            .is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn malformed_raw_snap_response_is_a_protocol_breach() {
+        let mut builder = snap_session_builder();
+        let mut session = idle_session(&mut builder).await;
+        let (id, _rx) = dispatch_snap_request(&mut session, 0);
+
+        // The request id can't be decoded at all.
+        let resp =
+            RawSnapResponse::new(SnapMessageId::BlockAccessLists, UNDECODABLE_BODY.to_vec().into());
+        let outcome = session.on_raw_snap_response(resp);
+        assert!(matches!(outcome, OnIncomingMessageOutcome::BadMessage { .. }));
+
+        // The response is expected, but its payload doesn't decode.
+        let resp = raw_snap_response(SnapMessageId::BlockAccessLists, id, UNDECODABLE_BODY);
+        let outcome = session.on_raw_snap_response(resp);
         assert!(matches!(outcome, OnIncomingMessageOutcome::BadMessage { .. }));
     }
 

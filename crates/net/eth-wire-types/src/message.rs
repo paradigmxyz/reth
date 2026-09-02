@@ -942,12 +942,7 @@ impl RawResponse {
     /// Decodes the request id, the first element of the response list, without decoding the rest
     /// of the payload.
     pub fn request_id(&self) -> alloy_rlp::Result<u64> {
-        let buf = &mut self.payload.as_ref();
-        let header = Header::decode(buf)?;
-        if !header.list {
-            return Err(alloy_rlp::Error::UnexpectedString)
-        }
-        u64::decode(buf)
+        decode_request_id(&self.payload)
     }
 
     /// Decodes the response into its typed [`EthMessage`] variant according to the given
@@ -986,6 +981,16 @@ impl Debug for RawResponse {
             .field("payload_len", &self.payload.len())
             .finish()
     }
+}
+
+/// Decodes the request id of an RLP encoded `[request-id, payload...]` list without decoding the
+/// rest of the payload.
+pub(crate) fn decode_request_id(mut payload: &[u8]) -> alloy_rlp::Result<u64> {
+    let header = Header::decode(&mut payload)?;
+    if !header.list {
+        return Err(alloy_rlp::Error::UnexpectedString)
+    }
+    u64::decode(&mut payload)
 }
 
 #[cfg(test)]

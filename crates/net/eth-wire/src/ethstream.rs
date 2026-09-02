@@ -162,6 +162,11 @@ where
         self.lazy_responses = lazy;
     }
 
+    /// Returns `true` if response decoding is deferred, see [`Self::set_lazy_responses`].
+    pub const fn lazy_responses(&self) -> bool {
+        self.lazy_responses
+    }
+
     /// Decodes incoming bytes into an [`EthMessage`].
     pub fn decode_message(&self, mut bytes: BytesMut) -> Result<EthMessage<N>, EthStreamError> {
         if bytes.len() > self.max_message_size {

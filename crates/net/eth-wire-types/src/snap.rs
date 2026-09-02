@@ -83,6 +83,30 @@ impl SnapMessageId {
             }
         }
     }
+
+    /// Returns `true` if this is the id of a response message.
+    pub const fn is_response(self) -> bool {
+        matches!(
+            self,
+            Self::AccountRange | Self::StorageRanges | Self::ByteCodes | Self::BlockAccessLists
+        )
+    }
+
+    /// Returns the message id for the given wire value, or `None` if it isn't a known snap
+    /// message id.
+    pub const fn from_u8(id: u8) -> Option<Self> {
+        Some(match id {
+            0x00 => Self::GetAccountRange,
+            0x01 => Self::AccountRange,
+            0x02 => Self::GetStorageRanges,
+            0x03 => Self::StorageRanges,
+            0x04 => Self::GetByteCodes,
+            0x05 => Self::ByteCodes,
+            0x08 => Self::GetBlockAccessLists,
+            0x09 => Self::BlockAccessLists,
+            _ => return None,
+        })
+    }
 }
 
 /// Request for a range of accounts from the state trie.
@@ -514,15 +538,75 @@ impl SnapProtocolMessage {
     /// Empty payload, invalid id, and malformed body are reported as distinct
     /// [`SnapProtocolError`] variants.
     pub fn decode_versioned(version: SnapVersion, bytes: &[u8]) -> Result<Self, SnapProtocolError> {
-        let (&id, mut body) = bytes.split_first().ok_or(SnapProtocolError::Empty)?;
+        let (&id, body) = bytes.split_first().ok_or(SnapProtocolError::Empty)?;
         if !version.supports_message_id(id) {
             return Err(SnapProtocolError::UnsupportedMessageId(id, version));
         }
+        Self::decode_body(id, body)
+    }
+
+    /// Decodes the RLP body of the message with the given id, rejecting trailing bytes.
+    fn decode_body(id: u8, mut body: &[u8]) -> Result<Self, SnapProtocolError> {
         let msg = Self::decode(id, &mut body)?;
         if !body.is_empty() {
             return Err(SnapProtocolError::Rlp(alloy_rlp::Error::UnexpectedLength));
         }
         Ok(msg)
+    }
+}
+
+/// A `snap` response message read from the wire whose payload is still RLP encoded.
+///
+/// The `snap` counterpart of [`RawResponse`](crate::message::RawResponse): only the message id
+/// and the [request id](Self::request_id) are exposed, the latter decoded on demand without
+/// touching the rest of the payload, so a consumer can correlate the response with its request
+/// before paying for [`Self::decode`].
+#[derive(Clone, PartialEq, Eq)]
+pub struct RawSnapResponse {
+    /// The id of the response message.
+    message_id: SnapMessageId,
+    /// The RLP encoded `[request-id, payload...]` list.
+    payload: Bytes,
+}
+
+impl RawSnapResponse {
+    /// Creates a new raw response from the message id and the RLP encoded
+    /// `[request-id, payload...]` list that follows the id on the wire.
+    ///
+    /// The caller must ensure that `message_id` [is a response](SnapMessageId::is_response).
+    pub const fn new(message_id: SnapMessageId, payload: Bytes) -> Self {
+        Self { message_id, payload }
+    }
+
+    /// Returns the id of the response message.
+    pub const fn message_id(&self) -> SnapMessageId {
+        self.message_id
+    }
+
+    /// Returns the RLP encoded `[request-id, payload...]` list.
+    pub const fn payload(&self) -> &Bytes {
+        &self.payload
+    }
+
+    /// Decodes the request id, the first element of the response list, without decoding the rest
+    /// of the payload.
+    pub fn request_id(&self) -> alloy_rlp::Result<u64> {
+        crate::message::decode_request_id(&self.payload)
+    }
+
+    /// Decodes the response into its [`SnapProtocolMessage`] variant.
+    pub fn decode(&self) -> Result<SnapProtocolMessage, SnapProtocolError> {
+        SnapProtocolMessage::decode_body(self.message_id as u8, &self.payload)
+    }
+}
+
+impl core::fmt::Debug for RawSnapResponse {
+    /// Prints the payload length instead of the payload, which can be several MB.
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("RawSnapResponse")
+            .field("message_id", &self.message_id)
+            .field("payload_len", &self.payload.len())
+            .finish()
     }
 }
 
@@ -947,5 +1031,54 @@ mod tests {
         slot.data = [slot.data.as_ref(), &[0x00]].concat().into();
 
         assert!(slot.value().is_err());
+    }
+
+    #[test]
+    fn snap_message_id_from_u8_roundtrips() {
+        for id in [
+            SnapMessageId::GetAccountRange,
+            SnapMessageId::AccountRange,
+            SnapMessageId::GetStorageRanges,
+            SnapMessageId::StorageRanges,
+            SnapMessageId::GetByteCodes,
+            SnapMessageId::ByteCodes,
+            SnapMessageId::GetBlockAccessLists,
+            SnapMessageId::BlockAccessLists,
+        ] {
+            assert_eq!(SnapMessageId::from_u8(id as u8), Some(id));
+            assert_eq!(id.is_response(), id.response().is_none());
+        }
+        // the trie node messages removed by snap/2 and anything beyond the id space
+        for id in [0x06, 0x07, 0x0a] {
+            assert_eq!(SnapMessageId::from_u8(id), None);
+        }
+    }
+
+    #[test]
+    fn raw_snap_response_request_id_and_decode() {
+        let msg = SnapProtocolMessage::AccountRange(AccountRangeMessage {
+            request_id: 1337,
+            accounts: vec![AccountData {
+                hash: B256::repeat_byte(1),
+                body: Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE]),
+            }],
+            proof: vec![Bytes::from_static(&[0x01])],
+        });
+        let encoded = msg.encode();
+
+        // the raw response is the encoded message without the leading message id
+        let raw = RawSnapResponse::new(SnapMessageId::AccountRange, encoded[1..].to_vec().into());
+        assert_eq!(raw.request_id().unwrap(), 1337);
+        assert_eq!(raw.decode().unwrap(), msg);
+
+        // trailing bytes are rejected, same as for eagerly decoded messages
+        let raw = RawSnapResponse::new(
+            SnapMessageId::AccountRange,
+            [&encoded[1..], &[0x00][..]].concat().into(),
+        );
+        assert!(matches!(
+            raw.decode(),
+            Err(SnapProtocolError::Rlp(alloy_rlp::Error::UnexpectedLength))
+        ));
     }
 }

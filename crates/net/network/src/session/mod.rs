@@ -598,7 +598,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 }
 
                 // Responses are correlated with their request before their payload is decoded,
-                // see `ActiveSession::on_raw_response`.
+                // see `ActiveSession::correlate_raw_response`.
                 conn.set_lazy_responses(true);
 
                 let session = ActiveSession {
