@@ -90,7 +90,7 @@ impl BalPrewarmPool {
 
     /// Fire-and-forget: warm an account (basic account + bytecode) and its storage slots.
     ///
-    /// The slots are dispatched in [`WARM_BATCH_SIZE`] chunks that are distributed independently,
+    /// The slots are dispatched in `WARM_BATCH_SIZE` chunks that are distributed independently,
     /// so a single account with a large read-set does not serialize onto one worker;
     /// [`end_block`](Self::end_block) waits for the slowest queue.
     pub fn warm_account(&self, addr: Address, slots: impl IntoIterator<Item = StorageKey>) {
