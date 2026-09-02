@@ -174,6 +174,44 @@ fn bench_add_transactions(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmarks an account-only update against a pool at capacity: sender nonces and balances move
+/// without any fee change, as happens on the reorg account-reload path and via
+/// `Pool::update_accounts`.
+fn bench_update_accounts(c: &mut Criterion) {
+    let mut group = c.benchmark_group("saturated_pool");
+    group.sample_size(30);
+
+    let (pool, mut counter) = build_saturated_pool();
+    let size = pool.size();
+    assert!(size.pending >= 9_000, "pending pool not saturated: {size:?}");
+
+    // senders that already have transactions in the pool, so the update has something to do
+    let senders =
+        pool.pending_transactions().iter().take(25).map(|tx| tx.sender()).collect::<Vec<Address>>();
+    assert!(!senders.is_empty());
+
+    // the reported nonce stays put so the transactions are re-evaluated rather than discarded,
+    // which keeps every iteration doing the same amount of work
+    let mut flip = false;
+    group.bench_function("update_accounts_only_at_capacity", |b| {
+        b.iter_batched(
+            || {
+                flip = !flip;
+                let balance = if flip { U256::from(u128::MAX) } else { U256::from(u128::MAX - 1) };
+                senders
+                    .iter()
+                    .map(|address| ChangedAccount { address: *address, nonce: 0, balance })
+                    .collect::<Vec<ChangedAccount>>()
+            },
+            |changed| pool.update_accounts(changed),
+            BatchSize::PerIteration,
+        )
+    });
+
+    let _ = &mut counter;
+    group.finish();
+}
+
 /// Benchmarks a canonical state update against a pool at capacity: mined transactions are
 /// removed, sender states change and the base fee moves.
 fn bench_canonical_state_change(c: &mut Criterion) {
@@ -233,5 +271,10 @@ fn bench_canonical_state_change(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_add_transactions, bench_canonical_state_change);
+criterion_group!(
+    benches,
+    bench_add_transactions,
+    bench_canonical_state_change,
+    bench_update_accounts
+);
 criterion_main!(benches);
