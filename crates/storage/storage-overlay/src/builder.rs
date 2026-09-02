@@ -614,7 +614,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         match &self.overlay_source {
             Some(OverlaySource::Managed) if anchor_hash != self.parent_hash => self
                 .overlay_manager
-                .execution_overlay_for_parent_with_blocks(self.parent_hash, anchor_hash, blocks)
+                .execution_overlay_for_blocks(self.parent_hash, anchor_hash, blocks)
                 .map_err(ProviderError::other),
             Some(OverlaySource::Managed) | None => Ok(Arc::new(ExecutionOverlay::default())),
             Some(OverlaySource::Immediate { .. }) => Err(ProviderError::other(
