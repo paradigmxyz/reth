@@ -1614,16 +1614,15 @@ where
                             }
                         };
 
-                        // if the parent is the canonical head, we can insert the block as the
-                        // pending block
-                        if self.state.tree_state.canonical_block_hash() ==
-                            block.recovered_block().parent_hash()
-                        {
+                        let is_pending = self.state.tree_state.canonical_block_hash() ==
+                            block.recovered_block().parent_hash();
+                        self.state.tree_state.insert_executed(block.clone());
+
+                        if is_pending {
                             debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
                             self.canonical_in_memory_state.set_pending_block(block.clone());
                         }
 
-                        self.state.tree_state.insert_executed(block.clone());
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
                         self.emit_event(EngineApiEvent::BeaconConsensus(
                             ConsensusEngineEvent::CanonicalBlockAdded(block, now.elapsed()),
@@ -3134,14 +3133,15 @@ where
             self.execution_timing_stats.insert(executed.recovered_block().hash(), stats);
         }
 
-        // if the parent is the canonical head, we can insert the block as the pending block
-        if self.state.tree_state.canonical_block_hash() == executed.recovered_block().parent_hash()
-        {
+        let is_pending = self.state.tree_state.canonical_block_hash() ==
+            executed.recovered_block().parent_hash();
+        self.state.tree_state.insert_executed(executed.clone());
+
+        if is_pending {
             debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
             self.canonical_in_memory_state.set_pending_block(executed.clone());
         }
 
-        self.state.tree_state.insert_executed(executed.clone());
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
 
         // emit insert event

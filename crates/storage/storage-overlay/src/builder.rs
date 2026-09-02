@@ -387,7 +387,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
         // Collect any reverts which are required to bring the DB view back to the anchor hash.
         let (trie_updates, hashed_post_state) = match &anchor_for_parent {
-            AnchorForParent::RevertsRequired { anchor, .. } => {
+            AnchorForParent::RevertsRequired { anchor, finish } => {
                 let revert_blocks =
                     self.revert_blocks(&anchor_for_parent)?.expect("reverts are required");
 
@@ -403,7 +403,8 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                         .entered();
                     let start = Instant::now();
                     let accumulated_reverts =
-                        self.overlay_manager.get_or_compute_cached_changesets_range_at_frontiers(
+                        self.overlay_manager.changeset_cache().get_or_compute_range(
+                            self.clone().with_parent_state_at(*finish),
                             provider,
                             revert_blocks.clone(),
                             state_trie_tip_block,
@@ -468,15 +469,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     state_trie_tip_block.hash,
                     finish_tip_block.hash,
                 ) {
-                    debug!(
-                        target: "storage::overlay",
-                        parent_hash = %self.parent_hash,
-                        state_trie_tip_hash = %state_trie_tip_block.hash,
-                        finish_tip_hash = %finish_tip_block.hash,
-                        sparse_trie_anchor_hash = ?self.reused_sparse_trie_anchor_hash,
-                        "Skipping overlay construction because reused sparse trie covers durable frontiers to parent"
-                    );
-
                     self.metrics.sparse_trie_overlay_skips.increment(1);
 
                     return Ok(StateTrieOverlay::empty())
@@ -641,6 +633,19 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 Ok(Some(anchor.number + 1..=finish.number))
             }
         }
+    }
+
+    /// Reuses this builder's snapshot at `parent`, discarding any newer blocks.
+    fn with_parent_state_at(mut self, parent: BlockNumHash) -> Self {
+        self.parent_hash = parent.hash;
+        self.parent_state = self.parent_state.as_ref().and_then(|state| {
+            state
+                .chain()
+                .find(|state| state.block_ref().recovered_block().num_hash() == parent)
+                .cloned()
+        });
+        self.reused_sparse_trie_anchor_hash = None;
+        self
     }
 
     /// Returns true if managed overlay resolution can be skipped for this builder.
@@ -1356,6 +1361,30 @@ mod tests {
                 panic!("persisted parent below Finish must require reverts")
             }
         }
+    }
+
+    #[test]
+    fn builder_trims_parent_state_to_checkpoint() {
+        let manager = OverlayManager::default();
+        let blocks = test_blocks();
+        for block in &blocks {
+            manager.insert_block(block.clone());
+        }
+
+        let builder = manager
+            .overlay_builder(blocks[4].recovered_block().hash())
+            .with_parent_state_at(blocks[2].recovered_block().num_hash());
+        let hashes =
+            builder.parent_state.unwrap().chain().map(BlockState::hash).collect::<Vec<_>>();
+
+        assert_eq!(
+            hashes,
+            blocks[..=2]
+                .iter()
+                .rev()
+                .map(|block| block.recovered_block().hash())
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]
