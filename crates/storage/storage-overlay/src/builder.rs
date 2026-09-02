@@ -585,7 +585,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     ))
                 } else {
                     self.overlay_manager
-                        .overlay_for_parent_with_blocks(self.parent_hash, anchor_hash, blocks)
+                        .overlay_for_blocks(self.parent_hash, anchor_hash, blocks)
                         .map_err(ProviderError::other)
                 }
             }
