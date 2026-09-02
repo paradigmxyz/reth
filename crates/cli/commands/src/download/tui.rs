@@ -1,7 +1,7 @@
 use crate::download::{
     download_command,
     manifest::{ComponentSelection, SnapshotComponentType, SnapshotManifest},
-    DownloadProgress, SelectionPreset,
+    minimal_selection_for_component, DownloadProgress, SelectionPreset,
 };
 use crossterm::{
     event::{self, Event, KeyCode},
@@ -16,6 +16,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
     Frame, Terminal,
 };
+use reth_prune_types::{MINIMUM_DISTANCE, MINIMUM_UNWIND_SAFE_DISTANCE};
 use std::{
     collections::BTreeMap,
     io,
@@ -33,25 +34,25 @@ pub struct SelectorOutput {
 /// All distance presets. Groups filter this to only valid options.
 const DISTANCE_PRESETS: [ComponentSelection; 6] = [
     ComponentSelection::None,
-    ComponentSelection::Distance(64),
-    ComponentSelection::Distance(10_064),
+    ComponentSelection::Distance(MINIMUM_DISTANCE),
+    ComponentSelection::Distance(MINIMUM_UNWIND_SAFE_DISTANCE),
     ComponentSelection::Distance(100_000),
     ComponentSelection::Distance(1_000_000),
     ComponentSelection::All,
 ];
 
-/// Presets for components that require at least 64 blocks (receipts).
+/// Presets for components that require the minimum pruning distance (receipts).
 const RECEIPTS_PRESETS: [ComponentSelection; 5] = [
-    ComponentSelection::Distance(64),
-    ComponentSelection::Distance(10_064),
+    ComponentSelection::Distance(MINIMUM_DISTANCE),
+    ComponentSelection::Distance(MINIMUM_UNWIND_SAFE_DISTANCE),
     ComponentSelection::Distance(100_000),
     ComponentSelection::Distance(1_000_000),
     ComponentSelection::All,
 ];
 
-/// Presets for components that require at least 10064 blocks (account/storage history).
+/// Presets for components that require the minimum unwind-safe history.
 const HISTORY_PRESETS: [ComponentSelection; 4] = [
-    ComponentSelection::Distance(10_064),
+    ComponentSelection::Distance(MINIMUM_UNWIND_SAFE_DISTANCE),
     ComponentSelection::Distance(100_000),
     ComponentSelection::Distance(1_000_000),
     ComponentSelection::All,
@@ -67,7 +68,36 @@ struct DisplayGroup {
     required: bool,
     /// Valid presets for this group. Components with minimum distance requirements
     /// exclude presets that would produce invalid prune configs.
-    presets: &'static [ComponentSelection],
+    presets: Vec<ComponentSelection>,
+}
+
+/// Adds a configured preset to the ordered list of generic TUI choices.
+fn presets_with_configured(
+    presets: &[ComponentSelection],
+    configured: ComponentSelection,
+) -> Vec<ComponentSelection> {
+    let mut presets = presets.to_vec();
+    if presets.contains(&configured) {
+        return presets;
+    }
+
+    let insert_at = match configured {
+        ComponentSelection::None => 0,
+        ComponentSelection::Distance(distance) => presets
+            .iter()
+            .position(|selection| {
+                matches!(selection, ComponentSelection::Distance(other) if *other > distance) ||
+                    matches!(selection, ComponentSelection::All)
+            })
+            .unwrap_or(presets.len()),
+        ComponentSelection::Since(_) => presets
+            .iter()
+            .position(|selection| matches!(selection, ComponentSelection::All))
+            .unwrap_or(presets.len()),
+        ComponentSelection::All => presets.len(),
+    };
+    presets.insert(insert_at, configured);
+    presets
 }
 
 /// Build the display groups from available components in the manifest.
@@ -81,7 +111,7 @@ fn build_groups(manifest: &SnapshotManifest) -> Vec<DisplayGroup> {
             name: "State (mdbx)",
             types: vec![SnapshotComponentType::State],
             required: true,
-            presets: &DISTANCE_PRESETS,
+            presets: DISTANCE_PRESETS.to_vec(),
         });
     }
 
@@ -90,7 +120,7 @@ fn build_groups(manifest: &SnapshotManifest) -> Vec<DisplayGroup> {
             name: "Headers",
             types: vec![SnapshotComponentType::Headers],
             required: true,
-            presets: &DISTANCE_PRESETS,
+            presets: DISTANCE_PRESETS.to_vec(),
         });
     }
 
@@ -99,7 +129,13 @@ fn build_groups(manifest: &SnapshotManifest) -> Vec<DisplayGroup> {
             name: "Transactions",
             types: vec![SnapshotComponentType::Transactions],
             required: false,
-            presets: &HISTORY_PRESETS,
+            presets: presets_with_configured(
+                &HISTORY_PRESETS,
+                minimal_selection_for_component(
+                    SnapshotComponentType::Transactions,
+                    manifest.block,
+                ),
+            ),
         });
     }
 
@@ -108,7 +144,10 @@ fn build_groups(manifest: &SnapshotManifest) -> Vec<DisplayGroup> {
             name: "Receipts",
             types: vec![SnapshotComponentType::Receipts],
             required: false,
-            presets: &RECEIPTS_PRESETS,
+            presets: presets_with_configured(
+                &RECEIPTS_PRESETS,
+                minimal_selection_for_component(SnapshotComponentType::Receipts, manifest.block),
+            ),
         });
     }
 
@@ -123,11 +162,12 @@ fn build_groups(manifest: &SnapshotManifest) -> Vec<DisplayGroup> {
         if has_stor {
             types.push(SnapshotComponentType::StorageChangesets);
         }
+        let configured = minimal_selection_for_component(types[0], manifest.block);
         groups.push(DisplayGroup {
             name: "State History",
             types,
             required: false,
-            presets: &HISTORY_PRESETS,
+            presets: presets_with_configured(&HISTORY_PRESETS, configured),
         });
     }
 
@@ -157,7 +197,10 @@ impl SelectorApp {
         let groups = build_groups(&manifest);
 
         // Default to the minimal preset (matches --minimal prune config)
-        let selections = groups.iter().map(|g| g.types[0].minimal_selection()).collect();
+        let selections = groups
+            .iter()
+            .map(|g| minimal_selection_for_component(g.types[0], manifest.block))
+            .collect();
 
         let mut list_state = ListState::default();
         list_state.select(Some(0));
@@ -178,7 +221,7 @@ impl SelectorApp {
             if group.required {
                 return;
             }
-            let presets = group.presets;
+            let presets = &group.presets;
             let current = self.selections[self.cursor];
             let idx = presets.iter().position(|p| *p == current).unwrap_or(0);
             self.selections[self.cursor] = presets[(idx + 1) % presets.len()];
@@ -191,7 +234,7 @@ impl SelectorApp {
             if group.required {
                 return;
             }
-            let presets = group.presets;
+            let presets = &group.presets;
             let current = self.selections[self.cursor];
             let idx = presets.iter().position(|p| *p == current).unwrap_or(0);
             self.selections[self.cursor] = presets[(idx + presets.len() - 1) % presets.len()];
@@ -206,14 +249,16 @@ impl SelectorApp {
 
     fn select_minimal(&mut self) {
         for (i, group) in self.groups.iter().enumerate() {
-            self.selections[i] = group.types[0].minimal_selection();
+            self.selections[i] =
+                minimal_selection_for_component(group.types[0], self.manifest.block);
         }
         self.preset = Some(SelectionPreset::Minimal);
     }
 
     fn select_full(&mut self) {
         for (i, group) in self.groups.iter().enumerate() {
-            let mut selection = group.types[0].minimal_selection();
+            let mut selection =
+                minimal_selection_for_component(group.types[0], self.manifest.block);
             for ty in &group.types {
                 if let Some(sel) = self.full_preset.get(ty).copied() {
                     selection = sel;
@@ -435,4 +480,26 @@ fn render(f: &mut Frame<'_>, app: &mut SelectorApp) {
     .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
     .block(Block::default().borders(Borders::ALL));
     f.render_widget(footer, chunks[2]);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn configured_distance_is_an_ordered_tui_choice() {
+        let configured = ComponentSelection::Distance(64_864);
+        let presets = presets_with_configured(&HISTORY_PRESETS, configured);
+
+        assert_eq!(
+            presets,
+            vec![
+                ComponentSelection::Distance(MINIMUM_UNWIND_SAFE_DISTANCE),
+                configured,
+                ComponentSelection::Distance(100_000),
+                ComponentSelection::Distance(1_000_000),
+                ComponentSelection::All,
+            ]
+        );
+    }
 }

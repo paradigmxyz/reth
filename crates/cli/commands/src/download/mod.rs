@@ -108,7 +108,7 @@ use reth_db::{init_db, Database};
 use reth_db_api::transaction::DbTx;
 use reth_fs_util as fs;
 use reth_node_core::args::DefaultPruningValues;
-use reth_prune_types::PruneMode;
+use reth_prune_types::{PruneMode, PruneModes};
 use source::{
     discover_manifest_url, fetch_manifest_from_source, fetch_snapshot_api_entries,
     print_snapshot_listing, resolve_manifest_base_url,
@@ -758,7 +758,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             .iter()
             .copied()
             .filter(|ty| manifest.component(*ty).is_some())
-            .map(|ty| (ty, ty.minimal_selection()))
+            .map(|ty| (ty, minimal_selection_for_component(ty, manifest.block)))
             .collect()
     }
 
@@ -882,6 +882,38 @@ fn explicit_component_selection(
     } else {
         distance.map(ComponentSelection::Distance)
     }
+}
+
+/// Returns the component coverage required by the configured minimal pruning defaults.
+pub(super) fn minimal_selection_for_component(
+    component: SnapshotComponentType,
+    snapshot_block: u64,
+) -> ComponentSelection {
+    minimal_selection_for_component_with_modes(
+        component,
+        snapshot_block,
+        &DefaultPruningValues::get_global().minimal_prune_modes,
+    )
+}
+
+fn minimal_selection_for_component_with_modes(
+    component: SnapshotComponentType,
+    snapshot_block: u64,
+    modes: &PruneModes,
+) -> ComponentSelection {
+    let mode = match component {
+        SnapshotComponentType::State | SnapshotComponentType::Headers => {
+            return ComponentSelection::All
+        }
+        SnapshotComponentType::Transactions => modes.bodies_history,
+        SnapshotComponentType::TransactionSenders => modes.sender_recovery,
+        SnapshotComponentType::Receipts => modes.receipts,
+        SnapshotComponentType::AccountChangesets => modes.account_history,
+        SnapshotComponentType::StorageChangesets => modes.storage_history,
+        SnapshotComponentType::RocksdbIndices => return ComponentSelection::None,
+    };
+
+    selection_from_prune_mode(mode, snapshot_block)
 }
 
 /// Converts a prune mode into the matching component selection.
@@ -1278,6 +1310,60 @@ mod tests {
         ]);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn minimal_component_selection_uses_configured_prune_modes() {
+        let history_distance = 64_864;
+        let modes = PruneModes {
+            sender_recovery: Some(PruneMode::Full),
+            receipts: Some(PruneMode::Distance(128)),
+            account_history: Some(PruneMode::Distance(history_distance)),
+            storage_history: Some(PruneMode::Distance(history_distance)),
+            bodies_history: Some(PruneMode::Distance(history_distance)),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            minimal_selection_for_component_with_modes(
+                SnapshotComponentType::Transactions,
+                1_000_000,
+                &modes,
+            ),
+            ComponentSelection::Distance(history_distance)
+        );
+        assert_eq!(
+            minimal_selection_for_component_with_modes(
+                SnapshotComponentType::Receipts,
+                1_000_000,
+                &modes,
+            ),
+            ComponentSelection::Distance(128)
+        );
+        assert_eq!(
+            minimal_selection_for_component_with_modes(
+                SnapshotComponentType::AccountChangesets,
+                1_000_000,
+                &modes,
+            ),
+            ComponentSelection::Distance(history_distance)
+        );
+        assert_eq!(
+            minimal_selection_for_component_with_modes(
+                SnapshotComponentType::StorageChangesets,
+                1_000_000,
+                &modes,
+            ),
+            ComponentSelection::Distance(history_distance)
+        );
+        assert_eq!(
+            minimal_selection_for_component_with_modes(
+                SnapshotComponentType::TransactionSenders,
+                1_000_000,
+                &modes,
+            ),
+            ComponentSelection::None
+        );
     }
 
     #[test]
