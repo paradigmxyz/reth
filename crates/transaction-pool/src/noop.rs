@@ -274,6 +274,10 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
 
     fn on_propagated(&self, _txs: PropagatedTransactions) {}
 
+    fn has_propagation_listeners(&self) -> bool {
+        false
+    }
+
     fn get_transactions_by_sender(
         &self,
         _sender: Address,

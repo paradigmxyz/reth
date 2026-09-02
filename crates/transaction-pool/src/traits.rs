@@ -587,6 +587,17 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     /// Consumer: P2P
     fn on_propagated(&self, txs: PropagatedTransactions);
 
+    /// Returns whether the pool has any listeners that would be notified by
+    /// [`TransactionPool::on_propagated`].
+    ///
+    /// If this returns `false`, the caller can skip assembling the [`PropagatedTransactions`]
+    /// bookkeeping, which is a per (transaction, peer) allocation on the propagation path.
+    ///
+    /// Consumer: P2P
+    fn has_propagation_listeners(&self) -> bool {
+        true
+    }
+
     /// Returns all transactions sent by a given user
     fn get_transactions_by_sender(
         &self,

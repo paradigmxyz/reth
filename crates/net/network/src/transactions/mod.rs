@@ -939,7 +939,7 @@ where
     ) -> Option<PropagatedTransactions> {
         let peer = self.peers.get_mut(&peer_id)?;
         trace!(target: "net::tx", ?peer_id, "Propagating transactions to peer");
-        let mut propagated = PropagatedTransactions::default();
+        let mut propagated = PropagationTracker::new(self.pool.has_propagation_listeners());
 
         // filter all transactions unknown to the peer
         let mut full_transactions = FullTransactionsBuilder::new(peer.version);
@@ -970,7 +970,7 @@ where
         // send hashes if any
         if let Some(new_pooled_hashes) = pooled {
             for hash in new_pooled_hashes.iter_hashes().copied() {
-                propagated.record(hash, PropagateKind::Hash(peer_id));
+                propagated.record(hash, || PropagateKind::Hash(peer_id));
                 // mark transaction as seen by peer
                 peer.seen_transactions.insert(hash);
             }
@@ -982,7 +982,7 @@ where
         // send full transactions, if any
         if let Some(new_full_transactions) = full {
             for hash in new_full_transactions.iter_hashes() {
-                propagated.record(*hash, PropagateKind::Full(peer_id));
+                propagated.record(*hash, || PropagateKind::Full(peer_id));
                 // mark transaction as seen by peer
                 peer.seen_transactions.insert(*hash);
             }
@@ -994,7 +994,7 @@ where
         // Update propagated transactions metrics
         self.metrics.propagated_transactions.increment(propagated.len() as u64);
 
-        Some(propagated)
+        Some(propagated.into_propagated())
     }
 
     /// Propagate the transaction hashes to the given peer
@@ -1019,7 +1019,7 @@ where
             let to_propagate =
                 self.pool.get_all(hashes).into_iter().map(PropagateTransaction::pool_tx);
 
-            let mut propagated = PropagatedTransactions::default();
+            let mut propagated = PropagationTracker::new(self.pool.has_propagation_listeners());
 
             // check if transaction is known to peer
             let mut hashes = PooledTransactionsHashesBuilder::new(peer.version);
@@ -1043,7 +1043,7 @@ where
             }
 
             for hash in new_pooled_hashes.iter_hashes().copied() {
-                propagated.record(hash, PropagateKind::Hash(peer_id));
+                propagated.record(hash, || PropagateKind::Hash(peer_id));
                 peer.seen_transactions.insert(hash);
             }
 
@@ -1055,7 +1055,7 @@ where
             // Update propagated transactions metrics
             self.metrics.propagated_transactions.increment(propagated.len() as u64);
 
-            propagated
+            propagated.into_propagated()
         };
 
         // notify pool so events get fired
@@ -1073,10 +1073,10 @@ where
         to_propagate: Vec<PropagateTransaction>,
         propagation_mode: PropagationMode,
     ) -> PropagatedTransactions {
-        let mut propagated = PropagatedTransactions::default();
         if self.network.tx_gossip_disabled() {
-            return propagated
+            return PropagatedTransactions::default()
         }
+        let mut propagated = PropagationTracker::new(self.pool.has_propagation_listeners());
 
         // send full transactions to a set of the connected peers based on the configured mode
         let max_num_full = self.config.propagation_mode.full_peer_count(self.peers.len());
@@ -1145,7 +1145,7 @@ where
                 }
 
                 for hash in new_pooled_hashes.iter_hashes().copied() {
-                    propagated.record(hash, PropagateKind::Hash(*peer_id));
+                    propagated.record(hash, || PropagateKind::Hash(*peer_id));
                 }
 
                 trace!(target: "net::tx", ?peer_id, num_txs=?new_pooled_hashes.len(), "Propagating tx hashes to peer");
@@ -1157,7 +1157,7 @@ where
             // send full transactions, if any
             if let Some(new_full_transactions) = full {
                 for hash in new_full_transactions.iter_hashes() {
-                    propagated.record(*hash, PropagateKind::Full(*peer_id));
+                    propagated.record(*hash, || PropagateKind::Full(*peer_id));
                 }
 
                 trace!(target: "net::tx", ?peer_id, num_txs=?new_full_transactions.len(), "Propagating full transactions to peer");
@@ -1170,7 +1170,7 @@ where
         // Update propagated transactions metrics
         self.metrics.propagated_transactions.increment(propagated.len() as u64);
 
-        propagated
+        propagated.into_propagated()
     }
 
     /// Propagates the given transactions to the peers
@@ -1987,6 +1987,58 @@ struct PropagateTransactions {
     pooled: Option<NewPooledTransactionHashes>,
     /// The transactions to send in full.
     full: Option<BroadcastPoolTransactions>,
+}
+
+/// Tracks the transactions that were propagated during one propagation round.
+///
+/// [`PropagatedTransactions`] keeps a `Vec<PropagateKind>` per transaction and appends a
+/// [`PeerId`] sized entry for every peer the transaction was sent to. That bookkeeping is only
+/// consumed by the pool's event listeners, so when the pool has none the tracker degrades to the
+/// set of distinct hashes, which is all the propagation metric needs.
+#[derive(Debug)]
+enum PropagationTracker {
+    /// Records which peers each transaction was propagated to.
+    PerPeer(PropagatedTransactions),
+    /// Only records the distinct propagated hashes.
+    HashesOnly(B256Set),
+}
+
+impl PropagationTracker {
+    /// Creates a tracker that records the per peer propagation info only if `per_peer` is true.
+    fn new(per_peer: bool) -> Self {
+        if per_peer {
+            Self::PerPeer(Default::default())
+        } else {
+            Self::HashesOnly(Default::default())
+        }
+    }
+
+    /// Records that `hash` was propagated. `kind` is only evaluated if the per peer info is kept.
+    fn record(&mut self, hash: TxHash, kind: impl FnOnce() -> PropagateKind) {
+        match self {
+            Self::PerPeer(propagated) => propagated.record(hash, kind()),
+            Self::HashesOnly(hashes) => {
+                hashes.insert(hash);
+            }
+        }
+    }
+
+    /// Returns the number of distinct transactions that were propagated.
+    fn len(&self) -> usize {
+        match self {
+            Self::PerPeer(propagated) => propagated.len(),
+            Self::HashesOnly(hashes) => hashes.len(),
+        }
+    }
+
+    /// Consumes the tracker and returns the recorded propagation info, which is empty if only
+    /// hashes were tracked.
+    fn into_propagated(self) -> PropagatedTransactions {
+        match self {
+            Self::PerPeer(propagated) => propagated,
+            Self::HashesOnly(_) => PropagatedTransactions::default(),
+        }
+    }
 }
 
 /// Helper type for constructing the full transaction message that enforces the
@@ -3340,6 +3392,9 @@ mod tests {
         let (mut tx_manager, network) = new_eth_tx_manager().await;
         let peer_id = PeerId::random();
 
+        // per peer propagation info is only tracked while the pool has event listeners
+        let _events = tx_manager.pool.all_transactions_event_listener();
+
         // ensure not syncing
         network.handle().update_sync_state(SyncState::Idle);
 
@@ -3421,6 +3476,8 @@ mod tests {
         reth_tracing::init_test_tracing();
 
         let (mut tx_manager, network) = new_eth_tx_manager().await;
+        // per peer propagation info is only tracked while the pool has event listeners
+        let _events = tx_manager.pool.all_transactions_event_listener();
         // all peers receive hash announcements only
         tx_manager.config.propagation_mode = TransactionPropagationMode::Max(0);
 
