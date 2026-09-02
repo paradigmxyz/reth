@@ -168,7 +168,7 @@ where
     }
 
     /// Decodes incoming bytes into an [`EthMessage`].
-    pub fn decode_message(&self, mut bytes: BytesMut) -> Result<EthMessage<N>, EthStreamError> {
+    pub fn decode_message(&self, bytes: BytesMut) -> Result<EthMessage<N>, EthStreamError> {
         if bytes.len() > self.max_message_size {
             return Err(EthStreamError::MessageTooBig(bytes.len()));
         }
@@ -180,16 +180,16 @@ where
             return Err(EthStreamError::UnsupportedMessage { message_id: id });
         }
 
+        let bytes = bytes.freeze();
         if self.lazy_responses &&
             let Some(&id) = bytes.first() &&
             let Ok(message_id) = EthMessageID::try_from(id as usize) &&
-            message_id.is_response()
+            let Some(resp) = RawResponse::new(message_id, bytes.slice(1..).into())
         {
             if !message_id.is_valid_for_version(self.version) {
                 return Err(MessageError::Invalid(self.version, message_id).into());
             }
-            let payload = bytes.split_off(1).freeze();
-            return Ok(EthMessage::RawResponse(RawResponse::new(message_id, payload.into())));
+            return Ok(EthMessage::RawResponse(resp));
         }
 
         let msg = match ProtocolMessage::decode_message_with_tx_memory_budget(

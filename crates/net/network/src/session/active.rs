@@ -2074,7 +2074,7 @@ mod tests {
 
     /// Builds a [`RawResponse`] carrying `request_id` followed by `body`.
     fn raw_response(message_id: EthMessageID, request_id: u64, body: &[u8]) -> RawResponse {
-        RawResponse::new(message_id, response_payload(request_id, body))
+        RawResponse::new(message_id, response_payload(request_id, body)).unwrap()
     }
 
     /// Builds a [`RawSnapResponse`] carrying `request_id` followed by `body`.
@@ -2165,7 +2165,8 @@ mod tests {
         let (id, _rx) = dispatch_block_bodies_request(&mut session);
 
         // The request id can't be decoded at all.
-        let resp = RawResponse::new(EthMessageID::BlockBodies, UNDECODABLE_BODY.to_vec().into());
+        let resp =
+            RawResponse::new(EthMessageID::BlockBodies, UNDECODABLE_BODY.to_vec().into()).unwrap();
         let outcome = session.on_incoming_message(EthMessage::RawResponse(resp));
         assert!(matches!(outcome, OnIncomingMessageOutcome::BadMessage { .. }));
 

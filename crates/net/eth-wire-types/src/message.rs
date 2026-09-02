@@ -915,6 +915,7 @@ where
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RawResponse {
     /// The id of the response message.
+    #[cfg_attr(feature = "serde", serde(deserialize_with = "deserialize_response_id"))]
     message_id: EthMessageID,
     /// The RLP encoded `[request-id, payload...]` list.
     payload: Bytes,
@@ -924,9 +925,9 @@ impl RawResponse {
     /// Creates a new raw response from the message id and the RLP encoded
     /// `[request-id, payload...]` list that follows the id on the wire.
     ///
-    /// The caller must ensure that `message_id` [is a response](EthMessageID::is_response).
-    pub const fn new(message_id: EthMessageID, payload: Bytes) -> Self {
-        Self { message_id, payload }
+    /// Returns `None` if `message_id` is not the id of a [response](EthMessageID::is_response).
+    pub fn new(message_id: EthMessageID, payload: Bytes) -> Option<Self> {
+        message_id.is_response().then_some(Self { message_id, payload })
     }
 
     /// Returns the id of the response message.
@@ -941,6 +942,9 @@ impl RawResponse {
 
     /// Decodes the request id, the first element of the response list, without decoding the rest
     /// of the payload.
+    ///
+    /// The id is read from within the list's declared payload, so an id that merely follows an
+    /// under-declared list is rejected instead of being taken at face value.
     pub fn request_id(&self) -> alloy_rlp::Result<u64> {
         decode_request_id(&self.payload)
     }
@@ -985,12 +989,25 @@ impl Debug for RawResponse {
 
 /// Decodes the request id of an RLP encoded `[request-id, payload...]` list without decoding the
 /// rest of the payload.
+///
+/// The id is read from within the list's declared payload, so an id that merely follows an
+/// under-declared list is rejected instead of being taken at face value.
 pub(crate) fn decode_request_id(mut payload: &[u8]) -> alloy_rlp::Result<u64> {
-    let header = Header::decode(&mut payload)?;
-    if !header.list {
-        return Err(alloy_rlp::Error::UnexpectedString)
+    let mut list = Header::decode_bytes(&mut payload, true)?;
+    u64::decode(&mut list)
+}
+
+/// Deserializes the id of a [`RawResponse`], upholding that it is a response id.
+#[cfg(feature = "serde")]
+fn deserialize_response_id<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<EthMessageID, D::Error> {
+    use serde::Deserialize;
+    let message_id = EthMessageID::deserialize(deserializer)?;
+    if !message_id.is_response() {
+        return Err(serde::de::Error::custom("not a response message id"))
     }
-    u64::decode(&mut payload)
+    Ok(message_id)
 }
 
 #[cfg(test)]
@@ -1289,23 +1306,38 @@ mod tests {
         let encoded = encode(ProtocolMessage::from(msg.clone()));
 
         // the raw response is the encoded message without the leading message id
-        let raw = RawResponse::new(EthMessageID::BlockBodies, encoded[1..].to_vec().into());
+        let raw =
+            RawResponse::new(EthMessageID::BlockBodies, encoded[1..].to_vec().into()).unwrap();
         assert_eq!(raw.request_id().unwrap(), 1337);
         assert_eq!(raw.decode::<EthNetworkPrimitives>(EthVersion::Eth68).unwrap(), msg);
     }
 
     #[test]
     fn raw_response_request_id_rejects_malformed_payload() {
+        let raw = |payload: &[u8]| {
+            RawResponse::new(EthMessageID::BlockBodies, payload.to_vec().into()).unwrap()
+        };
+
         // a string instead of the `[request-id, payload]` list
-        let raw = RawResponse::new(EthMessageID::BlockBodies, hex!("820539").into());
-        assert!(matches!(raw.request_id(), Err(Error::UnexpectedString)));
+        assert!(matches!(raw(&hex!("820539")).request_id(), Err(Error::UnexpectedString)));
 
         // an empty list without a request id
-        let raw = RawResponse::new(EthMessageID::BlockBodies, hex!("c0").into());
-        assert!(matches!(raw.request_id(), Err(Error::InputTooShort)));
+        assert!(matches!(raw(&hex!("c0")).request_id(), Err(Error::InputTooShort)));
 
         // a list header that claims more bytes than the payload holds
-        let raw = RawResponse::new(EthMessageID::BlockBodies, hex!("c5820539").into());
-        assert!(matches!(raw.request_id(), Err(Error::InputTooShort)));
+        assert!(matches!(raw(&hex!("c5820539")).request_id(), Err(Error::InputTooShort)));
+
+        // an under-declared list: the id only follows the empty list instead of being in it
+        assert!(matches!(raw(&hex!("c005")).request_id(), Err(Error::InputTooShort)));
+
+        // bytes after the list are ignored, same as the full decoder does
+        assert_eq!(raw(&hex!("c105ff")).request_id().unwrap(), 5);
+    }
+
+    #[test]
+    fn raw_response_requires_response_id() {
+        assert!(RawResponse::new(EthMessageID::GetBlockBodies, hex!("c0").into()).is_none());
+        assert!(RawResponse::new(EthMessageID::Status, hex!("c0").into()).is_none());
+        assert!(RawResponse::new(EthMessageID::BlockBodies, hex!("c0").into()).is_some());
     }
 }
