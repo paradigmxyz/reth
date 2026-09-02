@@ -847,13 +847,15 @@ where
     }
 
     /// Lookup storage history and return [`HistoryInfo`].
+    ///
+    /// `visible_tip` is only resolved on the `RocksDB` path; the MDBX cursor does not need it.
     pub fn storage_history_info(
         &mut self,
         address: Address,
         storage_key: alloy_primitives::B256,
         block_number: BlockNumber,
         lowest_available_block_number: Option<BlockNumber>,
-        visible_tip: BlockNumber,
+        visible_tip: impl FnOnce() -> ProviderResult<BlockNumber>,
     ) -> ProviderResult<HistoryInfo> {
         match self {
             Self::Database(cursor, _) => {
@@ -872,7 +874,7 @@ where
                 storage_key,
                 block_number,
                 lowest_available_block_number,
-                visible_tip,
+                visible_tip()?,
             ),
         }
     }
@@ -895,12 +897,14 @@ where
     }
 
     /// Lookup account history and return [`HistoryInfo`].
+    ///
+    /// `visible_tip` is only resolved on the `RocksDB` path; the MDBX cursor does not need it.
     pub fn account_history_info(
         &mut self,
         address: Address,
         block_number: BlockNumber,
         lowest_available_block_number: Option<BlockNumber>,
-        visible_tip: BlockNumber,
+        visible_tip: impl FnOnce() -> ProviderResult<BlockNumber>,
     ) -> ProviderResult<HistoryInfo> {
         match self {
             Self::Database(cursor, _) => {
@@ -918,7 +922,7 @@ where
                 address,
                 block_number,
                 lowest_available_block_number,
-                visible_tip,
+                visible_tip()?,
             ),
         }
     }
@@ -1449,7 +1453,9 @@ mod rocksdb_tests {
                     PhantomData,
                 );
             let mdbx_result = mdbx_reader
-                .account_history_info(address, query.block_number, query.lowest_available, u64::MAX)
+                .account_history_info(address, query.block_number, query.lowest_available, || {
+                    Ok(u64::MAX)
+                })
                 .unwrap();
 
             // RocksDB query via EitherReader — reuse snapshot for consistent view
@@ -1543,7 +1549,7 @@ mod rocksdb_tests {
                     storage_key,
                     query.block_number,
                     query.lowest_available,
-                    u64::MAX,
+                    || Ok(u64::MAX),
                 )
                 .unwrap();
 
