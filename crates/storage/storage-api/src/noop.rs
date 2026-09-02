@@ -14,7 +14,8 @@ use crate::{
 
 #[cfg(feature = "db-api")]
 use crate::{
-    DBProvider, DatabaseProviderFactory, DbTxProvider, StorageChangeSetReader, StorageSettingsCache,
+    DBProvider, DatabaseProviderFactory, DbTxProvider, HistoryInfo, HistoryReader,
+    StorageChangeSetReader, StorageSettingsCache,
 };
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use alloy_consensus::transaction::TransactionMeta;
@@ -423,6 +424,28 @@ impl<C: Send + Sync, N: NodePrimitives> ChangeSetReader for NoopProvider<C, N> {
         _range: impl core::ops::RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
         Ok(Vec::default())
+    }
+}
+
+#[cfg(feature = "db-api")]
+impl<C: Send + Sync, N: NodePrimitives> HistoryReader for NoopProvider<C, N> {
+    fn account_history_info(
+        &self,
+        _address: Address,
+        _block_number: BlockNumber,
+        _lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo> {
+        Ok(HistoryInfo::NotYetWritten)
+    }
+
+    fn storage_history_info(
+        &self,
+        _address: Address,
+        _storage_key: B256,
+        _block_number: BlockNumber,
+        _lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo> {
+        Ok(HistoryInfo::NotYetWritten)
     }
 }
 

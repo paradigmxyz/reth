@@ -1,5 +1,6 @@
 use alloy_primitives::BlockNumber;
 use reth_db_api::{cursor::DbCursorRO, table::Table, BlockNumberList};
+use reth_storage_api::HistoryInfo as ReaderHistoryInfo;
 use reth_storage_errors::provider::ProviderResult;
 
 /// Result of a history lookup for an account or storage slot.
@@ -54,6 +55,28 @@ impl HistoryInfo {
             // The chunk does not contain an entry for a write after our block. This can only
             // happen if this is the last chunk and so we need to look in the plain state.
             Self::InPlainState
+        }
+    }
+}
+
+impl From<ReaderHistoryInfo> for HistoryInfo {
+    fn from(info: ReaderHistoryInfo) -> Self {
+        match info {
+            ReaderHistoryInfo::NotYetWritten => Self::NotYetWritten,
+            ReaderHistoryInfo::InChangeset(block_number) => Self::InChangeset(block_number),
+            ReaderHistoryInfo::InPlainState => Self::InPlainState,
+            ReaderHistoryInfo::MaybeInPlainState => Self::MaybeInPlainState,
+        }
+    }
+}
+
+impl From<HistoryInfo> for ReaderHistoryInfo {
+    fn from(info: HistoryInfo) -> Self {
+        match info {
+            HistoryInfo::NotYetWritten => Self::NotYetWritten,
+            HistoryInfo::InChangeset(block_number) => Self::InChangeset(block_number),
+            HistoryInfo::InPlainState => Self::InPlainState,
+            HistoryInfo::MaybeInPlainState => Self::MaybeInPlainState,
         }
     }
 }

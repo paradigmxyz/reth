@@ -24,6 +24,7 @@ use reth_engine_primitives::{
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
+use reth_network_p2p::full_block::SealedBlockWithAccessList;
 use reth_payload_builder::{BuildNewPayload, PayloadBuilderHandle, PayloadBuilderLease};
 use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadAttributes, PayloadTypes};
 use reth_primitives_traits::{
@@ -329,9 +330,6 @@ where
     payload_builds: PayloadBuildTracker,
     /// Notifies the engine when the final active payload job finishes.
     payload_build_finished: Receiver<()>,
-    /// A durable persistence completion whose destructive in-memory handoff is deferred until
-    /// payload jobs finish.
-    pending_persisted_handoff: Option<PersistenceResult>,
     /// Task runtime for spawning blocking work on named, reusable threads.
     runtime: reth_tasks::Runtime,
 }
@@ -360,7 +358,6 @@ where
             .field("evm_config", &self.evm_config)
             .field("execution_timing_stats", &self.execution_timing_stats.len())
             .field("payload_builds_active", &self.payload_builds.is_active())
-            .field("pending_persisted_handoff", &self.pending_persisted_handoff)
             .field("runtime", &self.runtime)
             .finish()
     }
@@ -428,7 +425,6 @@ where
             execution_timing_stats: B256Map::default(),
             payload_builds,
             payload_build_finished,
-            pending_persisted_handoff: None,
             runtime,
         }
     }
@@ -605,12 +601,7 @@ where
                         return
                     }
                 }
-                LoopEvent::PayloadBuildFinished => {
-                    if let Err(err) = self.on_payload_build_finished() {
-                        error!(target: "engine::tree", %err, "Payload build completion handling failed");
-                        return
-                    }
-                }
+                LoopEvent::PayloadBuildFinished => {}
                 LoopEvent::Disconnected => {
                     error!(target: "engine::tree", "Channel disconnected");
                     return
@@ -646,28 +637,11 @@ where
         }
     }
 
-    /// Blocks until the next event that can safely be processed is ready.
+    /// Blocks until the next event is ready.
     ///
-    /// A pending persisted handoff keeps processing engine messages while prioritizing the
-    /// notification that all active payload builds have finished. This keeps the engine responsive
-    /// without reclaiming the in-memory overlay while a payload job may still access it. Otherwise,
-    /// uses biased selection to prioritize persistence completion to update in-memory state and
-    /// unblock further writes.
+    /// Uses biased selection to prioritize persistence completion so in-memory state is updated and
+    /// further writes are unblocked.
     fn wait_for_event(&mut self) -> LoopEvent<T, N> {
-        if self.pending_persisted_handoff.is_some() {
-            self.metrics.engine.backpressure_active.set(0.0);
-            return crossbeam_channel::select_biased! {
-                recv(self.payload_build_finished) -> result => match result {
-                    Ok(()) => LoopEvent::PayloadBuildFinished,
-                    Err(_) => LoopEvent::Disconnected,
-                },
-                recv(self.incoming) -> msg => match msg {
-                    Ok(m) => LoopEvent::EngineMessage(m),
-                    Err(_) => LoopEvent::Disconnected,
-                },
-            }
-        }
-
         // Take ownership of persistence rx if present
         let maybe_persistence = self.persistence_state.rx.take();
 
@@ -724,7 +698,7 @@ where
     /// block request processing isn't blocked for a long time.
     fn on_downloaded(
         &mut self,
-        mut blocks: Vec<SealedBlock<N::Block>>,
+        mut blocks: Vec<SealedBlockWithAccessList<N::Block>>,
     ) -> Result<Option<TreeEvent>, InsertBlockFatalError> {
         if blocks.is_empty() {
             // nothing to execute
@@ -1429,7 +1403,10 @@ where
         Ok(TreeOutcome::new(OnForkChoiceUpdated::valid(PayloadStatus::from_status(
             PayloadStatusEnum::Syncing,
         )))
-        .with_event(TreeEvent::Download(DownloadRequest::single_block(target))))
+        .with_event(TreeEvent::Download(
+            DownloadRequest::single_block(target)
+                .with_access_lists(self.should_download_access_lists()),
+        )))
     }
 
     /// Helper method to remove blocks and set the persistence state. This ensures we keep track of
@@ -1462,12 +1439,6 @@ where
     /// This checks if we need to remove blocks (disk reorg) or save new blocks to disk.
     /// Persistence completion is handled separately via the `wait_for_event` method.
     fn advance_persistence(&mut self) -> Result<(), AdvancePersistenceError> {
-        // A second persistence completion would overwrite the frontier needed by the deferred
-        // handoff. Wait until the payload jobs using the old overlay have finished.
-        if self.pending_persisted_handoff.is_some() {
-            return Ok(())
-        }
-
         if !self.persistence_state.in_progress() {
             if let Some(new_tip_num) = self.find_disk_reorg()? {
                 self.remove_blocks(new_tip_num)
@@ -1500,7 +1471,7 @@ where
             if let Some((rx, start_time, action)) = self.persistence_state.rx.take() {
                 debug!(target: "engine::tree", ?action, "waiting for in-flight persistence");
                 let result = rx.recv().map_err(|_| AdvancePersistenceError::ChannelClosed)?;
-                self.finish_persistence(result, start_time);
+                self.on_persistence_complete(result, start_time)?;
                 continue
             }
 
@@ -1552,31 +1523,9 @@ where
         result: PersistenceResult,
         start_time: Instant,
     ) -> Result<(), AdvancePersistenceError> {
-        let handoff = self.finish_persistence(result, start_time);
-
-        if self.payload_builds.is_active() {
-            debug_assert!(
-                self.pending_persisted_handoff.is_none(),
-                "a new persistence task must not start while its predecessor handoff is pending"
-            );
-            debug!(target: "engine::tree", "Deferring persisted in-memory handoff until payload jobs finish");
-            self.pending_persisted_handoff = Some(handoff);
-            return Ok(())
-        }
-
-        self.on_persisted_handoff(handoff)
-    }
-
-    /// Records a completed persistence operation and returns its deferred in-memory handoff.
-    fn finish_persistence(
-        &mut self,
-        result: PersistenceResult,
-        start_time: Instant,
-    ) -> PersistenceResult {
         self.metrics.engine.persistence_duration.record(start_time.elapsed());
 
-        let last_block = result.last_block;
-        let last_state_trie_block = result.last_state_trie_block;
+        let PersistenceResult { last_block, last_state_trie_block, commit_duration } = result;
         debug_assert!(
             last_state_trie_block.number <= last_block.number,
             "state/trie frontier cannot exceed the last persisted block"
@@ -1585,28 +1534,6 @@ where
         debug!(target: "engine::tree", ?last_block, ?last_state_trie_block, elapsed=?start_time.elapsed(), "Finished persisting, calling finish");
         self.persistence_state.finish(last_block, last_state_trie_block);
 
-        result
-    }
-
-    /// Applies the destructive in-memory portion of a completed persistence operation.
-    fn on_persisted_handoff(
-        &mut self,
-        handoff: PersistenceResult,
-    ) -> Result<(), AdvancePersistenceError> {
-        if handoff.last_block != self.persistence_state.last_persisted_block ||
-            handoff.last_state_trie_block !=
-                self.persistence_state.last_state_trie_persisted_block
-        {
-            debug!(
-                target: "engine::tree",
-                handoff_last_block = ?handoff.last_block,
-                current_last_block = ?self.persistence_state.last_persisted_block,
-                "Discarding stale persisted handoff"
-            );
-            return Ok(())
-        }
-
-        let PersistenceResult { last_block, commit_duration, .. } = handoff;
         let last_block_number = last_block.number;
 
         // Evict cached changesets for blocks below the eviction threshold.
@@ -1633,19 +1560,6 @@ where
         self.on_new_persisted_block()?;
 
         self.purge_timing_stats(last_block_number, commit_duration);
-
-        Ok(())
-    }
-
-    /// Releases work deferred until all payload jobs have finished.
-    fn on_payload_build_finished(&mut self) -> Result<(), AdvancePersistenceError> {
-        if self.payload_builds.is_active() {
-            return Ok(())
-        }
-
-        if let Some(handoff) = self.pending_persisted_handoff.take() {
-            self.on_persisted_handoff(handoff)?;
-        }
 
         Ok(())
     }
@@ -2028,10 +1942,10 @@ where
                     "Backfill complete, downloading remaining blocks to reach FCU target"
                 );
 
-                self.emit_event(EngineApiEvent::Download(DownloadRequest::BlockRange(
-                    lowest_buffered.parent_hash(),
-                    distance,
-                )));
+                self.emit_event(EngineApiEvent::Download(
+                    DownloadRequest::block_range(lowest_buffered.parent_hash(), distance)
+                        .with_access_lists(self.should_download_access_lists()),
+                ));
                 return Ok(());
             }
         } else {
@@ -2042,9 +1956,10 @@ where
                 head_hash = %sync_target_state.head_block_hash,
                 "Backfill complete but head block not buffered, requesting download"
             );
-            self.emit_event(EngineApiEvent::Download(DownloadRequest::single_block(
-                sync_target_state.head_block_hash,
-            )));
+            self.emit_event(EngineApiEvent::Download(
+                DownloadRequest::single_block(sync_target_state.head_block_hash)
+                    .with_access_lists(self.should_download_access_lists()),
+            ));
             return Ok(());
         }
 
@@ -2169,12 +2084,9 @@ where
                 "backfill action should only be emitted when backfill is idle"
             );
 
-            if self.payload_builds.is_active() ||
-                self.persistence_state.in_progress() ||
-                self.pending_persisted_handoff.is_some()
-            {
-                // Backfill can remove the same in-memory blocks as an active payload job or a
-                // persisted handoff, so it must not start until the next sync trigger.
+            if self.payload_builds.is_active() || self.persistence_state.in_progress() {
+                // Backfill can remove the same in-memory blocks as an active payload job or
+                // persistence task, so it must not start until the next sync trigger.
                 debug!(target: "engine::tree", "skipping backfill while in-memory overlay is in use");
                 return
             }
@@ -2421,6 +2333,18 @@ where
             .unwrap_or_else(|| hash)
     }
 
+    /// Returns whether block downloads should also attempt to fetch the blocks' access lists.
+    ///
+    /// This is the case once Amsterdam is active at the current canonical head, indicated by the
+    /// head header carrying a block access list hash.
+    ///
+    /// This is a coarse gate: a download issued while the head is still pre-Amsterdam won't ask
+    /// for access lists of blocks past the fork. Access list downloads are best-effort anyway, so
+    /// those blocks simply take the regular execution path.
+    fn should_download_access_lists(&self) -> bool {
+        self.canonical_in_memory_state.get_canonical_head().block_access_list_hash().is_some()
+    }
+
     /// If validation fails, the response MUST contain the latest valid hash:
     ///
     ///   - The block hash of the ancestor of the invalid payload satisfying the following two
@@ -2658,9 +2582,10 @@ where
                 Err(err) => {
                     if let InsertPayloadError::Block(err) = err {
                         debug!(target: "engine::tree", ?err, "failed to connect buffered block to tree");
-                        if let Err(fatal) = self.on_internal_insert_block_error(err) {
+                        if let Err(InsertBlockProcessingError::Fatal(fatal)) =
+                            self.on_insert_block_error(err)
+                        {
                             warn!(target: "engine::tree", %fatal, "fatal error occurred while connecting buffered blocks");
-                            return Err(fatal)
                         }
                     }
                 }
@@ -2679,7 +2604,7 @@ where
         if let Err(err) = self.validate_block(&block) {
             return Err(InsertBlockError::consensus_error(err, block))
         }
-        self.state.buffer.insert_block(block);
+        self.state.buffer.insert_block(block.into());
         Ok(())
     }
 
@@ -2937,7 +2862,7 @@ where
             self.distance_from_local_tip(head.number, missing_parent.number)
         {
             trace!(target: "engine::tree", %distance, missing=?missing_parent, "downloading missing parent block range");
-            DownloadRequest::BlockRange(missing_parent.hash, distance)
+            DownloadRequest::block_range(missing_parent.hash, distance)
         } else {
             trace!(target: "engine::tree", missing=?missing_parent, "downloading missing parent block");
             // This happens when the missing parent is on an outdated
@@ -2945,7 +2870,7 @@ where
             DownloadRequest::single_block(missing_parent.hash)
         };
 
-        Some(TreeEvent::Download(request))
+        Some(TreeEvent::Download(request.with_access_lists(self.should_download_access_lists())))
     }
 
     /// Handles a downloaded block that was successfully inserted as valid.
@@ -2983,7 +2908,10 @@ where
             if self.state.tree_state.canonical_block_hash() != sync_target.head_block_hash {
                 let target = self.lowest_buffered_ancestor_or(sync_target.head_block_hash);
                 trace!(target: "engine::tree", %target, "sync target head not yet reached, downloading head block");
-                return Ok(Some(TreeEvent::Download(DownloadRequest::single_block(target))))
+                return Ok(Some(TreeEvent::Download(
+                    DownloadRequest::single_block(target)
+                        .with_access_lists(self.should_download_access_lists()),
+                )))
             }
 
             return Ok(None)
@@ -3001,7 +2929,7 @@ where
     #[instrument(level = "debug", target = "engine::tree", skip_all, fields(block_hash = %block.hash(), block_num = %block.number()))]
     fn on_downloaded_block(
         &mut self,
-        block: SealedBlock<N::Block>,
+        block: SealedBlockWithAccessList<N::Block>,
     ) -> Result<Option<TreeEvent>, InsertBlockFatalError> {
         let block_num_hash = block.num_hash();
         let lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_num_hash.hash);
@@ -3033,9 +2961,10 @@ where
             Err(err) => {
                 if let InsertPayloadError::Block(err) = err {
                     debug!(target: "engine::tree", err=%err.kind(), "failed to insert downloaded block");
-                    if let Err(fatal) = self.on_internal_insert_block_error(err) {
+                    if let Err(InsertBlockProcessingError::Fatal(fatal)) =
+                        self.on_insert_block_error(err)
+                    {
                         warn!(target: "engine::tree", %fatal, "fatal error occurred while inserting downloaded block");
-                        return Err(fatal)
                     }
                 }
             }
@@ -3059,13 +2988,13 @@ where
             payload.block_with_parent(),
             payload,
             |validator, payload, ctx| validator.validate_payload(payload, ctx),
-            |this, payload| Ok(this.payload_validator.convert_payload_to_block(payload)?),
+            |this, payload| Ok(this.payload_validator.convert_payload_to_block(payload)?.into()),
         )
     }
 
     fn insert_block(
         &mut self,
-        block: SealedBlock<N::Block>,
+        block: SealedBlockWithAccessList<N::Block>,
     ) -> Result<InsertPayloadOk, InsertPayloadError<N::Block>> {
         self.insert_block_or_payload(
             block.block_with_parent(),
@@ -3097,7 +3026,10 @@ where
         block_id: BlockWithParent,
         input: Input,
         execute: impl FnOnce(&mut V, Input, TreeCtx<'_, N>) -> Result<ValidationOutput<N>, Err>,
-        convert_to_block: impl FnOnce(&mut Self, Input) -> Result<SealedBlock<N::Block>, Err>,
+        convert_to_block: impl FnOnce(
+            &mut Self,
+            Input,
+        ) -> Result<SealedBlockWithAccessList<N::Block>, Err>,
     ) -> Result<InsertPayloadOk, Err>
     where
         Err: From<InsertBlockError<N::Block>>,
@@ -3118,7 +3050,7 @@ where
             match self.provider.sealed_header_by_hash(block_num_hash.hash) {
                 Err(err) => {
                     let block = convert_to_block(self, input)?;
-                    return Err(InsertBlockError::new(block, err.into()).into());
+                    return Err(InsertBlockError::new(block.split().0, err.into()).into());
                 }
                 Ok(Some(_)) => {
                     convert_to_block(self, input)?;
@@ -3134,7 +3066,7 @@ where
                 Ok(header) => header.is_some(),
                 Err(err) => {
                     let block = convert_to_block(self, input)?;
-                    return Err(InsertBlockError::new(block, err.into()).into());
+                    return Err(InsertBlockError::new(block.split().0, err.into()).into());
                 }
             };
 
@@ -3287,17 +3219,6 @@ where
             PayloadStatusEnum::Invalid { validation_error: validation_err.to_string() },
             latest_valid_hash,
         ))
-    }
-
-    /// Handles an insertion error from a non-RPC source, where malformed input can be discarded.
-    fn on_internal_insert_block_error(
-        &mut self,
-        error: InsertBlockError<N::Block>,
-    ) -> Result<(), InsertBlockFatalError> {
-        match self.on_insert_block_error(error) {
-            Ok(_) | Err(InsertBlockProcessingError::MalformedInput(_)) => Ok(()),
-            Err(InsertBlockProcessingError::Fatal(error)) => Err(error),
-        }
     }
 
     /// Handles a [`NewPayloadError`] by converting it to a [`PayloadStatus`].
@@ -3545,7 +3466,7 @@ where
         /// When the persistence operation started.
         start_time: Instant,
     },
-    /// The last active payload job has finished, so deferred in-memory work may proceed.
+    /// The last active payload job has finished, so suppressed persistence may resume.
     PayloadBuildFinished,
     /// A channel was disconnected.
     Disconnected,
