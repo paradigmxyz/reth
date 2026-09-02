@@ -18,7 +18,7 @@ pub(super) fn test_get_leaf_value_after_update<T: SparseTrie>(new_trie: fn() -> 
     let new_value = U256::from(42);
     let new_value_rlp = encode_fixed_size(&new_value).to_vec();
     let mut leaf_updates: B256Map<LeafUpdate> =
-        once((key4, LeafUpdate::Changed(new_value_rlp.clone()))).collect();
+        once((key4, LeafUpdate::Changed(LeafValue::from_slice(&new_value_rlp)))).collect();
     trie.update_leaves(&mut leaf_updates, |_, _| {}).expect("update_leaves should succeed");
 
     assert_eq!(
@@ -31,7 +31,7 @@ pub(super) fn test_get_leaf_value_after_update<T: SparseTrie>(new_trie: fn() -> 
     let updated_value = U256::from(222);
     let updated_value_rlp = encode_fixed_size(&updated_value).to_vec();
     let mut leaf_updates: B256Map<LeafUpdate> =
-        once((key2, LeafUpdate::Changed(updated_value_rlp.clone()))).collect();
+        once((key2, LeafUpdate::Changed(LeafValue::from_slice(&updated_value_rlp)))).collect();
     trie.update_leaves(&mut leaf_updates, |_, _| {}).expect("update_leaves should succeed");
 
     assert_eq!(
@@ -61,7 +61,8 @@ pub(super) fn test_get_leaf_value_after_removal<T: SparseTrie>(new_trie: fn() ->
         "get_leaf_value should return Some before removal"
     );
 
-    // Remove key2 by setting its value to U256::ZERO (produces LeafUpdate::Changed(vec![])).
+    // Remove key2 by setting its value to U256::ZERO (produces
+    // LeafUpdate::Changed(LeafValue::new())).
     let mut leaf_updates = SuiteTestHarness::leaf_updates(&BTreeMap::from([(key2, U256::ZERO)]));
     harness.reveal_and_update(&mut trie, &mut leaf_updates);
 

@@ -22,7 +22,9 @@ use alloy_rlp::{encode_fixed_size, Decodable};
 use alloy_trie::EMPTY_ROOT_HASH;
 use reth_trie::test_utils::TrieTestHarness;
 use reth_trie_common::{Nibbles, ProofV2Target, TrieNodeV2};
-use reth_trie_sparse::{LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, TrieNodeEpoch};
+use reth_trie_sparse::{
+    LeafLookup, LeafLookupError, LeafUpdate, LeafValue, SparseTrie, TrieNodeEpoch,
+};
 use std::{collections::BTreeMap, iter::once};
 
 mod find_leaf;
@@ -79,9 +81,9 @@ impl SuiteTestHarness {
             .iter()
             .map(|(&slot, &value)| {
                 let rlp_value = if value == U256::ZERO {
-                    Vec::new()
+                    LeafValue::new()
                 } else {
-                    encode_fixed_size(&value).to_vec()
+                    LeafValue::from_slice(&encode_fixed_size(&value))
                 };
                 (slot, LeafUpdate::Changed(rlp_value))
             })

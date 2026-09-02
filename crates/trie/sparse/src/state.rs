@@ -560,7 +560,7 @@ impl<S: SparseTrieTrait + Clone> StorageTries<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ArenaParallelSparseTrie, LeafLookup, LeafUpdate};
+    use crate::{ArenaParallelSparseTrie, LeafLookup, LeafUpdate, LeafValue};
     use alloy_primitives::{
         b256,
         map::{HashMap, HashSet},
@@ -645,7 +645,7 @@ mod tests {
 
         // Remove the leaf node and check that the state trie does not contain the leaf node and
         // value
-        apply_account_update(&mut sparse, B256::ZERO, LeafUpdate::Changed(Vec::new()));
+        apply_account_update(&mut sparse, B256::ZERO, LeafUpdate::Changed(LeafValue::new()));
         assert!(matches!(
             sparse.state_trie_ref().unwrap().find_leaf(&full_path_0, None),
             Ok(LeafLookup::NonExistent)
@@ -708,7 +708,7 @@ mod tests {
 
         // Remove the leaf node and check that the storage trie does not contain the leaf node and
         // value
-        let mut updates = B256Map::from_iter([(B256::ZERO, LeafUpdate::Changed(Vec::new()))]);
+        let mut updates = B256Map::from_iter([(B256::ZERO, LeafUpdate::Changed(LeafValue::new()))]);
         sparse
             .storage_trie_mut(&B256::ZERO)
             .unwrap()
@@ -805,7 +805,9 @@ mod tests {
 
         let mut storage_updates = B256Map::from_iter([(
             slot,
-            LeafUpdate::Changed(alloy_rlp::encode_fixed_size(&U256::from(2)).to_vec()),
+            LeafUpdate::Changed(LeafValue::from_slice(&alloy_rlp::encode_fixed_size(&U256::from(
+                2,
+            )))),
         )]);
         sparse
             .storage_trie_mut(&account)
@@ -823,7 +825,7 @@ mod tests {
         apply_account_update(
             &mut sparse,
             account,
-            LeafUpdate::Changed(alloy_rlp::encode(trie_account)),
+            LeafUpdate::Changed(LeafValue::from_vec(alloy_rlp::encode(trie_account))),
         );
         let root_before = sparse.root(epoch(10)).unwrap();
         sparse.prune(epoch(10));
@@ -905,7 +907,7 @@ mod tests {
         );
 
         // Remove the leaf node
-        apply_account_update(&mut sparse, B256::ZERO, LeafUpdate::Changed(Vec::new()));
+        apply_account_update(&mut sparse, B256::ZERO, LeafUpdate::Changed(LeafValue::new()));
         assert!(sparse.state_trie_ref().unwrap().get_leaf_value(&full_path_0).is_none());
     }
 
@@ -955,7 +957,7 @@ mod tests {
         );
 
         // Remove the leaf node
-        let mut updates = B256Map::from_iter([(B256::ZERO, LeafUpdate::Changed(Vec::new()))]);
+        let mut updates = B256Map::from_iter([(B256::ZERO, LeafUpdate::Changed(LeafValue::new()))]);
         sparse
             .storage_trie_mut(&B256::ZERO)
             .unwrap()
@@ -1076,11 +1078,13 @@ mod tests {
         apply_account_update(
             &mut sparse,
             address_3,
-            LeafUpdate::Changed(alloy_rlp::encode(trie_account_3)),
+            LeafUpdate::Changed(LeafValue::from_vec(alloy_rlp::encode(trie_account_3))),
         );
 
-        let mut updates =
-            B256Map::from_iter([(slot_3, LeafUpdate::Changed(alloy_rlp::encode(value_3)))]);
+        let mut updates = B256Map::from_iter([(
+            slot_3,
+            LeafUpdate::Changed(LeafValue::from_vec(alloy_rlp::encode(value_3))),
+        )]);
         sparse
             .storage_trie_mut(&address_1)
             .unwrap()
@@ -1091,7 +1095,7 @@ mod tests {
         apply_account_update(
             &mut sparse,
             address_1,
-            LeafUpdate::Changed(alloy_rlp::encode(trie_account_1)),
+            LeafUpdate::Changed(LeafValue::from_vec(alloy_rlp::encode(trie_account_1))),
         );
 
         sparse.root(epoch(0)).unwrap();

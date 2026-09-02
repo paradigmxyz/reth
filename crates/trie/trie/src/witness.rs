@@ -14,7 +14,7 @@ use reth_trie_common::{
     DecodedMultiProofV2, ExecutionWitnessMode, HashedPostState, MultiProofTargetsV2, ProofV2Target,
     TrieNodeV2,
 };
-use reth_trie_sparse::{LeafUpdate, SparseStateTrie, SparseTrie as _, TrieNodeEpoch};
+use reth_trie_sparse::{LeafUpdate, LeafValue, SparseStateTrie, SparseTrie as _, TrieNodeEpoch};
 
 /// State transition witness for the trie.
 #[derive(Debug)]
@@ -160,11 +160,13 @@ where
                     storage_removals
                         .entry(*hashed_address)
                         .or_default()
-                        .insert(hashed_slot, LeafUpdate::Changed(vec![]));
+                        .insert(hashed_slot, LeafUpdate::Changed(LeafValue::new()));
                 } else {
                     storage_upserts.entry(*hashed_address).or_default().insert(
                         hashed_slot,
-                        LeafUpdate::Changed(alloy_rlp::encode_fixed_size(value).to_vec()),
+                        LeafUpdate::Changed(LeafValue::from_slice(&alloy_rlp::encode_fixed_size(
+                            value,
+                        ))),
                     );
                 }
             }
@@ -251,11 +253,12 @@ where
                 };
 
             if account.is_empty() && storage_root == EMPTY_ROOT_HASH {
-                account_removals.insert(hashed_address, LeafUpdate::Changed(vec![]));
+                account_removals.insert(hashed_address, LeafUpdate::Changed(LeafValue::new()));
             } else {
                 let mut rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
                 account.into_trie_account(storage_root).encode(&mut rlp);
-                account_upserts.insert(hashed_address, LeafUpdate::Changed(rlp));
+                account_upserts
+                    .insert(hashed_address, LeafUpdate::Changed(LeafValue::from_vec(rlp)));
             }
         }
 

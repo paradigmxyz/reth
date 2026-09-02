@@ -2900,7 +2900,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
 mod tests {
     use super::TRACE_TARGET;
     use crate::{
-        ArenaParallelSparseTrie, ArenaParallelismThresholds, LeafUpdate, SparseTrie, TrieNodeEpoch,
+        ArenaParallelSparseTrie, ArenaParallelismThresholds, LeafUpdate, LeafValue, SparseTrie,
+        TrieNodeEpoch,
     };
     use alloy_primitives::{map::B256Map, B256, U256};
     use rand::{seq::SliceRandom, Rng, SeedableRng};
@@ -2964,9 +2965,9 @@ mod tests {
                 .iter()
                 .map(|(&slot, &value)| {
                     let rlp_value = if value == U256::ZERO {
-                        Vec::new()
+                        LeafValue::new()
                     } else {
-                        alloy_rlp::encode_fixed_size(&value).to_vec()
+                        LeafValue::from_slice(&alloy_rlp::encode_fixed_size(&value))
                     };
                     (slot, LeafUpdate::Changed(rlp_value))
                 })

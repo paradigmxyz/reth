@@ -415,7 +415,10 @@ pub(super) fn test_touched_on_blinded_triggers_proof_then_changed_succeeds<T: Sp
 
     // Step 3: Replace Touched with Changed(new_value) in the map.
     let new_value = U256::from(999);
-    leaf_updates.insert(target_key, LeafUpdate::Changed(encode_fixed_size(&new_value).to_vec()));
+    leaf_updates.insert(
+        target_key,
+        LeafUpdate::Changed(LeafValue::from_slice(&encode_fixed_size(&new_value))),
+    );
 
     // Step 4: update_leaves again — key should now be drained.
     trie.update_leaves(&mut leaf_updates, |_, _| {})
@@ -472,7 +475,7 @@ pub(super) fn test_get_leaf_value_for_storage_root_lookup<T: SparseTrie>(new_tri
 
     // Step 4: Update the leaf with the re-encoded value.
     let mut leaf_updates: B256Map<LeafUpdate> =
-        once((key1, LeafUpdate::Changed(new_value_rlp))).collect();
+        once((key1, LeafUpdate::Changed(LeafValue::from_vec(new_value_rlp)))).collect();
     trie.update_leaves(&mut leaf_updates, |_, _| {}).expect("update_leaves should succeed");
 
     // Step 5: Compute root and verify against reference.
@@ -523,8 +526,11 @@ pub(super) fn test_find_leaf_before_update_to_check_existence<T: SparseTrie>(new
     let new_key2_value = U256::from(222);
     let new_insert_value = U256::from(444);
     let mut leaf_updates: B256Map<LeafUpdate> = [
-        (key2, LeafUpdate::Changed(encode_fixed_size(&new_key2_value).to_vec())),
-        (nonexistent_key, LeafUpdate::Changed(encode_fixed_size(&new_insert_value).to_vec())),
+        (key2, LeafUpdate::Changed(LeafValue::from_slice(&encode_fixed_size(&new_key2_value)))),
+        (
+            nonexistent_key,
+            LeafUpdate::Changed(LeafValue::from_slice(&encode_fixed_size(&new_insert_value))),
+        ),
     ]
     .into_iter()
     .collect();

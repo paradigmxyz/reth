@@ -150,7 +150,7 @@ pub(super) fn test_prune_then_update_and_recompute_root<T: SparseTrie>(new_trie:
 
     let mut first_update = B256Map::from_iter([(
         keys[0],
-        LeafUpdate::Changed(encode_fixed_size(&U256::from(100)).to_vec()),
+        LeafUpdate::Changed(LeafValue::from_slice(&encode_fixed_size(&U256::from(100)))),
     )]);
     trie.update_leaves(&mut first_update, |_, _| {
         panic!("fully revealed trie must not request proofs")
@@ -163,7 +163,7 @@ pub(super) fn test_prune_then_update_and_recompute_root<T: SparseTrie>(new_trie:
     let new_value = U256::from(999);
     let mut leaf_updates = B256Map::from_iter([(
         keys[0],
-        LeafUpdate::Changed(encode_fixed_size(&new_value).to_vec()),
+        LeafUpdate::Changed(LeafValue::from_slice(&encode_fixed_size(&new_value))),
     )]);
     trie.update_leaves(&mut leaf_updates, |_, _| {
         panic!("leaf at the cutoff epoch should remain revealed")
@@ -201,7 +201,10 @@ pub(super) fn test_prune_then_reveal_pruned_subtree<T: SparseTrie>(new_trie: fn(
 
     let new_value = U256::from(777);
     let mut leaf_updates: B256Map<LeafUpdate> = B256Map::default();
-    leaf_updates.insert(keys[2], LeafUpdate::Changed(encode_fixed_size(&new_value).to_vec()));
+    leaf_updates.insert(
+        keys[2],
+        LeafUpdate::Changed(LeafValue::from_slice(&encode_fixed_size(&new_value))),
+    );
     harness.reveal_and_update(&mut trie, &mut leaf_updates);
 
     let root_after = trie.root(epoch(2));
@@ -278,7 +281,7 @@ pub(super) fn test_prune_then_update_no_panic<T: SparseTrie>(new_trie: fn() -> T
     new_key.0[0] = 0xFF;
     let value_bytes = encode_fixed_size(&U256::from(999));
     let mut leaf_updates =
-        B256Map::from_iter([(new_key, LeafUpdate::Changed(value_bytes.to_vec()))]);
+        B256Map::from_iter([(new_key, LeafUpdate::Changed(LeafValue::from_slice(&value_bytes)))]);
 
     // The update will hit blinded nodes — the reveal_and_update loop supplies proofs.
     harness.reveal_and_update(&mut trie, &mut leaf_updates);
@@ -335,7 +338,7 @@ pub(super) fn test_prune_handles_small_subtrie_root_nodes<T: SparseTrie>(new_tri
     trie.root(epoch(0));
     let mut update = B256Map::from_iter([(
         small_key,
-        LeafUpdate::Changed(encode_fixed_size(&U256::from(2)).to_vec()),
+        LeafUpdate::Changed(LeafValue::from_slice(&encode_fixed_size(&U256::from(2)))),
     )]);
     trie.update_leaves(&mut update, |_, _| panic!("fully revealed trie must not request proofs"))
         .expect("update_leaves should succeed");
