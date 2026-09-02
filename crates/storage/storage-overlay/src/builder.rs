@@ -464,15 +464,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     state_trie_tip_block.hash,
                     finish_tip_block.hash,
                 ) {
-                    debug!(
-                        target: "storage::overlay",
-                        parent_hash = %self.parent_hash,
-                        state_trie_tip_hash = %state_trie_tip_block.hash,
-                        finish_tip_hash = %finish_tip_block.hash,
-                        sparse_trie_anchor_hash = ?self.reused_sparse_trie_anchor_hash,
-                        "Skipping overlay construction because reused sparse trie covers durable frontiers to parent"
-                    );
-
                     self.metrics.sparse_trie_overlay_skips.increment(1);
 
                     return Ok(StateTrieOverlay::empty())
