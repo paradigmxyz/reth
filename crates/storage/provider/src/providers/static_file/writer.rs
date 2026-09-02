@@ -369,7 +369,12 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             "Ensuring end range consistency"
         );
 
-        self.writer.commit().map_err(ProviderError::other)?;
+        // Only the header prune above dirties the writer here; `NippyJarWriter::new` has already
+        // committed any file level heal. Committing a segment that did not change costs four
+        // fsyncs, once per segment, on every startup.
+        if self.writer.is_dirty() {
+            self.writer.commit().map_err(ProviderError::other)?;
+        }
 
         // Updates the [SnapshotProvider] manager
         self.update_index()?;

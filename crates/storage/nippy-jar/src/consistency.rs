@@ -25,6 +25,8 @@ pub struct NippyJarChecker<H: NippyJarHeader = ()> {
     pub(crate) data_file: Option<BufWriter<File>>,
     /// File handle to where the offsets are stored.
     pub(crate) offsets_file: Option<BufWriter<File>>,
+    /// Whether a heal changed the jar on disk and therefore needs to be committed.
+    pub(crate) healed: bool,
 }
 
 impl<H: NippyJarHeader> NippyJarChecker<H> {
@@ -34,7 +36,15 @@ impl<H: NippyJarHeader> NippyJarChecker<H> {
     /// the data or offsets files. The [`NippyJar`] passed in contains all necessary
     /// configurations for handling data.
     pub const fn new(jar: NippyJar<H>) -> Self {
-        Self { jar, data_file: None, offsets_file: None }
+        Self { jar, data_file: None, offsets_file: None, healed: false }
+    }
+
+    /// Whether the last [`Self::ensure_consistency`] call healed the jar.
+    ///
+    /// A healed jar has pending file truncations and/or a changed row count that the caller must
+    /// commit to disk.
+    pub const fn healed(&self) -> bool {
+        self.healed
     }
 
     /// It will throw an error if the [`NippyJar`] is in an inconsistent state.
@@ -81,6 +91,7 @@ impl<H: NippyJarHeader> NippyJarChecker<H> {
                 drop(reader);
 
                 self.offsets_file().get_mut().set_len(expected_offsets_file_size)?;
+                self.healed = true;
                 reader = self.jar.open_data_reader()?;
             }
             Ordering::Greater => {
@@ -94,6 +105,7 @@ impl<H: NippyJarHeader> NippyJarChecker<H> {
 
                 // Freeze row count changed
                 self.jar.freeze_config()?;
+                self.healed = true;
             }
             Ordering::Equal => {}
         }
@@ -115,6 +127,7 @@ impl<H: NippyJarHeader> NippyJarChecker<H> {
                 // Happened during an appending job, so we need to truncate the data, since there's
                 // no way to recover it.
                 self.data_file().get_mut().set_len(last_offset)?;
+                self.healed = true;
             }
             Ordering::Greater => {
                 // Happened during a pruning job, so we need to reverse iterate offsets until we
@@ -134,6 +147,7 @@ impl<H: NippyJarHeader> NippyJarChecker<H> {
                         drop(reader);
 
                         self.offsets_file().get_mut().set_len(new_len)?;
+                        self.healed = true;
 
                         // Since we decrease the offset list, we need to check the consistency of
                         // `self.jar.rows` again

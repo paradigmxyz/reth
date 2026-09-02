@@ -53,21 +53,21 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         let (data_file, offsets_file, is_created) =
             Self::create_or_open_files(jar.data_path(), &jar.offsets_path())?;
 
-        let (jar, data_file, offsets_file) = if is_created {
+        let (jar, data_file, offsets_file, healed) = if is_created {
             // Makes sure we don't have dangling data and offset files when we just created the file
             jar.freeze_config()?;
 
-            (jar, BufWriter::new(data_file), BufWriter::new(offsets_file))
+            (jar, BufWriter::new(data_file), BufWriter::new(offsets_file), false)
         } else {
             // If we are opening a previously created jar, we need to check its consistency, and
             // make changes if necessary.
             let mut checker = NippyJarChecker::new(jar);
             checker.ensure_consistency()?;
 
-            let NippyJarChecker { jar, data_file, offsets_file } = checker;
+            let NippyJarChecker { jar, data_file, offsets_file, healed } = checker;
 
             // Calling ensure_consistency, will fill data_file and offsets_file
-            (jar, data_file.expect("qed"), offsets_file.expect("qed"))
+            (jar, data_file.expect("qed"), offsets_file.expect("qed"), healed)
         };
 
         let mut writer = Self {
@@ -81,8 +81,9 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
             dirty: false,
         };
 
-        if !is_created {
-            // Commit any potential heals done above.
+        if healed {
+            // Commit the heals done above. A jar that was already consistent has nothing to write,
+            // and committing it anyway costs four fsyncs per segment on every startup.
             writer.commit()?;
         }
 
