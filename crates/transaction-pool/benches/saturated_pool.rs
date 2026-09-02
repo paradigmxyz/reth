@@ -233,5 +233,29 @@ fn bench_canonical_state_change(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_add_transactions, bench_canonical_state_change);
+/// Benchmarks constructing the `best_transactions` iterator over a pool at capacity, and draining
+/// the first few hundred transactions from it the way a block builder would.
+fn bench_best_transactions(c: &mut Criterion) {
+    let mut group = c.benchmark_group("saturated_pool");
+    group.sample_size(50);
+
+    let (pool, _) = build_saturated_pool();
+    let size = pool.size();
+    assert!(size.pending >= 9_000, "pending pool not saturated: {size:?}");
+
+    group.bench_function("best_transactions_init", |b| b.iter(|| pool.best_transactions()));
+
+    group.bench_function("best_transactions_take_300", |b| {
+        b.iter(|| pool.best_transactions().take(300).count())
+    });
+
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    bench_add_transactions,
+    bench_canonical_state_change,
+    bench_best_transactions
+);
 criterion_main!(benches);

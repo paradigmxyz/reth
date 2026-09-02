@@ -11,7 +11,7 @@ use imbl::OrdMap;
 use reth_primitives_traits::transaction::error::InvalidTransactionError;
 use rustc_hash::FxHashSet;
 use std::{
-    collections::{BTreeSet, VecDeque},
+    collections::{BinaryHeap, VecDeque},
     sync::Arc,
 };
 use tokio::sync::broadcast::{error::TryRecvError, Receiver};
@@ -100,7 +100,10 @@ pub struct BestTransactions<T: TransactionOrdering> {
     ///
     /// Once an `independent` transaction with the nonce `N` is returned, it unlocks `N+1`, which
     /// then can be moved from the `all` set to the `independent` set.
-    pub(crate) independent: BTreeSet<PendingTransaction<T>>,
+    ///
+    /// `Ord` for `PendingTransaction` ranks the highest priority as greatest, so the root of this
+    /// max-heap is the next transaction to yield.
+    pub(crate) independent: BinaryHeap<PendingTransaction<T>>,
     /// There might be the case where a yielded transactions is invalid, this will track it.
     pub(crate) invalid: FxHashSet<SenderId>,
     /// Used to receive any new pending transactions that have been added to the pool after this
@@ -172,7 +175,7 @@ impl<T: TransactionOrdering> BestTransactions<T> {
     /// Removes the currently best independent transaction from the independent set and the total
     /// set.
     fn pop_best(&mut self) -> Option<PendingTransaction<T>> {
-        self.independent.pop_last().inspect(|best| {
+        self.independent.pop().inspect(|best| {
             self.all.remove(best.transaction.id());
         })
     }
@@ -188,7 +191,7 @@ impl<T: TransactionOrdering> BestTransactions<T> {
                     IncomingTransaction::Process(tx) => {
                         let tx_id = *tx.transaction.id();
                         if self.ancestor(&tx_id).is_none() {
-                            self.independent.insert(tx.clone());
+                            self.independent.push(tx.clone());
                         }
                         self.all.insert(tx_id, tx);
                     }
@@ -226,7 +229,7 @@ impl<T: TransactionOrdering> BestTransactions<T> {
 
             // Insert transactions that just got unlocked.
             if let Some(unlocked) = self.all.get(&best.unlocks()) {
-                self.independent.insert(unlocked.clone());
+                self.independent.push(unlocked.clone());
             }
 
             if self.skip_blobs && best.transaction.is_eip4844() {
@@ -856,7 +859,7 @@ mod tests {
 
         // Verify that the new transaction has been added to the 'independent' set
         assert_eq!(best.independent.len(), 2);
-        assert!(best.independent.contains(&pending_tx));
+        assert!(best.independent.iter().any(|tx| tx == &pending_tx));
     }
 
     #[test]
@@ -903,7 +906,7 @@ mod tests {
 
         // Verify that the new transaction has been added to the 'independent' set
         assert_eq!(best.independent.len(), 2);
-        assert!(best.independent.contains(&pending_tx1));
+        assert!(best.independent.iter().any(|tx| tx == &pending_tx1));
 
         // Attempt to add a new transaction with a different nonce (not a duplicate)
         let base_tx2 = base_tx1.with_nonce(6);
@@ -926,7 +929,7 @@ mod tests {
 
         // Verify that the new transaction has not been added to the 'independent' set
         assert_eq!(best.independent.len(), 2);
-        assert!(!best.independent.contains(&pending_tx2));
+        assert!(!best.independent.iter().any(|tx| tx == &pending_tx2));
     }
 
     #[test]
