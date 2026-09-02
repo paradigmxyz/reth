@@ -209,23 +209,6 @@ impl ExecutionOverlay {
     }
 }
 
-/// Source of data to apply on top of the durable database state.
-#[derive(Debug, Clone)]
-pub enum OverlaySource {
-    /// Immediate overlay with already-computed data.
-    Immediate {
-        /// Trie updates overlay.
-        ///
-        /// This can be non-empty when a caller starts with an explicit `TrieInputSorted`, such
-        /// as historical providers.
-        trie: Arc<TrieUpdatesSorted>,
-        /// Hashed state overlay.
-        state: Arc<HashedPostStateSorted>,
-    },
-    /// Manager-backed overlay for in-memory state.
-    Managed,
-}
-
 /// Builder for calculating trie and hashed-state overlays.
 ///
 /// This stores the overlay manager, overlay configuration, and the logic for resolving overlays
@@ -234,8 +217,6 @@ pub enum OverlaySource {
 pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
     /// Parent hash requested by the caller.
     parent_hash: B256,
-    /// Optional overlay source.
-    overlay_source: Option<OverlaySource>,
     /// Manager used for cached changesets and overlays.
     overlay_manager: OverlayManager<N>,
     /// Snapshot of the in-memory chain ending at the requested parent.
@@ -257,21 +238,12 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     ) -> Self {
         Self {
             parent_hash,
-            overlay_source: Some(OverlaySource::Managed),
             overlay_manager,
             parent_state,
             reused_sparse_trie_anchor_hash: None,
             no_reverts: false,
             metrics: OverlayBuilderMetrics::default(),
         }
-    }
-
-    /// Set the overlay source.
-    ///
-    /// This overlay will be applied on top of any reverts.
-    pub fn with_overlay_source(mut self, source: Option<OverlaySource>) -> Self {
-        self.overlay_source = source;
-        self
     }
 
     /// Skips managed overlay construction when the sparse trie was reused and the DB tip is
@@ -284,16 +256,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     /// Returns an error instead of querying revert changesets when reverts are required.
     pub const fn with_no_reverts(mut self) -> Self {
         self.no_reverts = true;
-        self
-    }
-
-    /// Sets an immediate hashed-state and trie-updates overlay.
-    pub fn with_immediate_state_trie_overlay(
-        mut self,
-        state: Arc<HashedPostStateSorted>,
-        trie: Arc<TrieUpdatesSorted>,
-    ) -> Self {
-        self.overlay_source = Some(OverlaySource::Immediate { trie, state });
         self
     }
 
@@ -316,22 +278,13 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     where
         Provider: BlockNumReader + PruneCheckpointReader,
     {
-        match &self.overlay_source {
-            Some(OverlaySource::Managed) => anchor_for_parent_with_frontiers(
-                self.parent_hash,
-                self.parent_state.iter().flat_map(|state| state.chain()).map(BlockState::block),
-                partial_state_trie,
-                finish,
-                provider,
-            ),
-            _ => anchor_for_parent_with_frontiers(
-                self.parent_hash,
-                std::iter::empty::<ExecutedBlock<N>>(),
-                partial_state_trie,
-                finish,
-                provider,
-            ),
-        }
+        anchor_for_parent_with_frontiers(
+            self.parent_hash,
+            self.parent_state.iter().flat_map(|state| state.chain()).map(BlockState::block),
+            partial_state_trie,
+            finish,
+            provider,
+        )
     }
 
     /// Builds the effective state trie overlay for the given provider.
@@ -561,37 +514,17 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         &self,
         anchor_hash: BlockHash,
     ) -> ProviderResult<(Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>)> {
-        match &self.overlay_source {
-            Some(OverlaySource::Managed) => {
-                if anchor_hash == self.parent_hash {
-                    Ok((
-                        Arc::new(TrieUpdatesSorted::default()),
-                        Arc::new(HashedPostStateSorted::default()),
-                    ))
-                } else {
-                    let parent_state = self.parent_state.as_ref().ok_or_else(|| {
-                        ProviderError::other(std::io::Error::other(
-                            "state trie overlay cannot be anchored without in-memory parent state",
-                        ))
-                    })?;
-                    self.overlay_manager
-                        .overlay_for_parent(parent_state, anchor_hash)
-                        .map_err(ProviderError::other)
-                }
-            }
-            Some(OverlaySource::Immediate { trie, state }) => {
-                if anchor_hash != self.parent_hash {
-                    return Err(ProviderError::other(std::io::Error::other(format!(
-                        "anchor_hash {anchor_hash} doesn't match OverlayBuilder's configured parent ({})",
-                        self.parent_hash
-                    ))))
-                }
-                Ok((Arc::clone(trie), Arc::clone(state)))
-            }
-            None => Ok((
-                Arc::new(TrieUpdatesSorted::default()),
-                Arc::new(HashedPostStateSorted::default()),
-            )),
+        if anchor_hash == self.parent_hash {
+            Ok((Arc::new(TrieUpdatesSorted::default()), Arc::new(HashedPostStateSorted::default())))
+        } else {
+            let parent_state = self.parent_state.as_ref().ok_or_else(|| {
+                ProviderError::other(std::io::Error::other(
+                    "state trie overlay cannot be anchored without in-memory parent state",
+                ))
+            })?;
+            self.overlay_manager
+                .overlay_for_parent(parent_state, anchor_hash)
+                .map_err(ProviderError::other)
         }
     }
 
@@ -600,19 +533,15 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         &self,
         anchor_hash: BlockHash,
     ) -> ProviderResult<Arc<ExecutionOverlay>> {
-        match &self.overlay_source {
-            Some(OverlaySource::Managed) if anchor_hash != self.parent_hash => {
-                let parent_state = self.parent_state.as_ref().ok_or_else(|| {
-                    ProviderError::other(std::io::Error::other("missing in-memory parent state"))
-                })?;
-                self.overlay_manager
-                    .execution_overlay_for_block_state(parent_state, anchor_hash)
-                    .map_err(ProviderError::other)
-            }
-            Some(OverlaySource::Managed) | None => Ok(Arc::new(ExecutionOverlay::default())),
-            Some(OverlaySource::Immediate { .. }) => Err(ProviderError::other(
-                std::io::Error::other("immediate state trie overlay has no execution state"),
-            )),
+        if anchor_hash == self.parent_hash {
+            Ok(Arc::new(ExecutionOverlay::default()))
+        } else {
+            let parent_state = self.parent_state.as_ref().ok_or_else(|| {
+                ProviderError::other(std::io::Error::other("missing in-memory parent state"))
+            })?;
+            self.overlay_manager
+                .execution_overlay_for_block_state(parent_state, anchor_hash)
+                .map_err(ProviderError::other)
         }
     }
 
@@ -656,13 +585,8 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     ) -> bool {
         let Some(anchor_hash) = self.reused_sparse_trie_anchor_hash else { return false };
 
-        match &self.overlay_source {
-            Some(OverlaySource::Managed) => {
-                self.contains_hash(anchor_hash, state_trie_tip_hash) &&
-                    self.contains_hash(anchor_hash, finish_tip_hash)
-            }
-            _ => false,
-        }
+        self.contains_hash(anchor_hash, state_trie_tip_hash) &&
+            self.contains_hash(anchor_hash, finish_tip_hash)
     }
 
     fn contains_hash(&self, anchor_hash: B256, hash: B256) -> bool {
@@ -1213,19 +1137,6 @@ mod tests {
     }
 
     #[test]
-    fn execution_overlay_rejects_immediate_state_trie_overlay() {
-        let (factory, blocks) = setup_frontiers(1, 1);
-        let provider = factory.provider().unwrap();
-        let error = OverlayManager::<EthPrimitives>::default()
-            .overlay_builder(blocks[1].recovered_block().hash())
-            .with_immediate_state_trie_overlay(Default::default(), Default::default())
-            .execution_overlay(&provider)
-            .unwrap_err();
-
-        assert!(error.to_string().contains("immediate state trie overlay has no execution state"));
-    }
-
-    #[test]
     fn execution_overlay_uses_managed_blocks_after_the_anchor() {
         let (factory, blocks) = setup_frontiers(1, 3);
         let manager = OverlayManager::default();
@@ -1393,7 +1304,6 @@ mod tests {
         let provider = factory.provider().unwrap();
         let error = OverlayManager::<EthPrimitives>::default()
             .overlay_builder(blocks[3].recovered_block().hash())
-            .with_overlay_source(None)
             .build_state_trie_overlay(&provider)
             .unwrap_err();
 
