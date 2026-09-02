@@ -66,7 +66,12 @@ impl MockDiscovery {
         let mut tasks = JoinSet::<()>::new();
 
         let udp = Arc::clone(&socket);
-        tasks.spawn(receive_loop(udp, ingress_tx, local_enr.id));
+        tasks.spawn(receive_loop(
+            udp,
+            ingress_tx,
+            local_enr.id,
+            Discv4Config::default().udp_ingress_readers,
+        ));
 
         let udp = Arc::clone(&socket);
         tasks.spawn(send_loop(udp, egress_rx));

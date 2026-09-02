@@ -49,6 +49,7 @@ use std::{
     collections::{btree_map, hash_map::Entry, BTreeMap, HashMap, VecDeque},
     fmt, io,
     net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4},
+    num::NonZeroUsize,
     pin::Pin,
     rc::Rc,
     sync::Arc,
@@ -574,7 +575,12 @@ impl Discv4Service {
 
         if let Some(ingress_tx) = ingress_tx {
             let udp = Arc::clone(&socket);
-            tasks.spawn(receive_loop(udp, ingress_tx, local_node_record.id));
+            tasks.spawn(receive_loop(
+                udp,
+                ingress_tx,
+                local_node_record.id,
+                config.udp_ingress_readers,
+            ));
         }
 
         let udp = Arc::clone(&socket);
@@ -2022,8 +2028,30 @@ const MAX_INCOMING_PACKETS_PER_MINUTE_BY_IP: usize = 60usize;
 ///
 /// The receive loop enforces primitive rate limiting for IPs to prevent message spams from
 /// individual IPs.
-pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_id: PeerId) {
-    let mut handler = IngressHandler::new(tx, local_id);
+pub(crate) async fn receive_loop(
+    udp: Arc<UdpSocket>,
+    tx: IngressSender,
+    local_id: PeerId,
+    readers: NonZeroUsize,
+) {
+    let handler = Arc::new(IngressHandler::new(tx, local_id));
+
+    // Decoding a packet runs an ECDSA recovery, so a single reader leaves the socket unread for
+    // the duration of every recovery. Several readers share the socket instead: the kernel hands
+    // each datagram to exactly one of them, and they only contend on the short rate limit and
+    // duplicate lookups.
+    // A `JoinSet` so that aborting the receive loop takes the extra readers down with it; a bare
+    // `JoinHandle` would detach them and leave them draining the socket after shutdown.
+    let mut tasks = JoinSet::new();
+    for _ in 0..readers.get() {
+        tasks.spawn(read_datagrams(udp.clone(), handler.clone()));
+    }
+
+    while tasks.join_next().await.is_some() {}
+}
+
+/// Reads datagrams off the socket and hands them to the handler until the socket dies.
+async fn read_datagrams(udp: Arc<UdpSocket>, handler: Arc<IngressHandler>) {
     let mut buf = [0; MAX_PACKET_SIZE];
     loop {
         let res = udp.recv_from(&mut buf).await;
@@ -2049,11 +2077,31 @@ pub struct IngressHandler {
     local_id: PeerId,
     tick: usize,
     tick_interval: Duration,
-    cache: ReceiveCache,
-    last_tick: Instant,
+    /// Rate limiting and duplicate tracking, shared so that several reader tasks can decode
+    /// concurrently. Only ever held for a map lookup, never across the decode or a send.
+    cache: Mutex<ReceiveCache>,
+    last_tick: Mutex<Instant>,
 }
 
 impl IngressHandler {
+    /// Creates a handler wired to an in-memory channel of the given capacity, together with a
+    /// callback that drains it and reports how many packets were forwarded.
+    ///
+    /// The channel types are internal, so this keeps them out of the public API while still
+    /// letting benchmarks drive the receive path.
+    #[cfg(feature = "test-utils")]
+    pub fn in_memory(local_id: PeerId, capacity: usize) -> (Self, impl FnMut() -> usize) {
+        let (tx, mut rx) = mpsc::channel(capacity);
+        let drain = move || {
+            let mut forwarded = 0;
+            while rx.try_recv().is_ok() {
+                forwarded += 1;
+            }
+            forwarded
+        };
+        (Self::new(tx, local_id), drain)
+    }
+
     fn new(tx: IngressSender, local_id: PeerId) -> Self {
         let tick = MAX_INCOMING_PACKETS_PER_MINUTE_BY_IP / 2;
         Self {
@@ -2061,8 +2109,8 @@ impl IngressHandler {
             local_id,
             tick,
             tick_interval: Duration::from_secs(tick as u64),
-            cache: ReceiveCache::default(),
-            last_tick: Instant::now(),
+            cache: Mutex::new(ReceiveCache::default()),
+            last_tick: Mutex::new(Instant::now()),
         }
     }
 
@@ -2074,28 +2122,34 @@ impl IngressHandler {
 
     /// Handles an incoming raw packet: decodes, rate-limits, deduplicates, and forwards to the
     /// discv4 service. Used in shared-port mode to process unrecognized frames from discv5.
-    pub async fn handle_packet(&mut self, data: &[u8], src: SocketAddr) {
-        if self.last_tick.elapsed() >= self.tick_interval {
-            self.cache.tick_ips(self.tick);
-            self.last_tick = Instant::now();
-        }
-
-        // rate limit incoming packets by IP
-        if self.cache.inc_ip(src.ip()) > MAX_INCOMING_PACKETS_PER_MINUTE_BY_IP {
-            trace!(target: "discv4", ?src, "Too many incoming packets from IP.");
-            return
-        }
-
-        // A packet starts with the hash of everything that follows it, and `Message::decode`
-        // rejects any packet whose contents do not hash to it. A repeat of a packet we already
-        // accepted can therefore be recognised from those 32 bytes alone, without decoding.
-        // Decoding runs an ECDSA recovery, so checking here keeps a replayed packet from costing
-        // a signature verification.
-        if data.len() >= MIN_PACKET_SIZE &&
-            self.cache.contains_packet(B256::from_slice(&data[..32]))
+    pub async fn handle_packet(&self, data: &[u8], src: SocketAddr) {
         {
-            debug!(target: "discv4", ?src, "Received duplicate packet.");
-            return
+            let mut last_tick = self.last_tick.lock();
+            if last_tick.elapsed() >= self.tick_interval {
+                self.cache.lock().tick_ips(self.tick);
+                *last_tick = Instant::now();
+            }
+        }
+
+        {
+            let mut cache = self.cache.lock();
+
+            // rate limit incoming packets by IP
+            if cache.inc_ip(src.ip()) > MAX_INCOMING_PACKETS_PER_MINUTE_BY_IP {
+                trace!(target: "discv4", ?src, "Too many incoming packets from IP.");
+                return
+            }
+
+            // A packet starts with the hash of everything that follows it, and `Message::decode`
+            // rejects any packet whose contents do not hash to it. A repeat of a packet we already
+            // accepted can therefore be recognised from those 32 bytes alone, without decoding.
+            // Decoding runs an ECDSA recovery, so checking here keeps a replayed packet from
+            // costing a signature verification.
+            if data.len() >= MIN_PACKET_SIZE && cache.contains_packet(B256::from_slice(&data[..32]))
+            {
+                debug!(target: "discv4", ?src, "Received duplicate packet.");
+                return
+            }
         }
 
         let event = match Message::decode(data) {
@@ -2106,8 +2160,12 @@ impl IngressHandler {
                 }
 
                 // Only packets that decoded are remembered, so a peer cannot suppress a packet we
-                // have not seen yet by guessing its hash.
-                self.cache.insert_packet(packet.hash);
+                // have not seen yet by guessing its hash. Re-checking here rather than trusting
+                // the lookup above keeps deduplication exact when several readers decode at once.
+                if !self.cache.lock().insert_packet(packet.hash) {
+                    debug!(target: "discv4", ?src, "Received duplicate packet.");
+                    return
+                }
 
                 IngressEvent::Packet(src, packet)
             }
@@ -2165,9 +2223,9 @@ impl ReceiveCache {
         self.unique_packets.get(&hash).is_some()
     }
 
-    /// Remembers a packet we accepted.
-    fn insert_packet(&mut self, hash: B256) {
-        self.unique_packets.insert(hash, ());
+    /// Remembers a packet we accepted, returning false if it was already known.
+    fn insert_packet(&mut self, hash: B256) -> bool {
+        self.unique_packets.insert(hash, ())
     }
 }
 
@@ -2592,12 +2650,62 @@ mod tests {
     use secp256k1::SECP256K1;
     use std::future::poll_fn;
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_receive_loop_readers_deliver_every_packet() {
+        // stays under MAX_INCOMING_PACKETS_PER_MINUTE_BY_IP, every packet shares a source ip here
+        const PACKETS: usize = 40;
+
+        let socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let dst = socket.local_addr().unwrap();
+        let (tx, mut rx) = mpsc::channel(PACKETS * 2);
+        let local_id = pk2id(&SecretKey::new(&mut rand_08::thread_rng()).public_key(SECP256K1));
+
+        let _loop_task = tokio::spawn(receive_loop(
+            socket,
+            tx,
+            local_id,
+            NonZeroUsize::new(4).expect("not zero"),
+        ));
+
+        let sender = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let mut sent = Vec::with_capacity(PACKETS);
+        for i in 0..PACKETS {
+            let key = SecretKey::new(&mut rand_08::thread_rng());
+            let msg = Message::Ping(Ping {
+                from: rng_endpoint(&mut rand_08::thread_rng()),
+                to: rng_endpoint(&mut rand_08::thread_rng()),
+                expire: u64::MAX,
+                enr_sq: Some(i as u64),
+            });
+            let (packet, hash) = msg.encode(&key);
+            sender.send_to(&packet, dst).await.unwrap();
+            sent.push(hash);
+        }
+
+        // every packet must come out exactly once, no matter which reader picked it up
+        let mut received = Vec::with_capacity(PACKETS);
+        while received.len() < PACKETS {
+            let event = tokio::time::timeout(Duration::from_secs(10), rx.recv())
+                .await
+                .expect("timed out waiting for packets")
+                .expect("channel closed");
+            match event {
+                IngressEvent::Packet(_, packet) => received.push(packet.hash),
+                other => panic!("unexpected ingress event: {other:?}"),
+            }
+        }
+
+        received.sort_unstable();
+        sent.sort_unstable();
+        assert_eq!(received, sent);
+    }
+
     #[tokio::test]
     async fn test_duplicate_packet_rejected_without_decoding() {
         let secret_key = SecretKey::new(&mut rand_08::thread_rng());
         let local_id = pk2id(&secret_key.public_key(SECP256K1));
         let (tx, mut rx) = mpsc::channel(16);
-        let mut handler = IngressHandler::new(tx, local_id);
+        let handler = IngressHandler::new(tx, local_id);
 
         let remote_key = SecretKey::new(&mut rand_08::thread_rng());
         let msg = Message::Ping(Ping {
@@ -2615,7 +2723,7 @@ mod tests {
         // the replay is dropped on the hash prefix alone
         handler.handle_packet(&packet, src).await;
         assert!(rx.try_recv().is_err());
-        assert!(handler.cache.contains_packet(hash));
+        assert!(handler.cache.lock().contains_packet(hash));
     }
 
     #[tokio::test]
@@ -2623,7 +2731,7 @@ mod tests {
         let secret_key = SecretKey::new(&mut rand_08::thread_rng());
         let local_id = pk2id(&secret_key.public_key(SECP256K1));
         let (tx, mut rx) = mpsc::channel(16);
-        let mut handler = IngressHandler::new(tx, local_id);
+        let handler = IngressHandler::new(tx, local_id);
 
         let remote_key = SecretKey::new(&mut rand_08::thread_rng());
         let msg = Message::Ping(Ping {
@@ -2642,7 +2750,7 @@ mod tests {
         forged[last] ^= 0xff;
         handler.handle_packet(&forged, src).await;
         assert!(matches!(rx.try_recv(), Ok(IngressEvent::BadPacket(..))));
-        assert!(!handler.cache.contains_packet(hash));
+        assert!(!handler.cache.lock().contains_packet(hash));
 
         // so the genuine packet still gets through
         handler.handle_packet(&packet, src).await;

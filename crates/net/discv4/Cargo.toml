@@ -63,3 +63,8 @@ test-utils = ["dep:rand_08"]
 [[bench]]
 name = "codec"
 harness = false
+
+[[bench]]
+name = "ingress"
+required-features = ["test-utils"]
+harness = false

@@ -10,6 +10,7 @@ use reth_net_nat::{NatResolver, ResolveNatInterval};
 use reth_network_peers::NodeRecord;
 use std::{
     collections::{HashMap, HashSet},
+    num::NonZeroUsize,
     time::Duration,
 };
 
@@ -21,6 +22,11 @@ pub struct Discv4Config {
     pub udp_egress_message_buffer: usize,
     /// Size of the channel buffer for incoming messages.
     pub udp_ingress_message_buffer: usize,
+    /// Number of tasks reading datagrams off the discovery socket.
+    ///
+    /// Decoding a packet runs an ECDSA recovery, so a single reader cannot read from the socket
+    /// while it verifies. Additional readers share the socket and decode concurrently.
+    pub udp_ingress_readers: NonZeroUsize,
     /// The number of allowed consecutive failures for `FindNode` requests. Default: 5.
     pub max_find_node_failures: u8,
     /// The interval to use when checking for expired nodes that need to be re-pinged. Default:
@@ -115,6 +121,7 @@ impl Default for Discv4Config {
             udp_egress_message_buffer: 1024,
             // Every outgoing request will eventually lead to an incoming response
             udp_ingress_message_buffer: 1024,
+            udp_ingress_readers: NonZeroUsize::new(2).expect("not zero"),
             max_find_node_failures: 5,
             ping_interval: Duration::from_secs(10),
             // Unified expiration and timeout durations, mirrors geth's `expiration` duration
@@ -148,6 +155,12 @@ pub struct Discv4ConfigBuilder {
 }
 
 impl Discv4ConfigBuilder {
+    /// Sets the number of tasks reading datagrams off the discovery socket.
+    pub const fn udp_ingress_readers(&mut self, readers: NonZeroUsize) -> &mut Self {
+        self.config.udp_ingress_readers = readers;
+        self
+    }
+
     /// Sets the channel size for incoming messages
     pub const fn udp_ingress_message_buffer(
         &mut self,
