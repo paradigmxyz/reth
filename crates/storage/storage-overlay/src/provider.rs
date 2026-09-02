@@ -1063,6 +1063,32 @@ mod tests {
     }
 
     #[test]
+    fn lazy_overlays_survive_manager_block_removal() {
+        let (factory, blocks) = setup_frontiers(1, 1);
+        let manager = OverlayManager::default();
+        for block in &blocks[2..=3] {
+            manager.insert_block(block.clone());
+        }
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            factory,
+            manager.overlay_builder(blocks[3].recovered_block().hash()),
+        );
+        let provider = state_provider_factory.database_provider_ro().unwrap();
+
+        manager.remove_blocks(blocks[2..=3].iter().map(|block| block.recovered_block().hash()));
+
+        let execution_overlay = provider.execution_overlay().unwrap();
+        assert_eq!(
+            execution_overlay.block_hashes(),
+            [blocks[2].recovered_block().num_hash(), blocks[3].recovered_block().num_hash()]
+        );
+        assert_eq!(
+            account_keys(provider.state_trie_overlay().unwrap()),
+            vec![B256::with_last_byte(3), B256::with_last_byte(4)]
+        );
+    }
+
+    #[test]
     fn skipped_state_trie_overlay_is_not_cached_or_used_for_state_roots() {
         let (factory, blocks) = setup_frontiers(3, 3);
         let manager = OverlayManager::default();
