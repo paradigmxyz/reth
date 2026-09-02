@@ -348,37 +348,11 @@ impl<N: NodePrimitives> OverlayManager<N> {
         skip_all,
         fields(tip_hash = %parent_hash, anchor_hash = %anchor_hash)
     )]
-    #[cfg(test)]
-    pub(crate) fn overlay_for_parent(
-        &self,
-        parent_hash: B256,
-        anchor_hash: B256,
-    ) -> Result<(Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>), StateTrieOverlayError> {
-        self.overlay_for_parent_inner(
-            parent_hash,
-            anchor_hash,
-            OverlayBlockSource::Managed { wait_for_pending: true },
-        )
-    }
-
-    pub(crate) fn overlay_for_parent_with_blocks(
+    pub(crate) fn overlay_for_blocks(
         &self,
         parent_hash: B256,
         anchor_hash: B256,
         blocks: &[ExecutedBlock<N>],
-    ) -> Result<(Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>), StateTrieOverlayError> {
-        self.overlay_for_parent_inner(
-            parent_hash,
-            anchor_hash,
-            OverlayBlockSource::Provided(blocks),
-        )
-    }
-
-    fn overlay_for_parent_inner(
-        &self,
-        parent_hash: B256,
-        anchor_hash: B256,
-        block_source: OverlayBlockSource<'_, N>,
     ) -> Result<(Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>), StateTrieOverlayError> {
         debug!(
             target: "storage::overlay::manager",
@@ -392,7 +366,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
                 &self.metrics,
                 parent_hash,
                 anchor_hash,
-                block_source,
+                OverlayBlockSource::Provided(blocks),
                 |input, span| self.compute_state_trie_overlay(input, anchor_hash, span),
             )?
             .expect("required overlay lookup cannot skip an in-progress computation");
@@ -637,7 +611,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
 
     /// Returns true if `hash` is in the parent chain segment from `anchor_hash` inclusive to
     /// `parent_hash` inclusive.
-    pub fn contains_hash(&self, parent_hash: B256, anchor_hash: B256, hash: B256) -> bool {
+    fn contains_hash(&self, parent_hash: B256, anchor_hash: B256, hash: B256) -> bool {
         let mut current_hash = parent_hash;
 
         loop {
@@ -1047,13 +1021,22 @@ mod tests {
             .collect()
     }
 
+    fn overlay_for_parent(
+        manager: &OverlayManager,
+        parent_hash: B256,
+        anchor_hash: B256,
+    ) -> Result<(Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>), StateTrieOverlayError> {
+        let blocks = manager.blocks_for_parent(parent_hash, anchor_hash)?;
+        manager.overlay_for_blocks(parent_hash, anchor_hash, &blocks)
+    }
+
     #[test]
     fn errors_for_unknown_parent() {
         let manager = OverlayManager::<EthPrimitives>::default();
         let parent = B256::random();
         let anchor = B256::random();
 
-        let err = manager.overlay_for_parent(parent, anchor).unwrap_err();
+        let err = overlay_for_parent(&manager, parent, anchor).unwrap_err();
 
         assert_eq!(err.tip_hash, parent);
         assert_eq!(err.anchor_hash, anchor);
@@ -1070,15 +1053,15 @@ mod tests {
         let anchor_hash = blocks[0].recovered_block().parent_hash();
 
         let (_, state) =
-            manager.overlay_for_parent(blocks[2].recovered_block().hash(), anchor_hash).unwrap();
+            overlay_for_parent(&manager, blocks[2].recovered_block().hash(), anchor_hash).unwrap();
         assert_eq!(state.accounts.len(), 3);
 
         let short_anchor = blocks[1].recovered_block().hash();
         let (_, short) =
-            manager.overlay_for_parent(blocks[2].recovered_block().hash(), short_anchor).unwrap();
+            overlay_for_parent(&manager, blocks[2].recovered_block().hash(), short_anchor).unwrap();
         assert_eq!(short.accounts.len(), 1);
         let (_, cached_short) =
-            manager.overlay_for_parent(blocks[2].recovered_block().hash(), short_anchor).unwrap();
+            overlay_for_parent(&manager, blocks[2].recovered_block().hash(), short_anchor).unwrap();
         assert!(Arc::ptr_eq(&short, &cached_short));
     }
 
@@ -1147,10 +1130,10 @@ mod tests {
         let parent_key = OverlayCacheKey { anchor_hash, tip_hash: parent_hash };
         let child_key = OverlayCacheKey { anchor_hash, tip_hash: child_hash };
 
-        manager.overlay_for_parent(parent_hash, anchor_hash).unwrap();
+        overlay_for_parent(&manager, parent_hash, anchor_hash).unwrap();
         manager.execution_overlay_for_parent(parent_hash, anchor_hash).unwrap();
 
-        manager.overlay_for_parent(child_hash, anchor_hash).unwrap();
+        overlay_for_parent(&manager, child_hash, anchor_hash).unwrap();
         manager.execution_overlay_for_parent(child_hash, anchor_hash).unwrap();
 
         assert!(!manager.state_trie_overlays.entries.contains_key(&parent_key));
@@ -1172,7 +1155,7 @@ mod tests {
         let child_hash = blocks[2].recovered_block().hash();
         let parent_key = OverlayCacheKey { anchor_hash, tip_hash: parent_hash };
 
-        manager.overlay_for_parent(parent_hash, anchor_hash).unwrap();
+        overlay_for_parent(&manager, parent_hash, anchor_hash).unwrap();
         let state_parent = manager
             .state_trie_overlays
             .entries
@@ -1185,7 +1168,7 @@ mod tests {
         let execution_parent =
             manager.execution_overlay_for_parent(parent_hash, anchor_hash).unwrap();
 
-        let (_, child_state) = manager.overlay_for_parent(child_hash, anchor_hash).unwrap();
+        let (_, child_state) = overlay_for_parent(&manager, child_hash, anchor_hash).unwrap();
         let child_execution =
             manager.execution_overlay_for_parent(child_hash, anchor_hash).unwrap();
 
@@ -1347,8 +1330,9 @@ mod tests {
 
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
-            let res =
-                manager.overlay_for_parent(key.tip_hash, key.anchor_hash).map(|(_, state)| state);
+            let res = manager
+                .overlay_for_blocks(key.tip_hash, key.anchor_hash, &[])
+                .map(|(_, state)| state);
             tx.send(res).unwrap();
         });
 
@@ -1372,7 +1356,7 @@ mod tests {
         }
 
         let original_anchor = blocks[0].recovered_block().parent_hash();
-        manager.overlay_for_parent(blocks[2].recovered_block().hash(), original_anchor).unwrap();
+        overlay_for_parent(&manager, blocks[2].recovered_block().hash(), original_anchor).unwrap();
         manager
             .execution_overlay_for_parent(blocks[2].recovered_block().hash(), original_anchor)
             .unwrap();
@@ -1383,15 +1367,14 @@ mod tests {
         ]);
 
         let anchor_hash = blocks[1].recovered_block().hash();
-        assert!(manager
-            .overlay_for_parent(blocks[2].recovered_block().hash(), original_anchor)
+        assert!(overlay_for_parent(&manager, blocks[2].recovered_block().hash(), original_anchor)
             .is_err());
         assert!(manager
             .execution_overlay_for_parent(blocks[2].recovered_block().hash(), original_anchor)
             .is_err());
 
         let (_, state) =
-            manager.overlay_for_parent(blocks[2].recovered_block().hash(), anchor_hash).unwrap();
+            overlay_for_parent(&manager, blocks[2].recovered_block().hash(), anchor_hash).unwrap();
         assert_eq!(state.accounts.len(), 1);
         let execution = manager
             .execution_overlay_for_parent(blocks[2].recovered_block().hash(), anchor_hash)
