@@ -96,7 +96,7 @@ pub mod tx_fetcher {
     pub const DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER: u8 = 1;
 
     /// Default maximum number of announced transaction hashes to keep track of, pending and
-    /// inflight. Announcements of new hashes are dropped while this limit is reached.
+    /// inflight. Once reached, the oldest pending hash is evicted for a newly announced one.
     ///
     /// Default is 100 times the [`SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST`],
     /// which is 256 hashes, so 25 600 hashes.
@@ -111,12 +111,25 @@ pub mod tx_fetcher {
     pub const DEFAULT_MAX_COUNT_ANNOUNCED_HASHES_PER_PEER: u32 =
         SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE as u32;
 
-    /// Maximum number of peers remembered as candidates for a single hash. Announcements of the
-    /// hash from further peers are ignored until a candidate is dropped. This also bounds the
-    /// number of peers a hash is requested from before it is given up on.
+    /// Maximum number of peers remembered as candidates for a single hash. These are the most
+    /// recent peers to announce the hash, plus the peer that is currently fetching it. This also
+    /// bounds the number of peers a hash is requested from before it is given up on.
     ///
     /// Default is 8 peers.
     pub const MAX_COUNT_CANDIDATE_PEERS_PER_HASH: usize = 8;
+
+    /// Minimum number of hashes in a
+    /// [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) request while the number of
+    /// hashes the pool can import is used up by inflight requests. Instead of stopping, requests
+    /// shrink to this size, so that peers that don't respond can't stop fetching from the others.
+    ///
+    /// This is kept small because responses to these requests may exceed what the pool can
+    /// import at once.
+    ///
+    /// Default is a sixteenth of [`SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST`],
+    /// which is spec'd at 256 hashes, so 16 hashes.
+    pub const MIN_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST: usize =
+        SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST / 16;
 
     /// Assumed byte size of a transaction whose size wasn't announced, used when packing
     /// requests.

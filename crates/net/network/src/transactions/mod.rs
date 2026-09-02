@@ -1664,6 +1664,8 @@ where
         // more than we can import.
         duration_metered_exec!(
             {
+                // Peers whose session channel was full are retried on the next poll, which any
+                // other event triggers.
                 let budget = this.remaining_pool_import_capacity();
                 if budget > 0 && this.transaction_fetcher.dispatch(&this.peers, budget) > 0 {
                     // poll the fetcher again so the new inflight requests register their wakers

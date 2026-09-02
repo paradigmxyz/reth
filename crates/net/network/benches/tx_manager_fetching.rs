@@ -219,5 +219,58 @@ fn bench_fetch(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_announce, bench_fetch);
+/// A manager with a large backlog of announced hashes waiting for their peers to become idle.
+struct Backlog {
+    harness: TxFetchHarness,
+    requests: Vec<MockRequest>,
+}
+
+/// Answers one request per round with an empty response, which makes its peer idle again, and
+/// polls until the next request to that peer is out.
+fn backlog_rounds(backlog: &mut Backlog, rounds: usize) -> Stats {
+    let mut stats = Stats::default();
+    for _ in 0..rounds {
+        let Some(request) = backlog.requests.pop() else { break };
+        let _ = request.response.send(Ok(PooledTransactions::default()));
+        backlog.harness.poll_until_idle();
+        let requests = backlog.harness.take_requests();
+        stats.requests += requests.len();
+        stats.hashes += requests.iter().map(|r| r.request.0.len()).sum::<usize>();
+        backlog.requests.extend(requests);
+    }
+    stats
+}
+
+fn bench_backlog(c: &mut Criterion) {
+    let runtime = Runtime::new().unwrap();
+    let _enter = runtime.enter();
+    let mut group = c.benchmark_group("tx_manager/backlog");
+
+    // 10 peers announce 4096 distinct hashes each, far more than can be requested at once, so
+    // most of them wait for their peer to become idle again. This measures the cost of sending
+    // the next request from that backlog.
+    let hashes = (0..10 * 4096).map(hash).collect::<Vec<_>>();
+    let workload = Workload::disjoint(10, &hashes);
+    const ROUNDS: usize = 8;
+    let setup = || {
+        let mut harness = workload.harness(&runtime);
+        workload.announce(&mut harness);
+        harness.poll_until_idle();
+        let requests = harness.take_requests();
+        Backlog { harness, requests }
+    };
+
+    let stats = backlog_rounds(&mut setup(), ROUNDS);
+    println!("backlog/next_request: {stats:?}");
+    assert!(stats.requests >= ROUNDS, "every round sends at least one request");
+
+    group.throughput(Throughput::Elements(ROUNDS as u64));
+    group.bench_function("next_request", |b| {
+        b.iter_batched_ref(setup, |backlog| backlog_rounds(backlog, ROUNDS), BatchSize::LargeInput)
+    });
+
+    group.finish();
+}
+
+criterion_group!(benches, bench_announce, bench_fetch, bench_backlog);
 criterion_main!(benches);

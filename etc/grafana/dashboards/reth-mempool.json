@@ -2853,7 +2853,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Rate of announced transaction hashes the fetcher drops.\n\nAt Capacity - the fetcher already tracks the maximum number of hashes.\n\nPeer Limit - the announcing peer is already a candidate for the maximum number of hashes.\n\nNo Peer Left - all peers that announced the hash failed to deliver it or disconnected.",
+      "description": "Rate of announced transaction hashes the fetcher drops or evicts.\n\nAt Capacity - a new hash was dropped because the fetcher tracks the maximum number of hashes and none of the oldest ones is pending.\n\nEvicted At Capacity - the oldest pending hash was evicted for a newly announced one.\n\nPeer Limit - the announcing peer is already a candidate for the maximum number of hashes.\n\nNo Peer Left - all peers that announced the hash failed to deliver it or disconnected.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2979,6 +2979,23 @@
           "legendFormat": "No Peer Left",
           "range": true,
           "refId": "C",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "code",
+          "expr": "rate(reth_network_hashes_evicted_at_capacity{$instance_label=\"$instance\"}[$__rate_interval])",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Evicted At Capacity",
+          "range": true,
+          "refId": "D",
           "useBackend": false
         }
       ],

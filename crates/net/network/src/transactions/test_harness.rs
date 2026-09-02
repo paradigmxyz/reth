@@ -187,6 +187,7 @@ impl Wake for WakeFlag {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::transactions::constants::tx_fetcher::MIN_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST;
     use alloy_primitives::map::{B256Map, B256Set};
     use reth_eth_wire::NewPooledTransactionHashes68;
     use reth_network_p2p::error::RequestError;
@@ -326,19 +327,26 @@ mod tests {
         }
 
         let mut total_requests = 0;
+        harness.poll_until_idle();
         loop {
-            harness.poll_until_idle();
             let requests = harness.take_requests();
             if requests.is_empty() {
                 break
             }
-            // never more hashes inflight than the pool can import at once
+            // the inflight hashes stay within the import capacity, apart from the minimum
+            // request every idle peer is granted
             let inflight = requests.iter().map(|r| r.request.0.len()).sum::<usize>();
-            assert!(inflight <= 300, "requested {inflight} hashes with an import capacity of 300");
+            let bound = 300 + peers.len() * MIN_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST;
+            assert!(
+                inflight <= bound,
+                "requested {inflight} hashes with an import capacity of 300"
+            );
             total_requests += requests.len();
+            // responses arrive one by one and the pool imports each before the next one arrives
             for request in requests {
                 let txs = request.request.0.iter().map(|hash| by_hash[hash].clone()).collect();
                 request.response.send(Ok(PooledTransactions(txs))).unwrap();
+                harness.poll_until_idle();
             }
         }
 
