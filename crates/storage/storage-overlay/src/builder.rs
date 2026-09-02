@@ -248,19 +248,23 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
     /// Skips managed overlay construction when the sparse trie was reused and the DB tip is
     /// already covered by its anchor-to-parent range.
-    pub const fn with_skip_overlay_for_reused_sparse_trie(mut self, anchor_hash: B256) -> Self {
+    pub(crate) const fn with_skip_overlay_for_reused_sparse_trie(
+        mut self,
+        anchor_hash: B256,
+    ) -> Self {
         self.reused_sparse_trie_anchor_hash = Some(anchor_hash);
         self
     }
 
     /// Returns an error instead of querying revert changesets when reverts are required.
-    pub const fn with_no_reverts(mut self) -> Self {
+    pub(crate) const fn with_no_reverts(mut self) -> Self {
         self.no_reverts = true;
         self
     }
 
     /// Returns the durable anchor to use for this builder's parent.
-    pub fn anchor_at_parent<Provider>(&self, provider: &Provider) -> ProviderResult<AnchorForParent>
+    #[cfg(test)]
+    fn anchor_at_parent<Provider>(&self, provider: &Provider) -> ProviderResult<AnchorForParent>
     where
         Provider: StageCheckpointReader + BlockNumReader + PruneCheckpointReader,
     {
@@ -350,8 +354,9 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     }
 
     /// Builds the effective state trie overlay for the given provider.
+    #[cfg(test)]
     #[instrument(level = "debug", target = "storage::overlay", skip_all)]
-    pub fn build_state_trie_overlay<Provider>(
+    fn build_state_trie_overlay<Provider>(
         &self,
         provider: &Provider,
     ) -> ProviderResult<StateTrieOverlay>
@@ -377,7 +382,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         skip_all,
         fields(?state_trie_tip_block, ?finish_tip_block, parent_hash = ?self.parent_hash)
     )]
-    pub fn build_state_trie_overlay_at_frontiers<Provider>(
+    pub(crate) fn build_state_trie_overlay_at_frontiers<Provider>(
         &self,
         provider: &Provider,
         state_trie_tip_block: BlockNumHash,
@@ -522,8 +527,9 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     }
 
     /// Returns the in-memory execution overlay and the block for historical fallback reads.
+    #[cfg(test)]
     #[instrument(level = "debug", target = "storage::overlay", skip_all)]
-    pub fn execution_overlay<Provider>(
+    fn execution_overlay<Provider>(
         &self,
         provider: &Provider,
     ) -> ProviderResult<(Arc<ExecutionOverlay>, Option<BlockNumber>)>
@@ -546,7 +552,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         skip_all,
         fields(?state_trie_tip_block, ?finish_tip_block, parent_hash = ?self.parent_hash)
     )]
-    pub fn execution_overlay_at_frontiers<Provider>(
+    pub(crate) fn execution_overlay_at_frontiers<Provider>(
         &self,
         provider: &Provider,
         state_trie_tip_block: BlockNumHash,
@@ -561,14 +567,13 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     {
         let anchor_for_parent =
             self.anchor_at_parent_with_frontiers(provider, state_trie_tip_block, finish_tip_block)?;
-        let fallback_block_number = match &anchor_for_parent {
-            AnchorForParent::RevertsRequired { anchor, .. } => Some(anchor.number + 1),
-            AnchorForParent::NoReverts { .. } => None,
+        let (anchor_hash, fallback_block_number) = match anchor_for_parent {
+            AnchorForParent::RevertsRequired { anchor, .. } => {
+                (anchor.hash, Some(anchor.number + 1))
+            }
+            AnchorForParent::NoReverts { anchor } => (anchor.hash, None),
         };
-        Ok((
-            self.resolve_execution_overlay(anchor_for_parent.anchor().hash)?,
-            fallback_block_number,
-        ))
+        Ok((self.resolve_execution_overlay(anchor_hash)?, fallback_block_number))
     }
 
     /// Resolves the effective overlay (trie updates, hashed state).
@@ -671,7 +676,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
 /// Returns the highest blocks whose state/trie data and non-state/trie data are durably
 /// available in the database.
-pub fn database_state_frontiers<Provider>(
+pub(crate) fn database_state_frontiers<Provider>(
     provider: &Provider,
 ) -> ProviderResult<(BlockNumHash, BlockNumHash)>
 where
@@ -739,7 +744,7 @@ fn anchor_for_parent_in<N: NodePrimitives>(
 
 /// Describes whether an overlay must revert the database before using its anchor.
 #[derive(Debug)]
-pub enum AnchorForParent {
+enum AnchorForParent {
     /// The in-memory chain covers the durable frontiers through this anchor.
     NoReverts {
         /// Block to anchor the overlay to.
@@ -752,15 +757,6 @@ pub enum AnchorForParent {
         /// Current Finish frontier.
         finish: BlockNumHash,
     },
-}
-
-impl AnchorForParent {
-    /// Returns the durable block anchoring this overlay.
-    pub const fn anchor(&self) -> BlockNumHash {
-        match self {
-            Self::NoReverts { anchor, .. } | Self::RevertsRequired { anchor, .. } => *anchor,
-        }
-    }
 }
 
 #[cfg(test)]
