@@ -2023,7 +2023,7 @@ mod tests {
             .encode(&mut payload);
         request_id.encode(&mut payload);
         payload.extend_from_slice(body);
-        RawResponse::new(message_id, payload.into())
+        RawResponse::new(message_id, payload.into()).unwrap()
     }
 
     /// Not a valid `BlockBodies` payload: decoding it is a protocol breach.
@@ -2105,7 +2105,8 @@ mod tests {
         let (id, _rx) = dispatch_block_bodies_request(&mut session);
 
         // The request id can't be decoded at all.
-        let resp = RawResponse::new(EthMessageID::BlockBodies, UNDECODABLE_BODY.to_vec().into());
+        let resp =
+            RawResponse::new(EthMessageID::BlockBodies, UNDECODABLE_BODY.to_vec().into()).unwrap();
         let outcome = session.on_incoming_message(EthMessage::RawResponse(resp));
         assert!(matches!(outcome, OnIncomingMessageOutcome::BadMessage { .. }));
 
