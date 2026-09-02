@@ -573,9 +573,9 @@ impl RawSnapResponse {
     /// Creates a new raw response from the message id and the RLP encoded
     /// `[request-id, payload...]` list that follows the id on the wire.
     ///
-    /// The caller must ensure that `message_id` [is a response](SnapMessageId::is_response).
-    pub const fn new(message_id: SnapMessageId, payload: Bytes) -> Self {
-        Self { message_id, payload }
+    /// Returns `None` if `message_id` is not the id of a [response](SnapMessageId::is_response).
+    pub fn new(message_id: SnapMessageId, payload: Bytes) -> Option<Self> {
+        message_id.is_response().then_some(Self { message_id, payload })
     }
 
     /// Returns the id of the response message.
@@ -1066,8 +1066,12 @@ mod tests {
         });
         let encoded = msg.encode();
 
+        // only response ids can be wrapped
+        let payload: Bytes = encoded[1..].to_vec().into();
+        assert!(RawSnapResponse::new(SnapMessageId::GetAccountRange, payload.clone()).is_none());
+
         // the raw response is the encoded message without the leading message id
-        let raw = RawSnapResponse::new(SnapMessageId::AccountRange, encoded[1..].to_vec().into());
+        let raw = RawSnapResponse::new(SnapMessageId::AccountRange, payload).unwrap();
         assert_eq!(raw.request_id().unwrap(), 1337);
         assert_eq!(raw.decode().unwrap(), msg);
 
@@ -1075,7 +1079,8 @@ mod tests {
         let raw = RawSnapResponse::new(
             SnapMessageId::AccountRange,
             [&encoded[1..], &[0x00][..]].concat().into(),
-        );
+        )
+        .unwrap();
         assert!(matches!(
             raw.decode(),
             Err(SnapProtocolError::Rlp(alloy_rlp::Error::UnexpectedLength))

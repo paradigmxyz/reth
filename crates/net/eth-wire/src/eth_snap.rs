@@ -183,10 +183,11 @@ where
             return Poll::Ready(Some(this.eth.decode_message(bytes).map(EthSnapMessage::Eth)))
         };
         bytes[0] = snap_id;
+        let bytes = bytes.freeze();
 
         if this.eth.lazy_responses() &&
             let Some(message_id) = SnapMessageId::from_u8(snap_id) &&
-            message_id.is_response()
+            let Some(resp) = RawSnapResponse::new(message_id, bytes.slice(1..).into())
         {
             if !SnapVersion::V2.supports_message_id(snap_id) {
                 return Poll::Ready(Some(Err(SnapProtocolError::UnsupportedMessageId(
@@ -195,11 +196,7 @@ where
                 )
                 .into())))
             }
-            let payload = bytes.split_off(1).freeze();
-            return Poll::Ready(Some(Ok(EthSnapMessage::RawSnapResponse(RawSnapResponse::new(
-                message_id,
-                payload.into(),
-            )))))
+            return Poll::Ready(Some(Ok(EthSnapMessage::RawSnapResponse(resp))))
         }
 
         Poll::Ready(Some(

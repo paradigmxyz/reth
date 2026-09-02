@@ -2083,7 +2083,7 @@ mod tests {
         request_id: u64,
         body: &[u8],
     ) -> RawSnapResponse {
-        RawSnapResponse::new(message_id, response_payload(request_id, body))
+        RawSnapResponse::new(message_id, response_payload(request_id, body)).unwrap()
     }
 
     /// Not a valid `BlockBodies` or `BlockAccessLists` payload: decoding it is a protocol breach.
@@ -2242,7 +2242,8 @@ mod tests {
 
         // The request id can't be decoded at all.
         let resp =
-            RawSnapResponse::new(SnapMessageId::BlockAccessLists, UNDECODABLE_BODY.to_vec().into());
+            RawSnapResponse::new(SnapMessageId::BlockAccessLists, UNDECODABLE_BODY.to_vec().into())
+                .unwrap();
         let outcome = session.on_raw_snap_response(resp);
         assert!(matches!(outcome, OnIncomingMessageOutcome::BadMessage { .. }));
 
