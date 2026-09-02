@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use super::{evm_state_to_hashed_post_state, StateRootComputeOutcome, StateRootMessage};
 use alloy_primitives::{
-    map::{hash_map::Entry, B256Map},
+    map::{hash_map::Entry, B256Map, B256Set},
     B256,
 };
 use alloy_rlp::{Decodable, Encodable};
@@ -67,7 +67,15 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// Account trie updates.
     account_updates: B256Map<LeafUpdate>,
     /// Storage trie updates. hashed address -> slot -> update.
+    ///
+    /// Entries are kept after their inner map drains: a present-but-empty entry means "this
+    /// account had storage updates in this block and they are all applied", which
+    /// [`Self::promote_pending_account_updates`] distinguishes from a missing entry.
     storage_updates: B256Map<B256Map<LeafUpdate>>,
+    /// Accounts whose entry in [`Self::storage_updates`] may have become empty since the last
+    /// [`Self::compute_drained_storage_roots`] call. Candidates only: that method re-checks
+    /// emptiness, so a stale entry is harmless and re-emptying re-adds it.
+    drained_storage_updates: B256Set,
 
     /// Account updates that are buffered but were not yet applied to the trie.
     new_account_updates: B256Map<LeafUpdate>,
@@ -168,6 +176,7 @@ where
             max_targets_for_chunking: DEFAULT_MAX_TARGETS_FOR_CHUNKING,
             account_updates: Default::default(),
             storage_updates: Default::default(),
+            drained_storage_updates: Default::default(),
             new_account_updates: Default::default(),
             new_storage_updates: Default::default(),
             pending_account_updates: Default::default(),
@@ -518,6 +527,10 @@ where
                         existing.remove(&slot);
                     }
                 }
+
+                if existing_updates.is_some_and(|existing| existing.is_empty()) {
+                    self.drained_storage_updates.insert(address);
+                }
             }
 
             // Make sure account is tracked in `account_updates` so that it is revealed in accounts
@@ -577,6 +590,9 @@ where
         for (address, mut new) in self.new_storage_updates.drain() {
             match self.storage_updates.entry(address) {
                 Entry::Vacant(entry) => {
+                    if new.is_empty() {
+                        self.drained_storage_updates.insert(address);
+                    }
                     entry.insert(new); // insert the whole map at once, no per-slot loop
                 }
                 Entry::Occupied(mut entry) => {
@@ -653,6 +669,10 @@ where
             self.storage_cache_hits += (updates_len_before - updates_len_after) as u64;
             self.storage_cache_misses += updates_len_after as u64;
 
+            if !new && updates_len_after == 0 {
+                self.drained_storage_updates.insert(*address);
+            }
+
             if !targets.is_empty() {
                 self.pending_targets.extend_storage_targets(address, targets);
             }
@@ -713,20 +733,19 @@ where
     ///
     /// we trigger state root computation on a rayon pool.
     fn compute_drained_storage_roots(&mut self) {
-        let addresses_to_compute_roots: Vec<_> = self
-            .storage_updates
-            .iter()
-            .filter_map(|(address, updates)| updates.is_empty().then_some(*address))
-            .collect();
-
         struct SendStorageTriePtr<S>(*mut RevealableSparseTrie<S>);
         // SAFETY: this wrapper only forwards the pointer across rayon; deref invariants are
         // documented at the use site below.
         unsafe impl<S: Send> Send for SendStorageTriePtr<S> {}
 
         let mut tries_to_compute_roots: Vec<(B256, SendStorageTriePtr<S>)> =
-            Vec::with_capacity(addresses_to_compute_roots.len());
-        for address in addresses_to_compute_roots {
+            Vec::with_capacity(self.drained_storage_updates.len());
+        for address in self.drained_storage_updates.drain() {
+            if self.storage_updates.get(&address).is_none_or(|updates| !updates.is_empty()) {
+                // Refilled since it was recorded; it will be recorded again once it drains.
+                continue;
+            }
+
             if let Some(trie) = self.trie.storage_tries_mut().get_mut(&address) &&
                 !trie.is_root_cached()
             {
@@ -759,7 +778,7 @@ where
             let _enter = span.entered();
             // SAFETY:
             // - pointers are created from `storage_tries_mut().get_mut(address)` above;
-            // - `addresses_to_compute_roots` comes from map iteration, so addresses are unique;
+            // - `drained_storage_updates` is a set, so addresses are unique;
             // - we do not insert/remove entries between pointer collection and use, so pointers
             //   stay valid and map reallocation cannot occur;
             // - each pointer is consumed by at most one rayon task, so no aliasing mutable access.
@@ -901,8 +920,8 @@ where
 
     fn has_pending_sparse_trie_updates(&self) -> bool {
         !self.account_updates.is_empty() ||
-            self.storage_updates.values().any(|updates| !updates.is_empty()) ||
-            !self.pending_account_updates.is_empty()
+            !self.pending_account_updates.is_empty() ||
+            self.storage_updates.values().any(|updates| !updates.is_empty())
     }
 
     /// Errors when pending trie updates remain but nothing can deliver them: no update
