@@ -175,9 +175,16 @@ impl<T: TransactionOrdering> BestTransactions<T> {
     /// Removes the currently best independent transaction from the independent set and the total
     /// set.
     fn pop_best(&mut self) -> Option<PendingTransaction<T>> {
-        self.independent.pop().inspect(|best| {
-            self.all.remove(best.transaction.id());
-        })
+        loop {
+            let best = self.independent.pop()?;
+            // The heap can hold two entries for one transaction id: if a replacement for an
+            // already yielded nonce arrives over the update channel, the descendant is promoted
+            // again when that replacement is popped. Only the pop that still finds the id in
+            // `all` is live, the other is stale and must not be yielded a second time.
+            if self.all.remove(best.transaction.id()).is_some() {
+                return Some(best)
+            }
+        }
     }
 
     /// Checks for new transactions that have come into the `PendingPool` after this iterator was
@@ -930,6 +937,40 @@ mod tests {
         // Verify that the new transaction has not been added to the 'independent' set
         assert_eq!(best.independent.len(), 2);
         assert!(!best.independent.iter().any(|tx| tx == &pending_tx2));
+    }
+
+    #[test]
+    fn test_best_replacement_does_not_yield_transaction_twice() {
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        // one sender with three gapless transactions, nonce 0 pays the most so it is yielded first
+        let tx = MockTransaction::eip1559();
+        for (nonce, fee) in [(0u64, 100u128), (1, 10), (2, 10)] {
+            let tx =
+                tx.clone().rng_hash().with_nonce(nonce).with_priority_fee(fee).with_max_fee(fee);
+            pool.add_transaction(Arc::new(f.validated(tx)), 0);
+        }
+
+        let mut best = pool.best();
+        let first = best.next().unwrap();
+        assert_eq!(first.nonce(), 0);
+
+        // replace the nonce that was just yielded. the replacement pays less than the yielded
+        // transaction, so the iterator processes instead of stashing it, and more than nonce 1, so
+        // it is popped first and promotes nonce 1 into the independent heap a second time
+        let replacement = tx.rng_hash().with_nonce(0).with_priority_fee(50).with_max_fee(50);
+        pool.remove_transaction(first.id());
+        pool.add_transaction(Arc::new(f.validated(replacement)), 0);
+
+        let mut hashes = vec![*first.hash()];
+        hashes.extend(best.map(|tx| *tx.hash()));
+
+        let mut unique = hashes.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(unique.len(), hashes.len(), "transaction yielded twice: {hashes:?}");
+        assert_eq!(hashes.len(), 4, "unexpected transactions yielded: {hashes:?}");
     }
 
     #[test]
