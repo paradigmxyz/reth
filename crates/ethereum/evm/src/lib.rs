@@ -40,7 +40,7 @@ use reth_evm::{ConfigureEngineEvm, ExecutableTxIterator};
 #[allow(unused_imports)]
 use {
     alloy_eips::Decodable2718,
-    alloy_primitives::{Bytes, U256},
+    alloy_primitives::{keccak256, Bytes, U256},
     alloy_rpc_types_engine::ExecutionData,
     reth_chainspec::EthereumHardforks,
     reth_evm::{EvmEnvFor, ExecutionCtxFor},
@@ -355,9 +355,10 @@ where
     ) -> Result<impl ExecutableTxIterator<Self>, Self::Error> {
         let txs = payload.payload.transactions().clone();
         let sender_recovery_cache = self.sender_recovery_cache.clone();
-        let convert = move |tx: Bytes| {
+        let convert = move |raw: Bytes| {
             let tx =
-                TxTy::<Self::Primitives>::decode_2718_exact(tx.as_ref()).map_err(AnyError::new)?;
+                TxTy::<Self::Primitives>::decode_2718_exact(raw.as_ref()).map_err(AnyError::new)?;
+            let tx = with_hash_from_raw(tx, &raw);
             let signer = if let Some(cache) = &sender_recovery_cache {
                 cache.recover(&tx)
             } else {
@@ -371,11 +372,37 @@ where
     }
 }
 
+/// Returns `tx` with its hash cache populated from `raw`, the buffer it was decoded from, saving
+/// the re-encode that the first `tx_hash()` call would otherwise perform.
+///
+/// [`Decodable2718::decode_2718_exact`] rejects non-canonical RLP and trailing bytes, so
+/// re-encoding `tx` reproduces `raw` and `keccak256(raw)` is the transaction hash. The one input
+/// it normalizes is a legacy transaction carrying a `0x00` type prefix, which re-encodes untagged;
+/// that case keeps the lazily computed hash.
+#[cfg(feature = "std")]
+fn with_hash_from_raw(tx: TransactionSigned, raw: &[u8]) -> TransactionSigned {
+    if raw.first() == Some(&0) {
+        return tx;
+    }
+
+    let signed = tx.into_signed();
+    let signature = *signed.signature();
+    TransactionSigned::new_unchecked(signed.strip_signature(), signature, keccak256(raw))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::Header;
+    use alloy_consensus::{
+        Header, SignableTransaction, TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy,
+    };
+    use alloy_eips::{
+        eip2930::{AccessList, AccessListItem},
+        eip7702::{Authorization, SignedAuthorization},
+        Encodable2718,
+    };
     use alloy_genesis::Genesis;
+    use alloy_primitives::{Address, Signature, TxKind, B256};
     use reth_chainspec::{Chain, ChainSpec};
     use reth_evm::{execute::ProviderError, EvmEnv};
     use revm::{
@@ -384,6 +411,130 @@ mod tests {
         database_interface::EmptyDBTyped,
         inspector::NoOpInspector,
     };
+
+    /// Builds one transaction of each type, all sharing the same dummy signature.
+    fn all_tx_types() -> Vec<TransactionSigned> {
+        let signature = Signature::new(U256::from(1), U256::from(2), false);
+        let to = Address::repeat_byte(0x33);
+        let value = U256::from(5);
+        let input = Bytes::from_static(&[0xab, 0xcd]);
+        let access_list = AccessList(vec![AccessListItem {
+            address: Address::repeat_byte(0x11),
+            storage_keys: vec![B256::repeat_byte(0x22)],
+        }]);
+
+        vec![
+            TxLegacy {
+                chain_id: Some(1),
+                nonce: 2,
+                gas_price: 3,
+                gas_limit: 4,
+                to: TxKind::Call(to),
+                value,
+                input: input.clone(),
+            }
+            .into_signed(signature)
+            .into(),
+            TxEip2930 {
+                chain_id: 1,
+                nonce: 2,
+                gas_price: 3,
+                gas_limit: 4,
+                to: TxKind::Call(to),
+                value,
+                access_list: access_list.clone(),
+                input: input.clone(),
+            }
+            .into_signed(signature)
+            .into(),
+            TxEip1559 {
+                chain_id: 1,
+                nonce: 2,
+                gas_limit: 4,
+                max_fee_per_gas: 5,
+                max_priority_fee_per_gas: 6,
+                to: TxKind::Call(to),
+                value,
+                access_list: access_list.clone(),
+                input: input.clone(),
+            }
+            .into_signed(signature)
+            .into(),
+            TxEip4844 {
+                chain_id: 1,
+                nonce: 2,
+                gas_limit: 4,
+                max_fee_per_gas: 5,
+                max_priority_fee_per_gas: 6,
+                to,
+                value,
+                access_list: access_list.clone(),
+                blob_versioned_hashes: vec![B256::repeat_byte(0x44)],
+                max_fee_per_blob_gas: 7,
+                input: input.clone(),
+            }
+            .into_signed(signature)
+            .into(),
+            TxEip7702 {
+                chain_id: 1,
+                nonce: 2,
+                gas_limit: 4,
+                max_fee_per_gas: 5,
+                max_priority_fee_per_gas: 6,
+                to,
+                value,
+                access_list,
+                authorization_list: vec![SignedAuthorization::new_unchecked(
+                    Authorization {
+                        chain_id: U256::from(1),
+                        address: Address::repeat_byte(0x55),
+                        nonce: 8,
+                    },
+                    1,
+                    U256::from(9),
+                    U256::from(10),
+                )],
+                input,
+            }
+            .into_signed(signature)
+            .into(),
+        ]
+    }
+
+    #[test]
+    fn tx_hash_seeded_from_raw_bytes() {
+        for tx in all_tx_types() {
+            let raw = Bytes::from(tx.encoded_2718());
+            let decoded = TransactionSigned::decode_2718_exact(raw.as_ref()).unwrap();
+            let seeded = with_hash_from_raw(decoded, &raw);
+
+            assert_eq!(*seeded.tx_hash(), keccak256(&raw), "{:?}", tx.tx_type());
+            assert_eq!(seeded.tx_hash(), tx.tx_hash(), "{:?}", tx.tx_type());
+        }
+    }
+
+    #[test]
+    fn tx_hash_is_taken_from_the_raw_bytes() {
+        // the returned transaction must carry the supplied hash instead of lazily recomputing it
+        let raw = Bytes::from_static(b"not a transaction encoding");
+        let seeded = with_hash_from_raw(all_tx_types().remove(0), &raw);
+
+        assert_eq!(*seeded.tx_hash(), keccak256(&raw));
+    }
+
+    #[test]
+    fn tx_hash_not_seeded_for_type_prefixed_legacy() {
+        let legacy = all_tx_types().remove(0);
+        let mut raw = vec![0x00];
+        raw.extend_from_slice(&legacy.encoded_2718());
+
+        // the decoder strips the `0x00` prefix, so the raw bytes are not the hash preimage
+        let decoded = TransactionSigned::decode_2718_exact(&raw).unwrap();
+        let seeded = with_hash_from_raw(decoded, &raw);
+
+        assert_eq!(seeded.tx_hash(), legacy.tx_hash());
+        assert_ne!(*seeded.tx_hash(), keccak256(&raw));
+    }
 
     #[test]
     fn test_fill_cfg_and_block_env() {
