@@ -34,7 +34,7 @@ use reth_eth_wire::{
 };
 use reth_eth_wire_types::{
     message::RequestPair, snap::SnapProtocolMessage, NewPooledTransactionHashes,
-    RawCapabilityMessage,
+    RawCapabilityMessage, RawResponse,
 };
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_api::{PeerRequest, RequestMessage};
@@ -256,6 +256,10 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     /// Handle a message read from the connection.
     ///
     /// Returns an error if the message is considered to be in violation of the protocol.
+    ///
+    /// The connection yields responses as [`EthMessage::RawResponse`], which are correlated with
+    /// their request in [`Self::on_raw_response`] before they are decoded; the typed response
+    /// variants are only reached from there.
     fn on_incoming_message(&mut self, msg: EthMessage<N>) -> OnIncomingMessageOutcome<N> {
         /// A macro that handles an incoming request
         /// This creates a new channel and tries to send the sender half to the session while
@@ -423,7 +427,67 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             EthMessage::GetCells(resp) => {
                 on_request!(resp, Cells, GetCells)
             }
+            EthMessage::RawResponse(resp) => self.on_raw_response(resp),
             EthMessage::Other(bytes) => self.try_emit_broadcast(PeerMessage::Other(bytes)).into(),
+        }
+    }
+
+    /// Handles a response whose payload is still RLP encoded, see [`EthMessage::RawResponse`].
+    ///
+    /// The response is correlated with its in-flight request first: unsolicited, late (already
+    /// timed out internally) and mismatched responses are settled on the request id alone, so a
+    /// peer can't make the session decode payloads it never asked for. Only a response the session
+    /// is still waiting for is decoded, and then delivered through the typed response handling in
+    /// [`Self::on_incoming_message`].
+    fn on_raw_response(&mut self, resp: RawResponse) -> OnIncomingMessageOutcome<N> {
+        let request_id = match resp.request_id() {
+            Ok(request_id) => request_id,
+            Err(err) => {
+                return OnIncomingMessageOutcome::BadMessage {
+                    error: EthStreamError::InvalidMessage(err.into()),
+                    message: EthMessage::RawResponse(resp),
+                }
+            }
+        };
+
+        let expected = match self.inflight_requests.get(&request_id).map(|req| &req.request) {
+            Some(RequestState::Waiting(request)) => request.response_message_id(),
+            Some(RequestState::TimedOut) => {
+                // request was already timed out internally, the late response only updates the
+                // timeout estimate
+                if let Some(req) = self.inflight_requests.remove(&request_id) {
+                    self.update_request_timeout(req.timestamp, Instant::now());
+                }
+                return OnIncomingMessageOutcome::Ok
+            }
+            None => {
+                trace!(peer_id=?self.remote_peer_id, ?request_id, "received response to unknown request");
+                // we received a response to a request we never sent
+                self.on_bad_message();
+                return OnIncomingMessageOutcome::Ok
+            }
+        };
+
+        if expected != Some(resp.message_id()) {
+            // The peer replied to a request id we handed out, but with the wrong response type.
+            // This cancels the pending request, so it must cost the peer reputation. Without the
+            // penalty the peer can kill any request we send it, repeatedly and for free.
+            debug!(target: "net::session", ?request_id, msg_id=?resp.message_id(), remote_peer_id=?self.remote_peer_id, "received response of wrong type");
+            self.on_bad_message();
+            if let Some(InflightRequest { request: RequestState::Waiting(request), .. }) =
+                self.inflight_requests.remove(&request_id)
+            {
+                request.send_bad_response();
+            }
+            return OnIncomingMessageOutcome::Ok
+        }
+
+        match self.conn.decode_raw_response(&resp) {
+            Ok(msg) => self.on_incoming_message(msg),
+            Err(error) => OnIncomingMessageOutcome::BadMessage {
+                error,
+                message: EthMessage::RawResponse(resp),
+            },
         }
     }
 
@@ -1322,6 +1386,7 @@ mod tests {
     use crate::session::{handle::PendingSessionEvent, start_pending_incoming_session};
     use alloy_eips::eip2124::ForkFilter;
     use alloy_primitives::B256;
+    use alloy_rlp::Encodable;
     use futures::task::noop_waker;
     use reth_chainspec::MAINNET;
     use reth_ecies::stream::ECIESStream;
@@ -1436,9 +1501,10 @@ mod tests {
                     remote_addr,
                     peer_id,
                     capabilities,
-                    conn,
+                    mut conn,
                     ..
                 } => {
+                    conn.set_lazy_responses(true);
                     let (_to_session_tx, messages_rx) = mpsc::channel(10);
                     let (commands_to_session, commands_rx) = mpsc::channel(10);
                     let (_unbounded_tx, unbounded_rx) = mpsc::unbounded_channel();
@@ -1934,6 +2000,119 @@ mod tests {
         assert!(futures::FutureExt::now_or_never(builder.active_session_rx.next())
             .flatten()
             .is_none());
+    }
+
+    /// Returns an established session whose remote side just idles.
+    async fn idle_session(builder: &mut SessionBuilder) -> ActiveSession<EthNetworkPrimitives> {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+        let fut = builder.with_client_stream(local_addr, async move |client_stream| {
+            let _client_stream = client_stream;
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        });
+        tokio::task::spawn(fut);
+        let (incoming, _) = listener.accept().await.unwrap();
+        builder.connect_incoming(incoming).await
+    }
+
+    /// Builds a [`RawResponse`] carrying `request_id` followed by `body`, the raw RLP of the
+    /// response payload.
+    fn raw_response(message_id: EthMessageID, request_id: u64, body: &[u8]) -> RawResponse {
+        let mut payload = Vec::new();
+        alloy_rlp::Header { list: true, payload_length: request_id.length() + body.len() }
+            .encode(&mut payload);
+        request_id.encode(&mut payload);
+        payload.extend_from_slice(body);
+        RawResponse::new(message_id, payload.into())
+    }
+
+    /// Not a valid `BlockBodies` payload: decoding it is a protocol breach.
+    const UNDECODABLE_BODY: &[u8] = &[0x01];
+    /// An empty `BlockBodies` payload.
+    const EMPTY_BODIES: &[u8] = &[alloy_rlp::EMPTY_LIST_CODE];
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn unsolicited_raw_response_is_penalized_without_decoding() {
+        let mut builder = SessionBuilder::default();
+        let mut session = idle_session(&mut builder).await;
+
+        // Settled on the request id alone, the body is never decoded.
+        let resp = raw_response(EthMessageID::BlockBodies, 999, UNDECODABLE_BODY);
+        let outcome = session.on_incoming_message(EthMessage::RawResponse(resp));
+        assert!(matches!(outcome, OnIncomingMessageOutcome::Ok));
+        assert!(matches!(
+            futures::FutureExt::now_or_never(builder.active_session_rx.next()).flatten(),
+            Some(ActiveSessionMessage::BadMessage { .. })
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn wrong_type_raw_response_is_penalized_without_decoding() {
+        let mut builder = SessionBuilder::default();
+        let mut session = idle_session(&mut builder).await;
+        let (id, rx) = dispatch_block_bodies_request(&mut session);
+
+        let resp = raw_response(EthMessageID::BlockHeaders, id, UNDECODABLE_BODY);
+        let outcome = session.on_incoming_message(EthMessage::RawResponse(resp));
+        assert!(matches!(outcome, OnIncomingMessageOutcome::Ok));
+        assert!(!session.inflight_requests.contains_key(&id));
+        assert_eq!(rx.await.unwrap().unwrap_err(), RequestError::BadResponse);
+        assert!(matches!(
+            futures::FutureExt::now_or_never(builder.active_session_rx.next()).flatten(),
+            Some(ActiveSessionMessage::BadMessage { .. })
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn late_raw_response_is_consumed_without_decoding() {
+        let mut builder = SessionBuilder::default();
+        let mut session = idle_session(&mut builder).await;
+
+        session.internal_request_timeout.store(1, Ordering::Relaxed);
+        let (id, _rx) = dispatch_block_bodies_request(&mut session);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(!session.check_timed_out_requests(Instant::now()));
+
+        let resp = raw_response(EthMessageID::BlockBodies, id, UNDECODABLE_BODY);
+        let outcome = session.on_incoming_message(EthMessage::RawResponse(resp));
+        assert!(matches!(outcome, OnIncomingMessageOutcome::Ok));
+        assert!(!session.inflight_requests.contains_key(&id));
+        assert!(futures::FutureExt::now_or_never(builder.active_session_rx.next())
+            .flatten()
+            .is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn expected_raw_response_is_decoded_and_delivered() {
+        let mut builder = SessionBuilder::default();
+        let mut session = idle_session(&mut builder).await;
+        let (id, rx) = dispatch_block_bodies_request(&mut session);
+
+        let resp = raw_response(EthMessageID::BlockBodies, id, EMPTY_BODIES);
+        let outcome = session.on_incoming_message(EthMessage::RawResponse(resp));
+        assert!(matches!(outcome, OnIncomingMessageOutcome::Ok));
+        assert!(!session.inflight_requests.contains_key(&id));
+        assert_eq!(rx.await.unwrap().unwrap(), BlockBodies::default());
+        assert!(futures::FutureExt::now_or_never(builder.active_session_rx.next())
+            .flatten()
+            .is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn malformed_raw_response_is_a_protocol_breach() {
+        let mut builder = SessionBuilder::default();
+        let mut session = idle_session(&mut builder).await;
+        let (id, _rx) = dispatch_block_bodies_request(&mut session);
+
+        // The request id can't be decoded at all.
+        let resp = RawResponse::new(EthMessageID::BlockBodies, UNDECODABLE_BODY.to_vec().into());
+        let outcome = session.on_incoming_message(EthMessage::RawResponse(resp));
+        assert!(matches!(outcome, OnIncomingMessageOutcome::BadMessage { .. }));
+
+        // The response is expected, but its payload doesn't decode.
+        let resp = raw_response(EthMessageID::BlockBodies, id, UNDECODABLE_BODY);
+        let outcome = session.on_incoming_message(EthMessage::RawResponse(resp));
+        assert!(matches!(outcome, OnIncomingMessageOutcome::BadMessage { .. }));
     }
 
     #[tokio::test(flavor = "multi_thread")]
