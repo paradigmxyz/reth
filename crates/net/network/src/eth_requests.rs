@@ -129,19 +129,19 @@ where
     fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<C::Header> {
         let GetBlockHeaders { start_block, limit, skip, direction } = request;
 
-        let mut headers = Vec::new();
-
         let mut block: BlockHashOrNumber = match start_block {
             BlockHashOrNumber::Hash(start) => start.into(),
             BlockHashOrNumber::Number(num) => {
                 let Some(hash) = self.client.block_hash(num).unwrap_or_default() else {
-                    return headers
+                    return Vec::new()
                 };
                 hash.into()
             }
         };
 
         let skip = skip as u64;
+        // `limit` is peer controlled, so never reserve beyond what is served
+        let mut headers = Vec::with_capacity(limit.min(MAX_HEADERS_SERVE as u64) as usize);
         let mut total_bytes = 0;
 
         for _ in 0..limit {
@@ -207,7 +207,7 @@ where
         response: oneshot::Sender<RequestResult<BlockBodies<<C::Block as Block>::Body>>>,
     ) {
         self.metrics.eth_bodies_requests_received_total.increment(1);
-        let mut bodies = Vec::new();
+        let mut bodies = Vec::with_capacity(request.0.len().min(MAX_BODIES_SERVE));
 
         let mut total_bytes = 0;
 
@@ -343,7 +343,7 @@ where
         F: Fn(Vec<C::Receipt>) -> Vec<T>,
         T: Encodable,
     {
-        let mut receipts = Vec::new();
+        let mut receipts = Vec::with_capacity(request.0.len().min(MAX_RECEIPTS_SERVE));
         let mut total_bytes = 0;
 
         for hash in request {
@@ -372,6 +372,7 @@ where
         response: oneshot::Sender<RequestResult<Cells>>,
     ) {
         let mut cells_response = Cells { cell_mask: request.cell_mask, ..Default::default() };
+        let mut total_bytes = 0;
 
         for hash in request.hashes.into_iter().take(MAX_CELLS_SERVE) {
             let Some(cells) =
@@ -380,10 +381,11 @@ where
                 continue;
             };
 
+            total_bytes += hash.length() + cells.length();
             cells_response.hashes.push(hash);
             cells_response.cells.push(cells);
 
-            if cells_response.length() > SOFT_RESPONSE_LIMIT {
+            if total_bytes > SOFT_RESPONSE_LIMIT {
                 break
             }
         }
