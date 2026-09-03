@@ -14,6 +14,9 @@ use tracing::error;
 /// Default max cache size for [`PrecompileCache`]
 const MAX_CACHE_SIZE: u32 = 1024 * 1024;
 
+/// Maximum calldata size to cache for a precompile.
+const MAX_PRECOMPILE_CACHE_INPUT_SIZE: usize = 2 * 1024;
+
 /// Stores caches for each precompile.
 #[derive(Debug, Clone, Default)]
 pub struct PrecompileCacheMap<S>(Arc<DashMap<Address, PrecompileCache<S>, FbBuildHasher<20>>>)
@@ -179,7 +182,9 @@ where
     }
 
     fn call(&self, input: PrecompileInput<'_>) -> PrecompileResult {
-        if let Some(entry) = &self.cache.get(input.data, self.spec_id.clone()) &&
+        let cacheable_input = input.data.len() <= MAX_PRECOMPILE_CACHE_INPUT_SIZE;
+        if cacheable_input &&
+            let Some(entry) = &self.cache.get(input.data, self.spec_id.clone()) &&
             input.gas >= entry.gas_used()
         {
             self.increment_by_one_precompile_cache_hits();
@@ -193,7 +198,7 @@ where
         match &result {
             // Only successful outputs are cacheable. Non-success statuses and errors must execute
             // again instead of poisoning the cache for subsequent calls.
-            Ok(output) if output.is_success() => {
+            Ok(output) if cacheable_input && output.is_success() => {
                 // Sanity-check precompile output to ensure that it does not affect state gas in any
                 // way.
                 //
@@ -212,6 +217,8 @@ where
                     self.increment_by_one_precompile_cache_misses();
                 }
             }
+            // Oversized successful inputs execute normally but are not cacheable.
+            Ok(output) if output.is_success() => {}
             _ => {
                 self.increment_by_one_precompile_errors();
             }
@@ -250,6 +257,7 @@ impl CachedPrecompileMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use metrics_util::debugging::{DebugValue, DebuggingRecorder};
     use reth_evm::{EthEvmFactory, Evm, EvmEnv, EvmFactory};
     use reth_revm::db::EmptyDB;
     use revm::{
@@ -406,5 +414,55 @@ mod tests {
             .into_output()
             .unwrap();
         assert_eq!(result3.as_ref(), b"output_from_precompile_1");
+    }
+
+    #[test]
+    fn test_oversized_successful_input_is_not_an_error() {
+        let recorder = DebuggingRecorder::new();
+        let snapshotter = recorder.snapshotter();
+        let cache = PrecompileCache::default();
+        let input_data = Bytes::from(vec![0; MAX_PRECOMPILE_CACHE_INPUT_SIZE + 1]);
+        let address = Address::with_last_byte(1);
+
+        metrics::with_local_recorder(&recorder, || {
+            let precompile: DynPrecompile = (|_input: PrecompileInput<'_>| {
+                Ok(PrecompileOutput {
+                    status: PrecompileStatus::Success,
+                    gas_used: 0,
+                    state_gas_used: 0,
+                    state_gas_spilled: 0,
+                    reservoir: 0,
+                    gas_refunded: 0,
+                    bytes: Bytes::default(),
+                })
+            })
+            .into();
+            let wrapped = CachedPrecompile::wrap(
+                precompile,
+                cache.clone(),
+                SpecId::PRAGUE,
+                Some(CachedPrecompileMetrics::new_with_address(address)),
+            );
+            let mut evm =
+                EthEvmFactory::default().create_evm(EmptyDB::default(), EvmEnv::default());
+            evm.precompiles_mut().apply_precompile(&address, |_| Some(wrapped));
+
+            evm.transact_raw(TxEnv {
+                caller: Address::ZERO,
+                gas_limit: 100_000,
+                data: input_data.clone(),
+                kind: address.into(),
+                ..Default::default()
+            })
+            .unwrap();
+        });
+
+        assert!(cache.get(&input_data, SpecId::PRAGUE).is_none());
+        let error_count = snapshotter.snapshot().into_vec().into_iter().find_map(
+            |(key, _unit, _description, value)| {
+                (key.key().name() == "sync.caching.precompile_errors").then_some(value)
+            },
+        );
+        assert_eq!(error_count, Some(DebugValue::Counter(0)));
     }
 }

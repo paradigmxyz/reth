@@ -135,12 +135,13 @@ use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
 };
-use reth_errors::{BlockExecutionError, ProviderResult};
+use reth_errors::{BlockExecutionError, BlockValidationError, ProviderResult};
 use reth_evm::{
     block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
     OnStateHook, SpecFor,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats};
+use reth_network_p2p::full_block::SealedBlockWithAccessList;
 use reth_payload_builder::{PayloadBuilderLease, PayloadBuilderResources};
 use reth_payload_primitives::{
     BuiltPayload, BuiltPayloadExecutedBlock, InvalidPayloadAttributesError, NewPayloadError,
@@ -152,9 +153,10 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     BlockExecutionOutput, BlockHashReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
-    DatabaseProviderROFactory, HashedPostStateProvider, ProviderError, PruneCheckpointReader,
-    StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
-    StateRootProvider, StorageChangeSetReader, StorageSettingsCache,
+    DatabaseProviderROFactory, HashedPostStateProvider, HistoryReader, ProviderError,
+    PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderBox,
+    StateProviderFactory, StateReader, StateRootProvider, StorageChangeSetReader,
+    StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
@@ -315,6 +317,7 @@ where
                           + ChangeSetReader
                           + StorageChangeSetReader
                           + StorageSettingsCache
+                          + HistoryReader
                           + 'static,
         > + BlockReader<Header = N::BlockHeader>
         + ChangeSetReader
@@ -404,7 +407,7 @@ where
     {
         match input {
             BlockOrPayload::Payload(payload) => self.validator.convert_payload_to_block(payload),
-            BlockOrPayload::Block(block) => Ok(block),
+            BlockOrPayload::Block(block) => Ok(block.split().0),
         }
     }
 
@@ -941,7 +944,7 @@ where
             )
             .entered();
             let block = match input {
-                BlockOrPayload::Block(block) => block,
+                BlockOrPayload::Block(block) => block.split().0,
                 BlockOrPayload::Payload(payload) => {
                     validator.convert_payload_to_block(payload)?
                 }
@@ -1262,7 +1265,7 @@ where
             let Some(tx_result) = transactions.next() else { break };
             self.metrics.record_transaction_wait(wait_start.elapsed());
 
-            let tx = tx_result.map_err(BlockExecutionError::other)?;
+            let tx = tx_result.map_err(BlockValidationError::other)?;
             let tx_signer = *<Tx as alloy_evm::RecoveredTx<InnerTx>>::signer(&tx);
 
             senders.push(tx_signer);
@@ -1756,10 +1759,10 @@ pub trait EngineValidator<
         ctx: TreeCtx<'_, N>,
     ) -> ValidationOutcome<N>;
 
-    /// Validates a block downloaded from the network.
+    /// Validates a block downloaded from the network, optionally carrying its access list data.
     fn validate_block(
         &mut self,
-        block: SealedBlock<N::Block>,
+        block: SealedBlockWithAccessList<N::Block>,
         ctx: TreeCtx<'_, N>,
     ) -> ValidationOutcome<N>;
 
@@ -1799,6 +1802,7 @@ where
                           + ChangeSetReader
                           + StorageChangeSetReader
                           + StorageSettingsCache
+                          + HistoryReader
                           + 'static,
         > + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
@@ -1846,7 +1850,7 @@ where
 
     fn validate_block(
         &mut self,
-        block: SealedBlock<N::Block>,
+        block: SealedBlockWithAccessList<N::Block>,
         ctx: TreeCtx<'_, N>,
     ) -> ValidationOutcome<N> {
         self.validate_block_with_state(BlockOrPayload::Block(block), ctx)
@@ -1984,8 +1988,8 @@ where
 pub enum BlockOrPayload<T: PayloadTypes> {
     /// Payload.
     Payload(T::ExecutionData),
-    /// Block.
-    Block(SealedBlock<BlockTy<<T::BuiltPayload as BuiltPayload>::Primitives>>),
+    /// Block with optional access list data, e.g. downloaded from the network.
+    Block(SealedBlockWithAccessList<BlockTy<<T::BuiltPayload as BuiltPayload>::Primitives>>),
 }
 
 impl<T: PayloadTypes> BlockOrPayload<T> {
@@ -2046,7 +2050,7 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
                 .block_access_list()
                 .map(|block_access_list| DecodedBal::from_rlp_bytes(block_access_list.clone()))
                 .transpose(),
-            Self::Block(_) => Ok(None),
+            Self::Block(block) => block.data().clone().map(DecodedBal::from_raw_bal).transpose(),
         }
     }
 

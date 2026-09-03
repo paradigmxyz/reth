@@ -1159,9 +1159,9 @@ mod tests {
     }
 
     #[test]
-    fn worker_tx_recovery_error_becomes_other_error() {
+    fn worker_tx_recovery_error_becomes_validation_error() {
         // A tx recovery failure fed into the worker channel must surface as
-        // BalExecutionError::Other. Uses execute_block directly since tx_stream hardcodes
+        // a block validation error. Uses execute_block directly since tx_stream hardcodes
         // Infallible and cannot inject errors.
         let evm_config = EthEvmConfig::mainnet();
         let block = empty_amsterdam_block(B256::ZERO);
@@ -1192,8 +1192,8 @@ mod tests {
         );
 
         assert!(
-            matches!(result, Err(BalExecutionError::Other(_))),
-            "expected Other error from tx recovery failure, got {result:?}",
+            matches!(result, Err(BalExecutionError::Execution(BlockExecutionError::Validation(_)))),
+            "expected validation error from tx recovery failure, got {result:?}",
         );
     }
 
