@@ -156,7 +156,7 @@ pub const DEFAULT_BAL_PREWARM_THREADS: usize = 128;
 /// Batching amortizes the send over many slots and hands the worker a run of slots that live
 /// close together in the storage table, while the cap keeps enough messages in flight to saturate
 /// the workers on blocks whose read-set is concentrated in a few accounts.
-const WARM_BATCH_SIZE: usize = 32;
+const WARM_BATCH_SIZE: usize = 8;
 
 fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
     // The provider (and its MDBX read txn) held for the current block, between `BeginBlock` and
