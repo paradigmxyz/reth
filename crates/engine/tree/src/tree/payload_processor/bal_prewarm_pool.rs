@@ -21,6 +21,7 @@ pub type BuildProviderFn = dyn Fn() -> ProviderResult<StateProviderBox> + Send +
 
 /// A single warm request: a whole account (basic account + its bytecode) followed by a batch of
 /// its storage slots, or a batch of storage slots on their own.
+#[derive(Debug)]
 enum PrewarmTarget {
     Account(Address, Box<[StorageKey]>),
     Storage(Address, Box<[StorageKey]>),
@@ -35,8 +36,8 @@ enum PrewarmMsg {
         caches: ExecutionCache,
         txpool_snapshot: Option<TxPoolPrewarmCacheSnapshot>,
     },
-    /// Warm one target into the held provider's cache. Ignored if no provider is held.
-    Warm(PrewarmTarget),
+    /// Warm a batch of targets into the held provider's cache. Ignored if no provider is held.
+    Warm(Vec<PrewarmTarget>),
     /// Drop the held provider (and its read txn).
     EndBlock(Arc<SendOnDrop>),
 }
@@ -88,23 +89,10 @@ impl BalPrewarmPool {
         }
     }
 
-    /// Fire-and-forget: warm an account (basic account + bytecode) and its storage slots.
-    ///
-    /// The slots are dispatched in `WARM_BATCH_SIZE` chunks that are distributed independently,
-    /// so a single account with a large read-set does not serialize onto one worker;
-    /// [`end_block`](Self::end_block) waits for the slowest queue.
-    pub fn warm_account(&self, addr: Address, slots: impl IntoIterator<Item = StorageKey>) {
-        let mut slots = slots.into_iter();
-        let mut batch: Box<[StorageKey]> = slots.by_ref().take(WARM_BATCH_SIZE).collect();
-        self.send_warm(PrewarmTarget::Account(addr, batch));
-
-        loop {
-            batch = slots.by_ref().take(WARM_BATCH_SIZE).collect();
-            if batch.is_empty() {
-                break
-            }
-            self.send_warm(PrewarmTarget::Storage(addr, batch));
-        }
+    /// Returns a warmer that batches warm requests for the current block and hands each batch to
+    /// a worker. Drop it, or call [`BalPrewarmer::finish`], before [`end_block`](Self::end_block).
+    pub const fn warmer(&self) -> BalPrewarmer<'_> {
+        BalPrewarmer { pool: self, batch: Vec::new() }
     }
 
     /// Ends the block: every worker drops its provider (and read txn) once it has drained the warm
@@ -123,9 +111,68 @@ impl BalPrewarmPool {
         rx.blocking_recv().expect("BAL prewarm pool dropped without signaling completion");
     }
 
-    fn send_warm(&self, target: PrewarmTarget) {
+    fn send_warm(&self, batch: Vec<PrewarmTarget>) {
         let i = self.next.fetch_add(1, Ordering::Relaxed) % self.workers.len();
-        let _ = self.workers[i].send(PrewarmMsg::Warm(target));
+        let _ = self.workers[i].send(PrewarmMsg::Warm(batch));
+    }
+}
+
+/// Fire-and-forget warm requests for one block, batched across accounts.
+///
+/// Targets are collected until `WARM_BATCH_TARGETS` of them are pending, then sent to the next
+/// worker as one message, so neither a small account nor a single slot chunk costs a send of its
+/// own. The remainder is flushed by [`finish`](Self::finish) or on drop.
+#[derive(Debug)]
+pub struct BalPrewarmer<'a> {
+    pool: &'a BalPrewarmPool,
+    batch: Vec<PrewarmTarget>,
+}
+
+impl BalPrewarmer<'_> {
+    /// Warms an account (basic account + bytecode) and its storage slots.
+    ///
+    /// The slots are split into `WARM_BATCH_SIZE` chunks that can land on different workers, so a
+    /// single account with a large read-set does not serialize onto one worker;
+    /// [`BalPrewarmPool::end_block`] waits for the slowest queue.
+    pub fn warm_account(&mut self, addr: Address, slots: impl IntoIterator<Item = StorageKey>) {
+        let mut slots = slots.into_iter();
+        let mut chunk: Box<[StorageKey]> = slots.by_ref().take(WARM_BATCH_SIZE).collect();
+        self.push(PrewarmTarget::Account(addr, chunk));
+
+        loop {
+            chunk = slots.by_ref().take(WARM_BATCH_SIZE).collect();
+            if chunk.is_empty() {
+                break
+            }
+            self.push(PrewarmTarget::Storage(addr, chunk));
+        }
+    }
+
+    /// Sends the pending targets.
+    pub fn finish(mut self) {
+        self.flush();
+    }
+
+    fn push(&mut self, target: PrewarmTarget) {
+        if self.batch.is_empty() {
+            self.batch.reserve(WARM_BATCH_TARGETS);
+        }
+        self.batch.push(target);
+        if self.batch.len() >= WARM_BATCH_TARGETS {
+            self.flush();
+        }
+    }
+
+    fn flush(&mut self) {
+        if !self.batch.is_empty() {
+            self.pool.send_warm(std::mem::take(&mut self.batch));
+        }
+    }
+}
+
+impl Drop for BalPrewarmer<'_> {
+    fn drop(&mut self) {
+        self.flush();
     }
 }
 
@@ -158,6 +205,12 @@ pub const DEFAULT_BAL_PREWARM_THREADS: usize = 128;
 /// the workers on blocks whose read-set is concentrated in a few accounts.
 const WARM_BATCH_SIZE: usize = 8;
 
+/// Number of warm targets (accounts or slot chunks) carried by one message.
+///
+/// Consecutive BAL accounts are small on average, so sending them one per message left the send
+/// itself as the dominant per-account cost of the dispatch loop.
+const WARM_BATCH_TARGETS: usize = 8;
+
 fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
     // The provider (and its MDBX read txn) held for the current block, between `BeginBlock` and
     // `EndBlock`. `None` while idle, so no read txn is pinned across the inter-block gap.
@@ -178,23 +231,25 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
                     }
                 };
             }
-            PrewarmMsg::Warm(target) => {
+            PrewarmMsg::Warm(targets) => {
                 let Some(provider) = provider.as_ref() else { continue };
-                match target {
-                    PrewarmTarget::Account(addr, slots) => {
-                        if let Ok(Some(account)) = provider.basic_account(&addr) &&
-                            let Some(code_hash) = account.bytecode_hash &&
-                            code_hash != alloy_consensus::constants::KECCAK_EMPTY
-                        {
-                            let _ = provider.bytecode_by_hash(&code_hash);
+                for target in targets {
+                    match target {
+                        PrewarmTarget::Account(addr, slots) => {
+                            if let Ok(Some(account)) = provider.basic_account(&addr) &&
+                                let Some(code_hash) = account.bytecode_hash &&
+                                code_hash != alloy_consensus::constants::KECCAK_EMPTY
+                            {
+                                let _ = provider.bytecode_by_hash(&code_hash);
+                            }
+                            for &slot in &slots {
+                                let _ = provider.storage(addr, slot);
+                            }
                         }
-                        for &slot in &slots {
-                            let _ = provider.storage(addr, slot);
-                        }
-                    }
-                    PrewarmTarget::Storage(addr, slots) => {
-                        for &slot in &slots {
-                            let _ = provider.storage(addr, slot);
+                        PrewarmTarget::Storage(addr, slots) => {
+                            for &slot in &slots {
+                                let _ = provider.storage(addr, slot);
+                            }
                         }
                     }
                 }
