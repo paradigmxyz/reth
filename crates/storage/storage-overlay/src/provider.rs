@@ -199,6 +199,24 @@ impl<Provider, N: NodePrimitives> OverlayStateProvider<OwnedProvider<Provider>, 
 }
 
 impl<'a, Provider, N: NodePrimitives> OverlayStateProvider<&'a Provider, N> {
+    /// Creates an overlay state provider over a borrowed database provider.
+    pub fn new_ref(provider: &'a Provider, overlay_builder: OverlayBuilder<N>) -> Self
+    where
+        Provider: StorageSettingsCache,
+    {
+        let is_v2 = provider.cached_storage_settings().is_v2();
+        Self {
+            provider,
+            overlay_builder: Some(overlay_builder),
+            state_trie_overlay_cache: Default::default(),
+            execution_overlay_cache: Default::default(),
+            metrics: Default::default(),
+            state_trie_overlay: OnceCell::new(),
+            execution_overlay: OnceCell::new(),
+            is_v2,
+        }
+    }
+
     pub(crate) fn new_with_state_trie(
         provider: &'a Provider,
         state_trie_overlay: StateTrieOverlay,

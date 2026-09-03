@@ -3,8 +3,8 @@ use crate::{
         ConsistentProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider,
         StaticFileProviderRWRefMut,
     },
-    BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
-    BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
+    AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
+    BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
     CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
     DatabaseProviderFactory, HeaderProvider, ProviderError, ProviderFactory, PruneCheckpointReader,
     ReceiptProvider, ReceiptProviderIdExt, RocksDBProviderFactory, StageCheckpointReader,
@@ -1020,7 +1020,10 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
         let storage_changeset = provider.storage_changeset(block)?;
 
         let Some(block_hash) = provider.block_hash(block)? else { return Ok(None) };
-        let state_provider = self.history_by_block_hash(block_hash)?;
+        let state_provider = OverlayStateProvider::<&_, N::Primitives>::new_ref(
+            &provider,
+            self.database.overlay_manager().overlay_builder(block_hash),
+        );
         let (state, reverts) = provider.populate_bundle_state(
             account_changeset,
             storage_changeset,
