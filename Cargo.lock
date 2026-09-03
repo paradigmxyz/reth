@@ -9603,6 +9603,7 @@ dependencies = [
  "metrics-exporter-prometheus",
  "metrics-process",
  "metrics-util",
+ "parking_lot",
  "pprof_util",
  "procfs",
  "reqwest",
