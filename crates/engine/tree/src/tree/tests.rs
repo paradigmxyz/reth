@@ -2853,6 +2853,51 @@ fn test_canonicalizing_downloaded_sync_target_head_updates_finalized() {
     assert!(test_harness.tree.state.forkchoice_state_tracker.sync_target_state().is_none());
 }
 
+/// Tests that pipeline backfill reaching a syncing FCU with `head == finalized` applies the
+/// finalized block without waiting for another FCU.
+#[test]
+fn test_backfill_reaching_sync_target_head_updates_finalized() {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = MAINNET.clone();
+    let mut test_harness = TestHarness::new(chain_spec);
+
+    let blocks: Vec<_> = test_harness.block_builder.get_executed_blocks(0..3).collect();
+    let initial_head = blocks[0].recovered_block().num_hash();
+    let sync_target = blocks[2].recovered_block().num_hash();
+    test_harness = test_harness.with_blocks(blocks);
+    test_harness.tree.state.tree_state.set_canonical_head(initial_head);
+
+    let fcu_state = ForkchoiceState {
+        head_block_hash: sync_target.hash,
+        safe_block_hash: sync_target.hash,
+        finalized_block_hash: sync_target.hash,
+    };
+    test_harness
+        .tree
+        .state
+        .forkchoice_state_tracker
+        .set_latest(fcu_state, ForkchoiceStatus::Syncing);
+
+    test_harness
+        .tree
+        .on_backfill_sync_finished(ControlFlow::Continue { block_number: sync_target.number })
+        .unwrap();
+
+    assert_eq!(test_harness.tree.state.tree_state.current_canonical_head, sync_target);
+    assert_eq!(
+        test_harness.tree.canonical_in_memory_state.get_finalized_num_hash(),
+        Some(sync_target)
+    );
+    assert_eq!(test_harness.tree.canonical_in_memory_state.get_safe_num_hash(), Some(sync_target));
+    assert_eq!(
+        test_harness.tree.state.forkchoice_state_tracker.last_valid_state(),
+        Some(fcu_state)
+    );
+    assert!(test_harness.tree.state.forkchoice_state_tracker.sync_target_state().is_none());
+    assert!(test_harness.from_tree_rx.try_recv().is_err());
+}
+
 // --- Backfill target selection tests ---
 //
 // Cover `backfill_target_hash` and its consumer `backfill_sync_target`, exercised end-to-end

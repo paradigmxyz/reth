@@ -1885,6 +1885,13 @@ where
 
             // update the tracked canonical head
             self.canonical_in_memory_state.set_canonical_head(new_head);
+
+            // If the pipeline reached the head of the syncing FCU, apply its safe and finalized
+            // blocks now that the head is canonical. An unwind must wait for a new FCU because the
+            // supplied sync target may have been invalidated.
+            if !ctrl.is_unwind() {
+                self.on_canonicalized_sync_target(backfill_num_hash.hash);
+            }
         }
 
         // check if we need to run backfill again by comparing the most recent backfill target
