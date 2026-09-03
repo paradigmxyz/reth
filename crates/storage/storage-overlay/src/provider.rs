@@ -294,14 +294,22 @@ where
             return Ok((&overlay.overlay, overlay.historical_fallback.as_ref()))
         }
 
+        let initialization_start = Instant::now();
+        let frontiers_start = Instant::now();
         let (state_trie_tip_block, finish_tip_block) = database_state_frontiers(self.provider())?;
+        self.metrics.execution_overlay_frontiers_duration.record(frontiers_start.elapsed());
+        let cache_access_start = Instant::now();
         let overlay = match self
             .execution_overlay_cache
             .entry((state_trie_tip_block.hash, finish_tip_block.hash))
         {
-            dashmap::Entry::Occupied(entry) => entry.get().clone(),
+            dashmap::Entry::Occupied(entry) => {
+                self.metrics.execution_overlay_cache_hits.increment(1);
+                entry.get().clone()
+            }
             dashmap::Entry::Vacant(entry) => {
                 self.metrics.execution_overlay_cache_misses.increment(1);
+                let build_start = Instant::now();
                 let (overlay, fallback_block_number) = self
                     .overlay_builder
                     .as_ref()
@@ -341,11 +349,16 @@ where
                     })
                     .transpose()?;
                 let overlay = CachedExecutionOverlay { overlay, historical_fallback };
+                self.metrics.execution_overlay_build_duration.record(build_start.elapsed());
                 entry.insert(overlay.clone());
                 overlay
             }
         };
+        self.metrics.execution_overlay_cache_access_duration.record(cache_access_start.elapsed());
         let _ = self.execution_overlay.set(overlay);
+        self.metrics
+            .execution_overlay_initialization_duration
+            .record(initialization_start.elapsed());
         let overlay = self.execution_overlay.get().expect("execution overlay was just initialized");
         Ok((&overlay.overlay, overlay.historical_fallback.as_ref()))
     }
@@ -978,6 +991,16 @@ pub(crate) struct OverlayStateProviderFactoryMetrics {
     state_trie_overlay_cache_misses: Counter,
     /// Number of cache misses when fetching execution overlays.
     execution_overlay_cache_misses: Counter,
+    /// Number of cache hits when fetching execution overlays.
+    execution_overlay_cache_hits: Counter,
+    /// Duration of resolving durable frontiers for a cold execution overlay.
+    execution_overlay_frontiers_duration: Histogram,
+    /// Duration of accessing the execution overlay cache.
+    execution_overlay_cache_access_duration: Histogram,
+    /// Duration of constructing an execution overlay on a cache miss.
+    execution_overlay_build_duration: Histogram,
+    /// Overall duration of initializing a provider's execution overlay.
+    execution_overlay_initialization_duration: Histogram,
 }
 
 type StateTrieOverlayCache = Arc<DashMap<(BlockHash, BlockHash), StateTrieOverlay>>;
