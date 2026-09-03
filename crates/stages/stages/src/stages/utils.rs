@@ -1,5 +1,8 @@
 //! Utils for `stages`.
-use alloy_primitives::{map::AddressMap, Address, BlockNumber, TxNumber, B256};
+use alloy_primitives::{
+    map::{AddressMap, HashMap},
+    Address, BlockNumber, TxNumber, B256,
+};
 use reth_config::config::EtlConfig;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -20,7 +23,7 @@ use reth_provider::{
 use reth_stages_api::StageError;
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{ChangeSetReader, StorageChangeSetReader};
-use std::{collections::HashMap, hash::Hash, ops::RangeBounds};
+use std::{hash::Hash, ops::RangeBounds};
 use tracing::info;
 
 /// Number of blocks before pushing indices from cache to [`Collector`]
