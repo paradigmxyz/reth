@@ -183,6 +183,10 @@ where
         // create state root context once for reuse
         let mut storage_ctx = StateRootContext::new();
 
+        // Handed to every account whose storage did not change. `PrefixSet::default()` allocates a
+        // fresh `Arc` for its (empty) key vec, whereas cloning this one only bumps a refcount.
+        let empty_prefix_set = PrefixSet::default();
+
         // first handle any in-progress storage root calculation
         let (mut hash_builder, mut account_node_iter) = if let Some(state) = self.previous_state {
             let IntermediateStateRootState { account_root_state, storage_root_state } = state;
@@ -233,7 +237,7 @@ where
                             .storage_prefix_sets
                             .get(&hashed_address)
                             .cloned()
-                            .unwrap_or_default(),
+                            .unwrap_or_else(|| empty_prefix_set.clone()),
                         previous_state: Some(storage_state.state),
                         walk_all_changed_branch_children: self.walk_all_changed_branch_children,
                         threshold: remaining_threshold,
@@ -306,7 +310,7 @@ where
                                 .storage_prefix_sets
                                 .get(&hashed_address)
                                 .cloned()
-                                .unwrap_or_default(),
+                                .unwrap_or_else(|| empty_prefix_set.clone()),
                             previous_state: None,
                             walk_all_changed_branch_children: self.walk_all_changed_branch_children,
                             threshold: remaining_threshold,
