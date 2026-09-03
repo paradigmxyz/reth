@@ -42,6 +42,65 @@ pub struct Proof<T, H, K = AddedRemovedKeys> {
     added_removed_keys: Option<K>,
 }
 
+#[cfg(test)]
+mod account_extension_tests {
+    use super::*;
+    use crate::{
+        hashed_cursor::mock::MockHashedCursorFactory, trie_cursor::noop::NoopTrieCursorFactory,
+        HashedPostState, StateRoot,
+    };
+    use alloy_primitives::Address;
+    use alloy_rlp::{BufMut, Decodable, Encodable};
+    use alloy_trie::TrieAccountExtension;
+    use reth_primitives_traits::{Account, InMemorySize};
+
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    struct TestExtension(u64);
+
+    impl TrieAccountExtension for TestExtension {
+        fn payload_length(&self) -> usize {
+            self.0.length()
+        }
+
+        fn encode_payload(&self, out: &mut dyn BufMut) {
+            self.0.encode(out);
+        }
+
+        fn decode_payload(payload: &mut &[u8]) -> alloy_rlp::Result<Self> {
+            u64::decode(payload).map(Self)
+        }
+    }
+
+    impl InMemorySize for TestExtension {
+        fn size(&self) -> usize {
+            size_of::<Self>()
+        }
+    }
+
+    #[test]
+    fn account_extension_is_committed_to_root_and_proof() {
+        let address = Address::with_last_byte(1);
+        let hashed_address = keccak256(address);
+        let account = Account { nonce: 1, extension: TestExtension(42), ..Default::default() };
+        let state = HashedPostState::default().with_accounts([(hashed_address, Some(account))]);
+        let cursors = MockHashedCursorFactory::from_hashed_post_state(state);
+
+        let root = StateRoot::new(NoopTrieCursorFactory, cursors.clone()).root().unwrap();
+        let proof = Proof::new(NoopTrieCursorFactory, cursors).account_proof(address, &[]).unwrap();
+
+        assert_eq!(proof.info.as_ref().unwrap().extension, TestExtension(42));
+        proof.verify(root).unwrap();
+
+        let ethereum_account = Account { extension: TestExtension(0), ..account };
+        let ethereum_cursors = MockHashedCursorFactory::from_hashed_post_state(
+            HashedPostState::default().with_accounts([(hashed_address, Some(ethereum_account))]),
+        );
+        let ethereum_root = StateRoot::new(NoopTrieCursorFactory, ethereum_cursors).root().unwrap();
+        assert_ne!(root, ethereum_root);
+    }
+}
+
 impl<T, H> Proof<T, H> {
     /// Create a new [`Proof`] instance.
     pub fn new(t: T, h: H) -> Self {
@@ -127,13 +186,13 @@ where
         self,
         address: Address,
         slots: &[B256],
-    ) -> Result<AccountProof, StateProofError> {
+    ) -> Result<AccountProof<H::AccountExtension>, StateProofError> {
         Ok(self
             .multiproof(MultiProofTargets::from_iter([(
                 keccak256(address),
                 slots.iter().map(keccak256).collect(),
             )]))?
-            .account_proof(address, slots)?)
+            .account_proof_with_extension::<H::AccountExtension>(address, slots)?)
     }
 
     /// Generate a state multiproof using the V2 proof calculator.

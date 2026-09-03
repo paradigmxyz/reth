@@ -4,12 +4,12 @@ use crate::{
     updates::{StorageTrieUpdates, TrieUpdates},
 };
 use alloy_primitives::B256;
-use reth_primitives_traits::Account;
+use reth_primitives_traits::{Account, EmptyAccountExtension};
 use reth_stages_types::MerkleCheckpoint;
 
 /// The progress of the state root computation.
 #[derive(Debug)]
-pub enum StateRootProgress {
+pub enum StateRootProgress<E = EmptyAccountExtension> {
     /// The complete state root computation with updates, the total number of entries walked, and
     /// the computed root.
     Complete(B256, usize, TrieUpdates),
@@ -17,25 +17,25 @@ pub enum StateRootProgress {
     /// Contains the walker stack, the hash builder, and the trie updates.
     ///
     /// Also contains any progress in an inner storage root computation.
-    Progress(Box<IntermediateStateRootState>, usize, TrieUpdates),
+    Progress(Box<IntermediateStateRootState<E>>, usize, TrieUpdates),
 }
 
 /// The intermediate state of the state root computation.
 #[derive(Debug)]
-pub struct IntermediateStateRootState {
+pub struct IntermediateStateRootState<E = EmptyAccountExtension> {
     /// The intermediate account root state.
     pub account_root_state: IntermediateRootState,
     /// The intermediate storage root state with account data.
-    pub storage_root_state: Option<IntermediateStorageRootState>,
+    pub storage_root_state: Option<IntermediateStorageRootState<E>>,
 }
 
 /// The intermediate state of a storage root computation along with the account.
 #[derive(Debug)]
-pub struct IntermediateStorageRootState {
+pub struct IntermediateStorageRootState<E = EmptyAccountExtension> {
     /// The intermediate storage trie state.
     pub state: IntermediateRootState,
     /// The account for which the storage root is being computed.
-    pub account: Account,
+    pub account: Account<E>,
 }
 
 impl From<MerkleCheckpoint> for IntermediateStateRootState {
@@ -61,6 +61,7 @@ impl From<MerkleCheckpoint> for IntermediateStateRootState {
                         nonce: checkpoint.account_nonce,
                         balance: checkpoint.account_balance,
                         bytecode_hash: Some(checkpoint.account_bytecode_hash),
+                        ..Default::default()
                     },
                 }
             }),

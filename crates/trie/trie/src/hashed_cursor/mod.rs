@@ -1,5 +1,5 @@
 use alloy_primitives::{keccak256, Address, B256, U256};
-use reth_primitives_traits::Account;
+use reth_primitives_traits::{Account, AccountExtension};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::HashedPostState;
 use revm::database::BundleAccount;
@@ -24,8 +24,10 @@ pub use metrics::{HashedCursorMetricsCache, InstrumentedHashedCursor};
 /// The factory trait for creating cursors over the hashed state.
 #[auto_impl::auto_impl(&)]
 pub trait HashedCursorFactory {
+    /// Chain-specific account data returned by account cursors.
+    type AccountExtension: AccountExtension;
     /// The hashed account cursor type.
-    type AccountCursor<'a>: HashedCursor<Value = Account>
+    type AccountCursor<'a>: HashedCursor<Value = Account<Self::AccountExtension>>
     where
         Self: 'a;
     /// The hashed storage cursor type.
@@ -84,7 +86,9 @@ pub trait HashedStorageCursor: HashedCursor {
 /// Final bundle values take precedence so that destroy-then-recreate transitions retain storage
 /// written by the recreated account.
 pub fn zero_destroyed_account_storage<'a>(
-    cursor_factory: &impl HashedCursorFactory,
+    cursor_factory: &impl HashedCursorFactory<
+        AccountExtension = reth_primitives_traits::EmptyAccountExtension,
+    >,
     accounts: impl IntoIterator<Item = (&'a Address, &'a BundleAccount)>,
     hashed_state: &mut HashedPostState,
 ) -> Result<(), DatabaseError> {
@@ -124,7 +128,9 @@ mod tests {
         let mut hashed_state = HashedPostState::default();
 
         zero_destroyed_account_storage(
-            &mock::MockHashedCursorFactory::default(),
+            &mock::MockHashedCursorFactory::<
+                reth_primitives_traits::EmptyAccountExtension,
+            >::default(),
             [(&address, &account)],
             &mut hashed_state,
         )

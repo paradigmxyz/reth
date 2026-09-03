@@ -1,7 +1,7 @@
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 use alloy_primitives::{B256, U256};
 use core::marker::PhantomData;
-use reth_primitives_traits::Account;
+use reth_primitives_traits::{Account, EmptyAccountExtension};
 use reth_storage_errors::db::DatabaseError;
 
 /// Noop hashed cursor factory.
@@ -10,6 +10,7 @@ use reth_storage_errors::db::DatabaseError;
 pub struct NoopHashedCursorFactory;
 
 impl HashedCursorFactory for NoopHashedCursorFactory {
+    type AccountExtension = EmptyAccountExtension;
     type AccountCursor<'a>
         = NoopHashedCursor<Account>
     where

@@ -30,7 +30,9 @@ use crate::{
 use alloy_consensus::Header;
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
-use reth_primitives_traits::{Account, Bytecode, StorageEntry};
+use reth_primitives_traits::{
+    Account, AccountExtensionTy, Bytecode, EmptyAccountExtension, StorageEntry,
+};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
 use reth_trie_common::{
@@ -400,9 +402,9 @@ tables! {
     }
 
     /// Stores the current state of an [`Account`].
-    table PlainAccountState {
+    table PlainAccountState<E = EmptyAccountExtension> {
         type Key = Address;
-        type Value = Account;
+        type Value = Account<E>;
     }
 
     /// Stores the current value of a storage key.
@@ -478,9 +480,9 @@ tables! {
     /// This table is in preparation for merklization and calculation of state root.
     /// We are saving whole account data as it is needed for partial update when
     /// part of storage is changed. Benefit for merklization is that hashed addresses are sorted.
-    table HashedAccounts {
+    table HashedAccounts<E = EmptyAccountExtension> {
         type Key = B256;
-        type Value = Account;
+        type Value = Account<E>;
     }
 
     /// Stores the current storage values indexed with `keccak256Address` and
@@ -616,6 +618,12 @@ impl Decode for ChainStateKey {
 
 // Alias types.
 
+/// Plain account state table configured for a node's account extension.
+pub type PlainAccountStateFor<N> = PlainAccountState<AccountExtensionTy<N>>;
+
+/// Hashed account state table configured for a node's account extension.
+pub type HashedAccountsFor<N> = HashedAccounts<AccountExtensionTy<N>>;
+
 /// List with transaction numbers.
 pub type BlockNumberList = IntegerList;
 
@@ -625,6 +633,7 @@ pub type StageId = String;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_ethereum_primitives::EthPrimitives;
     use std::str::FromStr;
 
     #[test]
@@ -634,5 +643,17 @@ mod tests {
             assert_eq!(table.to_string(), table.name());
             assert_eq!(Tables::from_str(table.name()).unwrap(), *table);
         }
+    }
+
+    #[test]
+    fn node_account_table_views_reuse_canonical_tables() {
+        assert_eq!(
+            <PlainAccountStateFor<EthPrimitives> as Table>::NAME,
+            <PlainAccountState as Table>::NAME
+        );
+        assert_eq!(
+            <HashedAccountsFor<EthPrimitives> as Table>::NAME,
+            <HashedAccounts as Table>::NAME
+        );
     }
 }

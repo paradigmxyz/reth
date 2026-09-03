@@ -928,6 +928,7 @@ where
         + BlockNumReader
         + StorageSettingsCache,
 {
+    type AccountExtension = reth_primitives_traits::EmptyAccountExtension;
     type AccountCursor<'a>
         = <HashedPostStateCursorFactory<
         DatabaseHashedCursorFactory<&'a <Provider::Target as DbTxProvider>::Tx>,

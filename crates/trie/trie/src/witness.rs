@@ -105,7 +105,10 @@ where
     /// # Arguments
     ///
     /// `state` - state transition containing both modified and touched accounts and storage slots.
-    pub fn compute(mut self, state: HashedPostState) -> Result<B256Map<Bytes>, TrieWitnessError> {
+    pub fn compute(
+        mut self,
+        state: HashedPostState<H::AccountExtension>,
+    ) -> Result<B256Map<Bytes>, TrieWitnessError> {
         let is_state_empty = state.is_empty();
         if is_state_empty && !self.always_include_root_node {
             return Ok(Default::default())
@@ -236,6 +239,7 @@ where
                 .accounts
                 .get(&hashed_address)
                 .ok_or(TrieWitnessError::MissingAccount(hashed_address))?
+                .clone()
                 .unwrap_or_default();
 
             let storage_root =
@@ -367,7 +371,7 @@ where
 
     /// Retrieve proof targets for incoming hashed state.
     /// Aggregates all accounts and slots present in the state.
-    fn get_proof_targets(state: &HashedPostState) -> MultiProofTargetsV2 {
+    fn get_proof_targets(state: &HashedPostState<H::AccountExtension>) -> MultiProofTargetsV2 {
         let mut targets = MultiProofTargetsV2::default();
         for &hashed_address in state.accounts.keys() {
             targets.account_targets.push(ProofV2Target::new(hashed_address));

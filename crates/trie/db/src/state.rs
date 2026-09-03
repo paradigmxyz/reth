@@ -5,6 +5,7 @@ use reth_db_api::{
     transaction::DbTx,
 };
 use reth_execution_errors::StateRootError;
+use reth_primitives_traits::{AccountExtension, EmptyAccountExtension};
 use reth_storage_api::{ChangeSetReader, DBProvider, StorageChangeSetReader, StorageSettingsCache};
 use reth_storage_errors::provider::ProviderError;
 use reth_trie::{
@@ -19,7 +20,10 @@ use std::{
 use tracing::{debug, instrument};
 
 /// Extends [`StateRoot`] with operations specific for working with a database transaction.
-pub trait DatabaseStateRoot<'a, TX>: Sized {
+pub trait DatabaseStateRoot<'a, TX, E = EmptyAccountExtension>: Sized
+where
+    E: AccountExtension,
+{
     /// Create a new [`StateRoot`] instance.
     fn from_tx(tx: &'a TX) -> Self;
 
@@ -79,7 +83,7 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
                  + StorageSettingsCache
                  + DBProvider<Tx = TX>),
         range: RangeInclusive<BlockNumber>,
-    ) -> Result<StateRootProgress, StateRootError>;
+    ) -> Result<StateRootProgress<E>, StateRootError>;
 
     /// Calculate the state root for this [`HashedPostStateSorted`].
     /// Internally, this method retrieves prefixsets and uses them
@@ -116,25 +120,30 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     /// # Returns
     ///
     /// The state root for this [`HashedPostStateSorted`].
-    fn overlay_root(tx: &'a TX, post_state: &HashedPostStateSorted)
-        -> Result<B256, StateRootError>;
+    fn overlay_root(
+        tx: &'a TX,
+        post_state: &HashedPostStateSorted<E>,
+    ) -> Result<B256, StateRootError>;
 
     /// Calculates the state root for this [`HashedPostStateSorted`] and returns it alongside trie
     /// updates. See [`Self::overlay_root`] for more info.
     fn overlay_root_with_updates(
         tx: &'a TX,
-        post_state: &HashedPostStateSorted,
+        post_state: &HashedPostStateSorted<E>,
     ) -> Result<(B256, TrieUpdates), StateRootError>;
 
     /// Calculates the state root for provided [`HashedPostStateSorted`] using cached intermediate
     /// nodes.
-    fn overlay_root_from_nodes(tx: &'a TX, input: TrieInputSorted) -> Result<B256, StateRootError>;
+    fn overlay_root_from_nodes(
+        tx: &'a TX,
+        input: TrieInputSorted<E>,
+    ) -> Result<B256, StateRootError>;
 
     /// Calculates the state root and trie updates for provided [`HashedPostStateSorted`] using
     /// cached intermediate nodes.
     fn overlay_root_from_nodes_with_updates(
         tx: &'a TX,
-        input: TrieInputSorted,
+        input: TrieInputSorted<E>,
     ) -> Result<(B256, TrieUpdates), StateRootError>;
 }
 
@@ -149,8 +158,8 @@ pub trait DatabaseHashedPostState: Sized {
     ) -> Result<HashedPostStateSorted, ProviderError>;
 }
 
-impl<'a, TX: DbTx, A: crate::TrieTableAdapter> DatabaseStateRoot<'a, TX>
-    for StateRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>
+impl<'a, TX: DbTx, A: crate::TrieTableAdapter, E: AccountExtension> DatabaseStateRoot<'a, TX, E>
+    for StateRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX, E>>
 {
     fn from_tx(tx: &'a TX) -> Self {
         Self::new(DatabaseTrieCursorFactory::new(tx), DatabaseHashedCursorFactory::new(tx))
@@ -196,14 +205,14 @@ impl<'a, TX: DbTx, A: crate::TrieTableAdapter> DatabaseStateRoot<'a, TX>
                  + StorageSettingsCache
                  + DBProvider<Tx = TX>),
         range: RangeInclusive<BlockNumber>,
-    ) -> Result<StateRootProgress, StateRootError> {
+    ) -> Result<StateRootProgress<E>, StateRootError> {
         debug!(target: "trie::loader", ?range, "incremental state root with progress");
         Self::incremental_root_calculator(provider, range)?.root_with_progress()
     }
 
     fn overlay_root(
         tx: &'a TX,
-        post_state: &HashedPostStateSorted,
+        post_state: &HashedPostStateSorted<E>,
     ) -> Result<B256, StateRootError> {
         let prefix_sets = post_state.construct_prefix_sets().freeze();
         StateRoot::new(
@@ -216,7 +225,7 @@ impl<'a, TX: DbTx, A: crate::TrieTableAdapter> DatabaseStateRoot<'a, TX>
 
     fn overlay_root_with_updates(
         tx: &'a TX,
-        post_state: &HashedPostStateSorted,
+        post_state: &HashedPostStateSorted<E>,
     ) -> Result<(B256, TrieUpdates), StateRootError> {
         let prefix_sets = post_state.construct_prefix_sets().freeze();
         StateRoot::new(
@@ -227,7 +236,10 @@ impl<'a, TX: DbTx, A: crate::TrieTableAdapter> DatabaseStateRoot<'a, TX>
         .root_with_updates()
     }
 
-    fn overlay_root_from_nodes(tx: &'a TX, input: TrieInputSorted) -> Result<B256, StateRootError> {
+    fn overlay_root_from_nodes(
+        tx: &'a TX,
+        input: TrieInputSorted<E>,
+    ) -> Result<B256, StateRootError> {
         StateRoot::new(
             InMemoryTrieCursorFactory::new(
                 DatabaseTrieCursorFactory::<_, A>::new(tx),
@@ -244,7 +256,7 @@ impl<'a, TX: DbTx, A: crate::TrieTableAdapter> DatabaseStateRoot<'a, TX>
 
     fn overlay_root_from_nodes_with_updates(
         tx: &'a TX,
-        input: TrieInputSorted,
+        input: TrieInputSorted<E>,
     ) -> Result<(B256, TrieUpdates), StateRootError> {
         StateRoot::new(
             InMemoryTrieCursorFactory::new(

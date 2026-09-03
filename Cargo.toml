@@ -695,3 +695,13 @@ vergen-git2 = "10.0.1"
 
 # networking
 ipnet = "2.11"
+
+[patch.crates-io]
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "67b45175" }
+alloy-trie = { git = "https://github.com/alloy-rs/trie", rev = "b7185a1" }
+reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "ca36e6f" }
+reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "ca36e6f" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "ca36e6f" }
+revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "0df358cfe2ae5bada5d7edfbbb47d38815790930" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "0df358cfe2ae5bada5d7edfbbb47d38815790930" }
+revm-state = { git = "https://github.com/bluealloy/revm", rev = "0df358cfe2ae5bada5d7edfbbb47d38815790930" }

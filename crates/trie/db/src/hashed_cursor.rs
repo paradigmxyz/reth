@@ -5,23 +5,25 @@ use reth_db_api::{
     transaction::DbTx,
     DatabaseError,
 };
-use reth_primitives_traits::Account;
+use reth_primitives_traits::{Account, AccountExtension, EmptyAccountExtension};
 use reth_trie::hashed_cursor::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
+use std::marker::PhantomData;
 
 /// A struct wrapping database transaction that implements [`HashedCursorFactory`].
 #[derive(Debug, Clone)]
-pub struct DatabaseHashedCursorFactory<T>(T);
+pub struct DatabaseHashedCursorFactory<T, E = EmptyAccountExtension>(T, PhantomData<E>);
 
-impl<T> DatabaseHashedCursorFactory<T> {
+impl<T, E> DatabaseHashedCursorFactory<T, E> {
     /// Create new database hashed cursor factory.
     pub const fn new(tx: T) -> Self {
-        Self(tx)
+        Self(tx, PhantomData)
     }
 }
 
-impl<TX: DbTx> HashedCursorFactory for DatabaseHashedCursorFactory<&TX> {
+impl<TX: DbTx, E: AccountExtension> HashedCursorFactory for DatabaseHashedCursorFactory<&TX, E> {
+    type AccountExtension = E;
     type AccountCursor<'a>
-        = DatabaseHashedAccountCursor<<TX as DbTx>::Cursor<tables::HashedAccounts>>
+        = DatabaseHashedAccountCursor<<TX as DbTx>::Cursor<tables::HashedAccounts<E>>, E>
     where
         Self: 'a;
     type StorageCursor<'a>
@@ -30,7 +32,10 @@ impl<TX: DbTx> HashedCursorFactory for DatabaseHashedCursorFactory<&TX> {
         Self: 'a;
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
-        Ok(DatabaseHashedAccountCursor(self.0.cursor_read::<tables::HashedAccounts>()?))
+        Ok(DatabaseHashedAccountCursor(
+            self.0.cursor_read::<tables::HashedAccounts<E>>()?,
+            PhantomData,
+        ))
     }
 
     fn hashed_storage_cursor(
@@ -47,20 +52,21 @@ impl<TX: DbTx> HashedCursorFactory for DatabaseHashedCursorFactory<&TX> {
 /// A struct wrapping database cursor over hashed accounts implementing [`HashedCursor`] for
 /// iterating over accounts.
 #[derive(Debug)]
-pub struct DatabaseHashedAccountCursor<C>(C);
+pub struct DatabaseHashedAccountCursor<C, E = EmptyAccountExtension>(C, PhantomData<E>);
 
-impl<C> DatabaseHashedAccountCursor<C> {
+impl<C, E> DatabaseHashedAccountCursor<C, E> {
     /// Create new database hashed account cursor.
     pub const fn new(cursor: C) -> Self {
-        Self(cursor)
+        Self(cursor, PhantomData)
     }
 }
 
-impl<C> HashedCursor for DatabaseHashedAccountCursor<C>
+impl<C, E> HashedCursor for DatabaseHashedAccountCursor<C, E>
 where
-    C: DbCursorRO<tables::HashedAccounts>,
+    E: AccountExtension,
+    C: DbCursorRO<tables::HashedAccounts<E>>,
 {
-    type Value = Account;
+    type Value = Account<E>;
 
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         self.0.seek(key)

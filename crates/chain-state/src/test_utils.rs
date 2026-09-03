@@ -16,8 +16,8 @@ use reth_ethereum_primitives::{
 use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome};
 use reth_primitives_traits::{
     proofs::{calculate_receipt_root, calculate_transaction_root, calculate_withdrawals_root},
-    Account, NodePrimitives, Recovered, RecoveredBlock, SealedBlock, SealedHeader,
-    SignedTransaction,
+    Account, EmptyAccountExtension, NodePrimitives, Recovered, RecoveredBlock, SealedBlock,
+    SealedHeader, SignedTransaction,
 };
 use reth_storage_api::NodePrimitivesProvider;
 use reth_trie::{root::state_root_unhashed, ComputedTrieData, SortedTrieData};
@@ -167,7 +167,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             beneficiary: Address::random(),
             state_root: state_root_unhashed([(
                 self.signer,
-                Account {
+                Account::<EmptyAccountExtension> {
                     balance: initial_signer_balance - signer_balance_decrease,
                     nonce: num_txs,
                     ..Default::default()
