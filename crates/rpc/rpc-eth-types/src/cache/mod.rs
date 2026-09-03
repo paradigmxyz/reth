@@ -429,7 +429,7 @@ where
         self.bal_cache.shrink_to(min_capacity);
     }
 
-    fn update_cached_metrics(&self) {
+    fn update_cached_metrics(&mut self) {
         self.full_block_cache.update_cached_metrics();
         self.receipts_cache.update_cached_metrics();
         self.bal_cache.update_cached_metrics();
@@ -449,7 +449,8 @@ where
             let Poll::Ready(action) = this.action_rx.poll_next_unpin(cx) else {
                 // shrink queues if we don't have any work to do
                 this.shrink_queues();
-                // gauges only need to be accurate once the batch of messages is drained
+                // gauges only need to be accurate once the batch of messages is drained, and only
+                // caches that changed during the batch republish theirs
                 this.update_cached_metrics();
                 return Poll::Pending;
             };
