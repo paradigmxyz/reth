@@ -231,21 +231,10 @@ where
         // the last time changes were polled, in other words the best block at last poll + 1
         let (start_block, kind) = {
             let mut filters = self.inner.active_filters.inner.lock().await;
-            let filter = filters.get_mut(&id).ok_or(EthFilterError::FilterNotFound(id))?;
-
-            if filter.block > best_number {
-                // no new blocks since the last poll
-                return Ok(FilterChanges::Empty)
-            }
-
-            // update filter
-            // we fetch all changes from [filter.block..best_block], so we advance the filter's
-            // block to `best_block +1`, the next from which we should start fetching changes again
-            let mut block = best_number + 1;
-            std::mem::swap(&mut filter.block, &mut block);
+            let filter =
+                filters.get_mut(&id).ok_or_else(|| EthFilterError::FilterNotFound(id.clone()))?;
             filter.last_poll_timestamp = Instant::now();
-
-            (block, filter.kind.clone())
+            (filter.block, filter.kind.clone())
         };
 
         match kind {
@@ -258,6 +247,10 @@ where
                 FilterChanges::Logs(_) => unreachable!("pending transaction filter returned logs"),
             }),
             FilterKind::Block => {
+                if start_block > best_number {
+                    // no new blocks since the last poll
+                    return Ok(FilterChanges::Empty)
+                }
                 // Note: we need to fetch the block hashes from inclusive range
                 // [start_block..best_block]
                 let end_block = best_number + 1;
@@ -265,44 +258,94 @@ where
                     self.provider().canonical_hashes_range(start_block, end_block).map_err(
                         |_| EthApiError::HeaderRangeNotFound(start_block.into(), end_block.into()),
                     )?;
+                self.advance_filter_cursor(&id, end_block).await;
                 Ok(FilterChanges::Hashes(block_hashes))
             }
             FilterKind::Log(filter) => {
+                if start_block > best_number {
+                    // no new blocks since the last poll
+                    return Ok(FilterChanges::Empty)
+                }
                 let (from_block_number, to_block_number) = match filter.block_option {
                     FilterBlockOption::Range { from_block, to_block } => {
+                        // `latest` and `pending` don't bound a poll, it covers the blocks since
+                        // the last poll
                         let from = from_block
+                            .filter(|num| !num.is_latest() && !num.is_pending())
                             .map(|num| self.provider().convert_block_number(num))
                             .transpose()?
                             .flatten();
                         let to = to_block
+                            .filter(|num| !num.is_latest() && !num.is_pending())
                             .map(|num| self.provider().convert_block_number(num))
                             .transpose()?
                             .flatten();
-                        logs_utils::get_filter_block_range(from, to, start_block, info)?
+                        // only the blocks since the last poll, clamped to the filter's own range
+                        (
+                            from.map_or(start_block, |from| from.max(start_block)),
+                            to.map_or(best_number, |to| to.min(best_number)),
+                        )
                     }
                     FilterBlockOption::AtBlockHash(block_hash) => {
                         // blockHash is equivalent to fromBlock = toBlock = the block number with
-                        // hash blockHash
-                        // get_logs_in_block_range is inclusive
+                        // hash blockHash, which only the first poll covering that block delivers
                         let block_number = self
                             .provider()
                             .block_number(block_hash)?
                             .ok_or(ProviderError::HeaderNotFound(block_hash.into()))?;
-                        (block_number, block_number)
+                        (block_number.max(start_block), block_number.min(best_number))
                     }
                 };
-                let logs = self
+                if from_block_number > to_block_number {
+                    // the filter's range contains no block since the last poll
+                    return Ok(FilterChanges::Empty)
+                }
+
+                let limits = self.inner.query_limits;
+                // a poll delivers at most the configured block cap, the next poll continues from
+                // there
+                let to_block_number = limits.max_blocks_per_filter.map_or(to_block_number, |max| {
+                    to_block_number.min(from_block_number.saturating_add(max))
+                });
+                let (logs, delivered_to) = match self
                     .inner
                     .clone()
                     .get_logs_in_block_range(
-                        *filter,
+                        *filter.clone(),
                         from_block_number,
                         to_block_number,
-                        self.inner.query_limits,
+                        limits,
                     )
-                    .await?;
+                    .await
+                {
+                    Ok(logs) => (logs, to_block_number),
+                    Err(EthFilterError::QueryExceedsMaxResults { to_block, .. }) => {
+                        // deliver the prefix of blocks that fits under the log cap, the next poll
+                        // continues from there
+                        let logs = self
+                            .inner
+                            .clone()
+                            .get_logs_in_block_range(*filter, from_block_number, to_block, limits)
+                            .await?;
+                        (logs, to_block)
+                    }
+                    Err(err) => return Err(err),
+                };
+                self.advance_filter_cursor(&id, delivered_to + 1).await;
                 Ok(FilterChanges::Logs(logs))
             }
+        }
+    }
+
+    /// Moves the cursor of the filter with the given id to `next`, the first block a subsequent
+    /// poll returns changes for.
+    ///
+    /// This runs after the changes were fetched so that a failed poll is retried by the next one,
+    /// and never moves the cursor backwards in case a concurrent poll already advanced it further.
+    async fn advance_filter_cursor(&self, id: &FilterId, next: u64) {
+        let mut filters = self.inner.active_filters.inner.lock().await;
+        if let Some(filter) = filters.get_mut(id) {
+            filter.block = filter.block.max(next);
         }
     }
 
@@ -1425,6 +1468,80 @@ mod tests {
         .build()
     }
 
+    /// Adds one block per number in `blocks`, each with a single legacy transaction whose receipt
+    /// emits one log, so that a `Filter::default()` matches exactly one log per block.
+    fn add_blocks_with_log(provider: &MockEthProvider, blocks: RangeInclusive<u64>) {
+        use alloy_consensus::TxLegacy;
+        use alloy_primitives::{Address, Bloom, Bytes, Log, LogData, Signature};
+        use reth_db_api::models::StoredBlockBodyIndices;
+        use reth_ethereum_primitives::{Block, BlockBody, Receipt, TransactionSigned};
+
+        let tx = TransactionSigned::new_unhashed(
+            TxLegacy {
+                chain_id: Some(1),
+                gas_price: 21_000,
+                gas_limit: 21_000,
+                ..Default::default()
+            }
+            .into(),
+            Signature::test_signature(),
+        );
+        let receipt = Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 21_000,
+            logs: vec![Log {
+                address: Address::ZERO,
+                data: LogData::new_unchecked(vec![], Bytes::new()),
+            }],
+            success: true,
+        };
+
+        let mut parent_hash = blocks
+            .start()
+            .checked_sub(1)
+            .and_then(|parent| provider.header_by_number(parent).unwrap())
+            .map(|parent| parent.hash_slow())
+            .unwrap_or_default();
+        for number in blocks {
+            let header = alloy_consensus::Header {
+                number,
+                parent_hash,
+                logs_bloom: Bloom::from([1u8; 256]),
+                ..Default::default()
+            };
+            parent_hash = header.hash_slow();
+            let block = Block {
+                header,
+                body: BlockBody { transactions: vec![tx.clone()], ..Default::default() },
+            };
+            provider.add_block(parent_hash, block);
+            provider.add_receipts(number, vec![receipt.clone()]);
+            provider.add_block_body_indices(
+                number,
+                StoredBlockBodyIndices { first_tx_num: number, tx_count: 1 },
+            );
+        }
+    }
+
+    /// Polls the filter and returns the block numbers of the delivered logs.
+    async fn poll_log_blocks<Eth>(eth_filter: &EthFilter<Eth>, id: &FilterId) -> Vec<u64>
+    where
+        Eth: FullEthApiTypes<Provider: BlockReader + BlockIdReader>
+            + RpcNodeCoreExt
+            + LoadReceipt
+            + EthBlocks
+            + 'static,
+        RpcLog<Eth::NetworkTypes>: Into<alloy_rpc_types_eth::Log>,
+    {
+        match eth_filter.filter_changes(id.clone()).await.unwrap() {
+            FilterChanges::Logs(logs) => {
+                logs.into_iter().map(|log| log.into().block_number.unwrap()).collect()
+            }
+            FilterChanges::Empty => Vec::new(),
+            changes => panic!("unexpected changes: {changes:?}"),
+        }
+    }
+
     #[tokio::test]
     async fn test_logs_for_filter_from_block_beyond_head() {
         let provider = MockEthProvider::default();
@@ -2039,5 +2156,116 @@ mod tests {
         // Each block hash should be the hash of its own header, not derived from any other header
         assert_eq!(logs[0].block_hash, Some(expected_hashes[0])); // block 100
         assert_eq!(logs[1].block_hash, Some(expected_hashes[2])); // block 102
+    }
+
+    #[tokio::test]
+    async fn test_filter_changes_only_delivers_new_logs() {
+        let provider = MockEthProvider::default();
+        add_blocks_with_log(&provider, 0..=3);
+        let eth_filter = EthFilter::new(
+            build_test_eth_api(provider.clone()),
+            EthFilterConfig::default(),
+            Runtime::test(),
+        );
+
+        // an explicit `fromBlock` bounds the filter but must not be rescanned on every poll
+        let id = eth_filter.new_filter(Filter::new().from_block(0u64)).await.unwrap();
+
+        assert_eq!(poll_log_blocks(&eth_filter, &id).await, vec![3]);
+        assert_eq!(poll_log_blocks(&eth_filter, &id).await, Vec::<u64>::new());
+
+        add_blocks_with_log(&provider, 4..=5);
+        assert_eq!(poll_log_blocks(&eth_filter, &id).await, vec![4, 5]);
+        assert_eq!(poll_log_blocks(&eth_filter, &id).await, Vec::<u64>::new());
+
+        // `eth_getFilterLogs` still returns the filter's entire range
+        assert_eq!(eth_filter.filter_logs(id).await.unwrap().len(), 6);
+    }
+
+    #[tokio::test]
+    async fn test_filter_changes_clamps_future_to_block() {
+        let provider = MockEthProvider::default();
+        add_blocks_with_log(&provider, 0..=3);
+        let eth_filter = EthFilter::new(
+            build_test_eth_api(provider.clone()),
+            EthFilterConfig::default(),
+            Runtime::test(),
+        );
+
+        // a `toBlock` beyond the head bounds future polls instead of failing them
+        let id = eth_filter.new_filter(Filter::new().to_block(100u64)).await.unwrap();
+        assert_eq!(poll_log_blocks(&eth_filter, &id).await, vec![3]);
+
+        add_blocks_with_log(&provider, 4..=5);
+        assert_eq!(poll_log_blocks(&eth_filter, &id).await, vec![4, 5]);
+    }
+
+    #[tokio::test]
+    async fn test_filter_changes_latest_tag_covers_all_new_blocks() {
+        let provider = MockEthProvider::default();
+        add_blocks_with_log(&provider, 0..=3);
+        let eth_filter = EthFilter::new(
+            build_test_eth_api(provider.clone()),
+            EthFilterConfig::default(),
+            Runtime::test(),
+        );
+
+        // `fromBlock: latest` means from the installation onwards, not only the head at poll time
+        let id =
+            eth_filter.new_filter(Filter::new().select(BlockNumberOrTag::Latest..)).await.unwrap();
+        add_blocks_with_log(&provider, 4..=5);
+        assert_eq!(poll_log_blocks(&eth_filter, &id).await, vec![3, 4, 5]);
+    }
+
+    #[tokio::test]
+    async fn test_filter_changes_pages_over_log_limit() {
+        let provider = MockEthProvider::default();
+        add_blocks_with_log(&provider, 0..=0);
+        let eth_filter = EthFilter::new(
+            build_test_eth_api(provider.clone()),
+            EthFilterConfig::default().max_logs_per_response(1),
+            Runtime::test(),
+        );
+        let id = eth_filter.new_filter(Filter::default()).await.unwrap();
+        assert_eq!(poll_log_blocks(&eth_filter, &id).await, vec![0]);
+
+        // three blocks with one log each exceed the cap, so each poll delivers the prefix that
+        // fits and the next poll continues from there without losing or repeating a block
+        add_blocks_with_log(&provider, 1..=3);
+        assert_eq!(poll_log_blocks(&eth_filter, &id).await, vec![1]);
+        assert_eq!(poll_log_blocks(&eth_filter, &id).await, vec![2]);
+        assert_eq!(poll_log_blocks(&eth_filter, &id).await, vec![3]);
+        assert_eq!(poll_log_blocks(&eth_filter, &id).await, Vec::<u64>::new());
+    }
+
+    #[tokio::test]
+    async fn test_pending_transaction_filter_changes_without_new_blocks() {
+        use reth_transaction_pool::{
+            test_utils::MockTransaction, TransactionOrigin, TransactionPool,
+        };
+
+        let provider = MockEthProvider::default();
+        add_blocks_with_log(&provider, 0..=0);
+        let eth_filter = EthFilter::new(
+            build_test_eth_api(provider),
+            EthFilterConfig::default(),
+            Runtime::test(),
+        );
+        let id = eth_filter.new_pending_transaction_filter(None).await.unwrap();
+        assert!(matches!(
+            eth_filter.filter_changes(id.clone()).await.unwrap(),
+            FilterChanges::Hashes(hashes) if hashes.is_empty()
+        ));
+
+        // a pending transaction filter is independent of block production
+        let outcome = eth_filter
+            .pool()
+            .add_transaction(TransactionOrigin::External, MockTransaction::eip1559())
+            .await
+            .unwrap();
+        assert!(matches!(
+            eth_filter.filter_changes(id).await.unwrap(),
+            FilterChanges::Hashes(hashes) if hashes == vec![outcome.hash]
+        ));
     }
 }
