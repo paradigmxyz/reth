@@ -12,7 +12,8 @@ pub struct NippyJarCursor<'a, H = ()> {
     jar: &'a NippyJar<H>,
     /// Data and offset reader.
     reader: Arc<DataReader>,
-    /// Internal buffer to unload data to without reallocating memory on each retrieval.
+    /// Internal buffer to unload data to without reallocating memory on each retrieval. Only
+    /// compressed jars decompress into it, so it is sized on first use.
     internal_buffer: Vec<u8>,
     /// Cursor row position.
     row: u64,
@@ -27,30 +28,21 @@ impl<H: NippyJarHeader> std::fmt::Debug for NippyJarCursor<'_, H> {
 impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
     /// Creates a new instance of [`NippyJarCursor`] for the given [`NippyJar`].
     pub fn new(jar: &'a NippyJar<H>) -> Result<Self, NippyJarError> {
-        let max_row_size = jar.max_row_size;
         Ok(Self {
             jar,
             reader: Arc::new(jar.open_data_reader()?),
-            // Makes sure that we have enough buffer capacity to decompress any row of data.
-            internal_buffer: Vec::with_capacity(max_row_size),
+            internal_buffer: Vec::new(),
             row: 0,
         })
     }
 
     /// Creates a new instance of [`NippyJarCursor`] with the specified [`NippyJar`] and data
     /// reader.
-    pub fn with_reader(
+    pub const fn with_reader(
         jar: &'a NippyJar<H>,
         reader: Arc<DataReader>,
     ) -> Result<Self, NippyJarError> {
-        let max_row_size = jar.max_row_size;
-        Ok(Self {
-            jar,
-            reader,
-            // Makes sure that we have enough buffer capacity to decompress any row of data.
-            internal_buffer: Vec::with_capacity(max_row_size),
-            row: 0,
-        })
+        Ok(Self { jar, reader, internal_buffer: Vec::new(), row: 0 })
     }
 
     /// Returns a reference to the related [`NippyJar`]
@@ -162,6 +154,12 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
         };
 
         if let Some(compression) = self.jar.compressor() {
+            // The decompressors write into the spare capacity of the buffer, so it has to fit any
+            // row of data. The buffer is only cleared between rows, so this reserves once.
+            if self.internal_buffer.capacity() < self.jar.max_row_size {
+                self.internal_buffer.reserve(self.jar.max_row_size - self.internal_buffer.len());
+            }
+
             let from = self.internal_buffer.len();
             match compression {
                 Compressors::Zstd(z) if z.use_dict => {
