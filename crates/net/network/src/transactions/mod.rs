@@ -328,6 +328,10 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     /// This way we can track incoming transactions and prevent multiple pool imports for the same
     /// transaction
     transactions_by_peers: B256Map<SmallVec<[PeerId; 1]>>,
+    /// Blobless EIP-4844 bodies from eth/72 `PooledTransactions` responses.
+    ///
+    /// Held pending cell delivery and evicted on TTL expiry.
+    buffered_blob_txs: B256Map<BufferedBlobBody<N::PooledTransaction>>,
     /// Transactions that are currently imported into the `Pool`.
     ///
     /// The import process includes:
@@ -435,6 +439,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             network_events,
             transaction_fetcher,
             transactions_by_peers: Default::default(),
+            buffered_blob_txs: Default::default(),
             pool_imports: Default::default(),
             pending_pool_imports_info,
             bad_imports: LruCache::with_hasher(DEFAULT_MAX_COUNT_BAD_IMPORTS, Default::default()),
@@ -545,9 +550,9 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             // The transaction may be valid — only the sidecar from this peer was wrong.
             // Using regular penalties means repeated offenders still get disconnected.
             //
-            // Eth/72 peers cannot reach this path with an elided sidecar: their blob
-            // transactions are dropped before import in `import_transactions`, so any sidecar
-            // failure here means actual blob data failed validation.
+            // Eth/72 peers cannot reach this path with an elided sidecar: those bodies are
+            // buffered in `import_transactions` and never imported, so any sidecar failure
+            // here means actual blob data failed validation.
             if let Some(peers) = peers {
                 for peer_id in peers {
                     self.report_peer_bad_transactions(peer_id);
@@ -706,8 +711,11 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
         }
 
-        // 2. filter out transactions pending import to pool
-        partially_valid_msg.retain_by_hash(|hash| !self.transactions_by_peers.contains_key(hash));
+        // 2. filter out transactions pending import to pool or already buffered from eth/72
+        partially_valid_msg.retain_by_hash(|hash| {
+            !self.transactions_by_peers.contains_key(hash) &&
+                !self.buffered_blob_txs.contains_key(hash)
+        });
 
         // 3. filter out invalid entries (spam)
         //
@@ -1457,20 +1465,39 @@ where
             }
         }
 
-        // Eth/72 `PooledTransactions` responses elide blob payloads from type 3 transactions per
-        // EIP-8070, so their sidecars can never validate. Drop them before touching the pool;
-        // geth equivalently diverts these bodies into a buffer that is completed with cells
-        // fetched via `GetCells`, which is not implemented yet.
+        // Eth/72 `PooledTransactions` responses elide blob payloads from type-3 transactions.
+        // Buffer those bodies instead of importing them; they cannot validate without cells.
         if peer.version() == EthVersion::Eth72 {
-            let len_before = transactions.len();
-            transactions.retain(|tx| !tx.is_eip4844());
-            let dropped = len_before - transactions.len();
-            if dropped > 0 {
-                trace!(target: "net::tx",
-                    peer_id=format!("{peer_id:#}"),
-                    dropped,
-                    "dropped blob transactions from eth72 response, cell fetching not implemented"
-                );
+            let (blob_txs, rest): (Vec<_>, Vec<_>) =
+                transactions.into_iter().partition(|tx| tx.is_eip4844());
+            transactions = rest;
+
+            if !blob_txs.is_empty() {
+                let now = Instant::now();
+                let mut buffered = 0usize;
+                for tx in blob_txs {
+                    let hash = *tx.tx_hash();
+                    if self.buffered_blob_txs.len() >= DEFAULT_MAX_COUNT_BUFFERED_BLOB_TXS {
+                        break;
+                    }
+                    if self.buffered_blob_txs.contains_key(&hash) ||
+                        self.transactions_by_peers.contains_key(&hash)
+                    {
+                        continue;
+                    }
+                    self.buffered_blob_txs
+                        .insert(hash, BufferedBlobBody { tx, peer_id, buffered_at: now });
+                    buffered += 1;
+                }
+                if buffered > 0 {
+                    trace!(target: "net::tx",
+                        peer_id = format!("{peer_id:#}"),
+                        buffered,
+                        total_buffered = self.buffered_blob_txs.len(),
+                        "buffered blobless eth/72 bodies pending cell fetch"
+                    );
+                    self.metrics.buffered_blob_txs.set(self.buffered_blob_txs.len() as f64);
+                }
             }
         }
 
@@ -1782,6 +1809,18 @@ where
         );
 
         this.transaction_fetcher.update_metrics();
+
+        // Evict expired eth/72 buffered blob bodies.
+        if !this.buffered_blob_txs.is_empty() {
+            let ttl = Duration::from_secs(BLOB_BUFFER_TTL_SECS);
+            let before = this.buffered_blob_txs.len();
+            this.buffered_blob_txs.retain(|_, entry| entry.buffered_at.elapsed() < ttl);
+            let evicted = before - this.buffered_blob_txs.len();
+            if evicted > 0 {
+                this.metrics.buffered_blob_txs_evicted.increment(evicted as u64);
+                this.metrics.buffered_blob_txs.set(this.buffered_blob_txs.len() as f64);
+            }
+        }
 
         // all channels are fully drained and import futures pending
         if maybe_more_network_events ||
@@ -2220,6 +2259,18 @@ impl TransactionSource {
     const fn is_broadcast(&self) -> bool {
         matches!(self, Self::Broadcast)
     }
+}
+
+/// A blobless EIP-4844 transaction body received from an eth/72 peer.
+#[derive(Debug)]
+#[allow(dead_code)]
+struct BufferedBlobBody<T> {
+    /// Pooled transaction with blob payloads elided.
+    tx: T,
+    /// Peer that delivered this body.
+    peer_id: PeerId,
+    /// Insertion time, used for TTL eviction.
+    buffered_at: Instant,
 }
 
 /// Tracks a single peer in the context of [`TransactionsManager`].
@@ -3592,5 +3643,155 @@ mod tests {
         );
 
         network_service_handle.abort();
+    }
+
+    /// Signed EIP-4844 pooled transaction in the eth/72 shape: sidecar keeps commitments, blob
+    /// payloads are elided.
+    fn blob_tx_without_blobs() -> PooledTransactionVariant {
+        use alloy_consensus::{transaction::TxEip4844WithSidecar, SignableTransaction, TxEip4844};
+        use alloy_eips::eip7594::{BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant};
+        use alloy_primitives::Address;
+        use reth_primitives_traits::crypto::secp256k1::sign_message;
+
+        let mut versioned_hash = B256::random();
+        versioned_hash.0[0] = 0x01;
+
+        let tx = TxEip4844 {
+            chain_id: 1,
+            nonce: 0,
+            gas_limit: 100_000,
+            max_fee_per_gas: 20_000_000_000,
+            max_priority_fee_per_gas: 1_000_000_000,
+            to: Address::random(),
+            value: U256::ZERO,
+            access_list: Default::default(),
+            blob_versioned_hashes: vec![versioned_hash],
+            max_fee_per_blob_gas: 20_000_000_000,
+            input: Default::default(),
+        };
+
+        let signature = sign_message(B256::random(), tx.signature_hash()).unwrap();
+        let sidecar = BlobTransactionSidecarVariant::Eip7594(BlobTransactionSidecarEip7594 {
+            blobs: vec![],
+            commitments: vec![Default::default()],
+            cell_proofs: vec![],
+        });
+
+        PooledTransactionVariant::Eip4844(
+            TxEip4844WithSidecar::from_tx_and_sidecar(tx, sidecar).into_signed(signature),
+        )
+    }
+
+    #[tokio::test]
+    async fn test_eth72_blob_body_buffered_not_dropped() {
+        let (mut tx_manager, _network) = new_tx_manager().await;
+
+        let peer_id = PeerId::random();
+        let (peer, _rx) = new_mock_session(peer_id, EthVersion::Eth72);
+        tx_manager.peers.insert(peer_id, peer);
+
+        let blob_tx = blob_tx_without_blobs();
+        let blob_hash = *blob_tx.tx_hash();
+
+        let eip1559_tx: PooledTransactionVariant = {
+            use alloy_consensus::SignableTransaction;
+            use reth_primitives_traits::crypto::secp256k1::sign_message;
+
+            let tx = TxEip1559 {
+                chain_id: 1,
+                nonce: 1,
+                gas_limit: 21_000,
+                max_fee_per_gas: 20_000_000_000,
+                max_priority_fee_per_gas: 1_000_000_000,
+                to: TxKind::Call(alloy_primitives::Address::random()),
+                value: U256::ZERO,
+                access_list: Default::default(),
+                input: Default::default(),
+            };
+            let sig = sign_message(B256::random(), tx.signature_hash()).unwrap();
+            PooledTransactionVariant::Eip1559(tx.into_signed(sig))
+        };
+        let eip1559_hash = *eip1559_tx.tx_hash();
+
+        tx_manager.import_transactions(
+            peer_id,
+            PooledTransactions(vec![blob_tx, eip1559_tx]),
+            TransactionSource::Response,
+        );
+
+        assert!(tx_manager.buffered_blob_txs.contains_key(&blob_hash));
+        assert!(!tx_manager.transactions_by_peers.contains_key(&blob_hash));
+        assert!(tx_manager.transactions_by_peers.contains_key(&eip1559_hash));
+        assert!(!tx_manager.buffered_blob_txs.contains_key(&eip1559_hash));
+    }
+
+    #[tokio::test]
+    async fn test_eth72_buffer_capacity_cap() {
+        let (mut tx_manager, _network) = new_tx_manager().await;
+
+        let peer_id = PeerId::random();
+        let (peer, _rx) = new_mock_session(peer_id, EthVersion::Eth72);
+        tx_manager.peers.insert(peer_id, peer);
+
+        let now = Instant::now();
+        let dummy = blob_tx_without_blobs();
+        for _ in 0..DEFAULT_MAX_COUNT_BUFFERED_BLOB_TXS {
+            tx_manager.buffered_blob_txs.insert(
+                B256::random(),
+                BufferedBlobBody { tx: dummy.clone(), peer_id, buffered_at: now },
+            );
+        }
+        assert_eq!(tx_manager.buffered_blob_txs.len(), DEFAULT_MAX_COUNT_BUFFERED_BLOB_TXS);
+
+        let overflow_tx = blob_tx_without_blobs();
+        let overflow_hash = *overflow_tx.tx_hash();
+
+        tx_manager.import_transactions(
+            peer_id,
+            PooledTransactions(vec![overflow_tx]),
+            TransactionSource::Response,
+        );
+
+        assert_eq!(tx_manager.buffered_blob_txs.len(), DEFAULT_MAX_COUNT_BUFFERED_BLOB_TXS);
+        assert!(!tx_manager.buffered_blob_txs.contains_key(&overflow_hash));
+        assert!(!tx_manager.transactions_by_peers.contains_key(&overflow_hash));
+    }
+
+    #[tokio::test]
+    async fn test_eth72_buffer_ttl_eviction() {
+        let (mut tx_manager, _network) = new_tx_manager().await;
+
+        let stale_tx = blob_tx_without_blobs();
+        let stale_hash = *stale_tx.tx_hash();
+        let fresh_tx = blob_tx_without_blobs();
+        let fresh_hash = *fresh_tx.tx_hash();
+
+        tx_manager.buffered_blob_txs.insert(
+            stale_hash,
+            BufferedBlobBody {
+                tx: stale_tx,
+                peer_id: PeerId::random(),
+                buffered_at: Instant::now() - Duration::from_secs(BLOB_BUFFER_TTL_SECS + 10),
+            },
+        );
+        tx_manager.buffered_blob_txs.insert(
+            fresh_hash,
+            BufferedBlobBody {
+                tx: fresh_tx,
+                peer_id: PeerId::random(),
+                buffered_at: Instant::now(),
+            },
+        );
+
+        assert_eq!(tx_manager.buffered_blob_txs.len(), 2);
+
+        poll_fn(|cx| {
+            let _ = tx_manager.poll_unpin(cx);
+            Poll::Ready(())
+        })
+        .await;
+
+        assert!(!tx_manager.buffered_blob_txs.contains_key(&stale_hash));
+        assert!(tx_manager.buffered_blob_txs.contains_key(&fresh_hash));
     }
 }
