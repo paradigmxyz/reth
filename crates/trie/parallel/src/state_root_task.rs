@@ -69,7 +69,7 @@ pub struct StateRootHandle {
     cancel_guard: StateRootTaskCancelGuard,
     /// Receiver for the final state root result.
     state_root_rx:
-        Option<std::sync::mpsc::Receiver<Result<StateRootComputeOutcome, StateRootTaskError>>>,
+        Option<crossbeam_channel::Receiver<Result<StateRootComputeOutcome, StateRootTaskError>>>,
     /// Receiver for the hashed post state.
     hashed_state_rx: Option<std::sync::mpsc::Receiver<Arc<HashedPostState>>>,
 }
@@ -80,7 +80,7 @@ impl StateRootHandle {
         cached_trie_state_root: B256,
         updates_tx: crossbeam_channel::Sender<StateRootMessage>,
         cancel_guard: StateRootTaskCancelGuard,
-        state_root_rx: std::sync::mpsc::Receiver<
+        state_root_rx: crossbeam_channel::Receiver<
             Result<StateRootComputeOutcome, StateRootTaskError>,
         >,
         hashed_state_rx: std::sync::mpsc::Receiver<Arc<HashedPostState>>,
@@ -155,7 +155,7 @@ impl StateRootHandle {
     /// If called more than once.
     pub const fn take_state_root_rx(
         &mut self,
-    ) -> std::sync::mpsc::Receiver<Result<StateRootComputeOutcome, StateRootTaskError>> {
+    ) -> crossbeam_channel::Receiver<Result<StateRootComputeOutcome, StateRootTaskError>> {
         self.state_root_rx.take().expect("state_root already taken")
     }
 
@@ -210,7 +210,7 @@ pub struct PayloadStateRootHandle {
     /// Cancels the backing task when the handle is dropped without consuming the result.
     cancel_guard: Option<StateRootTaskCancelGuard>,
     state_root_rx:
-        Option<std::sync::mpsc::Receiver<Result<StateRootComputeOutcome, StateRootTaskError>>>,
+        Option<crossbeam_channel::Receiver<Result<StateRootComputeOutcome, StateRootTaskError>>>,
     hashed_state_rx: Option<std::sync::mpsc::Receiver<Arc<HashedPostState>>>,
 }
 
@@ -234,7 +234,7 @@ impl PayloadStateRootHandle {
     pub const fn new(
         name: &'static str,
         hook: Option<StateRootUpdateHook>,
-        state_root_rx: std::sync::mpsc::Receiver<
+        state_root_rx: crossbeam_channel::Receiver<
             Result<StateRootComputeOutcome, StateRootTaskError>,
         >,
         hashed_state_rx: Option<std::sync::mpsc::Receiver<Arc<HashedPostState>>>,
@@ -278,7 +278,7 @@ impl PayloadStateRootHandle {
     /// If called more than once.
     pub const fn take_state_root_rx(
         &mut self,
-    ) -> std::sync::mpsc::Receiver<Result<StateRootComputeOutcome, StateRootTaskError>> {
+    ) -> crossbeam_channel::Receiver<Result<StateRootComputeOutcome, StateRootTaskError>> {
         self.state_root_rx.take().expect("state_root already taken")
     }
 
@@ -679,7 +679,7 @@ mod tests {
     fn authoritative_capability_can_only_be_taken_once() {
         let (updates_tx, _updates_rx) = crossbeam_channel::unbounded();
         let (cancel_guard, _cancel_rx) = StateRootTaskCancelGuard::channel();
-        let (_state_root_tx, state_root_rx) = std::sync::mpsc::channel();
+        let (_state_root_tx, state_root_rx) = crossbeam_channel::unbounded();
         let (_hashed_state_tx, hashed_state_rx) = std::sync::mpsc::channel();
         let mut handle = StateRootHandle::new(
             B256::ZERO,
@@ -702,7 +702,7 @@ mod tests {
         let sink = Arc::new(CountingSink::default());
         let hook = StateRootUpdateStream::new(sink.clone()).into_state_hook();
 
-        let (state_root_tx, state_root_rx) = std::sync::mpsc::channel();
+        let (state_root_tx, state_root_rx) = crossbeam_channel::unbounded();
         let (hashed_state_tx, hashed_state_rx) = std::sync::mpsc::channel();
         let mut handle =
             PayloadStateRootHandle::new("test", Some(hook), state_root_rx, Some(hashed_state_rx));
@@ -735,7 +735,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "state_root already taken")]
     fn payload_state_root_receiver_can_only_be_taken_once() {
-        let (_state_root_tx, state_root_rx) = std::sync::mpsc::channel();
+        let (_state_root_tx, state_root_rx) = crossbeam_channel::unbounded();
         let mut handle = PayloadStateRootHandle::new("test", None, state_root_rx, None);
 
         let _state_root_rx = handle.take_state_root_rx();
@@ -746,7 +746,7 @@ mod tests {
     fn payload_state_root_receiver_retains_cancellation() {
         let (updates_tx, _updates_rx) = crossbeam_channel::unbounded();
         let (cancel_guard, cancel_rx) = StateRootTaskCancelGuard::channel();
-        let (_state_root_tx, state_root_rx) = std::sync::mpsc::channel();
+        let (_state_root_tx, state_root_rx) = crossbeam_channel::unbounded();
         let (_hashed_state_tx, hashed_state_rx) = std::sync::mpsc::channel();
         let mut handle = StateRootHandle::new(
             B256::ZERO,
@@ -760,7 +760,7 @@ mod tests {
         let state_root_rx = handle.take_state_root_rx();
         assert!(matches!(
             state_root_rx.recv_timeout(Duration::ZERO),
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+            Err(crossbeam_channel::RecvTimeoutError::Timeout)
         ));
         assert!(matches!(cancel_rx.try_recv(), Err(crossbeam_channel::TryRecvError::Empty)));
 

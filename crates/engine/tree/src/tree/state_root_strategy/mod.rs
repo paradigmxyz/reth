@@ -58,7 +58,9 @@ mod sparse_trie;
 use self::sparse_trie::{SparseTrieCacheTask, SparseTrieTaskMetrics};
 use crate::tree::{metrics::BlockValidationMetrics, EngineApiTreeState, ExecutionEnv, TreeConfig};
 use alloy_primitives::B256;
-use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
+use crossbeam_channel::{
+    Receiver as CrossbeamReceiver, RecvTimeoutError, Sender as CrossbeamSender,
+};
 use reth_chain_state::{ExecutedBlock, PreservedSparseTrie};
 use reth_errors::ProviderResult;
 use reth_evm::{ConfigureEvm, OnStateHook};
@@ -90,10 +92,7 @@ use reth_trie_sparse::{
 };
 use std::{
     fmt,
-    sync::{
-        mpsc::{self, RecvTimeoutError},
-        Arc,
-    },
+    sync::{mpsc, Arc},
     time::Duration,
 };
 use tracing::{debug, debug_span, instrument, warn, Span};
@@ -457,7 +456,8 @@ impl StateRootJobOutcome {
 
 /// Receiver for the raced serial state-root fallback: root, trie updates, and the hashed
 /// post state the fallback recomputed.
-type SerialFallbackRx = mpsc::Receiver<ProviderResult<(B256, TrieUpdates, Arc<HashedPostState>)>>;
+type SerialFallbackRx =
+    CrossbeamReceiver<ProviderResult<(B256, TrieUpdates, Arc<HashedPostState>)>>;
 
 /// Default state-root strategy used by engine-tree validation.
 ///
@@ -523,7 +523,7 @@ impl DefaultStateRootStrategy {
         let proof_handle =
             ProofWorkerHandle::new(executor, task_ctx, halve_workers, proof_result_tx.clone());
 
-        let (state_root_tx, state_root_rx) = mpsc::channel();
+        let (state_root_tx, state_root_rx) = crossbeam_channel::unbounded();
         let (hashed_state_tx, hashed_state_rx) = mpsc::channel();
         let parent_state_root = parent_header.state_root();
 
@@ -567,7 +567,7 @@ impl DefaultStateRootStrategy {
         proof_worker_handle: ProofWorkerHandle,
         proof_result_tx: CrossbeamSender<ProofResultMessage>,
         proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
-        state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, StateRootTaskError>>,
+        state_root_tx: CrossbeamSender<Result<StateRootComputeOutcome, StateRootTaskError>>,
         hashed_state_tx: mpsc::Sender<Arc<HashedPostState>>,
         from_multi_proof: CrossbeamReceiver<StateRootMessage>,
         cancel_rx: CrossbeamReceiver<()>,
@@ -1032,7 +1032,7 @@ where
         output: Arc<BlockExecutionOutput<N::Receipt>>,
     ) -> ProviderResult<SerialFallbackRx> {
         let provider = state_provider_factory.database_provider_ro()?;
-        let (fallback_tx, fallback_rx) = mpsc::channel();
+        let (fallback_tx, fallback_rx) = crossbeam_channel::bounded(1);
         executor.spawn_blocking_named("serial-root", move || {
             let result = (|| {
                 let hashed_state = Arc::new(provider.hashed_post_state(&output.state)?);
@@ -1178,37 +1178,36 @@ where
             }
         };
 
-        loop {
-            if let Ok(Ok(outcome)) = task_rx.try_recv() {
-                let outcome = self.sparse_outcome(block, &output, outcome);
-                if outcome.state_root == block.header().state_root() {
-                    return Ok(outcome)
+        let fallback_result = crossbeam_channel::select_biased! {
+            recv(task_rx) -> result => {
+                if let Ok(Ok(outcome)) = result {
+                    let outcome = self.sparse_outcome(block, &output, outcome);
+                    if outcome.state_root == block.header().state_root() {
+                        return Ok(outcome)
+                    }
+                    // A wrong task root falls through to the serial fallback already racing below.
+                    warn!(
+                        target: "engine::tree::state_root_strategy",
+                        state_root = ?outcome.state_root,
+                        block_state_root = ?block.header().state_root(),
+                        "State root task returned incorrect state root, using serial fallback"
+                    );
                 }
-                // A wrong task root falls through to the serial fallback already racing below.
-                warn!(
-                    target: "engine::tree::state_root_strategy",
-                    state_root = ?outcome.state_root,
-                    block_state_root = ?block.header().state_root(),
-                    "State root task returned incorrect state root, using serial fallback"
-                );
+                fallback_rx.recv()
             }
+            recv(fallback_rx) -> result => result,
+        };
 
-            match fallback_rx.try_recv() {
-                Ok(Ok((state_root, trie_updates, hashed_state))) => {
-                    self.metrics.state_root_task_fallback_success_total.increment(1);
-                    return Ok(StateRootJobOutcome::new(state_root, Arc::new(trie_updates))
-                        .with_hashed_state(Some(hashed_state)))
-                }
-                Ok(Err(err)) => return Err(err),
-                Err(mpsc::TryRecvError::Empty) => {}
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    return Err(ProviderError::other(std::io::Error::other(
-                        "serial state root fallback task dropped",
-                    )))
-                }
+        match fallback_result {
+            Ok(Ok((state_root, trie_updates, hashed_state))) => {
+                self.metrics.state_root_task_fallback_success_total.increment(1);
+                Ok(StateRootJobOutcome::new(state_root, Arc::new(trie_updates))
+                    .with_hashed_state(Some(hashed_state)))
             }
-
-            std::thread::sleep(Duration::from_millis(1));
+            Ok(Err(err)) => Err(err),
+            Err(_) => Err(ProviderError::other(std::io::Error::other(
+                "serial state root fallback task dropped",
+            ))),
         }
     }
 }
