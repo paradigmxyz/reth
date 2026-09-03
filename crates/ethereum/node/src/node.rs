@@ -607,7 +607,10 @@ where
         let jit = &ctx.config().jit;
         let dump_dir = jit.debug.then(|| ctx.config().datadir().data_dir().join("jit"));
 
-        let (evm_config, revmc_metrics) = build_evm_config(ctx.chain_spec(), jit, dump_dir)?;
+        let (mut evm_config, revmc_metrics) = build_evm_config(ctx.chain_spec(), jit, dump_dir)?;
+        if let Some(cache) = ctx.sender_recovery_cache() {
+            evm_config = evm_config.with_sender_recovery_cache(cache.clone());
+        }
 
         #[cfg(not(feature = "jit"))]
         let _ = revmc_metrics;
@@ -636,10 +639,29 @@ where
 ///
 /// This contains various settings that can be configured and take precedence over the node's
 /// config.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub struct EthereumPoolBuilder {
-    // TODO add options for txpool args
+    init_kzg_settings: bool,
+}
+
+impl EthereumPoolBuilder {
+    /// Creates a new [`EthereumPoolBuilder`].
+    pub const fn new() -> Self {
+        Self { init_kzg_settings: false }
+    }
+
+    /// Sets whether to initialize KZG settings even if EIP-4844 support is disabled in the pool.
+    pub const fn with_init_kzg_settings(mut self, init_kzg_settings: bool) -> Self {
+        self.init_kzg_settings = init_kzg_settings;
+        self
+    }
+}
+
+impl Default for EthereumPoolBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<Types, Node, Evm> PoolBuilder<Node, Evm> for EthereumPoolBuilder
@@ -695,7 +717,7 @@ where
                 .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
                 .build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
 
-        if validator.validator().eip4844() {
+        if validator.validator().eip4844() || self.init_kzg_settings {
             // initializing the KZG settings can be expensive, this should be done upfront so that
             // it doesn't impact the first block or the first gossiped blob transaction, so we
             // initialize this in the background
@@ -783,5 +805,16 @@ where
 
     async fn build(self, ctx: &AddOnsContext<'_, Node>) -> eyre::Result<Self::Validator> {
         Ok(EthereumEngineValidator::new(ctx.config.chain.clone()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EthereumPoolBuilder;
+
+    #[test]
+    fn configures_kzg_settings_initialization() {
+        assert!(!EthereumPoolBuilder::new().init_kzg_settings);
+        assert!(EthereumPoolBuilder::new().with_init_kzg_settings(true).init_kzg_settings);
     }
 }

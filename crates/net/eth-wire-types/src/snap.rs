@@ -7,8 +7,9 @@
 
 use crate::BlockAccessLists;
 use alloc::vec::Vec;
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::{Bytes, B256, KECCAK256_EMPTY, U256};
 use alloy_rlp::{BufMut, Decodable, Encodable, RlpDecodable, RlpEncodable};
+use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
 use reth_codecs_derive::add_arbitrary_tests;
 
 /// Supported SNAP protocol versions.
@@ -113,6 +114,40 @@ pub struct AccountData {
     pub body: Bytes,
 }
 
+impl AccountData {
+    /// Encodes `account` in snap/2's slim format.
+    pub fn from_trie_account(hash: B256, account: &TrieAccount) -> Self {
+        let body = alloy_rlp::encode(SlimAccountBodyRef {
+            nonce: account.nonce,
+            balance: account.balance,
+            storage_root: SlimAccountBodyRef::shorten(&account.storage_root, EMPTY_ROOT_HASH),
+            code_hash: SlimAccountBodyRef::shorten(&account.code_hash, KECCAK256_EMPTY),
+        });
+        Self { hash, body: body.into() }
+    }
+
+    /// Decodes the slim body into the account the trie leaf commits to.
+    ///
+    /// Range proofs are verified against the full encoding, so the omitted storage root and code
+    /// hash are restored to their defaults here.
+    pub fn trie_account(&self) -> alloy_rlp::Result<TrieAccount> {
+        let slim = alloy_rlp::decode_exact::<SlimAccountBody>(&self.body)?;
+
+        Ok(TrieAccount {
+            nonce: slim.nonce,
+            balance: slim.balance,
+            storage_root: SlimAccountBody::restore(&slim.storage_root, EMPTY_ROOT_HASH)?,
+            code_hash: SlimAccountBody::restore(&slim.code_hash, KECCAK256_EMPTY)?,
+        })
+    }
+
+    /// Consumes the wire value and returns its hashed key with the decoded trie account.
+    pub fn into_trie_entry(self) -> alloy_rlp::Result<(B256, TrieAccount)> {
+        let account = self.trie_account()?;
+        Ok((self.hash, account))
+    }
+}
+
 /// Response containing a number of consecutive accounts and the Merkle proofs for the entire range.
 // http://github.com/ethereum/devp2p/blob/master/caps/snap.md#accountrange-0x01
 #[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
@@ -208,6 +243,18 @@ pub struct StorageData {
     pub hash: B256,
     /// Data content of the slot
     pub data: Bytes,
+}
+
+impl StorageData {
+    /// Encodes a slot value as the storage trie leaf commits to it.
+    pub fn from_value(hash: B256, value: U256) -> Self {
+        Self { hash, data: alloy_rlp::encode(value).into() }
+    }
+
+    /// Decodes the slot value.
+    pub fn value(&self) -> alloy_rlp::Result<U256> {
+        alloy_rlp::decode_exact(&self.data)
+    }
 }
 
 /// Response containing a number of consecutive storage slots for the requested account
@@ -476,6 +523,53 @@ impl SnapProtocolMessage {
             return Err(SnapProtocolError::Rlp(alloy_rlp::Error::UnexpectedLength));
         }
         Ok(msg)
+    }
+}
+
+/// Like a trie account, with empty code and storage hashes omitted to reduce transfer size.
+#[derive(RlpDecodable)]
+struct SlimAccountBody {
+    /// The account's nonce.
+    nonce: u64,
+    /// The account's balance.
+    balance: U256,
+    /// Empty when the account has no storage.
+    storage_root: Bytes,
+    /// Empty when the account has no code.
+    code_hash: Bytes,
+}
+
+impl SlimAccountBody {
+    /// Restores a dropped field to `empty`, rejecting any length the encoding never produces.
+    fn restore(value: &[u8], empty: B256) -> alloy_rlp::Result<B256> {
+        match value {
+            [] => Ok(empty),
+            _ => B256::try_from(value).map_err(|_| alloy_rlp::Error::UnexpectedLength),
+        }
+    }
+}
+
+/// Borrowed encode twin of [`SlimAccountBody`].
+#[derive(RlpEncodable)]
+struct SlimAccountBodyRef<'a> {
+    /// The account's nonce.
+    nonce: u64,
+    /// The account's balance.
+    balance: U256,
+    /// Empty when the account has no storage.
+    storage_root: &'a [u8],
+    /// Empty when the account has no code.
+    code_hash: &'a [u8],
+}
+
+impl<'a> SlimAccountBodyRef<'a> {
+    /// Drops a field that holds its empty default, which is what makes the encoding slim.
+    fn shorten(value: &'a B256, empty: B256) -> &'a [u8] {
+        if *value == empty {
+            &[]
+        } else {
+            value.as_slice()
+        }
     }
 }
 
@@ -788,5 +882,70 @@ mod tests {
         };
         assert_eq!(msg.starting_hash.unwrap_or(B256::ZERO), B256::ZERO);
         assert_eq!(msg.limit_hash.unwrap_or(B256::repeat_byte(0xff)), B256::repeat_byte(0xff));
+    }
+
+    fn trie_account(storage_root: B256, code_hash: B256) -> TrieAccount {
+        TrieAccount { nonce: 7, balance: U256::from(42), storage_root, code_hash }
+    }
+
+    #[test]
+    fn slim_body_elides_empty_storage_and_code() {
+        let account = trie_account(EMPTY_ROOT_HASH, KECCAK256_EMPTY);
+        let hash = B256::repeat_byte(1);
+        let encoded = AccountData::from_trie_account(hash, &account);
+
+        let body = SlimAccountBody::decode(&mut encoded.body.as_ref()).unwrap();
+        assert!(body.storage_root.is_empty());
+        assert!(body.code_hash.is_empty());
+        assert_eq!(encoded.trie_account().unwrap(), account);
+        assert_eq!(encoded.into_trie_entry().unwrap(), (hash, account));
+    }
+
+    #[test]
+    fn slim_body_keeps_non_default_storage_and_code() {
+        let account = trie_account(B256::repeat_byte(2), B256::repeat_byte(3));
+        let encoded = AccountData::from_trie_account(B256::repeat_byte(1), &account);
+
+        let body = SlimAccountBody::decode(&mut encoded.body.as_ref()).unwrap();
+        assert_eq!(body.storage_root.len(), 32);
+        assert_eq!(body.code_hash.len(), 32);
+        assert_eq!(encoded.trie_account().unwrap(), account);
+    }
+
+    #[test]
+    fn slim_body_rejects_field_lengths_the_encoding_never_produces() {
+        // A 16-byte field is neither an elided default nor a hash, so accepting it would let a
+        // peer smuggle a value that hashes differently than the one it claims to serve.
+        let truncated = Bytes::from_static(&[0xaa; 16]);
+
+        assert!(SlimAccountBody::restore(&truncated, EMPTY_ROOT_HASH).is_err());
+    }
+
+    #[test]
+    fn slim_body_rejects_trailing_bytes() {
+        let account = trie_account(EMPTY_ROOT_HASH, KECCAK256_EMPTY);
+        let mut encoded = AccountData::from_trie_account(B256::repeat_byte(1), &account);
+        encoded.body = [encoded.body.as_ref(), &[0x00]].concat().into();
+
+        assert!(encoded.trie_account().is_err());
+    }
+
+    #[test]
+    fn storage_data_carries_the_trie_leaf_encoding() {
+        let value = U256::from(1234);
+        let slot = StorageData::from_value(B256::repeat_byte(4), value);
+
+        // Clients verify range proofs against the RLP-encoded trie leaf, so the wire bytes must be
+        // exactly that rather than a fixed-width word.
+        assert_eq!(slot.data.as_ref(), alloy_rlp::encode(value));
+        assert_eq!(slot.value().unwrap(), value);
+    }
+
+    #[test]
+    fn storage_data_rejects_trailing_bytes() {
+        let mut slot = StorageData::from_value(B256::repeat_byte(4), U256::from(1));
+        slot.data = [slot.data.as_ref(), &[0x00]].concat().into();
+
+        assert!(slot.value().is_err());
     }
 }

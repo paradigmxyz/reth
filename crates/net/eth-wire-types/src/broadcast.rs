@@ -794,8 +794,13 @@ pub struct NewPooledTransactionHashes72 {
     ///
     /// Per [EIP-8070](https://eips.ethereum.org/EIPS/eip-8070), this is a `B_16`
     /// bitarray over `CELLS_PER_EXT_BLOB`; bit `i` is set when the announcer has column
-    /// `i` available for every type 3 transaction in the message. `None` encodes as RLP
-    /// `nil` and must be used when no type 3 transactions are announced.
+    /// `i` available for every type 3 transaction in the message.
+    ///
+    /// On the wire this field is always encoded as a 16 byte string, zero-filled when no
+    /// type 3 transactions are announced: go-ethereum decodes the mask into a fixed
+    /// `[16]byte` and rejects the RLP `nil` encoding the EIP text describes, so the
+    /// always-present form is the de facto network format. `None` is equivalent to a zero
+    /// mask; decoding additionally accepts the spec's `nil` encoding for compatibility.
     pub cell_mask: Option<B128>,
 }
 
@@ -831,6 +836,12 @@ impl proptest::prelude::Arbitrary for NewPooledTransactionHashes72 {
 }
 
 impl NewPooledTransactionHashes72 {
+    /// Cell mask advertising availability of every cell.
+    ///
+    /// Used when announcing blob transactions whose full sidecar is available locally, since
+    /// every cell can be computed from the complete blob data.
+    pub const ALL_CELLS_MASK: B128 = B128::repeat_byte(0xff);
+
     /// Returns a new instance with capacity for `capacity` entries and no cell mask.
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
@@ -851,6 +862,9 @@ impl NewPooledTransactionHashes72 {
         self.hashes.push(*tx.tx_hash());
         self.sizes.push(tx.encode_2718_len());
         self.types.push(tx.ty());
+        if tx.is_eip4844() {
+            self.cell_mask = Some(Self::ALL_CELLS_MASK);
+        }
     }
 
     /// Appends the provided transactions
@@ -886,7 +900,7 @@ impl NewPooledTransactionHashes72 {
         self.types.as_slice().length() +
             self.sizes.length() +
             self.hashes.length() +
-            self.cell_mask.as_ref().map_or(1, Encodable::length)
+            self.cell_mask.unwrap_or_default().length()
     }
 }
 
@@ -896,11 +910,8 @@ impl Encodable for NewPooledTransactionHashes72 {
         self.types.as_slice().encode(out);
         self.sizes.encode(out);
         self.hashes.encode(out);
-        if let Some(cell_mask) = &self.cell_mask {
-            cell_mask.encode(out);
-        } else {
-            out.put_u8(alloy_rlp::EMPTY_STRING_CODE);
-        }
+        // A zero-filled mask when no cells are available, see the `cell_mask` field docs.
+        self.cell_mask.unwrap_or_default().encode(out);
     }
 
     fn length(&self) -> usize {
@@ -924,10 +935,13 @@ impl Decodable for NewPooledTransactionHashes72 {
             return Err(alloy_rlp::Error::InputTooShort)
         };
         let cell_mask = if first_byte == alloy_rlp::EMPTY_STRING_CODE {
+            // The EIP-8070 `nil` encoding, tolerated for compatibility.
             payload = &payload[1..];
             None
         } else {
-            Some(B128::decode(&mut payload)?)
+            // A zero mask is the wire representation of "no cells available", see the
+            // `cell_mask` field docs.
+            Some(B128::decode(&mut payload)?).filter(|mask| !mask.is_zero())
         };
 
         if !payload.is_empty() {
@@ -1034,7 +1048,7 @@ impl DedupPayload for NewPooledTransactionHashes72 {
     }
 
     fn dedup(self) -> PartiallyValidData<Self::Value> {
-        let Self { hashes, mut sizes, mut types, .. } = self;
+        let Self { hashes, mut sizes, mut types, cell_mask } = self;
 
         let mut deduped_data = B256Map::with_capacity_and_hasher(hashes.len(), Default::default());
 
@@ -1044,7 +1058,7 @@ impl DedupPayload for NewPooledTransactionHashes72 {
             }
         }
 
-        PartiallyValidData::from_raw_data_eth72(deduped_data)
+        PartiallyValidData::from_raw_data_eth72_with_cell_mask(deduped_data, cell_mask)
     }
 }
 
@@ -1161,6 +1175,8 @@ pub struct PartiallyValidData<V> {
     #[into_iterator]
     data: B256Map<V>,
     version: Option<EthVersion>,
+    /// The eth/72 message-level cell mask, if present.
+    cell_mask: Option<B128>,
 }
 
 handle_mempool_data_map_impl!(PartiallyValidData<V>, <V>);
@@ -1168,12 +1184,20 @@ handle_mempool_data_map_impl!(PartiallyValidData<V>, <V>);
 impl<V> PartiallyValidData<V> {
     /// Wraps raw data.
     pub const fn from_raw_data(data: B256Map<V>, version: Option<EthVersion>) -> Self {
-        Self { data, version }
+        Self { data, version, cell_mask: None }
     }
 
     /// Wraps raw data with version [`EthVersion::Eth72`].
     pub const fn from_raw_data_eth72(data: B256Map<V>) -> Self {
         Self::from_raw_data(data, Some(EthVersion::Eth72))
+    }
+
+    /// Wraps raw data with an eth/72 message-level cell mask.
+    pub const fn from_raw_data_eth72_with_cell_mask(
+        data: B256Map<V>,
+        cell_mask: Option<B128>,
+    ) -> Self {
+        Self { data, version: Some(EthVersion::Eth72), cell_mask }
     }
 
     /// Wraps raw data with version [`EthVersion::Eth68`].
@@ -1210,6 +1234,11 @@ impl<V> PartiallyValidData<V> {
         self.version
     }
 
+    /// Returns the eth/72 message-level cell mask, if present.
+    pub const fn eth72_cell_mask(&self) -> Option<B128> {
+        self.cell_mask
+    }
+
     /// Destructs returning the validated data.
     pub fn into_data(self) -> B256Map<V> {
         self.data
@@ -1225,6 +1254,8 @@ pub struct ValidAnnouncementData {
     #[into_iterator]
     data: B256Map<Eth68TxMetadata>,
     version: EthVersion,
+    /// The eth/72 message-level cell mask, if present.
+    cell_mask: Option<B128>,
 }
 
 handle_mempool_data_map_impl!(ValidAnnouncementData,);
@@ -1242,11 +1273,16 @@ impl ValidAnnouncementData {
     /// from an announcement, should have some [`EthVersion`]. Panics if [`PartiallyValidData`] has
     /// version set to `None`.
     pub fn from_partially_valid_data(data: PartiallyValidData<Eth68TxMetadata>) -> Self {
-        let PartiallyValidData { data, version } = data;
+        let PartiallyValidData { data, version, cell_mask } = data;
 
         let version = version.expect("should have eth version for conversion");
 
-        Self { data, version }
+        Self { data, version, cell_mask }
+    }
+
+    /// Returns the eth/72 message-level cell mask, if present.
+    pub const fn eth72_cell_mask(&self) -> Option<B128> {
+        self.cell_mask
     }
 
     /// Destructs returning the validated data.
@@ -1636,6 +1672,8 @@ mod tests {
     #[test]
     fn eth_72_tx_hash_roundtrip() {
         let vectors = vec![
+            // `None` is always encoded as a zero-filled 16 byte mask, matching go-ethereum's
+            // non-optional `[16]byte` field.
             (
                 NewPooledTransactionHashes72 {
                     types: vec![],
@@ -1643,7 +1681,7 @@ mod tests {
                     hashes: vec![],
                     cell_mask: None,
                 },
-                &hex!("c480c0c080")[..],
+                &hex!("d480c0c09000000000000000000000000000000000")[..],
             ),
             (
                 NewPooledTransactionHashes72 {
@@ -1662,12 +1700,40 @@ mod tests {
     }
 
     #[test]
+    fn eth_72_decodes_spec_nil_cell_mask() {
+        // The EIP-8070 text encodes an absent mask as the RLP empty string; decoding stays
+        // lenient even though reth never produces this form.
+        let encoded = hex!("c480c0c080");
+
+        let decoded = NewPooledTransactionHashes72::decode(&mut encoded.as_ref()).unwrap();
+
+        assert_eq!(decoded.cell_mask, None);
+    }
+
+    #[test]
     fn eth_72_rejects_missing_cell_mask() {
         let encoded_eth68_payload = hex!("c380c0c0");
 
         let result = NewPooledTransactionHashes72::decode(&mut encoded_eth68_payload.as_ref());
 
         assert!(matches!(result, Err(alloy_rlp::Error::InputTooShort)));
+    }
+
+    #[test]
+    fn eth_72_dedup_preserves_message_cell_mask() {
+        let cell_mask = Some(B128::repeat_byte(0x11));
+        let announcement = NewPooledTransactionHashes72 {
+            types: vec![3],
+            sizes: vec![128],
+            hashes: vec![B256::from([1u8; 32])],
+            cell_mask,
+        };
+
+        let partially_valid = announcement.dedup();
+        assert_eq!(partially_valid.eth72_cell_mask(), cell_mask);
+
+        let valid = ValidAnnouncementData::from_partially_valid_data(partially_valid);
+        assert_eq!(valid.eth72_cell_mask(), cell_mask);
     }
 
     #[test]

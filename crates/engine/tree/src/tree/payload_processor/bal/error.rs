@@ -1,8 +1,7 @@
 //! Errors for the BAL execution path.
 
-use alloy_evm::block::BlockExecutionError;
-use reth_consensus::ConsensusError;
-use reth_provider::ProviderError;
+use reth_engine_primitives::BlockAccessListDecodeError;
+use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
 
 /// Errors surfaced by `execute_block`.
 #[derive(Debug, thiserror::Error)]
@@ -10,6 +9,9 @@ pub enum BalExecutionError {
     /// Block violated consensus rules while running the BAL path.
     #[error(transparent)]
     Consensus(#[from] ConsensusError),
+    /// The block access list could not be decoded for execution.
+    #[error(transparent)]
+    BlockAccessListDecode(#[from] BlockAccessListDecodeError),
     /// Worker or canonical EVM failure.
     #[error("evm execution failed: {0}")]
     Execution(#[from] BlockExecutionError),

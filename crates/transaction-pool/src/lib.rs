@@ -71,7 +71,7 @@
 //!   activation)
 //! - **Size**: Input data ≤ 128KB (default)
 //! - **Gas**: Limit ≤ block gas limit
-//! - **Fees**: Priority fee ≤ max fee; local tx fee cap; external minimum priority fee
+//! - **Fees**: Priority fee ≤ max fee; local tx fee cap; minimum priority fee
 //! - **Chain ID**: Must match current chain
 //! - **Intrinsic Gas**: Sufficient for data and access lists
 //! - **Blobs** (EIP-4844): Valid count, KZG proofs

@@ -4,13 +4,17 @@ use alloy_eips::merge::EPOCH_SLOTS;
 use core::time::Duration;
 
 /// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
-pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
+pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 7;
 
-/// Maximum canonical-minus-persisted gap before engine API processing is stalled.
+/// Number of persisted blocks whose state/trie writes are masked by an in-memory suffix.
+pub const DEFAULT_NUM_STATE_MASKING_BLOCKS: u64 = 0;
+
+/// Maximum number of blocks beyond the in-memory buffer target awaiting persistence before engine
+/// API processing is stalled.
 pub const DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD: u64 = 16;
 
 /// How close to the canonical head we persist blocks.
-pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 0;
+pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 5;
 
 /// The size of proof targets chunk to spawn in one multiproof calculation.
 pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 5;
@@ -32,16 +36,6 @@ pub const DEFAULT_RESERVED_CPU_CORES: usize = 1;
 /// Depth 4 means we keep roughly 16^4 = 65536 potential branch paths at most.
 pub const DEFAULT_SPARSE_TRIE_PRUNE_DEPTH: usize = 4;
 
-/// Default LFU hot-slot capacity for sparse trie pruning.
-///
-/// Limits the number of `(address, slot)` pairs retained across prune cycles.
-pub const DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS: usize = 1500;
-
-/// Default LFU hot-account capacity for sparse trie pruning.
-///
-/// Limits the number of account addresses retained across prune cycles.
-pub const DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS: usize = 1000;
-
 /// Default timeout for the state root task before spawning a sequential fallback.
 pub const DEFAULT_STATE_ROOT_TASK_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -57,6 +51,21 @@ const fn assert_backpressure_threshold_invariant(
     debug_assert!(
         persistence_backpressure_threshold > persistence_threshold,
         "persistence_backpressure_threshold must be greater than persistence_threshold",
+    );
+}
+
+const fn assert_state_masking_invariant(
+    persistence_threshold: u64,
+    num_state_masking_blocks: u64,
+    memory_block_buffer_target: u64,
+) {
+    let valid_window = match num_state_masking_blocks.checked_add(memory_block_buffer_target) {
+        Some(window) => window < persistence_threshold,
+        None => false,
+    };
+    debug_assert!(
+        num_state_masking_blocks == 0 || valid_window,
+        "num_state_masking_blocks + memory_block_buffer_target must be less than persistence_threshold",
     );
 }
 
@@ -93,12 +102,16 @@ pub struct TreeConfig {
     /// Maximum number of blocks to be kept only in memory without triggering
     /// persistence.
     persistence_threshold: u64,
+    /// Number of persisted blocks whose state/trie writes are masked instead of being durably
+    /// written in the current cycle.
+    num_state_masking_blocks: u64,
     /// How close to the canonical head we persist blocks. Represents the ideal
     /// number of most recent blocks to keep in memory for quick access and reorgs.
     ///
     /// Note: this should be less than or equal to `persistence_threshold`.
     memory_block_buffer_target: u64,
-    /// Maximum canonical-minus-persisted gap before engine API processing is stalled.
+    /// Maximum number of blocks beyond the in-memory buffer target awaiting persistence before
+    /// engine API processing is stalled.
     persistence_backpressure_threshold: u64,
     /// Number of pending blocks that cannot be executed due to missing parent and
     /// are kept in cache.
@@ -122,6 +135,8 @@ pub struct TreeConfig {
     disable_state_cache: bool,
     /// Whether to disable parallel prewarming.
     disable_prewarming: bool,
+    /// Whether txpool-driven prewarming between payloads is enabled.
+    txpool_prewarming: bool,
     /// Whether to enable state provider metrics.
     state_provider_metrics: bool,
     /// Cross-block cache size in bytes.
@@ -164,10 +179,6 @@ pub struct TreeConfig {
     disable_cache_metrics: bool,
     /// Depth for sparse trie pruning after state root computation.
     sparse_trie_prune_depth: usize,
-    /// LFU hot-slot capacity: max `(address, slot)` pairs retained across prune cycles.
-    sparse_trie_max_hot_slots: usize,
-    /// LFU hot-account capacity: max account addresses retained across prune cycles.
-    sparse_trie_max_hot_accounts: usize,
     /// When set, blocks whose total processing time (execution + state reads + state root +
     /// DB commit) exceeds this duration trigger a structured `warn!` log with detailed timing,
     /// state-operation counts, and cache hit-rate metrics. `Duration::ZERO` logs every block.
@@ -185,9 +196,8 @@ pub struct TreeConfig {
     share_sparse_trie_with_payload_builder: bool,
     /// Whether to suppress persistence cycles while building a payload.
     ///
-    /// When enabled, persistence is deferred from the moment an FCU with payload attributes
-    /// arrives until the next FCU without attributes. This avoids persistence I/O competing
-    /// with block building on latency-sensitive chains.
+    /// When enabled, persistence is deferred while a payload job is active. This avoids
+    /// persistence I/O competing with block building on latency-sensitive chains.
     suppress_persistence_during_build: bool,
     /// Whether to disable BAL (Block Access List, EIP-7928) based parallel execution.
     /// When disabled, uses the sequential execution path even when a BAL is available.
@@ -217,8 +227,14 @@ impl Default for TreeConfig {
             DEFAULT_PERSISTENCE_THRESHOLD,
             DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
         );
+        assert_state_masking_invariant(
+            DEFAULT_PERSISTENCE_THRESHOLD,
+            DEFAULT_NUM_STATE_MASKING_BLOCKS,
+            DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
+        );
         Self {
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
+            num_state_masking_blocks: DEFAULT_NUM_STATE_MASKING_BLOCKS,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
             persistence_backpressure_threshold: DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
             block_buffer_limit: DEFAULT_BLOCK_BUFFER_LIMIT,
@@ -228,6 +244,7 @@ impl Default for TreeConfig {
             always_compare_trie_updates: false,
             disable_state_cache: false,
             disable_prewarming: false,
+            txpool_prewarming: false,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
             has_enough_parallelism: has_enough_parallelism(),
@@ -239,8 +256,6 @@ impl Default for TreeConfig {
             allow_unwind_canonical_header: false,
             disable_cache_metrics: false,
             sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
-            sparse_trie_max_hot_slots: DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
-            sparse_trie_max_hot_accounts: DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
             slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout: Some(DEFAULT_STATE_ROOT_TASK_TIMEOUT),
@@ -262,6 +277,7 @@ impl TreeConfig {
     #[expect(clippy::too_many_arguments)]
     pub const fn new(
         persistence_threshold: u64,
+        num_state_masking_blocks: u64,
         memory_block_buffer_target: u64,
         persistence_backpressure_threshold: u64,
         block_buffer_limit: u32,
@@ -282,8 +298,6 @@ impl TreeConfig {
         allow_unwind_canonical_header: bool,
         disable_cache_metrics: bool,
         sparse_trie_prune_depth: usize,
-        sparse_trie_max_hot_slots: usize,
-        sparse_trie_max_hot_accounts: usize,
         slow_block_threshold: Option<Duration>,
         state_root_task_timeout: Option<Duration>,
         share_execution_cache_with_payload_builder: bool,
@@ -293,8 +307,14 @@ impl TreeConfig {
             persistence_threshold,
             persistence_backpressure_threshold,
         );
+        assert_state_masking_invariant(
+            persistence_threshold,
+            num_state_masking_blocks,
+            memory_block_buffer_target,
+        );
         Self {
             persistence_threshold,
+            num_state_masking_blocks,
             memory_block_buffer_target,
             persistence_backpressure_threshold,
             block_buffer_limit,
@@ -304,6 +324,7 @@ impl TreeConfig {
             always_compare_trie_updates,
             disable_state_cache,
             disable_prewarming,
+            txpool_prewarming: false,
             state_provider_metrics,
             cross_block_cache_size,
             has_enough_parallelism,
@@ -315,8 +336,6 @@ impl TreeConfig {
             allow_unwind_canonical_header,
             disable_cache_metrics,
             sparse_trie_prune_depth,
-            sparse_trie_max_hot_slots,
-            sparse_trie_max_hot_accounts,
             slow_block_threshold,
             disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout,
@@ -335,6 +354,11 @@ impl TreeConfig {
     /// Return the persistence threshold.
     pub const fn persistence_threshold(&self) -> u64 {
         self.persistence_threshold
+    }
+
+    /// Return the number of persisted blocks whose state/trie writes are masked.
+    pub const fn num_state_masking_blocks(&self) -> u64 {
+        self.num_state_masking_blocks
     }
 
     /// Return the memory block buffer target.
@@ -400,6 +424,11 @@ impl TreeConfig {
         self.disable_prewarming
     }
 
+    /// Returns whether txpool prewarming is enabled.
+    pub const fn txpool_prewarming(&self) -> bool {
+        self.txpool_prewarming
+    }
+
     /// Returns whether to always compare trie updates from the state root task to the trie updates
     /// from the regular state root calculation.
     pub const fn always_compare_trie_updates(&self) -> bool {
@@ -449,6 +478,22 @@ impl TreeConfig {
             self.persistence_threshold,
             self.persistence_backpressure_threshold,
         );
+        assert_state_masking_invariant(
+            self.persistence_threshold,
+            self.num_state_masking_blocks,
+            self.memory_block_buffer_target,
+        );
+        self
+    }
+
+    /// Setter for the number of persisted blocks whose state/trie writes are masked.
+    pub const fn with_num_state_masking_blocks(mut self, num_state_masking_blocks: u64) -> Self {
+        self.num_state_masking_blocks = num_state_masking_blocks;
+        assert_state_masking_invariant(
+            self.persistence_threshold,
+            self.num_state_masking_blocks,
+            self.memory_block_buffer_target,
+        );
         self
     }
 
@@ -458,6 +503,11 @@ impl TreeConfig {
         memory_block_buffer_target: u64,
     ) -> Self {
         self.memory_block_buffer_target = memory_block_buffer_target;
+        assert_state_masking_invariant(
+            self.persistence_threshold,
+            self.num_state_masking_blocks,
+            self.memory_block_buffer_target,
+        );
         self
     }
 
@@ -516,6 +566,12 @@ impl TreeConfig {
     /// Setter for whether to disable parallel prewarming.
     pub const fn without_prewarming(mut self, disable_prewarming: bool) -> Self {
         self.disable_prewarming = disable_prewarming;
+        self
+    }
+
+    /// Enables or disables txpool transaction prewarming.
+    pub const fn with_txpool_prewarming(mut self, enabled: bool) -> Self {
+        self.txpool_prewarming = enabled;
         self
     }
 
@@ -609,28 +665,6 @@ impl TreeConfig {
     /// Setter for sparse trie prune depth.
     pub const fn with_sparse_trie_prune_depth(mut self, depth: usize) -> Self {
         self.sparse_trie_prune_depth = depth;
-        self
-    }
-
-    /// Returns the LFU hot-slot capacity for sparse trie pruning.
-    pub const fn sparse_trie_max_hot_slots(&self) -> usize {
-        self.sparse_trie_max_hot_slots
-    }
-
-    /// Setter for LFU hot-slot capacity.
-    pub const fn with_sparse_trie_max_hot_slots(mut self, max_hot_slots: usize) -> Self {
-        self.sparse_trie_max_hot_slots = max_hot_slots;
-        self
-    }
-
-    /// Returns the LFU hot-account capacity for sparse trie pruning.
-    pub const fn sparse_trie_max_hot_accounts(&self) -> usize {
-        self.sparse_trie_max_hot_accounts
-    }
-
-    /// Setter for LFU hot-account capacity.
-    pub const fn with_sparse_trie_max_hot_accounts(mut self, max_hot_accounts: usize) -> Self {
-        self.sparse_trie_max_hot_accounts = max_hot_accounts;
         self
     }
 
@@ -780,7 +814,13 @@ impl TreeConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::TreeConfig;
+    use super::{TreeConfig, DEFAULT_NUM_STATE_MASKING_BLOCKS};
+
+    #[test]
+    fn txpool_prewarming_is_disabled_by_default_and_can_be_enabled() {
+        assert!(!TreeConfig::default().txpool_prewarming());
+        assert!(TreeConfig::default().with_txpool_prewarming(true).txpool_prewarming());
+    }
 
     #[test]
     fn state_root_task_requires_parallelism_without_overrides() {
@@ -804,5 +844,32 @@ mod tests {
         let _ = TreeConfig::default()
             .with_persistence_threshold(4)
             .with_persistence_backpressure_threshold(4);
+    }
+
+    #[test]
+    fn state_masking_is_disabled_by_default() {
+        assert_eq!(
+            TreeConfig::default().num_state_masking_blocks(),
+            DEFAULT_NUM_STATE_MASKING_BLOCKS
+        );
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "num_state_masking_blocks + memory_block_buffer_target must be less than persistence_threshold"
+    )]
+    fn rejects_state_masking_window_at_or_above_persistence_threshold() {
+        let _ = TreeConfig::default()
+            .with_persistence_threshold(4)
+            .with_memory_block_buffer_target(2)
+            .with_num_state_masking_blocks(2);
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "num_state_masking_blocks + memory_block_buffer_target must be less than persistence_threshold"
+    )]
+    fn rejects_overflowing_state_masking_window() {
+        let _ = TreeConfig::default().with_num_state_masking_blocks(u64::MAX);
     }
 }

@@ -16,7 +16,8 @@ use futures_util::FutureExt;
 use reth_chain_state::CanonStateNotification;
 use reth_execution_cache::SavedCache;
 use reth_payload_builder::{
-    BuildNewPayload, KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJobGenerator,
+    BuildNewPayload, KeepPayloadJobAlive, PayloadBuilderLease, PayloadId, PayloadJob,
+    PayloadJobGenerator,
 };
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind};
@@ -200,6 +201,7 @@ where
             cached_reads,
             execution_cache: resources.take_execution_cache(),
             state_root_handle: resources.take_state_root_handle(),
+            leases: resources.take_leases(),
             payload_task_guard: self.payload_task_guard.clone(),
             metrics: Default::default(),
             builder: self.builder.clone(),
@@ -390,6 +392,11 @@ where
     execution_cache: Option<SavedCache>,
     /// Optional state-root task handle, shared with the engine.
     state_root_handle: Option<PayloadStateRootHandle>,
+    /// Lifecycle leases shared with the payload-builder service.
+    ///
+    /// Every detached build task clones these so that the loaned resources remain available until
+    /// `try_build` completes, even if the payload job is resolved first.
+    leases: Vec<PayloadBuilderLease>,
     /// metrics for this type
     metrics: PayloadBuilderMetrics,
     /// The type responsible for building payloads.
@@ -409,7 +416,7 @@ where
         trace!(target: "payload_builder", id = %self.config.payload_id(), "spawn new payload build task");
         let (tx, rx) = oneshot::channel();
         let cancel = CancelOnDrop::default();
-        let _cancel = cancel.clone();
+        let pending_cancel = cancel.clone();
         let guard = self.payload_task_guard.clone();
         let payload_config = self.config.clone();
         let best_payload = self.best_payload.payload().cloned();
@@ -417,6 +424,7 @@ where
         let cached_reads = self.cached_reads.take().unwrap_or_default();
         let execution_cache = self.execution_cache.clone();
         let state_root_handle = self.state_root_handle.take();
+        let leases = self.leases.clone();
         let builder = self.builder.clone();
         let executor = self.executor.clone();
         self.executor.spawn_task(async move {
@@ -433,11 +441,12 @@ where
                     best_payload,
                 };
                 let result = builder.try_build(args);
+                drop(leases);
                 let _ = tx.send(result);
             });
         });
 
-        self.pending_block = Some(PendingPayload { _cancel, payload: rx });
+        self.pending_block = Some(PendingPayload { cancel: pending_cancel, payload: rx });
     }
 }
 
@@ -558,6 +567,10 @@ where
         let mut empty_payload = None;
 
         if best_payload.is_none() {
+            if let Some(pending) = maybe_better.as_ref() {
+                pending.cancel.request_finalization();
+            }
+
             debug!(target: "payload_builder", id=%self.config.payload_id(), "no best payload yet to resolve, building empty payload");
 
             let args = BuildArguments {
@@ -725,8 +738,8 @@ where
 /// A future that resolves to the result of the block building job.
 #[derive(Debug)]
 pub struct PendingPayload<P> {
-    /// The marker to cancel the job on drop
-    _cancel: CancelOnDrop,
+    /// Cancels the job on drop and carries cooperative control signals.
+    cancel: CancelOnDrop,
     /// The channel to send the result to.
     payload: oneshot::Receiver<Result<BuildOutcome<P>, PayloadBuilderError>>,
 }
@@ -737,7 +750,7 @@ impl<P> PendingPayload<P> {
         cancel: CancelOnDrop,
         payload: oneshot::Receiver<Result<BuildOutcome<P>, PayloadBuilderError>>,
     ) -> Self {
-        Self { _cancel: cancel, payload }
+        Self { cancel, payload }
     }
 }
 

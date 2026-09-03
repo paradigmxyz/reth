@@ -32,7 +32,7 @@ reth-discv4.workspace = true
 reth-discv5.workspace = true
 reth-net-nat.workspace = true
 reth-net-banlist.workspace = true
-reth-network-peers.workspace = true
+reth-network-peers = { workspace = true, features = ["secp256k1"] }
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 reth-ethereum-forks.workspace = true
@@ -89,8 +89,6 @@ min-warn-logs = ["tracing/release_max_level_warn"]
 min-info-logs = ["tracing/release_max_level_info"]
 min-debug-logs = ["tracing/release_max_level_debug"]
 min-trace-logs = ["tracing/release_max_level_trace"]
-
-partial-persistence = ["reth-stages-types/partial-persistence"]
 
 # Debug recording for sparse trie mutations
 trie-debug = ["reth-engine-primitives/trie-debug"]

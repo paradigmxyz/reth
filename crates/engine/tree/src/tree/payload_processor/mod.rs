@@ -4,7 +4,7 @@ use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
     payload_processor::prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource, ExecutionCache,
-    ExecutionEnv, PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig,
+    ExecutionEnv, PayloadExecutionCache, SavedCache, TreeConfig,
 };
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::B256;
@@ -17,8 +17,12 @@ use reth_evm::{
     ConfigureEvm, ConvertTx, ExecutableTxIterator, ExecutableTxTuple, SpecFor, TxEnvFor,
 };
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
-use reth_provider::{BlockExecutionOutput, BlockReader, StateProviderFactory, StateReader};
+use reth_provider::{
+    BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory, HistoryReader,
+    PruneCheckpointReader, StageCheckpointReader, StorageChangeSetReader, StorageSettingsCache,
+};
 use reth_revm::db::BundleState;
+use reth_storage_overlay::OverlayStateProviderFactory;
 use reth_tasks::Runtime;
 pub use reth_trie_parallel::{
     error::StateRootTaskError,
@@ -38,7 +42,7 @@ use std::{
 use tracing::{debug, instrument, trace, warn, Span};
 
 pub mod bal;
-pub(crate) mod bal_prewarm_pool;
+pub mod bal_prewarm_pool;
 pub mod prewarm;
 pub mod receipt_root_task;
 
@@ -166,20 +170,28 @@ where
         &self,
         env: ExecutionEnv<Evm>,
         transactions: I,
-        provider_builder: StateProviderBuilder<Evm::Primitives, P>,
+        state_provider_factory: OverlayStateProviderFactory<P, Evm::Primitives>,
         hint_stream: Option<StateRootHintStream>,
         hashed_update_stream: Option<StateRootUpdateStream>,
         parallel_bal_execution: bool,
     ) -> IteratorPayloadHandle<Evm, I>
     where
-        P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+        P: DatabaseProviderFactory + Clone + 'static,
+        P::Provider: BlockNumReader
+            + PruneCheckpointReader
+            + StageCheckpointReader
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + StorageSettingsCache
+            + HistoryReader
+            + 'static,
     {
         let (prewarm_rx, execution_rx) =
             self.spawn_tx_iterator(transactions, env.transaction_count, parallel_bal_execution);
         let prewarm_handle = self.spawn_caching_with(
             env,
             prewarm_rx,
-            provider_builder,
+            state_provider_factory,
             hint_stream,
             hashed_update_stream,
             parallel_bal_execution,
@@ -330,13 +342,21 @@ where
         &self,
         env: ExecutionEnv<Evm>,
         transactions: mpsc::Receiver<(usize, impl ExecutableTxFor<Evm> + Clone + Send + 'static)>,
-        provider_builder: StateProviderBuilder<Evm::Primitives, P>,
+        state_provider_factory: OverlayStateProviderFactory<P, Evm::Primitives>,
         hint_stream: Option<StateRootHintStream>,
         hashed_update_stream: Option<StateRootUpdateStream>,
         parallel_bal_execution: bool,
     ) -> CacheTaskHandle<<Evm::Primitives as NodePrimitives>::Receipt>
     where
-        P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+        P: DatabaseProviderFactory + Clone + 'static,
+        P::Provider: BlockNumReader
+            + PruneCheckpointReader
+            + StageCheckpointReader
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + StorageSettingsCache
+            + HistoryReader
+            + 'static,
     {
         // Each mode carries the capability its producers use; the rest is dropped here, so
         // unused capabilities do not keep the state-root task's update channel open.
@@ -360,7 +380,7 @@ where
             env,
             evm_config: self.evm_config.clone(),
             saved_cache: saved_cache.clone(),
-            provider: provider_builder,
+            provider: state_provider_factory,
             bal_prewarm_pool: parallel_bal_execution.then(|| self.bal_prewarm_pool()),
             metrics: PrewarmMetrics::default(),
             cache_metrics: self.cache_metrics.clone(),

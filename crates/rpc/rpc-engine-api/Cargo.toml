@@ -51,6 +51,7 @@ reth-ethereum-engine-primitives.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-ethereum-primitives.workspace = true
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
+reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 alloy-rlp.workspace = true
 reth-node-ethereum.workspace = true

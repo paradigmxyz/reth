@@ -4,7 +4,8 @@ use crate::tree::payload_processor::bal::BalExecutionError;
 use alloy_consensus::BlockHeader;
 use reth_consensus::ConsensusError;
 pub use reth_engine_primitives::{
-    InsertBlockErrorKind, InsertBlockFatalError, InsertBlockValidationError,
+    BlockAccessListDecodeError, InsertBlockErrorKind, InsertBlockFatalError,
+    InsertBlockProcessingError, InsertBlockValidationError,
 };
 use reth_errors::ProviderError;
 use reth_payload_primitives::NewPayloadError;
@@ -111,6 +112,7 @@ impl From<BalExecutionError> for InsertBlockErrorKind {
     fn from(e: BalExecutionError) -> Self {
         match e {
             BalExecutionError::Consensus(inner) => Self::Consensus(inner),
+            BalExecutionError::BlockAccessListDecode(inner) => Self::BlockAccessListDecode(inner),
             BalExecutionError::Execution(inner) => Self::Execution(inner),
             BalExecutionError::Provider(inner) => Self::Provider(inner),
             BalExecutionError::Other(inner) => Self::Other(inner),

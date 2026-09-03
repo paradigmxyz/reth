@@ -20,11 +20,7 @@ pub use state::{
         HistoricalStateProviderRef, HistoryInfo, LowestAvailableBlocks,
     },
     latest::{LatestStateProvider, LatestStateProviderRef},
-    overlay::{OverlayBuilder, OverlayStateProvider, OverlayStateProviderFactory},
 };
-
-mod consistent_view;
-pub use consistent_view::{ConsistentDbView, ConsistentViewError};
 
 mod blockchain_provider;
 pub use blockchain_provider::{BlockchainProvider, SNAPSHOT_STATE_RETENTION};

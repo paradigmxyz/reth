@@ -14,7 +14,7 @@
 //! **Warning:** This namespace allows building arbitrary blocks. Never expose it
 //! on public-facing RPC endpoints without proper authentication.
 
-use alloy_consensus::{Header, Transaction};
+use alloy_consensus::Transaction;
 use alloy_eips::{eip1559::calculate_block_gas_limit, eip2718::Decodable2718};
 use alloy_evm::{Evm, RecoveredTx};
 use alloy_primitives::{
@@ -22,7 +22,10 @@ use alloy_primitives::{
     Address, Bytes, B256, U256,
 };
 use alloy_rlp::Encodable;
-use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV5, ForkchoiceState, PayloadAttributes};
+use alloy_rpc_types_engine::{
+    BlobsBundleV2, ExecutionData, ExecutionPayloadEnvelopeV5, ExecutionPayloadSidecar,
+    ExecutionPayloadV3, ForkchoiceState, PayloadAttributes, PraguePayloadFields,
+};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
@@ -30,12 +33,11 @@ use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
 use reth_engine_primitives::ConsensusEngineHandle;
 use reth_errors::RethError;
 use reth_ethereum_engine_primitives::EthBuiltPayload;
-use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{execute::BlockBuilder, ConfigureEvm, NextBlockEnvAttributes};
-use reth_payload_primitives::PayloadTypes;
+use reth_payload_primitives::{BuiltPayload, PayloadTypes};
 use reth_primitives_traits::{
     transaction::{recover::try_recover_signers, signed::RecoveryError},
-    AlloyBlockHeader as BlockTrait, TxTy,
+    AlloyBlockHeader as BlockTrait, Block as _, HeaderTy, TxTy,
 };
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_api::{TestingApiServer, TestingBuildBlockRequestV1};
@@ -100,23 +102,24 @@ impl<Eth, Evm, Payload: PayloadTypes> TestingApi<Eth, Evm, Payload> {
 
 impl<Eth, Evm, Payload> TestingApi<Eth, Evm, Payload>
 where
-    Payload: PayloadTypes,
-    Payload::ExecutionData: From<EthBuiltPayload>,
+    Payload: PayloadTypes<
+        ExecutionData = ExecutionData,
+        BuiltPayload: BuiltPayload<Primitives = Evm::Primitives>,
+    >,
     Eth: Call<
-        Provider: BlockReader<Header = Header>
-                      + BlockReaderIdExt<Header = Header>
+        Provider: BlockReader<Header = HeaderTy<Evm::Primitives>>
+                      + BlockReaderIdExt<Header = HeaderTy<Evm::Primitives>>
                       + ChainSpecProvider<ChainSpec: EthereumHardforks>,
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Evm::Primitives>>>,
     >,
-    Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes, Primitives = EthPrimitives>
-        + 'static,
+    Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes> + 'static,
 {
     async fn build_payload_v1(
         &self,
         request: TestingBuildBlockRequestV1,
         skip_invalid_transactions: bool,
         use_pool_transactions: bool,
-    ) -> Result<EthBuiltPayload, Eth::Error> {
+    ) -> Result<EthBuiltPayload<Evm::Primitives>, Eth::Error> {
         let evm_config = self.evm_config.clone();
         let desired_gas_limit = self.desired_gas_limit;
         let gas_limit_override = self.gas_limit_override;
@@ -149,7 +152,13 @@ where
                     suggested_fee_recipient: request.payload_attributes.suggested_fee_recipient,
                     prev_randao: request.payload_attributes.prev_randao,
                     gas_limit: gas_limit_override.unwrap_or_else(|| {
-                        calculate_block_gas_limit(parent.gas_limit(), desired_gas_limit)
+                        calculate_block_gas_limit(
+                            parent.gas_limit(),
+                            request
+                                .payload_attributes
+                                .target_gas_limit
+                                .unwrap_or(desired_gas_limit),
+                        )
                     }),
                     parent_beacon_block_root: request.payload_attributes.parent_beacon_block_root,
                     withdrawals: withdrawals.map(Into::into),
@@ -282,11 +291,22 @@ where
         request: TestingBuildBlockRequestV1,
         use_pool_transactions: bool,
     ) -> Result<ExecutionPayloadEnvelopeV5, Eth::Error> {
-        self.build_payload_v1(request, self.skip_invalid_transactions, use_pool_transactions)
-            .await?
-            .try_into_v5()
-            .map_err(RethError::other)
-            .map_err(Eth::Error::from_eth_err)
+        let payload = self
+            .build_payload_v1(request, self.skip_invalid_transactions, use_pool_transactions)
+            .await?;
+        let fees = payload.fees();
+        let requests = payload.requests().unwrap_or_default();
+        let block = Arc::unwrap_or_clone(payload.into_block_arc());
+        let block_hash = block.hash();
+        let block = block.into_block().into_ethereum_block();
+
+        Ok(ExecutionPayloadEnvelopeV5 {
+            execution_payload: ExecutionPayloadV3::from_block_unchecked(block_hash, &block),
+            block_value: fees,
+            blobs_bundle: BlobsBundleV2::empty(),
+            should_override_builder: false,
+            execution_requests: requests,
+        })
     }
 
     async fn commit_block_v1(
@@ -331,7 +351,17 @@ where
             .await?;
 
         let block_hash = payload.block().hash();
-        let execution_data: Payload::ExecutionData = payload.into();
+        let requests = payload.requests();
+        let block_access_list = payload.block_access_list().cloned();
+        let block = Arc::unwrap_or_clone(payload.into_block_arc()).into_sealed_block();
+        let execution_data = Payload::block_to_payload(block, block_access_list);
+        let execution_data = match (requests, execution_data.sidecar.cancun()) {
+            (Some(requests), Some(cancun)) => ExecutionData::new(
+                execution_data.payload,
+                ExecutionPayloadSidecar::v4(cancun.clone(), PraguePayloadFields::new(requests)),
+            ),
+            _ => execution_data,
+        };
         let status = self
             .engine_handle
             .new_payload(execution_data)
@@ -372,16 +402,17 @@ where
 #[async_trait]
 impl<Eth, Evm, Payload> TestingApiServer for TestingApi<Eth, Evm, Payload>
 where
-    Payload: PayloadTypes,
-    Payload::ExecutionData: From<EthBuiltPayload>,
+    Payload: PayloadTypes<
+        ExecutionData = ExecutionData,
+        BuiltPayload: BuiltPayload<Primitives = Evm::Primitives>,
+    >,
     Eth: Call<
-        Provider: BlockReader<Header = Header>
-                      + BlockReaderIdExt<Header = Header>
+        Provider: BlockReader<Header = HeaderTy<Evm::Primitives>>
+                      + BlockReaderIdExt<Header = HeaderTy<Evm::Primitives>>
                       + ChainSpecProvider<ChainSpec: EthereumHardforks>,
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Evm::Primitives>>>,
     >,
-    Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes, Primitives = EthPrimitives>
-        + 'static,
+    Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes> + 'static,
 {
     /// Handles `testing_buildBlockV1` by gating concurrency via a semaphore and offloading heavy
     /// work to the blocking pool to avoid stalling the async runtime.
