@@ -632,30 +632,33 @@ async fn test_flashbots_validate_v6() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
+    let (mut nodes, wallet) = E2ETestSetupBuilder::<EthereumNode, _>::new(
         1,
-        chain_spec.clone(),
-        false,
-        Default::default(),
+        chain_spec,
         eth_payload_attributes_amsterdam,
     )
+    .with_node_config_modifier(|config| {
+        config.with_rpc(
+            RpcServerArgs::default()
+                .with_unused_ports()
+                .with_http()
+                .with_http_api(RpcModuleSelection::All)
+                .with_force_blob_sidecar_upcasting(),
+        )
+    })
+    .build()
     .await?;
     let mut node = nodes.pop().unwrap();
     let provider = ProviderBuilder::new()
         .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
         .connect_http(node.rpc_url());
 
-    for nonce in 0..3 {
-        let _ = provider
-            .send_transaction(TransactionRequest::default().to(Address::ZERO).nonce(nonce))
-            .await?;
-    }
-
+    inject_blob_transaction(&node, &wallet).await?;
     let payload = node.new_payload().await?;
     assert!(payload.block_access_list().is_some());
-    assert!(payload.block().body().transactions().count() >= 3);
 
     let envelope = payload.clone().try_into_v6()?;
+    assert!(!envelope.blobs_bundle.blobs.is_empty());
     let mut request = BuilderBlockValidationRequestV6 {
         request: SignedBidSubmissionV6 {
             message: BidTrace {
@@ -678,6 +681,18 @@ async fn test_flashbots_validate_v6() -> eyre::Result<()> {
         .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV6".into(), (&request,))
         .await
         .expect("request should validate");
+
+    let mut invalid_proof_request = request.clone();
+    invalid_proof_request.request.blobs_bundle.proofs[0] =
+        invalid_proof_request.request.blobs_bundle.proofs[1];
+    let err = provider
+        .raw_request::<_, ()>(
+            "flashbots_validateBuilderSubmissionV6".into(),
+            (&invalid_proof_request,),
+        )
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("invalid KZG proof"), "{err}");
 
     request.registered_gas_limit -= 1;
     assert!(provider
