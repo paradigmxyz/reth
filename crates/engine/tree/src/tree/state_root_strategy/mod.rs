@@ -1195,8 +1195,9 @@ where
 
             // Blocking on the fallback picks its result up as soon as it lands. The timeout only
             // bounds how long a task result can sit unnoticed in `task_rx`, which is an mpsc
-            // receiver and so cannot be selected on together with the fallback.
-            match fallback_rx.recv_timeout(Duration::from_micros(100)) {
+            // receiver and so cannot be selected on together with the fallback; 1 ms keeps the
+            // wakeup rate down while the fallback runs, which can take seconds on a large block.
+            match fallback_rx.recv_timeout(Duration::from_millis(1)) {
                 Ok(Ok((state_root, trie_updates, hashed_state))) => {
                     self.metrics.state_root_task_fallback_success_total.increment(1);
                     return Ok(StateRootJobOutcome::new(state_root, Arc::new(trie_updates))
