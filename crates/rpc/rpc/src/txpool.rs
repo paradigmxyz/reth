@@ -60,10 +60,14 @@ where
         from: Address,
     ) -> Result<TxpoolContentFrom<RpcTransaction<Eth::Network>>, Eth::Error> {
         let mut content = TxpoolContentFrom::default();
-        for tx in self.pool.get_pending_transactions_by_sender(from) {
+        // one snapshot for both sides, so a transaction moving between sub-pools meanwhile is
+        // reported on exactly one of them
+        let AllPoolTransactions { pending, queued } =
+            self.pool.get_pending_and_queued_transactions_by_sender(from);
+        for tx in pending {
             self.insert_by_nonce(&tx.transaction, &mut content.pending)?;
         }
-        for tx in self.pool.get_queued_transactions_by_sender(from) {
+        for tx in queued {
             self.insert_by_nonce(&tx.transaction, &mut content.queued)?;
         }
 

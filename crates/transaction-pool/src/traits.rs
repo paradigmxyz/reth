@@ -611,6 +611,22 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
+    /// Returns the pending and the queued transactions of the given sender.
+    ///
+    /// Both sides are read from one consistent snapshot of the pool, so a transaction that moves
+    /// between the pending and the queued sub-pools while this runs shows up on exactly one side.
+    ///
+    /// The default implementation queries both sides separately and does not give that guarantee.
+    fn get_pending_and_queued_transactions_by_sender(
+        &self,
+        sender: Address,
+    ) -> AllPoolTransactions<Self::Transaction> {
+        AllPoolTransactions {
+            pending: self.get_pending_transactions_by_sender(sender),
+            queued: self.get_queued_transactions_by_sender(sender),
+        }
+    }
+
     /// Returns the highest transaction sent by a given user
     fn get_highest_transaction_by_sender(
         &self,

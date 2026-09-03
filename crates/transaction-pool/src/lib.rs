@@ -727,6 +727,13 @@ where
         self.pool.get_queued_transactions_by_sender(sender)
     }
 
+    fn get_pending_and_queued_transactions_by_sender(
+        &self,
+        sender: Address,
+    ) -> AllPoolTransactions<Self::Transaction> {
+        self.pool.get_pending_and_queued_transactions_by_sender(sender)
+    }
+
     fn get_highest_transaction_by_sender(
         &self,
         sender: Address,

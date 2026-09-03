@@ -302,6 +302,13 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         vec![]
     }
 
+    fn get_pending_and_queued_transactions_by_sender(
+        &self,
+        _sender: Address,
+    ) -> AllPoolTransactions<Self::Transaction> {
+        Default::default()
+    }
+
     fn get_highest_transaction_by_sender(
         &self,
         _sender: Address,
