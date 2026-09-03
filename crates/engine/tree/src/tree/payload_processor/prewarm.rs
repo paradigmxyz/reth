@@ -428,7 +428,12 @@ where
                     .map(|provider| Box::new(provider) as _)
             });
 
-            pool.begin_block(build, caches, ctx.env.txpool_snapshot.clone());
+            pool.begin_block(
+                build,
+                caches,
+                ctx.env.txpool_snapshot.clone(),
+                ctx.cache_metrics.clone(),
+            );
             for account in prefetch_bal.as_bal() {
                 pool.warm_account(account.address);
                 for change in &account.storage_changes {
@@ -609,8 +614,12 @@ where
         if let Some(saved_cache) = &self.saved_cache {
             let caches = saved_cache.cache().clone();
             state_provider = Box::new(
-                CachedStateProvider::new_prewarm(state_provider, caches)
-                    .with_txpool_snapshot(self.env.txpool_snapshot.clone()),
+                CachedStateProvider::new_prewarm(
+                    state_provider,
+                    caches,
+                    self.cache_metrics.clone(),
+                )
+                .with_txpool_snapshot(self.env.txpool_snapshot.clone()),
             );
         }
 
@@ -729,8 +738,12 @@ where
                         (false, Some(saved)) => {
                             let caches = saved.cache().clone();
                             Box::new(
-                                CachedStateProvider::new_prewarm(inner, caches)
-                                    .with_txpool_snapshot(self.env.txpool_snapshot.clone()),
+                                CachedStateProvider::new_prewarm(
+                                    inner,
+                                    caches,
+                                    self.cache_metrics.clone(),
+                                )
+                                .with_txpool_snapshot(self.env.txpool_snapshot.clone()),
                             )
                         }
                         _ => Box::new(inner),

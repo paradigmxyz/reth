@@ -136,10 +136,12 @@ impl<S> CachedStateProvider<S> {
     }
 
     /// Creates a cache-filling [`CachedStateProvider`].
-    ///
-    /// Doesn't accept metrics because prewarming path does not need to report hit/misses.
-    pub const fn new_prewarm(state_provider: S, caches: ExecutionCache) -> Self {
-        Self::new_with_mode(state_provider, caches, CacheFillMode::FillOnMiss, None, None)
+    pub const fn new_prewarm(
+        state_provider: S,
+        caches: ExecutionCache,
+        metrics: Option<CachedStateMetrics>,
+    ) -> Self {
+        Self::new_with_mode(state_provider, caches, CacheFillMode::FillOnMiss, metrics, None)
     }
 
     /// Creates a [`CachedStateProvider`] with explicit cache fill behavior and optional
@@ -1467,6 +1469,31 @@ mod tests {
         let res = state_provider.storage(address, storage_key);
         assert!(res.is_ok());
         assert_eq!(res.unwrap(), Some(storage_value));
+    }
+
+    #[test]
+    fn test_prewarm_cache_metrics_include_fill_miss() {
+        let address = Address::random();
+        let storage_key = StorageKey::random();
+        let storage_value = U256::from(1);
+        let account =
+            ExtendedAccount::new(0, U256::ZERO).extend_storage(vec![(storage_key, storage_value)]);
+
+        let provider = MockEthProvider::default();
+        provider.extend_accounts(vec![(address, account)]);
+
+        let state_provider = CachedStateProvider::new_prewarm(
+            provider,
+            ExecutionCache::new(1000),
+            Some(CachedStateMetrics::zeroed(CachedStateMetricsSource::Test)),
+        );
+
+        assert_eq!(state_provider.storage(address, storage_key).unwrap(), Some(storage_value));
+        assert_eq!(state_provider.storage(address, storage_key).unwrap(), Some(storage_value));
+        assert_eq!(
+            state_provider.execution_metric_counts.take(),
+            CacheMetricSnapshot { storage_hits: 1, storage_misses: 1, ..Default::default() }
+        );
     }
 
     #[test]

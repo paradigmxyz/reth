@@ -1,7 +1,9 @@
 //! BAL read-set prewarming pool.
 
 use alloy_primitives::{Address, StorageKey};
-use reth_execution_cache::{CachedStateProvider, ExecutionCache, TxPoolPrewarmCacheSnapshot};
+use reth_execution_cache::{
+    CachedStateMetrics, CachedStateProvider, ExecutionCache, TxPoolPrewarmCacheSnapshot,
+};
 use reth_provider::{
     AccountReader, BytecodeReader, ProviderResult, StateProvider, StateProviderBox,
 };
@@ -33,6 +35,7 @@ enum PrewarmMsg {
         build: Arc<BuildProviderFn>,
         caches: ExecutionCache,
         txpool_snapshot: Option<TxPoolPrewarmCacheSnapshot>,
+        cache_metrics: Option<Arc<CachedStateMetrics>>,
     },
     /// Warm one target into the held provider's cache. Ignored if no provider is held.
     Warm(PrewarmTarget),
@@ -77,12 +80,15 @@ impl BalPrewarmPool {
         build: Arc<BuildProviderFn>,
         caches: ExecutionCache,
         txpool_snapshot: Option<TxPoolPrewarmCacheSnapshot>,
+        cache_metrics: Option<CachedStateMetrics>,
     ) {
+        let cache_metrics = cache_metrics.map(Arc::new);
         for worker in &self.workers {
             let _ = worker.send(PrewarmMsg::BeginBlock {
                 build: build.clone(),
                 caches: caches.clone(),
                 txpool_snapshot: txpool_snapshot.clone(),
+                cache_metrics: cache_metrics.clone(),
             });
         }
     }
@@ -149,11 +155,15 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
     // Blocks when idle; the channel disconnects (and the loop ends) when the pool is dropped.
     while let Ok(msg) = rx.recv() {
         match msg {
-            PrewarmMsg::BeginBlock { build, caches, txpool_snapshot } => {
+            PrewarmMsg::BeginBlock { build, caches, txpool_snapshot, cache_metrics } => {
                 provider = match (build)() {
                     Ok(inner) => Some(
-                        CachedStateProvider::new_prewarm(inner, caches)
-                            .with_txpool_snapshot(txpool_snapshot),
+                        CachedStateProvider::new_prewarm(
+                            inner,
+                            caches,
+                            cache_metrics.as_deref().cloned(),
+                        )
+                        .with_txpool_snapshot(txpool_snapshot),
                     ),
                     Err(err) => {
                         trace!(target: "engine::tree::bal_prewarm_pool", %err, "failed to build provider");
