@@ -2099,6 +2099,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ///
     /// Returns an iterator over the data. Yields [`None`] if the data for the specified number is
     /// not found.
+    ///
+    /// Data is read in batches, so advancing the iterator reads ahead within the requested range.
     pub fn fetch_range_iter<'a, T, F>(
         &'a self,
         segment: StaticFileSegment,
@@ -2107,29 +2109,73 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ) -> ProviderResult<impl Iterator<Item = ProviderResult<Option<T>>> + 'a>
     where
         F: Fn(&mut StaticFileCursor<'_>, u64) -> ProviderResult<Option<T>> + 'a,
-        T: std::fmt::Debug,
+        T: std::fmt::Debug + 'a,
     {
+        // A cursor borrows the provider it was created from, so it cannot be held across
+        // iterations. The range is therefore read in batches, which amortizes cursor creation
+        // (a buffer allocation and a metric record) over `BATCH_SIZE` elements instead of
+        // paying it for every single one.
+        const BATCH_SIZE: usize = 64;
+
+        let end = range.end;
         let mut provider = self.get_maybe_segment_provider(segment, range.start)?;
-        Ok(range.map(move |number| {
-            match provider
-                .as_ref()
-                .map(|provider| get_fn(&mut provider.cursor()?, number))
-                .and_then(|result| result.transpose())
-            {
-                Some(result) => result.map(Some),
-                None => {
-                    // There is a very small chance of hitting a deadlock if two consecutive
-                    // static files share the same bucket in the internal dashmap and we don't drop
-                    // the current provider before requesting the next one.
-                    provider.take();
-                    provider = self.get_maybe_segment_provider(segment, number)?;
+
+        Ok(range.step_by(BATCH_SIZE).flat_map(move |start| {
+            let batch_end = end.min(start.saturating_add(BATCH_SIZE as u64));
+            let mut batch = Vec::with_capacity((batch_end - start) as usize);
+            let mut number = start;
+
+            while number < batch_end {
+                match provider.as_ref().map(|provider| provider.cursor()).transpose() {
+                    Ok(Some(mut cursor)) => {
+                        // Reuse the cursor for as long as its static file covers the range.
+                        while number < batch_end {
+                            match get_fn(&mut cursor, number) {
+                                Ok(None) => break,
+                                result => {
+                                    batch.push(result);
+                                    number += 1;
+                                }
+                            }
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(err) => {
+                        batch.push(Err(err));
+                        number += 1;
+                        continue
+                    }
+                }
+
+                if number == batch_end {
+                    break
+                }
+
+                // There is a very small chance of hitting a deadlock if two consecutive
+                // static files share the same bucket in the internal dashmap and we don't drop
+                // the current provider before requesting the next one.
+                provider.take();
+                match self.get_maybe_segment_provider(segment, number) {
+                    Ok(next) => provider = next,
+                    Err(err) => {
+                        batch.push(Err(err));
+                        number += 1;
+                        continue
+                    }
+                }
+
+                // Retry `number` once against the new static file before reusing its cursor.
+                batch.push(
                     provider
                         .as_ref()
                         .map(|provider| get_fn(&mut provider.cursor()?, number))
                         .and_then(|result| result.transpose())
-                        .transpose()
-                }
+                        .transpose(),
+                );
+                number += 1;
             }
+
+            batch
         }))
     }
 
@@ -3063,11 +3109,14 @@ where
 mod tests {
     use std::collections::BTreeMap;
 
+    use alloy_consensus::Header;
+    use alloy_primitives::BlockHash;
     use reth_chain_state::EthPrimitives;
-    use reth_db::test_utils::create_test_static_files_dir;
+    use reth_db::{static_file::HeaderMask, test_utils::create_test_static_files_dir};
     use reth_static_file_types::{SegmentRangeInclusive, StaticFileSegment};
+    use reth_storage_errors::provider::ProviderResult;
 
-    use crate::{providers::StaticFileProvider, StaticFileProviderBuilder};
+    use crate::{providers::StaticFileProvider, StaticFileProviderBuilder, StaticFileWriter};
 
     #[test]
     fn test_find_fixed_range_with_block_index() -> eyre::Result<()> {
@@ -3185,6 +3234,36 @@ mod tests {
             sf_rw.find_fixed_range_with_block_index(segment, Some(&mixed_size_index), 550),
             SegmentRangeInclusive::new(550, 649)
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_fetch_range_iter_yields_one_result_per_number() -> eyre::Result<()> {
+        let (static_dir, _) = create_test_static_files_dir();
+        let sf_rw: StaticFileProvider<EthPrimitives> =
+            StaticFileProviderBuilder::read_write(&static_dir).with_blocks_per_file(10).build()?;
+
+        let tip = 29;
+        {
+            let mut writer = sf_rw.latest_writer(StaticFileSegment::Headers)?;
+            let mut header = Header::default();
+            for number in 0..=tip {
+                header.number = number;
+                writer.append_header(&header, &BlockHash::default())?;
+            }
+            writer.commit()?;
+        }
+
+        // spans three static files and reaches past the tip
+        let numbers = sf_rw
+            .fetch_range_iter(StaticFileSegment::Headers, 0..tip + 3, |cursor, number| {
+                cursor.get_one::<HeaderMask<Header>>(number.into())
+            })?
+            .map(|header| Ok(header?.map(|header| header.number)))
+            .collect::<ProviderResult<Vec<_>>>()?;
+
+        assert_eq!(numbers, (0..=tip).map(Some).chain([None, None]).collect::<Vec<_>>());
 
         Ok(())
     }
