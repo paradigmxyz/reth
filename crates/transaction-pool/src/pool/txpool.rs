@@ -230,48 +230,49 @@ impl<T: TransactionOrdering> TxPool<T> {
         F: FnMut(&Arc<ValidPoolTransaction<T::Transaction>>),
     {
         std::mem::swap(&mut self.all_transactions.pending_fees.blob_fee, &mut pending_blob_fee);
-        match (self.all_transactions.pending_fees.blob_fee.cmp(&pending_blob_fee), base_fee_update)
-        {
-            (Ordering::Equal, Ordering::Equal | Ordering::Greater) => {
-                // fee unchanged, nothing to update
+        let blob_fee_update = self.all_transactions.pending_fees.blob_fee.cmp(&pending_blob_fee);
+
+        // A rise in the blob fee parks pending blob transactions, a fall in either fee can make
+        // parked ones valid again, and a single update can need both: the blob fee and the base
+        // fee are derived from different gas counters, so a block can raise one while lowering the
+        // other. They are therefore checked independently rather than as one combined match.
+        if blob_fee_update.is_gt() {
+            // increased blob fee: recheck pending pool and remove all that are no longer valid
+            let removed =
+                self.pending_pool.update_blob_fee(self.all_transactions.pending_fees.blob_fee);
+            for tx in removed {
+                let to = {
+                    let tx = self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
+
+                    // the blob fee is too high now, unset the blob fee cap block flag
+                    tx.state.remove(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
+                    tx.subpool = tx.state.into();
+                    tx.subpool
+                };
+                self.add_transaction_to_subpool(to, tx);
             }
-            (Ordering::Greater, Ordering::Equal | Ordering::Greater) => {
-                // increased blob fee: recheck pending pool and remove all that are no longer valid
-                let removed =
-                    self.pending_pool.update_blob_fee(self.all_transactions.pending_fees.blob_fee);
-                for tx in removed {
-                    let to = {
-                        let tx =
-                            self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
+        }
 
-                        // the blob fee is too high now, unset the blob fee cap block flag
-                        tx.state.remove(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
-                        tx.subpool = tx.state.into();
-                        tx.subpool
-                    };
-                    self.add_transaction_to_subpool(to, tx);
+        if blob_fee_update.is_lt() || base_fee_update.is_lt() {
+            // decreased blob/base fee: recheck blob pool and promote all that are now valid.
+            // `satisfy_pending_fee_ids` requires both fees to be satisfied, so this cannot promote
+            // a transaction the block above just parked.
+            let removed = self.blob_pool.enforce_pending_fees(&self.all_transactions.pending_fees);
+            for tx in removed {
+                let subpool = {
+                    let tx_meta =
+                        self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
+                    tx_meta.state.insert(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
+                    tx_meta.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
+                    tx_meta.subpool = tx_meta.state.into();
+                    tx_meta.subpool
+                };
+
+                if subpool == SubPool::Pending {
+                    on_promoted(&tx);
                 }
-            }
-            (Ordering::Less, _) | (_, Ordering::Less) => {
-                // decreased blob/base fee: recheck blob pool and promote all that are now valid
-                let removed =
-                    self.blob_pool.enforce_pending_fees(&self.all_transactions.pending_fees);
-                for tx in removed {
-                    let subpool = {
-                        let tx_meta =
-                            self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
-                        tx_meta.state.insert(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
-                        tx_meta.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
-                        tx_meta.subpool = tx_meta.state.into();
-                        tx_meta.subpool
-                    };
 
-                    if subpool == SubPool::Pending {
-                        on_promoted(&tx);
-                    }
-
-                    self.add_transaction_to_subpool(subpool, tx);
-                }
+                self.add_transaction_to_subpool(subpool, tx);
             }
         }
     }
@@ -3583,6 +3584,42 @@ mod tests {
         let tx_meta = pool.all_transactions.txs.get(&id).unwrap();
         assert_eq!(tx_meta.subpool, SubPool::Pending);
         assert!(tx_meta.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK));
+    }
+
+    #[test]
+    fn update_blob_fee_parks_pending_when_base_fee_falls_in_the_same_block() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let initial_blob_fee = pool.all_transactions.pending_fees.blob_fee;
+        let initial_base_fee = 100u64;
+        pool.all_transactions.pending_fees.base_fee = initial_base_fee;
+
+        // comfortably satisfies both fees, so it starts out pending
+        let tx = MockTransaction::eip4844()
+            .with_max_fee(500)
+            .with_priority_fee(1)
+            .with_blob_fee(initial_blob_fee + 100);
+        let validated = f.validated(tx.clone());
+        let id = *validated.id();
+        pool.add_transaction(validated, U256::from(1_000_000), 0, None).unwrap();
+        assert_eq!(pool.pending_pool.len(), 1);
+
+        // the blob fee rises past its cap while the base fee falls, which is what a blob heavy
+        // but gas light block produces. The rise still has to park it.
+        let raised_blob_fee = tx.max_fee_per_blob_gas().unwrap() + 1;
+        pool.all_transactions.pending_fees.base_fee = initial_base_fee - 1;
+        pool.update_blob_fee(raised_blob_fee, Ordering::Less, |_| {});
+
+        assert!(pool.pending_pool.is_empty(), "transaction was left in the pending pool");
+        assert_eq!(pool.blob_pool.len(), 1);
+
+        let tx_meta = pool.all_transactions.txs.get(&id).unwrap();
+        assert!(
+            !tx_meta.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK),
+            "blob fee cap flag was not cleared"
+        );
+        assert_eq!(tx_meta.subpool, SubPool::Blob);
     }
 
     #[test]
