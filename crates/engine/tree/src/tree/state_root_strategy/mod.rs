@@ -1086,6 +1086,29 @@ where
         self.compute_serial(output)
     }
 
+    /// Takes the state root task result if it has finished and its root matches the block header.
+    ///
+    /// A mismatching root is logged and dropped so that the serial fallback decides instead.
+    fn matching_task_root(
+        &self,
+        task_rx: &mpsc::Receiver<Result<StateRootComputeOutcome, StateRootTaskError>>,
+        block: &RecoveredBlock<N::Block>,
+        output: &BlockExecutionOutput<N::Receipt>,
+    ) -> Option<StateRootJobOutcome> {
+        let Ok(Ok(outcome)) = task_rx.try_recv() else { return None };
+        let outcome = self.sparse_outcome(block, output, outcome);
+        if outcome.state_root == block.header().state_root() {
+            return Some(outcome)
+        }
+        warn!(
+            target: "engine::tree::state_root_strategy",
+            state_root = ?outcome.state_root,
+            block_state_root = ?block.header().state_root(),
+            "State root task returned incorrect state root, using serial fallback"
+        );
+        None
+    }
+
     fn sparse_outcome(
         &self,
         _block: &RecoveredBlock<N::Block>,
@@ -1179,37 +1202,36 @@ where
         };
 
         loop {
-            if let Ok(Ok(outcome)) = task_rx.try_recv() {
-                let outcome = self.sparse_outcome(block, &output, outcome);
-                if outcome.state_root == block.header().state_root() {
-                    return Ok(outcome)
-                }
-                // A wrong task root falls through to the serial fallback already racing below.
-                warn!(
-                    target: "engine::tree::state_root_strategy",
-                    state_root = ?outcome.state_root,
-                    block_state_root = ?block.header().state_root(),
-                    "State root task returned incorrect state root, using serial fallback"
-                );
+            if let Some(outcome) = self.matching_task_root(&task_rx, block, &output) {
+                return Ok(outcome)
             }
 
             // Blocking on the fallback picks its result up as soon as it lands. The timeout only
             // bounds how long a task result can sit unnoticed in `task_rx`, which is an mpsc
             // receiver and so cannot be selected on together with the fallback; 1 ms keeps the
             // wakeup rate down while the fallback runs, which can take seconds on a large block.
-            match fallback_rx.recv_timeout(Duration::from_millis(1)) {
+            let fallback = match fallback_rx.recv_timeout(Duration::from_millis(1)) {
+                Err(RecvTimeoutError::Timeout) => continue,
+                fallback => fallback,
+            };
+
+            // The fallback settled while this thread was blocked. A valid task result that landed
+            // in the meantime keeps precedence, in particular over a fallback error.
+            if let Some(outcome) = self.matching_task_root(&task_rx, block, &output) {
+                return Ok(outcome)
+            }
+
+            return match fallback {
                 Ok(Ok((state_root, trie_updates, hashed_state))) => {
                     self.metrics.state_root_task_fallback_success_total.increment(1);
-                    return Ok(StateRootJobOutcome::new(state_root, Arc::new(trie_updates))
+                    Ok(StateRootJobOutcome::new(state_root, Arc::new(trie_updates))
                         .with_hashed_state(Some(hashed_state)))
                 }
-                Ok(Err(err)) => return Err(err),
-                Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => {
-                    return Err(ProviderError::other(std::io::Error::other(
-                        "serial state root fallback task dropped",
-                    )))
-                }
+                Ok(Err(err)) => Err(err),
+                // `Timeout` was handled above, so this is `Disconnected`.
+                Err(_) => Err(ProviderError::other(std::io::Error::other(
+                    "serial state root fallback task dropped",
+                ))),
             }
         }
     }
