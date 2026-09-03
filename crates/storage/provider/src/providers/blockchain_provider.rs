@@ -1,3 +1,4 @@
+use super::state::latest::LatestStateProvider;
 use crate::{
     providers::{
         ConsistentProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider,
@@ -17,7 +18,7 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes, TxHash, TxNumber,
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chain_state::{
     BlockState, CanonicalInMemoryState, ForkChoiceNotifications, ForkChoiceSubscriptions,
-    PersistedBlockNotifications, PersistedBlockSubscriptions,
+    MemoryOverlayStateProvider, PersistedBlockNotifications, PersistedBlockSubscriptions,
 };
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
@@ -32,10 +33,13 @@ use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, DatabaseProviderROFactory, NodePrimitivesProvider, RangeEnd,
     RangeResponse, RangeResult, StateRangeProvider, StateRangeProviderFactory, StateRangeView,
-    StorageChangeSetReader, StorageRangeResult,
+    StorageChangeSetReader, StorageRangeResult, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_storage_overlay::{OverlayStateProvider, OverlayStateProviderFactory, OwnedProvider};
+use reth_storage_overlay::{
+    anchor_for_parent, AnchorForParent, OverlayStateProvider, OverlayStateProviderFactory,
+    OwnedProvider,
+};
 use reth_trie::{
     hashed_cursor::{HashedCursor, HashedCursorFactory},
     metrics::TrieRootMetrics,
@@ -154,11 +158,22 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         &self,
         state: &BlockState<N::Primitives>,
     ) -> ProviderResult<StateProviderBox> {
-        let state_provider_factory = OverlayStateProviderFactory::new(
-            self.database.clone(),
-            self.database.overlay_manager().overlay_builder(state.hash()),
-        );
-        Ok(Box::new(state_provider_factory.database_provider_ro()?))
+        let provider = self.database.provider()?;
+        let mut overlay = Vec::new();
+        let anchor = anchor_for_parent(
+            state.hash(),
+            state.chain().map(|state| state.block()).inspect(|block| overlay.push(block.clone())),
+            &provider,
+        )?;
+
+        let historical: StateProviderBox = match anchor {
+            AnchorForParent::NoReverts { .. } => Box::new(LatestStateProvider::new(provider)),
+            AnchorForParent::RevertsRequired { anchor, .. } => {
+                provider.try_into_history_at_block(anchor.number)?
+            }
+        };
+
+        Ok(Box::new(MemoryOverlayStateProvider::new(historical, overlay)))
     }
 
     /// Returns a cursor-backed state view for a state root still only in canonical in-memory
