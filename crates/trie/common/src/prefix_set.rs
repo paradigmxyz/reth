@@ -219,6 +219,7 @@ pub struct PrefixSet {
     /// Flag indicating that any entry should be considered changed.
     all: bool,
     index: usize,
+    /// `None` for an empty set to avoid allocating an empty vector.
     keys: Option<Arc<Vec<Nibbles>>>,
 }
 
