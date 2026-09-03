@@ -1125,7 +1125,7 @@ impl ArenaParallelSparseTrie {
 
             let branch = arena[head_idx].branch_mut();
             branch.state =
-                ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone(), epoch: node_epoch };
+                ArenaSparseNodeState::Cached { rlp_node, epoch: node_epoch };
             branch.branch_masks = new_branch_masks;
 
             // Record trie updates for dirty branches only.
