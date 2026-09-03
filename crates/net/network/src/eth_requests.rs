@@ -312,6 +312,7 @@ where
 
         let GetReceipts70 { first_block_receipt_index, block_hashes } = request;
 
+        let count = block_hashes.len();
         let mut receipts = Vec::new();
         let mut total_bytes = 0usize;
         let mut last_block_incomplete = false;
@@ -337,6 +338,9 @@ where
             }
 
             let block_size = block_receipts.length();
+            if receipts.is_empty() {
+                receipts.reserve(response_reserve_hint(count, block_size, MAX_BLOCKS_RESERVE));
+            }
 
             if total_bytes + block_size <= SOFT_RESPONSE_LIMIT {
                 total_bytes += block_size;
@@ -422,6 +426,14 @@ where
 
         let _ = response.send(Ok(cells_response));
     }
+}
+
+/// Number of response items to reserve once the first requested item has resolved.
+///
+/// Assumes the remaining items are about as large as the first one and reserves as many as fit into
+/// [`SOFT_RESPONSE_LIMIT`], bounded by the requested `count` and `max`.
+fn response_reserve_hint(count: usize, first_len: usize, max: usize) -> usize {
+    SOFT_RESPONSE_LIMIT.div_ceil(first_len.max(1)).min(count).min(max)
 }
 
 impl<C, N> EthRequestHandler<C, N>
@@ -665,14 +677,6 @@ fn boundary_proof_keys<T>(origin: B256, last: Option<&(B256, T)>) -> Vec<B256> {
         Some((last, _)) => vec![origin, *last],
         None => vec![origin],
     }
-}
-
-/// Number of response items to reserve once the first requested item has resolved.
-///
-/// Assumes the remaining items are about as large as the first one and reserves as many as fit into
-/// [`SOFT_RESPONSE_LIMIT`], bounded by the requested `count` and `max`.
-fn response_reserve_hint(count: usize, first_len: usize, max: usize) -> usize {
-    SOFT_RESPONSE_LIMIT.div_ceil(first_len.max(1)).min(count).min(max)
 }
 
 /// An endless future.
