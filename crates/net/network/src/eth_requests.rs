@@ -80,6 +80,20 @@ pub const MAX_STORAGE_RANGE_ACCOUNTS_SERVE: usize = 1024;
 /// Maximum size of replies to data retrievals: 2MB
 pub const SOFT_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
 
+/// Upper bound on the headers reserved once the first requested header resolves.
+///
+/// Header responses are bound by [`MAX_HEADERS_SERVE`] rather than by size, so a full batch reaches
+/// its final capacity within a few doublings while a batch that runs past the local tip wastes at
+/// most this many slots.
+const MAX_HEADERS_RESERVE: usize = 64;
+
+/// Upper bound on the block bodies or receipt lists reserved once the first requested block
+/// resolves.
+///
+/// These responses are bound by [`SOFT_RESPONSE_LIMIT`], so the first block's size predicts how
+/// many fit and this only caps the estimate for tiny blocks.
+const MAX_BLOCKS_RESERVE: usize = 16;
+
 /// Manages eth related requests on top of the p2p network.
 ///
 /// This can be spawned to another task and is supposed to be run as background service.
@@ -129,27 +143,33 @@ where
     fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<C::Header> {
         let GetBlockHeaders { start_block, limit, skip, direction } = request;
 
+        let mut headers = Vec::new();
+
         let mut block: BlockHashOrNumber = match start_block {
             BlockHashOrNumber::Hash(start) => start.into(),
             BlockHashOrNumber::Number(num) => {
                 let Some(hash) = self.client.block_hash(num).unwrap_or_default() else {
-                    return Vec::new()
+                    return headers
                 };
                 hash.into()
             }
         };
 
         let skip = skip as u64;
-        // `limit` is peer controlled, so never reserve beyond what is served
-        let mut headers = Vec::with_capacity(limit.min(MAX_HEADERS_SERVE as u64) as usize);
         let mut total_bytes = 0;
 
         for _ in 0..limit {
             if let Some(header) = self.client.header_by_hash_or_number(block).unwrap_or_default() {
                 let number = header.number();
                 let parent_hash = header.parent_hash();
+                let len = header.length();
 
-                total_bytes += header.length();
+                if headers.is_empty() {
+                    let count = limit.min(MAX_HEADERS_SERVE as u64) as usize;
+                    headers.reserve(response_reserve_hint(count, len, MAX_HEADERS_RESERVE));
+                }
+
+                total_bytes += len;
                 headers.push(header);
 
                 if headers.len() >= MAX_HEADERS_SERVE || total_bytes > SOFT_RESPONSE_LIMIT {
@@ -207,14 +227,19 @@ where
         response: oneshot::Sender<RequestResult<BlockBodies<<C::Block as Block>::Body>>>,
     ) {
         self.metrics.eth_bodies_requests_received_total.increment(1);
-        let mut bodies = Vec::with_capacity(request.0.len().min(MAX_BODIES_SERVE));
+        let count = request.0.len();
+        let mut bodies = Vec::new();
 
         let mut total_bytes = 0;
 
         for hash in request {
             if let Some(block) = self.client.block_by_hash(hash).unwrap_or_default() {
                 let body = block.into_body();
-                total_bytes += body.length();
+                let len = body.length();
+                if bodies.is_empty() {
+                    bodies.reserve(response_reserve_hint(count, len, MAX_BLOCKS_RESERVE));
+                }
+                total_bytes += len;
                 bodies.push(body);
 
                 if bodies.len() >= MAX_BODIES_SERVE || total_bytes > SOFT_RESPONSE_LIMIT {
@@ -343,7 +368,8 @@ where
         F: Fn(Vec<C::Receipt>) -> Vec<T>,
         T: Encodable,
     {
-        let mut receipts = Vec::with_capacity(request.0.len().min(MAX_RECEIPTS_SERVE));
+        let count = request.0.len();
+        let mut receipts = Vec::new();
         let mut total_bytes = 0;
 
         for hash in request {
@@ -351,7 +377,11 @@ where
                 self.client.receipts_by_block(BlockHashOrNumber::Hash(hash)).unwrap_or_default()
             {
                 let transformed_receipts = transform_fn(receipts_by_block);
-                total_bytes += transformed_receipts.length();
+                let len = transformed_receipts.length();
+                if receipts.is_empty() {
+                    receipts.reserve(response_reserve_hint(count, len, MAX_BLOCKS_RESERVE));
+                }
+                total_bytes += len;
                 receipts.push(transformed_receipts);
 
                 if receipts.len() >= MAX_RECEIPTS_SERVE || total_bytes > SOFT_RESPONSE_LIMIT {
@@ -635,6 +665,14 @@ fn boundary_proof_keys<T>(origin: B256, last: Option<&(B256, T)>) -> Vec<B256> {
         Some((last, _)) => vec![origin, *last],
         None => vec![origin],
     }
+}
+
+/// Number of response items to reserve once the first requested item has resolved.
+///
+/// Assumes the remaining items are about as large as the first one and reserves as many as fit into
+/// [`SOFT_RESPONSE_LIMIT`], bounded by the requested `count` and `max`.
+fn response_reserve_hint(count: usize, first_len: usize, max: usize) -> usize {
+    SOFT_RESPONSE_LIMIT.div_ceil(first_len.max(1)).min(count).min(max)
 }
 
 /// An endless future.
