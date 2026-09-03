@@ -6,6 +6,14 @@ use smallvec::SmallVec;
 use std::{ops::Range, sync::Arc};
 use zstd::bulk::Decompressor;
 
+/// The column value ranges of a single row, mirroring the inline capacity of [`RefRow`].
+///
+/// The ranges are collected before they are resolved into slices because [`read_value`] borrows the
+/// internal buffer mutably while filling it.
+///
+/// [`read_value`]: NippyJarCursor::read_value
+type ValueRanges = SmallVec<[ValueRange; 4]>;
+
 /// Simple cursor implementation to retrieve data from [`NippyJar`].
 #[derive(Clone)]
 pub struct NippyJarCursor<'a, H = ()> {
@@ -202,11 +210,3 @@ enum ValueRange {
     Mmap(Range<usize>),
     Internal(Range<usize>),
 }
-
-/// The column value ranges of a single row, mirroring the inline capacity of [`RefRow`].
-///
-/// The ranges are collected before they are resolved into slices because [`read_value`] borrows the
-/// internal buffer mutably while filling it.
-///
-/// [`read_value`]: NippyJarCursor::read_value
-type ValueRanges = SmallVec<[ValueRange; 4]>;
