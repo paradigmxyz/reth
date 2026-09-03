@@ -14,7 +14,7 @@ use crate::{
     },
     StaticFileProviderFactory,
 };
-use alloy_primitives::{map::HashMap, Address, BlockNumber, TxHash, TxNumber, B256};
+use alloy_primitives::{Address, BlockNumber, TxHash, TxNumber, B256};
 use rayon::slice::ParallelSliceMut;
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRW},
@@ -787,29 +787,36 @@ where
     CURSOR: DbCursorRO<tables::TransactionSenders>,
 {
     /// Fetches the senders for a range of transactions.
+    ///
+    /// The returned vector has one entry per transaction in `range`: entry `i` holds the sender of
+    /// transaction `range.start + i`, or `None` if no sender is recorded for it.
     pub fn senders_by_tx_range(
         &mut self,
         range: Range<TxNumber>,
-    ) -> ProviderResult<HashMap<TxNumber, Address>> {
+    ) -> ProviderResult<Vec<Option<Address>>> {
+        let start = range.start;
+        let mut senders = vec![None; range.end.saturating_sub(start) as usize];
         match self {
-            Self::Database(cursor, _) => cursor
-                .walk_range(range)?
-                .map(|result| result.map_err(ProviderError::from))
-                .collect::<ProviderResult<HashMap<_, _>>>(),
-            Self::StaticFile(provider, _) => range
-                .clone()
-                .zip(provider.fetch_range_iter(
+            Self::Database(cursor, _) => {
+                for entry in cursor.walk_range(range)? {
+                    let (tx_num, sender) = entry?;
+                    senders[(tx_num - start) as usize] = Some(sender);
+                }
+            }
+            Self::StaticFile(provider, _) => {
+                let iter = provider.fetch_range_iter(
                     StaticFileSegment::TransactionSenders,
                     range,
                     |cursor, number| cursor.get_one::<TransactionSenderMask>(number.into()),
-                )?)
-                .filter_map(|(tx_num, sender)| {
-                    let result = sender.transpose()?;
-                    Some(result.map(|sender| (tx_num, sender)))
-                })
-                .collect::<ProviderResult<HashMap<_, _>>>(),
-            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
+                )?;
+                for (slot, sender) in senders.iter_mut().zip(iter) {
+                    *slot = sender?;
+                }
+            }
+            Self::RocksDB(_) => return Err(ProviderError::UnsupportedProvider),
         }
+
+        Ok(senders)
     }
 }
 
@@ -1128,11 +1135,11 @@ mod tests {
                 assert!(matches!(reader, EitherReader::Database(_, _)));
             }
 
-            assert_eq!(
-                reader.senders_by_tx_range(0..6).unwrap(),
-                senders.iter().copied().collect::<HashMap<_, _>>(),
-                "{reader}"
-            );
+            let mut expected = vec![None; 6];
+            for (tx_num, sender) in senders {
+                expected[tx_num as usize] = Some(sender);
+            }
+            assert_eq!(reader.senders_by_tx_range(0..6).unwrap(), expected, "{reader}");
         }
     }
 }

@@ -1209,17 +1209,16 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         let senders = if tx_range.is_empty() {
             vec![]
         } else {
-            let known_senders: HashMap<TxNumber, Address> =
-                EitherReader::new_senders(self)?.senders_by_tx_range(tx_range.clone())?;
+            let known_senders = EitherReader::new_senders(self)?.senders_by_tx_range(tx_range)?;
 
             let mut senders = Vec::with_capacity(body.transactions().len());
-            for (tx_num, tx) in tx_range.zip(body.transactions()) {
-                match known_senders.get(&tx_num) {
+            for (known_sender, tx) in known_senders.into_iter().zip(body.transactions()) {
+                match known_sender {
                     None => {
                         let sender = tx.recover_signer_unchecked()?;
                         senders.push(sender);
                     }
-                    Some(sender) => senders.push(*sender),
+                    Some(sender) => senders.push(sender),
                 }
             }
             senders
@@ -1314,18 +1313,18 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             let senders = if tx_range.is_empty() {
                 Vec::new()
             } else {
-                let known_senders: HashMap<TxNumber, Address> =
-                    EitherReader::new_senders(self)?.senders_by_tx_range(tx_range.clone())?;
+                let known_senders =
+                    EitherReader::new_senders(self)?.senders_by_tx_range(tx_range)?;
 
                 let mut senders = Vec::with_capacity(body.transactions().len());
-                for (tx_num, tx) in tx_range.zip(body.transactions()) {
-                    match known_senders.get(&tx_num) {
+                for (known_sender, tx) in known_senders.into_iter().zip(body.transactions()) {
+                    match known_sender {
                         None => {
                             // recover the sender from the transaction if not found
                             let sender = tx.recover_signer_unchecked()?;
                             senders.push(sender);
                         }
-                        Some(sender) => senders.push(*sender),
+                        Some(sender) => senders.push(sender),
                     }
                 }
 
