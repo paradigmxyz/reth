@@ -96,8 +96,14 @@ impl<K: EnrKeyUnambiguous> SyncTree<K> {
     /// so one failed lookup would take the tree out of rotation permanently. It retries at the
     /// next recheck instead.
     pub(crate) fn root_update_failed(&mut self) {
-        self.root_updated = Instant::now();
-        self.sync_state = SyncState::Active;
+        // Only a lookup this tree scheduled releases it. Root lookups are also started from
+        // bootstrap, from the public sync command and from link entries found in other trees, and
+        // those outcomes must not overwrite a walk that is still recorded in `Pending`/`Enr`/
+        // `Link`, or the tree would go quiet with its subtree unvisited.
+        if matches!(self.sync_state, SyncState::RootUpdate) {
+            self.root_updated = Instant::now();
+            self.sync_state = SyncState::Active;
+        }
     }
 
     /// Updates the root and returns what changed
@@ -109,13 +115,15 @@ impl<K: EnrKeyUnambiguous> SyncTree<K> {
         self.root_updated = Instant::now();
 
         let state = match (enr_unchanged, link_unchanged) {
-            // both unchanged, nothing to resync, but the tree still has to go back to waiting for
-            // the next recheck: staying in `RootUpdate` would park `poll` on `None` forever and
-            // the tree would never pick up a later change
-            // both unchanged, nothing to resync, but the tree still has to go back to waiting for
-            // the next recheck: staying in `RootUpdate` would park `poll` on `None` forever and
-            // the tree would never pick up a later change
-            (true, true) => SyncState::Active,
+            // Nothing to resync. The tree still has to leave `RootUpdate`, which would otherwise
+            // park `poll` on `None` forever, but only when this answers its own recheck: an
+            // unsolicited lookup of an unchanged root must leave a walk in progress alone.
+            (true, true) => {
+                if !matches!(self.sync_state, SyncState::RootUpdate) {
+                    return
+                }
+                SyncState::Active
+            }
             // only ENR changed
             (false, true) => {
                 self.unresolved_nodes.clear();
@@ -206,6 +214,31 @@ mod tests {
         let same = base_root();
         tree.update_root(same);
         assert!(tree.poll(now, timeout).is_none());
+    }
+
+    #[test]
+    fn unsolicited_root_outcome_does_not_cancel_a_walk() {
+        let timeout = Duration::from_secs(60);
+
+        // a root lookup this tree did not schedule must not discard the walk it still owes. Root
+        // lookups are also started from bootstrap, the public sync command and link entries in
+        // other trees, and the query pool does not de-duplicate them.
+        for unsolicited in [true, false] {
+            let mut tree = make_tree();
+            // Pending -> emits Link, leaving the enr root still to walk
+            assert!(matches!(tree.poll(Instant::now(), timeout), Some(SyncAction::Link(_))));
+
+            if unsolicited {
+                tree.update_root(base_root());
+            } else {
+                tree.root_update_failed();
+            }
+
+            assert!(
+                matches!(tree.poll(Instant::now(), timeout), Some(SyncAction::Enr(_))),
+                "walk was cancelled by an unsolicited root outcome"
+            );
+        }
     }
 
     #[test]
