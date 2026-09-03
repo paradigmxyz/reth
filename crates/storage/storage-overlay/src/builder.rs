@@ -506,7 +506,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     }
 
     /// Returns the in-memory execution overlay and the block for historical fallback reads.
-    #[instrument(level = "debug", target = "storage::overlay", skip_all)]
     pub fn execution_overlay<Provider>(
         &self,
         provider: &Provider,
@@ -524,12 +523,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     }
 
     /// Returns the in-memory execution overlay using frontiers already read from the provider.
-    #[instrument(
-        level = "debug",
-        target = "storage::overlay",
-        skip_all,
-        fields(?state_trie_tip_block, ?finish_tip_block, parent_hash = ?self.parent_hash)
-    )]
     pub fn execution_overlay_at_frontiers<Provider>(
         &self,
         provider: &Provider,

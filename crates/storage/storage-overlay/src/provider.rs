@@ -40,7 +40,6 @@ use reth_trie_db::{
     PackedStoragesTrie,
 };
 use std::{cell::OnceCell, fmt, ops::Deref, sync::Arc, time::Instant};
-use tracing::instrument;
 
 /// Factory for creating overlay state providers with optional reverts and overlays.
 ///
@@ -96,7 +95,6 @@ where
     type Provider = OverlayStateProvider<OwnedProvider<F::Provider>, N>;
 
     /// Create a read-only [`OverlayStateProvider`].
-    #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
     fn database_provider_ro(
         &self,
     ) -> ProviderResult<OverlayStateProvider<OwnedProvider<F::Provider>, N>> {

@@ -383,12 +383,6 @@ impl<N: NodePrimitives> OverlayManager<N> {
     }
 
     /// Returns execution data for the in-memory chain from `anchor_hash` to `parent_hash`.
-    #[tracing::instrument(
-        level = "trace",
-        target = "storage::overlay::manager",
-        skip_all,
-        fields(tip_hash = %parent_state.hash(), anchor_hash = %anchor_hash)
-    )]
     pub(crate) fn execution_overlay_for_block_state(
         &self,
         parent_state: &BlockState<N>,
@@ -432,18 +426,6 @@ impl<N: NodePrimitives> OverlayManager<N> {
         )
     }
 
-    #[tracing::instrument(
-        level = "trace",
-        target = "storage::overlay::manager",
-        skip_all,
-        fields(
-            tip_hash = %parent_state.hash(),
-            anchor_hash = %anchor_hash,
-            cache_reused = tracing::field::Empty,
-            block_count = tracing::field::Empty,
-            parent_overlay_reused = tracing::field::Empty,
-        )
-    )]
     fn get_or_compute_overlay<T, M>(
         &self,
         cache: &OverlayCache<T>,
@@ -458,7 +440,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
     {
         let tip_hash = parent_state.hash();
         let key = OverlayCacheKey { anchor_hash, tip_hash };
-        let span = tracing::Span::current();
+        let span = tracing::Span::none();
         if let Some(entry) = cache.entries.get(&key).map(|entry| entry.value().clone()) {
             metrics.record_cache_reuse();
             span.record("cache_reused", true);
