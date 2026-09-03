@@ -172,7 +172,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
     pub(crate) fn update_blob_fee(
         &mut self,
         blob_fee: u128,
-    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+    ) -> Vec<(Arc<ValidPoolTransaction<T::Transaction>>, PendingRemovalReason)> {
         // Create a collection for removed transactions.
         let mut removed = Vec::new();
 
@@ -183,14 +183,18 @@ impl<T: TransactionOrdering> PendingPool<T> {
             {
                 // Add this tx to the removed collection since it no longer satisfies the blob fee
                 // condition. Decrease the total pool size.
-                removed.push(Arc::clone(&tx.transaction));
+                removed.push((Arc::clone(&tx.transaction), PendingRemovalReason::FeeCap));
 
-                // Remove all dependent transactions.
+                // Remove all dependent transactions. Their own fee caps are not the reason they
+                // leave, so they are reported separately.
                 'this: while let Some((next_id, next_tx)) = transactions_iter.peek() {
                     if next_id.sender != id.sender {
                         break 'this
                     }
-                    removed.push(Arc::clone(&next_tx.transaction));
+                    removed.push((
+                        Arc::clone(&next_tx.transaction),
+                        PendingRemovalReason::ParkedAncestor,
+                    ));
                     transactions_iter.next();
                 }
             } else {
@@ -215,7 +219,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
     pub(crate) fn update_base_fee(
         &mut self,
         base_fee: u64,
-    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+    ) -> Vec<(Arc<ValidPoolTransaction<T::Transaction>>, PendingRemovalReason)> {
         // Create a collection for removed transactions.
         let mut removed = Vec::new();
 
@@ -225,14 +229,18 @@ impl<T: TransactionOrdering> PendingPool<T> {
             if tx.transaction.max_fee_per_gas() < base_fee as u128 {
                 // Add this tx to the removed collection since it no longer satisfies the base fee
                 // condition. Decrease the total pool size.
-                removed.push(Arc::clone(&tx.transaction));
+                removed.push((Arc::clone(&tx.transaction), PendingRemovalReason::FeeCap));
 
-                // Remove all dependent transactions.
+                // Remove all dependent transactions. Their own fee caps are not the reason they
+                // leave, so they are reported separately.
                 'this: while let Some((next_id, next_tx)) = transactions_iter.peek() {
                     if next_id.sender != id.sender {
                         break 'this
                     }
-                    removed.push(Arc::clone(&next_tx.transaction));
+                    removed.push((
+                        Arc::clone(&next_tx.transaction),
+                        PendingRemovalReason::ParkedAncestor,
+                    ));
                     transactions_iter.next();
                 }
             } else {
@@ -625,6 +633,17 @@ impl<T: TransactionOrdering> PendingPool<T> {
     }
 }
 
+/// Why [`PendingPool::update_base_fee`] or [`PendingPool::update_blob_fee`] took a transaction
+/// out of the pending pool.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PendingRemovalReason {
+    /// The transaction's own fee cap no longer covers the fee.
+    FeeCap,
+    /// An ancestor of this transaction was removed, so its ancestors are no longer all pending.
+    /// Its own fee cap is fine.
+    ParkedAncestor,
+}
+
 /// A transaction that is ready to be included in a block.
 #[derive(Debug)]
 pub struct PendingTransaction<T: TransactionOrdering> {
@@ -1001,7 +1020,7 @@ mod tests {
         // Update the base fee to a value higher than tx1's fee, causing it to be removed
         let removed = pool.update_base_fee((tx1.max_fee_per_gas() + 1) as u64);
         assert_eq!(removed.len(), 1);
-        assert_eq!(removed[0].hash(), tx1.hash());
+        assert_eq!(removed[0].0.hash(), tx1.hash());
 
         // Verify that only tx2 remains in the pool
         assert_eq!(pool.len(), 1);
@@ -1040,7 +1059,7 @@ mod tests {
         // Update the blob fee to a value that causes tx1 to be removed
         let removed = pool.update_blob_fee(100);
         assert_eq!(removed.len(), 1);
-        assert_eq!(removed[0].hash(), tx1.hash());
+        assert_eq!(removed[0].0.hash(), tx1.hash());
 
         // Verify that only tx2 remains in the pool
         assert!(pool.contains(tx2.id()));

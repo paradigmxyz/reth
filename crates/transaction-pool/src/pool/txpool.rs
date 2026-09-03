@@ -12,7 +12,7 @@ use crate::{
         best::BestTransactions,
         blob::BlobTransactions,
         parked::{BasefeeOrd, ParkedPool, QueuedOrd},
-        pending::PendingPool,
+        pending::{PendingPool, PendingRemovalReason},
         state::{SubPool, TxState},
         update::{Destination, PoolUpdate, UpdateOutcome},
         AddedPendingTransaction, AddedTransaction, OnNewCanonicalStateOutcome,
@@ -239,15 +239,26 @@ impl<T: TransactionOrdering> TxPool<T> {
                 // increased blob fee: recheck pending pool and remove all that are no longer valid
                 let removed =
                     self.pending_pool.update_blob_fee(self.all_transactions.pending_fees.blob_fee);
-                for tx in removed {
+                for (tx, reason) in removed {
                     let to = {
-                        let tx =
+                        let meta =
                             self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
 
-                        // the blob fee is too high now, unset the blob fee cap block flag
-                        tx.state.remove(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
-                        tx.subpool = tx.state.into();
-                        tx.subpool
+                        match reason {
+                            // the blob fee is too high now, unset the blob fee cap block flag
+                            PendingRemovalReason::FeeCap => {
+                                meta.state.remove(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK)
+                            }
+                            // this one satisfies the blob fee, it only leaves because the ancestor
+                            // above it was parked. Clearing its fee flag instead would misreport
+                            // why it is parked, and for a non-4844 descendant it would clear a
+                            // flag that must always be set.
+                            PendingRemovalReason::ParkedAncestor => {
+                                meta.state.remove(TxState::NO_PARKED_ANCESTORS)
+                            }
+                        }
+                        meta.subpool = meta.state.into();
+                        meta.subpool
                     };
                     self.add_transaction_to_subpool(to, tx);
                 }
@@ -294,13 +305,22 @@ impl<T: TransactionOrdering> TxPool<T> {
                 // increased base fee: recheck pending pool and remove all that are no longer valid
                 let removed =
                     self.pending_pool.update_base_fee(self.all_transactions.pending_fees.base_fee);
-                for tx in removed {
+                for (tx, reason) in removed {
                     let to = {
-                        let tx =
+                        let meta =
                             self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
-                        tx.state.remove(TxState::ENOUGH_FEE_CAP_BLOCK);
-                        tx.subpool = tx.state.into();
-                        tx.subpool
+                        match reason {
+                            PendingRemovalReason::FeeCap => {
+                                meta.state.remove(TxState::ENOUGH_FEE_CAP_BLOCK)
+                            }
+                            // its own fee cap still covers the base fee, it is only blocked by the
+                            // ancestor that was just parked
+                            PendingRemovalReason::ParkedAncestor => {
+                                meta.state.remove(TxState::NO_PARKED_ANCESTORS)
+                            }
+                        }
+                        meta.subpool = meta.state.into();
+                        meta.subpool
                     };
                     self.add_transaction_to_subpool(to, tx);
                 }
@@ -3407,6 +3427,49 @@ mod tests {
         let InsertOk { state, .. } =
             pool.insert_tx(f.validated(tx), on_chain_balance, on_chain_nonce).unwrap();
         assert!(state.contains(TxState::NOT_TOO_MUCH_GAS));
+    }
+
+    #[test]
+    fn basefee_rise_parks_dependents_on_their_ancestor_not_their_fee() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        // same sender: the first only just covers the base fee, the second covers far more
+        let first = MockTransaction::eip1559().with_max_fee(110).with_priority_fee(1);
+        let first_v = f.validated(first.clone());
+        let first_id = *first_v.id();
+        pool.add_transaction(first_v, U256::from(u128::MAX), 0, None).unwrap();
+
+        let second_tx = MockTransaction::eip1559()
+            .with_sender(first.sender())
+            .with_nonce(first.nonce() + 1)
+            .with_max_fee(10_000)
+            .with_priority_fee(1);
+        let second_v = f.validated(second_tx);
+        let second_id = *second_v.id();
+        pool.add_transaction(second_v, U256::from(u128::MAX), 0, None).unwrap();
+
+        assert_eq!(pool.pending_pool.len(), 2);
+
+        // raise the base fee past the first transaction only
+        pool.update_basefee(200, |_| {});
+
+        let first_meta = pool.all_transactions.txs.get(&first_id).unwrap();
+        assert!(
+            !first_meta.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK),
+            "the transaction that failed the fee check should lose the fee flag"
+        );
+
+        let second_meta = pool.all_transactions.txs.get(&second_id).unwrap();
+        assert!(
+            second_meta.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK),
+            "the dependent covers the base fee, its fee flag must stay set"
+        );
+        assert!(
+            !second_meta.state.contains(TxState::NO_PARKED_ANCESTORS),
+            "the dependent is blocked by its parked ancestor, that is what should be recorded"
+        );
+        assert_eq!(second_meta.subpool, SubPool::Queued);
     }
 
     #[test]
