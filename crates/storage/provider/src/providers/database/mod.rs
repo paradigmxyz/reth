@@ -401,6 +401,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.db.path(),
             self.database_provider_metrics.clone(),
         )
+        .with_bal_store(self.bal_store.clone())
         .with_minimum_pruning_distance(self.minimum_pruning_distance))
     }
 
@@ -424,6 +425,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
                 self.db.path(),
                 self.database_provider_metrics.clone(),
             )
+            .with_bal_store(self.bal_store.clone())
             .with_reader_txn_tracker(self.db.clone())
             .with_minimum_pruning_distance(self.minimum_pruning_distance),
         ))
@@ -452,6 +454,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.db.path(),
             self.database_provider_metrics.clone(),
         )
+        .with_bal_store(self.bal_store.clone())
         .with_reader_txn_tracker(self.db.clone())
         .with_minimum_pruning_distance(self.minimum_pruning_distance))
     }
@@ -1005,10 +1008,11 @@ mod tests {
     use crate::{
         providers::{StaticFileProvider, StaticFileWriter},
         test_utils::{blocks::TEST_BLOCK, create_test_provider_factory, MockNodeTypesWithDB},
-        BlockHashReader, BlockNumReader, BlockWriter, DBProvider, HeaderSyncGapProvider,
-        TransactionsProvider,
+        BalProvider, BalStoreHandle, BlockHashReader, BlockNumReader, BlockWriter, DBProvider,
+        HeaderSyncGapProvider, InMemoryBalStore, TransactionsProvider,
     };
-    use alloy_primitives::{TxNumber, B256};
+    use alloy_eips::NumHash;
+    use alloy_primitives::{Bytes, TxNumber, B256};
     use assert_matches::assert_matches;
     use reth_chainspec::ChainSpecBuilder;
     use reth_db::{
@@ -1018,6 +1022,7 @@ mod tests {
     use reth_db_api::tables;
     use reth_primitives_traits::SignerRecoverable;
     use reth_prune_types::{PruneMode, PruneModes};
+    use reth_storage_api::RawBal;
     use reth_storage_errors::provider::ProviderError;
     use reth_testing_utils::generators::{self, random_block, random_header, BlockParams};
     use std::{ops::RangeInclusive, sync::Arc};
@@ -1046,6 +1051,24 @@ mod tests {
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw.block_hash(0).unwrap();
         provider.block_hash(0).unwrap();
+    }
+
+    #[test]
+    fn providers_share_factory_bal_store() {
+        fn assert_bal<P: BalProvider>(provider: &P, block_hash: B256, bal: &Bytes) {
+            assert_eq!(provider.get_bal_by_hash(block_hash).unwrap(), Some(bal.clone()));
+        }
+
+        let block_hash = B256::with_last_byte(1);
+        let bal = Bytes::from_static(b"bal");
+        let bal_store = BalStoreHandle::new(InMemoryBalStore::default());
+        bal_store.insert(NumHash::new(1, block_hash), RawBal::from(bal.clone())).unwrap();
+
+        let factory = create_test_provider_factory().with_bal_store(bal_store);
+
+        assert_bal(&factory.provider().unwrap(), block_hash, &bal);
+        assert_bal(&factory.provider_rw().unwrap(), block_hash, &bal);
+        assert_bal(&factory.unwind_provider_rw().unwrap(), block_hash, &bal);
     }
 
     #[test]

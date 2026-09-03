@@ -11,16 +11,16 @@ use crate::{
     traits::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
     },
-    AccountReader, BlockBodyWriter, BlockExecutionWriter, BlockHashReader, BlockNumReader,
-    BlockReader, BlockWriter, BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter,
-    DBProvider, DbTxProvider, EitherReader, EitherWriter, EitherWriterDestination, HashingWriter,
-    HeaderProvider, HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef,
-    HistoryWriter, LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown,
-    PersistenceFrontiers, ProviderError, PruneCheckpointReader, PruneCheckpointWriter,
-    RawRocksDBBatch, RevertsInit, RocksBatchArg, RocksDBProviderFactory, StageCheckpointReader,
-    StateProviderBox, StateWriter, StaticFileProviderFactory, StatsReader, StorageReader,
-    StorageTrieWriter, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
-    TrieWriter,
+    AccountReader, BalProvider, BalStoreHandle, BlockBodyWriter, BlockExecutionWriter,
+    BlockHashReader, BlockNumReader, BlockReader, BlockWriter, BundleStateInit,
+    ChainStateBlockReader, ChainStateBlockWriter, DBProvider, DbTxProvider, EitherReader,
+    EitherWriter, EitherWriterDestination, HashingWriter, HeaderProvider, HeaderSyncGapProvider,
+    HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter, LatestStateProvider,
+    LatestStateProviderRef, OriginalValuesKnown, PersistenceFrontiers, ProviderError,
+    PruneCheckpointReader, PruneCheckpointWriter, RawRocksDBBatch, RevertsInit, RocksBatchArg,
+    RocksDBProviderFactory, StageCheckpointReader, StateProviderBox, StateWriter,
+    StaticFileProviderFactory, StatsReader, StorageReader, StorageTrieWriter, TransactionVariant,
+    TransactionsProvider, TransactionsProviderExt, TrieWriter,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
@@ -140,6 +140,12 @@ impl<DB: Database, N: NodeTypes> AsRef<DatabaseProvider<<DB as Database>::TXMut,
     }
 }
 
+impl<DB: Database, N: NodeTypes> BalProvider for DatabaseProviderRW<DB, N> {
+    fn bal_store(&self) -> &BalStoreHandle {
+        &self.0.bal_store
+    }
+}
+
 impl<DB: Database, N: NodeTypes + 'static> DatabaseProviderRW<DB, N> {
     /// Commit database transaction and static file if it exists.
     pub fn commit(self) -> ProviderResult<()> {
@@ -205,6 +211,8 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     rocksdb_provider: RocksDBProvider,
     /// Manager for state trie overlays and cached changesets.
     overlay_manager: OverlayManager<N::Primitives>,
+    /// Store for block access lists shared with providers from the same factory.
+    bal_store: BalStoreHandle,
     /// Task runtime for spawning parallel I/O work.
     runtime: reth_tasks::Runtime,
     /// Path to the database directory.
@@ -232,6 +240,7 @@ impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
             .field("storage_settings", &self.storage_settings)
             .field("rocksdb_provider", &self.rocksdb_provider)
             .field("overlay_manager", &self.overlay_manager)
+            .field("bal_store", &self.bal_store)
             .field("runtime", &self.runtime)
             .field("pending_rocksdb_batches", &"<pending batches>")
             .field("commit_order", &self.commit_order)
@@ -250,6 +259,12 @@ impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Sets the minimum pruning distance.
     pub const fn with_minimum_pruning_distance(mut self, distance: u64) -> Self {
         self.minimum_pruning_distance = distance;
+        self
+    }
+
+    /// Sets the BAL store used by this provider.
+    pub fn with_bal_store(mut self, bal_store: BalStoreHandle) -> Self {
+        self.bal_store = bal_store;
         self
     }
 
@@ -362,6 +377,12 @@ impl<TX, N: NodeTypes> NodePrimitivesProvider for DatabaseProvider<TX, N> {
     type Primitives = N::Primitives;
 }
 
+impl<TX, N: NodeTypes> BalProvider for DatabaseProvider<TX, N> {
+    fn bal_store(&self) -> &BalStoreHandle {
+        &self.bal_store
+    }
+}
+
 impl<TX, N: NodeTypes> StaticFileProviderFactory for DatabaseProvider<TX, N> {
     /// Returns a static file provider
     fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
@@ -432,6 +453,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage_settings,
             rocksdb_provider,
             overlay_manager,
+            bal_store: BalStoreHandle::default(),
             runtime,
             db_path,
             pending_rocksdb_batches: Default::default(),
@@ -1132,6 +1154,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             storage_settings,
             rocksdb_provider,
             overlay_manager,
+            bal_store: BalStoreHandle::default(),
             runtime,
             db_path,
             pending_rocksdb_batches: Default::default(),

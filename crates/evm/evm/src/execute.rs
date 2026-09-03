@@ -41,6 +41,18 @@ pub trait Executor<DB: Database>: Sized {
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>;
 
+    /// Executes a block using a previously decoded block access list.
+    ///
+    /// Implementations that do not support consuming a BAL retain normal serial execution.
+    fn execute_one_with_bal(
+        &mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        _bal: Arc<Bal>,
+    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    {
+        self.execute_one(block)
+    }
+
     /// Executes the EVM with the given input and accepts a state hook closure that is invoked with
     /// the EVM state after execution.
     fn execute_one_with_state_hook<F>(
@@ -624,6 +636,22 @@ where
         self.db.merge_transitions(BundleRetention::Reverts);
 
         Ok(result)
+    }
+
+    fn execute_one_with_bal(
+        &mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        bal: Arc<Bal>,
+    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    {
+        // A stored BAL is advisory. Reads omitted by it must still use the canonical state so an
+        // incomplete cached entry cannot change the validity result of this block.
+        self.db.set_bal(Some(bal));
+        self.db.set_allow_bal_db_fallback(true);
+        let result = self.execute_one(block);
+        self.db.set_bal(None);
+        self.db.set_allow_bal_db_fallback(false);
+        result
     }
 
     fn execute_one_with_state_hook<H>(

@@ -28,6 +28,17 @@ pub struct ExecutorMetrics {
     /// The total amount of time it took to execute the latest block.
     pub execution_duration: Gauge,
 
+    /// Number of blocks executed using a cached block access list.
+    pub bal_execution_total: Counter,
+    /// Number of blocks whose cached block access list was unavailable.
+    pub bal_store_miss_total: Counter,
+    /// Number of blocks skipped because they are too small for BAL execution.
+    pub bal_execution_ineligible_total: Counter,
+    /// Number of cached BALs rejected before execution.
+    pub bal_execution_invalid_total: Counter,
+    /// The Histogram for time spent executing blocks using a cached BAL.
+    pub bal_execution_histogram: Histogram,
+
     /// The Histogram for number of accounts updated when executing the latest block.
     pub accounts_updated_histogram: Histogram,
     /// The Histogram for number of storage slots updated when executing the latest block.

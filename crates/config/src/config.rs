@@ -286,6 +286,11 @@ pub struct ExecutionConfig {
         )
     )]
     pub max_duration: Option<Duration>,
+    /// Minimum transaction count before historical execution attempts to use a cached BAL.
+    ///
+    /// Smaller blocks stay on the serial path because BAL decoding and setup costs more than the
+    /// work it can save.
+    pub bal_execution_min_tx_count: usize,
 }
 
 impl Default for ExecutionConfig {
@@ -297,6 +302,7 @@ impl Default for ExecutionConfig {
             max_cumulative_gas: Some(30_000_000 * 50_000),
             // 10 minutes
             max_duration: Some(Duration::from_secs(10 * 60)),
+            bal_execution_min_tx_count: 5,
         }
     }
 }
