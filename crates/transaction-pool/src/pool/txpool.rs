@@ -232,8 +232,13 @@ impl<T: TransactionOrdering> TxPool<T> {
         std::mem::swap(&mut self.all_transactions.pending_fees.blob_fee, &mut pending_blob_fee);
         match (self.all_transactions.pending_fees.blob_fee.cmp(&pending_blob_fee), base_fee_update)
         {
-            (Ordering::Equal, Ordering::Equal | Ordering::Greater) => {
-                // fee unchanged, nothing to update
+            (Ordering::Equal, Ordering::Equal) => {
+                // fees unchanged, nothing to update
+                return
+            }
+            (Ordering::Equal, Ordering::Greater) => {
+                // only the base fee increased, which `update_basefee` already handled for the
+                // pending pool. The blob sub-pool still needs its flags refreshed below.
             }
             (Ordering::Greater, Ordering::Equal | Ordering::Greater) => {
                 // increased blob fee: recheck pending pool and remove all that are no longer valid
@@ -284,6 +289,47 @@ impl<T: TransactionOrdering> TxPool<T> {
                     self.add_transaction_to_subpool(subpool, tx);
                 }
             }
+        }
+
+        // Any fee change can invalidate the flags of whatever is left in the blob sub-pool, and
+        // this runs after the promotions above so that nothing left in it satisfies both fees.
+        self.refresh_blob_pool_fee_flags();
+    }
+
+    /// Recomputes both fee flags for the transactions left in the blob sub-pool.
+    ///
+    /// Nothing else keeps them current: the pending pool only reports on what it holds, and
+    /// [`BlobPool::enforce_pending_fees`] only reports transactions that satisfy *both* fees, so a
+    /// transaction that keeps failing one of them would otherwise carry whatever flags it had when
+    /// it was parked, and claim to cover a fee it no longer covers.
+    ///
+    /// Must run after any promotion out of the blob sub-pool, so that every transaction still in it
+    /// fails at least one fee check and therefore stays there: this only rewrites flags, it never
+    /// moves a transaction between sub-pools.
+    fn refresh_blob_pool_fee_flags(&mut self) {
+        let PendingFees { base_fee, blob_fee } = self.all_transactions.pending_fees;
+        let recomputed = self
+            .blob_pool
+            .all()
+            .map(|tx| {
+                (
+                    *tx.id(),
+                    tx.max_fee_per_blob_gas() >= Some(blob_fee),
+                    tx.max_fee_per_gas() >= base_fee as u128,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        for (id, enough_blob_fee, enough_base_fee) in recomputed {
+            let Some(meta) = self.all_transactions.txs.get_mut(&id) else { continue };
+            meta.state.set(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK, enough_blob_fee);
+            meta.state.set(TxState::ENOUGH_FEE_CAP_BLOCK, enough_base_fee);
+            meta.subpool = meta.state.into();
+            debug_assert_eq!(
+                meta.subpool,
+                SubPool::Blob,
+                "transaction in the blob sub-pool must fail at least one fee check"
+            );
         }
     }
 
@@ -2195,6 +2241,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     pub(crate) fn assert_invariants(&self) {
         assert_eq!(self.by_hash.len(), self.txs.len(), "by_hash.len() != txs.len()");
         assert!(self.auths.len() <= self.txs.len(), "auths.len() > txs.len()");
+        self.assert_states_match_full_scan();
     }
 
     /// Asserts that every tracked state is what recomputing it from scratch would produce.
@@ -2208,11 +2255,10 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// Only the gapless prefix of each sender is checked. Transactions behind a nonce gap are
     /// deliberately left alone by the update paths, so there is nothing to compare them against.
     ///
-    /// Not currently wired into [`Self::assert_invariants`]: a transaction already parked in the
-    /// blob sub-pool keeps a stale `ENOUGH_BLOB_FEE_CAP_BLOCK` when the blob fee rises, because
-    /// the rise only consults the pending pool and nothing else recomputes that flag. Call this
-    /// explicitly from tests until that is fixed, then it can guard every invariant check.
-    #[cfg(test)]
+    /// Note that the pool is only consistent at rest: the fee update paths do not recompute a
+    /// descendant's `NO_PARKED_ANCESTORS`, so after a fee move the states settle on the next
+    /// [`Self::update`].
+    #[cfg(any(test, feature = "test-utils"))]
     pub(crate) fn assert_states_match_full_scan(&self) {
         let mut current_sender = None;
         let mut next_nonce = 0;
@@ -2852,6 +2898,47 @@ mod tests {
             // assert new pool lengths
             promotion_test.assert_single_tx_ending_subpool(&pool);
         }
+    }
+
+    #[test]
+    fn test_blob_pool_tx_loses_blob_fee_cap_on_blob_fee_rise() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let tx = MockTransaction::eip4844().inc_price().inc_limit();
+        let max_fee_per_blob_gas = tx.max_fee_per_blob_gas().unwrap();
+        let max_fee_per_gas = tx.max_fee_per_gas() as u64;
+
+        // base fee out of reach but the blob fee is affordable: parks in the blob sub-pool without
+        // ever entering the pending pool
+        let mut block_info = pool.block_info();
+        block_info.pending_basefee = max_fee_per_gas + 1;
+        block_info.pending_blob_fee = Some(max_fee_per_blob_gas);
+        pool.set_block_info(block_info);
+
+        let validated = f.validated(tx);
+        let id = *validated.id();
+        pool.add_transaction(validated, U256::MAX, 0, None).unwrap();
+        assert_eq!(pool.all_transactions.txs.get(&id).unwrap().subpool, SubPool::Blob);
+
+        // blob fee rises out of reach while the transaction sits in the blob sub-pool
+        block_info.pending_blob_fee = Some(max_fee_per_blob_gas + 1);
+        pool.set_block_info(block_info);
+        assert!(!pool
+            .all_transactions
+            .txs
+            .get(&id)
+            .unwrap()
+            .state
+            .contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
+
+        // base fee comes back within reach, the blob fee does not: the transaction must stay parked
+        block_info.pending_basefee = max_fee_per_gas;
+        pool.set_block_info(block_info);
+        let internal_tx = pool.all_transactions.txs.get(&id).unwrap();
+        assert!(!internal_tx.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
+        assert_eq!(internal_tx.subpool, SubPool::Blob);
+        assert_eq!(pool.pending_pool.len(), 0);
+        assert_eq!(pool.blob_pool.len(), 1);
     }
 
     #[test]
