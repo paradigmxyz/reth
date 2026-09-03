@@ -187,7 +187,8 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 // condition. Decrease the total pool size.
                 removed.push(Arc::clone(&tx.transaction));
 
-                // Remove all dependent transactions.
+                // Remove all dependent transactions. Draining the rest of the sender here is what
+                // keeps the tracked `highest` correct, see `flush_highest_nonce`.
                 'this: while let Some((next_id, next_tx)) = transactions_iter.peek() {
                     if next_id.sender != id.sender {
                         break 'this
@@ -236,7 +237,8 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 // condition. Decrease the total pool size.
                 removed.push(Arc::clone(&tx.transaction));
 
-                // Remove all dependent transactions.
+                // Remove all dependent transactions. Draining the rest of the sender here is what
+                // keeps the tracked `highest` correct, see `flush_highest_nonce`.
                 'this: while let Some((next_id, next_tx)) = transactions_iter.peek() {
                     if next_id.sender != id.sender {
                         break 'this
@@ -266,7 +268,10 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// `highest_nonces` if the loop has moved on to `next_sender`.
     ///
     /// The pool is drained in ascending `(sender, nonce)` order, so the highest kept nonce of a
-    /// sender is only known once the drain reaches the next sender or the end of the pool.
+    /// sender is only known once the drain reaches the next sender or the end of the pool. This
+    /// relies on the loops removing all remaining transactions of a sender once one of them no
+    /// longer satisfies the fee, otherwise the tracked transaction would not be the highest kept
+    /// one.
     fn flush_highest_nonce(
         &mut self,
         tracked: &mut Option<TransactionId>,
@@ -637,21 +642,56 @@ impl<T: TransactionOrdering> PendingPool<T> {
         &self.independent_transactions
     }
 
-    /// Asserts that the bijection between `by_id` and `all` is valid.
+    /// Asserts that the per-sender side maps are consistent with `by_id`.
+    ///
+    /// Every sender in `by_id` must be tracked with its lowest nonce transaction in
+    /// `independent_transactions` and its highest nonce transaction in `highest_nonces`, no other
+    /// sender may be tracked, and the tracked size must match the size of all transactions.
     #[cfg(any(test, feature = "test-utils"))]
     pub(crate) fn assert_invariants(&self) {
-        assert!(
-            self.independent_transactions.len() <= self.by_id.len(),
-            "independent_transactions.len() > by_id.len()"
-        );
-        assert!(
-            self.highest_nonces.len() <= self.by_id.len(),
-            "highest_nonces.len() > by_id.len()"
+        let mut senders = 0;
+        let mut txs = self.by_id.iter().peekable();
+        while let Some((lowest_id, lowest)) = txs.next() {
+            let sender = lowest_id.sender;
+            senders += 1;
+
+            let mut highest = lowest;
+            while let Some((_, tx)) = txs.next_if(|(id, _)| id.sender == sender) {
+                highest = tx;
+            }
+
+            let independent = self
+                .independent_transactions
+                .get(&sender)
+                .unwrap_or_else(|| panic!("no independent transaction tracked for {sender:?}"));
+            assert_eq!(
+                independent, lowest,
+                "independent transaction of {sender:?} does not match its lowest nonce pool entry"
+            );
+            let tracked_highest = self
+                .highest_nonces
+                .get(&sender)
+                .unwrap_or_else(|| panic!("no highest nonce tracked for {sender:?}"));
+            assert_eq!(
+                tracked_highest, highest,
+                "highest nonce of {sender:?} does not match its highest nonce pool entry"
+            );
+        }
+
+        assert_eq!(
+            self.independent_transactions.len(),
+            senders,
+            "independent_transactions tracks senders without transactions"
         );
         assert_eq!(
             self.highest_nonces.len(),
-            self.independent_transactions.len(),
-            "highest_nonces.len() != independent_transactions.len()"
+            senders,
+            "highest_nonces tracks senders without transactions"
+        );
+        assert_eq!(
+            self.size(),
+            self.by_id.values().map(|tx| tx.transaction.size()).sum::<usize>(),
+            "size_of does not match the size of all transactions"
         );
     }
 }
@@ -805,6 +845,30 @@ mod tests {
         assert_eq!(pool.independent_transactions[&a0.sender_id()].transaction.nonce(), a0.nonce());
         assert_eq!(pool.highest_nonces[&b1.sender_id()].transaction.nonce(), b1.nonce());
         assert_eq!(pool.independent_transactions[&b0.sender_id()].transaction.nonce(), b0.nonce());
+    }
+
+    #[test]
+    fn test_enforce_blobfee_tracks_highest_nonce_of_partially_removed_sender() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = PendingPool::new(MockOrdering::default());
+
+        // sender a keeps its first transaction but its descendant is priced out
+        let a = MockTransaction::eip4844().with_blob_fee(150);
+        let a0 = f.validated_arc(a.clone());
+        let a1 = f.validated_arc(a.inc_nonce().rng_hash().with_blob_fee(50));
+        // sender b keeps both of its transactions
+        let b = MockTransaction::eip4844().with_blob_fee(150);
+        let b0 = f.validated_arc(b.clone());
+        let b1 = f.validated_arc(b.inc_nonce().rng_hash());
+
+        for tx in [&a0, &a1, &b0, &b1] {
+            pool.add_transaction(tx.clone(), 0);
+        }
+
+        let removed = pool.update_blob_fee(100);
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].hash(), a1.hash());
+        pool.assert_invariants();
     }
 
     #[test]
