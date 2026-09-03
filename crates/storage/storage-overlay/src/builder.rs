@@ -319,14 +319,14 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         match &self.overlay_source {
             Some(OverlaySource::Managed) => anchor_for_parent_with_frontiers(
                 self.parent_hash,
-                self.parent_state.iter().flat_map(|state| state.chain()).map(BlockState::block),
+                self.parent_state.iter().flat_map(|state| state.chain()).map(BlockState::block_ref),
                 partial_state_trie,
                 finish,
                 provider,
             ),
             _ => anchor_for_parent_with_frontiers(
                 self.parent_hash,
-                std::iter::empty::<ExecutedBlock<N>>(),
+                std::iter::empty::<&ExecutedBlock<N>>(),
                 partial_state_trie,
                 finish,
                 provider,
@@ -506,7 +506,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     }
 
     /// Returns the in-memory execution overlay and the block for historical fallback reads.
-    #[instrument(level = "debug", target = "storage::overlay", skip_all)]
     pub fn execution_overlay<Provider>(
         &self,
         provider: &Provider,
@@ -524,12 +523,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     }
 
     /// Returns the in-memory execution overlay using frontiers already read from the provider.
-    #[instrument(
-        level = "debug",
-        target = "storage::overlay",
-        skip_all,
-        fields(?state_trie_tip_block, ?finish_tip_block, parent_hash = ?self.parent_hash)
-    )]
     pub fn execution_overlay_at_frontiers<Provider>(
         &self,
         provider: &Provider,
@@ -715,26 +708,27 @@ struct OverlayBuilderMetrics {
     sparse_trie_overlay_skips: Counter,
 }
 
-fn anchor_for_parent_in<N: NodePrimitives>(
+fn anchor_for_parent_in<'a, N: NodePrimitives + 'a>(
     parent_hash: B256,
-    mut in_mem_chain: impl Iterator<Item = ExecutedBlock<N>>,
-    preferred_anchor: B256,
-) -> B256 {
-    if parent_hash == preferred_anchor {
-        return parent_hash
+    in_mem_chain: impl Iterator<Item = &'a ExecutedBlock<N>>,
+    preferred_anchor: BlockNumHash,
+) -> Option<BlockNumHash> {
+    if parent_hash == preferred_anchor.hash {
+        return Some(preferred_anchor)
     }
 
-    let mut hash = parent_hash;
+    let mut anchor = None;
 
-    loop {
-        let Some(block) = in_mem_chain.next() else { return hash };
-        let block_parent_hash = block.recovered_block().parent_hash();
+    for block in in_mem_chain {
+        let block_parent = block.recovered_block().parent_num_hash();
 
-        if block_parent_hash == preferred_anchor {
-            return block_parent_hash
+        if block_parent.hash == preferred_anchor.hash {
+            return Some(preferred_anchor)
         }
-        hash = block_parent_hash;
+        anchor = Some(block_parent);
     }
+
+    anchor
 }
 
 /// Describes whether an overlay must revert the database before using its anchor.
@@ -769,13 +763,13 @@ impl AnchorForParent {
 /// * `parent`: The block whose post-state is being targeted.
 /// * `in_mem_chain`: Yields the in-memory blocks in the chain, starting at `parent_hash`.
 /// * `provider`: Used to resolve the durable frontiers and check changeset availability.
-pub fn anchor_for_parent<N, Provider>(
+pub fn anchor_for_parent<'a, N, Provider>(
     parent_hash: B256,
-    in_mem_chain: impl Iterator<Item = ExecutedBlock<N>>,
+    in_mem_chain: impl Iterator<Item = &'a ExecutedBlock<N>>,
     provider: &Provider,
 ) -> ProviderResult<AnchorForParent>
 where
-    N: NodePrimitives,
+    N: NodePrimitives + 'a,
     Provider: StageCheckpointReader + BlockNumReader + PruneCheckpointReader,
 {
     let (partial_state_trie, finish) = database_state_frontiers(provider)?;
@@ -797,22 +791,43 @@ where
 /// * `partial_state_trie`: The durable state/trie frontier.
 /// * `finish`: The durable Finish frontier.
 /// * `provider`: Used to resolve the parent and check changeset availability.
-pub fn anchor_for_parent_with_frontiers<N, Provider>(
+pub fn anchor_for_parent_with_frontiers<'a, N, Provider>(
     parent_hash: B256,
-    in_mem_chain: impl Iterator<Item = ExecutedBlock<N>>,
+    in_mem_chain: impl Iterator<Item = &'a ExecutedBlock<N>>,
     partial_state_trie: BlockNumHash,
     finish: BlockNumHash,
     provider: &Provider,
 ) -> ProviderResult<AnchorForParent>
 where
-    N: NodePrimitives,
+    N: NodePrimitives + 'a,
     Provider: BlockNumReader + PruneCheckpointReader,
 {
     use std::io::Error;
 
-    let persisted_parent = provider
-        .block_number(parent_hash)?
-        .filter(|&parent_number| parent_number <= partial_state_trie.number);
+    let mut in_mem_chain = in_mem_chain.peekable();
+    let managed_parent_number = in_mem_chain
+        .peek()
+        .filter(|block| block.recovered_block().hash() == parent_hash)
+        .map(|block| block.recovered_block().number());
+    // Managed blocks already carry their number. Blocks above the state trie frontier cannot be a
+    // persisted anchor; for older blocks, verify canonicality with a number-to-hash lookup.
+    let persisted_parent = if let Some(parent_number) = managed_parent_number {
+        if parent_number > partial_state_trie.number {
+            None
+        } else if parent_number == partial_state_trie.number &&
+            parent_hash == partial_state_trie.hash
+        {
+            Some(parent_number)
+        } else {
+            (provider.block_hash(parent_number)? == Some(parent_hash)).then_some(parent_number)
+        }
+    } else if parent_hash == partial_state_trie.hash {
+        Some(partial_state_trie.number)
+    } else {
+        provider
+            .block_number(parent_hash)?
+            .filter(|&parent_number| parent_number <= partial_state_trie.number)
+    };
 
     let mut finish_seen = parent_hash == finish.hash;
     let anchor = if let Some(parent_number) = persisted_parent {
@@ -822,11 +837,12 @@ where
             finish_seen |= block.recovered_block().hash() == finish.hash;
         });
 
-        let anchor_hash =
-            anchor_for_parent_in(parent_hash, &mut in_mem_chain, partial_state_trie.hash);
-        if anchor_hash == partial_state_trie.hash {
-            BlockNumHash::new(partial_state_trie.number, anchor_hash)
+        if let Some(anchor) =
+            anchor_for_parent_in(parent_hash, &mut in_mem_chain, partial_state_trie)
+        {
+            anchor
         } else {
+            let anchor_hash = parent_hash;
             let anchor_number = provider
                 .convert_hash_or_number(anchor_hash.into())?
                 .ok_or(ProviderError::BlockHashNotFound(anchor_hash))?;
