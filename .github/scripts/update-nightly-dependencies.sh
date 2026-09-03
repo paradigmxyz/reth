@@ -6,6 +6,9 @@ readonly NIGHTLY_BRANCH="nightly"
 readonly WORK_ROOT="${RUNNER_TEMP:-/tmp}/reth-nightly-dependencies"
 readonly MAX_REPAIR_ATTEMPTS=5
 
+GITHUB_CREDENTIAL=
+ANTHROPIC_CREDENTIAL=
+
 declare -A REPO_DIRS
 declare -A BUILD_COMMANDS
 
@@ -26,27 +29,49 @@ BUILD_COMMANDS[reth]='cargo check --workspace --all-targets --all-features'
 require_environment() {
   : "${GH_TOKEN:?GH_TOKEN is required}"
   : "${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}"
+  GITHUB_CREDENTIAL=$GH_TOKEN
+  ANTHROPIC_CREDENTIAL=$ANTHROPIC_API_KEY
+  unset GH_TOKEN GITHUB_TOKEN DEREK_TOKEN ANTHROPIC_API_KEY
+  export -n GITHUB_CREDENTIAL ANTHROPIC_CREDENTIAL
+  readonly GITHUB_CREDENTIAL ANTHROPIC_CREDENTIAL
   command -v claude >/dev/null
   command -v gh >/dev/null
   command -v jq >/dev/null
 }
 
+with_github_credential() (
+  unset GITHUB_TOKEN DEREK_TOKEN ANTHROPIC_API_KEY
+  export GH_TOKEN="$GITHUB_CREDENTIAL"
+  "$@"
+)
+
+with_anthropic_credential() (
+  unset GH_TOKEN GITHUB_TOKEN DEREK_TOKEN
+  export ANTHROPIC_API_KEY="$ANTHROPIC_CREDENTIAL"
+  "$@"
+)
+
+without_credentials() (
+  unset GH_TOKEN GITHUB_TOKEN DEREK_TOKEN ANTHROPIC_API_KEY
+  "$@"
+)
+
 configure_git() {
   local user_json name id login
-  user_json=$(gh api /user)
+  user_json=$(with_github_credential gh api /user)
   name=$(jq -r '.name // .login' <<< "$user_json")
   id=$(jq -r '.id' <<< "$user_json")
   login=$(jq -r '.login' <<< "$user_json")
   git config --global user.name "$name"
   git config --global user.email "${id}+${login}@users.noreply.github.com"
-  gh auth setup-git
+  with_github_credential gh auth setup-git
 }
 
 clone_repo() {
   local name=$1 repo=$2
   local dir=${REPO_DIRS[$name]}
   rm -rf "$dir"
-  gh repo clone "$repo" "$dir"
+  with_github_credential gh repo clone "$repo" "$dir"
   git -C "$dir" fetch origin main "+refs/heads/$NIGHTLY_BRANCH:refs/remotes/origin/$NIGHTLY_BRANCH" || true
 }
 
@@ -59,7 +84,7 @@ run_claude() {
   local dir=$1 prompt=$2
   (
     cd "$dir"
-    env -u GH_TOKEN -u GITHUB_TOKEN -u DEREK_TOKEN \
+    with_anthropic_credential \
       claude --print --dangerously-skip-permissions --max-turns 40 "$prompt"
   )
 }
@@ -111,7 +136,7 @@ setup_build() {
     return 0
   fi
   if [ "$name" = "revmc" ] || [ "$name" = "reth" ]; then
-    "$dir/.github/scripts/install_llvm.sh" ubuntu
+    without_credentials "$dir/.github/scripts/install_llvm.sh" ubuntu
   fi
   touch "$marker"
 }
@@ -125,7 +150,7 @@ run_build() {
   mkdir -p "$dir/target"
 
   while true; do
-    if (cd "$dir" && bash -o pipefail -c "$command") 2>&1 | tee "$log"; then
+    if (cd "$dir" && without_credentials bash -o pipefail -c "$command") 2>&1 | tee "$log"; then
       return 0
     fi
 
@@ -143,7 +168,7 @@ The latest failure is in $log. Read the log, repository instructions, and releva
 
 format_repo() {
   local dir=$1
-  (cd "$dir" && cargo +nightly fmt --all)
+  (cd "$dir" && without_credentials cargo +nightly fmt --all)
 }
 
 commit_repairs() {
@@ -165,7 +190,7 @@ commit_repairs() {
 push_nightly() {
   local name=$1
   local dir=${REPO_DIRS[$name]}
-  git -C "$dir" push --force-with-lease origin "HEAD:$NIGHTLY_BRANCH"
+  with_github_credential git -C "$dir" push --force-with-lease origin "HEAD:$NIGHTLY_BRANCH"
   echo "$name nightly: $(git -C "$dir" rev-parse HEAD)"
 }
 
@@ -188,7 +213,7 @@ assert_dependency() {
   grep -E "^${dependency} = .*git = \"https://github.com/${repo}\", rev = \"${rev}\"" "$manifest" >/dev/null
 }
 
-amend_dependency_update() {
+build_and_publish_update() {
   local name=$1
   local dir=${REPO_DIRS[$name]}
   shift
@@ -202,16 +227,13 @@ amend_dependency_update() {
     shift 3
   done
 
-  if [ -z "$(git -C "$dir" status --porcelain)" ]; then
-    push_nightly "$name"
-    return 0
-  fi
-
-  git -C "$dir" add -A
-  if [ "$(git -C "$dir" rev-list --count origin/main..HEAD)" -gt 0 ]; then
-    git -C "$dir" commit --amend --no-edit
-  else
-    git -C "$dir" commit -m "chore(deps): update nightly dependencies"
+  if [ -n "$(git -C "$dir" status --porcelain)" ]; then
+    git -C "$dir" add -A
+    if [ "$(git -C "$dir" rev-list --count origin/main..HEAD)" -gt 0 ]; then
+      git -C "$dir" commit --amend --no-edit
+    else
+      git -C "$dir" commit -m "chore(deps): update nightly dependencies"
+    fi
   fi
   push_nightly "$name"
 }
@@ -229,7 +251,25 @@ pin_revm_facade() {
   local name=$1 rev=$2
   local dir=${REPO_DIRS[$name]}
   pin_dependency "$dir/Cargo.toml" revm bluealloy/revm "$rev"
-  amend_dependency_update "$name" revm bluealloy/revm "$rev"
+  build_and_publish_update "$name" revm bluealloy/revm "$rev"
+}
+
+pin_reth_core_revm() {
+  local rev=$1 dir=${REPO_DIRS[reth-core]} package
+  local packages=(
+    revm-primitives
+    revm-bytecode
+    revm-state
+  )
+
+  for package in "${packages[@]}"; do
+    pin_dependency "$dir/Cargo.toml" "$package" bluealloy/revm "$rev"
+  done
+
+  build_and_publish_update reth-core \
+    revm-primitives bluealloy/revm "$rev" \
+    revm-bytecode bluealloy/revm "$rev" \
+    revm-state bluealloy/revm "$rev"
 }
 
 pin_revmc_revm() {
@@ -272,7 +312,7 @@ update_reth_dependencies() {
   pin_dependency "$dir/Cargo.toml" revm-inspectors paradigmxyz/revm-inspectors "$inspectors_rev"
   pin_dependency "$dir/Cargo.toml" revmc paradigmxyz/revmc "$revmc_rev"
 
-  amend_dependency_update reth \
+  build_and_publish_update reth \
     revm bluealloy/revm "$revm_rev" \
     alloy-evm alloy-rs/evm "$alloy_evm_rev" \
     reth-codecs paradigmxyz/reth-core "$reth_core_rev" \
@@ -302,13 +342,13 @@ main() {
   local revm_rev
   revm_rev=$(git -C "${REPO_DIRS[revm]}" rev-parse HEAD)
 
-  prepare_and_publish_base alloy-evm
+  prepare_branch alloy-evm
   pin_revm_facade alloy-evm "$revm_rev"
 
-  # reth-core does not depend on revm, so only advance and build its branch.
-  prepare_and_publish_base reth-core
+  prepare_branch reth-core
+  pin_reth_core_revm "$revm_rev"
 
-  prepare_and_publish_base revm-inspectors
+  prepare_branch revm-inspectors
   pin_revm_facade revm-inspectors "$revm_rev"
 
   local alloy_evm_rev reth_core_rev inspectors_rev
@@ -316,10 +356,10 @@ main() {
   reth_core_rev=$(git -C "${REPO_DIRS[reth-core]}" rev-parse HEAD)
   inspectors_rev=$(git -C "${REPO_DIRS[revm-inspectors]}" rev-parse HEAD)
 
-  prepare_and_publish_base revmc
+  prepare_branch revmc
   pin_revmc_revm "$revm_rev"
   pin_dependency "${REPO_DIRS[revmc]}/Cargo.toml" alloy-evm alloy-rs/evm "$alloy_evm_rev"
-  amend_dependency_update revmc \
+  build_and_publish_update revmc \
     revm-bytecode bluealloy/revm "$revm_rev" \
     revm-context bluealloy/revm "$revm_rev" \
     revm-context-interface bluealloy/revm "$revm_rev" \
@@ -336,7 +376,7 @@ main() {
   local revmc_rev
   revmc_rev=$(git -C "${REPO_DIRS[revmc]}" rev-parse HEAD)
 
-  prepare_and_publish_base reth
+  prepare_branch reth
   update_reth_dependencies \
     "$revm_rev" \
     "$alloy_evm_rev" \
