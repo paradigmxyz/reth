@@ -512,6 +512,10 @@ where
                     .into());
                 }
 
+                if !filter.matches_bloom(header.logs_bloom()) {
+                    return Ok(Vec::new())
+                }
+
                 let mut all_logs = Vec::new();
                 append_matching_block_logs(
                     &mut all_logs,
@@ -1220,7 +1224,7 @@ impl<
                 return Ok(None);
             };
 
-            let mut range_headers = Vec::with_capacity(self.max_range);
+            let mut range_headers = Vec::with_capacity(self.max_range.min(self.iter.len() + 1));
             range_headers.push(next_header);
 
             // Collect consecutive blocks up to max_range size

@@ -512,7 +512,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                             total: total_stages,
                         },
                         stage_id,
-                        result: out.clone(),
+                        result: out,
                     });
                     if let Some(metrics_tx) = &mut self.metrics_tx {
                         let _ = metrics_tx.send(MetricEvent::StageCheckpoint {
