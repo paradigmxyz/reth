@@ -5,12 +5,12 @@ use crate::{
     metrics::{DatabaseEnvMetrics, Operation, TransactionMode, TransactionOutcome},
     DatabaseError,
 };
-use quanta::Instant;
 use reth_db_api::{
     table::{Compress, DupSort, Encode, IntoVec, Table, TableImporter},
     transaction::{DbTx, DbTxMut},
 };
 use reth_libmdbx::{ffi::MDBX_dbi, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
+use reth_primitives_traits::FastInstant as Instant;
 use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
 use reth_tracing::tracing::{debug, instrument, trace, warn};
 use std::{
@@ -179,7 +179,8 @@ struct MetricsHandler<K: TransactionKind> {
     txn_id: u64,
     /// The time when transaction has started.
     ///
-    /// This is a TSC-backed [`quanta::Instant`] rather than [`std::time::Instant`] because
+    /// This is a TSC-backed [`reth_primitives_traits::FastInstant`] rather than
+    /// [`std::time::Instant`] because
     /// [`MetricsHandler::log_backtrace_on_long_read_transaction`] reads it on every database
     /// operation.
     start: Instant,
