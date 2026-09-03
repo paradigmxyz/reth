@@ -340,7 +340,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                             id.sender.start_bound(),
                             std::ops::Bound::Included(TransactionId::new(id.sender, u64::MAX)),
                         ))
-                        .last()
+                        .next_back()
                     {
                         // insert the new highest nonce for this sender
                         entry.insert(new_highest.clone());
