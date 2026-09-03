@@ -959,9 +959,11 @@ mod tests {
     fn test_single_verifier_complex_depth_first() {
         // Test a complex tree structure with depth-first ordering
         // Build a tree structure with proper parent-child relationships
-        let node_root = test_branch_node(0b0110, 0, 0b0110, vec![]); // root: children at nibbles 1 and 2
+        let node_root = test_branch_node(0b0110, 0, 0b0110, vec![]); // root: children at nibbles 1
+                                                                     // and 2
         let node1 = test_branch_node(0b0110, 0, 0b0110, vec![]); // 0x1: children at nibbles 1 and 2
-        let node11 = test_branch_node(0b0110, 0, 0b0110, vec![]); // 0x11: children at nibbles 1 and 2
+        let node11 = test_branch_node(0b0110, 0, 0b0110, vec![]); // 0x11: children at nibbles 1 and
+                                                                  // 2
         let node111 = test_branch_node(0b0001, 0, 0b0001, vec![]); // 0x111: leaf
         let node112 = test_branch_node(0b0010, 0, 0b0010, vec![]); // 0x112: leaf
         let node12 = test_branch_node(0b0100, 0, 0b0100, vec![]); // 0x12: leaf

@@ -178,7 +178,9 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
         // Drain and iterate over all transactions.
         let mut transactions_iter = self.clear_transactions().into_iter().peekable();
+        let mut highest: Option<TransactionId> = None;
         while let Some((id, tx)) = transactions_iter.next() {
+            self.flush_highest_nonce(&mut highest, Some(id.sender));
             if tx.transaction.is_eip4844() && tx.transaction.max_fee_per_blob_gas() < Some(blob_fee)
             {
                 // Add this tx to the removed collection since it no longer satisfies the blob fee
@@ -195,10 +197,15 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 }
             } else {
                 self.size_of += tx.transaction.size();
-                self.update_independents_and_highest_nonces(&tx);
+                if highest.is_none() {
+                    // first kept transaction of this sender, hence the independent one
+                    self.independent_transactions.insert(id.sender, tx.clone());
+                }
+                highest = Some(id);
                 self.by_id.insert(id, tx);
             }
         }
+        self.flush_highest_nonce(&mut highest, None);
 
         removed
     }
@@ -221,7 +228,9 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
         // Drain and iterate over all transactions.
         let mut transactions_iter = self.clear_transactions().into_iter().peekable();
+        let mut highest: Option<TransactionId> = None;
         while let Some((id, mut tx)) = transactions_iter.next() {
+            self.flush_highest_nonce(&mut highest, Some(id.sender));
             if tx.transaction.max_fee_per_gas() < base_fee as u128 {
                 // Add this tx to the removed collection since it no longer satisfies the base fee
                 // condition. Decrease the total pool size.
@@ -240,12 +249,34 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 tx.priority = self.ordering.priority(&tx.transaction.transaction, base_fee);
 
                 self.size_of += tx.transaction.size();
-                self.update_independents_and_highest_nonces(&tx);
+                if highest.is_none() {
+                    // first kept transaction of this sender, hence the independent one
+                    self.independent_transactions.insert(id.sender, tx.clone());
+                }
+                highest = Some(id);
                 self.by_id.insert(id, tx);
             }
         }
+        self.flush_highest_nonce(&mut highest, None);
 
         removed
+    }
+
+    /// Writes the transaction tracked by a rebuild loop (`update_base_fee`, `update_blob_fee`) to
+    /// `highest_nonces` if the loop has moved on to `next_sender`.
+    ///
+    /// The pool is drained in ascending `(sender, nonce)` order, so the highest kept nonce of a
+    /// sender is only known once the drain reaches the next sender or the end of the pool.
+    fn flush_highest_nonce(
+        &mut self,
+        tracked: &mut Option<TransactionId>,
+        next_sender: Option<SenderId>,
+    ) {
+        if let Some(id) = tracked.take_if(|id| Some(id.sender) != next_sender) &&
+            let Some(tx) = self.by_id.get(&id).cloned()
+        {
+            self.highest_nonces.insert(id.sender, tx);
+        }
     }
 
     /// Updates the independent transaction and highest nonces set, assuming the given transaction
@@ -340,7 +371,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                             id.sender.start_bound(),
                             std::ops::Bound::Included(TransactionId::new(id.sender, u64::MAX)),
                         ))
-                        .last()
+                        .next_back()
                     {
                         // insert the new highest nonce for this sender
                         entry.insert(new_highest.clone());
@@ -745,6 +776,35 @@ mod tests {
         assert_eq!(removed.len(), 2);
         assert!(pool.is_empty());
         pool.assert_invariants();
+    }
+
+    #[test]
+    fn test_enforce_basefee_tracks_highest_nonce_of_partially_removed_sender() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = PendingPool::new(MockOrdering::default());
+
+        // sender a keeps its first transaction but its descendant is priced out
+        let a = MockTransaction::eip1559().inc_price_by(20);
+        let a0 = f.validated_arc(a.clone());
+        let a1 = f.validated_arc(a.inc_nonce().rng_hash().decr_price_by(15));
+        // sender b keeps both of its transactions
+        let b = MockTransaction::eip1559().inc_price_by(20);
+        let b0 = f.validated_arc(b.clone());
+        let b1 = f.validated_arc(b.inc_nonce().rng_hash());
+
+        for tx in [&a0, &a1, &b0, &b1] {
+            pool.add_transaction(tx.clone(), 0);
+        }
+
+        let removed = pool.update_base_fee((a1.max_fee_per_gas() + 1) as u64);
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].hash(), a1.hash());
+
+        pool.assert_invariants();
+        assert_eq!(pool.highest_nonces[&a0.sender_id()].transaction.nonce(), a0.nonce());
+        assert_eq!(pool.independent_transactions[&a0.sender_id()].transaction.nonce(), a0.nonce());
+        assert_eq!(pool.highest_nonces[&b1.sender_id()].transaction.nonce(), b1.nonce());
+        assert_eq!(pool.independent_transactions[&b0.sender_id()].transaction.nonce(), b0.nonce());
     }
 
     #[test]

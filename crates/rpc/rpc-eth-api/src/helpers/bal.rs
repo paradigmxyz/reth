@@ -6,9 +6,7 @@ use alloy_rpc_types_eth::BlockId;
 use reth_errors::RethError;
 use reth_evm::{block::BlockExecutor, ConfigureEvm, Evm};
 use reth_revm::{database::StateProviderDatabase, State};
-use reth_rpc_eth_types::{
-    cache::db::StateProviderTraitObjWrapper, error::FromEthApiError, EthApiError,
-};
+use reth_rpc_eth_types::{error::FromEthApiError, EthApiError};
 use reth_storage_api::StateProviderFactory;
 
 use crate::{
@@ -24,6 +22,10 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
         block_id: BlockId,
     ) -> impl Future<Output = Result<Option<BlockAccessList>, Self::Error>> + Send {
         async move {
+            if block_id.is_pending() {
+                return Ok(None)
+            }
+
             let Some(block) = self.recovered_block(block_id).await? else {
                 return Ok(None);
             };
@@ -38,6 +40,8 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                 return Ok(Some(Vec::from(bal)))
             }
 
+            let _permit = self.acquire_owned_blocking_io().await;
+
             self.spawn_blocking_io(move |eth_api| {
                 let state = eth_api
                     .provider()
@@ -45,7 +49,7 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                     .map_err(Self::Error::from_eth_err)?;
 
                 let mut db = State::builder()
-                    .with_database(StateProviderDatabase::new(StateProviderTraitObjWrapper(state)))
+                    .with_database(StateProviderDatabase::new(state))
                     .with_bal_builder()
                     .build();
 

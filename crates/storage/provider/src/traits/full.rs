@@ -10,7 +10,7 @@ use reth_chain_state::{
 };
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_storage_api::{
-    NodePrimitivesProvider, StorageChangeSetReader, StorageSettingsCache,
+    HistoryReader, NodePrimitivesProvider, StorageChangeSetReader, StorageSettingsCache,
     TryIntoHistoricalStateProvider,
 };
 use std::fmt::Debug;
@@ -25,6 +25,7 @@ pub trait FullProvider<N: NodeTypesWithDB>:
                       + ChangeSetReader
                       + StorageChangeSetReader
                       + StorageSettingsCache
+                      + HistoryReader
                       + TryIntoHistoricalStateProvider
                       + 'static,
     > + NodePrimitivesProvider<Primitives = N::Primitives>
@@ -63,6 +64,7 @@ impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
                           + ChangeSetReader
                           + StorageChangeSetReader
                           + StorageSettingsCache
+                          + HistoryReader
                           + TryIntoHistoricalStateProvider
                           + 'static,
         > + NodePrimitivesProvider<Primitives = N::Primitives>

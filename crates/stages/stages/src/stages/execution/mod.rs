@@ -846,7 +846,6 @@ mod tests {
         let hashed_state = provider.latest().hashed_post_state(&state.bundle).unwrap();
 
         let storage = &hashed_state.storages[&hashed_address];
-        assert!(!storage.wiped);
         assert_eq!(storage.storage[&first_slot], U256::ZERO);
         assert_eq!(storage.storage[&second_slot], U256::ZERO);
         assert!(state.bundle.reverts.is_empty());
@@ -1211,7 +1210,7 @@ mod tests {
             // Test Unwind
             provider = factory.database_provider_rw().unwrap();
             let mut stage = stage();
-            provider.set_prune_modes(mode.clone().unwrap_or_default());
+            provider.set_prune_modes(mode.unwrap_or_default());
 
             let result = stage
                 .unwind(

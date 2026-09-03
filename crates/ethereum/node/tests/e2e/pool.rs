@@ -2,13 +2,18 @@ use crate::utils::eth_payload_attributes;
 use alloy_consensus::{EthereumTxEnvelope, TxEip4844};
 use alloy_eips::{eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M, Encodable2718};
 use alloy_genesis::Genesis;
-use alloy_primitives::B256;
+use alloy_primitives::{Address, TxKind, B256, U256};
+use alloy_provider::{Provider, ProviderBuilder};
+use alloy_rpc_types_eth::TransactionRequest;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::{
-    node::NodeTestContext, transaction::TransactionTestContext, wallet::Wallet,
+    node::NodeTestContext, transaction::TransactionTestContext, wallet::Wallet, E2ETestSetupBuilder,
 };
 use reth_node_builder::{NodeBuilder, NodeHandle};
-use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
+use reth_node_core::{
+    args::{RpcServerArgs, TxPoolArgs},
+    node_config::NodeConfig,
+};
 use reth_node_ethereum::EthereumNode;
 use reth_primitives_traits::Recovered;
 use reth_provider::CanonStateSubscriptions;
@@ -19,6 +24,61 @@ use reth_transaction_pool::{
     TransactionPoolExt,
 };
 use std::{sync::Arc, time::Duration};
+
+#[tokio::test]
+async fn rpc_enforces_minimum_priority_fee() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    const MINIMUM_PRIORITY_FEE: u128 = 1;
+
+    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json"))?;
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(genesis)
+            .cancun_activated()
+            .build(),
+    );
+    let (mut nodes, wallet) =
+        E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, eth_payload_attributes)
+            .with_node_config_modifier(|config| {
+                config.with_txpool(TxPoolArgs {
+                    minimum_priority_fee: Some(MINIMUM_PRIORITY_FEE),
+                    ..Default::default()
+                })
+            })
+            .build()
+            .await?;
+    let node = nodes.pop().unwrap();
+    let provider = ProviderBuilder::new().connect_http(node.rpc_url());
+
+    let transaction = |max_priority_fee_per_gas| TransactionRequest {
+        nonce: Some(0),
+        value: Some(U256::from(100)),
+        to: Some(TxKind::Call(Address::ZERO)),
+        gas: Some(21_000),
+        max_fee_per_gas: Some(20_000_000_000),
+        max_priority_fee_per_gas: Some(max_priority_fee_per_gas),
+        chain_id: Some(1),
+        ..Default::default()
+    };
+
+    let below_minimum = TransactionTestContext::sign_tx(wallet.inner.clone(), transaction(0)).await;
+    let err = provider.send_raw_transaction(&below_minimum.encoded_2718()).await.unwrap_err();
+    assert!(
+        err.to_string().contains("transaction priority fee below minimum required priority fee 1"),
+        "{err}"
+    );
+    assert!(node.inner.pool.is_empty());
+
+    let at_minimum =
+        TransactionTestContext::sign_tx(wallet.inner, transaction(MINIMUM_PRIORITY_FEE)).await;
+    let pending = provider.send_raw_transaction(&at_minimum.encoded_2718()).await?;
+    assert_eq!(node.inner.pool.len(), 1);
+    assert!(node.inner.pool.contains(pending.tx_hash()));
+
+    Ok(())
+}
 
 // Test that stale transactions could be correctly evicted.
 #[tokio::test]
