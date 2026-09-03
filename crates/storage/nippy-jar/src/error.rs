@@ -92,4 +92,8 @@ pub enum NippyJarError {
     /// A specified file is missing.
     #[error("Missing file: {}", .0.display())]
     MissingFile(PathBuf),
+
+    /// The offsets file is empty, e.g. after a crash before its offset size byte was written.
+    #[error("offsets file is empty: {}", .0.display())]
+    EmptyOffsetsFile(PathBuf),
 }

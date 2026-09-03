@@ -365,12 +365,15 @@ impl DataReader {
         // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
         let data_mmap = unsafe { Mmap::map(&data_file)? };
 
-        let offset_file = File::open(path.as_ref().with_extension(OFFSETS_FILE_EXTENSION))?;
+        let offsets_path = path.as_ref().with_extension(OFFSETS_FILE_EXTENSION);
+        let offset_file = File::open(&offsets_path)?;
         // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
         let offset_mmap = unsafe { Mmap::map(&offset_file)? };
 
-        // First byte is the size of one offset in bytes
-        let offset_size = offset_mmap[0];
+        // First byte is the size of one offset in bytes. Mapping an empty file succeeds and yields
+        // an empty slice, so it must not be indexed directly.
+        let offset_size =
+            *offset_mmap.first().ok_or(NippyJarError::EmptyOffsetsFile(offsets_path))?;
 
         // Ensure that the size of an offset is at most 8 bytes.
         if offset_size > 8 {
@@ -839,6 +842,20 @@ mod tests {
             let nippy = NippyJar::load_without_header(file_path.path()).unwrap();
             assert_eq!(nippy.rows, expected_rows);
         }
+    }
+
+    #[test]
+    fn test_empty_offsets_file() {
+        let file_path = tempfile::NamedTempFile::new().unwrap();
+        let nippy = NippyJar::new_without_header(2, file_path.path());
+
+        // Simulate a crash between creating the offsets file and writing its offset size byte.
+        File::create(nippy.offsets_path()).unwrap();
+
+        assert!(matches!(
+            nippy.open_data_reader(),
+            Err(NippyJarError::EmptyOffsetsFile(path)) if path == nippy.offsets_path()
+        ));
     }
 
     fn test_append_consistency_partial_commit(
