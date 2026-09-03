@@ -8076,7 +8076,6 @@ dependencies = [
  "page_size",
  "parking_lot",
  "proptest",
- "quanta",
  "reth-db-api",
  "reth-fs-util",
  "reth-libmdbx",
