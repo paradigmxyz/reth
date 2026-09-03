@@ -188,10 +188,14 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
                         {
                             let _ = provider.bytecode_by_hash(&code_hash);
                         }
-                        warm_slots(provider, addr, &slots);
+                        for &slot in &slots {
+                            let _ = provider.storage(addr, slot);
+                        }
                     }
                     PrewarmTarget::Storage(addr, slots) => {
-                        warm_slots(provider, addr, &slots);
+                        for &slot in &slots {
+                            let _ = provider.storage(addr, slot);
+                        }
                     }
                 }
             }
@@ -202,17 +206,6 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
         }
     }
 }
-
-fn warm_slots(
-    provider: &CachedStateProvider<StateProviderBox>,
-    addr: Address,
-    slots: &[StorageKey],
-) {
-    for &slot in slots {
-        let _ = provider.storage(addr, slot);
-    }
-}
-
 struct SendOnDrop {
     sender: Option<oneshot::Sender<()>>,
 }
