@@ -706,6 +706,12 @@ impl<T: TransactionOrdering> TxPool<T> {
         // This will record any additional promotions based on fee movements
         self.apply_fee_updates(prev_base_fee, prev_blob_fee, &mut outcome);
 
+        // The account update only rechecks the base fee, so a blob transaction it moved to pending
+        // on a stale blob fee flag was parked again by the fee update if the blob fee rose.
+        if self.all_transactions.pending_fees.blob_fee > prev_blob_fee {
+            outcome.promoted.retain(|tx| self.pending_pool.contains(tx.id()));
+        }
+
         // Update the rest of block info (without triggering fee updates again)
         self.all_transactions.set_block_info(block_info);
 
@@ -3630,6 +3636,47 @@ mod tests {
             "blob fee cap flag was not cleared"
         );
         assert_eq!(tx_meta.subpool, SubPool::Blob);
+    }
+
+    #[test]
+    fn canonical_state_change_does_not_report_blob_tx_parked_by_blob_fee_rise() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let initial_blob_fee = pool.all_transactions.pending_fees.blob_fee;
+        let mut block_info = pool.block_info();
+        block_info.pending_basefee = 600;
+        pool.set_block_info(block_info);
+
+        // parked in the blob pool only because its fee cap is below the base fee
+        let tx = MockTransaction::eip4844()
+            .with_max_fee(500)
+            .with_priority_fee(1)
+            .with_blob_fee(initial_blob_fee + 100);
+        let validated = f.validated(tx.clone());
+        let id = *validated.id();
+        pool.add_transaction(validated, U256::from(1_000_000), 0, None).unwrap();
+        assert_eq!(pool.blob_pool.len(), 1);
+
+        // The base fee falls below its cap while the blob fee rises above it. The account update
+        // runs first and moves it to pending on its stale blob fee flag, then the fee update parks
+        // it again, so it must not end up in the promoted set.
+        block_info.pending_basefee = 400;
+        block_info.pending_blob_fee = Some(tx.max_fee_per_blob_gas().unwrap() + 1);
+        let outcome = pool.on_canonical_state_change(
+            block_info,
+            vec![],
+            FxHashMap::default(),
+            PoolUpdateKind::Commit,
+        );
+
+        assert!(pool.pending_pool.is_empty());
+        assert_eq!(pool.blob_pool.len(), 1);
+        assert!(outcome.promoted.is_empty(), "parked transaction was reported as promoted");
+
+        let tx_meta = pool.all_transactions.txs.get(&id).unwrap();
+        assert_eq!(tx_meta.subpool, SubPool::Blob);
+        assert!(!tx_meta.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
     }
 
     #[test]
