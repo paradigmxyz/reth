@@ -1055,6 +1055,20 @@ where
         }
     }
 
+    /// Returns all transactions of the given sender, collected under a single read guard so that
+    /// both sides reflect the same pool state.
+    pub fn all_transactions_by_sender(
+        &self,
+        sender: Address,
+    ) -> AllPoolTransactions<T::Transaction> {
+        let Some(sender_id) = self.sender_id(&sender) else { return Default::default() };
+        let pool = self.get_pool_data();
+        AllPoolTransactions {
+            pending: pool.pending_txs_by_sender(sender_id),
+            queued: pool.queued_txs_by_sender(sender_id),
+        }
+    }
+
     /// Returns _all_ transactions in the pool
     pub fn all_transaction_hashes(&self) -> Vec<TxHash> {
         self.get_pool_data().all().transactions_iter().map(|tx| *tx.hash()).collect()
@@ -1198,20 +1212,6 @@ where
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let Some(sender_id) = self.sender_id(&sender) else { return Vec::new() };
         self.get_pool_data().pending_txs_by_sender(sender_id)
-    }
-
-    /// Returns the pending and the queued transactions of the given sender from one read guard,
-    /// so both sides reflect the same pool state.
-    pub fn get_pending_and_queued_transactions_by_sender(
-        &self,
-        sender: Address,
-    ) -> AllPoolTransactions<T::Transaction> {
-        let Some(sender_id) = self.sender_id(&sender) else { return Default::default() };
-        let pool = self.get_pool_data();
-        AllPoolTransactions {
-            pending: pool.pending_txs_by_sender(sender_id),
-            queued: pool.queued_txs_by_sender(sender_id),
-        }
     }
 
     /// Returns the highest transaction of the address
@@ -1693,7 +1693,7 @@ mod tests {
     use std::{fs, path::PathBuf, sync::Arc};
 
     #[tokio::test]
-    async fn pending_and_queued_by_sender_share_one_snapshot() {
+    async fn all_transactions_by_sender_across_reclassification() {
         let pool = testing_pool();
         let sender = Address::with_last_byte(1);
         // nonces 0 and 1 are pending, the gapped nonce 9 is queued
@@ -1708,7 +1708,7 @@ mod tests {
             nonces
         };
 
-        let txs = pool.get_pending_and_queued_transactions_by_sender(sender);
+        let txs = pool.all_transactions_by_sender(sender);
         assert_eq!(nonces(&txs.pending), [0, 1]);
         assert_eq!(nonces(&txs.queued), [9]);
 
@@ -1719,7 +1719,7 @@ mod tests {
             block_gas_limit: 30_000_000,
             ..Default::default()
         });
-        let txs = pool.get_pending_and_queued_transactions_by_sender(sender);
+        let txs = pool.all_transactions_by_sender(sender);
         assert!(txs.pending.is_empty());
         assert_eq!(nonces(&txs.queued), [0, 1, 9]);
         assert_eq!(nonces(&pool.get_transactions_by_sender(sender)), [0, 1, 9]);

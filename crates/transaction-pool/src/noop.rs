@@ -220,6 +220,13 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         AllPoolTransactions::default()
     }
 
+    fn all_transactions_by_sender(
+        &self,
+        _sender: Address,
+    ) -> AllPoolTransactions<Self::Transaction> {
+        AllPoolTransactions::default()
+    }
+
     fn all_transaction_hashes(&self) -> Vec<TxHash> {
         vec![]
     }
@@ -300,13 +307,6 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         _sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         vec![]
-    }
-
-    fn get_pending_and_queued_transactions_by_sender(
-        &self,
-        _sender: Address,
-    ) -> AllPoolTransactions<Self::Transaction> {
-        Default::default()
     }
 
     fn get_highest_transaction_by_sender(
