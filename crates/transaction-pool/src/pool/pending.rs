@@ -277,9 +277,10 @@ impl<T: TransactionOrdering> PendingPool<T> {
         tracked: &mut Option<TransactionId>,
         next_sender: Option<SenderId>,
     ) {
-        if let Some(id) = tracked.take_if(|id| Some(id.sender) != next_sender) {
-            let tx = self.by_id.get(&id).expect("tracked transaction was kept by the rebuild loop");
-            self.highest_nonces.insert(id.sender, tx.clone());
+        if let Some(id) = tracked.take_if(|id| Some(id.sender) != next_sender) &&
+            let Some(tx) = self.by_id.get(&id).cloned()
+        {
+            self.highest_nonces.insert(id.sender, tx);
         }
     }
 
