@@ -449,6 +449,8 @@ where
             let Poll::Ready(action) = this.action_rx.poll_next_unpin(cx) else {
                 // shrink queues if we don't have any work to do
                 this.shrink_queues();
+                // gauges only need to be accurate once the batch of messages is drained
+                this.update_cached_metrics();
                 return Poll::Pending;
             };
 
@@ -603,7 +605,6 @@ where
                             let _ = response_tx.send(result);
                         }
                     };
-                    this.update_cached_metrics();
                 }
             }
         }
