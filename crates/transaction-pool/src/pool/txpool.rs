@@ -2196,6 +2196,93 @@ impl<T: PoolTransaction> AllTransactions<T> {
         assert_eq!(self.by_hash.len(), self.txs.len(), "by_hash.len() != txs.len()");
         assert!(self.auths.len() <= self.txs.len(), "auths.len() > txs.len()");
     }
+
+    /// Asserts that every tracked state is what recomputing it from scratch would produce.
+    ///
+    /// The `state` bits are maintained incrementally, by `insert_tx`, by [`Self::update`] and by
+    /// the fee update paths in [`TxPool`], each of which touches a different subset. This
+    /// recomputes them from the sender info, the tracked fees and the transactions themselves, so
+    /// a path that updates one bit and forgets another is caught here instead of surfacing later
+    /// as a transaction sitting in the wrong sub-pool.
+    ///
+    /// Only the gapless prefix of each sender is checked. Transactions behind a nonce gap are
+    /// deliberately left alone by the update paths, so there is nothing to compare them against.
+    ///
+    /// Not currently wired into [`Self::assert_invariants`]: a transaction already parked in the
+    /// blob sub-pool keeps a stale `ENOUGH_BLOB_FEE_CAP_BLOCK` when the blob fee rises, because
+    /// the rise only consults the pending pool and nothing else recomputes that flag. Call this
+    /// explicitly from tests until that is fixed, then it can guard every invariant check.
+    #[cfg(test)]
+    pub(crate) fn assert_states_match_full_scan(&self) {
+        let mut current_sender = None;
+        let mut next_nonce = 0;
+        let mut cumulative_cost = U256::ZERO;
+        let mut has_parked_ancestor = false;
+        let mut balance = U256::ZERO;
+        let mut gapped = false;
+
+        for (id, tx) in &self.txs {
+            if current_sender != Some(id.sender) {
+                let info = self.sender_info.get(&id.sender).unwrap_or_else(|| {
+                    panic!("no sender info for {id:?}, which has transactions in the pool")
+                });
+                current_sender = Some(id.sender);
+                next_nonce = info.state_nonce;
+                balance = info.balance;
+                cumulative_cost = U256::ZERO;
+                has_parked_ancestor = false;
+                gapped = false;
+            }
+
+            if gapped || id.nonce != next_nonce {
+                // behind a nonce gap, the update paths do not maintain these
+                gapped = true;
+                continue
+            }
+
+            let mut expected = TxState::default();
+
+            // `ensure_valid` rejects anything above the limit, so everything tracked has this and
+            // the bit is not recomputed from the current limit, which may have moved since
+            expected.insert(TxState::NOT_TOO_MUCH_GAS);
+            expected.insert(TxState::NO_NONCE_GAPS);
+
+            if tx.transaction.is_eip4844() {
+                expected.insert(TxState::BLOB_TRANSACTION);
+                if tx.transaction.max_fee_per_blob_gas() >= Some(self.pending_fees.blob_fee) {
+                    expected.insert(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
+                }
+            } else {
+                expected.insert(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
+            }
+
+            if tx.transaction.max_fee_per_gas() >= self.pending_fees.base_fee as u128 {
+                expected.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
+            }
+
+            cumulative_cost += *tx.transaction.cost();
+            if cumulative_cost <= balance {
+                expected.insert(TxState::ENOUGH_BALANCE);
+            }
+
+            if !has_parked_ancestor {
+                expected.insert(TxState::NO_PARKED_ANCESTORS);
+            }
+            has_parked_ancestor = !expected.is_pending();
+            next_nonce = id.next_nonce();
+
+            assert_eq!(
+                tx.state, expected,
+                "state of {id:?} does not match a full recomputation, stored {:?} recomputed {:?}",
+                tx.state, expected
+            );
+            assert_eq!(
+                tx.subpool,
+                SubPool::from(expected),
+                "sub-pool of {id:?} does not match its recomputed state"
+            );
+        }
+    }
 }
 
 #[cfg(test)]
@@ -3470,6 +3557,46 @@ mod tests {
             "the dependent is blocked by its parked ancestor, that is what should be recorded"
         );
         assert_eq!(second_meta.subpool, SubPool::Queued);
+    }
+
+    #[test]
+    fn states_match_full_scan_through_inserts_and_fee_moves() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let base_fee = pool.all_transactions.pending_fees.base_fee;
+
+        // a sender with a chain of transactions, one of which will not survive a fee rise
+        let first = MockTransaction::eip1559().with_max_fee(base_fee as u128 + 10);
+        let sender = first.sender();
+        for (nonce, max_fee) in [(0u64, base_fee as u128 + 10), (1, base_fee as u128 + 1_000)] {
+            let tx = MockTransaction::eip1559()
+                .with_sender(sender)
+                .with_nonce(nonce)
+                .with_max_fee(max_fee)
+                .with_priority_fee(1);
+            pool.add_transaction(f.validated(tx), U256::from(u128::MAX), 0, None).unwrap();
+        }
+        // and an unrelated sender that should be untouched throughout
+        pool.add_transaction(
+            f.validated(MockTransaction::eip1559().with_max_fee(base_fee as u128 + 5_000)),
+            U256::from(u128::MAX),
+            0,
+            None,
+        )
+        .unwrap();
+        pool.all_transactions.assert_states_match_full_scan();
+
+        // a rise past the first transaction drags its descendant out with it
+        pool.update_basefee(base_fee + 100, |_| {});
+        pool.all_transactions.assert_states_match_full_scan();
+
+        // The fall promotes the ancestor, but nothing on the fee path recomputes the descendant's
+        // NO_PARKED_ANCESTORS, so the states are only consistent again after a full update. That
+        // is the contract this check documents: the fee paths leave a descendant lagging by one
+        // update, and `update` is what settles it.
+        pool.update_basefee(base_fee, |_| {});
+        pool.all_transactions.update(&Default::default());
+        pool.all_transactions.assert_states_match_full_scan();
     }
 
     #[test]
