@@ -13,9 +13,9 @@ use reth_libmdbx::{ffi::MDBX_dbi, CommitLatency, Transaction, TransactionKind, W
 use reth_primitives_traits::FastInstant as Instant;
 use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
 use reth_tracing::tracing::{debug, instrument, trace, warn};
+use rustc_hash::FxHashMap;
 use std::{
     backtrace::Backtrace,
-    collections::HashMap,
     marker::PhantomData,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -34,7 +34,7 @@ pub struct Tx<K: TransactionKind> {
     inner: Transaction<K>,
 
     /// Cached MDBX DBIs for reuse.
-    dbis: Arc<HashMap<&'static str, MDBX_dbi>>,
+    dbis: Arc<FxHashMap<&'static str, MDBX_dbi>>,
 
     /// Handler for metrics with its own [Drop] implementation for cases when the transaction isn't
     /// closed by [`Tx::commit`] or [`Tx::abort`], but we still need to report it in the metrics.
@@ -49,7 +49,7 @@ impl<K: TransactionKind> Tx<K> {
     #[track_caller]
     pub(crate) fn new(
         inner: Transaction<K>,
-        dbis: Arc<HashMap<&'static str, MDBX_dbi>>,
+        dbis: Arc<FxHashMap<&'static str, MDBX_dbi>>,
         env_metrics: Option<Arc<DatabaseEnvMetrics>>,
     ) -> reth_libmdbx::Result<Self> {
         let metrics_handler = env_metrics
