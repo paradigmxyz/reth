@@ -299,9 +299,9 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// Recomputes both fee flags for the transactions left in the blob sub-pool.
     ///
     /// Nothing else keeps them current: the pending pool only reports on what it holds, and
-    /// [`BlobPool::enforce_pending_fees`] only reports transactions that satisfy *both* fees, so a
-    /// transaction that keeps failing one of them would otherwise carry whatever flags it had when
-    /// it was parked, and claim to cover a fee it no longer covers.
+    /// [`BlobTransactions::enforce_pending_fees`] only reports transactions that satisfy *both*
+    /// fees, so a transaction that keeps failing one of them would otherwise carry whatever
+    /// flags it had when it was parked, and claim to cover a fee it no longer covers.
     ///
     /// Must run after any promotion out of the blob sub-pool, so that every transaction still in it
     /// fails at least one fee check and therefore stays there: this only rewrites flags, it never
