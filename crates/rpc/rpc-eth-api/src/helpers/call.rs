@@ -203,9 +203,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     };
 
                     let (result, results) = if trace_transfers {
-                        // prepare inspector to capture transfer inside the evm so they are recorded
-                        // and included in logs
-                        let inspector = TransferInspector::new(false).with_logs(true);
+                        // Collect transfer operations without inserting synthetic logs into the
+                        // journal; they are appended only to the RPC simulation result below.
+                        let inspector = TransferInspector::new(false);
                         let evm = this
                             .evm_config()
                             .evm_with_env_and_inspector(&mut db, evm_env, inspector);
@@ -219,6 +219,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             .map_err(|e| Self::Error::from_eth_err(EthApiError::other(e)))?;
                         }
 
+                        let mut next_transfer = 0;
                         simulate::execute_transactions(
                             builder,
                             &state_provider,
@@ -227,6 +228,13 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             chain_id,
                             this.compute_state_root_for_eth_simulate(),
                             this.converter(),
+                            |inspector, result| {
+                                simulate::append_transfer_logs(
+                                    inspector,
+                                    result,
+                                    &mut next_transfer,
+                                );
+                            },
                         )
                         .map_err(map_err)?
                     } else {
@@ -249,6 +257,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             chain_id,
                             this.compute_state_root_for_eth_simulate(),
                             this.converter(),
+                            |_, _| {},
                         )
                         .map_err(map_err)?
                     };
