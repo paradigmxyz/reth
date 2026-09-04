@@ -36,9 +36,9 @@ use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     BlockBodyIndicesProvider, BytecodeReader, DBProvider, DatabaseProviderFactory, DbTxProvider,
-    HashedPostStateProvider, NodePrimitivesProvider, StageCheckpointReader, StateProofProvider,
-    StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
-    TryIntoHistoricalStateProvider,
+    HashedPostStateProvider, HistoryInfo, HistoryReader, NodePrimitivesProvider,
+    StageCheckpointReader, StateProofProvider, StorageChangeSetReader, StorageRootProvider,
+    StorageSettingsCache, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
@@ -509,6 +509,29 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Clone + 'static> DatabaseProvi
         } else {
             Err(ConsistentViewError::Syncing { best_block: GotExpected::new(0, 0) }.into())
         }
+    }
+}
+
+impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> HistoryReader
+    for MockEthProvider<T, ChainSpec>
+{
+    fn account_history_info(
+        &self,
+        _address: Address,
+        _block_number: BlockNumber,
+        _lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo> {
+        Ok(HistoryInfo::InPlainState)
+    }
+
+    fn storage_history_info(
+        &self,
+        _address: Address,
+        _storage_key: B256,
+        _block_number: BlockNumber,
+        _lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo> {
+        Ok(HistoryInfo::InPlainState)
     }
 }
 
@@ -1111,6 +1134,14 @@ where
         _targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
         Ok(MultiProof::default())
+    }
+
+    fn multiproof_v2(
+        &self,
+        _input: TrieInput,
+        _targets: reth_trie::MultiProofTargetsV2,
+    ) -> ProviderResult<reth_trie::DecodedMultiProofV2> {
+        Ok(reth_trie::DecodedMultiProofV2::default())
     }
 
     fn witness(

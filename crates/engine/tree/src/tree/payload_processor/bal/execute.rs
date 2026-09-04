@@ -25,6 +25,7 @@ use alloy_evm::{
 };
 use alloy_primitives::Address;
 use crossbeam_channel::{Receiver, Sender};
+use reth_engine_primitives::BlockAccessListDecodeError;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor};
 use reth_primitives_traits::ReceiptTy;
 use reth_provider::BlockExecutionOutput;
@@ -193,11 +194,8 @@ fn convert_alloy_to_revm_bal(alloy_bal: &AlloyBal) -> Result<Arc<RevmBal>, BalEx
     // is triggered then the execution is reverted, and as such no actual code change event takes
     // place. Therefore, if we do observe such a bytecode in a BAL then that means the BAL is
     // invalid as no legal execution should've led to this bytecode deployment.
-    let received_bal_revm = RevmBal::clone_from_alloy(alloy_bal.as_vec()).map_err(|e| {
-        BalExecutionError::Consensus(reth_consensus::ConsensusError::BlockAccessListInvalid(
-            format!("{e:?}"),
-        ))
-    })?;
+    let received_bal_revm =
+        RevmBal::clone_from_alloy(alloy_bal.as_vec()).map_err(BlockAccessListDecodeError::new)?;
     Ok(Arc::new(received_bal_revm))
 }
 
@@ -328,8 +326,11 @@ impl BlockGasTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tree::error::{InsertBlockErrorKind, InsertBlockValidationError};
     use alloy_consensus::{BlockHeader, Header};
-    use alloy_eip7928::{bal::Bal as AlloyBal, BlockAccessList};
+    use alloy_eip7928::{
+        bal::Bal as AlloyBal, AccountChanges, BlockAccessIndex, BlockAccessList, CodeChange,
+    };
     use alloy_eips::{
         eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE},
@@ -447,6 +448,28 @@ mod tests {
             executor.apply_post_execution_changes().expect("post-exec");
         }
         state.take_built_alloy_bal().expect("with_bal_builder was set")
+    }
+
+    #[test]
+    fn invalid_bal_bytecode_is_validation_error() {
+        let alloy_bal = vec![AccountChanges {
+            address: Address::ZERO,
+            code_changes: vec![CodeChange::new(
+                BlockAccessIndex::new(1),
+                vec![0xef, 0x01, 0xde].into(),
+            )],
+            ..Default::default()
+        }]
+        .into();
+
+        let error = convert_alloy_to_revm_bal(&alloy_bal).unwrap_err();
+        assert!(matches!(&error, BalExecutionError::BlockAccessListDecode(_)));
+        let error = InsertBlockErrorKind::from(error);
+        assert!(matches!(&error, InsertBlockErrorKind::BlockAccessListDecode(_)));
+        assert!(matches!(
+            error.ensure_validation_error(),
+            Ok(InsertBlockValidationError::BlockAccessListDecode(_))
+        ));
     }
 
     #[test]
@@ -1136,9 +1159,9 @@ mod tests {
     }
 
     #[test]
-    fn worker_tx_recovery_error_becomes_other_error() {
+    fn worker_tx_recovery_error_becomes_validation_error() {
         // A tx recovery failure fed into the worker channel must surface as
-        // BalExecutionError::Other. Uses execute_block directly since tx_stream hardcodes
+        // a block validation error. Uses execute_block directly since tx_stream hardcodes
         // Infallible and cannot inject errors.
         let evm_config = EthEvmConfig::mainnet();
         let block = empty_amsterdam_block(B256::ZERO);
@@ -1169,8 +1192,8 @@ mod tests {
         );
 
         assert!(
-            matches!(result, Err(BalExecutionError::Other(_))),
-            "expected Other error from tx recovery failure, got {result:?}",
+            matches!(result, Err(BalExecutionError::Execution(BlockExecutionError::Validation(_)))),
+            "expected validation error from tx recovery failure, got {result:?}",
         );
     }
 
@@ -1189,7 +1212,8 @@ mod tests {
 
         let block_gas_limit = 1_000_000u64;
         let first_tx_gas = 600_000u64;
-        let second_tx_gas_limit = 500_000u64; // fits in total limit but not after cumulative deduction
+        let second_tx_gas_limit = 500_000u64; // fits in total limit but not after cumulative
+                                              // deduction
 
         let gas = ResultGas::new_with_state_gas(first_tx_gas, 0, 0, first_tx_gas / 2);
         let fake_result: ResultAndState<revm::context::result::HaltReason> =
