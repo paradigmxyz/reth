@@ -57,8 +57,6 @@ pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
     /// Under partial persistence the overlay depends on both durable frontiers, so both hashes are
     /// part of the cache key.
     state_trie_overlay_cache: StateTrieOverlayCache,
-    /// A cache which maps durable frontier pairs to [`ExecutionOverlay`]s.
-    execution_overlay_cache: ExecutionOverlayCache,
     /// Metrics for provider factory operations.
     metrics: OverlayStateProviderFactoryMetrics,
 }
@@ -70,7 +68,6 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
             factory,
             overlay_builder,
             state_trie_overlay_cache: Default::default(),
-            execution_overlay_cache: Default::default(),
             metrics: Default::default(),
         }
     }
@@ -81,7 +78,6 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
         self.overlay_builder =
             self.overlay_builder.with_skip_overlay_for_reused_sparse_trie(anchor_hash);
         self.state_trie_overlay_cache = Default::default();
-        self.execution_overlay_cache = Default::default();
         self
     }
 }
@@ -120,7 +116,6 @@ where
             provider,
             self.overlay_builder.clone(),
             Arc::clone(&self.state_trie_overlay_cache),
-            Arc::clone(&self.execution_overlay_cache),
             self.metrics.clone(),
             is_v2,
         ))
@@ -132,7 +127,6 @@ pub struct OverlayStateProvider<Provider, N: NodePrimitives = EthPrimitives> {
     provider: Provider,
     overlay_builder: Option<OverlayBuilder<N>>,
     state_trie_overlay_cache: StateTrieOverlayCache,
-    execution_overlay_cache: ExecutionOverlayCache,
     metrics: OverlayStateProviderFactoryMetrics,
     state_trie_overlay: OnceCell<StateTrieOverlay>,
     execution_overlay: OnceCell<CachedExecutionOverlay>,
@@ -160,7 +154,6 @@ impl<Provider, N: NodePrimitives> OverlayStateProvider<OwnedProvider<Provider>, 
         provider: Provider,
         overlay_builder: OverlayBuilder<N>,
         state_trie_overlay_cache: StateTrieOverlayCache,
-        execution_overlay_cache: ExecutionOverlayCache,
         metrics: OverlayStateProviderFactoryMetrics,
         is_v2: bool,
     ) -> Self {
@@ -168,7 +161,6 @@ impl<Provider, N: NodePrimitives> OverlayStateProvider<OwnedProvider<Provider>, 
             provider: OwnedProvider(provider),
             overlay_builder: Some(overlay_builder),
             state_trie_overlay_cache,
-            execution_overlay_cache,
             metrics,
             state_trie_overlay: OnceCell::new(),
             execution_overlay: OnceCell::new(),
@@ -186,7 +178,6 @@ impl<Provider, N: NodePrimitives> OverlayStateProvider<OwnedProvider<Provider>, 
             provider: OwnedProvider(provider),
             overlay_builder: None,
             state_trie_overlay_cache: Default::default(),
-            execution_overlay_cache: Default::default(),
             metrics: Default::default(),
             state_trie_overlay: OnceCell::new(),
             execution_overlay: OnceCell::from(CachedExecutionOverlay {
@@ -226,7 +217,6 @@ impl<'a, Provider, N: NodePrimitives> OverlayStateProvider<&'a Provider, N> {
             provider,
             overlay_builder: None,
             state_trie_overlay_cache: Default::default(),
-            execution_overlay_cache: Default::default(),
             metrics: Default::default(),
             state_trie_overlay: OnceCell::from(state_trie_overlay),
             execution_overlay: OnceCell::new(),
@@ -329,56 +319,43 @@ where
         }
 
         let (state_trie_tip_block, finish_tip_block) = database_state_frontiers(self.provider())?;
-        let overlay = match self
-            .execution_overlay_cache
-            .entry((state_trie_tip_block.hash, finish_tip_block.hash))
-        {
-            dashmap::Entry::Occupied(entry) => entry.get().clone(),
-            dashmap::Entry::Vacant(entry) => {
-                self.metrics.execution_overlay_cache_misses.increment(1);
-                let (overlay, fallback_block_number) = self
-                    .overlay_builder
-                    .as_ref()
-                    .expect("execution overlay must be initialized or lazily resolvable")
-                    .execution_overlay_at_frontiers(
-                        self.provider(),
-                        state_trie_tip_block,
-                        finish_tip_block,
-                    )?;
-                let historical_fallback = fallback_block_number
-                    .map(|block_number| {
-                        let account_history_block_number = self
-                            .provider()
-                            .get_prune_checkpoint(PruneSegment::AccountHistory)?
-                            .and_then(|checkpoint| checkpoint.block_number)
-                            .map(|block_number| block_number + 1);
-                        if account_history_block_number.is_some_and(|lowest| block_number < lowest)
-                        {
-                            return Err(ProviderError::StateAtBlockPruned(block_number))
-                        }
+        let (overlay, fallback_block_number) = self
+            .overlay_builder
+            .as_ref()
+            .expect("execution overlay must be initialized or lazily resolvable")
+            .execution_overlay_at_frontiers(
+                self.provider(),
+                state_trie_tip_block,
+                finish_tip_block,
+            )?;
+        let historical_fallback = fallback_block_number
+            .map(|block_number| {
+                let account_history_block_number = self
+                    .provider()
+                    .get_prune_checkpoint(PruneSegment::AccountHistory)?
+                    .and_then(|checkpoint| checkpoint.block_number)
+                    .map(|block_number| block_number + 1);
+                if account_history_block_number.is_some_and(|lowest| block_number < lowest) {
+                    return Err(ProviderError::StateAtBlockPruned(block_number))
+                }
 
-                        let storage_history_block_number = self
-                            .provider()
-                            .get_prune_checkpoint(PruneSegment::StorageHistory)?
-                            .and_then(|checkpoint| checkpoint.block_number)
-                            .map(|block_number| block_number + 1);
-                        if storage_history_block_number.is_some_and(|lowest| block_number < lowest)
-                        {
-                            return Err(ProviderError::StateAtBlockPruned(block_number))
-                        }
+                let storage_history_block_number = self
+                    .provider()
+                    .get_prune_checkpoint(PruneSegment::StorageHistory)?
+                    .and_then(|checkpoint| checkpoint.block_number)
+                    .map(|block_number| block_number + 1);
+                if storage_history_block_number.is_some_and(|lowest| block_number < lowest) {
+                    return Err(ProviderError::StateAtBlockPruned(block_number))
+                }
 
-                        Ok(HistoricalFallback {
-                            block_number,
-                            account_history_block_number,
-                            storage_history_block_number,
-                        })
-                    })
-                    .transpose()?;
-                let overlay = CachedExecutionOverlay { overlay, historical_fallback };
-                entry.insert(overlay.clone());
-                overlay
-            }
-        };
+                Ok(HistoricalFallback {
+                    block_number,
+                    account_history_block_number,
+                    storage_history_block_number,
+                })
+            })
+            .transpose()?;
+        let overlay = CachedExecutionOverlay { overlay, historical_fallback };
         let _ = self.execution_overlay.set(overlay);
         let overlay = self.execution_overlay.get().expect("execution overlay was just initialized");
         Ok((&overlay.overlay, overlay.historical_fallback.as_ref()))
@@ -1010,12 +987,9 @@ pub(crate) struct OverlayStateProviderFactoryMetrics {
     database_provider_ro_duration: Histogram,
     /// Number of cache misses when fetching state trie overlays.
     state_trie_overlay_cache_misses: Counter,
-    /// Number of cache misses when fetching execution overlays.
-    execution_overlay_cache_misses: Counter,
 }
 
 type StateTrieOverlayCache = Arc<DashMap<(BlockHash, BlockHash), StateTrieOverlay>>;
-type ExecutionOverlayCache = Arc<DashMap<(BlockHash, BlockHash), CachedExecutionOverlay>>;
 
 #[derive(Clone, Debug)]
 struct CachedExecutionOverlay {
@@ -1209,20 +1183,40 @@ mod tests {
         assert!(provider.state_trie_overlay.get().is_none());
         assert!(provider.execution_overlay.get().is_none());
         assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
-        assert!(state_provider_factory.execution_overlay_cache.is_empty());
 
         provider.basic_account(&Address::ZERO).unwrap();
-        let execution_overlay = Arc::clone(&provider.execution_overlay.get().unwrap().overlay);
         assert!(provider.state_trie_overlay.get().is_none());
         assert!(provider.execution_overlay.get().is_some());
         assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
-        assert_eq!(state_provider_factory.execution_overlay_cache.len(), 1);
-        let cached_overlay = state_provider_factory.execution_overlay_cache.iter().next().unwrap();
-        assert!(Arc::ptr_eq(&execution_overlay, &cached_overlay.value().overlay));
 
         provider.account_trie_cursor().unwrap();
         assert_eq!(state_provider_factory.state_trie_overlay_cache.len(), 1);
-        assert_eq!(state_provider_factory.execution_overlay_cache.len(), 1);
+    }
+
+    #[test]
+    fn lazy_overlays_survive_manager_block_removal() {
+        let (factory, blocks) = setup_frontiers(1, 1);
+        let manager = OverlayManager::default();
+        for block in &blocks[2..=3] {
+            manager.insert_block(block.clone());
+        }
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            factory,
+            manager.overlay_builder(blocks[3].recovered_block().hash()),
+        );
+        let provider = state_provider_factory.database_provider_ro().unwrap();
+
+        manager.remove_blocks(blocks[2..=3].iter().map(|block| block.recovered_block().hash()));
+
+        let (execution_overlay, _) = provider.execution_overlay().unwrap();
+        assert_eq!(
+            execution_overlay.block_hashes(),
+            [blocks[2].recovered_block().num_hash(), blocks[3].recovered_block().num_hash()]
+        );
+        assert_eq!(
+            account_keys(provider.state_trie_overlay().unwrap()),
+            vec![B256::with_last_byte(3), B256::with_last_byte(4)]
+        );
     }
 
     #[test]
