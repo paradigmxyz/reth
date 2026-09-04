@@ -497,7 +497,22 @@ where
                 let Some((receipts, maybe_block)) =
                     self.eth_cache().get_receipts_and_maybe_block(block_hash).await?
                 else {
-                    return Err(ProviderError::HeaderNotFound(block_hash.into()).into())
+                    // the block itself may still exist with its receipts pruned
+                    return Err(match self.provider().block_number(block_hash)? {
+                        Some(number) => {
+                            let earliest_available = self.provider().earliest_block_number()?;
+                            if number < earliest_available {
+                                EthApiError::PrunedHistoryUnavailable {
+                                    requested: number,
+                                    earliest_available,
+                                }
+                                .into()
+                            } else {
+                                EthFilterError::ReceiptsUnavailable(number)
+                            }
+                        }
+                        None => ProviderError::HeaderNotFound(block_hash.into()).into(),
+                    })
                 };
 
                 let header = if let Some(block) = &maybe_block {
@@ -1011,6 +1026,9 @@ pub enum EthFilterError {
     /// Query scope is too broad.
     #[error("query exceeds max block range {0}")]
     QueryExceedsMaxBlocks(u64),
+    /// Receipts of a block the filter matched are gone, most likely pruned.
+    #[error("pruned history unavailable")]
+    ReceiptsUnavailable(u64),
     /// Query result is too large.
     #[error("query exceeds max results {max_logs}, retry with the range {from_block}-{to_block}")]
     QueryExceedsMaxResults {
@@ -1040,6 +1058,9 @@ impl From<EthFilterError> for jsonrpsee::types::error::ErrorObject<'static> {
                 rpc_error_with_code(jsonrpsee::types::error::INTERNAL_ERROR_CODE, err.to_string())
             }
             EthFilterError::EthAPIError(err) => err.into(),
+            err @ EthFilterError::ReceiptsUnavailable(_) => {
+                rpc_error_with_code(4444, err.to_string())
+            }
             err @ (EthFilterError::InvalidBlockRangeParams |
             EthFilterError::QueryExceedsMaxBlocks(_) |
             EthFilterError::QueryExceedsMaxResults { .. } |
@@ -1196,20 +1217,16 @@ impl<
     > CachedMode<Eth>
 {
     async fn next(&mut self) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
-        for header in self.headers_iter.by_ref() {
-            // Use get_receipts_and_maybe_block which has automatic fallback to provider
-            if let Some((receipts, maybe_block)) =
-                self.filter_inner.eth_cache().get_receipts_and_maybe_block(header.hash()).await?
-            {
-                return Ok(Some(ReceiptBlockResult {
-                    receipts,
-                    recovered_block: maybe_block,
-                    header,
-                }));
-            }
-        }
+        let Some(header) = self.headers_iter.next() else { return Ok(None) };
 
-        Ok(None) // No more headers
+        // Use get_receipts_and_maybe_block which has automatic fallback to provider
+        let Some((receipts, maybe_block)) =
+            self.filter_inner.eth_cache().get_receipts_and_maybe_block(header.hash()).await?
+        else {
+            return Err(EthFilterError::ReceiptsUnavailable(header.number()))
+        };
+
+        Ok(Some(ReceiptBlockResult { receipts, recovered_block: maybe_block, header }))
     }
 }
 
@@ -1324,7 +1341,7 @@ impl<
                     // Not cached - fetch directly from provider
                     match self.filter_inner.provider().receipts_by_block(header.hash().into())? {
                         Some(receipts) => Arc::new(receipts),
-                        None => continue, // No receipts found
+                        None => return Err(EthFilterError::ReceiptsUnavailable(header.number())),
                     }
                 }
             };
@@ -1405,7 +1422,7 @@ impl<
             // unlikely to be cached
             let receipts = match filter_inner.provider().receipts_by_block(header.hash().into())? {
                 Some(receipts) => Arc::new(receipts),
-                None => continue, // No receipts found
+                None => return Err(EthFilterError::ReceiptsUnavailable(header.number())),
             };
 
             if !receipts.is_empty() {
@@ -1436,6 +1453,14 @@ mod tests {
     use reth_testing_utils::generators;
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
     use std::{collections::VecDeque, sync::Arc};
+
+    #[test]
+    fn receipts_unavailable_error_matches_geth() {
+        let err: jsonrpsee::types::error::ErrorObject<'static> =
+            EthFilterError::ReceiptsUnavailable(100).into();
+        assert_eq!(err.code(), 4444);
+        assert_eq!(err.message(), "pruned history unavailable");
+    }
 
     #[test]
     fn test_block_range_iter() {
@@ -1520,11 +1545,6 @@ mod tests {
     #[tokio::test]
     async fn test_range_block_mode_queued_results_priority() {
         let provider = MockEthProvider::default();
-        let eth_api = build_test_eth_api(provider);
-
-        let eth_filter =
-            super::EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
-        let filter_inner = eth_filter.inner;
 
         let headers = vec![
             SealedHeader::new(
@@ -1536,6 +1556,16 @@ mod tests {
                 FixedBytes::random(),
             ),
         ];
+        for header in &headers {
+            provider.add_header(header.hash(), header.header().clone());
+            provider.add_receipts(header.number(), vec![]);
+        }
+
+        let eth_api = build_test_eth_api(provider);
+
+        let eth_filter =
+            super::EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
+        let filter_inner = eth_filter.inner;
 
         // create specific mock results to test ordering
         let expected_block_hash_1 = FixedBytes::from([1u8; 32]);
@@ -1635,7 +1665,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_range_block_mode_single_block_no_receipts() {
+    async fn test_range_block_mode_single_block_missing_receipts() {
         let provider = MockEthProvider::default();
         let eth_api = build_test_eth_api(provider);
 
@@ -1658,8 +1688,10 @@ mod tests {
             pending_tasks: FuturesOrdered::new(),
         };
 
-        let result = range_mode.next().await;
-        assert!(result.is_ok());
+        // a block whose header matched the filter but whose receipts are gone must not be
+        // silently skipped
+        let Err(err) = range_mode.next().await else { panic!("missing receipts must be an error") };
+        assert!(matches!(err, EthFilterError::ReceiptsUnavailable(100)), "{err:?}");
     }
 
     #[tokio::test]
@@ -1705,6 +1737,8 @@ mod tests {
 
         provider.add_receipts(100, vec![receipt_100_1.clone(), receipt_100_2.clone()]);
         provider.add_receipts(101, vec![receipt_101_1.clone()]);
+        // a block without transactions, which a provider reports as an empty list
+        provider.add_receipts(102, vec![]);
 
         let eth_api = build_test_eth_api(provider);
 
@@ -2107,7 +2141,9 @@ mod tests {
         use reth_rpc_eth_api::helpers::SpawnBlocking;
 
         let provider = MockEthProvider::default();
-        provider.add_header(FixedBytes::random(), alloy_consensus::Header::default());
+        let header = alloy_consensus::Header::default();
+        provider.add_header(header.hash_slow(), header);
+        provider.add_receipts(0, vec![]);
         let eth_api = build_test_eth_api(provider);
 
         // take every permit so the scan has to wait for one
@@ -2257,5 +2293,52 @@ mod tests {
                 .unwrap();
             assert!(logs.is_empty());
         }
+    }
+
+    #[tokio::test]
+    async fn test_logs_for_filter_over_pruned_receipts() {
+        let provider = MockEthProvider::default();
+        let mut parent_hash = FixedBytes::default();
+        for number in 0..=2u64 {
+            let header = alloy_consensus::Header {
+                number,
+                parent_hash,
+                logs_bloom: alloy_primitives::Bloom::from([1u8; 256]),
+                ..Default::default()
+            };
+            parent_hash = header.hash_slow();
+            provider.add_block(
+                parent_hash,
+                reth_ethereum_primitives::Block { header, body: Default::default() },
+            );
+            // the receipts of block 1 were pruned
+            if number != 1 {
+                provider.add_receipts(number, vec![]);
+            }
+        }
+
+        let eth_filter = EthFilter::new(
+            build_test_eth_api(provider),
+            EthFilterConfig::default(),
+            Runtime::test(),
+        );
+
+        // a range that reaches the pruned block is rejected instead of served incompletely
+        let err = eth_filter
+            .inner
+            .clone()
+            .logs_for_filter(Filter::new().from_block(0u64).to_block(2u64), QueryLimits::default())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, EthFilterError::ReceiptsUnavailable(1)), "{err:?}");
+
+        // a range that avoids it is served
+        let logs = eth_filter
+            .inner
+            .clone()
+            .logs_for_filter(Filter::new().from_block(2u64).to_block(2u64), QueryLimits::default())
+            .await
+            .unwrap();
+        assert!(logs.is_empty());
     }
 }
