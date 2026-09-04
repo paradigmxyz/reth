@@ -23,8 +23,8 @@ use reth_trie::{
     },
     proof::{Proof, StorageProof as TrieStorageProof},
     trie_cursor::{
-        InMemoryTrieCursor, InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory,
-        TrieStorageCursor,
+        CursorFactoryProvider, InMemoryTrieCursor, InMemoryTrieCursorFactory, TrieCursor,
+        TrieCursorFactory, TrieStorageCursor,
     },
     updates::TrieUpdates,
     witness::TrieWitness,
@@ -85,14 +85,6 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
         self.execution_overlay_cache = Default::default();
         self
     }
-
-    /// Adapts this factory to produce cursor factories for the selected state trie overlay.
-    pub const fn into_cursor_factories_factory(
-        self,
-        trie_changesets: bool,
-    ) -> OverlayCursorFactoriesFactory<F, N> {
-        OverlayCursorFactoriesFactory { state_provider_factory: self, trie_changesets }
-    }
 }
 
 impl<F, N> DatabaseProviderROFactory for OverlayStateProviderFactory<F, N>
@@ -133,34 +125,6 @@ where
             self.metrics.clone(),
             is_v2,
         ))
-    }
-}
-
-/// Factory that produces cursor factories for a selected state trie overlay.
-#[derive(Clone, Debug)]
-pub struct OverlayCursorFactoriesFactory<F, N: NodePrimitives = EthPrimitives> {
-    state_provider_factory: OverlayStateProviderFactory<F, N>,
-    trie_changesets: bool,
-}
-
-impl<F, N> DatabaseProviderROFactory for OverlayCursorFactoriesFactory<F, N>
-where
-    N: NodePrimitives,
-    F: DatabaseProviderFactory,
-    F::Provider: StageCheckpointReader
-        + PruneCheckpointReader
-        + BlockNumReader
-        + ChangeSetReader
-        + StorageChangeSetReader
-        + StorageSettingsCache,
-{
-    type Provider = OverlayCursorFactoryProvider<OwnedProvider<F::Provider>, N>;
-
-    fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
-        Ok(OverlayCursorFactoryProvider {
-            state_provider: self.state_provider_factory.database_provider_ro()?,
-            trie_changesets: self.trie_changesets,
-        })
     }
 }
 
@@ -957,23 +921,9 @@ where
 }
 
 /// Cursor factories backed by a selected state trie overlay.
-struct OverlayCursorFactories<'a, Provider, N: NodePrimitives = EthPrimitives> {
+pub struct OverlayCursorFactories<'a, Provider, N: NodePrimitives = EthPrimitives> {
     provider: &'a OverlayStateProvider<Provider, N>,
     trie_changesets: bool,
-}
-
-/// Combined cursor factories backed by an owned [`OverlayStateProvider`].
-pub struct OverlayCursorFactoryProvider<Provider, N: NodePrimitives = EthPrimitives> {
-    state_provider: OverlayStateProvider<Provider, N>,
-    trie_changesets: bool,
-}
-
-impl<Provider, N: NodePrimitives> fmt::Debug for OverlayCursorFactoryProvider<Provider, N> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("OverlayCursorFactoryProvider")
-            .field("trie_changesets", &self.trie_changesets)
-            .finish_non_exhaustive()
-    }
 }
 
 impl<Provider, N: NodePrimitives> fmt::Debug for OverlayCursorFactories<'_, Provider, N> {
@@ -1100,7 +1050,7 @@ where
     }
 }
 
-impl<Provider, N: NodePrimitives> TrieCursorFactory for OverlayCursorFactoryProvider<Provider, N>
+impl<Provider, N: NodePrimitives> CursorFactoryProvider for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
     Provider::Target: DBProvider
@@ -1111,108 +1061,18 @@ where
         + BlockNumReader
         + StorageSettingsCache,
 {
-    type AccountTrieCursor<'a>
-        = InMemoryTrieCursor<'a, Box<dyn TrieCursor + Send + 'a>>
+    type CursorFactories<'a>
+        = OverlayCursorFactories<'a, Provider, N>
     where
         Self: 'a;
+    type Error = ProviderError;
 
-    type StorageTrieCursor<'a>
-        = InMemoryTrieCursor<'a, Box<dyn TrieStorageCursor + Send + 'a>>
-    where
-        Self: 'a;
-
-    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
-        let overlay = self
-            .state_provider
-            .state_trie_overlay(self.trie_changesets)
-            .map_err(into_database_error)?;
-        let cursor: Box<dyn TrieCursor + Send> = if self.state_provider.is_v2 {
-            Box::new(DatabaseAccountTrieCursor::<_, PackedKeyAdapter>::new(
-                self.state_provider.provider().tx().cursor_read::<PackedAccountsTrie>()?,
-            ))
-        } else {
-            Box::new(DatabaseAccountTrieCursor::<_, LegacyKeyAdapter>::new(
-                self.state_provider.provider().tx().cursor_read::<tables::AccountsTrie>()?,
-            ))
-        };
-        Ok(InMemoryTrieCursor::new_account(cursor, &overlay.input().nodes))
-    }
-
-    fn storage_trie_cursor(
+    fn cursor_factories(
         &self,
-        hashed_address: B256,
-    ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
-        let overlay = self
-            .state_provider
-            .state_trie_overlay(self.trie_changesets)
-            .map_err(into_database_error)?;
-        let cursor: Box<dyn TrieStorageCursor + Send> = if self.state_provider.is_v2 {
-            Box::new(DatabaseStorageTrieCursor::<_, PackedKeyAdapter>::new(
-                self.state_provider.provider().tx().cursor_dup_read::<PackedStoragesTrie>()?,
-                hashed_address,
-            ))
-        } else {
-            Box::new(DatabaseStorageTrieCursor::<_, LegacyKeyAdapter>::new(
-                self.state_provider.provider().tx().cursor_dup_read::<tables::StoragesTrie>()?,
-                hashed_address,
-            ))
-        };
-        Ok(InMemoryTrieCursor::new_storage(cursor, &overlay.input().nodes, hashed_address))
-    }
-}
-
-impl<Provider, N: NodePrimitives> HashedCursorFactory for OverlayCursorFactoryProvider<Provider, N>
-where
-    Provider: Deref,
-    Provider::Target: DBProvider
-        + StageCheckpointReader
-        + PruneCheckpointReader
-        + ChangeSetReader
-        + StorageChangeSetReader
-        + BlockNumReader
-        + StorageSettingsCache,
-{
-    type AccountCursor<'a>
-        = <HashedPostStateCursorFactory<
-        DatabaseHashedCursorFactory<&'a <Provider::Target as DbTxProvider>::Tx>,
-        &'a Arc<HashedPostStateSorted>,
-    > as HashedCursorFactory>::AccountCursor<'a>
-    where
-        Self: 'a;
-
-    type StorageCursor<'a>
-        = <HashedPostStateCursorFactory<
-        DatabaseHashedCursorFactory<&'a <Provider::Target as DbTxProvider>::Tx>,
-        &'a Arc<HashedPostStateSorted>,
-    > as HashedCursorFactory>::StorageCursor<'a>
-    where
-        Self: 'a;
-
-    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
-        let overlay = self
-            .state_provider
-            .state_trie_overlay(self.trie_changesets)
-            .map_err(into_database_error)?;
-        HashedPostStateCursorFactory::new(
-            DatabaseHashedCursorFactory::new(self.state_provider.provider().tx()),
-            &overlay.input().state,
-        )
-        .hashed_account_cursor()
-    }
-
-    fn hashed_storage_cursor(
-        &self,
-        hashed_address: B256,
-    ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
-        let overlay = self
-            .state_provider
-            .state_trie_overlay(self.trie_changesets)
-            .map_err(into_database_error)?;
-        HashedPostStateCursorFactory::new(
-            DatabaseHashedCursorFactory::new(self.state_provider.provider().tx()),
-            &overlay.input().state,
-        )
-        .hashed_storage_cursor(hashed_address)
+        trie_changesets: bool,
+    ) -> Result<(Self::CursorFactories<'_>, TriePrefixSetsMut), Self::Error> {
+        let prefix_sets = self.state_trie_overlay(trie_changesets)?.input().prefix_sets.clone();
+        Ok((OverlayCursorFactories { provider: self, trie_changesets }, prefix_sets))
     }
 }
 

@@ -1233,7 +1233,7 @@ mod tests {
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
-            ProofTaskCtx::new(state_provider_factory.into_cursor_factories_factory(true)),
+            ProofTaskCtx::new(state_provider_factory),
             false,
             proof_result_tx.clone(),
         );
@@ -1288,7 +1288,7 @@ mod tests {
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
-            ProofTaskCtx::new(state_provider_factory.into_cursor_factories_factory(true)),
+            ProofTaskCtx::new(state_provider_factory),
             false,
             proof_result_tx.clone(),
         );
@@ -1376,7 +1376,7 @@ mod tests {
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
-            ProofTaskCtx::new(state_provider_factory.into_cursor_factories_factory(true)),
+            ProofTaskCtx::new(state_provider_factory),
             false,
             proof_result_tx.clone(),
         );
@@ -1429,7 +1429,7 @@ mod tests {
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
-            ProofTaskCtx::new(state_provider_factory.into_cursor_factories_factory(true)),
+            ProofTaskCtx::new(state_provider_factory),
             false,
             proof_result_tx.clone(),
         );
