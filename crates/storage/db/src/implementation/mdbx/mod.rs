@@ -119,6 +119,8 @@ pub struct DatabaseArguments {
     /// environments). Choose `SafeNoSync` if performance is more important and occasional data
     /// loss is acceptable (e.g., testing or ephemeral data).
     sync_mode: SyncMode,
+    /// Whether writable environments modify pages through a writable memory map.
+    write_map: bool,
 }
 
 impl Default for DatabaseArguments {
@@ -143,6 +145,7 @@ impl DatabaseArguments {
             exclusive: None,
             max_readers: None,
             sync_mode: SyncMode::Durable,
+            write_map: true,
         }
     }
 
@@ -187,6 +190,14 @@ impl DatabaseArguments {
             self.sync_mode = sync_mode;
         }
 
+        self
+    }
+
+    /// Enables or disables writable mmap for read-write environments.
+    ///
+    /// This does not change the synchronization mode or durability guarantees.
+    pub const fn with_write_map(mut self, write_map: bool) -> Self {
+        self.write_map = write_map;
         self
     }
 
@@ -407,8 +418,9 @@ impl DatabaseEnv {
         let mode = match kind {
             DatabaseEnvKind::RO => Mode::ReadOnly,
             DatabaseEnvKind::RW => {
-                // enable writemap mode in RW mode
-                inner_env.write_map();
+                if args.write_map {
+                    inner_env.write_map();
+                }
                 Mode::ReadWrite { sync_mode: args.sync_mode }
             }
         };
@@ -727,6 +739,92 @@ mod tests {
     #[test]
     fn db_creation() {
         let _tempdir = create_test_db(DatabaseEnvKind::RW);
+    }
+
+    #[test]
+    fn durable_write_map_commit_and_reopen() {
+        // Both modes must persist the same state and header root, and databases must remain
+        // readable when switching modes. An aborted transaction must never reach disk.
+        fn state_root(address: Address, account: Account, storage: StorageEntry) -> B256 {
+            alloy_trie::root::state_root_unhashed([(
+                address,
+                alloy_trie::TrieAccount {
+                    nonce: account.nonce,
+                    balance: account.balance,
+                    storage_root: alloy_trie::root::storage_root_unhashed([(
+                        storage.key,
+                        storage.value,
+                    )]),
+                    ..Default::default()
+                },
+            )])
+        }
+        for write_map in [true, false] {
+            let tempdir = TempDir::new().unwrap();
+            let args = DatabaseArguments::test().with_write_map(write_map);
+            let mut db = DatabaseEnv::open(tempdir.path(), DatabaseEnvKind::RW, args).unwrap();
+            assert_eq!(db.is_write_map(), write_map);
+            assert!(matches!(
+                db.info().unwrap().mode(),
+                Mode::ReadWrite { sync_mode: SyncMode::Durable }
+            ));
+            db.create_tables().unwrap();
+
+            let address = Address::with_last_byte(1);
+            let account = Account { nonce: 7, balance: U256::from(1234), bytecode_hash: None };
+            let storage = StorageEntry { key: B256::with_last_byte(2), value: U256::from(5678) };
+            let header = Header {
+                number: 1,
+                state_root: state_root(address, account, storage),
+                ..Default::default()
+            };
+            let tx = db.tx_mut().unwrap();
+            tx.put::<PlainAccountState>(address, account).unwrap();
+            tx.put::<PlainStorageState>(address, storage).unwrap();
+            tx.put::<Headers>(1, header.clone()).unwrap();
+            tx.commit().unwrap();
+
+            let tx = db.tx_mut().unwrap();
+            tx.put::<PlainAccountState>(address, Account::default()).unwrap();
+            tx.delete::<PlainStorageState>(address, Some(storage)).unwrap();
+            tx.put::<Headers>(1, Header::default()).unwrap();
+            drop(tx);
+            drop(db);
+
+            // Reopen using the other writable mode before checking a read-only reopen.
+            for kind in [DatabaseEnvKind::RW, DatabaseEnvKind::RO] {
+                let db = DatabaseEnv::open(
+                    tempdir.path(),
+                    kind,
+                    DatabaseArguments::test().with_write_map(!write_map),
+                )
+                .unwrap();
+                assert_eq!(db.is_write_map(), kind.is_rw() && !write_map);
+                if kind.is_rw() {
+                    assert!(matches!(
+                        db.info().unwrap().mode(),
+                        Mode::ReadWrite { sync_mode: SyncMode::Durable }
+                    ));
+                } else {
+                    assert!(matches!(db.info().unwrap().mode(), Mode::ReadOnly));
+                }
+                let tx = db.tx().unwrap();
+                assert_eq!(tx.get::<PlainAccountState>(address).unwrap(), Some(account));
+                assert_eq!(tx.get::<Headers>(1).unwrap(), Some(header.clone()));
+                let reopened_storage = tx
+                    .cursor_dup_read::<PlainStorageState>()
+                    .unwrap()
+                    .seek_by_key_subkey(address, storage.key)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(reopened_storage, storage);
+                let reopened_account = tx.get::<PlainAccountState>(address).unwrap().unwrap();
+                assert_eq!(
+                    state_root(address, reopened_account, reopened_storage),
+                    header.state_root
+                );
+            }
+        }
     }
 
     #[test]

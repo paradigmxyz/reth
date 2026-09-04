@@ -8067,6 +8067,7 @@ version = "2.5.1"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives",
+ "alloy-trie",
  "arbitrary",
  "assert_matches",
  "derive_more",
@@ -9464,6 +9465,7 @@ dependencies = [
  "secp256k1 0.30.0",
  "serde",
  "strum 0.27.2",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "toml",

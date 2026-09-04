@@ -49,6 +49,7 @@ strum = { workspace = true, features = ["derive"], optional = true }
 libc.workspace = true
 
 [dev-dependencies]
+alloy-trie = { workspace = true, features = ["ethereum"] }
 # reth libs with arbitrary
 reth-primitives-traits = { workspace = true, features = ["reth-codec"] }
 reth-prune-types.workspace = true

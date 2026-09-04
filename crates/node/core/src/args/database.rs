@@ -60,6 +60,11 @@ pub struct DatabaseArgs {
         value_parser = value_parser!(SyncMode),
     )]
     pub sync_mode: Option<SyncMode>,
+    /// Use explicit writes instead of writable mmap for MDBX.
+    ///
+    /// Synchronization mode is unchanged; commits remain durable by default.
+    #[arg(long = "db.disable-write-map")]
+    pub disable_write_map: bool,
     /// `RocksDB` block cache size (e.g., 512MB, 4GB).
     ///
     /// Controls the size of the in-memory LRU cache for decompressed `RocksDB` blocks.
@@ -102,6 +107,7 @@ impl DatabaseArgs {
             .with_growth_step(self.growth_step)
             .with_max_readers(self.max_readers)
             .with_sync_mode(self.sync_mode)
+            .with_write_map(!self.disable_write_map)
     }
 
     /// Returns whether built-in database metrics are enabled.
@@ -436,6 +442,31 @@ mod tests {
     fn test_command_parser_with_valid_default_sync_mode() {
         let cmd = CommandParser::<DatabaseArgs>::try_parse_from(["reth"]).unwrap();
         assert!(cmd.args.sync_mode.is_none());
+    }
+
+    #[test]
+    fn test_disable_write_map_propagates_to_durable_environment() {
+        use reth_db::mdbx::{DatabaseEnv, DatabaseEnvKind, Mode};
+
+        for (argv, expected_write_map) in [
+            (vec!["reth"], true),
+            (vec!["reth", "--db.disable-write-map"], false),
+            (vec!["reth", "--db.disable-write-map", "--db.sync-mode", "durable"], false),
+        ] {
+            let args = CommandParser::<DatabaseArgs>::parse_from(argv).args;
+            let directory = tempfile::tempdir().unwrap();
+            let db = DatabaseEnv::open(
+                directory.path(),
+                DatabaseEnvKind::RW,
+                args.get_database_args(ClientVersion::default()),
+            )
+            .unwrap();
+            assert_eq!(db.is_write_map(), expected_write_map);
+            assert!(matches!(
+                db.info().unwrap().mode(),
+                Mode::ReadWrite { sync_mode: SyncMode::Durable }
+            ));
+        }
     }
 
     #[test]
