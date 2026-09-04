@@ -230,22 +230,67 @@ impl<T: TransactionOrdering> TxPool<T> {
         F: FnMut(&Arc<ValidPoolTransaction<T::Transaction>>),
     {
         std::mem::swap(&mut self.all_transactions.pending_fees.blob_fee, &mut pending_blob_fee);
-        let blob_fee_update = self.all_transactions.pending_fees.blob_fee.cmp(&pending_blob_fee);
-        match (blob_fee_update, base_fee_update) {
+        match (self.all_transactions.pending_fees.blob_fee.cmp(&pending_blob_fee), base_fee_update)
+        {
             (Ordering::Equal, Ordering::Equal | Ordering::Greater) => {
                 // fee unchanged, nothing to update
             }
             (Ordering::Greater, Ordering::Equal | Ordering::Greater) => {
                 // increased blob fee: recheck pending pool and remove all that are no longer valid
-                self.demote_pending_by_blob_fee();
+                let removed =
+                    self.pending_pool.update_blob_fee(self.all_transactions.pending_fees.blob_fee);
+                for tx in removed {
+                    let to = {
+                        let tx =
+                            self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
+
+                        // the blob fee is too high now, unset the blob fee cap block flag
+                        tx.state.remove(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
+                        tx.subpool = tx.state.into();
+                        tx.subpool
+                    };
+                    self.add_transaction_to_subpool(to, tx);
+                }
             }
-            (Ordering::Less, _) | (_, Ordering::Less) => {
-                if blob_fee_update.is_gt() {
-                    // increased blob fee while the base fee decreased: park pending transactions
-                    // that no longer cover the blob fee before promoting from the blob pool
-                    self.demote_pending_by_blob_fee();
+            (Ordering::Greater, Ordering::Less) => {
+                // The blob fee increased while the base fee decreased, so this update must both
+                // park transactions that no longer cover the blob fee and promote transactions
+                // that now cover both fees. Demote first so the promotion check sees the final
+                // fee state.
+                let removed =
+                    self.pending_pool.update_blob_fee(self.all_transactions.pending_fees.blob_fee);
+                for tx in removed {
+                    let to = {
+                        let tx =
+                            self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
+
+                        tx.state.remove(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
+                        tx.subpool = tx.state.into();
+                        tx.subpool
+                    };
+                    self.add_transaction_to_subpool(to, tx);
                 }
 
+                let removed =
+                    self.blob_pool.enforce_pending_fees(&self.all_transactions.pending_fees);
+                for tx in removed {
+                    let subpool = {
+                        let tx_meta =
+                            self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
+                        tx_meta.state.insert(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
+                        tx_meta.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
+                        tx_meta.subpool = tx_meta.state.into();
+                        tx_meta.subpool
+                    };
+
+                    if subpool == SubPool::Pending {
+                        on_promoted(&tx);
+                    }
+
+                    self.add_transaction_to_subpool(subpool, tx);
+                }
+            }
+            (Ordering::Less, _) | (Ordering::Equal, Ordering::Less) => {
                 // decreased blob/base fee: recheck blob pool and promote all that are now valid
                 let removed =
                     self.blob_pool.enforce_pending_fees(&self.all_transactions.pending_fees);
@@ -266,24 +311,6 @@ impl<T: TransactionOrdering> TxPool<T> {
                     self.add_transaction_to_subpool(subpool, tx);
                 }
             }
-        }
-    }
-
-    /// Moves all pending transactions that no longer satisfy the tracked blob fee to the sub-pool
-    /// they now belong to.
-    fn demote_pending_by_blob_fee(&mut self) {
-        let removed =
-            self.pending_pool.update_blob_fee(self.all_transactions.pending_fees.blob_fee);
-        for tx in removed {
-            let to = {
-                let tx = self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
-
-                // the blob fee is too high now, unset the blob fee cap block flag
-                tx.state.remove(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
-                tx.subpool = tx.state.into();
-                tx.subpool
-            };
-            self.add_transaction_to_subpool(to, tx);
         }
     }
 
@@ -705,12 +732,6 @@ impl<T: TransactionOrdering> TxPool<T> {
         // Apply subpool updates based on fee changes
         // This will record any additional promotions based on fee movements
         self.apply_fee_updates(prev_base_fee, prev_blob_fee, &mut outcome);
-
-        // The account update only rechecks the base fee, so a blob transaction it moved to pending
-        // on a stale blob fee flag was parked again by the fee update if the blob fee rose.
-        if self.all_transactions.pending_fees.blob_fee > prev_blob_fee {
-            outcome.promoted.retain(|tx| self.pending_pool.contains(tx.id()));
-        }
 
         // Update the rest of block info (without triggering fee updates again)
         self.all_transactions.set_block_info(block_info);
@@ -3639,44 +3660,46 @@ mod tests {
     }
 
     #[test]
-    fn canonical_state_change_does_not_report_blob_tx_parked_by_blob_fee_rise() {
+    fn update_blob_fee_demotes_and_promotes_when_base_fee_falls() {
         let mut f = MockTransactionFactory::default();
         let mut pool = TxPool::new(MockOrdering::default(), Default::default());
 
         let initial_blob_fee = pool.all_transactions.pending_fees.blob_fee;
-        let mut block_info = pool.block_info();
-        block_info.pending_basefee = 600;
-        pool.set_block_info(block_info);
+        let initial_base_fee = 600;
+        pool.all_transactions.pending_fees.base_fee = initial_base_fee;
 
-        // parked in the blob pool only because its fee cap is below the base fee
-        let tx = MockTransaction::eip4844()
-            .with_max_fee(500)
+        let tx_to_demote = MockTransaction::eip4844()
+            .with_max_fee(700)
             .with_priority_fee(1)
             .with_blob_fee(initial_blob_fee + 100);
-        let validated = f.validated(tx.clone());
-        let id = *validated.id();
+        let validated = f.validated(tx_to_demote);
+        let demoted_id = *validated.id();
         pool.add_transaction(validated, U256::from(1_000_000), 0, None).unwrap();
+
+        let tx_to_promote = MockTransaction::eip4844()
+            .with_max_fee(500)
+            .with_priority_fee(1)
+            .with_blob_fee(initial_blob_fee + 300);
+        let validated = f.validated(tx_to_promote);
+        let promoted_id = *validated.id();
+        pool.add_transaction(validated, U256::from(1_000_000), 0, None).unwrap();
+
+        assert_eq!(pool.pending_pool.len(), 1);
         assert_eq!(pool.blob_pool.len(), 1);
 
-        // The base fee falls below its cap while the blob fee rises above it. The account update
-        // runs first and moves it to pending on its stale blob fee flag, then the fee update parks
-        // it again, so it must not end up in the promoted set.
-        block_info.pending_basefee = 400;
-        block_info.pending_blob_fee = Some(tx.max_fee_per_blob_gas().unwrap() + 1);
-        let outcome = pool.on_canonical_state_change(
-            block_info,
-            vec![],
-            FxHashMap::default(),
-            PoolUpdateKind::Commit,
-        );
+        // The lower base fee makes one transaction affordable while the higher blob fee makes the
+        // other unaffordable, so the same update must both promote and demote.
+        let raised_blob_fee = initial_blob_fee + 200;
+        pool.all_transactions.pending_fees.base_fee = 400;
+        let mut promoted = Vec::new();
+        pool.update_blob_fee(raised_blob_fee, Ordering::Less, |tx| promoted.push(*tx.id()));
 
-        assert!(pool.pending_pool.is_empty());
+        assert_eq!(pool.pending_pool.len(), 1);
         assert_eq!(pool.blob_pool.len(), 1);
-        assert!(outcome.promoted.is_empty(), "parked transaction was reported as promoted");
+        assert_eq!(promoted, vec![promoted_id]);
 
-        let tx_meta = pool.all_transactions.txs.get(&id).unwrap();
-        assert_eq!(tx_meta.subpool, SubPool::Blob);
-        assert!(!tx_meta.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
+        assert_eq!(pool.all_transactions.txs.get(&demoted_id).unwrap().subpool, SubPool::Blob);
+        assert_eq!(pool.all_transactions.txs.get(&promoted_id).unwrap().subpool, SubPool::Pending);
     }
 
     #[test]
