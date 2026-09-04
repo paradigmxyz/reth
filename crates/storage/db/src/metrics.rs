@@ -404,3 +404,99 @@ impl OperationMetrics {
         }
     }
 }
+
+#[cfg(all(test, feature = "mdbx"))]
+mod tests {
+    use super::*;
+    use crate::{
+        implementation::mdbx::cursor::Cursor,
+        tables::{CanonicalHeaders, Headers, StorageChangeSets},
+        test_utils::create_test_rw_db,
+        Database,
+    };
+    use alloy_consensus::Header;
+    use alloy_primitives::{Address, B256, U256};
+    use metrics::{atomics::AtomicU64, HistogramFn};
+    use reth_db_api::{
+        cursor::{DbCursorRO, DbCursorRW, DbDupCursorRW},
+        models::BlockNumberAddress,
+        table::{Compress, Table},
+        transaction::{DbTx, DbTxMut},
+    };
+    use reth_libmdbx::RW;
+    use reth_primitives_traits::StorageEntry;
+    use std::sync::{atomic::Ordering, Mutex};
+
+    #[test]
+    fn cursor_write_metrics_include_errors_and_large_values() {
+        let db = create_test_rw_db();
+        let calls: [Arc<AtomicU64>; Operation::COUNT] = array::from_fn(|_| Arc::default());
+        let durations = Arc::<RecordedDurations>::default();
+        let metrics = Arc::new(array::from_fn(|index| OperationMetrics {
+            calls_total: Counter::from_arc(calls[index].clone()),
+            large_value_duration_seconds: Histogram::from_arc(durations.clone()),
+        }));
+        let tx = db.tx_mut().unwrap();
+        let mut cursor = instrument(tx.cursor_write::<CanonicalHeaders>().unwrap(), &metrics);
+        cursor.upsert(1, &B256::ZERO).unwrap();
+        cursor.insert(2, &B256::repeat_byte(1)).unwrap();
+        assert!(cursor.insert(2, &B256::repeat_byte(2)).is_err());
+        cursor.append(3, &B256::repeat_byte(3)).unwrap();
+        cursor.seek_exact(2).unwrap().unwrap();
+        cursor.delete_current().unwrap();
+        drop(cursor);
+
+        let mut cursor = instrument(tx.cursor_dup_write::<StorageChangeSets>().unwrap(), &metrics);
+        let key = BlockNumberAddress((1, Address::ZERO));
+        for index in 1..=2 {
+            cursor
+                .append_dup(
+                    key,
+                    StorageEntry { key: B256::with_last_byte(index), value: U256::from(index) },
+                )
+                .unwrap();
+        }
+        cursor.delete_current_duplicates().unwrap();
+        drop(cursor);
+
+        let mut cursor = instrument(tx.cursor_write::<Headers>().unwrap(), &metrics);
+        cursor.upsert(1, &Header::default()).unwrap();
+        assert!(durations.0.lock().unwrap().is_empty());
+        let large = Header { extra_data: vec![1; 8192].into(), ..Default::default() };
+        assert!(large.clone().compress().len() > LARGE_VALUE_THRESHOLD_BYTES);
+        cursor.insert(2, &large).unwrap();
+        assert!(cursor.insert(2, &large).is_err());
+        drop(cursor);
+        tx.commit().unwrap();
+
+        assert_eq!(
+            calls.each_ref().map(|counter| counter.load(Ordering::Relaxed)),
+            [0, 0, 0, 0, 2, 4, 1, 2, 1, 1]
+        );
+        let durations = durations.0.lock().unwrap();
+        assert_eq!(durations.len(), 2);
+        assert!(durations.iter().all(|duration| duration.is_finite() && *duration >= 0.0));
+        let tx = db.tx().unwrap();
+        assert_eq!(tx.get::<CanonicalHeaders>(1).unwrap(), Some(B256::ZERO));
+        assert_eq!(tx.get::<CanonicalHeaders>(2).unwrap(), None);
+        assert_eq!(tx.get::<CanonicalHeaders>(3).unwrap(), Some(B256::repeat_byte(3)));
+        assert_eq!(tx.entries::<StorageChangeSets>().unwrap(), 0);
+        assert_eq!(tx.get::<Headers>(2).unwrap(), Some(large));
+    }
+
+    fn instrument<T: Table>(
+        cursor: Cursor<RW, T>,
+        metrics: &TableOperationMetrics,
+    ) -> Cursor<RW, T> {
+        Cursor::new_with_metrics(cursor.inner, Some(metrics.clone()))
+    }
+
+    #[derive(Default)]
+    struct RecordedDurations(Mutex<Vec<f64>>);
+
+    impl HistogramFn for RecordedDurations {
+        fn record(&self, value: f64) {
+            self.0.lock().unwrap().push(value);
+        }
+    }
+}

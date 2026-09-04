@@ -2594,10 +2594,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
             return Ok(());
         }
 
-        // Drain and sort updates lexicographically by nibbles path.
+        // Full-length paths have the same lexicographic order as their hashed keys.
         let mut sorted: Vec<_> =
             updates.drain().map(|(key, update)| (key, Nibbles::unpack(key), update)).collect();
-        sorted.sort_unstable_by_key(|entry| entry.1);
+        sorted.sort_unstable_by_key(|entry| entry.0);
 
         let threshold = self.parallelism_thresholds.min_updates;
         let parallelize_distributed_updates = sorted.len() >= threshold.saturating_mul(4);
