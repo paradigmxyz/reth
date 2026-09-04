@@ -174,6 +174,9 @@ impl LaunchContext {
         // Update the config with the command line arguments. Only override when the CLI flag is
         // set, so the TOML value is preserved when the flag is not passed.
         toml_config.peers.trusted_nodes_only |= config.network.trusted_only;
+        if let Some(enabled) = config.historical_bal {
+            toml_config.historical_bal.enabled = enabled;
+        }
 
         // Merge static file CLI arguments with config file, giving priority to CLI
         toml_config.static_files =
@@ -1465,6 +1468,7 @@ mod tests {
     use reth_node_core::args::PruningArgs;
     use reth_provider::{MetadataProvider, ProviderResult, StageCheckpointReader};
     use reth_stages::{FinishCheckpoint, StageCheckpoint, StageId};
+    use reth_tasks::Runtime;
 
     const EXTENSION: &str = "toml";
 
@@ -1537,6 +1541,29 @@ mod tests {
             let loaded_config = Config::from_path(config_path).unwrap();
 
             assert_eq!(reth_config, loaded_config);
+        })
+    }
+
+    #[test]
+    fn test_historical_bal_cli_override_preserves_toml_when_omitted() {
+        with_tempdir("historical-bal-config", |config_path| {
+            const ENABLED_CONFIG: &str = "[historical_bal]\nenabled = true\nmin_transactions = 9\n";
+            const DISABLED_CONFIG: &str =
+                "[historical_bal]\nenabled = false\nmin_transactions = 11\n";
+
+            for (toml, cli_override, expected_enabled, expected_min_transactions) in [
+                (ENABLED_CONFIG, None, true, 9),
+                (ENABLED_CONFIG, Some(false), false, 9),
+                (DISABLED_CONFIG, Some(true), true, 11),
+            ] {
+                std::fs::write(config_path, toml).unwrap();
+                let node_config =
+                    NodeConfig::test().with_config(config_path).with_historical_bal(cli_override);
+                let context = LaunchContext::new(Runtime::test(), node_config.datadir());
+                let loaded = context.load_toml_config(&node_config).unwrap();
+                assert_eq!(loaded.historical_bal.enabled, expected_enabled);
+                assert_eq!(loaded.historical_bal.min_transactions.get(), expected_min_transactions);
+            }
         })
     }
 

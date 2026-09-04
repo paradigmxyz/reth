@@ -11,6 +11,9 @@
 
 extern crate alloc;
 
+mod bal;
+pub use bal::*;
+
 mod chain;
 pub use chain::*;
 
