@@ -2,7 +2,10 @@
 
 use std::sync::Arc;
 
-use super::{evm_state_to_hashed_post_state, StateRootComputeOutcome, StateRootMessage};
+use super::{
+    evm_state_to_hashed_post_state_with_created_empty_accounts, StateRootComputeOutcome,
+    StateRootMessage,
+};
 use alloy_primitives::{
     map::{hash_map::Entry, B256Map},
     B256,
@@ -144,6 +147,7 @@ where
         parent_state_root: B256,
         new_epoch: TrieNodeEpoch,
         chunk_size: usize,
+        allow_create_empty_account: bool,
     ) -> Self {
         let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
 
@@ -151,7 +155,12 @@ where
         let hashing_metrics = metrics.clone();
         executor.spawn_blocking_named("trie-hashing", move || {
             let _span = trace_span!(parent: parent_span, "run_hashing_task").entered();
-            Self::run_hashing_task(updates, hashed_state_tx, hashing_metrics)
+            Self::run_hashing_task(
+                updates,
+                hashed_state_tx,
+                hashing_metrics,
+                allow_create_empty_account,
+            )
         });
 
         Self {
@@ -193,6 +202,7 @@ where
         updates: CrossbeamReceiver<StateRootMessage>,
         hashed_state_tx: CrossbeamSender<SparseTrieTaskMessage>,
         metrics: SparseTrieTaskMetrics,
+        allow_create_empty_account: bool,
     ) {
         let mut total_idle_time = std::time::Duration::ZERO;
         let mut idle_start = Instant::now();
@@ -206,7 +216,10 @@ where
                 }
                 StateRootMessage::StateUpdate(state) => {
                     let _span = trace_span!(target: "engine::tree::payload_processor::sparse_trie", "hashing_state_update", n = state.len()).entered();
-                    let hashed = evm_state_to_hashed_post_state(state);
+                    let hashed = evm_state_to_hashed_post_state_with_created_empty_accounts(
+                        state,
+                        allow_create_empty_account,
+                    );
                     SparseTrieTaskMessage::HashedState(hashed)
                 }
                 StateRootMessage::FinishedStateUpdates => {
@@ -1045,21 +1058,22 @@ fn dispatch_with_chunking<T, I>(
 
 /// RLP-encodes the account as a [`TrieAccount`] leaf value, or returns empty for deletions.
 ///
-/// `Some(Account::default())` with an empty storage root is encoded as a deletion. This is valid
-/// for post-Merge state because EIP-7523 (<https://eips.ethereum.org/EIPS/eip-7523>) prohibits
-/// empty accounts. Do not use this encoding rule when replaying historical pre-Merge state, where
-/// an empty account and a missing account can have different trie representations.
+/// Account existence is explicit here: `None` deletes the leaf and `Some` writes it. Empty-account
+/// pruning is handled when execution state is converted into hashed post-state.
 fn encode_account_leaf_value(
     account: Option<Account>,
     storage_root: B256,
     account_rlp_buf: &mut Vec<u8>,
 ) -> Vec<u8> {
-    if account.is_none_or(|account| account.is_empty()) && storage_root == EMPTY_ROOT_HASH {
+    // Account existence is explicit in `HashedPostState`: `None` deletes the leaf, while `Some`
+    // writes it. Empty-account pruning happens when the execution state is converted into hashed
+    // post state.
+    let Some(account) = account else {
         return Vec::new();
-    }
+    };
 
     account_rlp_buf.clear();
-    account.unwrap_or_default().into_trie_account(storage_root).encode(account_rlp_buf);
+    account.into_trie_account(storage_root).encode(account_rlp_buf);
     account_rlp_buf.clone()
 }
 
@@ -1152,6 +1166,7 @@ mod tests {
                 updates_rx,
                 hashed_state_tx,
                 SparseTrieTaskMetrics::default(),
+                false,
             );
         });
 
@@ -1178,7 +1193,7 @@ mod tests {
     }
 
     #[test]
-    fn test_encode_account_leaf_value_deletion_and_empty_root_is_empty() {
+    fn test_encode_account_leaf_value_deleted_account_is_empty() {
         let mut account_rlp_buf = vec![0xAB];
         let encoded = encode_account_leaf_value(None, EMPTY_ROOT_HASH, &mut account_rlp_buf);
 
@@ -1188,17 +1203,17 @@ mod tests {
     }
 
     #[test]
-    fn test_encode_account_leaf_value_empty_account_and_empty_root_is_empty() {
+    fn test_encode_account_leaf_value_empty_account_is_rlp() {
         let mut account_rlp_buf = vec![0xAB];
         let encoded = encode_account_leaf_value(
             Some(Account::default()),
             EMPTY_ROOT_HASH,
             &mut account_rlp_buf,
         );
+        let decoded = TrieAccount::decode(&mut &encoded[..]).expect("valid account RLP");
 
-        assert!(encoded.is_empty());
-        // Early return should not touch the caller's buffer.
-        assert_eq!(account_rlp_buf, vec![0xAB]);
+        assert_eq!(decoded, TrieAccount::default());
+        assert_eq!(account_rlp_buf, encoded);
     }
 
     #[test]
@@ -1260,6 +1275,7 @@ mod tests {
             parent_state_root,
             TrieNodeEpoch::UNMODIFIED,
             1,
+            false,
         );
 
         updates_tx.send(StateRootMessage::FinishedStateUpdates).unwrap();
@@ -1314,6 +1330,7 @@ mod tests {
             B256::from([0x55; 32]),
             TrieNodeEpoch::UNMODIFIED,
             1,
+            false,
         );
 
         drop(updates_tx);
@@ -1402,6 +1419,7 @@ mod tests {
             B256::from([0x55; 32]),
             TrieNodeEpoch::UNMODIFIED,
             1,
+            false,
         );
 
         // The consumer abandons the computation. The updates channel is still open (no finish
@@ -1455,6 +1473,7 @@ mod tests {
             B256::from([0x55; 32]),
             TrieNodeEpoch::UNMODIFIED,
             1,
+            false,
         );
 
         updates_tx.send(StateRootMessage::FinishedStateUpdates).unwrap();
