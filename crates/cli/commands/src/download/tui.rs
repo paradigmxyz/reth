@@ -1,7 +1,7 @@
 use crate::download::{
     download_command,
     manifest::{ComponentSelection, SnapshotComponentType, SnapshotManifest},
-    minimal_selection_for_component, DownloadProgress, SelectionPreset,
+    DownloadProgress, SelectionPreset,
 };
 use crossterm::{
     event::{self, Event, KeyCode},
@@ -101,7 +101,10 @@ fn presets_with_configured(
 }
 
 /// Build the display groups from available components in the manifest.
-fn build_groups(manifest: &SnapshotManifest) -> Vec<DisplayGroup> {
+fn build_groups(
+    manifest: &SnapshotManifest,
+    minimal_preset: &BTreeMap<SnapshotComponentType, ComponentSelection>,
+) -> Vec<DisplayGroup> {
     let has = |ty: SnapshotComponentType| manifest.component(ty).is_some();
 
     let mut groups = Vec::new();
@@ -131,10 +134,10 @@ fn build_groups(manifest: &SnapshotManifest) -> Vec<DisplayGroup> {
             required: false,
             presets: presets_with_configured(
                 &HISTORY_PRESETS,
-                minimal_selection_for_component(
-                    SnapshotComponentType::Transactions,
-                    manifest.block,
-                ),
+                minimal_preset
+                    .get(&SnapshotComponentType::Transactions)
+                    .copied()
+                    .unwrap_or(ComponentSelection::None),
             ),
         });
     }
@@ -146,7 +149,10 @@ fn build_groups(manifest: &SnapshotManifest) -> Vec<DisplayGroup> {
             required: false,
             presets: presets_with_configured(
                 &RECEIPTS_PRESETS,
-                minimal_selection_for_component(SnapshotComponentType::Receipts, manifest.block),
+                minimal_preset
+                    .get(&SnapshotComponentType::Receipts)
+                    .copied()
+                    .unwrap_or(ComponentSelection::None),
             ),
         });
     }
@@ -162,7 +168,7 @@ fn build_groups(manifest: &SnapshotManifest) -> Vec<DisplayGroup> {
         if has_stor {
             types.push(SnapshotComponentType::StorageChangesets);
         }
-        let configured = minimal_selection_for_component(types[0], manifest.block);
+        let configured = minimal_preset.get(&types[0]).copied().unwrap_or(ComponentSelection::None);
         groups.push(DisplayGroup {
             name: "State History",
             types,
@@ -176,6 +182,7 @@ fn build_groups(manifest: &SnapshotManifest) -> Vec<DisplayGroup> {
 
 struct SelectorApp {
     manifest: SnapshotManifest,
+    minimal_preset: BTreeMap<SnapshotComponentType, ComponentSelection>,
     full_preset: BTreeMap<SnapshotComponentType, ComponentSelection>,
     /// Display groups shown in the TUI.
     groups: Vec<DisplayGroup>,
@@ -192,14 +199,15 @@ struct SelectorApp {
 impl SelectorApp {
     fn new(
         manifest: SnapshotManifest,
+        minimal_preset: BTreeMap<SnapshotComponentType, ComponentSelection>,
         full_preset: BTreeMap<SnapshotComponentType, ComponentSelection>,
     ) -> Self {
-        let groups = build_groups(&manifest);
+        let groups = build_groups(&manifest, &minimal_preset);
 
         // Default to the minimal preset (matches --minimal prune config)
         let selections = groups
             .iter()
-            .map(|g| minimal_selection_for_component(g.types[0], manifest.block))
+            .map(|g| minimal_preset.get(&g.types[0]).copied().unwrap_or(ComponentSelection::None))
             .collect();
 
         let mut list_state = ListState::default();
@@ -207,6 +215,7 @@ impl SelectorApp {
 
         Self {
             manifest,
+            minimal_preset,
             full_preset,
             groups,
             selections,
@@ -249,16 +258,22 @@ impl SelectorApp {
 
     fn select_minimal(&mut self) {
         for (i, group) in self.groups.iter().enumerate() {
-            self.selections[i] =
-                minimal_selection_for_component(group.types[0], self.manifest.block);
+            self.selections[i] = self
+                .minimal_preset
+                .get(&group.types[0])
+                .copied()
+                .unwrap_or(ComponentSelection::None);
         }
         self.preset = Some(SelectionPreset::Minimal);
     }
 
     fn select_full(&mut self) {
         for (i, group) in self.groups.iter().enumerate() {
-            let mut selection =
-                minimal_selection_for_component(group.types[0], self.manifest.block);
+            let mut selection = self
+                .minimal_preset
+                .get(&group.types[0])
+                .copied()
+                .unwrap_or(ComponentSelection::None);
             for ty in &group.types {
                 if let Some(sel) = self.full_preset.get(ty).copied() {
                     selection = sel;
@@ -323,6 +338,7 @@ impl SelectorApp {
 /// Runs the interactive component selector TUI.
 pub fn run_selector(
     manifest: SnapshotManifest,
+    minimal_preset: &BTreeMap<SnapshotComponentType, ComponentSelection>,
     full_preset: &BTreeMap<SnapshotComponentType, ComponentSelection>,
 ) -> eyre::Result<SelectorOutput> {
     enable_raw_mode()?;
@@ -331,7 +347,7 @@ pub fn run_selector(
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = SelectorApp::new(manifest, full_preset.clone());
+    let mut app = SelectorApp::new(manifest, minimal_preset.clone(), full_preset.clone());
     let result = event_loop(&mut terminal, &mut app);
 
     disable_raw_mode()?;

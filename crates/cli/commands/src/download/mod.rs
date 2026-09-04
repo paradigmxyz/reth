@@ -741,8 +741,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         }
 
         // Interactive TUI
+        let minimal_preset = self.minimal_preset_selections(manifest);
         let full_preset = self.full_preset_selections(manifest);
-        let SelectorOutput { selections, preset } = run_selector(manifest.clone(), &full_preset)?;
+        let SelectorOutput { selections, preset } =
+            run_selector(manifest.clone(), &minimal_preset, &full_preset)?;
         let selected =
             selections.into_iter().filter(|(_, sel)| *sel != ComponentSelection::None).collect();
 
@@ -830,7 +832,19 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             }
         }
 
-        selection_for_component_with_modes(ty, snapshot_block, prune_modes)
+        let mode = match ty {
+            SnapshotComponentType::State | SnapshotComponentType::Headers => {
+                return ComponentSelection::All
+            }
+            SnapshotComponentType::Transactions => prune_modes.bodies_history,
+            SnapshotComponentType::TransactionSenders => prune_modes.sender_recovery,
+            SnapshotComponentType::Receipts => prune_modes.receipts,
+            SnapshotComponentType::AccountChangesets => prune_modes.account_history,
+            SnapshotComponentType::StorageChangesets => prune_modes.storage_history,
+            SnapshotComponentType::RocksdbIndices => return ComponentSelection::None,
+        };
+
+        selection_from_prune_mode(mode, snapshot_block)
     }
 
     /// Resolves the manifest source from CLI input or snapshot discovery.
@@ -876,38 +890,6 @@ fn explicit_component_selection(
     } else {
         distance.map(ComponentSelection::Distance)
     }
-}
-
-/// Returns the component coverage required by the configured minimal pruning defaults.
-pub(super) fn minimal_selection_for_component(
-    component: SnapshotComponentType,
-    snapshot_block: u64,
-) -> ComponentSelection {
-    selection_for_component_with_modes(
-        component,
-        snapshot_block,
-        &DefaultPruningValues::get_global().minimal_prune_modes,
-    )
-}
-
-fn selection_for_component_with_modes(
-    component: SnapshotComponentType,
-    snapshot_block: u64,
-    modes: &PruneModes,
-) -> ComponentSelection {
-    let mode = match component {
-        SnapshotComponentType::State | SnapshotComponentType::Headers => {
-            return ComponentSelection::All
-        }
-        SnapshotComponentType::Transactions => modes.bodies_history,
-        SnapshotComponentType::TransactionSenders => modes.sender_recovery,
-        SnapshotComponentType::Receipts => modes.receipts,
-        SnapshotComponentType::AccountChangesets => modes.account_history,
-        SnapshotComponentType::StorageChangesets => modes.storage_history,
-        SnapshotComponentType::RocksdbIndices => return ComponentSelection::None,
-    };
-
-    selection_from_prune_mode(mode, snapshot_block)
 }
 
 /// Converts a prune mode into the matching component selection.
@@ -1308,6 +1290,8 @@ mod tests {
 
     #[test]
     fn minimal_component_selection_uses_configured_prune_modes() {
+        let args =
+            CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from(["reth"]).args;
         let history_distance = 64_864;
         let modes = PruneModes {
             sender_recovery: Some(PruneMode::Full),
@@ -1319,38 +1303,47 @@ mod tests {
         };
 
         assert_eq!(
-            selection_for_component_with_modes(
+            args.pruning_selection_for_component(
                 SnapshotComponentType::Transactions,
                 1_000_000,
                 &modes,
+                false,
             ),
             ComponentSelection::Distance(history_distance)
         );
         assert_eq!(
-            selection_for_component_with_modes(SnapshotComponentType::Receipts, 1_000_000, &modes),
+            args.pruning_selection_for_component(
+                SnapshotComponentType::Receipts,
+                1_000_000,
+                &modes,
+                false,
+            ),
             ComponentSelection::Distance(128)
         );
         assert_eq!(
-            selection_for_component_with_modes(
+            args.pruning_selection_for_component(
                 SnapshotComponentType::AccountChangesets,
                 1_000_000,
                 &modes,
+                false,
             ),
             ComponentSelection::Distance(history_distance)
         );
         assert_eq!(
-            selection_for_component_with_modes(
+            args.pruning_selection_for_component(
                 SnapshotComponentType::StorageChangesets,
                 1_000_000,
                 &modes,
+                false,
             ),
             ComponentSelection::Distance(history_distance)
         );
         assert_eq!(
-            selection_for_component_with_modes(
+            args.pruning_selection_for_component(
                 SnapshotComponentType::TransactionSenders,
                 1_000_000,
                 &modes,
+                false,
             ),
             ComponentSelection::None
         );
