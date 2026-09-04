@@ -17,8 +17,7 @@ use std::{
     sync::{Mutex, MutexGuard},
 };
 
-/// Answers account and storage requests from one queue, so retries across request kinds stay
-/// observable in submission order.
+/// Serves queued responses so retries remain observable in submission order.
 #[derive(Debug)]
 pub(super) struct TestSnapClient {
     responses: Mutex<VecDeque<PeerRequestResult<SnapResponse>>>,
@@ -94,17 +93,17 @@ impl SnapClient for TestSnapClient {
     fn get_byte_codes_with_priority(
         &self,
         _request: GetByteCodesMessage,
-        _priority: Priority,
+        priority: Priority,
     ) -> Self::Output {
-        unsupported()
+        self.next(priority)
     }
 
     fn get_block_access_lists_with_priority(
         &self,
         _request: GetBlockAccessListsMessage,
-        _priority: Priority,
+        priority: Priority,
     ) -> Self::Output {
-        unsupported()
+        self.next(priority)
     }
 }
 

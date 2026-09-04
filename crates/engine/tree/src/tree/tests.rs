@@ -44,6 +44,13 @@ use std::{
 };
 use tokio::sync::oneshot;
 
+/// Wraps blocks as if they had been downloaded without any access list data.
+fn downloaded_blocks<B: reth_primitives_traits::Block>(
+    blocks: Vec<reth_primitives_traits::SealedBlock<B>>,
+) -> Vec<SealedBlockWithAccessList<B>> {
+    blocks.into_iter().map(SealedBlockWithAccessList::from_block).collect()
+}
+
 /// Mock engine validator for tests
 #[derive(Debug, Clone)]
 struct MockEngineValidator;
@@ -58,7 +65,8 @@ impl reth_engine_primitives::PayloadValidator<EthEngineTypes> for MockEngineVali
         reth_primitives_traits::SealedBlock<Self::Block>,
         reth_payload_primitives::NewPayloadError,
     > {
-        let block = reth_ethereum_primitives::Block::try_from(payload.payload).map_err(|e| {
+        let ExecutionData { payload, sidecar } = payload;
+        let block = payload.try_into_block_with_sidecar(&sidecar).map_err(|e| {
             reth_payload_primitives::NewPayloadError::Other(format!("{e:?}").into())
         })?;
         Ok(block.seal_slow())
@@ -475,7 +483,8 @@ impl ValidatorTestHarness {
             &mut self.harness.tree.state,
             &self.harness.tree.canonical_in_memory_state,
         );
-        let result = self.validator.validate_block(block, ctx);
+        let result =
+            self.validator.validate_block(SealedBlockWithAccessList::from_block(block), ctx);
         self.metrics.record_validation(result.is_ok());
         result
     }
@@ -542,7 +551,7 @@ fn test_tree_persist_block_batch() {
         blocks.push(test_block_builder.generate_random_block(idx as u64, B256::random()));
     }
 
-    test_harness.to_tree_tx.send(FromEngine::DownloadedBlocks(blocks)).unwrap();
+    test_harness.to_tree_tx.send(FromEngine::DownloadedBlocks(downloaded_blocks(blocks))).unwrap();
 
     // process the message
     let msg = match test_harness.tree.wait_for_event() {
@@ -565,19 +574,19 @@ fn test_tree_persist_block_batch() {
 }
 
 #[test]
-fn malformed_input_is_non_fatal_insert_outcome() {
+fn block_access_list_decode_returns_invalid_with_null_latest_valid_hash() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
-    let block = test_harness.block_builder.generate_random_block(1, B256::ZERO);
+    let parent_hash = test_harness.tree.state.tree_state.canonical_block_hash();
+    let block = test_harness.block_builder.generate_random_block(1, parent_hash);
     let error = InsertBlockError::new(
         block,
         InsertBlockErrorKind::BlockAccessListDecode(BlockAccessListDecodeError::new(
             alloy_rlp::Error::UnexpectedString,
         )),
     );
-    assert_matches!(
-        test_harness.tree.on_insert_block_error(error),
-        Err(InsertBlockProcessingError::MalformedInput(_))
-    );
+    let status = test_harness.tree.on_insert_block_error(error).unwrap();
+    assert!(status.is_invalid());
+    assert_eq!(status.latest_valid_hash, None);
 }
 
 #[tokio::test]
@@ -674,7 +683,7 @@ fn payload_build_tracker_notifies_after_last_lease_drops() {
 }
 
 #[test]
-fn persistence_handoff_waits_for_active_payload_jobs() {
+fn persistence_completion_does_not_wait_for_active_payload_jobs() {
     let config = TreeConfig::default()
         .with_has_enough_parallelism(true)
         .with_persistence_threshold(0)
@@ -684,8 +693,7 @@ fn persistence_handoff_waits_for_active_payload_jobs() {
         TestHarness::with_config(MAINNET.clone(), config).with_blocks(blocks.clone());
     let persisted = blocks[0].recovered_block().num_hash();
     let persisted_hash = persisted.hash;
-    let first = test_harness.tree.payload_builds.acquire();
-    let second = test_harness.tree.payload_builds.acquire();
+    let _payload_build = test_harness.tree.payload_builds.acquire();
 
     test_harness
         .tree
@@ -699,102 +707,11 @@ fn persistence_handoff_waits_for_active_payload_jobs() {
         )
         .unwrap();
 
-    // Durability advances immediately, but the in-memory overlay remains available to jobs.
+    // Payload jobs own an overlay snapshot, so persistence can immediately reclaim the manager's
+    // copy.
     assert_eq!(test_harness.tree.persistence_state.last_persisted_block, persisted);
-    assert!(test_harness.tree.pending_persisted_handoff.is_some());
-    assert!(test_harness.tree.state.tree_state.contains_hash(&persisted_hash));
-    assert!(test_harness.tree.canonical_in_memory_state.state_by_hash(persisted_hash).is_some());
-
-    // Do not let another persistence action overwrite the deferred handoff's frontier.
-    test_harness.tree.advance_persistence().unwrap();
-    assert!(!test_harness.tree.persistence_state.in_progress());
-
-    drop(first);
-    assert!(test_harness.tree.payload_build_finished.try_recv().is_err());
-    assert!(test_harness.tree.pending_persisted_handoff.is_some());
-
-    drop(second);
-    assert!(matches!(test_harness.tree.wait_for_event(), super::LoopEvent::PayloadBuildFinished));
-    test_harness.tree.on_payload_build_finished().unwrap();
-
-    assert!(test_harness.tree.pending_persisted_handoff.is_none());
     assert!(!test_harness.tree.state.tree_state.contains_hash(&persisted_hash));
     assert!(test_harness.tree.canonical_in_memory_state.state_by_hash(persisted_hash).is_none());
-}
-
-#[test]
-fn pending_persisted_handoff_keeps_engine_messages_responsive() {
-    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
-    let mut test_harness = TestHarness::with_config(
-        MAINNET.clone(),
-        TreeConfig::default().with_has_enough_parallelism(true),
-    )
-    .with_blocks(blocks.clone());
-    let persisted = blocks[0].recovered_block().num_hash();
-    let payload_build = test_harness.tree.payload_builds.acquire();
-
-    test_harness
-        .tree
-        .on_persistence_complete(
-            PersistenceResult {
-                last_block: persisted,
-                last_state_trie_block: persisted,
-                commit_duration: Some(Duration::ZERO),
-            },
-            Instant::now(),
-        )
-        .unwrap();
-    assert!(test_harness.tree.pending_persisted_handoff.is_some());
-
-    // Engine messages remain processable while the handoff waits for the active payload build.
-    test_harness.to_tree_tx.send(FromEngine::Event(FromOrchestrator::BackfillSyncStarted)).unwrap();
-    assert_matches!(
-        test_harness.tree.wait_for_event(),
-        super::LoopEvent::EngineMessage(FromEngine::Event(FromOrchestrator::BackfillSyncStarted))
-    );
-    assert!(test_harness.tree.pending_persisted_handoff.is_some());
-    assert!(test_harness.tree.state.tree_state.contains_hash(&persisted.hash));
-
-    // Once the final lease drops, its completion is prioritized over queued engine messages so the
-    // handoff gets the first opportunity to reclaim the overlay.
-    test_harness.to_tree_tx.send(FromEngine::Event(FromOrchestrator::BackfillSyncStarted)).unwrap();
-    drop(payload_build);
-    assert_matches!(test_harness.tree.wait_for_event(), super::LoopEvent::PayloadBuildFinished);
-    test_harness.tree.on_payload_build_finished().unwrap();
-    assert!(test_harness.tree.pending_persisted_handoff.is_none());
-    assert!(!test_harness.tree.state.tree_state.contains_hash(&persisted.hash));
-    assert_matches!(
-        test_harness.tree.wait_for_event(),
-        super::LoopEvent::EngineMessage(FromEngine::Event(FromOrchestrator::BackfillSyncStarted))
-    );
-}
-
-#[test]
-fn persist_until_complete_updates_frontiers_without_in_memory_handoff() {
-    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
-    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
-    let persisted = blocks.last().unwrap().recovered_block().num_hash();
-    let persisted_hash = persisted.hash;
-    let (tx, rx) = crossbeam_channel::bounded(1);
-
-    tx.send(PersistenceResult {
-        last_block: persisted,
-        last_state_trie_block: persisted,
-        commit_duration: Some(Duration::ZERO),
-    })
-    .unwrap();
-    test_harness.tree.persistence_state.start_save(persisted, rx);
-
-    test_harness.tree.persist_until_complete().unwrap();
-
-    // Shutdown waits for the durable write, but process teardown does not need the destructive
-    // in-memory handoff that normally follows a completed persistence task.
-    assert_eq!(test_harness.tree.persistence_state.last_persisted_block, persisted);
-    assert_eq!(test_harness.tree.persistence_state.last_state_trie_persisted_block, persisted);
-    assert!(!test_harness.tree.persistence_state.in_progress());
-    assert!(test_harness.tree.pending_persisted_handoff.is_none());
-    assert!(test_harness.tree.state.tree_state.contains_hash(&persisted_hash));
-    assert!(test_harness.tree.canonical_in_memory_state.state_by_hash(persisted_hash).is_some());
 }
 
 #[test]
@@ -804,50 +721,13 @@ fn backfill_action_skips_while_payload_build_is_active() {
     let action = BackfillAction::Start(B256::random().into());
 
     test_harness.tree.emit_event(EngineApiEvent::BackfillAction(action));
-    assert!(test_harness.tree.pending_persisted_handoff.is_none());
     assert!(test_harness.tree.backfill_sync_state.is_idle());
     assert!(test_harness.from_tree_rx.try_recv().is_err());
 
     drop(payload_build);
     assert!(matches!(test_harness.tree.wait_for_event(), super::LoopEvent::PayloadBuildFinished));
-    test_harness.tree.on_payload_build_finished().unwrap();
 
     // The skipped action is not queued for a later replay.
-    assert!(test_harness.tree.backfill_sync_state.is_idle());
-    assert!(test_harness.from_tree_rx.try_recv().is_err());
-}
-
-#[test]
-fn backfill_action_skips_while_persisted_handoff_is_pending() {
-    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
-    let mut test_harness = TestHarness::with_config(
-        MAINNET.clone(),
-        TreeConfig::default().with_has_enough_parallelism(true),
-    )
-    .with_blocks(blocks.clone());
-    let persisted = blocks[0].recovered_block().num_hash();
-    let payload_build = test_harness.tree.payload_builds.acquire();
-
-    test_harness
-        .tree
-        .on_persistence_complete(
-            PersistenceResult {
-                last_block: persisted,
-                last_state_trie_block: persisted,
-                commit_duration: Some(Duration::ZERO),
-            },
-            Instant::now(),
-        )
-        .unwrap();
-
-    drop(payload_build);
-    assert!(!test_harness.tree.payload_builds.is_active());
-    assert!(test_harness.tree.pending_persisted_handoff.is_some());
-
-    test_harness
-        .tree
-        .emit_event(EngineApiEvent::BackfillAction(BackfillAction::Start(B256::random().into())));
-
     assert!(test_harness.tree.backfill_sync_state.is_idle());
     assert!(test_harness.from_tree_rx.try_recv().is_err());
 }
@@ -1011,7 +891,10 @@ fn test_disconnected_block() {
 
     let mut test_harness = TestHarness::new(HOLESKY.clone());
 
-    let outcome = test_harness.tree.insert_block(sealed.clone()).unwrap();
+    let outcome = test_harness
+        .tree
+        .insert_block(SealedBlockWithAccessList::from_block(sealed.clone()))
+        .unwrap();
     assert_eq!(
         outcome,
         InsertPayloadOk::Inserted(BlockStatus::Disconnected {
@@ -1045,7 +928,7 @@ fn test_validated_payload_bal_is_inserted_into_store() {
                         .with_raw_bal(Some(RawBal::from(raw_bal.clone()))),
                 )
             },
-            |_, executed| Ok(executed.recovered_block().clone_sealed_block()),
+            |_, executed| Ok(executed.recovered_block().clone_sealed_block().into()),
         )
         .unwrap();
 
@@ -1520,7 +1403,9 @@ async fn test_engine_tree_fcu_missing_head() {
     // after FCU we receive an EngineApiEvent::Download event to get the missing block.
     let event = test_harness.from_tree_rx.recv().await.unwrap();
     match event {
-        EngineApiEvent::Download(DownloadRequest::BlockSet(actual_block_set)) => {
+        EngineApiEvent::Download(DownloadRequest::BlockSet {
+            hashes: actual_block_set, ..
+        }) => {
             let expected_block_set = B256Set::from_iter([missing_block.hash()]);
             assert_eq!(actual_block_set, expected_block_set);
         }
@@ -1565,7 +1450,7 @@ async fn test_engine_tree_live_sync_transition_required_blocks_requested() {
 
     let event = test_harness.from_tree_rx.recv().await.unwrap();
     match event {
-        EngineApiEvent::Download(DownloadRequest::BlockSet(hash_set)) => {
+        EngineApiEvent::Download(DownloadRequest::BlockSet { hashes: hash_set, .. }) => {
             assert_eq!(hash_set, B256Set::from_iter([main_chain_last_hash]));
         }
         _ => panic!("Unexpected event: {event:#?}"),
@@ -1574,7 +1459,7 @@ async fn test_engine_tree_live_sync_transition_required_blocks_requested() {
     // After backfill completes with head not buffered, we also request head download
     let event = test_harness.from_tree_rx.recv().await.unwrap();
     match event {
-        EngineApiEvent::Download(DownloadRequest::BlockSet(hash_set)) => {
+        EngineApiEvent::Download(DownloadRequest::BlockSet { hashes: hash_set, .. }) => {
             assert_eq!(hash_set, B256Set::from_iter([main_chain_last_hash]));
         }
         _ => panic!("Unexpected event: {event:#?}"),
@@ -1582,15 +1467,19 @@ async fn test_engine_tree_live_sync_transition_required_blocks_requested() {
 
     let _ = test_harness
         .tree
-        .on_engine_message(FromEngine::DownloadedBlocks(vec![main_chain
+        .on_engine_message(FromEngine::DownloadedBlocks(downloaded_blocks(vec![main_chain
             .last()
             .unwrap()
-            .clone_sealed_block()]))
+            .clone_sealed_block()])))
         .unwrap();
 
     let event = test_harness.from_tree_rx.recv().await.unwrap();
     match event {
-        EngineApiEvent::Download(DownloadRequest::BlockRange(initial_hash, total_blocks)) => {
+        EngineApiEvent::Download(DownloadRequest::BlockRange {
+            hash: initial_hash,
+            count: total_blocks,
+            ..
+        }) => {
             assert_eq!(
                 total_blocks,
                 (main_chain.len() - backfill_finished_block_number as usize - 1) as u64
@@ -2560,7 +2449,7 @@ mod forkchoice_updated_tests {
 
         if let Some(TreeEvent::Download(download_request)) = result.event {
             match download_request {
-                DownloadRequest::BlockSet(block_set) => {
+                DownloadRequest::BlockSet { hashes: block_set, .. } => {
                     assert_eq!(block_set.len(), 1);
                 }
                 _ => panic!("Expected single block download request"),
@@ -2834,7 +2723,7 @@ fn test_on_valid_downloaded_non_head_sync_target_continues_to_head() {
     // With the fix: the engine makes safe canonical inline, then emits Download for head.
     // Without the fix: it would return MakeCanonical{safe_hash} and never download head.
     match result {
-        Some(TreeEvent::Download(DownloadRequest::BlockSet(hashes))) => {
+        Some(TreeEvent::Download(DownloadRequest::BlockSet { hashes, .. })) => {
             assert!(
                 hashes.contains(&head_hash),
                 "Expected download for head block {head_hash}, got {hashes:?}"
@@ -2962,6 +2851,51 @@ fn test_canonicalizing_downloaded_sync_target_head_updates_finalized() {
         Some(fcu_state)
     );
     assert!(test_harness.tree.state.forkchoice_state_tracker.sync_target_state().is_none());
+}
+
+/// Tests that pipeline backfill reaching a syncing FCU with `head == finalized` applies the
+/// finalized block without waiting for another FCU.
+#[test]
+fn test_backfill_reaching_sync_target_head_updates_finalized() {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = MAINNET.clone();
+    let mut test_harness = TestHarness::new(chain_spec);
+
+    let blocks: Vec<_> = test_harness.block_builder.get_executed_blocks(0..3).collect();
+    let initial_head = blocks[0].recovered_block().num_hash();
+    let sync_target = blocks[2].recovered_block().num_hash();
+    test_harness = test_harness.with_blocks(blocks);
+    test_harness.tree.state.tree_state.set_canonical_head(initial_head);
+
+    let fcu_state = ForkchoiceState {
+        head_block_hash: sync_target.hash,
+        safe_block_hash: sync_target.hash,
+        finalized_block_hash: sync_target.hash,
+    };
+    test_harness
+        .tree
+        .state
+        .forkchoice_state_tracker
+        .set_latest(fcu_state, ForkchoiceStatus::Syncing);
+
+    test_harness
+        .tree
+        .on_backfill_sync_finished(ControlFlow::Continue { block_number: sync_target.number })
+        .unwrap();
+
+    assert_eq!(test_harness.tree.state.tree_state.current_canonical_head, sync_target);
+    assert_eq!(
+        test_harness.tree.canonical_in_memory_state.get_finalized_num_hash(),
+        Some(sync_target)
+    );
+    assert_eq!(test_harness.tree.canonical_in_memory_state.get_safe_num_hash(), Some(sync_target));
+    assert_eq!(
+        test_harness.tree.state.forkchoice_state_tracker.last_valid_state(),
+        Some(fcu_state)
+    );
+    assert!(test_harness.tree.state.forkchoice_state_tracker.sync_target_state().is_none());
+    assert!(test_harness.from_tree_rx.try_recv().is_err());
 }
 
 // --- Backfill target selection tests ---
@@ -3172,7 +3106,7 @@ async fn assert_post_backfill_recheck_retriggers_to_buffered_target(engine_kind:
 
     // Buffer the target block — the recheck looks up the helper's resolved hash in the buffer
     // to decide whether to retrigger.
-    test_harness.tree.state.buffer.insert_block(target_block.clone_sealed_block());
+    test_harness.tree.state.buffer.insert_block(target_block.clone_sealed_block().into());
 
     // Place the buffered hash in the FCU slot the helper picks for this chain type, and put
     // an unrelated hash (not in buffer) in the other slot to keep the two slots distinct.

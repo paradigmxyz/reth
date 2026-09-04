@@ -1299,6 +1299,14 @@ where
         Err(ProviderError::UnsupportedProvider)
     }
 
+    fn multiproof_v2(
+        &self,
+        _input: TrieInput,
+        _targets: reth_trie::MultiProofTargetsV2,
+    ) -> Result<reth_trie::DecodedMultiProofV2, ProviderError> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
     fn witness(
         &self,
         _input: TrieInput,

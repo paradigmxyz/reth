@@ -131,7 +131,7 @@ where
 
 /// Calculate the receipts root, and compare it against the expected receipts root and logs
 /// bloom.
-fn verify_receipts<R: Receipt>(
+pub fn verify_receipts<R: Receipt>(
     expected_receipts_root: B256,
     expected_logs_bloom: Bloom,
     receipts: &[R],
@@ -153,7 +153,7 @@ fn verify_receipts<R: Receipt>(
 
 /// Compare the calculated receipts root with the expected receipts root, also compare
 /// the calculated logs bloom with the expected logs bloom.
-fn compare_receipts_root_and_logs_bloom(
+pub fn compare_receipts_root_and_logs_bloom(
     calculated_receipts_root: B256,
     calculated_logs_bloom: Bloom,
     expected_receipts_root: B256,
