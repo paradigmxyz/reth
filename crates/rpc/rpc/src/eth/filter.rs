@@ -2051,6 +2051,7 @@ mod tests {
         let header = alloy_consensus::Header { number: 2, ..Default::default() };
         let hash = header.hash_slow();
         provider.add_header(hash, header);
+        provider.add_receipts(2, vec![]);
         // the engine holds a payload that is not canonical yet
         provider.set_pending_block_num_hash(Some(alloy_eips::BlockNumHash::new(3, hash)));
 
