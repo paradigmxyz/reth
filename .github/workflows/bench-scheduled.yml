@@ -392,7 +392,7 @@ jobs:
 
           # schelk (snapshot rollback tool, invoked via sudo)
           if ! sudo sh -c 'command -v schelk' &>/dev/null; then
-            cargo install --git https://github.com/tempoxyz/schelk --locked
+            cargo install --git https://github.com/tempoxyz/schelk --rev e1047d33d3c76be67fb9c3e2c5cc4eecaa724c64 --locked
             sudo install "$HOME/.cargo/bin/schelk" /usr/local/bin/
           fi
 
