@@ -168,11 +168,11 @@ impl<T: TransactionOrdering> PendingPool<T> {
     ///
     /// # Returns
     ///
-    /// Removed transactions that no longer satisfy the blob fee.
+    /// Transactions removed because they or an ancestor no longer satisfy the blob fee.
     pub(crate) fn update_blob_fee(
         &mut self,
         blob_fee: u128,
-    ) -> Vec<(Arc<ValidPoolTransaction<T::Transaction>>, PendingRemovalReason)> {
+    ) -> Vec<(Arc<ValidPoolTransaction<T::Transaction>>, PendingRemovalKind)> {
         // Create a collection for removed transactions.
         let mut removed = Vec::new();
 
@@ -183,18 +183,16 @@ impl<T: TransactionOrdering> PendingPool<T> {
             {
                 // Add this tx to the removed collection since it no longer satisfies the blob fee
                 // condition. Decrease the total pool size.
-                removed.push((Arc::clone(&tx.transaction), PendingRemovalReason::FeeCap));
+                removed.push((Arc::clone(&tx.transaction), PendingRemovalKind::Trigger));
 
-                // Remove all dependent transactions. Their own fee caps are not the reason they
-                // leave, so they are reported separately.
+                // Remove all dependent transactions. They are reported separately because their
+                // ancestor state must also be updated, regardless of their own fee caps.
                 'this: while let Some((next_id, next_tx)) = transactions_iter.peek() {
                     if next_id.sender != id.sender {
                         break 'this
                     }
-                    removed.push((
-                        Arc::clone(&next_tx.transaction),
-                        PendingRemovalReason::ParkedAncestor,
-                    ));
+                    removed
+                        .push((Arc::clone(&next_tx.transaction), PendingRemovalKind::Descendant));
                     transactions_iter.next();
                 }
             } else {
@@ -215,11 +213,11 @@ impl<T: TransactionOrdering> PendingPool<T> {
     ///
     /// # Returns
     ///
-    /// Removed transactions that no longer satisfy the base fee.
+    /// Transactions removed because they or an ancestor no longer satisfy the base fee.
     pub(crate) fn update_base_fee(
         &mut self,
         base_fee: u64,
-    ) -> Vec<(Arc<ValidPoolTransaction<T::Transaction>>, PendingRemovalReason)> {
+    ) -> Vec<(Arc<ValidPoolTransaction<T::Transaction>>, PendingRemovalKind)> {
         // Create a collection for removed transactions.
         let mut removed = Vec::new();
 
@@ -229,18 +227,16 @@ impl<T: TransactionOrdering> PendingPool<T> {
             if tx.transaction.max_fee_per_gas() < base_fee as u128 {
                 // Add this tx to the removed collection since it no longer satisfies the base fee
                 // condition. Decrease the total pool size.
-                removed.push((Arc::clone(&tx.transaction), PendingRemovalReason::FeeCap));
+                removed.push((Arc::clone(&tx.transaction), PendingRemovalKind::Trigger));
 
-                // Remove all dependent transactions. Their own fee caps are not the reason they
-                // leave, so they are reported separately.
+                // Remove all dependent transactions. They are reported separately because their
+                // ancestor state must also be updated, regardless of their own fee caps.
                 'this: while let Some((next_id, next_tx)) = transactions_iter.peek() {
                     if next_id.sender != id.sender {
                         break 'this
                     }
-                    removed.push((
-                        Arc::clone(&next_tx.transaction),
-                        PendingRemovalReason::ParkedAncestor,
-                    ));
+                    removed
+                        .push((Arc::clone(&next_tx.transaction), PendingRemovalKind::Descendant));
                     transactions_iter.next();
                 }
             } else {
@@ -633,15 +629,16 @@ impl<T: TransactionOrdering> PendingPool<T> {
     }
 }
 
-/// Why [`PendingPool::update_base_fee`] or [`PendingPool::update_blob_fee`] took a transaction
-/// out of the pending pool.
+/// How a transaction was removed by [`PendingPool::update_base_fee`] or
+/// [`PendingPool::update_blob_fee`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PendingRemovalReason {
-    /// The transaction's own fee cap no longer covers the fee.
-    FeeCap,
-    /// An ancestor of this transaction was removed, so its ancestors are no longer all pending.
-    /// Its own fee cap is fine.
-    ParkedAncestor,
+pub(crate) enum PendingRemovalKind {
+    /// This transaction failed the fee check and triggered removal of its sender's suffix.
+    Trigger,
+    /// This transaction followed the transaction that triggered removal.
+    ///
+    /// It may independently fail the same fee check.
+    Descendant,
 }
 
 /// A transaction that is ready to be included in a block.
@@ -762,6 +759,8 @@ mod tests {
         // remove root transaction via fee
         let removed = pool.update_base_fee((root_tx.max_fee_per_gas() + 1) as u64);
         assert_eq!(removed.len(), 2);
+        assert_eq!(removed[0].1, PendingRemovalKind::Trigger);
+        assert_eq!(removed[1].1, PendingRemovalKind::Descendant);
         assert!(pool.is_empty());
         pool.assert_invariants();
     }
@@ -1060,6 +1059,7 @@ mod tests {
         let removed = pool.update_blob_fee(100);
         assert_eq!(removed.len(), 1);
         assert_eq!(removed[0].0.hash(), tx1.hash());
+        assert_eq!(removed[0].1, PendingRemovalKind::Trigger);
 
         // Verify that only tx2 remains in the pool
         assert!(pool.contains(tx2.id()));
