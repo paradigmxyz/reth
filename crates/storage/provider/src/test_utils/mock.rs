@@ -1211,6 +1211,8 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StorageSettingsCache
 impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> StateProviderFactory
     for MockEthProvider<T, ChainSpec>
 {
+    type Primitives = T;
+
     fn latest(&self) -> ProviderResult<StateProviderBox> {
         self.ensure_snap_state_reads_succeed()?;
         Ok(Box::new(self.clone()))
@@ -1348,6 +1350,8 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StateReader for MockEthProvider<
 impl<T: NodePrimitives, ChainSpec: Send + Sync> CanonStateSubscriptions
     for MockEthProvider<T, ChainSpec>
 {
+    type Primitives = T;
+
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<T> {
         broadcast::channel(1).1
     }

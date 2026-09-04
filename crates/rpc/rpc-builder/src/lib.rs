@@ -317,7 +317,8 @@ where
         + CanonStateSubscriptions<Primitives = N>
         + ForkChoiceSubscriptions<Header = N::BlockHeader>
         + PersistedBlockSubscriptions
-        + ChangeSetReader,
+        + ChangeSetReader
+        + NodePrimitivesProvider<Primitives = N>,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,

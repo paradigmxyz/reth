@@ -737,6 +737,8 @@ where
     N: Network,
     Node: NodeTypes,
 {
+    type Primitives = PrimitivesTy<Node>;
+
     fn latest(&self) -> Result<StateProviderBox, ProviderError> {
         Ok(Box::new(self.create_state_provider(self.best_block_number()?.into())))
     }
@@ -879,6 +881,8 @@ where
     N: Network,
     Node: NodeTypes,
 {
+    type Primitives = PrimitivesTy<Node>;
+
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<PrimitivesTy<Node>> {
         trace!(target: "alloy-provider", "Subscribing to canonical state notifications");
         self.canon_state_notification.subscribe()
@@ -1794,6 +1798,8 @@ where
     N: Network,
     Self: Clone + 'static,
 {
+    type Primitives = PrimitivesTy<Node>;
+
     fn latest(&self) -> Result<StateProviderBox, ProviderError> {
         Ok(Box::new(self.with_block_id(self.best_block_number()?.into())))
     }

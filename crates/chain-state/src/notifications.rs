@@ -4,7 +4,6 @@ use alloy_eips::BlockNumHash;
 use derive_more::{Deref, DerefMut};
 use reth_execution_types::{BlockReceipts, Chain};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
-use reth_storage_api::NodePrimitivesProvider;
 use std::{
     pin::Pin,
     sync::Arc,
@@ -26,7 +25,10 @@ pub type CanonStateNotificationSender<N = reth_ethereum_primitives::EthPrimitive
     broadcast::Sender<CanonStateNotification<N>>;
 
 /// A type that allows to register chain related event subscriptions.
-pub trait CanonStateSubscriptions: NodePrimitivesProvider + Send + Sync {
+pub trait CanonStateSubscriptions: Send + Sync {
+    /// The node primitive types.
+    type Primitives: NodePrimitives;
+
     /// Get notified when a new canonical chain was imported.
     ///
     /// A canonical chain be one or more blocks, a reorg or a revert.
@@ -41,6 +43,8 @@ pub trait CanonStateSubscriptions: NodePrimitivesProvider + Send + Sync {
 }
 
 impl<T: CanonStateSubscriptions> CanonStateSubscriptions for &T {
+    type Primitives = T::Primitives;
+
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<Self::Primitives> {
         (*self).subscribe_to_canonical_state()
     }
