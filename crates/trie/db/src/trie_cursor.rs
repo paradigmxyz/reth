@@ -286,14 +286,23 @@ where
         {
             num_entries += 1;
             let nibbles = A::StorageSubKey::from(*nibbles);
-            // Delete the old entry if it exists.
+            // Replace existing nodes at the cursor position to avoid deleting and reinserting
+            // the duplicate, which can rebalance the trie table unnecessarily.
             if self
                 .cursor
                 .seek_by_key_subkey(self.hashed_address, nibbles.clone())?
                 .as_ref()
                 .is_some_and(|e| *e.nibbles() == nibbles)
             {
-                self.cursor.delete_current()?;
+                if let Some(node) = maybe_updated {
+                    self.cursor.update_current(
+                        self.hashed_address,
+                        &A::StorageValue::new(nibbles, node.clone()),
+                    )?;
+                } else {
+                    self.cursor.delete_current()?;
+                }
+                continue
             }
 
             // There is an updated version of this node, insert new entry.
@@ -410,6 +419,56 @@ mod tests {
             cursor.seek(hex!("0303040f").to_vec().into()).unwrap().map(|(k, _)| k.0.to_vec()),
             Some(data[1].clone())
         );
+    }
+
+    #[test]
+    fn storage_trie_updates_replace_and_delete() {
+        fn check<A: TrieTableAdapter>() {
+            let factory = create_test_provider_factory();
+            let provider = factory.provider_rw().unwrap();
+            let cursor = provider.tx_ref().cursor_dup_write::<A::StorageTrieTable>().unwrap();
+            let address = B256::with_last_byte(1);
+            let mut cursor = DatabaseStorageTrieCursor::<_, A>::new(cursor, address);
+            let key = Nibbles::from_nibbles([1, 2]);
+            let neighbour = Nibbles::from_nibbles([1, 3]);
+            let node = BranchNodeCompact::new(1, 1, 1, vec![B256::with_last_byte(1)], None);
+            let large = BranchNodeCompact::new(
+                0xffff,
+                0xffff,
+                0xffff,
+                vec![B256::with_last_byte(2); 16],
+                Some(B256::with_last_byte(3)),
+            );
+            let initial = StorageTrieUpdatesSorted {
+                storage_nodes: vec![(key, Some(node.clone())), (neighbour, Some(node.clone()))],
+            };
+            assert_eq!(cursor.write_storage_trie_updates_sorted(&initial).unwrap(), 2);
+            for replacement in [&large, &node, &node] {
+                let updates = StorageTrieUpdatesSorted {
+                    storage_nodes: vec![(key, Some(replacement.clone()))],
+                };
+                assert_eq!(cursor.write_storage_trie_updates_sorted(&updates).unwrap(), 1);
+                let actual = cursor
+                    .cursor
+                    .walk_dup(Some(address), None)
+                    .unwrap()
+                    .map(|row| {
+                        let (_, entry) = row.unwrap();
+                        let (subkey, node) = entry.into_parts();
+                        (A::subkey_to_nibbles(&subkey), node)
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(actual, vec![(key, replacement.clone()), (neighbour, node.clone())]);
+            }
+            let remove = StorageTrieUpdatesSorted { storage_nodes: vec![(key, None)] };
+            assert_eq!(cursor.write_storage_trie_updates_sorted(&remove).unwrap(), 1);
+            assert_eq!(cursor.write_storage_trie_updates_sorted(&remove).unwrap(), 1);
+            let remaining = cursor.cursor.walk_dup(Some(address), None).unwrap().count();
+            assert_eq!(remaining, 1);
+        }
+
+        check::<LegacyKeyAdapter>();
+        check::<PackedKeyAdapter>();
     }
 
     // tests that upsert and seek match on the storage trie cursor
