@@ -26,6 +26,7 @@ memmap2.workspace = true
 bincode.workspace = true
 smallvec.workspace = true
 serde = { workspace = true, features = ["derive"] }
+smallvec.workspace = true
 tracing.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true

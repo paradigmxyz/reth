@@ -208,3 +208,6 @@ enum ValueRange {
     Mmap(Range<usize>),
     Internal(Range<usize>),
 }
+
+/// Inline storage covers all static file segments, which have at most three columns.
+type ValueRanges = SmallVec<[ValueRange; 3]>;
