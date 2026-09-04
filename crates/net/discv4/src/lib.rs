@@ -2094,7 +2094,7 @@ impl IngressHandler {
         if data.len() >= MIN_PACKET_SIZE &&
             self.cache.contains_packet(B256::from_slice(&data[..32]))
         {
-            debug!(target: "discv4", ?src, "Received duplicate packet.");
+            trace!(target: "discv4", ?src, "Received duplicate packet.");
             return
         }
 
