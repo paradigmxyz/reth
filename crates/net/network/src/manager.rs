@@ -776,6 +776,10 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     self.swarm.state_mut().update_fork_id(transition.current);
                 }
             }
+            NetworkHandleMessage::SetForkFilter { fork_filter } => {
+                let fork_id = self.swarm.sessions_mut().set_fork_filter(fork_filter);
+                self.swarm.state_mut().update_fork_id(fork_id);
+            }
             NetworkHandleMessage::GetPeerInfos(tx) => {
                 let _ = tx.send(self.get_peer_infos());
             }

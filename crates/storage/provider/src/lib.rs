@@ -24,7 +24,7 @@ pub mod providers;
 pub use providers::{
     DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, HistoricalStateProvider,
     HistoricalStateProviderRef, LatestStateProvider, LatestStateProviderRef, ProviderFactory,
-    PruneShardOutcome, PrunedIndices, SaveBlocksMode, StaticFileAccess, StaticFileProviderBuilder,
+    PruneShardOutcome, PrunedIndices, SaveBlocksInput, StaticFileAccess, StaticFileProviderBuilder,
     StaticFileWriteCtx, StaticFileWriter,
 };
 
@@ -39,7 +39,7 @@ pub mod either_writer;
 pub use either_writer::*;
 
 mod bal;
-pub use bal::{BalConfig, InMemoryBalStore};
+pub use bal::{BalConfig, InMemoryBalStore, RocksDBBalStore};
 
 pub use reth_chain_state::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotificationStream,

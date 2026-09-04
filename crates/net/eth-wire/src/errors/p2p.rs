@@ -5,7 +5,7 @@ use std::io;
 use reth_eth_wire_types::{DisconnectReason, UnknownDisconnectReason};
 use reth_primitives_traits::GotExpected;
 
-use crate::{capability::SharedCapabilityError, ProtocolVersion};
+use crate::{capability::SharedCapabilityError, Capability, ProtocolVersion};
 
 /// Errors when sending/receiving p2p messages. These should result in kicking the peer.
 #[derive(thiserror::Error, Debug)]
@@ -35,6 +35,30 @@ pub enum P2PStreamError {
         max_size: usize,
     },
 
+    /// A subprotocol message exceeds the limit declared by its local handler.
+    #[error(
+        "message for subprotocol {capability} has size {message_size}, exceeding max length {max_size}"
+    )]
+    SubprotocolMessageTooBig {
+        /// The negotiated capability whose limit was exceeded.
+        capability: Capability,
+        /// The frame size, including the capability-local message ID.
+        message_size: usize,
+        /// The maximum frame size declared by the protocol handler.
+        max_size: usize,
+    },
+
+    /// A subprotocol's bounded inbound queue has no remaining capacity.
+    #[error("inbound buffer for subprotocol {capability} is full")]
+    SubprotocolInboundBufferFull {
+        /// The negotiated capability whose queue is full.
+        capability: Capability,
+    },
+
+    /// An incoming message ID is outside all negotiated subprotocol ranges.
+    #[error("unknown subprotocol message id: {0:#04x}")]
+    UnknownSubprotocolMessageId(u8),
+
     /// Unknown reserved P2P message ID error.
     #[error("unknown reserved p2p message id: {0}")]
     UnknownReservedMessageId(u8),
@@ -42,6 +66,14 @@ pub enum P2PStreamError {
     /// Empty protocol message received error.
     #[error("empty protocol message received")]
     EmptyProtocolMessage,
+
+    /// Ping or Pong payload is not an RLP empty list.
+    #[error("invalid ping/pong payload for p2p message id: {0:#x}")]
+    InvalidPingPongPayload(u8),
+
+    /// Incoming ping rate limit exceeded.
+    #[error("too many pings received")]
+    TooManyPings,
 
     /// Error related to the Pinger.
     #[error(transparent)]

@@ -32,7 +32,7 @@ reth-discv4.workspace = true
 reth-discv5.workspace = true
 reth-net-nat.workspace = true
 reth-net-banlist.workspace = true
-reth-network-peers.workspace = true
+reth-network-peers = { workspace = true, features = ["secp256k1"] }
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 reth-ethereum-forks.workspace = true

@@ -15,7 +15,7 @@ use super::{bal_prewarm_pool::BalPrewarmPool, StateRootHintStream, StateRootUpda
 use crate::tree::{
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
-    PayloadExecutionCache, SavedCache, StateProviderBuilder,
+    PayloadExecutionCache, SavedCache,
 };
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
@@ -27,9 +27,12 @@ use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx,
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, FastInstant as Instant, NodePrimitives};
 use reth_provider::{
-    AccountReader, BlockExecutionOutput, BlockReader, StateProviderFactory, StateReader,
+    AccountReader, BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory,
+    DatabaseProviderROFactory, HistoryReader, PruneCheckpointReader, StageCheckpointReader,
+    StateProviderBox, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::database::StateProviderDatabase;
+use reth_storage_overlay::OverlayStateProviderFactory;
 use reth_tasks::{pool::WorkerPool, Runtime};
 use reth_trie_common::MultiProofTargetsV2;
 use std::sync::{
@@ -90,7 +93,15 @@ where
 impl<N, P, Evm> PrewarmCacheTask<N, P, Evm>
 where
     N: NodePrimitives,
-    P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+    P: DatabaseProviderFactory + Clone + 'static,
+    P::Provider: BlockNumReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + StorageSettingsCache
+        + HistoryReader
+        + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Initializes the task with the given transactions pending execution
@@ -410,19 +421,26 @@ where
             // This runs side-by-side with the parallel transaction execution reducing the time it
             // spends blocking on the data.
             let caches = saved_cache.cache().clone();
-            let provider_builder = ctx.provider.clone();
-            let build = Arc::new(move || provider_builder.build());
+            let state_provider_factory = ctx.provider.clone();
+            let build = Arc::new(move || {
+                state_provider_factory
+                    .database_provider_ro()
+                    .map(|provider| Box::new(provider) as _)
+            });
 
-            pool.begin_block(build, caches);
+            pool.begin_block(build, caches, ctx.env.txpool_snapshot.clone());
+            let dispatch_start = Instant::now();
             for account in prefetch_bal.as_bal() {
-                pool.warm_account(account.address);
-                for change in &account.storage_changes {
-                    pool.warm_storage(account.address, change.slot.into());
-                }
-                for &slot in &account.storage_reads {
-                    pool.warm_storage(account.address, slot.into());
-                }
+                pool.warm_account(
+                    account.address,
+                    account
+                        .storage_changes
+                        .iter()
+                        .map(|change| change.slot.into())
+                        .chain(account.storage_reads.iter().map(|&slot| slot.into())),
+                );
             }
+            ctx.metrics.bal_slot_iteration_duration.record(dispatch_start.elapsed());
             pool.end_block();
         }
 
@@ -479,6 +497,9 @@ where
                 }
                 PrewarmTaskEvent::Terminate { execution_outcome, valid_block_rx } => {
                     trace!(target: "engine::tree::payload_processor::prewarm", "Received termination signal");
+                    // `Terminate` can arrive without `TerminateTransactionExecution` when the
+                    // handle is dropped on an execution error, so stop workers before waiting.
+                    self.ctx.stop();
                     final_execution_outcome =
                         Some(execution_outcome.map(|outcome| (outcome, valid_block_rx)));
 
@@ -525,7 +546,7 @@ where
     /// The saved cache.
     pub saved_cache: Option<SavedCache>,
     /// Provider to obtain the state
-    pub provider: StateProviderBuilder<N, P>,
+    pub provider: OverlayStateProviderFactory<P, N>,
     /// Dedicated blocking pool for warming the BAL read-set. `Some` only on the BAL parallel
     /// execution path; the pool is owned by the [`PayloadProcessor`](super::PayloadProcessor).
     pub(crate) bal_prewarm_pool: Option<Arc<BalPrewarmPool>>,
@@ -561,14 +582,22 @@ type PrewarmEvmState<Evm> =
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
     N: NodePrimitives,
-    P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+    P: DatabaseProviderFactory,
+    P::Provider: BlockNumReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + StorageSettingsCache
+        + HistoryReader
+        + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Creates a per-thread EVM for prewarming.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn evm_for_ctx(&self) -> PrewarmEvmState<Evm> {
-        let mut state_provider = match self.provider.build() {
-            Ok(provider) => provider,
+        let mut state_provider: StateProviderBox = match self.provider.database_provider_ro() {
+            Ok(provider) => Box::new(provider),
             Err(err) => {
                 trace!(
                     target: "engine::tree::payload_processor::prewarm",
@@ -582,7 +611,10 @@ where
         // Use the caches to create a new provider with caching
         if let Some(saved_cache) = &self.saved_cache {
             let caches = saved_cache.cache().clone();
-            state_provider = Box::new(CachedStateProvider::new_prewarm(state_provider, caches));
+            state_provider = Box::new(
+                CachedStateProvider::new_prewarm(state_provider, caches)
+                    .with_txpool_snapshot(self.env.txpool_snapshot.clone()),
+            );
         }
 
         let state_provider = StateProviderDatabase::new(state_provider);
@@ -660,7 +692,7 @@ where
         // changes to start processing them before potentially hitting the db in the next step.
         if !account_changes.storage_changes.is_empty() {
             let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
-            let mut storage_map = reth_trie::HashedStorage::new(false);
+            let mut storage_map = reth_trie::HashedStorage::default();
 
             for slot_changes in &account_changes.storage_changes {
                 let hashed_slot = keccak256(slot_changes.slot.to_be_bytes::<32>());
@@ -684,7 +716,7 @@ where
                 )
                 .entered();
 
-                let inner = match self.provider.build() {
+                let inner = match self.provider.database_provider_ro() {
                     Ok(p) => p,
                     Err(err) => {
                         warn!(
@@ -699,7 +731,10 @@ where
                     match (self.disable_bal_batch_io, &self.saved_cache) {
                         (false, Some(saved)) => {
                             let caches = saved.cache().clone();
-                            Box::new(CachedStateProvider::new_prewarm(inner, caches))
+                            Box::new(
+                                CachedStateProvider::new_prewarm(inner, caches)
+                                    .with_txpool_snapshot(self.env.txpool_snapshot.clone()),
+                            )
                         }
                         _ => Box::new(inner),
                     };
@@ -804,11 +839,57 @@ fn multiproof_targets_from_withdrawals(withdrawals: &[Withdrawal]) -> MultiProof
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::transaction::Recovered;
     use alloy_eip7928::{
         AccountChanges, BalanceChange, BlockAccessIndex, CodeChange, NonceChange, SlotChanges,
         StorageChange,
     };
     use alloy_primitives::{address, bytes};
+    use reth_chainspec::ChainSpec;
+    use reth_ethereum_primitives::TransactionSigned;
+    use reth_evm::{execute::WithTxEnv, TxEnvFor};
+    use reth_evm_ethereum::EthEvmConfig;
+    use reth_provider::test_utils::MockEthProvider;
+    use reth_storage_overlay::OverlayManager;
+
+    #[test]
+    fn terminate_event_stops_transaction_execution() {
+        let terminate_execution = Arc::new(AtomicBool::new(false));
+        let ctx = PrewarmContext {
+            env: ExecutionEnv::test_default(),
+            evm_config: EthEvmConfig::new(Arc::new(ChainSpec::default())),
+            saved_cache: None,
+            provider: OverlayStateProviderFactory::new(
+                MockEthProvider::default(),
+                OverlayManager::default().overlay_builder(B256::ZERO),
+            ),
+            bal_prewarm_pool: None,
+            metrics: PrewarmMetrics::default(),
+            cache_metrics: None,
+            cache_state_metrics: None,
+            terminate_execution: Arc::clone(&terminate_execution),
+            executed_tx_index: Arc::new(AtomicUsize::new(0)),
+            precompile_cache_disabled: false,
+            precompile_cache_map: PrecompileCacheMap::default(),
+            disable_bal_parallel_state_root: false,
+            disable_bal_batch_io: false,
+        };
+        let (task, actions_tx) =
+            PrewarmCacheTask::new(Runtime::test(), PayloadExecutionCache::default(), ctx);
+        actions_tx
+            .send(PrewarmTaskEvent::Terminate {
+                execution_outcome: None,
+                valid_block_rx: mpsc::channel().1,
+            })
+            .unwrap();
+
+        task.run::<WithTxEnv<TxEnvFor<EthEvmConfig>, Recovered<TransactionSigned>>>(
+            PrewarmMode::Skipped,
+            actions_tx,
+        );
+
+        assert!(terminate_execution.load(Ordering::Relaxed));
+    }
 
     #[test]
     fn bal_read_only_account_does_not_change_state_root() {
@@ -868,13 +949,23 @@ mod tests {
 /// execution path without cloning the expensive `BundleState`.
 #[derive(Debug)]
 pub enum PrewarmTaskEvent<R> {
-    /// Forcefully terminate all remaining transaction execution.
+    /// Signals the prewarm workers to stop executing further transactions.
+    ///
+    /// This only sets the termination flag the workers poll; the task keeps running to save the
+    /// cache. Sent once the authoritative execution no longer needs prewarming, so the workers do
+    /// not race ahead on transactions that will never be used.
     TerminateTransactionExecution,
-    /// Forcefully terminate the task on demand and update the shared cache with the given output
-    /// before exiting.
+    /// Tears the whole task down: stops the workers, optionally saves the warmed cache from the
+    /// final output, and exits.
+    ///
+    /// Sent when execution completed successfully (carrying the output to save) or when the task
+    /// handle is dropped (carrying no output, e.g. after an execution error). Handling this event
+    /// also stops the workers, since a teardown may arrive without a preceding
+    /// [`TerminateTransactionExecution`](Self::TerminateTransactionExecution).
     Terminate {
-        /// The final execution outcome. Using `Arc` allows sharing with the main execution
-        /// path without cloning the expensive `BundleState`.
+        /// The final execution outcome, or `None` when the task is torn down without one (e.g. a
+        /// dropped handle). Using `Arc` allows sharing with the main execution path without
+        /// cloning the expensive `BundleState`.
         execution_outcome: Option<Arc<BlockExecutionOutput<R>>>,
         /// Receiver for the block validation result.
         ///
@@ -882,7 +973,8 @@ pub enum PrewarmTaskEvent<R> {
         /// updated cache but only save it once we know the block is valid.
         valid_block_rx: mpsc::Receiver<()>,
     },
-    /// Finished executing all transactions
+    /// Emitted by the worker-dispatch side once every dispatched transaction has finished or been
+    /// cancelled, reporting how many were executed.
     FinishedTxExecution {
         /// Number of transactions executed
         executed_transactions: usize,

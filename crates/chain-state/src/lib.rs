@@ -14,9 +14,6 @@ pub use execution_stats::ExecutionTimingStats;
 mod in_memory;
 pub use in_memory::*;
 
-mod state_trie_overlay;
-pub use state_trie_overlay::*;
-
 mod preserved_sparse_trie;
 pub use preserved_sparse_trie::*;
 

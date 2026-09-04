@@ -6,8 +6,9 @@ use alloy_primitives::{
     map::{B256Map, B256Set},
     BlockNumber, B256,
 };
-use reth_chain_state::{EthPrimitives, ExecutedBlock, StateTrieOverlayManager};
+use reth_chain_state::{EthPrimitives, ExecutedBlock};
 use reth_primitives_traits::{AlloyBlockHeader, NodePrimitives, SealedHeader};
+use reth_storage_overlay::OverlayManager;
 use std::{
     collections::{btree_map, hash_map, BTreeMap, VecDeque},
     ops::Bound,
@@ -38,8 +39,8 @@ pub struct TreeState<N: NodePrimitives = EthPrimitives> {
     pub(crate) current_canonical_head: BlockNumHash,
     /// The engine API variant of this handler
     pub(crate) engine_kind: EngineApiKind,
-    /// Flattened state trie overlays for in-memory blocks.
-    pub(crate) state_trie_overlays: StateTrieOverlayManager<N>,
+    /// Manages state trie overlays for in-memory blocks.
+    pub(crate) overlay_manager: OverlayManager<N>,
 }
 
 impl<N: NodePrimitives> TreeState<N> {
@@ -47,7 +48,7 @@ impl<N: NodePrimitives> TreeState<N> {
     pub fn new(
         current_canonical_head: BlockNumHash,
         engine_kind: EngineApiKind,
-        state_trie_overlays: StateTrieOverlayManager<N>,
+        overlay_manager: OverlayManager<N>,
     ) -> Self {
         Self {
             blocks_by_hash: B256Map::default(),
@@ -55,7 +56,7 @@ impl<N: NodePrimitives> TreeState<N> {
             current_canonical_head,
             parent_to_child: B256Map::default(),
             engine_kind,
-            state_trie_overlays,
+            overlay_manager,
         }
     }
 
@@ -64,7 +65,7 @@ impl<N: NodePrimitives> TreeState<N> {
         let engine_kind = self.engine_kind;
         let removed_hashes = self.blocks_by_hash.keys().copied().collect::<Vec<_>>();
         if !removed_hashes.is_empty() {
-            self.state_trie_overlays.remove_blocks(removed_hashes);
+            self.overlay_manager.remove_blocks(removed_hashes);
         }
         self.blocks_by_hash.clear();
         self.blocks_by_number.clear();
@@ -126,7 +127,7 @@ impl<N: NodePrimitives> TreeState<N> {
         self.blocks_by_number.entry(block_number).or_default().push(executed);
 
         self.parent_to_child.entry(parent_hash).or_default().insert(hash);
-        self.state_trie_overlays.insert_block(overlay_block);
+        self.overlay_manager.insert_block(overlay_block);
     }
 
     /// Remove single executed block by its hash.
@@ -321,7 +322,7 @@ impl<N: NodePrimitives> TreeState<N> {
         }
 
         if !removed_hashes.is_empty() {
-            self.state_trie_overlays.remove_blocks(removed_hashes);
+            self.overlay_manager.remove_blocks(removed_hashes);
         }
     }
 
@@ -400,7 +401,7 @@ mod tests {
         let mut tree_state = TreeState::new(
             BlockNumHash::default(),
             EngineApiKind::Ethereum,
-            StateTrieOverlayManager::default(),
+            OverlayManager::default(),
         );
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
 
@@ -427,7 +428,7 @@ mod tests {
         let mut tree_state = TreeState::new(
             BlockNumHash::default(),
             EngineApiKind::Ethereum,
-            StateTrieOverlayManager::default(),
+            OverlayManager::default(),
         );
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
 
@@ -457,7 +458,7 @@ mod tests {
         let mut tree_state = TreeState::new(
             BlockNumHash::default(),
             EngineApiKind::Ethereum,
-            StateTrieOverlayManager::default(),
+            OverlayManager::default(),
         );
         let mut test_block_builder = TestBlockBuilder::eth();
         let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..6).collect();
@@ -479,7 +480,8 @@ mod tests {
         tree_state.insert_executed(fork_block_5.clone());
 
         assert_eq!(tree_state.blocks_by_hash.len(), 8);
-        assert_eq!(tree_state.blocks_by_number[&3].len(), 2); // two blocks at height 3 (original and fork)
+        assert_eq!(tree_state.blocks_by_number[&3].len(), 2); // two blocks at height 3 (original
+                                                              // and fork)
         assert_eq!(tree_state.parent_to_child[&blocks[1].recovered_block().hash()].len(), 2); // block 2 should have two children
 
         // verify that we can insert the same block again without issues
@@ -498,11 +500,8 @@ mod tests {
     #[tokio::test]
     async fn test_tree_state_remove_before() {
         let start_num_hash = BlockNumHash::default();
-        let mut tree_state = TreeState::new(
-            start_num_hash,
-            EngineApiKind::Ethereum,
-            StateTrieOverlayManager::default(),
-        );
+        let mut tree_state =
+            TreeState::new(start_num_hash, EngineApiKind::Ethereum, OverlayManager::default());
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..6).collect();
 
         for block in &blocks {
@@ -552,11 +551,8 @@ mod tests {
     #[tokio::test]
     async fn test_tree_state_remove_before_finalized() {
         let start_num_hash = BlockNumHash::default();
-        let mut tree_state = TreeState::new(
-            start_num_hash,
-            EngineApiKind::Ethereum,
-            StateTrieOverlayManager::default(),
-        );
+        let mut tree_state =
+            TreeState::new(start_num_hash, EngineApiKind::Ethereum, OverlayManager::default());
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..6).collect();
 
         for block in &blocks {
@@ -606,11 +602,8 @@ mod tests {
     #[tokio::test]
     async fn test_tree_state_remove_before_lower_finalized() {
         let start_num_hash = BlockNumHash::default();
-        let mut tree_state = TreeState::new(
-            start_num_hash,
-            EngineApiKind::Ethereum,
-            StateTrieOverlayManager::default(),
-        );
+        let mut tree_state =
+            TreeState::new(start_num_hash, EngineApiKind::Ethereum, OverlayManager::default());
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..6).collect();
 
         for block in &blocks {
