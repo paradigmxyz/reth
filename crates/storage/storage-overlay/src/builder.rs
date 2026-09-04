@@ -209,23 +209,6 @@ impl ExecutionOverlay {
     }
 }
 
-/// Source of data to apply on top of the durable database state.
-#[derive(Debug, Clone)]
-pub enum OverlaySource {
-    /// Immediate overlay with already-computed data.
-    Immediate {
-        /// Trie updates overlay.
-        ///
-        /// This can be non-empty when a caller starts with an explicit `TrieInputSorted`, such
-        /// as historical providers.
-        trie: Arc<TrieUpdatesSorted>,
-        /// Hashed state overlay.
-        state: Arc<HashedPostStateSorted>,
-    },
-    /// Manager-backed overlay for in-memory state.
-    Managed,
-}
-
 /// Builder for calculating trie and hashed-state overlays.
 ///
 /// This stores the overlay manager, overlay configuration, and the logic for resolving overlays
@@ -234,8 +217,6 @@ pub enum OverlaySource {
 pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
     /// Parent hash requested by the caller.
     parent_hash: B256,
-    /// Optional overlay source.
-    overlay_source: Option<OverlaySource>,
     /// Manager used for cached changesets and overlays.
     overlay_manager: OverlayManager<N>,
     /// Snapshot of the in-memory chain ending at the requested parent.
@@ -257,7 +238,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     ) -> Self {
         Self {
             parent_hash,
-            overlay_source: Some(OverlaySource::Managed),
             overlay_manager,
             parent_state,
             reused_sparse_trie_anchor_hash: None,
@@ -266,39 +246,25 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         }
     }
 
-    /// Set the overlay source.
-    ///
-    /// This overlay will be applied on top of any reverts.
-    pub fn with_overlay_source(mut self, source: Option<OverlaySource>) -> Self {
-        self.overlay_source = source;
-        self
-    }
-
     /// Skips managed overlay construction when the sparse trie was reused and the DB tip is
     /// already covered by its anchor-to-parent range.
-    pub const fn with_skip_overlay_for_reused_sparse_trie(mut self, anchor_hash: B256) -> Self {
+    pub(crate) const fn with_skip_overlay_for_reused_sparse_trie(
+        mut self,
+        anchor_hash: B256,
+    ) -> Self {
         self.reused_sparse_trie_anchor_hash = Some(anchor_hash);
         self
     }
 
     /// Returns an error instead of querying revert changesets when reverts are required.
-    pub const fn with_no_reverts(mut self) -> Self {
+    pub(crate) const fn with_no_reverts(mut self) -> Self {
         self.no_reverts = true;
         self
     }
 
-    /// Sets an immediate hashed-state and trie-updates overlay.
-    pub fn with_immediate_state_trie_overlay(
-        mut self,
-        state: Arc<HashedPostStateSorted>,
-        trie: Arc<TrieUpdatesSorted>,
-    ) -> Self {
-        self.overlay_source = Some(OverlaySource::Immediate { trie, state });
-        self
-    }
-
     /// Returns the durable anchor to use for this builder's parent.
-    pub fn anchor_at_parent<Provider>(&self, provider: &Provider) -> ProviderResult<AnchorForParent>
+    #[cfg(test)]
+    fn anchor_at_parent<Provider>(&self, provider: &Provider) -> ProviderResult<AnchorForParent>
     where
         Provider: StageCheckpointReader + BlockNumReader + PruneCheckpointReader,
     {
@@ -307,7 +273,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     }
 
     /// Returns the durable anchor to use for this builder's parent using known frontiers.
-    pub fn anchor_at_parent_with_frontiers<Provider>(
+    fn anchor_at_parent_with_frontiers<Provider>(
         &self,
         provider: &Provider,
         partial_state_trie: BlockNumHash,
@@ -316,27 +282,100 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     where
         Provider: BlockNumReader + PruneCheckpointReader,
     {
-        match &self.overlay_source {
-            Some(OverlaySource::Managed) => anchor_for_parent_with_frontiers(
-                self.parent_hash,
-                self.parent_state.iter().flat_map(|state| state.chain()).map(BlockState::block),
-                partial_state_trie,
-                finish,
-                provider,
-            ),
-            _ => anchor_for_parent_with_frontiers(
-                self.parent_hash,
-                std::iter::empty::<ExecutedBlock<N>>(),
-                partial_state_trie,
-                finish,
-                provider,
-            ),
+        use std::io::Error;
+
+        let mut in_mem_chain = self
+            .parent_state
+            .iter()
+            .flat_map(|state| state.chain())
+            .map(BlockState::block_ref)
+            .peekable();
+        let persisted_parent = match in_mem_chain
+            .peek()
+            .filter(|block| block.recovered_block().hash() == self.parent_hash)
+            .map(|block| block.recovered_block().number())
+        {
+            Some(parent_number) if parent_number > partial_state_trie.number => None,
+            Some(parent_number)
+                if parent_number == partial_state_trie.number &&
+                    self.parent_hash == partial_state_trie.hash =>
+            {
+                Some(parent_number)
+            }
+            Some(parent_number) => (provider.block_hash(parent_number)? == Some(self.parent_hash))
+                .then_some(parent_number),
+            None if self.parent_hash == partial_state_trie.hash => Some(partial_state_trie.number),
+            None => provider
+                .block_number(self.parent_hash)?
+                .filter(|&number| number <= partial_state_trie.number),
+        };
+
+        let mut finish_seen = self.parent_hash == finish.hash;
+        let anchor = if let Some(parent_number) = persisted_parent {
+            BlockNumHash::new(parent_number, self.parent_hash)
+        } else {
+            let mut in_mem_chain = in_mem_chain.inspect(|block| {
+                finish_seen |= block.recovered_block().hash() == finish.hash;
+            });
+
+            if let Some(anchor) =
+                anchor_for_parent_in(self.parent_hash, &mut in_mem_chain, partial_state_trie)
+            {
+                anchor
+            } else {
+                let anchor_number = provider
+                    .convert_hash_or_number(self.parent_hash.into())?
+                    .ok_or(ProviderError::BlockHashNotFound(self.parent_hash))?;
+                BlockNumHash::new(anchor_number, self.parent_hash)
+            }
+        };
+
+        finish_seen |= anchor.hash == finish.hash;
+
+        if anchor.number > partial_state_trie.number {
+            return Err(ProviderError::other(Error::other(format!(
+                "overlay anchor #{} ({}) is after partial state trie frontier #{} ({}); missing trie updates for blocks #{}..=#{}",
+                anchor.number,
+                anchor.hash,
+                partial_state_trie.number,
+                partial_state_trie.hash,
+                partial_state_trie.number + 1,
+                anchor.number,
+            ))))
         }
+
+        // If the Finish block (db tip) was seen in the in-memory chain then we know that anchor is
+        // on the same chain as partial_state_trie as well. Given that anchor <= partial_state_trie,
+        // we can be sure that the in-memory chain is a superset of partial_state_trie+1..finish,
+        // and therefore can be used without reverts.
+        if finish_seen {
+            return Ok(AnchorForParent::NoReverts { anchor })
+        }
+
+        // Otherwise reverts are required; we check the changesets to make sure they are actually
+        // available before signaling that they are required.
+        let account_history = provider
+            .get_prune_checkpoint(PruneSegment::AccountHistory)?
+            .and_then(|checkpoint| checkpoint.block_number);
+        let storage_history = provider
+            .get_prune_checkpoint(PruneSegment::StorageHistory)?
+            .and_then(|checkpoint| checkpoint.block_number);
+        let lower_bound = account_history.max(storage_history).unwrap_or_default();
+        let available_range = lower_bound..=finish.number;
+        if !available_range.contains(&anchor.number) {
+            return Err(ProviderError::InsufficientChangesets {
+                requested: anchor.number,
+                available: available_range,
+            })
+        }
+
+        Ok(AnchorForParent::RevertsRequired { anchor, finish })
     }
 
     /// Builds the effective state trie overlay for the given provider.
+    #[cfg(test)]
     #[instrument(level = "debug", target = "storage::overlay", skip_all)]
-    pub fn build_state_trie_overlay<Provider>(
+    fn build_state_trie_overlay<Provider>(
         &self,
         provider: &Provider,
     ) -> ProviderResult<StateTrieOverlay>
@@ -362,7 +401,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         skip_all,
         fields(?state_trie_tip_block, ?finish_tip_block, parent_hash = ?self.parent_hash)
     )]
-    pub fn build_state_trie_overlay_at_frontiers<Provider>(
+    pub(crate) fn build_state_trie_overlay_at_frontiers<Provider>(
         &self,
         provider: &Provider,
         state_trie_tip_block: BlockNumHash,
@@ -506,8 +545,9 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     }
 
     /// Returns the in-memory execution overlay and the block for historical fallback reads.
+    #[cfg(test)]
     #[instrument(level = "debug", target = "storage::overlay", skip_all)]
-    pub fn execution_overlay<Provider>(
+    fn execution_overlay<Provider>(
         &self,
         provider: &Provider,
     ) -> ProviderResult<(Arc<ExecutionOverlay>, Option<BlockNumber>)>
@@ -525,12 +565,12 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
     /// Returns the in-memory execution overlay using frontiers already read from the provider.
     #[instrument(
-        level = "debug",
+        level = "trace",
         target = "storage::overlay",
         skip_all,
         fields(?state_trie_tip_block, ?finish_tip_block, parent_hash = ?self.parent_hash)
     )]
-    pub fn execution_overlay_at_frontiers<Provider>(
+    pub(crate) fn execution_overlay_at_frontiers<Provider>(
         &self,
         provider: &Provider,
         state_trie_tip_block: BlockNumHash,
@@ -545,14 +585,13 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     {
         let anchor_for_parent =
             self.anchor_at_parent_with_frontiers(provider, state_trie_tip_block, finish_tip_block)?;
-        let fallback_block_number = match &anchor_for_parent {
-            AnchorForParent::RevertsRequired { anchor, .. } => Some(anchor.number + 1),
-            AnchorForParent::NoReverts { .. } => None,
+        let (anchor_hash, fallback_block_number) = match anchor_for_parent {
+            AnchorForParent::RevertsRequired { anchor, .. } => {
+                (anchor.hash, Some(anchor.number + 1))
+            }
+            AnchorForParent::NoReverts { anchor } => (anchor.hash, None),
         };
-        Ok((
-            self.resolve_execution_overlay(anchor_for_parent.anchor().hash)?,
-            fallback_block_number,
-        ))
+        Ok((self.resolve_execution_overlay(anchor_hash)?, fallback_block_number))
     }
 
     /// Resolves the effective overlay (trie updates, hashed state).
@@ -560,37 +599,17 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         &self,
         anchor_hash: BlockHash,
     ) -> ProviderResult<(Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>)> {
-        match &self.overlay_source {
-            Some(OverlaySource::Managed) => {
-                if anchor_hash == self.parent_hash {
-                    Ok((
-                        Arc::new(TrieUpdatesSorted::default()),
-                        Arc::new(HashedPostStateSorted::default()),
-                    ))
-                } else {
-                    let parent_state = self.parent_state.as_ref().ok_or_else(|| {
-                        ProviderError::other(std::io::Error::other(
-                            "state trie overlay cannot be anchored without in-memory parent state",
-                        ))
-                    })?;
-                    self.overlay_manager
-                        .overlay_for_parent(parent_state, anchor_hash)
-                        .map_err(ProviderError::other)
-                }
-            }
-            Some(OverlaySource::Immediate { trie, state }) => {
-                if anchor_hash != self.parent_hash {
-                    return Err(ProviderError::other(std::io::Error::other(format!(
-                        "anchor_hash {anchor_hash} doesn't match OverlayBuilder's configured parent ({})",
-                        self.parent_hash
-                    ))))
-                }
-                Ok((Arc::clone(trie), Arc::clone(state)))
-            }
-            None => Ok((
-                Arc::new(TrieUpdatesSorted::default()),
-                Arc::new(HashedPostStateSorted::default()),
-            )),
+        if anchor_hash == self.parent_hash {
+            Ok((Arc::new(TrieUpdatesSorted::default()), Arc::new(HashedPostStateSorted::default())))
+        } else {
+            let parent_state = self.parent_state.as_ref().ok_or_else(|| {
+                ProviderError::other(std::io::Error::other(
+                    "state trie overlay cannot be anchored without in-memory parent state",
+                ))
+            })?;
+            self.overlay_manager
+                .overlay_for_parent(parent_state, anchor_hash)
+                .map_err(ProviderError::other)
         }
     }
 
@@ -599,19 +618,15 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         &self,
         anchor_hash: BlockHash,
     ) -> ProviderResult<Arc<ExecutionOverlay>> {
-        match &self.overlay_source {
-            Some(OverlaySource::Managed) if anchor_hash != self.parent_hash => {
-                let parent_state = self.parent_state.as_ref().ok_or_else(|| {
-                    ProviderError::other(std::io::Error::other("missing in-memory parent state"))
-                })?;
-                self.overlay_manager
-                    .execution_overlay_for_block_state(parent_state, anchor_hash)
-                    .map_err(ProviderError::other)
-            }
-            Some(OverlaySource::Managed) | None => Ok(Arc::new(ExecutionOverlay::default())),
-            Some(OverlaySource::Immediate { .. }) => Err(ProviderError::other(
-                std::io::Error::other("immediate state trie overlay has no execution state"),
-            )),
+        if anchor_hash == self.parent_hash {
+            Ok(Arc::new(ExecutionOverlay::default()))
+        } else {
+            let parent_state = self.parent_state.as_ref().ok_or_else(|| {
+                ProviderError::other(std::io::Error::other("missing in-memory parent state"))
+            })?;
+            self.overlay_manager
+                .execution_overlay_for_block_state(parent_state, anchor_hash)
+                .map_err(ProviderError::other)
         }
     }
 
@@ -642,13 +657,8 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     ) -> bool {
         let Some(anchor_hash) = self.reused_sparse_trie_anchor_hash else { return false };
 
-        match &self.overlay_source {
-            Some(OverlaySource::Managed) => {
-                self.contains_hash(anchor_hash, state_trie_tip_hash) &&
-                    self.contains_hash(anchor_hash, finish_tip_hash)
-            }
-            _ => false,
-        }
+        self.contains_hash(anchor_hash, state_trie_tip_hash) &&
+            self.contains_hash(anchor_hash, finish_tip_hash)
     }
 
     fn contains_hash(&self, anchor_hash: B256, hash: B256) -> bool {
@@ -671,7 +681,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
 /// Returns the highest blocks whose state/trie data and non-state/trie data are durably
 /// available in the database.
-pub fn database_state_frontiers<Provider>(
+pub(crate) fn database_state_frontiers<Provider>(
     provider: &Provider,
 ) -> ProviderResult<(BlockNumHash, BlockNumHash)>
 where
@@ -715,31 +725,32 @@ struct OverlayBuilderMetrics {
     sparse_trie_overlay_skips: Counter,
 }
 
-fn anchor_for_parent_in<N: NodePrimitives>(
+fn anchor_for_parent_in<'a, N: NodePrimitives + 'a>(
     parent_hash: B256,
-    mut in_mem_chain: impl Iterator<Item = ExecutedBlock<N>>,
-    preferred_anchor: B256,
-) -> B256 {
-    if parent_hash == preferred_anchor {
-        return parent_hash
+    in_mem_chain: impl Iterator<Item = &'a ExecutedBlock<N>>,
+    preferred_anchor: BlockNumHash,
+) -> Option<BlockNumHash> {
+    if parent_hash == preferred_anchor.hash {
+        return Some(preferred_anchor)
     }
 
-    let mut hash = parent_hash;
+    let mut anchor = None;
 
-    loop {
-        let Some(block) = in_mem_chain.next() else { return hash };
-        let block_parent_hash = block.recovered_block().parent_hash();
+    for block in in_mem_chain {
+        let block_parent = block.recovered_block().parent_num_hash();
 
-        if block_parent_hash == preferred_anchor {
-            return block_parent_hash
+        if block_parent.hash == preferred_anchor.hash {
+            return Some(preferred_anchor)
         }
-        hash = block_parent_hash;
+        anchor = Some(block_parent);
     }
+
+    anchor
 }
 
 /// Describes whether an overlay must revert the database before using its anchor.
 #[derive(Debug)]
-pub enum AnchorForParent {
+enum AnchorForParent {
     /// The in-memory chain covers the durable frontiers through this anchor.
     NoReverts {
         /// Block to anchor the overlay to.
@@ -752,128 +763,6 @@ pub enum AnchorForParent {
         /// Current Finish frontier.
         finish: BlockNumHash,
     },
-}
-
-impl AnchorForParent {
-    /// Returns the durable block anchoring this overlay.
-    pub const fn anchor(&self) -> BlockNumHash {
-        match self {
-            Self::NoReverts { anchor, .. } | Self::RevertsRequired { anchor, .. } => *anchor,
-        }
-    }
-}
-
-/// Returns the anchor block to use for the target parent and a chain of in-memory blocks.
-///
-/// # Arguments
-/// * `parent`: The block whose post-state is being targeted.
-/// * `in_mem_chain`: Yields the in-memory blocks in the chain, starting at `parent_hash`.
-/// * `provider`: Used to resolve the durable frontiers and check changeset availability.
-pub fn anchor_for_parent<N, Provider>(
-    parent_hash: B256,
-    in_mem_chain: impl Iterator<Item = ExecutedBlock<N>>,
-    provider: &Provider,
-) -> ProviderResult<AnchorForParent>
-where
-    N: NodePrimitives,
-    Provider: StageCheckpointReader + BlockNumReader + PruneCheckpointReader,
-{
-    let (partial_state_trie, finish) = database_state_frontiers(provider)?;
-    anchor_for_parent_with_frontiers(
-        parent_hash,
-        in_mem_chain,
-        partial_state_trie,
-        finish,
-        provider,
-    )
-}
-
-/// Returns the anchor block to use for the target parent and a chain of in-memory blocks using
-/// known durable frontiers.
-///
-/// # Arguments
-/// * `parent`: The block whose post-state is being targeted.
-/// * `in_mem_chain`: Yields the in-memory blocks in the chain, starting at `parent_hash`.
-/// * `partial_state_trie`: The durable state/trie frontier.
-/// * `finish`: The durable Finish frontier.
-/// * `provider`: Used to resolve the parent and check changeset availability.
-pub fn anchor_for_parent_with_frontiers<N, Provider>(
-    parent_hash: B256,
-    in_mem_chain: impl Iterator<Item = ExecutedBlock<N>>,
-    partial_state_trie: BlockNumHash,
-    finish: BlockNumHash,
-    provider: &Provider,
-) -> ProviderResult<AnchorForParent>
-where
-    N: NodePrimitives,
-    Provider: BlockNumReader + PruneCheckpointReader,
-{
-    use std::io::Error;
-
-    let persisted_parent = provider
-        .block_number(parent_hash)?
-        .filter(|&parent_number| parent_number <= partial_state_trie.number);
-
-    let mut finish_seen = parent_hash == finish.hash;
-    let anchor = if let Some(parent_number) = persisted_parent {
-        BlockNumHash::new(parent_number, parent_hash)
-    } else {
-        let mut in_mem_chain = in_mem_chain.inspect(|block| {
-            finish_seen |= block.recovered_block().hash() == finish.hash;
-        });
-
-        let anchor_hash =
-            anchor_for_parent_in(parent_hash, &mut in_mem_chain, partial_state_trie.hash);
-        if anchor_hash == partial_state_trie.hash {
-            BlockNumHash::new(partial_state_trie.number, anchor_hash)
-        } else {
-            let anchor_number = provider
-                .convert_hash_or_number(anchor_hash.into())?
-                .ok_or(ProviderError::BlockHashNotFound(anchor_hash))?;
-            BlockNumHash::new(anchor_number, anchor_hash)
-        }
-    };
-
-    finish_seen |= anchor.hash == finish.hash;
-
-    if anchor.number > partial_state_trie.number {
-        return Err(ProviderError::other(Error::other(format!(
-                "overlay anchor #{} ({}) is after partial state trie frontier #{} ({}); missing trie updates for blocks #{}..=#{}",
-                anchor.number,
-                anchor.hash,
-                partial_state_trie.number,
-                partial_state_trie.hash,
-                partial_state_trie.number + 1,
-                anchor.number,
-            ))))
-    }
-
-    // If the Finish block (db tip) was seen in the in-memory chain then we know that anchor is on
-    // the same chain as partial_state_trie as well. Given that anchor <= partial_state_trie, we can
-    // be sure that the in-memory chain is a superset of partial_state_trie+1..finish, and therefore
-    // can be used without reverts.
-    if finish_seen {
-        return Ok(AnchorForParent::NoReverts { anchor })
-    }
-
-    // Otherwise reverts are required; we check the changesets to make sure they are actually
-    // available before signaling that they are required.
-    let account_history = provider
-        .get_prune_checkpoint(PruneSegment::AccountHistory)?
-        .and_then(|checkpoint| checkpoint.block_number);
-    let storage_history = provider
-        .get_prune_checkpoint(PruneSegment::StorageHistory)?
-        .and_then(|checkpoint| checkpoint.block_number);
-    let lower_bound = account_history.max(storage_history).unwrap_or_default();
-    let available_range = lower_bound..=finish.number;
-    if !available_range.contains(&anchor.number) {
-        return Err(ProviderError::InsufficientChangesets {
-            requested: anchor.number,
-            available: available_range,
-        })
-    }
-
-    Ok(AnchorForParent::RevertsRequired { anchor, finish })
 }
 
 #[cfg(test)]
@@ -1199,19 +1088,6 @@ mod tests {
     }
 
     #[test]
-    fn execution_overlay_rejects_immediate_state_trie_overlay() {
-        let (factory, blocks) = setup_frontiers(1, 1);
-        let provider = factory.provider().unwrap();
-        let error = OverlayManager::<EthPrimitives>::default()
-            .overlay_builder(blocks[1].recovered_block().hash())
-            .with_immediate_state_trie_overlay(Default::default(), Default::default())
-            .execution_overlay(&provider)
-            .unwrap_err();
-
-        assert!(error.to_string().contains("immediate state trie overlay has no execution state"));
-    }
-
-    #[test]
     fn execution_overlay_uses_managed_blocks_after_the_anchor() {
         let (factory, blocks) = setup_frontiers(1, 3);
         let manager = OverlayManager::default();
@@ -1355,7 +1231,6 @@ mod tests {
         let provider = factory.provider().unwrap();
         let error = OverlayManager::<EthPrimitives>::default()
             .overlay_builder(blocks[3].recovered_block().hash())
-            .with_overlay_source(None)
             .build_state_trie_overlay(&provider)
             .unwrap_err();
 
