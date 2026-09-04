@@ -140,6 +140,7 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 )
             }
             EngineApiError::InvalidBodiesRange { .. } |
+            EngineApiError::NewPayload(BeaconOnNewPayloadError::InvalidParams(_)) |
             EngineApiError::EngineObjectValidationError(
                 EngineObjectValidationError::Payload(_) |
                 EngineObjectValidationError::InvalidParams(_),
@@ -299,6 +300,16 @@ mod tests {
             UNKNOWN_PAYLOAD_CODE,
             "Unknown payload",
             EngineApiError::UnknownPayload,
+        );
+
+        // Processing errors explicitly classified as malformed request parameters are rejected
+        // with an invalid params error instead of an `INVALID` payload status.
+        ensure_engine_rpc_error(
+            INVALID_PARAMS_CODE,
+            INVALID_PARAMS_MSG,
+            EngineApiError::NewPayload(BeaconOnNewPayloadError::InvalidParams(
+                "malformed payload parameters".into(),
+            )),
         );
 
         // Per the Shanghai Engine API spec, FCU V2 must return -38003 when the wrong

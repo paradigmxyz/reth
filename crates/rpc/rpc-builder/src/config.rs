@@ -125,7 +125,6 @@ impl RethRpcServerConfig for RpcServerArgs {
         EthStateCacheConfig {
             max_blocks: self.rpc_state_cache.max_blocks,
             max_receipts: self.rpc_state_cache.max_receipts,
-            max_headers: self.rpc_state_cache.max_headers,
             max_bals: self.rpc_state_cache.max_bals,
             max_concurrent_db_requests: self.rpc_state_cache.max_concurrent_db_requests,
             max_cached_tx_hashes: self.rpc_state_cache.max_cached_tx_hashes,
@@ -213,7 +212,12 @@ impl RethRpcServerConfig for RpcServerArgs {
                 .with_http_address(socket_address)
                 .with_http(self.http_ws_server_builder())
                 .with_http_cors(self.http_corsdomain.clone())
-                .with_http_disable_compression(self.http_disable_compression);
+                .with_http_disable_compression(self.http_disable_compression)
+                .with_http_compression_algorithms(self.http_compression_algorithms.clone())
+                .with_http_decompression(
+                    self.http_decompression_algorithms.clone(),
+                    self.rpc_max_request_size_bytes(),
+                );
         }
 
         if self.ws {

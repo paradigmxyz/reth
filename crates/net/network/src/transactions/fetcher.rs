@@ -184,10 +184,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     #[inline]
     pub fn is_idle(&self, peer_id: &PeerId) -> bool {
         let Some(inflight_count) = self.active_peers.peek(peer_id) else { return true };
-        if *inflight_count < self.info.max_inflight_requests_per_peer {
-            return true
-        }
-        false
+        *inflight_count < self.info.max_inflight_requests_per_peer
     }
 
     /// Returns any idle peer for the given hash.

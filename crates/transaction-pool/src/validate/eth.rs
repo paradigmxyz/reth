@@ -16,7 +16,7 @@ use crate::{
 use alloy_consensus::{
     constants::{
         EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
-        LEGACY_TX_TYPE_ID,
+        KECCAK_EMPTY, LEGACY_TX_TYPE_ID,
     },
     BlockHeader,
 };
@@ -573,10 +573,9 @@ where
             }
         }
 
-        // Drop non-local transactions with a fee lower than the configured fee for acceptance into
-        // the pool.
-        if !is_local &&
-            transaction.is_dynamic_fee() &&
+        // Drop dynamic fee transactions with a fee lower than the configured fee for acceptance
+        // into the pool.
+        if transaction.is_dynamic_fee() &&
             transaction.max_priority_fee_per_gas() < self.minimum_priority_fee
         {
             return Err(InvalidPoolTransactionError::PriorityFeeBelowMinimum {
@@ -732,7 +731,9 @@ where
         //
         // Any other case means that the account is not an EOA, and should not be able to send
         // transactions.
-        if let Some(code_hash) = &sender.bytecode_hash {
+        if let Some(code_hash) = &sender.bytecode_hash &&
+            *code_hash != KECCAK_EMPTY
+        {
             let is_eip7702 = if self.fork_tracker.is_prague_activated() {
                 match state.bytecode_by_hash(code_hash) {
                     Ok(bytecode) => bytecode.unwrap_or_default().is_eip7702(),
@@ -1552,7 +1553,7 @@ mod tests {
         eip2718::{Decodable2718, Encodable2718},
         eip2930::{AccessList, AccessListItem},
     };
-    use alloy_primitives::{hex, Address, B256, U256};
+    use alloy_primitives::{hex, Address, Bytes, B256, U256};
     use reth_ethereum_primitives::PooledTransactionVariant;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::SignedTransaction;
@@ -1683,6 +1684,22 @@ mod tests {
         assert!(res.is_ok());
         let tx = pool.get(transaction.hash());
         assert!(tx.is_some());
+    }
+
+    #[test]
+    fn accepts_sender_with_empty_bytecode() {
+        let transaction = get_transaction();
+        let provider = MockEthProvider::default().with_genesis_block();
+        provider.add_account(
+            transaction.sender(),
+            ExtendedAccount::new(transaction.nonce(), U256::MAX).with_bytecode(Bytes::new()),
+        );
+        let validator = EthTransactionValidatorBuilder::new(provider, test_evm_config())
+            .build(InMemoryBlobStore::default());
+
+        let outcome = validator.validate_one(TransactionOrigin::External, transaction);
+
+        assert!(outcome.is_valid());
     }
 
     #[test]
@@ -1933,24 +1950,27 @@ mod tests {
         let validator =
             create_validator_with_minimum_fee(provider, Some(minimum_priority_fee), None);
 
-        // External transaction should be rejected due to low priority fee
-        let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
-        assert!(outcome.is_invalid());
-
-        if let TransactionValidationOutcome::Invalid(_, err) = outcome {
+        for origin in
+            [TransactionOrigin::External, TransactionOrigin::Local, TransactionOrigin::Private]
+        {
+            let outcome = validator.validate_one(origin, transaction.clone());
             assert!(matches!(
-                err,
-                InvalidPoolTransactionError::PriorityFeeBelowMinimum { minimum_priority_fee: min_fee }
-                if min_fee == minimum_priority_fee
+                outcome,
+                TransactionValidationOutcome::Invalid(
+                    _,
+                    InvalidPoolTransactionError::PriorityFeeBelowMinimum {
+                        minimum_priority_fee: min_fee
+                    }
+                ) if min_fee == minimum_priority_fee
             ));
         }
 
-        // Test pool integration
+        // Local submission is the path used by `eth_sendRawTransaction`.
         let blob_store = InMemoryBlobStore::default();
         let pool =
             Pool::new(validator, CoinbaseTipOrdering::default(), blob_store, Default::default());
 
-        let res = pool.add_external_transaction(transaction.clone()).await;
+        let res = pool.add_transaction(TransactionOrigin::Local, transaction.clone()).await;
         assert!(res.is_err());
         assert!(matches!(
             res.unwrap_err().kind,
@@ -1960,14 +1980,6 @@ mod tests {
         ));
         let tx = pool.get(transaction.hash());
         assert!(tx.is_none());
-
-        // Local transactions should still be accepted regardless of minimum priority fee
-        let (_, local_provider) = setup_priority_fee_test();
-        let validator_local =
-            create_validator_with_minimum_fee(local_provider, Some(minimum_priority_fee), None);
-
-        let local_outcome = validator_local.validate_one(TransactionOrigin::Local, transaction);
-        assert!(local_outcome.is_valid());
     }
 
     #[tokio::test]

@@ -283,6 +283,8 @@ where
             self.last_block_hashes.pop_front();
         }
 
+        self.update_forkchoice_state().await?;
+
         Ok(())
     }
 }

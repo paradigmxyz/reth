@@ -263,6 +263,23 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         transition
     }
 
+    /// Replaces the active [`ForkFilter`] with a newly derived one and returns the resulting
+    /// [`ForkId`].
+    ///
+    /// This is used to adopt a fork schedule that changed at runtime (e.g. an L1-signalled
+    /// upgrade) without restarting the node. The caller is expected to build `fork_filter` from
+    /// the updated chain spec already advanced to the node's current head, so that
+    /// [`ForkFilter::current`] reflects the correct [`ForkId`] immediately.
+    ///
+    /// Every subsequent handshake clones this filter and advertises the returned [`ForkId`], so
+    /// the node's advertised fork identity stays aligned with the rules it now enforces. Existing
+    /// active sessions are not revalidated here; see [`SessionManager::active_sessions`].
+    pub(crate) fn set_fork_filter(&mut self, fork_filter: ForkFilter) -> ForkId {
+        self.fork_filter = fork_filter;
+        self.status.forkid = self.fork_filter.current();
+        self.status.forkid
+    }
+
     /// An incoming TCP connection was received. This starts the authentication process to turn this
     /// stream into an active peer session.
     ///
@@ -1244,14 +1261,18 @@ async fn authenticate_stream<N: NetworkPrimitives>(
 
         // install additional handlers
         for handler in extra_handlers.into_iter() {
-            let cap = handler.protocol().cap;
+            let protocol = handler.protocol();
+            let limits = handler.inbound_limits();
             let remote_peer_id = authenticated_peer_id;
 
+            // The unsupported-handler pass above guarantees that every remaining handler has a
+            // matching negotiated capability. The multiplexer retains the same immutable set of
+            // shared capabilities, so installing one of these handlers cannot fail.
             multiplex_stream
-                .install_protocol(&cap, move |conn| {
+                .install_protocol_with_limits(&protocol.cap, limits, move |conn| {
                     handler.into_connection(direction, remote_peer_id, conn)
                 })
-                .ok();
+                .expect("remaining handler capability was negotiated");
         }
 
         let (multiplex_stream, their_status) = match multiplex_stream

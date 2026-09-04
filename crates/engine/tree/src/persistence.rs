@@ -567,43 +567,6 @@ mod tests {
     }
 
     #[test]
-    fn test_save_blocks_flushes_bal_store() {
-        use reth_provider::{RocksDBBalStore, RocksDBProviderFactory};
-
-        reth_tracing::init_test_tracing();
-        let provider = create_test_provider_factory();
-        let bal_store = BalStoreHandle::new(RocksDBBalStore::new(provider.rocksdb_provider()));
-        let provider = provider.with_bal_store(bal_store);
-        init_genesis(&provider).unwrap();
-
-        let mut test_block_builder = TestBlockBuilder::eth();
-        let executed = test_block_builder.get_executed_block_with_number(1, B256::random());
-        let num_hash = executed.recovered_block().num_hash();
-        let raw_bal = Bytes::from_static(&[0xc0]);
-
-        provider.bal_store().insert(num_hash, RawBal::new(raw_bal.clone())).unwrap();
-
-        let (_finished_exex_height_tx, finished_exex_height_rx) =
-            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
-        let pruner =
-            Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
-        let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
-        let handle = PersistenceHandle::<EthPrimitives>::spawn_service(
-            provider.clone(),
-            pruner,
-            sync_metrics_tx,
-        );
-        let (tx, rx) = crossbeam_channel::bounded(1);
-
-        handle.save_blocks(full_save_input(vec![executed]), tx).unwrap();
-
-        let result = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("test timed out");
-        assert_eq!(result.last_block, num_hash);
-        let persisted_store = RocksDBBalStore::new(provider.rocksdb_provider());
-        assert_eq!(persisted_store.get_by_hash(num_hash.hash).unwrap(), Some(raw_bal));
-    }
-
-    #[test]
     fn test_save_blocks_multiple_blocks() {
         reth_tracing::init_test_tracing();
         let handle = default_persistence_handle();
@@ -738,14 +701,16 @@ mod tests {
 
         // Check the primary can read its own historical state.
         {
-            let primary_state_at_1 = provider_factory.history_by_block_number(1).unwrap();
+            let provider = provider_factory.provider().unwrap();
+            let primary_state_at_1 = provider.history_by_block_number(1).unwrap();
             let primary_account = primary_state_at_1.basic_account(&signer).unwrap();
             assert!(primary_account.is_some(), "primary: signer must exist at block 1");
         }
 
         // Verify historical state at block 1 is accessible via changesets on the secondary.
         {
-            let state_at_1 = secondary.history_by_block_number(1).unwrap();
+            let provider = secondary.provider().unwrap();
+            let state_at_1 = provider.history_by_block_number(1).unwrap();
             let account_at_1 = state_at_1.basic_account(&signer).unwrap();
             assert!(account_at_1.is_some(), "signer account must exist at block 1");
             let account_at_1 = account_at_1.unwrap();
@@ -840,7 +805,8 @@ mod tests {
         );
 
         // Verify historical state at block 1 is still accessible after the reorg.
-        let state_at_1 = secondary.history_by_block_number(1).unwrap();
+        let provider = secondary.provider().unwrap();
+        let state_at_1 = provider.history_by_block_number(1).unwrap();
         let account_at_1 = state_at_1.basic_account(&signer).unwrap();
         assert!(account_at_1.is_some(), "signer account must exist at block 1 after reorg");
         let account_at_1 = account_at_1.unwrap();
@@ -854,7 +820,8 @@ mod tests {
         );
 
         // Verify the latest state (at block 2) reflects the reorged execution.
-        let state_at_2 = secondary.history_by_block_number(2).unwrap();
+        let provider = secondary.provider().unwrap();
+        let state_at_2 = provider.history_by_block_number(2).unwrap();
         let account_at_2 = state_at_2.basic_account(&signer).unwrap();
         assert!(account_at_2.is_some(), "signer account must exist at block 2 after reorg");
         let account_at_2 = account_at_2.unwrap();

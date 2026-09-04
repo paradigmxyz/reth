@@ -141,6 +141,14 @@ impl StateProofProvider for StateProviderTest {
         unimplemented!("proof generation is not supported")
     }
 
+    fn multiproof_v2(
+        &self,
+        _input: TrieInput,
+        _targets: reth_trie::MultiProofTargetsV2,
+    ) -> ProviderResult<reth_trie::DecodedMultiProofV2> {
+        unimplemented!("proof generation is not supported")
+    }
+
     fn witness(
         &self,
         _input: TrieInput,

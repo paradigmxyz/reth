@@ -1,5 +1,5 @@
 use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use alloy_primitives::{keccak256, map::B256Map, BlockNumber, B256};
+use alloy_primitives::{keccak256, map::B256Map, Address, BlockNumber, B256};
 use reth_db_api::{
     models::{AccountBeforeTx, BlockNumberAddress},
     transaction::DbTx,
@@ -307,11 +307,21 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
 
         if start < end {
             let end_inclusive = end.saturating_sub(1);
+            // Rows are ordered by `BlockNumberAddress`, so all slots of one account arrive
+            // consecutively and the address hash can be reused across them.
+            let mut last_address: Option<(Address, B256)> = None;
             for (BlockNumberAddress((_, address)), storage) in
                 provider.storage_changesets_range(start..=end_inclusive)?
             {
                 if seen_storage_keys.insert((address, storage.key)) {
-                    let hashed_address = keccak256(address);
+                    let hashed_address = match last_address {
+                        Some((last, hashed)) if last == address => hashed,
+                        _ => {
+                            let hashed = keccak256(address);
+                            last_address = Some((address, hashed));
+                            hashed
+                        }
+                    };
                     storages
                         .entry(hashed_address)
                         .or_default()
@@ -325,7 +335,7 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
             .into_iter()
             .map(|(address, mut slots)| {
                 slots.sort_unstable_by_key(|(slot, _)| *slot);
-                (address, HashedStorageSorted { storage_slots: slots, wiped: false })
+                (address, HashedStorageSorted { storage_slots: slots })
             })
             .collect();
 

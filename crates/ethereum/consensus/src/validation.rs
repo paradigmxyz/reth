@@ -110,8 +110,12 @@ where
         !chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) &&
         block.header().block_access_list_hash().is_some();
 
-    if (chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) ||
-        is_allowed_pre_amsterdam_bal_hash) &&
+    let is_amsterdam = chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp());
+    if is_amsterdam && block_access_list_hash.is_none() {
+        return Err(ConsensusError::BlockAccessListHashMissing)
+    }
+
+    if (is_amsterdam || is_allowed_pre_amsterdam_bal_hash) &&
         let Some(block_access_list_hash) = block_access_list_hash
     {
         let block_bal_hash = block.header().block_access_list_hash().unwrap_or_default();
@@ -127,7 +131,7 @@ where
 
 /// Calculate the receipts root, and compare it against the expected receipts root and logs
 /// bloom.
-fn verify_receipts<R: Receipt>(
+pub fn verify_receipts<R: Receipt>(
     expected_receipts_root: B256,
     expected_logs_bloom: Bloom,
     receipts: &[R],
@@ -149,7 +153,7 @@ fn verify_receipts<R: Receipt>(
 
 /// Compare the calculated receipts root with the expected receipts root, also compare
 /// the calculated logs bloom with the expected logs bloom.
-fn compare_receipts_root_and_logs_bloom(
+pub fn compare_receipts_root_and_logs_bloom(
     calculated_receipts_root: B256,
     calculated_logs_bloom: Bloom,
     expected_receipts_root: B256,
