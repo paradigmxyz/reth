@@ -1392,11 +1392,14 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     last_seen_block_hash: B256,
     /// Expected blob and base fee for the pending block.
     pending_fees: PendingFees,
-    /// The fees that the states stored in [`Self::txs`] currently reflect.
+    /// Snapshot of [`Self::pending_fees`] recorded after the most recent all-transactions pass in
+    /// [`Self::update`].
     ///
-    /// Only [`Self::update`] applies fees to every transaction, so while this matches
-    /// [`Self::pending_fees`] a transaction of an unchanged sender cannot change state.
-    state_fees: PendingFees,
+    /// The all-transactions pass calls [`Self::update_txs`] over every entry in [`Self::txs`].
+    /// This field is initialized to the default fees because an empty pool trivially reflects
+    /// them. It is not necessarily the immediately preceding fee value: partial sender updates
+    /// and fee changes do not modify it.
+    last_full_update_fees: PendingFees,
     /// Configured price bump settings for replacements
     price_bumps: PriceBumpConfig,
     /// How to handle [`TransactionOrigin::Local`](crate::TransactionOrigin) transactions.
@@ -1521,12 +1524,12 @@ impl<T: PoolTransaction> AllTransactions<T> {
         let mut updates = Vec::with_capacity(64);
         let base_fee = self.pending_fees.base_fee;
 
-        if self.state_fees == self.pending_fees {
-            // The states already reflect these fees, so a transaction can only change if its
-            // sender's account did: everything else the loop derives (nonce gaps, ancestors,
-            // cumulative cost) is a function of the sender's own transactions, which did not
-            // change either. Visiting the whole pool would be wasted work, so walk just the
-            // senders that changed.
+        if self.last_full_update_fees == self.pending_fees {
+            // The per-transaction eligibility metadata already reflects these fees, so a
+            // transaction can only change if its sender's account did: everything else the loop
+            // derives (nonce gaps, ancestors, cumulative cost) is a function of the sender's own
+            // transactions, which did not change either. Visiting the whole pool would be wasted
+            // work, so walk just the senders that changed.
             for sender in changed_accounts.keys() {
                 let range = TransactionId::new(*sender, 0)..=TransactionId::new(*sender, u64::MAX);
                 Self::update_txs(
@@ -1538,7 +1541,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             }
         } else {
             Self::update_txs(base_fee, changed_accounts, self.txs.iter_mut(), &mut updates);
-            self.state_fees = self.pending_fees;
+            self.last_full_update_fees = self.pending_fees;
         }
 
         updates
@@ -2242,7 +2245,7 @@ impl<T: PoolTransaction> Default for AllTransactions<T> {
             last_seen_block_hash: Default::default(),
             pending_fees: Default::default(),
             // an empty pool trivially reflects the initial fees
-            state_fees: Default::default(),
+            last_full_update_fees: Default::default(),
             price_bumps: Default::default(),
             local_transactions_config: Default::default(),
             auths: Default::default(),
@@ -3466,7 +3469,7 @@ mod tests {
 
         // a full update applies the current fees to every transaction and records them
         pool.all_transactions.update(&Default::default());
-        assert_eq!(pool.all_transactions.state_fees, pool.all_transactions.pending_fees);
+        assert_eq!(pool.all_transactions.last_full_update_fees, pool.all_transactions.pending_fees);
 
         // sender `a` moved past its transaction on chain, the fees did not move. Only `a` should
         // be evaluated, and `b` must be left exactly as it was.
