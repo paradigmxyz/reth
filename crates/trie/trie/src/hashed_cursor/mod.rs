@@ -87,6 +87,9 @@ pub trait HashedStorageCursor: HashedCursor {
 /// bounded only by `limit`, with the vector growing on demand for legitimately large pages.
 const MAX_ACCOUNT_RANGE_PREALLOC: usize = 1024;
 
+/// Accounts in a range and the first hashed key of the next page, if any.
+pub type HashedAccountRange = (Vec<(B256, Account)>, Option<B256>);
+
 /// Builds one account-range page by seeking and scanning the hashed account cursor.
 ///
 /// Returns up to `limit` accounts whose hashed keys are greater than or equal to `start`, in
@@ -95,7 +98,7 @@ pub fn account_range(
     cursor_factory: &impl HashedCursorFactory,
     start: B256,
     limit: usize,
-) -> Result<(Vec<(B256, Account)>, Option<B256>), DatabaseError> {
+) -> Result<HashedAccountRange, DatabaseError> {
     if limit == 0 {
         return Ok((Vec::new(), None))
     }

@@ -326,7 +326,7 @@ impl BlockGasTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tree::error::{InsertBlockErrorKind, InsertBlockProcessingError};
+    use crate::tree::error::{InsertBlockErrorKind, InsertBlockValidationError};
     use alloy_consensus::{BlockHeader, Header};
     use alloy_eip7928::{
         bal::Bal as AlloyBal, AccountChanges, BlockAccessIndex, BlockAccessList, CodeChange,
@@ -451,7 +451,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_bal_bytecode_is_malformed_input() {
+    fn invalid_bal_bytecode_is_validation_error() {
         let alloy_bal = vec![AccountChanges {
             address: Address::ZERO,
             code_changes: vec![CodeChange::new(
@@ -468,7 +468,7 @@ mod tests {
         assert!(matches!(&error, InsertBlockErrorKind::BlockAccessListDecode(_)));
         assert!(matches!(
             error.ensure_validation_error(),
-            Err(InsertBlockProcessingError::MalformedInput(_))
+            Ok(InsertBlockValidationError::BlockAccessListDecode(_))
         ));
     }
 
@@ -1159,9 +1159,9 @@ mod tests {
     }
 
     #[test]
-    fn worker_tx_recovery_error_becomes_other_error() {
+    fn worker_tx_recovery_error_becomes_validation_error() {
         // A tx recovery failure fed into the worker channel must surface as
-        // BalExecutionError::Other. Uses execute_block directly since tx_stream hardcodes
+        // a block validation error. Uses execute_block directly since tx_stream hardcodes
         // Infallible and cannot inject errors.
         let evm_config = EthEvmConfig::mainnet();
         let block = empty_amsterdam_block(B256::ZERO);
@@ -1192,8 +1192,8 @@ mod tests {
         );
 
         assert!(
-            matches!(result, Err(BalExecutionError::Other(_))),
-            "expected Other error from tx recovery failure, got {result:?}",
+            matches!(result, Err(BalExecutionError::Execution(BlockExecutionError::Validation(_)))),
+            "expected validation error from tx recovery failure, got {result:?}",
         );
     }
 
@@ -1212,7 +1212,8 @@ mod tests {
 
         let block_gas_limit = 1_000_000u64;
         let first_tx_gas = 600_000u64;
-        let second_tx_gas_limit = 500_000u64; // fits in total limit but not after cumulative deduction
+        let second_tx_gas_limit = 500_000u64; // fits in total limit but not after cumulative
+                                              // deduction
 
         let gas = ResultGas::new_with_state_gas(first_tx_gas, 0, 0, first_tx_gas / 2);
         let fake_result: ResultAndState<revm::context::result::HaltReason> =

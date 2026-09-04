@@ -9,8 +9,11 @@ use reth_db_api::{
 };
 use reth_db_common::DbTool;
 use reth_node_builder::NodeTypesWithDB;
-use reth_provider::{providers::ProviderNodeTypes, StaticFileProviderFactory};
-use reth_storage_api::{BlockNumReader, StateProvider, StorageSettingsCache};
+use reth_provider::{
+    providers::{BlockchainProvider, ProviderNodeTypes},
+    StaticFileProviderFactory,
+};
+use reth_storage_api::{BlockNumReader, StateProvider, StateProviderFactory, StorageSettingsCache};
 use reth_tasks::spawn_scoped_os_thread;
 use std::{
     collections::BTreeSet,
@@ -138,7 +141,8 @@ impl Command {
         block: BlockNumber,
         limit: usize,
     ) -> eyre::Result<()> {
-        let provider = tool.provider_factory.history_by_block_number(block)?;
+        let provider = BlockchainProvider::new(tool.provider_factory.clone())?
+            .history_by_block_number(block)?;
 
         // Get account info at that block
         let account = provider.basic_account(&address)?;

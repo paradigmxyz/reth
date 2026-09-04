@@ -11,8 +11,9 @@ use reth_storage_api::{
     StateRootProvider, StorageRootProvider,
 };
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, TrieInput, TrieInputSorted,
+    updates::TrieUpdates, AccountProof, DecodedMultiProofV2, HashedPostState, HashedStorage,
+    MultiProof, MultiProofTargets, MultiProofTargetsV2, StorageMultiProof, TrieInput,
+    TrieInputSorted,
 };
 use revm::database::BundleState;
 use std::{borrow::Cow, sync::OnceLock};
@@ -198,6 +199,15 @@ impl<N: NodePrimitives> StateProofProvider for MemoryOverlayStateProviderRef<'_,
     ) -> ProviderResult<MultiProof> {
         input.prepend_self(self.trie_input().clone());
         self.historical.multiproof(input, targets)
+    }
+
+    fn multiproof_v2(
+        &self,
+        mut input: TrieInput,
+        targets: MultiProofTargetsV2,
+    ) -> ProviderResult<DecodedMultiProofV2> {
+        input.prepend_self(self.trie_input().clone());
+        self.historical.multiproof_v2(input, targets)
     }
 
     fn witness(

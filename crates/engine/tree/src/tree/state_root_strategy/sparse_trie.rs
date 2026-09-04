@@ -359,9 +359,6 @@ where
             }
         };
 
-        #[cfg(feature = "trie-debug")]
-        let debug_recorders = self.trie.take_debug_recorders();
-
         let end = Instant::now();
         self.metrics.sparse_trie_final_update_duration_histogram.record(end.duration_since(start));
         self.metrics.sparse_trie_total_duration_histogram.record(end.duration_since(now));
@@ -380,8 +377,6 @@ where
             trie_updates: Arc::new(trie_updates),
             hashed_state: finalized_hashed_state
                 .expect("finished state updates publish the hashed post state"),
-            #[cfg(feature = "trie-debug")]
-            debug_recorders,
         })
     }
 
@@ -1230,7 +1225,7 @@ mod tests {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
         let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
-        let overlay_factory = OverlayStateProviderFactory::new(
+        let state_provider_factory = OverlayStateProviderFactory::new(
             provider_factory,
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
                 .overlay_builder(anchor_hash),
@@ -1238,7 +1233,7 @@ mod tests {
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
-            ProofTaskCtx::new(overlay_factory),
+            ProofTaskCtx::new(state_provider_factory),
             false,
             proof_result_tx.clone(),
         );
@@ -1285,7 +1280,7 @@ mod tests {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
         let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
-        let overlay_factory = OverlayStateProviderFactory::new(
+        let state_provider_factory = OverlayStateProviderFactory::new(
             provider_factory,
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
                 .overlay_builder(anchor_hash),
@@ -1293,7 +1288,7 @@ mod tests {
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
-            ProofTaskCtx::new(overlay_factory),
+            ProofTaskCtx::new(state_provider_factory),
             false,
             proof_result_tx.clone(),
         );
@@ -1373,7 +1368,7 @@ mod tests {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
         let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
-        let overlay_factory = OverlayStateProviderFactory::new(
+        let state_provider_factory = OverlayStateProviderFactory::new(
             provider_factory,
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
                 .overlay_builder(anchor_hash),
@@ -1381,7 +1376,7 @@ mod tests {
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
-            ProofTaskCtx::new(overlay_factory),
+            ProofTaskCtx::new(state_provider_factory),
             false,
             proof_result_tx.clone(),
         );
@@ -1426,7 +1421,7 @@ mod tests {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
         let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
-        let overlay_factory = OverlayStateProviderFactory::new(
+        let state_provider_factory = OverlayStateProviderFactory::new(
             provider_factory,
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
                 .overlay_builder(anchor_hash),
@@ -1434,7 +1429,7 @@ mod tests {
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
-            ProofTaskCtx::new(overlay_factory),
+            ProofTaskCtx::new(state_provider_factory),
             false,
             proof_result_tx.clone(),
         );

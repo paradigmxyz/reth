@@ -512,6 +512,10 @@ where
                     .into());
                 }
 
+                if !filter.matches_bloom(header.logs_bloom()) {
+                    return Ok(Vec::new())
+                }
+
                 let mut all_logs = Vec::new();
                 append_matching_block_logs(
                     &mut all_logs,
@@ -581,13 +585,6 @@ where
                         requested: t,
                         head: info.best_number,
                     });
-                }
-
-                if let Some(f) = from &&
-                    f > info.best_number
-                {
-                    // start block higher than local head, can return empty
-                    return Ok(Vec::new());
                 }
 
                 let (from_block_number, to_block_number) =
@@ -1227,7 +1224,7 @@ impl<
                 return Ok(None);
             };
 
-            let mut range_headers = Vec::with_capacity(self.max_range);
+            let mut range_headers = Vec::with_capacity(self.max_range.min(self.iter.len() + 1));
             range_headers.push(next_header);
 
             // Collect consecutive blocks up to max_range size
@@ -1426,6 +1423,20 @@ mod tests {
             EthEvmConfig::new(provider.chain_spec()),
         )
         .build()
+    }
+
+    #[tokio::test]
+    async fn test_logs_for_filter_from_block_beyond_head() {
+        let provider = MockEthProvider::default();
+        provider.add_header(FixedBytes::random(), alloy_consensus::Header::default());
+        let eth_api = build_test_eth_api(provider);
+
+        let eth_filter =
+            super::EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
+
+        let filter = Filter::new().from_block(100u64).to_block(BlockNumberOrTag::Latest);
+        let result = eth_filter.inner.clone().logs_for_filter(filter, QueryLimits::default()).await;
+        assert!(matches!(result, Err(EthFilterError::InvalidBlockRangeParams)), "{result:?}");
     }
 
     #[tokio::test]
