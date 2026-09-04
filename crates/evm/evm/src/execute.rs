@@ -1302,10 +1302,22 @@ pub trait FromRecoveredTx<T> {
 
 impl<T, TxEnv> FromRecoveredTx<T> for Recovered<TxEnv>
 where
-    TxEnv: From<T>,
+    TxEnv: FromRecoveredTx<T>,
 {
     fn from_recovered_tx(tx: Recovered<T>) -> Self {
-        tx.convert()
+        let signer = tx.signer();
+        // Preserve the recovered signer for chain-specific transaction environments instead of
+        // converting only the envelope and forcing them to recover its signature again.
+        Recovered::new_unchecked(TxEnv::from_recovered_tx(tx), signer)
+    }
+}
+
+impl<T> FromRecoveredTx<T> for evm2::ethereum::TxEnvelope
+where
+    Self: From<T>,
+{
+    fn from_recovered_tx(tx: Recovered<T>) -> Self {
+        tx.into_inner().into()
     }
 }
 
@@ -1322,7 +1334,17 @@ pub trait FromTxWithEncoded<T>: FromRecoveredTx<T> {
     }
 }
 
-impl<T, TxEnv> FromTxWithEncoded<T> for Recovered<TxEnv> where TxEnv: From<T> {}
+impl<T, TxEnv> FromTxWithEncoded<T> for Recovered<TxEnv>
+where
+    TxEnv: FromTxWithEncoded<T>,
+{
+    fn from_tx_with_encoded(tx: WithEncoded<Recovered<T>>) -> Self {
+        let signer = tx.1.signer();
+        Recovered::new_unchecked(TxEnv::from_tx_with_encoded(tx), signer)
+    }
+}
+
+impl<T> FromTxWithEncoded<T> for evm2::ethereum::TxEnvelope where Self: From<T> {}
 
 /// Converts transaction wrappers into the configured transaction environment.
 pub trait IntoTxEnv<TxEnv> {
@@ -1470,5 +1492,60 @@ impl<TxEnv, T: RecoveredTx<Tx>, Tx> ExecutableTxParts<TxEnv, Tx> for WithTxEnv<T
 
     fn into_parts(self) -> (TxEnv, Self::Recovered) {
         (self.tx_env, self.tx)
+    }
+}
+
+#[cfg(test)]
+mod conversion_tests {
+    use super::*;
+
+    #[derive(Debug)]
+    struct SignerAwareEnv {
+        signer: Address,
+        value: u8,
+        has_encoding: bool,
+    }
+
+    impl From<u8> for SignerAwareEnv {
+        fn from(_: u8) -> Self {
+            panic!("recovered conversion must not use unsigned envelope conversion")
+        }
+    }
+
+    impl FromRecoveredTx<u8> for SignerAwareEnv {
+        fn from_recovered_tx(tx: Recovered<u8>) -> Self {
+            Self { signer: tx.signer(), value: *tx.inner(), has_encoding: false }
+        }
+    }
+
+    impl FromTxWithEncoded<u8> for SignerAwareEnv {
+        fn from_tx_with_encoded(tx: WithEncoded<Recovered<u8>>) -> Self {
+            let has_encoding = !tx.encoded_bytes().is_empty();
+            Self { has_encoding, ..Self::from_recovered_tx(tx.1) }
+        }
+    }
+
+    #[test]
+    fn recovered_wrapper_preserves_signer_without_envelope_conversion() {
+        let signer = Address::repeat_byte(0x42);
+        let tx = Recovered::new_unchecked(7u8, signer);
+        let (env, original): (Recovered<SignerAwareEnv>, _) = ExecutableTxParts::into_parts(tx);
+        assert_eq!(env.signer(), signer);
+        assert_eq!(env.inner().signer, signer);
+        assert_eq!(env.inner().value, 7);
+        assert_eq!(original.signer(), signer);
+    }
+
+    #[test]
+    fn recovered_wrapper_preserves_encoded_conversion_context() {
+        let signer = Address::repeat_byte(0x42);
+        let tx = WithEncoded::new(
+            alloy_primitives::Bytes::from_static(&[1]),
+            Recovered::new_unchecked(7u8, signer),
+        );
+        let env: Recovered<SignerAwareEnv> = FromTxWithEncoded::from_tx_with_encoded(tx);
+        assert_eq!(env.signer(), signer);
+        assert_eq!(env.inner().signer, signer);
+        assert!(env.inner().has_encoding);
     }
 }
