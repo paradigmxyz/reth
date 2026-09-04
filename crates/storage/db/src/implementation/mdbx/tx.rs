@@ -10,6 +10,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_libmdbx::{ffi::MDBX_dbi, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
+use reth_primitives_traits::FastInstant as Instant;
 use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
 use reth_tracing::tracing::{debug, instrument, trace, warn};
 use rustc_hash::FxHashMap;
@@ -20,7 +21,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 /// Duration after which we emit the log about long-lived database transactions.
@@ -177,6 +178,11 @@ struct MetricsHandler<K: TransactionKind> {
     /// Cached internal transaction ID provided by libmdbx.
     txn_id: u64,
     /// The time when transaction has started.
+    ///
+    /// This is a TSC-backed [`reth_primitives_traits::FastInstant`] rather than
+    /// [`std::time::Instant`] because
+    /// [`MetricsHandler::log_backtrace_on_long_read_transaction`] reads it on every database
+    /// operation.
     start: Instant,
     /// Duration after which we emit the log about long-lived database transactions.
     long_transaction_duration: Duration,
