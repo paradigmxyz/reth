@@ -25,6 +25,7 @@ use reth_storage_errors::{
     db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation, LogLevel},
     provider::{ProviderError, ProviderResult},
 };
+use revm::database::states::PlainStateReverts;
 use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, CompactionPri, DBCompressionType,
     DBRawIteratorWithThreadMode, IteratorMode, OptimisticTransactionDB,
@@ -1375,6 +1376,7 @@ impl RocksDBProvider {
         blocks: &[ExecutedBlock<N>],
         tx_nums: &[TxNumber],
         ctx: RocksDBWriteCtx,
+        reverts: &[PlainStateReverts],
         runtime: &reth_tasks::Runtime,
     ) -> ProviderResult<()> {
         if !ctx.storage_settings.storage_v2 {
@@ -1404,14 +1406,14 @@ impl RocksDBProvider {
             if write_account_history {
                 s.spawn(|_| {
                     let _guard = span.enter();
-                    r_account_history = Some(self.write_account_history(blocks, &ctx));
+                    r_account_history = Some(self.write_account_history(reverts, &ctx));
                 });
             }
 
             if write_storage_history {
                 s.spawn(|_| {
                     let _guard = span.enter();
-                    r_storage_history = Some(self.write_storage_history(blocks, &ctx));
+                    r_storage_history = Some(self.write_storage_history(reverts, &ctx));
                 });
             }
         });
@@ -1460,27 +1462,27 @@ impl RocksDBProvider {
         Ok(())
     }
 
-    /// Writes account history indices for the given blocks.
+    /// Writes account history indices from precomputed state reverts.
     ///
-    /// Derives history indices from reverts (same source as changesets) to ensure consistency.
+    /// The reverts are shared with the changeset writers so history indices and changesets use
+    /// the same state snapshot without converting the original reverts again.
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
-    fn write_account_history<N: reth_node_types::NodePrimitives>(
+    fn write_account_history(
         &self,
-        blocks: &[ExecutedBlock<N>],
+        reverts: &[PlainStateReverts],
         ctx: &RocksDBWriteCtx,
     ) -> ProviderResult<()> {
         let mut batch = self.batch();
         let mut account_history: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
 
-        for (block_idx, block) in blocks.iter().enumerate() {
+        for (block_idx, reverts) in reverts.iter().enumerate() {
             let block_number = ctx.first_block_number + block_idx as u64;
-            let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
 
             // Iterate through account reverts - these are exactly the accounts that have
             // changesets written, ensuring history indices match changeset entries.
-            for account_block_reverts in reverts.accounts {
+            for account_block_reverts in &reverts.accounts {
                 for (address, _) in account_block_reverts {
-                    account_history.entry(address).or_default().push(block_number);
+                    account_history.entry(*address).or_default().push(block_number);
                 }
             }
         }
@@ -1493,26 +1495,26 @@ impl RocksDBProvider {
         Ok(())
     }
 
-    /// Writes storage history indices for the given blocks.
+    /// Writes storage history indices from precomputed state reverts.
     ///
-    /// Derives history indices from reverts (same source as changesets) to ensure consistency.
+    /// The reverts are shared with the changeset writers so history indices and changesets use
+    /// the same state snapshot without converting the original reverts again.
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
-    fn write_storage_history<N: reth_node_types::NodePrimitives>(
+    fn write_storage_history(
         &self,
-        blocks: &[ExecutedBlock<N>],
+        reverts: &[PlainStateReverts],
         ctx: &RocksDBWriteCtx,
     ) -> ProviderResult<()> {
         let mut storage_history: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
 
-        for (block_idx, block) in blocks.iter().enumerate() {
+        for (block_idx, reverts) in reverts.iter().enumerate() {
             let block_number = ctx.first_block_number + block_idx as u64;
-            let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
 
             // Iterate through storage reverts - these are exactly the slots that have
             // changesets written, ensuring history indices match changeset entries.
-            for storage_block_reverts in reverts.storage {
+            for storage_block_reverts in &reverts.storage {
                 for revert in storage_block_reverts {
-                    for (slot, _) in revert.storage_revert {
+                    for (slot, _) in &revert.storage_revert {
                         let plain_key = B256::new(slot.to_be_bytes());
                         storage_history
                             .entry((revert.address, plain_key))
