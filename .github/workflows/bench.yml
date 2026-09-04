@@ -960,6 +960,11 @@ jobs:
               }
             }
 
+      - name: Prepare Cargo dependency cooldown verifier
+        uses: tempoxyz/gh-actions/actions/cargo-cooldown@0aa93238d85fd085d7901320b670cc6adb7a02f3 # gh-actions#101
+        with:
+          strict-project-config: true
+
       - name: Install dependencies
         env:
           DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
@@ -999,13 +1004,13 @@ jobs:
 
           # schelk (snapshot rollback tool, invoked via sudo)
           if ! sudo sh -c 'command -v schelk' &>/dev/null; then
-            cargo install --git https://github.com/tempoxyz/schelk --rev e1047d33d3c76be67fb9c3e2c5cc4eecaa724c64 --locked
+            .github/scripts/install-cargo-git-tool.sh https://github.com/tempoxyz/schelk e1047d33d3c76be67fb9c3e2c5cc4eecaa724c64
             sudo install "$HOME/.cargo/bin/schelk" /usr/local/bin/
           fi
 
           # samply (optional CPU profiler, invoked via sudo)
           if [ "${BENCH_SAMPLY:-false}" = "true" ] && ! sudo sh -c 'command -v samply' &>/dev/null; then
-            cargo install samply --git https://github.com/DaniPopes/samply --rev dac609073bd4a41c1c1e4e4b12b617fd41b5d9ac --locked
+            .github/scripts/install-cargo-git-tool.sh https://github.com/DaniPopes/samply dac609073bd4a41c1c1e4e4b12b617fd41b5d9ac samply
             sudo install "$HOME/.cargo/bin/samply" /usr/local/bin/
           fi
 
