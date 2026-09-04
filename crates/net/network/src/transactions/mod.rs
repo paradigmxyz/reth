@@ -1204,6 +1204,12 @@ where
             return
         }
         if let Some(peer) = self.peers.get_mut(&peer_id) {
+            if !self.policies.propagation_policy().can_propagate(peer) {
+                trace!(target: "net::tx", ?peer_id, "Ignoring GetPooledTransactions request from peer not eligible under propagation policy");
+                let _ = response.send(Ok(PooledTransactions::default()));
+                return
+            }
+
             let transactions = self.pool.get_pooled_transaction_elements(
                 request.0,
                 GetPooledTransactionLimit::ResponseSizeSoftLimit(
@@ -1298,6 +1304,11 @@ where
         // transactions in the pool.
         if self.network.is_initially_syncing() || self.network.tx_gossip_disabled() {
             trace!(target: "net::tx", ?peer_id, "Skipping transaction broadcast: node syncing or gossip disabled");
+            return
+        }
+
+        if !self.policies.propagation_policy().can_propagate(peer) {
+            trace!(target: "net::tx", ?peer_id, "Skipping transaction broadcast: peer not eligible under propagation policy");
             return
         }
 
@@ -3481,6 +3492,128 @@ mod tests {
 
         let peer = tx_manager.peers.get(&peer_id).expect("peer should exist");
         assert!(peer.seen_transactions.contains(&tx_hash));
+    }
+
+    /// Builds a [`TransactionsManager`] with a given [`TransactionPropagationKind`] policy.
+    async fn new_eth_tx_manager_with_propagation_policy(
+        policy: TransactionPropagationKind,
+    ) -> (TransactionsManager<EthTestPool, EthNetworkPrimitives>, NetworkHandle<EthNetworkPrimitives>)
+    {
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let client = NoopProvider::default();
+
+        let config = NetworkConfigBuilder::new(secret_key, Runtime::test())
+            .listener_port(0)
+            .disable_discovery()
+            .build(client);
+
+        let pool = Pool::new(
+            OkValidator::default().set_propagate_transactions(true),
+            CoinbaseTipOrdering::default(),
+            InMemoryBlobStore::default(),
+            Default::default(),
+        );
+
+        let transactions_manager_config = config.transactions_manager_config.clone();
+        let mut network_manager = NetworkManager::new(config).await.unwrap();
+        let (to_tx_manager_tx, from_network_rx) =
+            reth_metrics::common::mpsc::memory_bounded_channel::<
+                NetworkTransactionEvent<EthNetworkPrimitives>,
+            >(
+                crate::transactions::constants::tx_manager::DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
+                "test_tx_channel",
+            );
+        network_manager.set_transactions(to_tx_manager_tx);
+        let network_handle = network_manager.handle().clone();
+        tokio::spawn(network_manager);
+
+        let tx_manager = TransactionsManager::with_policy(
+            network_handle.clone(),
+            pool,
+            from_network_rx,
+            transactions_manager_config,
+            NetworkPolicies::new(policy, StrictEthAnnouncementFilter::default()),
+        );
+
+        (tx_manager, network_handle)
+    }
+
+    #[tokio::test]
+    async fn test_trusted_propagation_policy_gates_initial_snapshot() {
+        reth_tracing::init_test_tracing();
+
+        let (mut tx_manager, network) =
+            new_eth_tx_manager_with_propagation_policy(TransactionPropagationKind::Trusted).await;
+        network.update_sync_state(SyncState::Idle);
+
+        let mut tx_gen = TransactionGenerator::new(rand::rng());
+        let tx = gen_eip1559_pooled_with_nonce(&mut tx_gen, 0);
+        let tx_hash = *tx.hash();
+        tx_manager
+            .pool
+            .add_transaction(TransactionOrigin::External, tx)
+            .await
+            .expect("transaction should be accepted into the pool");
+
+        // an untrusted peer connects: under the `Trusted` policy it must not learn about the
+        // pending pool via the initial `NewPooledTransactionHashes` snapshot
+        let peer_id = PeerId::random();
+        let (msg_tx, _rx) = mpsc::channel::<PeerRequest>(1);
+        let session_info = SessionInfo {
+            peer_id,
+            remote_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+            client_version: Arc::from(""),
+            capabilities: Arc::new(vec![].into()),
+            status: Arc::new(Default::default()),
+            version: EthVersion::Eth68,
+            peer_kind: PeerKind::Basic,
+        };
+        let messages: PeerRequestSender<PeerRequest> = PeerRequestSender::new(peer_id, msg_tx);
+        tx_manager
+            .on_network_event(NetworkEvent::ActivePeerSession { info: session_info, messages });
+
+        let peer = tx_manager.peers.get(&peer_id).expect("peer should exist");
+        assert!(!peer.seen_transactions.contains(&tx_hash));
+    }
+
+    #[tokio::test]
+    async fn test_trusted_propagation_policy_denies_pooled_transactions_request() {
+        reth_tracing::init_test_tracing();
+
+        let (mut tx_manager, network) =
+            new_eth_tx_manager_with_propagation_policy(TransactionPropagationKind::Trusted).await;
+        network.update_sync_state(SyncState::Idle);
+
+        let mut tx_gen = TransactionGenerator::new(rand::rng());
+        let tx = gen_eip1559_pooled_with_nonce(&mut tx_gen, 0);
+        let tx_hash = *tx.hash();
+        tx_manager
+            .pool
+            .add_transaction(TransactionOrigin::External, tx)
+            .await
+            .expect("transaction should be accepted into the pool");
+
+        // an untrusted peer requests the transaction directly via `GetPooledTransactions`
+        let peer_id = PeerId::random();
+        let (msg_tx, _rx) = mpsc::channel::<PeerRequest>(1);
+        let peer = PeerMetadata::new(
+            PeerRequestSender::new(peer_id, msg_tx),
+            EthVersion::Eth68,
+            Arc::from(""),
+            100,
+            PeerKind::Basic,
+        );
+        tx_manager.peers.insert(peer_id, peer);
+
+        let (response_tx, response_rx) = oneshot::channel();
+        tx_manager.on_get_pooled_transactions(
+            peer_id,
+            GetPooledTransactions(vec![tx_hash]),
+            response_tx,
+        );
+
+        let response = response_rx.await.unwrap().expect("response should be sent");
+        assert!(response.0.is_empty());
     }
 
     #[tokio::test]
