@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use super::{evm_state_to_hashed_post_state, StateRootComputeOutcome, StateRootMessage};
 use alloy_primitives::{
-    map::{hash_map::Entry, B256Map},
+    map::{hash_map::Entry, B256Map, B256Set},
     B256,
 };
 use alloy_rlp::{Decodable, Encodable};
@@ -68,6 +68,9 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     account_updates: B256Map<LeafUpdate>,
     /// Storage trie updates. hashed address -> slot -> update.
     storage_updates: B256Map<B256Map<LeafUpdate>>,
+    /// Storage batches that made no progress and need a proof or another applied update before
+    /// retrying. A batch that applied any update remains eligible for another pass.
+    blocked_storage_updates: B256Set,
 
     /// Account updates that are buffered but were not yet applied to the trie.
     new_account_updates: B256Map<LeafUpdate>,
@@ -168,6 +171,7 @@ where
             max_targets_for_chunking: DEFAULT_MAX_TARGETS_FOR_CHUNKING,
             account_updates: Default::default(),
             storage_updates: Default::default(),
+            blocked_storage_updates: Default::default(),
             new_account_updates: Default::default(),
             new_storage_updates: Default::default(),
             pending_account_updates: Default::default(),
@@ -545,6 +549,9 @@ where
     }
 
     fn on_proof_result(&mut self, result: DecodedMultiProofV2) -> Result<(), StateRootTaskError> {
+        for address in result.storage_proofs.keys() {
+            self.blocked_storage_updates.remove(address);
+        }
         self.trie
             .reveal_decoded_multiproof_v2(result)
             .map_err(|e| StateRootTaskError::Other(format!("could not reveal multiproof: {e:?}")))
@@ -627,7 +634,7 @@ where
         // Process all storage updates, skipping tries with no pending updates.
         let span = trace_span!("process_storage_leaf_updates").entered();
         for (address, updates) in storage_updates {
-            if updates.is_empty() {
+            if updates.is_empty() || (!new && self.blocked_storage_updates.contains(address)) {
                 continue;
             }
             let _enter = trace_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage_trie_leaf_updates", a=%address).entered();
@@ -650,6 +657,12 @@ where
                 }
             })?;
             let updates_len_after = updates.len();
+            if updates_len_after < updates_len_before {
+                // Applying another update can make a previously blocked deletion possible.
+                self.blocked_storage_updates.remove(address);
+            } else if !new {
+                self.blocked_storage_updates.insert(*address);
+            }
             self.storage_cache_hits += (updates_len_before - updates_len_after) as u64;
             self.storage_cache_misses += updates_len_after as u64;
 
@@ -1118,6 +1131,10 @@ mod tests {
     use reth_db_common::init::init_genesis;
     use reth_provider::test_utils::create_test_provider_factory;
     use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
+    use reth_trie_common::{
+        BranchNodeV2, HashBuilder, LeafNode, Nibbles, ProofTrieNodeV2, RlpNode, TrieMask,
+        TrieNodeV2,
+    };
     use reth_trie_parallel::proof_task::ProofTaskCtx;
     use reth_trie_sparse::ArenaParallelSparseTrie;
 
@@ -1125,6 +1142,253 @@ mod tests {
         for task_name in ["trie-hashing", "storage-workers", "account-workers"] {
             runtime.spawn_blocking_named(task_name, || {}).get();
         }
+    }
+
+    fn with_revealed_sparse_task(test: impl FnOnce(&mut SparseTrieCacheTask)) {
+        let runtime = Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor = init_genesis(&provider_factory).unwrap();
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayManager::<reth_chain_state::EthPrimitives>::default().overlay_builder(anchor),
+        );
+        let (proof_tx, proof_rx) = crossbeam_channel::unbounded();
+        let proof_worker = ProofWorkerHandle::new(
+            &runtime,
+            ProofTaskCtx::new(state_provider_factory),
+            false,
+            proof_tx.clone(),
+        );
+        let mut accounts = RevealableSparseTrie::blind();
+        accounts.reveal_root(TrieNodeV2::EmptyRoot, None, true).unwrap();
+        let trie = SparseStateTrie::default().with_accounts_trie(accounts).with_updates(true);
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (_cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
+        let mut task = SparseTrieCacheTask::new_with_trie(
+            &runtime,
+            updates_rx,
+            cancel_rx,
+            std::sync::mpsc::channel().0,
+            proof_worker,
+            proof_tx,
+            proof_rx,
+            SparseTrieTaskMetrics::default(),
+            trie,
+            EMPTY_ROOT_HASH,
+            TrieNodeEpoch::new(10),
+            1,
+        );
+        test(&mut task);
+        drop(updates_tx);
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
+    }
+
+    fn storage_slot(nibble: u8) -> B256 {
+        let mut key = B256::ZERO;
+        key[0] = nibble << 4;
+        key
+    }
+
+    fn storage_leaf(nibble: u8, value: u64) -> ProofTrieNodeV2 {
+        ProofTrieNodeV2 {
+            path: Nibbles::from_nibbles_unchecked([nibble]),
+            node: TrieNodeV2::Leaf(LeafNode::new(
+                Nibbles::from_nibbles_unchecked([0u8; 63]),
+                alloy_rlp::encode(U256::from(value)),
+            )),
+            masks: None,
+        }
+    }
+
+    fn storage_branch(leaves: &[(u8, u64)]) -> ProofTrieNodeV2 {
+        assert!(leaves.windows(2).all(|pair| pair[0].0 < pair[1].0));
+        let stack = leaves
+            .iter()
+            .map(|&(nibble, value)| {
+                RlpNode::from_rlp(&alloy_rlp::encode(storage_leaf(nibble, value).node))
+            })
+            .collect();
+        ProofTrieNodeV2 {
+            path: Nibbles::default(),
+            node: TrieNodeV2::Branch(BranchNodeV2::new(
+                Nibbles::default(),
+                stack,
+                TrieMask::from(leaves.iter().fold(0u16, |mask, (nibble, _)| mask | (1 << nibble))),
+                None,
+            )),
+            masks: None,
+        }
+    }
+
+    fn reveal_storage(task: &mut SparseTrieCacheTask, address: B256, nodes: Vec<ProofTrieNodeV2>) {
+        task.on_proof_result(DecodedMultiProofV2 {
+            storage_proofs: B256Map::from_iter([(address, nodes)]),
+            ..Default::default()
+        })
+        .unwrap();
+    }
+
+    fn assert_storage_root(task: &mut SparseTrieCacheTask, address: B256, leaves: &[(u8, u64)]) {
+        let mut reference = HashBuilder::default();
+        for &(nibble, value) in leaves {
+            reference.add_leaf(
+                Nibbles::unpack(storage_slot(nibble)),
+                &alloy_rlp::encode(U256::from(value)),
+            );
+        }
+        assert_eq!(task.trie.storage_root(&address, task.new_epoch), Some(reference.root()));
+    }
+
+    #[test]
+    fn blocked_storage_retries_wait_for_relevant_proofs_without_hiding_stalls() {
+        with_revealed_sparse_task(|task| {
+            let address = B256::repeat_byte(1);
+            let other = B256::repeat_byte(2);
+            task.storage_updates
+                .entry(address)
+                .or_default()
+                .insert(storage_slot(1), LeafUpdate::Changed(alloy_rlp::encode(U256::from(11))));
+            task.process_leaf_updates(false).unwrap();
+            assert!(task.blocked_storage_updates.contains(&address));
+            assert_eq!(task.storage_cache_misses, 1);
+            assert_eq!(task.pending_targets.take().1, 1);
+
+            // An unrelated proof must not retry this unchanged blind trie.
+            reveal_storage(task, other, vec![storage_branch(&[(1, 1), (2, 2)])]);
+            task.process_leaf_updates(false).unwrap();
+            assert_eq!(task.storage_cache_misses, 1);
+            assert!(task.pending_targets.is_empty());
+            task.finished_state_updates = true;
+            assert!(matches!(task.ensure_not_stalled(false), Err(StateRootTaskError::Stalled)));
+            task.in_flight_proof_batches = 1;
+            assert!(task.ensure_not_stalled(false).is_ok());
+            task.finished_state_updates = false;
+            task.in_flight_proof_batches = 0;
+
+            reveal_storage(
+                task,
+                address,
+                vec![storage_branch(&[(1, 1), (2, 2)]), storage_leaf(1, 1)],
+            );
+            assert!(!task.blocked_storage_updates.contains(&address));
+            task.process_leaf_updates(false).unwrap();
+            assert!(task.storage_updates[&address].is_empty());
+            assert_eq!(task.storage_cache_hits, 1);
+            assert_storage_root(task, address, &[(1, 11), (2, 2)]);
+        });
+    }
+
+    #[test]
+    fn blocked_storage_deletion_retries_after_new_same_address_progress() {
+        with_revealed_sparse_task(|task| {
+            let address = B256::repeat_byte(1);
+            reveal_storage(
+                task,
+                address,
+                vec![storage_branch(&[(1, 1), (2, 2)]), storage_leaf(1, 1)],
+            );
+            task.storage_updates
+                .entry(address)
+                .or_default()
+                .insert(storage_slot(1), LeafUpdate::Changed(Vec::new()));
+            task.process_leaf_updates(false).unwrap();
+            assert!(task.blocked_storage_updates.contains(&address));
+            assert_eq!(task.pending_targets.take().1, 1);
+
+            // This new change is also blocked, so it cannot unlock the old deletion yet.
+            let mut state = HashedPostState::default();
+            state
+                .storages
+                .entry(address)
+                .or_default()
+                .storage
+                .insert(storage_slot(2), U256::from(22));
+            task.on_hashed_state_update(state);
+            task.pending_updates = 1;
+            task.process_new_updates().unwrap();
+            assert!(task.blocked_storage_updates.contains(&address));
+            let misses = task.storage_cache_misses;
+            task.process_leaf_updates(false).unwrap();
+            assert_eq!(task.storage_cache_misses, misses);
+
+            // Inserting a revealed third child makes deletion possible without collapsing onto
+            // the blinded sibling. No proof arrived between the blocked and productive passes.
+            let mut state = HashedPostState::default();
+            state
+                .storages
+                .entry(address)
+                .or_default()
+                .storage
+                .insert(storage_slot(3), U256::from(3));
+            task.on_hashed_state_update(state);
+            task.pending_updates = 1;
+            task.process_new_updates().unwrap();
+            assert!(!task.blocked_storage_updates.contains(&address));
+            task.process_leaf_updates(false).unwrap();
+            assert!(!task.storage_updates[&address].contains_key(&storage_slot(1)));
+            assert!(task.storage_updates[&address].contains_key(&storage_slot(2)));
+            assert!(
+                !task.blocked_storage_updates.contains(&address),
+                "partial progress must retry"
+            );
+            assert_storage_root(task, address, &[(2, 2), (3, 3)]);
+            task.process_leaf_updates(false).unwrap();
+            assert!(task.blocked_storage_updates.contains(&address));
+
+            reveal_storage(task, address, vec![storage_leaf(2, 2)]);
+            task.process_leaf_updates(false).unwrap();
+            assert!(task.storage_updates[&address].is_empty());
+            assert_storage_root(task, address, &[(2, 22), (3, 3)]);
+        });
+    }
+
+    #[test]
+    fn blocked_storage_retries_preserve_partial_deletions_and_broader_targets() {
+        with_revealed_sparse_task(|task| {
+            let address = B256::repeat_byte(1);
+            reveal_storage(
+                task,
+                address,
+                vec![
+                    storage_branch(&[(1, 1), (2, 2), (3, 3)]),
+                    storage_leaf(1, 1),
+                    storage_leaf(2, 2),
+                ],
+            );
+            task.storage_updates.insert(
+                address,
+                B256Map::from_iter([
+                    (storage_slot(1), LeafUpdate::Changed(Vec::new())),
+                    (storage_slot(2), LeafUpdate::Changed(Vec::new())),
+                ]),
+            );
+            // A previous request with a narrower parent must not suppress the sibling proof
+            // needed by the deletion that collapses the current root branch.
+            task.fetched_storage_targets
+                .entry(address)
+                .or_default()
+                .insert(storage_slot(3), ProofV2TargetParent::new(1));
+            task.process_leaf_updates(false).unwrap();
+            assert_eq!(task.storage_updates[&address].len(), 1);
+            assert!(!task.blocked_storage_updates.contains(&address));
+            let (targets, count) = task.pending_targets.take();
+            assert_eq!(count, 1);
+            let target = &targets.storage_targets[&address][0];
+            assert_eq!(target.key(), storage_slot(3));
+            assert_eq!(target.parent, ProofV2TargetParent::new(0));
+            assert_storage_root(task, address, &[(2, 2), (3, 3)]);
+
+            let misses = task.storage_cache_misses;
+            task.process_leaf_updates(false).unwrap();
+            assert_eq!(task.storage_cache_misses, misses + 1);
+            assert!(task.blocked_storage_updates.contains(&address));
+            assert!(task.pending_targets.is_empty());
+            reveal_storage(task, address, vec![storage_leaf(3, 3)]);
+            task.process_leaf_updates(false).unwrap();
+            assert!(task.storage_updates[&address].is_empty());
+            assert_storage_root(task, address, &[(3, 3)]);
+        });
     }
 
     #[test]

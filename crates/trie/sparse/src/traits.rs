@@ -229,6 +229,9 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     ///
     /// Once that proof is calculated and revealed via [`SparseTrie::reveal_nodes`], the same
     /// `updates` map can be reused to retry the update.
+    /// If no entries are removed, retrying the unchanged map must not make further progress
+    /// until a proof is revealed or another update is applied to this trie. Callers may skip
+    /// such retries while waiting for either event.
     ///
     /// The callback receives `(key, parent)` where `key` is the full 32-byte hashed key
     /// (right-padded with zeros from the blinded path) and `parent` identifies the revealed logical
