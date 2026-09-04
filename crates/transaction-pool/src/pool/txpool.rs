@@ -1365,6 +1365,15 @@ impl<T: TransactionOrdering> fmt::Debug for TxPool<T> {
     }
 }
 
+/// Minimum number of live senders before the changed-sender ratio can trigger a full update.
+///
+/// Account-update benchmarks put the paths near parity at 500 senders and favor a full traversal
+/// from 1,000 senders at the ratio below.
+const FULL_UPDATE_MIN_SENDERS: usize = 1_000;
+
+/// Run a full update when at least one in this many live senders changed.
+const FULL_UPDATE_SENDER_RATIO: usize = 4;
+
 /// Container for _all_ transaction in the pool.
 ///
 /// This is the sole entrypoint that's guarding all sub-pools, all sub-pool actions are always
@@ -1524,7 +1533,13 @@ impl<T: PoolTransaction> AllTransactions<T> {
         let mut updates = Vec::with_capacity(64);
         let pending_fees = self.pending_fees;
 
-        if self.last_full_update_fees == self.pending_fees {
+        let update_all = self.last_full_update_fees != self.pending_fees ||
+            self.should_update_all_senders(changed_accounts.len());
+
+        if update_all {
+            Self::update_txs(pending_fees, changed_accounts, &mut updates, self.txs.iter_mut());
+            self.last_full_update_fees = self.pending_fees;
+        } else {
             // Fee eligibility is unchanged, while nonce gaps, ancestors, and cumulative cost are
             // sender-local; only transactions from changed accounts can require updates.
             for sender in changed_accounts.keys() {
@@ -1536,12 +1551,17 @@ impl<T: PoolTransaction> AllTransactions<T> {
                     self.txs.range_mut(range),
                 );
             }
-        } else {
-            Self::update_txs(pending_fees, changed_accounts, &mut updates, self.txs.iter_mut());
-            self.last_full_update_fees = self.pending_fees;
         }
 
         updates
+    }
+
+    /// Returns whether one full traversal is preferable to a range lookup per changed sender.
+    fn should_update_all_senders(&self, changed_sender_count: usize) -> bool {
+        let pool_sender_count = self.tx_counter.len();
+        changed_sender_count >= pool_sender_count ||
+            (pool_sender_count >= FULL_UPDATE_MIN_SENDERS &&
+                changed_sender_count >= pool_sender_count.div_ceil(FULL_UPDATE_SENDER_RATIO))
     }
 
     /// Updates the given transactions, which must be ordered by [`TransactionId`] and must start
@@ -3460,6 +3480,27 @@ mod tests {
         let InsertOk { state, .. } =
             pool.insert_tx(f.validated(tx), on_chain_balance, on_chain_nonce).unwrap();
         assert!(state.contains(TxState::NOT_TOO_MUCH_GAS));
+    }
+
+    #[test]
+    fn full_update_sender_heuristic() {
+        let mut pool = AllTransactions::<MockTransaction>::default();
+        for sender in 0..(FULL_UPDATE_MIN_SENDERS - 1) as u64 {
+            pool.tx_counter.insert(sender.into(), 1);
+        }
+
+        // Below the pool-size floor, only covering every live sender triggers a full update.
+        assert!(!pool.should_update_all_senders(250));
+        assert!(pool.should_update_all_senders(FULL_UPDATE_MIN_SENDERS - 1));
+
+        pool.tx_counter.insert((FULL_UPDATE_MIN_SENDERS as u64 - 1).into(), 1);
+
+        // At the floor, one quarter of the live senders is the crossover.
+        assert!(
+            !pool.should_update_all_senders(FULL_UPDATE_MIN_SENDERS / FULL_UPDATE_SENDER_RATIO - 1)
+        );
+        assert!(pool.should_update_all_senders(FULL_UPDATE_MIN_SENDERS / FULL_UPDATE_SENDER_RATIO));
+        assert!(pool.should_update_all_senders(FULL_UPDATE_MIN_SENDERS + 1));
     }
 
     #[test]
