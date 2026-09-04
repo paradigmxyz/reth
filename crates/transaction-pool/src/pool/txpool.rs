@@ -1525,11 +1525,8 @@ impl<T: PoolTransaction> AllTransactions<T> {
         let base_fee = self.pending_fees.base_fee;
 
         if self.last_full_update_fees == self.pending_fees {
-            // The per-transaction eligibility metadata already reflects these fees, so a
-            // transaction can only change if its sender's account did: everything else the loop
-            // derives (nonce gaps, ancestors, cumulative cost) is a function of the sender's own
-            // transactions, which did not change either. Visiting the whole pool would be wasted
-            // work, so walk just the senders that changed.
+            // Fee eligibility is unchanged, while nonce gaps, ancestors, and cumulative cost are
+            // sender-local; only transactions from changed accounts can require updates.
             for sender in changed_accounts.keys() {
                 let range = TransactionId::new(*sender, 0)..=TransactionId::new(*sender, u64::MAX);
                 Self::update_txs(
