@@ -76,7 +76,7 @@ pub struct MockEthProvider<T: NodePrimitives = EthPrimitives, ChainSpec = reth_c
     pub block_body_indices: Arc<Mutex<HashMap<BlockNumber, StoredBlockBodyIndices>>>,
     /// Local stage checkpoints
     stage_checkpoints: Arc<Mutex<HashMap<StageId, StageCheckpoint>>>,
-    /// Lowest block number that has not been expired
+    /// Lowest block number that history expiry (EIP-4444) has not removed
     earliest_block_number: Arc<AtomicU64>,
     /// The engine's pending block, if any
     pending_block_num_hash: Arc<Mutex<Option<BlockNumHash>>>,
