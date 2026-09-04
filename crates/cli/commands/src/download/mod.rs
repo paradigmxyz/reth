@@ -754,12 +754,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         &self,
         manifest: &SnapshotManifest,
     ) -> BTreeMap<SnapshotComponentType, ComponentSelection> {
-        SnapshotComponentType::ALL
-            .iter()
-            .copied()
-            .filter(|ty| manifest.component(*ty).is_some())
-            .map(|ty| (ty, minimal_selection_for_component(ty, manifest.block)))
-            .collect()
+        self.pruning_preset_selections(manifest, SelectionPreset::Minimal)
     }
 
     /// Builds the default full-node component selection for the manifest.
@@ -767,6 +762,23 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         &self,
         manifest: &SnapshotManifest,
     ) -> BTreeMap<SnapshotComponentType, ComponentSelection> {
+        self.pruning_preset_selections(manifest, SelectionPreset::Full)
+    }
+
+    /// Builds component selections from the configured pruning preset.
+    fn pruning_preset_selections(
+        &self,
+        manifest: &SnapshotManifest,
+        preset: SelectionPreset,
+    ) -> BTreeMap<SnapshotComponentType, ComponentSelection> {
+        let defaults = DefaultPruningValues::get_global();
+        let (prune_modes, bodies_history_use_pre_merge) = match preset {
+            SelectionPreset::Minimal => (&defaults.minimal_prune_modes, false),
+            SelectionPreset::Full => {
+                (&defaults.full_prune_modes, defaults.full_bodies_history_use_pre_merge)
+            }
+            SelectionPreset::Archive => unreachable!("archive selects every component"),
+        };
         let mut selections = BTreeMap::new();
 
         for ty in [
@@ -783,7 +795,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                 continue;
             }
 
-            let selection = self.full_selection_for_component(ty, manifest.block);
+            let selection = self.pruning_selection_for_component(
+                ty,
+                manifest.block,
+                prune_modes,
+                bodies_history_use_pre_merge,
+            );
             if selection != ComponentSelection::None {
                 selections.insert(ty, selection);
             }
@@ -792,51 +809,28 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         selections
     }
 
-    /// Returns the full preset selection for one component type.
-    fn full_selection_for_component(
+    /// Returns the component selection for one configured pruning preset.
+    fn pruning_selection_for_component(
         &self,
         ty: SnapshotComponentType,
         snapshot_block: u64,
+        prune_modes: &PruneModes,
+        bodies_history_use_pre_merge: bool,
     ) -> ComponentSelection {
-        let defaults = DefaultPruningValues::get_global();
-        match ty {
-            SnapshotComponentType::State | SnapshotComponentType::Headers => {
-                ComponentSelection::All
+        if ty == SnapshotComponentType::Transactions && bodies_history_use_pre_merge {
+            return match self
+                .env
+                .chain
+                .ethereum_fork_activation(EthereumHardfork::Paris)
+                .block_number()
+            {
+                Some(paris) if snapshot_block >= paris => ComponentSelection::Since(paris),
+                Some(_) => ComponentSelection::None,
+                None => ComponentSelection::All,
             }
-            SnapshotComponentType::Transactions => {
-                if defaults.full_bodies_history_use_pre_merge {
-                    match self
-                        .env
-                        .chain
-                        .ethereum_fork_activation(EthereumHardfork::Paris)
-                        .block_number()
-                    {
-                        Some(paris) if snapshot_block >= paris => ComponentSelection::Since(paris),
-                        Some(_) => ComponentSelection::None,
-                        None => ComponentSelection::All,
-                    }
-                } else {
-                    selection_from_prune_mode(
-                        defaults.full_prune_modes.bodies_history,
-                        snapshot_block,
-                    )
-                }
-            }
-            SnapshotComponentType::Receipts => {
-                selection_from_prune_mode(defaults.full_prune_modes.receipts, snapshot_block)
-            }
-            SnapshotComponentType::AccountChangesets => {
-                selection_from_prune_mode(defaults.full_prune_modes.account_history, snapshot_block)
-            }
-            SnapshotComponentType::StorageChangesets => {
-                selection_from_prune_mode(defaults.full_prune_modes.storage_history, snapshot_block)
-            }
-            SnapshotComponentType::TransactionSenders => {
-                selection_from_prune_mode(defaults.full_prune_modes.sender_recovery, snapshot_block)
-            }
-            // Keep hidden by default in full mode; if users want indices they can use archive.
-            SnapshotComponentType::RocksdbIndices => ComponentSelection::None,
         }
+
+        selection_for_component_with_modes(ty, snapshot_block, prune_modes)
     }
 
     /// Resolves the manifest source from CLI input or snapshot discovery.
@@ -889,14 +883,14 @@ pub(super) fn minimal_selection_for_component(
     component: SnapshotComponentType,
     snapshot_block: u64,
 ) -> ComponentSelection {
-    minimal_selection_for_component_with_modes(
+    selection_for_component_with_modes(
         component,
         snapshot_block,
         &DefaultPruningValues::get_global().minimal_prune_modes,
     )
 }
 
-fn minimal_selection_for_component_with_modes(
+fn selection_for_component_with_modes(
     component: SnapshotComponentType,
     snapshot_block: u64,
     modes: &PruneModes,
@@ -1325,7 +1319,7 @@ mod tests {
         };
 
         assert_eq!(
-            minimal_selection_for_component_with_modes(
+            selection_for_component_with_modes(
                 SnapshotComponentType::Transactions,
                 1_000_000,
                 &modes,
@@ -1333,15 +1327,11 @@ mod tests {
             ComponentSelection::Distance(history_distance)
         );
         assert_eq!(
-            minimal_selection_for_component_with_modes(
-                SnapshotComponentType::Receipts,
-                1_000_000,
-                &modes,
-            ),
+            selection_for_component_with_modes(SnapshotComponentType::Receipts, 1_000_000, &modes),
             ComponentSelection::Distance(128)
         );
         assert_eq!(
-            minimal_selection_for_component_with_modes(
+            selection_for_component_with_modes(
                 SnapshotComponentType::AccountChangesets,
                 1_000_000,
                 &modes,
@@ -1349,7 +1339,7 @@ mod tests {
             ComponentSelection::Distance(history_distance)
         );
         assert_eq!(
-            minimal_selection_for_component_with_modes(
+            selection_for_component_with_modes(
                 SnapshotComponentType::StorageChangesets,
                 1_000_000,
                 &modes,
@@ -1357,7 +1347,7 @@ mod tests {
             ComponentSelection::Distance(history_distance)
         );
         assert_eq!(
-            minimal_selection_for_component_with_modes(
+            selection_for_component_with_modes(
                 SnapshotComponentType::TransactionSenders,
                 1_000_000,
                 &modes,
