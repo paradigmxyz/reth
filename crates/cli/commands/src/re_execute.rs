@@ -28,7 +28,9 @@ use reth_revm::{
     },
 };
 use reth_stages::stages::calculate_gas_used_from_headers;
-use reth_storage_api::{ChangeSetReader, DBProvider, StorageChangeSetReader};
+use reth_storage_api::{
+    ChangeSetReader, DBProvider, HashedPostStateProvider, StateRootProvider, StorageChangeSetReader,
+};
 use std::{
     collections::HashMap,
     sync::{
@@ -68,6 +70,10 @@ pub struct Command<C: ChainSpecParser> {
     #[arg(long)]
     skip_invalid_blocks: bool,
 
+    /// Compare exact receipts and recompute every state root; requires one block per chunk.
+    #[arg(long)]
+    verify_state_roots: bool,
+
     #[command(flatten)]
     pub jit: JitArgs,
 }
@@ -76,6 +82,25 @@ impl<C: ChainSpecParser> Command<C> {
     /// Returns the underlying chain being used to run this command
     pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         Some(&self.env.chain)
+    }
+
+    fn validate_root_verification_options(&self) -> eyre::Result<()> {
+        if self.verify_state_roots {
+            eyre::ensure!(
+                self.blocks_per_chunk == 1,
+                "--verify-state-roots requires --blocks-per-chunk 1"
+            );
+            eyre::ensure!(
+                !self.skip_invalid_blocks,
+                "--verify-state-roots cannot skip invalid blocks"
+            );
+            eyre::ensure!(self.from > 0, "--verify-state-roots requires --from greater than zero");
+            eyre::ensure!(
+                self.num_tasks != Some(0),
+                "--verify-state-roots requires at least one task"
+            );
+        }
+        Ok(())
     }
 }
 
@@ -89,6 +114,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
     where
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
     {
+        self.validate_root_verification_options()?;
+
         // Default to 4GB RocksDB block cache for re-execute unless explicitly set.
         if self.env.db.rocksdb_block_cache_size.is_none() {
             self.env.db.rocksdb_block_cache_size = Some(4 << 30);
@@ -129,6 +156,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
         let skip_invalid_blocks = self.skip_invalid_blocks;
         let blocks_per_chunk = self.blocks_per_chunk;
+        let verify_state_roots = self.verify_state_roots;
         let (stats_tx, mut stats_rx) = mpsc::unbounded_channel();
         let (info_tx, mut info_rx) = mpsc::unbounded_channel();
         let cancellation = CancellationToken::new();
@@ -201,6 +229,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                 return Err(err.into())
                             }
                         };
+
+                        if verify_state_roots {
+                            let expected_receipts = provider_factory.receipts_by_block(block.number().into())?
+                                .ok_or_else(|| eyre::eyre!("Missing receipts for block {}", block.number()))?;
+                            verify_exact_receipts(block.number(), &result.receipts, &expected_receipts)?;
+                        }
 
                         let bal_hash = executor
                             .take_bal()
@@ -278,8 +312,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         let _ = stats_tx.send((block.number(), block.gas_used()));
 
                         // Reset DB once in a while to avoid OOM or read tx timeouts
-                        if executor.size_hint() > 5_000_000 ||
-                            executor_created.elapsed() > executor_lifetime
+                        if !verify_state_roots && (executor.size_hint() > 5_000_000 ||
+                            executor_created.elapsed() > executor_lifetime)
                         {
                             let last_block = block.number();
                             let old_executor = std::mem::replace(
@@ -296,8 +330,19 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         }
                     }
 
+                    if cancellation.is_cancelled() {
+                        break;
+                    }
+
                     // Full verification at chunk end for remaining unverified blocks
                     let bundle = executor.into_state().take_bundle();
+                    if verify_state_roots {
+                        let parent_state = provider.history_by_block_number(chunk_start - 1)?;
+                        let block = provider_factory.recovered_block(chunk_start.into(), TransactionVariant::NoHash)?
+                            .ok_or_else(|| eyre::eyre!("Missing block {}", chunk_start))?;
+                        let state_root = verify_state_root(&parent_state, &bundle, chunk_start, block.state_root())?;
+                        info!(block = chunk_start, block_hash = %block.hash(), timestamp = block.timestamp(), %state_root, receipt_root = %block.receipts_root(), gas_used = block.gas_used(), "Verified execution roots and exact receipts");
+                    }
                     verify_bundle_against_changesets(
                         &provider,
                         &bundle,
@@ -388,6 +433,31 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
         Ok(())
     }
+}
+
+/// Check exact receipt fields, including per-transaction status, cumulative gas and logs.
+fn verify_exact_receipts<R: PartialEq>(
+    block: u64,
+    actual: &[R],
+    expected: &[R],
+) -> eyre::Result<()> {
+    eyre::ensure!(actual == expected, "Receipt mismatch at block {block}");
+    Ok(())
+}
+
+/// Recompute the trie from the parent state and the executed block's complete state changes.
+fn verify_state_root<P: HashedPostStateProvider + StateRootProvider>(
+    parent: &P,
+    bundle: &BundleState,
+    block: u64,
+    expected: B256,
+) -> eyre::Result<B256> {
+    let actual = parent.state_root(parent.hashed_post_state(bundle)?)?;
+    eyre::ensure!(
+        actual == expected,
+        "State root mismatch at block {block}: got {actual}, expected {expected}"
+    );
+    Ok(actual)
 }
 
 /// Verifies reverts against database changesets.
@@ -488,4 +558,84 @@ where
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::{Eip658Value, Receipt};
+    use alloy_primitives::Log;
+    use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
+    use reth_provider::test_utils::create_test_provider_factory;
+    use reth_trie::{root::state_root_unhashed, TrieAccount};
+
+    #[test]
+    fn root_verification_rejects_incomplete_options() {
+        for invalid in [
+            vec!["--blocks-per-chunk", "2"],
+            vec!["--skip-invalid-blocks"],
+            vec!["--from", "0"],
+            vec!["--num-tasks", "0"],
+        ] {
+            let mut args = vec!["reth", "--verify-state-roots"];
+            if invalid[0] != "--blocks-per-chunk" {
+                args.extend(["--blocks-per-chunk", "1"]);
+            }
+            args.extend(invalid);
+            let command = Command::<EthereumChainSpecParser>::try_parse_from(args).unwrap();
+            assert!(command.validate_root_verification_options().is_err());
+        }
+        let command = Command::<EthereumChainSpecParser>::try_parse_from([
+            "reth",
+            "--verify-state-roots",
+            "--blocks-per-chunk",
+            "1",
+        ])
+        .unwrap();
+        command.validate_root_verification_options().unwrap();
+    }
+
+    #[test]
+    fn exact_receipts_reject_status_gas_logs_and_missing_receipts() {
+        let expected: Receipt = Receipt {
+            status: Eip658Value::Eip658(true),
+            cumulative_gas_used: 21000,
+            logs: vec![Log::default()],
+        };
+        verify_exact_receipts(128, &[expected.clone()], &[expected.clone()]).unwrap();
+        let mut bad_status = expected.clone();
+        bad_status.status = Eip658Value::Eip658(false);
+        let mut bad_gas = expected.clone();
+        bad_gas.cumulative_gas_used += 1;
+        let mut bad_logs = expected.clone();
+        bad_logs.logs.clear();
+        for actual in [vec![bad_status], vec![bad_gas], vec![bad_logs], vec![]] {
+            assert!(verify_exact_receipts(128, &actual, &[expected.clone()]).is_err());
+        }
+    }
+
+    #[test]
+    fn root_verification_detects_corrupt_execution_state() {
+        let factory = create_test_provider_factory();
+        let provider = factory.provider().unwrap();
+        let parent = provider.latest();
+        let address = Address::with_last_byte(1);
+        let account = reth_revm::state::AccountInfo {
+            nonce: 1,
+            balance: U256::from(42),
+            ..Default::default()
+        };
+        let bundle =
+            BundleState::builder(128..=128).state_present_account_info(address, account).build();
+        let expected = state_root_unhashed([(
+            address,
+            TrieAccount { nonce: 1, balance: U256::from(42), ..Default::default() },
+        )]);
+        assert_eq!(verify_state_root(&parent, &bundle, 128, expected).unwrap(), expected);
+
+        let mut corrupt = bundle;
+        corrupt.state.get_mut(&address).unwrap().info.as_mut().unwrap().balance += U256::from(1);
+        let error = verify_state_root(&parent, &corrupt, 128, expected).unwrap_err();
+        assert!(error.to_string().contains("State root mismatch at block 128"));
+    }
 }
