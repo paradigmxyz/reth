@@ -499,7 +499,18 @@ where
                 else {
                     // the block itself may still exist with its receipts pruned
                     return Err(match self.provider().block_number(block_hash)? {
-                        Some(number) => EthFilterError::ReceiptsUnavailable(number),
+                        Some(number) => {
+                            let earliest_available = self.provider().earliest_block_number()?;
+                            if number < earliest_available {
+                                EthApiError::PrunedHistoryUnavailable {
+                                    requested: number,
+                                    earliest_available,
+                                }
+                                .into()
+                            } else {
+                                EthFilterError::ReceiptsUnavailable(number)
+                            }
+                        }
                         None => ProviderError::HeaderNotFound(block_hash.into()).into(),
                     })
                 };
@@ -1016,7 +1027,7 @@ pub enum EthFilterError {
     #[error("query exceeds max block range {0}")]
     QueryExceedsMaxBlocks(u64),
     /// Receipts of a block the filter matched are gone, most likely pruned.
-    #[error("receipts unavailable for block {0}, they may have been pruned")]
+    #[error("pruned history unavailable")]
     ReceiptsUnavailable(u64),
     /// Query result is too large.
     #[error("query exceeds max results {max_logs}, retry with the range {from_block}-{to_block}")]
@@ -1047,8 +1058,10 @@ impl From<EthFilterError> for jsonrpsee::types::error::ErrorObject<'static> {
                 rpc_error_with_code(jsonrpsee::types::error::INTERNAL_ERROR_CODE, err.to_string())
             }
             EthFilterError::EthAPIError(err) => err.into(),
+            err @ EthFilterError::ReceiptsUnavailable(_) => {
+                rpc_error_with_code(4444, err.to_string())
+            }
             err @ (EthFilterError::InvalidBlockRangeParams |
-            EthFilterError::ReceiptsUnavailable(_) |
             EthFilterError::QueryExceedsMaxBlocks(_) |
             EthFilterError::QueryExceedsMaxResults { .. } |
             EthFilterError::BlockRangeExceedsHead { .. }) => {
@@ -1440,6 +1453,14 @@ mod tests {
     use reth_testing_utils::generators;
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
     use std::{collections::VecDeque, sync::Arc};
+
+    #[test]
+    fn receipts_unavailable_error_matches_geth() {
+        let err: jsonrpsee::types::error::ErrorObject<'static> =
+            EthFilterError::ReceiptsUnavailable(100).into();
+        assert_eq!(err.code(), 4444);
+        assert_eq!(err.message(), "pruned history unavailable");
+    }
 
     #[test]
     fn test_block_range_iter() {
