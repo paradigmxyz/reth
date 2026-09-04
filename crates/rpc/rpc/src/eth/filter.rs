@@ -620,11 +620,15 @@ where
 
                 let info = self.provider().chain_info()?;
                 let start_block = info.best_number;
+                // Without a pending block to serve, a `pending` bound resolves to the head on both
+                // ends instead of to whatever payload the engine currently holds
                 let from = from_block
+                    .filter(|num| !num.is_pending())
                     .map(|num| self.provider().convert_block_number(num))
                     .transpose()?
                     .flatten();
                 let to = to_block
+                    .filter(|num| !num.is_pending())
                     .map(|num| self.provider().convert_block_number(num))
                     .transpose()?
                     .flatten();
@@ -2345,6 +2349,35 @@ mod tests {
             ),
             "{err:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn test_logs_for_filter_pending_to_block_ends_at_head() {
+        let provider = MockEthProvider::default();
+        let header = alloy_consensus::Header { number: 2, ..Default::default() };
+        let hash = header.hash_slow();
+        provider.add_header(hash, header);
+        provider.add_receipts(2, vec![]);
+        // the engine holds a payload that is not canonical yet
+        provider.set_pending_block_num_hash(Some(alloy_eips::BlockNumHash::new(3, hash)));
+
+        let eth_filter = EthFilter::new(
+            build_test_eth_api(provider),
+            EthFilterConfig::default(),
+            Runtime::test(),
+        );
+        for filter in [
+            Filter::new().from_block(0u64).to_block(BlockNumberOrTag::Pending),
+            Filter::new().select(BlockNumberOrTag::Pending..),
+        ] {
+            let logs = eth_filter
+                .inner
+                .clone()
+                .logs_for_filter(filter, QueryLimits::default())
+                .await
+                .unwrap();
+            assert!(logs.is_empty());
+        }
     }
 
     #[tokio::test]
