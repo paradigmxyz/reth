@@ -561,10 +561,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
     }
 
     /// Returns every in-memory block in the chain whose tip is `parent_hash`.
-    pub(crate) fn parent_chain(
-        &self,
-        parent_hash: B256,
-    ) -> impl Iterator<Item = ExecutedBlock<N>> + '_ {
+    fn parent_chain(&self, parent_hash: B256) -> impl Iterator<Item = ExecutedBlock<N>> + '_ {
         let mut hash = parent_hash;
         std::iter::from_fn(move || {
             let block = self.blocks.get(&hash)?;
@@ -636,7 +633,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
 
 /// Error returned when a state trie overlay cannot be built from the manager's current block set.
 #[derive(Debug)]
-pub struct StateTrieOverlayError {
+pub(crate) struct StateTrieOverlayError {
     /// Requested in-memory tip hash.
     tip_hash: B256,
     /// Requested anchor hash.

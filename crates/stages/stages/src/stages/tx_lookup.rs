@@ -175,7 +175,7 @@ where
                             info!(
                                 target: "sync::stages::transaction_lookup",
                                 ?append_only,
-                                progress = %format!("{:.2}%", (index as f64 / total_hashes as f64) * 100.0),
+                                progress = %format_args!("{:.2}%", (index as f64 / total_hashes as f64) * 100.0),
                                 "Inserting hashes"
                             );
                         }
