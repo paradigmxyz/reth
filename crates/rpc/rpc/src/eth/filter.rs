@@ -224,8 +224,7 @@ where
         FilterChanges<RpcTransaction<Eth::NetworkTypes>, RpcLog<Eth::NetworkTypes>>,
         EthFilterError,
     > {
-        let info = self.provider().chain_info()?;
-        let best_number = info.best_number;
+        let best_number = self.provider().best_block_number()?;
 
         // start_block is the block from which we should start fetching changes, the next block from
         // the last time changes were polled, in other words the best block at last poll + 1
@@ -288,12 +287,13 @@ where
                     }
                     FilterBlockOption::AtBlockHash(block_hash) => {
                         // blockHash is equivalent to fromBlock = toBlock = the block number with
-                        // hash blockHash, which only the first poll covering that block delivers
+                        // hash blockHash
+                        // get_logs_in_block_range is inclusive
                         let block_number = self
                             .provider()
                             .block_number(block_hash)?
                             .ok_or(ProviderError::HeaderNotFound(block_hash.into()))?;
-                        (block_number.max(start_block), block_number.min(best_number))
+                        (block_number, block_number)
                     }
                 };
                 if from_block_number > to_block_number {
@@ -340,8 +340,9 @@ where
     /// Moves the cursor of the filter with the given id to `next`, the first block a subsequent
     /// poll returns changes for.
     ///
-    /// This runs after the changes were fetched so that a failed poll is retried by the next one,
-    /// and never moves the cursor backwards in case a concurrent poll already advanced it further.
+    /// This runs after the changes were fetched so that a failed poll is retried by the next one.
+    /// A poll therefore delivers its range at least once: two polls of the same filter that run
+    /// concurrently both cover the range neither of them has acknowledged yet.
     async fn advance_filter_cursor(&self, id: &FilterId, next: u64) {
         let mut filters = self.inner.active_filters.inner.lock().await;
         if let Some(filter) = filters.get_mut(id) {
@@ -1470,6 +1471,9 @@ mod tests {
 
     /// Adds one block per number in `blocks`, each with a single legacy transaction whose receipt
     /// emits one log, so that a `Filter::default()` matches exactly one log per block.
+    ///
+    /// The block body indices assume the added blocks form a range anchored at 0, which is what
+    /// `MockEthProvider::transaction_by_id` resolves against.
     fn add_blocks_with_log(provider: &MockEthProvider, blocks: RangeInclusive<u64>) {
         use alloy_consensus::TxLegacy;
         use alloy_primitives::{Address, Bloom, Bytes, Log, LogData, Signature};
@@ -2267,5 +2271,53 @@ mod tests {
             eth_filter.filter_changes(id).await.unwrap(),
             FilterChanges::Hashes(hashes) if hashes == vec![outcome.hash]
         ));
+    }
+
+    #[tokio::test]
+    async fn test_filter_changes_delivers_at_most_max_blocks_per_poll() {
+        let provider = MockEthProvider::default();
+        add_blocks_with_log(&provider, 0..=0);
+        let eth_filter = EthFilter::new(
+            build_test_eth_api(provider.clone()),
+            EthFilterConfig::default().max_blocks_per_filter(1),
+            Runtime::test(),
+        );
+        let id = eth_filter.new_filter(Filter::default()).await.unwrap();
+
+        // a backlog wider than the block limit is delivered over successive polls instead of
+        // failing them all with `QueryExceedsMaxBlocks`
+        add_blocks_with_log(&provider, 1..=3);
+        assert_eq!(poll_log_blocks(&eth_filter, &id).await, vec![0, 1]);
+        assert_eq!(poll_log_blocks(&eth_filter, &id).await, vec![2, 3]);
+        assert_eq!(poll_log_blocks(&eth_filter, &id).await, Vec::<u64>::new());
+    }
+
+    #[tokio::test]
+    async fn test_poll_keeps_filter_alive_on_stalled_chain() {
+        let provider = MockEthProvider::default();
+        add_blocks_with_log(&provider, 0..=0);
+        let ttl = Duration::from_secs(60);
+        let eth_filter = EthFilter::new(
+            build_test_eth_api(provider),
+            EthFilterConfig::default().stale_filter_ttl(ttl),
+            Runtime::test(),
+        );
+        let id = eth_filter.new_block_filter().await.unwrap();
+
+        {
+            let mut filters = eth_filter.inner.active_filters.inner.lock().await;
+            let filter = filters.get_mut(&id).unwrap();
+            filter.last_poll_timestamp =
+                Instant::now().checked_sub(ttl + Duration::from_secs(1)).unwrap();
+        }
+
+        // a poll that finds no new blocks still counts as a poll
+        let _ = eth_filter.filter_changes(id.clone()).await.unwrap();
+
+        eth_filter.clear_stale_filters(Instant::now()).await;
+        assert!(
+            eth_filter.active_filters().contains(&id).await,
+            "a filter polled on a chain that does not advance must not be evicted as stale"
+        );
     }
 }
