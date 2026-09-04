@@ -1,6 +1,6 @@
 use crate::{
-    AccountReader, BlockHashReader, ChangeSetReader, EitherReader, HashedPostStateProvider,
-    ProviderError, RocksDBProviderFactory, StateProvider, StateRootProvider,
+    AccountReader, BlockHashReader, ChangeSetReader, HashedPostStateProvider, ProviderError,
+    StateProvider, StateRootProvider,
 };
 use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
@@ -13,9 +13,9 @@ use reth_db_api::{
 };
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives};
 use reth_storage_api::{
-    BlockNumReader, BytecodeReader, DBProvider, NodePrimitivesProvider, PruneCheckpointReader,
-    StageCheckpointReader, StateProofProvider, StorageChangeSetReader, StorageRootProvider,
-    StorageSettingsCache,
+    BlockNumReader, BytecodeReader, DBProvider, HistoryInfo as ReaderHistoryInfo, HistoryReader,
+    NodePrimitivesProvider, PruneCheckpointReader, StageCheckpointReader, StateProofProvider,
+    StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_storage_overlay::{OverlayManager, StateTrieOverlay};
@@ -107,6 +107,28 @@ impl HistoryInfo {
     }
 }
 
+impl From<ReaderHistoryInfo> for HistoryInfo {
+    fn from(info: ReaderHistoryInfo) -> Self {
+        match info {
+            ReaderHistoryInfo::NotYetWritten => Self::NotYetWritten,
+            ReaderHistoryInfo::InChangeset(block_number) => Self::InChangeset(block_number),
+            ReaderHistoryInfo::InPlainState => Self::InPlainState,
+            ReaderHistoryInfo::MaybeInPlainState => Self::MaybeInPlainState,
+        }
+    }
+}
+
+impl From<HistoryInfo> for ReaderHistoryInfo {
+    fn from(info: HistoryInfo) -> Self {
+        match info {
+            HistoryInfo::NotYetWritten => Self::NotYetWritten,
+            HistoryInfo::InChangeset(block_number) => Self::InChangeset(block_number),
+            HistoryInfo::InPlainState => Self::InPlainState,
+            HistoryInfo::MaybeInPlainState => Self::MaybeInPlainState,
+        }
+    }
+}
+
 /// State provider for a given block number which takes a tx reference.
 ///
 /// Historical state provider accesses the state at the start of the provided block number.
@@ -170,29 +192,25 @@ where
         Self { provider, overlay_manager, block_number, lowest_available_blocks }
     }
 
-    /// Lookup an account in the `AccountsHistory` table using `EitherReader`.
+    /// Lookup an account in the `AccountsHistory` table using `HistoryReader`.
     pub fn account_history_lookup(&self, address: Address) -> ProviderResult<HistoryInfo>
     where
-        Provider: StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider,
+        Provider: HistoryReader,
     {
         if !self.lowest_available_blocks.is_account_history_available(self.block_number) {
             return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
 
-        let visible_tip = self.provider.best_block_number()?;
-
-        self.provider.with_rocksdb_snapshot(|rocksdb_ref| {
-            let mut reader = EitherReader::new_accounts_history(self.provider, rocksdb_ref)?;
-            reader.account_history_info(
+        self.provider
+            .account_history_info(
                 address,
                 self.block_number,
                 self.lowest_available_blocks.account_history_block_number,
-                visible_tip,
             )
-        })
+            .map(Into::into)
     }
 
-    /// Lookup a storage key in the `StoragesHistory` table using `EitherReader`.
+    /// Lookup a storage key in the `StoragesHistory` table using `HistoryReader`.
     ///
     /// `lookup_key` is always a plain (unhashed) storage key.
     pub fn storage_history_lookup(
@@ -201,24 +219,20 @@ where
         lookup_key: B256,
     ) -> ProviderResult<HistoryInfo>
     where
-        Provider: StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider,
+        Provider: HistoryReader,
     {
         if !self.lowest_available_blocks.is_storage_history_available(self.block_number) {
             return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
 
-        let visible_tip = self.provider.best_block_number()?;
-
-        self.provider.with_rocksdb_snapshot(|rocksdb_ref| {
-            let mut reader = EitherReader::new_storages_history(self.provider, rocksdb_ref)?;
-            reader.storage_history_info(
+        self.provider
+            .storage_history_info(
                 address,
                 lookup_key,
                 self.block_number,
                 self.lowest_available_blocks.storage_history_block_number,
-                visible_tip,
             )
-        })
+            .map(Into::into)
     }
 
     /// Resolves a storage value by looking up the given key in history, changesets, or
@@ -231,7 +245,7 @@ where
         lookup_key: B256,
     ) -> ProviderResult<Option<StorageValue>>
     where
-        Provider: StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider,
+        Provider: StorageSettingsCache + HistoryReader,
     {
         match self.storage_history_lookup(address, lookup_key)? {
             HistoryInfo::NotYetWritten => Ok(None),
@@ -344,7 +358,7 @@ where
         + ChangeSetReader
         + StorageChangeSetReader
         + StorageSettingsCache
-        + RocksDBProviderFactory
+        + HistoryReader
         + NodePrimitivesProvider<Primitives = N>,
     N: NodePrimitives,
 {
@@ -697,7 +711,7 @@ where
         + PruneCheckpointReader
         + StageCheckpointReader
         + StorageSettingsCache
-        + RocksDBProviderFactory
+        + HistoryReader
         + NodePrimitivesProvider<Primitives = N>,
     N: NodePrimitives,
 {
@@ -798,7 +812,7 @@ impl<
 }
 
 // Delegates all provider impls to [HistoricalStateProviderRef]
-reth_storage_api::macros::delegate_provider_impls!(HistoricalStateProvider<Provider> where [Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader + StorageChangeSetReader + PruneCheckpointReader + StageCheckpointReader + StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider]);
+reth_storage_api::macros::delegate_provider_impls!(HistoricalStateProvider<Provider> where [Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader + StorageChangeSetReader + PruneCheckpointReader + StageCheckpointReader + StorageSettingsCache + HistoryReader + NodePrimitivesProvider]);
 
 /// Lowest blocks at which different parts of the state are available.
 /// They may be [Some] if pruning is enabled.
@@ -896,7 +910,6 @@ where
         // table.
         let is_before_first_write = needs_prev_shard_check(rank, found_block, block_number) &&
             !cursor.prev()?.is_some_and(|(k, _)| key_filter(&k));
-
         Ok(HistoryInfo::from_lookup(
             found_block,
             is_before_first_write,
@@ -918,7 +931,7 @@ mod tests {
     use crate::{
         providers::state::historical::{HistoryInfo, LowestAvailableBlocks},
         test_utils::create_test_provider_factory,
-        AccountReader, HistoricalStateProvider, HistoricalStateProviderRef, RocksDBProviderFactory,
+        AccountReader, HistoricalStateProvider, HistoricalStateProviderRef, HistoryReader,
         StateProvider,
     };
     use alloy_primitives::{address, b256, Address, B256, U256};
@@ -953,7 +966,7 @@ mod tests {
             + PruneCheckpointReader
             + StageCheckpointReader
             + StorageSettingsCache
-            + RocksDBProviderFactory
+            + HistoryReader
             + NodePrimitivesProvider,
     >() {
         assert_state_provider::<HistoricalStateProvider<T>>();

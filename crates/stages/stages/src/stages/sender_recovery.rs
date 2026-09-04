@@ -350,7 +350,7 @@ where
                 // Read the raw value, and let the rayon worker to decompress & decode.
                 let chunk = match static_file_provider.fetch_range_with_predicate(
                     StaticFileSegment::Transactions,
-                    chunk_range.clone(),
+                    chunk_range,
                     |cursor, number| {
                         Ok(cursor
                             .get_one::<TransactionMask<

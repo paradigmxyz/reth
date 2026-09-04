@@ -683,7 +683,7 @@ fn payload_build_tracker_notifies_after_last_lease_drops() {
 }
 
 #[test]
-fn persistence_handoff_waits_for_active_payload_jobs() {
+fn persistence_completion_does_not_wait_for_active_payload_jobs() {
     let config = TreeConfig::default()
         .with_has_enough_parallelism(true)
         .with_persistence_threshold(0)
@@ -693,8 +693,7 @@ fn persistence_handoff_waits_for_active_payload_jobs() {
         TestHarness::with_config(MAINNET.clone(), config).with_blocks(blocks.clone());
     let persisted = blocks[0].recovered_block().num_hash();
     let persisted_hash = persisted.hash;
-    let first = test_harness.tree.payload_builds.acquire();
-    let second = test_harness.tree.payload_builds.acquire();
+    let _payload_build = test_harness.tree.payload_builds.acquire();
 
     test_harness
         .tree
@@ -708,102 +707,11 @@ fn persistence_handoff_waits_for_active_payload_jobs() {
         )
         .unwrap();
 
-    // Durability advances immediately, but the in-memory overlay remains available to jobs.
+    // Payload jobs own an overlay snapshot, so persistence can immediately reclaim the manager's
+    // copy.
     assert_eq!(test_harness.tree.persistence_state.last_persisted_block, persisted);
-    assert!(test_harness.tree.pending_persisted_handoff.is_some());
-    assert!(test_harness.tree.state.tree_state.contains_hash(&persisted_hash));
-    assert!(test_harness.tree.canonical_in_memory_state.state_by_hash(persisted_hash).is_some());
-
-    // Do not let another persistence action overwrite the deferred handoff's frontier.
-    test_harness.tree.advance_persistence().unwrap();
-    assert!(!test_harness.tree.persistence_state.in_progress());
-
-    drop(first);
-    assert!(test_harness.tree.payload_build_finished.try_recv().is_err());
-    assert!(test_harness.tree.pending_persisted_handoff.is_some());
-
-    drop(second);
-    assert!(matches!(test_harness.tree.wait_for_event(), super::LoopEvent::PayloadBuildFinished));
-    test_harness.tree.on_payload_build_finished().unwrap();
-
-    assert!(test_harness.tree.pending_persisted_handoff.is_none());
     assert!(!test_harness.tree.state.tree_state.contains_hash(&persisted_hash));
     assert!(test_harness.tree.canonical_in_memory_state.state_by_hash(persisted_hash).is_none());
-}
-
-#[test]
-fn pending_persisted_handoff_keeps_engine_messages_responsive() {
-    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
-    let mut test_harness = TestHarness::with_config(
-        MAINNET.clone(),
-        TreeConfig::default().with_has_enough_parallelism(true),
-    )
-    .with_blocks(blocks.clone());
-    let persisted = blocks[0].recovered_block().num_hash();
-    let payload_build = test_harness.tree.payload_builds.acquire();
-
-    test_harness
-        .tree
-        .on_persistence_complete(
-            PersistenceResult {
-                last_block: persisted,
-                last_state_trie_block: persisted,
-                commit_duration: Some(Duration::ZERO),
-            },
-            Instant::now(),
-        )
-        .unwrap();
-    assert!(test_harness.tree.pending_persisted_handoff.is_some());
-
-    // Engine messages remain processable while the handoff waits for the active payload build.
-    test_harness.to_tree_tx.send(FromEngine::Event(FromOrchestrator::BackfillSyncStarted)).unwrap();
-    assert_matches!(
-        test_harness.tree.wait_for_event(),
-        super::LoopEvent::EngineMessage(FromEngine::Event(FromOrchestrator::BackfillSyncStarted))
-    );
-    assert!(test_harness.tree.pending_persisted_handoff.is_some());
-    assert!(test_harness.tree.state.tree_state.contains_hash(&persisted.hash));
-
-    // Once the final lease drops, its completion is prioritized over queued engine messages so the
-    // handoff gets the first opportunity to reclaim the overlay.
-    test_harness.to_tree_tx.send(FromEngine::Event(FromOrchestrator::BackfillSyncStarted)).unwrap();
-    drop(payload_build);
-    assert_matches!(test_harness.tree.wait_for_event(), super::LoopEvent::PayloadBuildFinished);
-    test_harness.tree.on_payload_build_finished().unwrap();
-    assert!(test_harness.tree.pending_persisted_handoff.is_none());
-    assert!(!test_harness.tree.state.tree_state.contains_hash(&persisted.hash));
-    assert_matches!(
-        test_harness.tree.wait_for_event(),
-        super::LoopEvent::EngineMessage(FromEngine::Event(FromOrchestrator::BackfillSyncStarted))
-    );
-}
-
-#[test]
-fn persist_until_complete_updates_frontiers_without_in_memory_handoff() {
-    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
-    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
-    let persisted = blocks.last().unwrap().recovered_block().num_hash();
-    let persisted_hash = persisted.hash;
-    let (tx, rx) = crossbeam_channel::bounded(1);
-
-    tx.send(PersistenceResult {
-        last_block: persisted,
-        last_state_trie_block: persisted,
-        commit_duration: Some(Duration::ZERO),
-    })
-    .unwrap();
-    test_harness.tree.persistence_state.start_save(persisted, rx);
-
-    test_harness.tree.persist_until_complete().unwrap();
-
-    // Shutdown waits for the durable write, but process teardown does not need the destructive
-    // in-memory handoff that normally follows a completed persistence task.
-    assert_eq!(test_harness.tree.persistence_state.last_persisted_block, persisted);
-    assert_eq!(test_harness.tree.persistence_state.last_state_trie_persisted_block, persisted);
-    assert!(!test_harness.tree.persistence_state.in_progress());
-    assert!(test_harness.tree.pending_persisted_handoff.is_none());
-    assert!(test_harness.tree.state.tree_state.contains_hash(&persisted_hash));
-    assert!(test_harness.tree.canonical_in_memory_state.state_by_hash(persisted_hash).is_some());
 }
 
 #[test]
@@ -813,50 +721,13 @@ fn backfill_action_skips_while_payload_build_is_active() {
     let action = BackfillAction::Start(B256::random().into());
 
     test_harness.tree.emit_event(EngineApiEvent::BackfillAction(action));
-    assert!(test_harness.tree.pending_persisted_handoff.is_none());
     assert!(test_harness.tree.backfill_sync_state.is_idle());
     assert!(test_harness.from_tree_rx.try_recv().is_err());
 
     drop(payload_build);
     assert!(matches!(test_harness.tree.wait_for_event(), super::LoopEvent::PayloadBuildFinished));
-    test_harness.tree.on_payload_build_finished().unwrap();
 
     // The skipped action is not queued for a later replay.
-    assert!(test_harness.tree.backfill_sync_state.is_idle());
-    assert!(test_harness.from_tree_rx.try_recv().is_err());
-}
-
-#[test]
-fn backfill_action_skips_while_persisted_handoff_is_pending() {
-    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
-    let mut test_harness = TestHarness::with_config(
-        MAINNET.clone(),
-        TreeConfig::default().with_has_enough_parallelism(true),
-    )
-    .with_blocks(blocks.clone());
-    let persisted = blocks[0].recovered_block().num_hash();
-    let payload_build = test_harness.tree.payload_builds.acquire();
-
-    test_harness
-        .tree
-        .on_persistence_complete(
-            PersistenceResult {
-                last_block: persisted,
-                last_state_trie_block: persisted,
-                commit_duration: Some(Duration::ZERO),
-            },
-            Instant::now(),
-        )
-        .unwrap();
-
-    drop(payload_build);
-    assert!(!test_harness.tree.payload_builds.is_active());
-    assert!(test_harness.tree.pending_persisted_handoff.is_some());
-
-    test_harness
-        .tree
-        .emit_event(EngineApiEvent::BackfillAction(BackfillAction::Start(B256::random().into())));
-
     assert!(test_harness.tree.backfill_sync_state.is_idle());
     assert!(test_harness.from_tree_rx.try_recv().is_err());
 }
@@ -2980,6 +2851,51 @@ fn test_canonicalizing_downloaded_sync_target_head_updates_finalized() {
         Some(fcu_state)
     );
     assert!(test_harness.tree.state.forkchoice_state_tracker.sync_target_state().is_none());
+}
+
+/// Tests that pipeline backfill reaching a syncing FCU with `head == finalized` applies the
+/// finalized block without waiting for another FCU.
+#[test]
+fn test_backfill_reaching_sync_target_head_updates_finalized() {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = MAINNET.clone();
+    let mut test_harness = TestHarness::new(chain_spec);
+
+    let blocks: Vec<_> = test_harness.block_builder.get_executed_blocks(0..3).collect();
+    let initial_head = blocks[0].recovered_block().num_hash();
+    let sync_target = blocks[2].recovered_block().num_hash();
+    test_harness = test_harness.with_blocks(blocks);
+    test_harness.tree.state.tree_state.set_canonical_head(initial_head);
+
+    let fcu_state = ForkchoiceState {
+        head_block_hash: sync_target.hash,
+        safe_block_hash: sync_target.hash,
+        finalized_block_hash: sync_target.hash,
+    };
+    test_harness
+        .tree
+        .state
+        .forkchoice_state_tracker
+        .set_latest(fcu_state, ForkchoiceStatus::Syncing);
+
+    test_harness
+        .tree
+        .on_backfill_sync_finished(ControlFlow::Continue { block_number: sync_target.number })
+        .unwrap();
+
+    assert_eq!(test_harness.tree.state.tree_state.current_canonical_head, sync_target);
+    assert_eq!(
+        test_harness.tree.canonical_in_memory_state.get_finalized_num_hash(),
+        Some(sync_target)
+    );
+    assert_eq!(test_harness.tree.canonical_in_memory_state.get_safe_num_hash(), Some(sync_target));
+    assert_eq!(
+        test_harness.tree.state.forkchoice_state_tracker.last_valid_state(),
+        Some(fcu_state)
+    );
+    assert!(test_harness.tree.state.forkchoice_state_tracker.sync_target_state().is_none());
+    assert!(test_harness.from_tree_rx.try_recv().is_err());
 }
 
 // --- Backfill target selection tests ---
