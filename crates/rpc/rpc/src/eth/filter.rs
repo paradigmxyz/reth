@@ -81,8 +81,13 @@ const BLOOM_ADJUSTMENT_MIN_BLOCKS: u64 = 100;
 /// The maximum number of headers we read at once when handling a range filter.
 const MAX_HEADERS_RANGE: u64 = 1_000; // with ~530bytes per header this is ~500kb
 
-/// Minimum number of blocks in a range for fetching receipts in parallel
-const PARALLEL_PROCESSING_THRESHOLD: u64 = 1000;
+// Cached mode is only reachable for ranges that fit into a single header window, which is what
+// keeps the mode decision independent of how a range is split.
+const _: () = assert!(CACHED_MODE_BLOCK_THRESHOLD <= MAX_HEADERS_RANGE);
+
+/// Minimum number of bloom matching blocks in a header window for fetching their receipts in
+/// parallel
+const PARALLEL_PROCESSING_THRESHOLD: usize = 1000;
 
 /// Default concurrency for parallel processing
 const DEFAULT_PARALLEL_CONCURRENCY: usize = 4;
@@ -1100,6 +1105,10 @@ impl<
         let use_cached_mode =
             Self::should_use_cached_mode(&sealed_headers, block_count, distance_from_tip);
 
+        // Fetching receipts in parallel is only worth the extra tasks when most of the window has
+        // them to read; the sequential path serves the rest from the receipt cache where it can
+        let parallel = sealed_headers.len() >= PARALLEL_PROCESSING_THRESHOLD;
+
         if use_cached_mode && !sealed_headers.is_empty() {
             Self::Cached(CachedMode { filter_inner, headers_iter: sealed_headers.into_iter() })
         } else {
@@ -1108,7 +1117,7 @@ impl<
                 iter: sealed_headers.into_iter().peekable(),
                 next: VecDeque::new(),
                 max_range: (max_headers_range as usize).min(MAX_PARALLEL_BATCH_SIZE),
-                parallel: block_count >= PARALLEL_PROCESSING_THRESHOLD,
+                parallel,
                 pending_tasks: FuturesOrdered::new(),
             })
         }
@@ -1326,7 +1335,7 @@ impl<
         range_headers: Vec<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
     ) {
         // Split headers into chunks
-        let chunk_size = std::cmp::max(range_headers.len() / DEFAULT_PARALLEL_CONCURRENCY, 1);
+        let chunk_size = range_headers.len().div_ceil(DEFAULT_PARALLEL_CONCURRENCY).max(1);
         let header_chunks = range_headers
             .into_iter()
             .chunks(chunk_size)
@@ -2107,8 +2116,8 @@ mod tests {
             success: true,
         };
 
-        // blocks with a matching log spread over three header windows, the range is large
-        // enough for the parallel receipt fetching
+        // an empty filter matches every header, so every window is fetched in parallel while
+        // only three blocks have logs to return
         let matching_blocks = [5u64, 1_200, 2_400];
         let mut parent_hash = FixedBytes::default();
         for number in 0..=2_500u64 {
@@ -2132,6 +2141,8 @@ mod tests {
                     number,
                     StoredBlockBodyIndices { first_tx_num: tx_num, tx_count: 1 },
                 );
+            } else {
+                provider.add_receipts(number, vec![]);
             }
         }
 
@@ -2148,5 +2159,30 @@ mod tests {
             .unwrap();
         let blocks = logs.iter().map(|log| log.block_number.unwrap()).collect::<Vec<_>>();
         assert_eq!(blocks, matching_blocks);
+
+        // the log limit ends the scan in the window that exceeds it and names the last block that
+        // fit as the range to retry with
+        let err = eth_filter
+            .inner
+            .clone()
+            .get_logs_in_block_range(
+                Filter::default(),
+                0,
+                2_500,
+                QueryLimits { max_blocks_per_filter: None, max_logs_per_response: Some(1) },
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                EthFilterError::QueryExceedsMaxResults {
+                    max_logs: 1,
+                    from_block: 0,
+                    to_block: 1_199
+                }
+            ),
+            "{err:?}"
+        );
     }
 }
