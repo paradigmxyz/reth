@@ -28,6 +28,7 @@ use core::{
     marker::PhantomData,
     ops::{RangeBounds, RangeInclusive},
 };
+#[cfg(feature = "chain-state")]
 use reth_chain_state::{
     CanonStateNotifications, CanonStateSubscriptions, ForkChoiceNotifications,
     ForkChoiceSubscriptions, PersistedBlockNotifications, PersistedBlockSubscriptions,
@@ -667,6 +668,7 @@ impl<C: Send + Sync + 'static, N: NodePrimitives> StateProviderFactory for NoopP
     }
 }
 
+#[cfg(feature = "chain-state")]
 impl<C: Send + Sync, N: NodePrimitives> CanonStateSubscriptions for NoopProvider<C, N> {
     type Primitives = N;
 
@@ -675,6 +677,7 @@ impl<C: Send + Sync, N: NodePrimitives> CanonStateSubscriptions for NoopProvider
     }
 }
 
+#[cfg(feature = "chain-state")]
 impl<C: Send + Sync, N: NodePrimitives> ForkChoiceSubscriptions for NoopProvider<C, N> {
     type Header = N::BlockHeader;
 
@@ -689,6 +692,7 @@ impl<C: Send + Sync, N: NodePrimitives> ForkChoiceSubscriptions for NoopProvider
     }
 }
 
+#[cfg(feature = "chain-state")]
 impl<C: Send + Sync, N: NodePrimitives> PersistedBlockSubscriptions for NoopProvider<C, N> {
     fn subscribe_persisted_block(&self) -> PersistedBlockNotifications {
         let (_, rx) = tokio::sync::watch::channel(None);

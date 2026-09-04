@@ -7,6 +7,7 @@ use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, StorageValue, B256, U256};
 use auto_impl::auto_impl;
+#[cfg(feature = "chain-state")]
 use reth_chain_state::ExecutedBlock;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{Bytecode, NodePrimitives};
@@ -145,6 +146,7 @@ pub trait StateProviderFactory: BlockIdReader + Send {
     fn latest(&self) -> ProviderResult<StateProviderBox>;
 
     /// Returns a state provider after applying `block` to `parent_hash`.
+    #[cfg(feature = "chain-state")]
     fn state_with_block_appended(
         &self,
         _parent_hash: BlockHash,

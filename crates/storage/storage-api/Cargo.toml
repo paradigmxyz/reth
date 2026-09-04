@@ -15,7 +15,7 @@ workspace = true
 # reth
 reth-db-models.workspace = true
 reth-chainspec.workspace = true
-reth-chain-state.workspace = true
+reth-chain-state = { workspace = true, optional = true }
 reth-db-api = { workspace = true, optional = true }
 reth-execution-types.workspace = true
 reth-primitives-traits.workspace = true
@@ -36,7 +36,7 @@ alloy-rpc-types-engine.workspace = true
 auto_impl.workspace = true
 serde_json = { workspace = true, optional = true }
 reth-tokio-util = { workspace = true, optional = true }
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync"], optional = true }
 
 [dev-dependencies]
 alloy-primitives = { workspace = true, features = ["getrandom"] }
@@ -70,8 +70,13 @@ db-api = [
     "dep:serde_json",
 ]
 
+chain-state = [
+    "dep:reth-chain-state",
+    "dep:tokio",
+]
+
 serde = [
-    "reth-chain-state/serde",
+    "reth-chain-state?/serde",
     "reth-ethereum-primitives/serde",
     "reth-db-models/serde",
     "reth-execution-types/serde",
