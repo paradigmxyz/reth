@@ -69,7 +69,12 @@ fn archive_bytes(path: &str, data: &[u8]) -> Vec<u8> {
 }
 
 fn download(server: &SnapshotServer, datadir: &Path, args: &[&str]) -> Output {
-    Command::new(RETH)
+    download_command(server, datadir, args).output().unwrap()
+}
+
+fn download_command(server: &SnapshotServer, datadir: &Path, args: &[&str]) -> Command {
+    let mut command = Command::new(RETH);
+    command
         .env("RUST_LOG", "off")
         .args(["download", "--datadir"])
         .arg(datadir)
@@ -78,9 +83,8 @@ fn download(server: &SnapshotServer, datadir: &Path, args: &[&str]) -> Output {
             &format!("{}/snapshot/manifest.json", server.url),
             "--non-interactive",
         ])
-        .args(args)
-        .output()
-        .unwrap()
+        .args(args);
+    command
 }
 
 #[track_caller]
@@ -210,4 +214,71 @@ async fn bad_output_checksum_prevents_finalization() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("Failed integrity validation"));
     assert!(!dir.path().join("reth.toml").exists());
     assert!(!dir.path().join("db/mdbx.dat").exists());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn segmented_download_resumes_after_process_exit() {
+    use std::{process::Stdio, sync::Arc, time::Duration};
+    use tokio::sync::Semaphore;
+
+    let mut snapshot = Snapshot::new();
+    snapshot.manifest["components"].as_object_mut().unwrap().retain(|name, _| name == "state");
+    let archive = snapshot.files.get_mut("/snapshot/state.tar.zst").unwrap();
+    // A skippable zstd frame crosses the production segmentation threshold while keeping
+    // the extracted snapshot tiny. All transfer is over loopback; no real snapshot is needed.
+    let padding = 128 * 1024 * 1024;
+    let mut padded = Vec::with_capacity(padding + 8 + archive.len());
+    padded.extend_from_slice(&0x184D2A50_u32.to_le_bytes());
+    padded.extend_from_slice(&(padding as u32).to_le_bytes());
+    padded.resize(padding + 8, 0);
+    padded.append(archive);
+    *archive = padded;
+    snapshot.manifest["components"]["state"]["size"] = json!(archive.len());
+    snapshot
+        .files
+        .insert("/snapshot/manifest.json".into(), serde_json::to_vec(&snapshot.manifest).unwrap());
+    let piece_size = 32 * 1024 * 1024;
+    let gate = Arc::new(Semaphore::new(0));
+    let server =
+        SnapshotServer::start_gated(snapshot.files, true, Some((piece_size, Arc::clone(&gate))))
+            .await;
+    let dir = tempfile::tempdir().unwrap();
+    let args = ["--download-concurrency", "2"];
+    let mut command = tokio::process::Command::from(download_command(&server, dir.path(), &args));
+    let mut child =
+        command.kill_on_drop(true).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
+    let sidecar = dir.path().join(".download-cache/state.tar.zst.part.json");
+    tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            if let Ok(bytes) = fs::read(&sidecar) &&
+                let Ok(state) = serde_json::from_slice::<Value>(&bytes) &&
+                state["completed"][0] == true
+            {
+                break;
+            }
+            assert!(
+                child.try_wait().unwrap().is_none(),
+                "download exited before persisting its first piece"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("first piece was not persisted");
+    child.kill().await.unwrap();
+    assert!(!dir.path().join("db/snapshot").exists());
+    assert!(!dir.path().join("reth.toml").exists());
+
+    server.clear_requests();
+    gate.add_permits(16);
+    success(download(&server, dir.path(), &args));
+    assert_eq!(fs::read(dir.path().join("db/snapshot")).unwrap(), b"state.tar.zst");
+    let ranges: Vec<_> = server.requests().into_iter().filter_map(|(_, range)| range).collect();
+    assert!(ranges.contains(&format!("bytes={piece_size}-{}", 2 * piece_size - 1)));
+    assert!(
+        !ranges.contains(&format!("bytes=0-{}", piece_size - 1)),
+        "completed piece was downloaded again"
+    );
+    assert!(!sidecar.exists());
+    assert!(!dir.path().join(".download-cache/state.tar.zst.part").exists());
 }

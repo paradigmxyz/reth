@@ -82,7 +82,7 @@ hyper-util = { workspace = true, features = ["tokio"] }
 serde_json.workspace = true
 tar.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "process"] }
 toml.workspace = true
 zstd.workspace = true
 

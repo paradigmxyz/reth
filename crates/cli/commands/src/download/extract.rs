@@ -375,7 +375,7 @@ fn download_and_extract(
     session: DownloadSession,
 ) -> Result<()> {
     let quiet = session.progress().is_some();
-    let fetcher = ArchiveFetcher::new(url.to_string(), target_dir, session.clone());
+    let fetcher = ArchiveFetcher::new(url.to_string(), target_dir, session.clone(), None);
     let DownloadedArchive { path: downloaded_path, size: total_size } = {
         let mut download_progress = ArchiveDownloadProgress::new(session.progress());
         let downloaded = fetcher.download(Some(&mut download_progress))?;
