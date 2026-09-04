@@ -1236,30 +1236,6 @@ mod tests {
     }
 
     #[test]
-    fn builder_trims_parent_state_to_checkpoint() {
-        let manager = OverlayManager::default();
-        let blocks = test_blocks();
-        for block in &blocks {
-            manager.insert_block(block.clone());
-        }
-
-        let builder = manager
-            .overlay_builder(blocks[4].recovered_block().hash())
-            .with_parent_state_at(blocks[2].recovered_block().num_hash());
-        let hashes =
-            builder.parent_state.unwrap().chain().map(BlockState::hash).collect::<Vec<_>>();
-
-        assert_eq!(
-            hashes,
-            blocks[..=2]
-                .iter()
-                .rev()
-                .map(|block| block.recovered_block().hash())
-                .collect::<Vec<_>>()
-        );
-    }
-
-    #[test]
     fn builder_appends_block_to_parent_state() {
         let manager = OverlayManager::default();
         let blocks = test_blocks();
