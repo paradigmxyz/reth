@@ -30,12 +30,17 @@ use reth_storage_api::{
 use reth_tasks::WorkerPool;
 use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSorted};
 use std::{
+    collections::VecDeque,
     fmt,
     ops::RangeInclusive,
-    sync::{Arc, OnceLock},
+    sync::{Arc, OnceLock, Weak},
     time::Instant,
 };
 use tracing::{debug, trace};
+
+/// Maximum number of completed flattened snapshots retained by the cache. Active readers retain
+/// their own `Arc`s, and cache misses rebuild from the unchanged block graph.
+const MAX_READY_OVERLAYS: usize = 4;
 
 /// Manages flattened state trie overlays for in-memory blocks.
 ///
@@ -45,6 +50,9 @@ use tracing::{debug, trace};
 pub struct OverlayManager<N: NodePrimitives = EthPrimitives> {
     blocks: Arc<DashMap<B256, ExecutedBlock<N>>>,
     overlays: Arc<DashMap<OverlayCacheKey, OverlayCacheEntry>>,
+    /// Serializes publication and bounds cache ownership without retaining evicted snapshots.
+    /// Always acquire this before an overlay map guard, never the reverse.
+    ready_overlays: Arc<Mutex<VecDeque<(OverlayCacheKey, Weak<TrieInputSorted>)>>>,
     changeset_cache: ChangesetCache,
     preserved_sparse_trie: Arc<Mutex<Option<PreservedSparseTrie>>>,
     #[cfg(feature = "rayon")]
@@ -69,6 +77,7 @@ impl<N: NodePrimitives> Default for OverlayManager<N> {
         Self {
             blocks: Default::default(),
             overlays: Default::default(),
+            ready_overlays: Default::default(),
             changeset_cache: Default::default(),
             preserved_sparse_trie: Default::default(),
             #[cfg(feature = "rayon")]
@@ -94,6 +103,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
         Self {
             blocks: Default::default(),
             overlays: Default::default(),
+            ready_overlays: Default::default(),
             changeset_cache: Default::default(),
             preserved_sparse_trie: Default::default(),
             worker_pool: Some(worker_pool),
@@ -276,11 +286,16 @@ impl<N: NodePrimitives> OverlayManager<N> {
         span.record("removed_blocks", removed_blocks);
 
         if removed_blocks > 0 {
-            let overlays_before = self.overlays.len();
-            self.overlays.retain(|key, _| {
-                self.contains_hash(key.tip_hash, key.anchor_hash, key.anchor_hash)
-            });
-            pruned_overlays = overlays_before.saturating_sub(self.overlays.len());
+            // Do not hold an overlay shard while consulting the block graph or dropping a
+            // potentially large snapshot. Only remove the generation that was inspected.
+            let candidates = self
+                .overlays
+                .iter()
+                .map(|entry| (*entry.key(), entry.value().clone()))
+                .collect::<Vec<_>>();
+            for (key, candidate) in candidates {
+                pruned_overlays += usize::from(self.prune_unreachable_overlay(key, &candidate));
+            }
             span.record("pruned_overlays", pruned_overlays);
         }
         debug!(
@@ -290,6 +305,20 @@ impl<N: NodePrimitives> OverlayManager<N> {
             pruned_overlays,
             "removed blocks from state trie overlay manager"
         );
+    }
+
+    fn prune_unreachable_overlay(
+        &self,
+        key: OverlayCacheKey,
+        candidate: &OverlayCacheEntry,
+    ) -> bool {
+        if self.contains_hash(key.tip_hash, key.anchor_hash, key.anchor_hash) {
+            return false
+        }
+        let removed =
+            self.overlays.remove_if(&key, |_, current| current.same_generation(candidate));
+        // The returned entry owns its snapshot and drops after the shard guard is released.
+        removed.is_some()
     }
 
     /// Returns the flattened overlay from `anchor_hash` to `parent_hash`.
@@ -406,21 +435,49 @@ impl<N: NodePrimitives> OverlayManager<N> {
                 let input = self.compute_overlay(compute_input, anchor_hash, span);
                 waiter.finish(Arc::clone(&input));
 
-                if let Entry::Occupied(mut entry) = self.overlays.entry(key) {
-                    // The entry may have been pruned while the overlay was computing. Only cache
-                    // the result if the map still points at the waiter installed by this task.
-                    let should_publish = match entry.get() {
-                        OverlayCacheEntry::Computing(existing) => Arc::ptr_eq(existing, &waiter),
-                        OverlayCacheEntry::Ready(_) => false,
-                    };
-                    if should_publish {
-                        entry.insert(OverlayCacheEntry::Ready(Arc::clone(&input)));
-                    }
-                }
+                self.publish_ready(key, &waiter, &input);
 
                 Ok(input)
             }
         }
+    }
+
+    /// Publish a completed generation and evict the oldest completed cache ownership. Waiters
+    /// and external readers remain valid even when their result is no longer cached.
+    fn publish_ready(
+        &self,
+        key: OverlayCacheKey,
+        waiter: &Arc<OverlayWaiter>,
+        input: &Arc<TrieInputSorted>,
+    ) {
+        let removed = {
+            let mut ready = self.ready_overlays.lock();
+            let replaced = match self.overlays.entry(key) {
+                Entry::Occupied(mut entry)
+                    if matches!(entry.get(),
+                    OverlayCacheEntry::Computing(existing) if Arc::ptr_eq(existing, waiter)) =>
+                {
+                    Some(entry.insert(OverlayCacheEntry::Ready(Arc::clone(input))))
+                }
+                _ => None,
+            };
+            // Pruning may have removed this waiter or replaced its generation during computation.
+            let Some(replaced) = replaced else { return };
+            let mut removed = vec![replaced];
+            ready.push_back((key, Arc::downgrade(input)));
+            while ready.len() > MAX_READY_OVERLAYS {
+                let (old_key, generation) = ready.pop_front().expect("nonempty ready queue");
+                if let Some((_, entry)) = self.overlays.remove_if(&old_key, |_, current| {
+                    matches!(current, OverlayCacheEntry::Ready(snapshot)
+                        if Arc::as_ptr(snapshot) == generation.as_ptr())
+                }) {
+                    removed.push(entry);
+                }
+            }
+            removed
+        };
+        // Snapshot deallocation can be substantial; keep it outside both cache locks.
+        drop(removed);
     }
 
     fn record_overlay_cache_reuse(&self, span: &tracing::Span) {
@@ -515,6 +572,19 @@ enum OverlayCacheEntry {
 }
 
 impl OverlayCacheEntry {
+    fn same_generation(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Ready(a), Self::Ready(b)) => Arc::ptr_eq(a, b),
+            (Self::Computing(a), Self::Computing(b)) => Arc::ptr_eq(a, b),
+            // Publication does not create a new generation: pruning may have captured the
+            // waiter before this exact completed snapshot was published.
+            (Self::Ready(input), Self::Computing(waiter)) => {
+                waiter.input.get().is_some_and(|computed| Arc::ptr_eq(input, computed))
+            }
+            _ => false,
+        }
+    }
+
     fn ready(&self) -> Option<Arc<TrieInputSorted>> {
         match self {
             Self::Ready(input) => Some(Arc::clone(input)),
@@ -873,5 +943,324 @@ mod tests {
         let (_, state) =
             manager.overlay_for_parent(blocks[2].recovered_block().hash(), anchor_hash).unwrap();
         assert_eq!(state.accounts.len(), 1);
+    }
+
+    fn ready_count(manager: &OverlayManager<EthPrimitives>) -> usize {
+        manager
+            .overlays
+            .iter()
+            .filter(|entry| matches!(entry.value(), OverlayCacheEntry::Ready(_)))
+            .count()
+    }
+
+    fn many_blocks() -> Vec<ExecutedBlock<EthPrimitives>> {
+        TestBlockBuilder::eth()
+            .get_executed_blocks(1..13)
+            .enumerate()
+            .map(|(i, block)| with_unique_state(&block, i as u8 + 1))
+            .collect()
+    }
+
+    fn assert_overlay_eq(actual: &TrieInputSorted, expected: &TrieInputSorted) {
+        assert_eq!(actual.state, expected.state);
+        assert_eq!(actual.nodes, expected.nodes);
+    }
+
+    #[test]
+    fn ready_snapshots_are_bounded_and_eviction_preserves_readers_and_roots() {
+        let manager = OverlayManager::default();
+        let blocks = many_blocks();
+        for block in &blocks {
+            manager.insert_block(block.clone());
+        }
+        let anchor = blocks[0].recovered_block().parent_hash();
+        let first = manager.get_overlay(blocks[0].recovered_block().hash(), anchor).unwrap();
+        let first_weak = Arc::downgrade(&first);
+        let first_expected = merge_blocks(vec![blocks[0].clone()]);
+        for block in &blocks[1..] {
+            manager.get_overlay(block.recovered_block().hash(), anchor).unwrap();
+            assert!(ready_count(&manager) <= 4, "completed snapshots must be bounded");
+        }
+        assert_eq!(manager.blocks.len(), blocks.len(), "cache eviction must not prune blocks");
+        assert_overlay_eq(&first, &first_expected);
+        let rebuilt = manager.get_overlay(blocks[0].recovered_block().hash(), anchor).unwrap();
+        assert!(!Arc::ptr_eq(&first, &rebuilt), "historical tip should have been evicted");
+        assert_overlay_eq(&rebuilt, &first_expected);
+        assert_eq!(overlay_root(&rebuilt), overlay_root(&first));
+        drop(first);
+        assert!(first_weak.upgrade().is_none(), "eviction records must not retain snapshots");
+    }
+
+    fn overlay_root(input: &TrieInputSorted) -> B256 {
+        use reth_provider::test_utils::create_test_provider_factory;
+        use reth_trie::StateRoot;
+        use reth_trie_db::{
+            DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseTrieCursorFactory,
+            LegacyKeyAdapter,
+        };
+        type Root<'a, TX> = StateRoot<
+            DatabaseTrieCursorFactory<&'a TX, LegacyKeyAdapter>,
+            DatabaseHashedCursorFactory<&'a TX>,
+        >;
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+        let mut input = input.clone();
+        input.prefix_sets = input.state.construct_prefix_sets();
+        let actual = Root::overlay_root_from_nodes(provider.tx_ref(), input.clone()).unwrap();
+        let oracle = reth_trie::test_utils::state_root_prehashed(
+            input.state.accounts.iter().filter_map(|(address, account)| {
+                account.map(|account| {
+                    (
+                        *address,
+                        (
+                            account,
+                            input
+                                .state
+                                .storages
+                                .get(address)
+                                .map(|storage| {
+                                    storage
+                                        .storage_slots_ref()
+                                        .iter()
+                                        .copied()
+                                        .filter(|(_, value)| !value.is_zero())
+                                        .collect::<Vec<_>>()
+                                })
+                                .unwrap_or_default(),
+                        ),
+                    )
+                })
+            }),
+        );
+        assert_eq!(actual, oracle, "database overlay root must match independent triehash");
+        actual
+    }
+
+    fn mixed_blocks() -> Vec<ExecutedBlock<EthPrimitives>> {
+        use reth_trie::Nibbles;
+        let address = B256::with_last_byte(80);
+        TestBlockBuilder::eth()
+            .get_executed_blocks(1..9)
+            .enumerate()
+            .map(|(i, block)| {
+                let account = (i != 4)
+                    .then_some(Account { balance: U256::from(i + 1), ..Default::default() });
+                let (wiped, slots) = match i {
+                    0 => (false, vec![(1, 1), (2, 2)]),
+                    1 => (false, vec![(1, 3)]),
+                    2 => (false, vec![(2, 0)]),
+                    3 => (true, vec![(3, 4)]),
+                    4 => (true, vec![]),
+                    5 => (false, vec![(4, 6)]),
+                    _ => (false, vec![(1, i as u64 + 1)]),
+                };
+                let state = HashedPostState::default()
+                    .with_accounts([(address, account)])
+                    .with_storages([(
+                        address,
+                        HashedStorage::from_iter(
+                            wiped,
+                            slots.into_iter().map(|(slot, value)| {
+                                (B256::with_last_byte(slot), U256::from(value))
+                            }),
+                        ),
+                    )])
+                    .into_sorted();
+                // Nonempty node updates also participate in cached/uncached comparisons.
+                let nodes = TrieUpdatesSorted::new(
+                    vec![(Nibbles::from_nibbles([i as u8]), None)],
+                    Default::default(),
+                );
+                ExecutedBlock::new(
+                    Arc::clone(&block.recovered_block),
+                    Arc::clone(&block.execution_output),
+                    ComputedTrieData::new(Arc::new(state), Arc::new(nodes)),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn evicted_mixed_state_and_forks_match_full_merge_at_multiple_anchors() {
+        let manager = OverlayManager::default();
+        let blocks = mixed_blocks();
+        for block in &blocks {
+            manager.insert_block(block.clone());
+        }
+        let anchor = blocks[0].recovered_block().parent_hash();
+        for (i, block) in blocks.iter().enumerate() {
+            let cached = manager.get_overlay(block.recovered_block().hash(), anchor).unwrap();
+            let expected = merge_blocks(blocks[..=i].iter().rev().cloned().collect());
+            assert_overlay_eq(&cached, &expected);
+            assert_eq!(overlay_root(&cached), overlay_root(&expected));
+        }
+        // A different tip with the same parent exercises a fork, without modifying canonical data.
+        let fork = with_unique_state(
+            &TestBlockBuilder::eth()
+                .get_executed_block_with_number(5, blocks[3].recovered_block().hash()),
+            90,
+        );
+        manager.insert_block(fork.clone());
+        let fork_state = manager.get_overlay(fork.recovered_block().hash(), anchor).unwrap();
+        let fork_expected = merge_blocks(
+            std::iter::once(fork.clone()).chain(blocks[..4].iter().rev().cloned()).collect(),
+        );
+        assert_overlay_eq(&fork_state, &fork_expected);
+        assert_eq!(overlay_root(&fork_state), overlay_root(&fork_expected));
+        for block in &blocks[..4] {
+            let idx = (block.recovered_block().number() - 1) as usize;
+            assert_overlay_eq(
+                &manager.get_overlay(block.recovered_block().hash(), anchor).unwrap(),
+                &merge_blocks(blocks[..=idx].iter().rev().cloned().collect()),
+            );
+        }
+        let new_anchor = blocks[3].recovered_block().hash();
+        let expected = merge_blocks(blocks[4..].iter().rev().cloned().collect());
+        let before = manager.get_overlay(blocks[7].recovered_block().hash(), new_anchor).unwrap();
+        assert_overlay_eq(&before, &expected);
+        manager.remove_blocks(blocks[..4].iter().map(|block| block.recovered_block().hash()));
+        let after = manager.get_overlay(blocks[7].recovered_block().hash(), new_anchor).unwrap();
+        assert_overlay_eq(&after, &expected);
+        assert!(manager.get_overlay(blocks[7].recovered_block().hash(), anchor).is_err());
+        assert_overlay_eq(&before, &expected);
+    }
+
+    fn begin_computing(
+        manager: &OverlayManager<EthPrimitives>,
+        key: OverlayCacheKey,
+    ) -> Arc<OverlayWaiter> {
+        let waiter = Arc::new(OverlayWaiter::new());
+        manager.overlays.insert(key, OverlayCacheEntry::Computing(Arc::clone(&waiter)));
+        waiter
+    }
+
+    fn finish_computing(
+        manager: &OverlayManager<EthPrimitives>,
+        key: OverlayCacheKey,
+        waiter: &Arc<OverlayWaiter>,
+    ) -> Arc<TrieInputSorted> {
+        let input = Arc::new(TrieInputSorted::default());
+        waiter.finish(Arc::clone(&input));
+        manager.publish_ready(key, waiter, &input);
+        input
+    }
+
+    #[test]
+    fn capacity_eviction_preserves_computing_waiters_and_stale_generations() {
+        let manager = OverlayManager::<EthPrimitives>::default();
+        let key = OverlayCacheKey { anchor_hash: B256::ZERO, tip_hash: B256::with_last_byte(1) };
+        let old_waiter = begin_computing(&manager, key);
+        let (tx, rx) = mpsc::channel();
+        let readers = (0..2)
+            .map(|_| {
+                let manager = manager.clone();
+                let tx = tx.clone();
+                thread::spawn(move || {
+                    tx.send(manager.get_overlay(key.tip_hash, key.anchor_hash).unwrap()).unwrap()
+                })
+            })
+            .collect::<Vec<_>>();
+        assert!(rx.recv_timeout(Duration::from_millis(50)).is_err());
+        for id in 2..10 {
+            let other =
+                OverlayCacheKey { anchor_hash: B256::ZERO, tip_hash: B256::with_last_byte(id) };
+            let waiter = begin_computing(&manager, other);
+            finish_computing(&manager, other, &waiter);
+        }
+        assert!(matches!(
+            manager.overlays.get(&key).unwrap().value(),
+            OverlayCacheEntry::Computing(_)
+        ));
+        let first = finish_computing(&manager, key, &old_waiter);
+        for _ in 0..2 {
+            assert!(Arc::ptr_eq(&first, &rx.recv_timeout(Duration::from_secs(1)).unwrap()));
+        }
+        for reader in readers {
+            reader.join().unwrap();
+        }
+        // Keep old snapshot alive so its stale Weak record is still upgradeable.
+        manager.overlays.remove(&key);
+        let replacement = begin_computing(&manager, key);
+        let new = finish_computing(&manager, key, &replacement);
+        manager.publish_ready(key, &old_waiter, &first);
+        for id in 10..13 {
+            let other =
+                OverlayCacheKey { anchor_hash: B256::ZERO, tip_hash: B256::with_last_byte(id) };
+            let waiter = begin_computing(&manager, other);
+            finish_computing(&manager, other, &waiter);
+        }
+        assert!(
+            Arc::ptr_eq(&new, &manager.get_overlay(key.tip_hash, key.anchor_hash).unwrap()),
+            "stale record must not evict fresh generation"
+        );
+        assert_eq!(ready_count(&manager), 4);
+    }
+
+    #[test]
+    fn pruned_producer_finishes_readers_without_overwriting_replacement() {
+        let manager = OverlayManager::<EthPrimitives>::default();
+        let key = OverlayCacheKey { anchor_hash: B256::ZERO, tip_hash: B256::with_last_byte(1) };
+        let old = begin_computing(&manager, key);
+        manager.overlays.remove(&key);
+        let new = begin_computing(&manager, key);
+        let old_input = finish_computing(&manager, key, &old);
+        assert!(Arc::ptr_eq(&old.wait(), &old_input));
+        assert!(
+            matches!(manager.overlays.get(&key).unwrap().value(), OverlayCacheEntry::Computing(waiter) if Arc::ptr_eq(waiter, &new))
+        );
+        let new_input = finish_computing(&manager, key, &new);
+        assert!(Arc::ptr_eq(&new.wait(), &new_input));
+        assert!(Arc::ptr_eq(
+            &manager.get_overlay(key.tip_hash, key.anchor_hash).unwrap(),
+            &new_input
+        ));
+    }
+
+    #[test]
+    fn concurrent_publications_finish_with_bounded_ready_ownership() {
+        let manager = OverlayManager::<EthPrimitives>::default();
+        let barrier = Arc::new(std::sync::Barrier::new(9));
+        let (tx, rx) = mpsc::channel();
+        let workers = (1..=8)
+            .map(|id| {
+                let manager = manager.clone();
+                let barrier = Arc::clone(&barrier);
+                let tx = tx.clone();
+                let key =
+                    OverlayCacheKey { anchor_hash: B256::ZERO, tip_hash: B256::with_last_byte(id) };
+                let waiter = begin_computing(&manager, key);
+                thread::spawn(move || {
+                    barrier.wait();
+                    finish_computing(&manager, key, &waiter);
+                    tx.send(()).unwrap();
+                })
+            })
+            .collect::<Vec<_>>();
+        barrier.wait();
+        for _ in 0..8 {
+            rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        }
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        assert_eq!(ready_count(&manager), 4);
+        assert_eq!(manager.ready_overlays.lock().len(), 4);
+    }
+    #[test]
+    fn pruning_captured_waiter_removes_its_completed_generation_only() {
+        let manager = OverlayManager::<EthPrimitives>::default();
+        let key = OverlayCacheKey { anchor_hash: B256::ZERO, tip_hash: B256::with_last_byte(1) };
+        let waiter = begin_computing(&manager, key);
+        let captured = manager.overlays.get(&key).unwrap().value().clone();
+        // Deterministic interleaving: pruning captured Computing, then publication happened
+        // before its reachability check and generation-checked removal.
+        let external = finish_computing(&manager, key, &waiter);
+        assert!(manager.prune_unreachable_overlay(key, &captured));
+        assert!(Arc::ptr_eq(&external, &waiter.wait()));
+        let replacement = begin_computing(&manager, key);
+        assert!(!manager.prune_unreachable_overlay(key, &captured));
+        let new = finish_computing(&manager, key, &replacement);
+        assert!(!manager.prune_unreachable_overlay(key, &captured));
+        assert!(Arc::ptr_eq(&new, &manager.get_overlay(key.tip_hash, key.anchor_hash).unwrap()));
     }
 }
