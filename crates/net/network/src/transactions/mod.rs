@@ -20,7 +20,8 @@ pub use self::constants::{
 use config::AnnouncementAcceptance;
 pub use config::{
     AnnouncementFilteringPolicy, TransactionFetcherConfig, TransactionIngressPolicy,
-    TransactionPropagationMode, TransactionPropagationPolicy, TransactionsManagerConfig,
+    TransactionPropagationMode, TransactionPropagationPolicy, TransactionServePolicy,
+    TransactionsManagerConfig,
 };
 use policy::NetworkPolicies;
 
@@ -1204,6 +1205,12 @@ where
             return
         }
         if let Some(peer) = self.peers.get_mut(&peer_id) {
+            if !self.config.serve_policy.allows(peer.peer_kind) {
+                trace!(target: "net::tx", peer_id=format!("{peer_id:#}"), policy=?self.config.serve_policy, "Not serving `GetPooledTransactions` request from peer blocked by serve policy");
+                let _ = response.send(Ok(PooledTransactions::default()));
+                return
+            }
+
             let transactions = self.pool.get_pooled_transaction_elements(
                 request.0,
                 GetPooledTransactionLimit::ResponseSizeSoftLimit(
