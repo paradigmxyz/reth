@@ -567,7 +567,9 @@ pub trait BlockBuilder: Sized {
     type Executor: BlockExecutor<
         Transaction = TxTy<Self::Primitives>,
         Receipt = ReceiptTy<Self::Primitives>,
-        Evm: Evm<Transaction: From<TxTy<Self::Primitives>>>,
+        Evm: Evm<
+            Transaction: From<TxTy<Self::Primitives>> + FromTxWithEncoded<TxTy<Self::Primitives>>,
+        >,
     >;
     /// EVM environment used for block execution.
     type EvmEnv: EvmEnv;
@@ -725,7 +727,8 @@ where
     Assembler: BlockAssembler<F, Block = N::Block>,
     N: NodePrimitives,
     TxTy<N>: Clone,
-    <<Executor as BlockExecutor>::Evm as Evm>::Transaction: From<TxTy<N>>,
+    <<Executor as BlockExecutor>::Evm as Evm>::Transaction:
+        From<TxTy<N>> + FromTxWithEncoded<TxTy<N>>,
 {
     type Primitives = N;
     type Executor = Executor;
