@@ -4,11 +4,7 @@ use crate::{EthMessage, EthVersion, NetworkPrimitives};
 use alloc::{sync::Arc, vec::Vec};
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eips::eip2718::Typed2718;
-use alloy_primitives::{
-    bytes::BufMut,
-    map::{B256Map, B256Set},
-    Bytes, TxHash, B128, B256, U128,
-};
+use alloy_primitives::{bytes::BufMut, map::B256Set, Bytes, TxHash, B128, B256, U128};
 use alloy_rlp::{
     decode_append, Decodable, Encodable, Header, RlpDecodable, RlpDecodableWrapper, RlpEncodable,
     RlpEncodableWrapper,
@@ -1009,7 +1005,8 @@ pub trait DedupPayload {
     /// Returns the number of entries.
     fn len(&self) -> usize;
 
-    /// Consumes self, returning an iterator over hashes in payload.
+    /// Consumes self, returning the entries of the payload without duplicate hashes. The first
+    /// occurrence of a hash is kept and entries stay in the order of the payload.
     fn dedup(self) -> PartiallyValidData<Self::Value>;
 }
 
@@ -1048,17 +1045,9 @@ impl DedupPayload for NewPooledTransactionHashes72 {
     }
 
     fn dedup(self) -> PartiallyValidData<Self::Value> {
-        let Self { hashes, mut sizes, mut types, cell_mask } = self;
-
-        let mut deduped_data = B256Map::with_capacity_and_hasher(hashes.len(), Default::default());
-
-        for hash in hashes.into_iter().rev() {
-            if let (Some(ty), Some(size)) = (types.pop(), sizes.pop()) {
-                deduped_data.insert(hash, Some((ty, size)));
-            }
-        }
-
-        PartiallyValidData::from_raw_data_eth72_with_cell_mask(deduped_data, cell_mask)
+        let Self { hashes, sizes, types, cell_mask } = self;
+        let data = dedup_announcement(hashes, types, sizes);
+        PartiallyValidData::from_raw_data_eth72_with_cell_mask(data, cell_mask)
     }
 }
 
@@ -1074,17 +1063,8 @@ impl DedupPayload for NewPooledTransactionHashes68 {
     }
 
     fn dedup(self) -> PartiallyValidData<Self::Value> {
-        let Self { hashes, mut sizes, mut types } = self;
-
-        let mut deduped_data = B256Map::with_capacity_and_hasher(hashes.len(), Default::default());
-
-        for hash in hashes.into_iter().rev() {
-            if let (Some(ty), Some(size)) = (types.pop(), sizes.pop()) {
-                deduped_data.insert(hash, Some((ty, size)));
-            }
-        }
-
-        PartiallyValidData::from_raw_data_eth68(deduped_data)
+        let Self { hashes, sizes, types } = self;
+        PartiallyValidData::from_raw_data_eth68(dedup_announcement(hashes, types, sizes))
     }
 }
 
@@ -1101,17 +1081,31 @@ impl DedupPayload for NewPooledTransactionHashes66 {
 
     fn dedup(self) -> PartiallyValidData<Self::Value> {
         let Self(hashes) = self;
-
-        let mut deduped_data = B256Map::with_capacity_and_hasher(hashes.len(), Default::default());
-
-        let noop_value: Eth68TxMetadata = None;
-
-        for hash in hashes.into_iter().rev() {
-            deduped_data.insert(hash, noop_value);
-        }
-
-        PartiallyValidData::from_raw_data_eth66(deduped_data)
+        let mut seen = B256Set::with_capacity_and_hasher(hashes.len(), Default::default());
+        let mut data = Vec::with_capacity(hashes.len());
+        data.extend(hashes.into_iter().filter(|hash| seen.insert(*hash)).map(|hash| (hash, None)));
+        PartiallyValidData::from_raw_data_eth66(data)
     }
+}
+
+/// Pairs announced hashes with their type and size, keeping the first occurrence of every hash in
+/// announcement order.
+fn dedup_announcement(
+    hashes: Vec<TxHash>,
+    types: Vec<u8>,
+    sizes: Vec<usize>,
+) -> Vec<(TxHash, Eth68TxMetadata)> {
+    let mut seen = B256Set::with_capacity_and_hasher(hashes.len(), Default::default());
+    let mut data = Vec::with_capacity(hashes.len());
+    data.extend(
+        hashes
+            .into_iter()
+            .zip(types)
+            .zip(sizes)
+            .filter(|((hash, _), _)| seen.insert(*hash))
+            .map(|((hash, ty), size)| (hash, Some((ty, size)))),
+    );
+    data
 }
 
 /// Interface for handling mempool message data. Used in various filters in pipelines in
@@ -1148,7 +1142,7 @@ impl<T: SignedTransaction> HandleMempoolData for Vec<T> {
     }
 }
 
-macro_rules! handle_mempool_data_map_impl {
+macro_rules! handle_mempool_data_vec_impl {
     ($data_ty:ty, $(<$generic:ident>)?) => {
         impl$(<$generic>)? HandleMempoolData for $data_ty {
             fn is_empty(&self) -> bool {
@@ -1160,72 +1154,72 @@ macro_rules! handle_mempool_data_map_impl {
             }
 
             fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) {
-                self.data.retain(|hash, _| f(hash));
+                self.data.retain(|(hash, _)| f(hash));
             }
         }
     };
 }
 
 /// Data that has passed an initial validation pass that is not specific to any mempool message
-/// type.
+/// type. Entries are unique by hash and keep the order of the message.
 #[derive(Debug, Deref, DerefMut, IntoIterator)]
 pub struct PartiallyValidData<V> {
     #[deref]
     #[deref_mut]
     #[into_iterator]
-    data: B256Map<V>,
+    data: Vec<(TxHash, V)>,
     version: Option<EthVersion>,
     /// The eth/72 message-level cell mask, if present.
     cell_mask: Option<B128>,
 }
 
-handle_mempool_data_map_impl!(PartiallyValidData<V>, <V>);
+handle_mempool_data_vec_impl!(PartiallyValidData<V>, <V>);
 
 impl<V> PartiallyValidData<V> {
     /// Wraps raw data.
-    pub const fn from_raw_data(data: B256Map<V>, version: Option<EthVersion>) -> Self {
+    pub const fn from_raw_data(data: Vec<(TxHash, V)>, version: Option<EthVersion>) -> Self {
         Self { data, version, cell_mask: None }
     }
 
     /// Wraps raw data with version [`EthVersion::Eth72`].
-    pub const fn from_raw_data_eth72(data: B256Map<V>) -> Self {
+    pub const fn from_raw_data_eth72(data: Vec<(TxHash, V)>) -> Self {
         Self::from_raw_data(data, Some(EthVersion::Eth72))
     }
 
     /// Wraps raw data with an eth/72 message-level cell mask.
     pub const fn from_raw_data_eth72_with_cell_mask(
-        data: B256Map<V>,
+        data: Vec<(TxHash, V)>,
         cell_mask: Option<B128>,
     ) -> Self {
         Self { data, version: Some(EthVersion::Eth72), cell_mask }
     }
 
     /// Wraps raw data with version [`EthVersion::Eth68`].
-    pub const fn from_raw_data_eth68(data: B256Map<V>) -> Self {
+    pub const fn from_raw_data_eth68(data: Vec<(TxHash, V)>) -> Self {
         Self::from_raw_data(data, Some(EthVersion::Eth68))
     }
 
     /// Wraps raw data with version [`EthVersion::Eth66`].
-    pub const fn from_raw_data_eth66(data: B256Map<V>) -> Self {
+    pub const fn from_raw_data_eth66(data: Vec<(TxHash, V)>) -> Self {
         Self::from_raw_data(data, Some(EthVersion::Eth66))
     }
 
     /// Returns a new [`PartiallyValidData`] with empty data from an [`Eth72`](EthVersion::Eth72)
     /// announcement.
-    pub fn empty_eth72() -> Self {
-        Self::from_raw_data_eth72(B256Map::default())
+    pub const fn empty_eth72() -> Self {
+        Self::from_raw_data_eth72(Vec::new())
     }
 
     /// Returns a new [`PartiallyValidData`] with empty data from an [`Eth68`](EthVersion::Eth68)
     /// announcement.
-    pub fn empty_eth68() -> Self {
-        Self::from_raw_data_eth68(B256Map::default())
+    pub const fn empty_eth68() -> Self {
+        Self::from_raw_data_eth68(Vec::new())
     }
 
     /// Returns a new [`PartiallyValidData`] with empty data from an [`Eth66`](EthVersion::Eth66)
     /// announcement.
-    pub fn empty_eth66() -> Self {
-        Self::from_raw_data_eth66(B256Map::default())
+    pub const fn empty_eth66() -> Self {
+        Self::from_raw_data_eth66(Vec::new())
     }
 
     /// Returns the version of the message this data was received in if different versions of the
@@ -1240,31 +1234,31 @@ impl<V> PartiallyValidData<V> {
     }
 
     /// Destructs returning the validated data.
-    pub fn into_data(self) -> B256Map<V> {
+    pub fn into_data(self) -> Vec<(TxHash, V)> {
         self.data
     }
 }
 
-/// Partially validated data from an announcement or a
-/// [`PooledTransactions`](crate::PooledTransactions) response.
+/// Validated data from an announcement. Entries are unique by hash and keep the order of the
+/// announcement.
 #[derive(Debug, Deref, DerefMut, IntoIterator, From)]
 pub struct ValidAnnouncementData {
     #[deref]
     #[deref_mut]
     #[into_iterator]
-    data: B256Map<Eth68TxMetadata>,
+    data: Vec<(TxHash, Eth68TxMetadata)>,
     version: EthVersion,
     /// The eth/72 message-level cell mask, if present.
     cell_mask: Option<B128>,
 }
 
-handle_mempool_data_map_impl!(ValidAnnouncementData,);
+handle_mempool_data_vec_impl!(ValidAnnouncementData,);
 
 impl ValidAnnouncementData {
     /// Destructs returning only the valid hashes and the announcement message version. Caution! If
     /// this is [`Eth68`](EthVersion::Eth68) announcement data, this drops the metadata.
     pub fn into_request_hashes(self) -> (RequestTxHashes, EthVersion) {
-        let hashes = self.data.into_keys().collect::<B256Set>();
+        let hashes = self.data.into_iter().map(|(hash, _)| hash).collect::<B256Set>();
 
         (RequestTxHashes::new(hashes), self.version)
     }
@@ -1286,7 +1280,7 @@ impl ValidAnnouncementData {
     }
 
     /// Destructs returning the validated data.
-    pub fn into_data(self) -> B256Map<Eth68TxMetadata> {
+    pub fn into_data(self) -> Vec<(TxHash, Eth68TxMetadata)> {
         self.data
     }
 }
@@ -1734,6 +1728,33 @@ mod tests {
 
         let valid = ValidAnnouncementData::from_partially_valid_data(partially_valid);
         assert_eq!(valid.eth72_cell_mask(), cell_mask);
+    }
+
+    #[test]
+    fn dedup_keeps_first_occurrence_in_announcement_order() {
+        let hashes = [
+            B256::from([1u8; 32]),
+            B256::from([2u8; 32]),
+            B256::from([1u8; 32]),
+            B256::from([3u8; 32]),
+        ];
+        let announcement = NewPooledTransactionHashes68 {
+            types: vec![1, 2, 3, 4],
+            sizes: vec![10, 20, 30, 40],
+            hashes: hashes.to_vec(),
+        };
+
+        let deduped = announcement.dedup();
+
+        assert_eq!(deduped.msg_version(), Some(EthVersion::Eth68));
+        assert_eq!(
+            deduped.into_data(),
+            vec![
+                (hashes[0], Some((1, 10))),
+                (hashes[1], Some((2, 20))),
+                (hashes[3], Some((4, 40)))
+            ]
+        );
     }
 
     #[test]
