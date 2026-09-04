@@ -145,7 +145,6 @@ impl<Provider, N: NodePrimitives> OverlayStateProvider<OwnedProvider<Provider>, 
             overlay_builder,
             Default::default(),
             Default::default(),
-            Default::default(),
             is_v2,
         )
     }
@@ -200,7 +199,6 @@ impl<'a, Provider, N: NodePrimitives> OverlayStateProvider<&'a Provider, N> {
             provider,
             overlay_builder: Some(overlay_builder),
             state_trie_overlay_cache: Default::default(),
-            execution_overlay_cache: Default::default(),
             metrics: Default::default(),
             state_trie_overlay: OnceCell::new(),
             execution_overlay: OnceCell::new(),
