@@ -1,7 +1,6 @@
 //! Version information for reth.
 use std::{borrow::Cow, sync::OnceLock};
 
-use alloy_primitives::Bytes;
 use alloy_rpc_types_engine::ClientCode;
 use reth_db::ClientVersion;
 
@@ -81,12 +80,6 @@ pub struct RethCliVersionConsts {
 /// ```
 pub fn default_extra_data() -> String {
     format!("reth/v{}/{}", env!("CARGO_PKG_VERSION"), std::env::consts::OS)
-}
-
-/// The default extra data in bytes.
-/// See [`default_extra_data`].
-pub fn default_extra_data_bytes() -> Bytes {
-    Bytes::from(default_extra_data().as_bytes().to_vec())
 }
 
 /// The default client version accessing the database.

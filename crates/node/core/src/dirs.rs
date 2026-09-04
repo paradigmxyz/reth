@@ -21,13 +21,6 @@ pub fn data_dir() -> Option<PathBuf> {
     dirs_next::data_dir().map(|root| root.join("reth"))
 }
 
-/// Returns the path to the reth database.
-///
-/// Refer to [`dirs_next::data_dir`] for cross-platform behavior.
-pub fn database_path() -> Option<PathBuf> {
-    data_dir().map(|root| root.join("db"))
-}
-
 /// Returns the path to the reth configuration directory.
 ///
 /// Refer to [`dirs_next::config_dir`] for cross-platform behavior.
@@ -166,11 +159,6 @@ impl<D> PlatformPath<D> {
         let path = self.0.join(chain_name);
         Self(path, std::marker::PhantomData)
     }
-
-    /// Map the inner path to a new type `T`.
-    pub fn map_to<T>(&self) -> PlatformPath<T> {
-        PlatformPath(self.0.clone(), std::marker::PhantomData)
-    }
 }
 
 /// An Optional wrapper type around [`PlatformPath`].
@@ -191,11 +179,6 @@ impl<D: XdgPath> MaybePlatformPath<D> {
             chain,
             datadir_args,
         )
-    }
-
-    /// Returns the default platform path for the specified [Chain].
-    pub fn chain_default(chain: Chain) -> ChainPath<D> {
-        PlatformPath::default().with_chain(chain, DatadirArgs::default())
     }
 
     /// Returns true if a custom path is set

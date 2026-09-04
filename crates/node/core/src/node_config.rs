@@ -217,14 +217,6 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         f(self)
     }
 
-    /// Applies a fallible function to the config.
-    pub fn try_apply<F, R>(self, f: F) -> Result<Self, R>
-    where
-        F: FnOnce(Self) -> Result<Self, R>,
-    {
-        f(self)
-    }
-
     /// Sets --dev mode for the node [`NodeConfig::dev`], if `dev` is true.
     pub const fn set_dev(self, dev: bool) -> Self {
         if dev {
@@ -252,65 +244,10 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         self
     }
 
-    /// Set the [`ChainSpec`] for the node and converts the type to that chainid.
-    pub fn map_chain<C>(self, chain: impl Into<Arc<C>>) -> NodeConfig<C> {
-        let Self {
-            datadir,
-            config,
-            metrics,
-            instance,
-            network,
-            rpc,
-            txpool,
-            builder,
-            debug,
-            db,
-            dev,
-            pruning,
-            engine,
-            era,
-            static_files,
-            storage,
-            jit,
-            ..
-        } = self;
-        NodeConfig {
-            datadir,
-            config,
-            chain: chain.into(),
-            metrics,
-            instance,
-            network,
-            rpc,
-            txpool,
-            builder,
-            debug,
-            db,
-            dev,
-            pruning,
-            engine,
-            era,
-            static_files,
-            storage,
-            jit,
-        }
-    }
-
     /// Set the metrics address for the node
     pub fn with_metrics(mut self, metrics: MetricArgs) -> Self {
         self.metrics = metrics;
         self
-    }
-
-    /// Set the instance for the node
-    pub const fn with_instance(mut self, instance: u16) -> Self {
-        self.instance = Some(instance);
-        self
-    }
-
-    /// Returns the instance value, defaulting to 1 if not set.
-    pub fn get_instance(&self) -> u16 {
-        self.instance.unwrap_or(1)
     }
 
     /// Set the network args for the node
@@ -331,12 +268,6 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         self
     }
 
-    /// Set the builder args for the node
-    pub fn with_payload_builder(mut self, builder: PayloadBuilderArgs) -> Self {
-        self.builder = builder;
-        self
-    }
-
     /// Set the debug args for the node
     pub fn with_debug(mut self, debug: DebugArgs) -> Self {
         self.debug = debug;
@@ -352,14 +283,6 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     /// Set the dev args for the node
     pub fn with_dev(mut self, dev: DevArgs) -> Self {
         self.dev = dev;
-        self
-    }
-
-    /// Set the dev block time for the node.
-    ///
-    /// This sets the interval at which the dev miner produces new blocks.
-    pub const fn with_dev_block_time(mut self, block_time: std::time::Duration) -> Self {
-        self.dev.block_time = Some(block_time);
         self
     }
 
@@ -514,21 +437,6 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     pub fn with_unused_ports(mut self) -> Self {
         self.rpc = self.rpc.with_unused_ports();
         self.network = self.network.with_unused_ports();
-        self
-    }
-
-    /// Disables all discovery services for the node.
-    pub const fn with_disabled_discovery(mut self) -> Self {
-        self.network.discovery.disable_discovery = true;
-        self
-    }
-
-    /// Effectively disables the RPC state cache by setting the cache sizes to `0`.
-    ///
-    /// By setting the cache sizes to 0, caching of newly executed or fetched blocks will be
-    /// effectively disabled.
-    pub const fn with_disabled_rpc_cache(mut self) -> Self {
-        self.rpc.rpc_state_cache.set_zero_lengths();
         self
     }
 

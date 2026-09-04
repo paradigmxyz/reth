@@ -1,15 +1,12 @@
 //! Utility functions for node startup and shutdown, for example path parsing and retrieving single
-//! blocks from the network.
+//! headers from the network.
 
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
 use alloy_rpc_types_engine::{JwtError, JwtSecret};
 use eyre::Result;
-use reth_consensus::Consensus;
-use reth_network_p2p::{
-    bodies::client::BodiesClient, headers::client::HeadersClient, priority::Priority,
-};
-use reth_primitives_traits::{Block, SealedBlock, SealedHeader};
+use reth_network_p2p::{headers::client::HeadersClient, priority::Priority};
+use reth_primitives_traits::SealedHeader;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info};
 
@@ -61,27 +58,4 @@ where
     }
 
     Ok(header)
-}
-
-/// Get a body from the network based on header
-pub async fn get_single_body<B, Client>(
-    client: Client,
-    header: SealedHeader<B::Header>,
-    consensus: impl Consensus<B>,
-) -> Result<SealedBlock<B>>
-where
-    B: Block,
-    Client: BodiesClient<Body = B::Body>,
-{
-    let (peer_id, response) = client.get_block_body(header.hash()).await?.split();
-
-    let Some(body) = response else {
-        client.report_bad_message(peer_id);
-        eyre::bail!("Invalid number of bodies received. Expected: 1. Received: 0");
-    };
-
-    let block = SealedBlock::from_sealed_parts(header, body);
-    consensus.validate_block_pre_execution(&block)?;
-
-    Ok(block)
 }

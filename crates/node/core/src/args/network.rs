@@ -665,14 +665,6 @@ impl NetworkArgs {
         }
     }
 
-    /// Resolve all trusted peers at once
-    pub async fn resolve_trusted_peers(&self) -> Result<Vec<NodeRecord>, std::io::Error> {
-        futures::future::try_join_all(
-            self.trusted_peers.iter().map(|peer| async move { peer.resolve().await }),
-        )
-        .await
-    }
-
     /// Load the p2p secret key from the provided options.
     ///
     /// If `p2p_secret_key_hex` is provided, it will be used directly.
