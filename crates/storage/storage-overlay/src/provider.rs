@@ -220,7 +220,7 @@ impl<'a, Provider, N: NodePrimitives> OverlayStateProvider<&'a Provider, N> {
             overlay_builder: None,
             state_trie_overlay_cache: Default::default(),
             metrics: Default::default(),
-            state_trie_overlay: OnceCell::new(),
+            state_trie_overlay: OnceCell::from(state_trie_overlay.clone()),
             state_trie_overlay_with_trie_changesets: OnceCell::from(state_trie_overlay),
             execution_overlay: OnceCell::new(),
             is_v2,
@@ -1241,6 +1241,20 @@ mod tests {
         provider.state_trie_overlay(true).unwrap();
 
         assert_eq!(state_provider_factory.state_trie_overlay_cache.len(), 2);
+    }
+
+    #[test]
+    fn supplied_state_trie_overlay_is_available_in_both_modes() {
+        let (factory, _) = setup_frontiers(1, 1);
+        let provider = factory.provider().unwrap();
+        let provider = OverlayStateProvider::<&_, EthPrimitives>::new_with_state_trie(
+            &provider,
+            StateTrieOverlay::new(TrieInputSorted::default()),
+            false,
+        );
+
+        assert!(provider.state_trie_overlay(false).is_ok());
+        assert!(provider.state_trie_overlay(true).is_ok());
     }
 
     #[test]
