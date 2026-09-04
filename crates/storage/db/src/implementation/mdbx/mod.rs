@@ -119,6 +119,8 @@ pub struct DatabaseArguments {
     /// environments). Choose `SafeNoSync` if performance is more important and occasional data
     /// loss is acceptable (e.g., testing or ephemeral data).
     sync_mode: SyncMode,
+    /// Whether to probe and prewrite nonresident pages before modifying their mappings.
+    prefault_write: bool,
 }
 
 impl Default for DatabaseArguments {
@@ -143,6 +145,7 @@ impl DatabaseArguments {
             exclusive: None,
             max_readers: None,
             sync_mode: SyncMode::Durable,
+            prefault_write: false,
         }
     }
 
@@ -187,6 +190,15 @@ impl DatabaseArguments {
             self.sync_mode = sync_mode;
         }
 
+        self
+    }
+
+    /// Enables or disables prefault writes without changing transaction durability.
+    ///
+    /// Enabling this can avoid reading obsolete page contents when reclaiming cold pages, at the
+    /// cost of checking page residency even when the working set is already cached.
+    pub const fn with_prefault_write(mut self, enabled: bool) -> Self {
+        self.prefault_write = enabled;
         self
     }
 
@@ -501,6 +513,7 @@ impl DatabaseEnv {
         // because we want to prioritize freelist lookup speed over database growth.
         // https://github.com/paradigmxyz/reth/blob/fa2b9b685ed9787636d962f4366caf34a9186e66/crates/storage/libmdbx-rs/mdbx-sys/libmdbx/mdbx.c#L16017.
         inner_env.set_rp_augment_limit(256 * 1024);
+        inner_env.set_prefault_write(args.prefault_write);
 
         if let Some(log_level) = args.log_level {
             // Levels higher than [LogLevel::Notice] require libmdbx built with `MDBX_DEBUG` option.

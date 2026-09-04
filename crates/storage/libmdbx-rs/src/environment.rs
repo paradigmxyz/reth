@@ -50,6 +50,7 @@ impl Environment {
             txn_dp_limit: None,
             spill_max_denominator: None,
             spill_min_denominator: None,
+            prefault_write: None,
             geometry: None,
             log_level: None,
             kind: Default::default(),
@@ -618,6 +619,7 @@ pub struct EnvironmentBuilder {
     txn_dp_limit: Option<u64>,
     spill_max_denominator: Option<u64>,
     spill_min_denominator: Option<u64>,
+    prefault_write: Option<bool>,
     geometry: Option<Geometry<(Option<usize>, Option<usize>)>>,
     log_level: Option<ffi::MDBX_log_level_t>,
     kind: EnvironmentKind,
@@ -691,6 +693,7 @@ impl EnvironmentBuilder {
                     (ffi::MDBX_opt_txn_dp_limit, self.txn_dp_limit),
                     (ffi::MDBX_opt_spill_max_denominator, self.spill_max_denominator),
                     (ffi::MDBX_opt_spill_min_denominator, self.spill_min_denominator),
+                    (ffi::MDBX_opt_prefault_write_enable, self.prefault_write.map(u64::from)),
                 ] {
                     if let Some(v) = v {
                         mdbx_result(ffi::mdbx_env_set_option(env, opt, v))?;
@@ -848,6 +851,19 @@ impl EnvironmentBuilder {
         self
     }
 
+    /// Controls prefault writes for newly allocated and reclaimed pages in WRITEMAP mode.
+    ///
+    /// When enabled, MDBX checks whether pages are resident and writes nonresident pages before
+    /// touching their mappings, avoiding reads of their obsolete contents. Disabling this avoids
+    /// residency-check overhead but can increase page faults and read I/O for cold databases.
+    /// This does not change the synchronization mode or transaction durability.
+    ///
+    /// If unset, MDBX selects its platform-dependent default.
+    pub const fn set_prefault_write(&mut self, enabled: bool) -> &mut Self {
+        self.prefault_write = Some(enabled);
+        self
+    }
+
     pub const fn set_loose_limit(&mut self, v: u64) -> &mut Self {
         self.loose_limit = Some(v);
         self
@@ -948,11 +964,57 @@ fn convert_hsr_fn(callback: Option<HandleSlowReadersCallback>) -> ffi::MDBX_hsr_
 
 #[cfg(test)]
 mod tests {
-    use crate::{Environment, Error, Geometry, HandleSlowReadersReturnCode, PageSize, WriteFlags};
+    use crate::{
+        Environment, Error, Geometry, HandleSlowReadersReturnCode, Mode, PageSize, SyncMode,
+        WriteFlags,
+    };
     use std::{
         ops::RangeInclusive,
         sync::atomic::{AtomicBool, Ordering},
     };
+
+    #[test]
+    fn prefault_write_preserves_durable_commit_and_abort() {
+        for enabled in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut builder = Environment::builder();
+            builder.write_map().set_prefault_write(enabled);
+            let env = builder.open(dir.path()).unwrap();
+            let mut configured = u64::MAX;
+            // SAFETY: The environment remains open and configured points to a valid output value.
+            let rc = unsafe {
+                ffi::mdbx_env_get_option(
+                    env.env_ptr(),
+                    ffi::MDBX_opt_prefault_write_enable,
+                    &mut configured,
+                )
+            };
+            assert_eq!(rc, ffi::MDBX_SUCCESS);
+            assert_eq!(configured, u64::from(enabled));
+            assert!(env.is_write_map());
+            assert!(matches!(
+                env.info().unwrap().mode(),
+                Mode::ReadWrite { sync_mode: SyncMode::Durable }
+            ));
+
+            let tx = env.begin_rw_txn().unwrap();
+            let dbi = tx.open_db(None).unwrap().dbi();
+            tx.put(dbi, b"keep", [1; 256], WriteFlags::empty()).unwrap();
+            tx.put(dbi, b"delete", [2; 512], WriteFlags::empty()).unwrap();
+            tx.commit().unwrap();
+            let tx = env.begin_rw_txn().unwrap();
+            tx.put(dbi, b"keep", [3; 4096], WriteFlags::empty()).unwrap();
+            tx.del(dbi, b"delete", None).unwrap();
+            drop(tx);
+            drop(env);
+
+            let reopened = builder.open(dir.path()).unwrap();
+            let tx = reopened.begin_ro_txn().unwrap();
+            let dbi = tx.open_db(None).unwrap().dbi();
+            assert_eq!(tx.get::<Vec<u8>>(dbi, b"keep").unwrap(), Some(vec![1; 256]));
+            assert_eq!(tx.get::<Vec<u8>>(dbi, b"delete").unwrap(), Some(vec![2; 512]));
+        }
+    }
 
     #[test]
     fn test_handle_slow_readers_callback() {
