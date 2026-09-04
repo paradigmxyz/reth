@@ -3366,8 +3366,9 @@ mod tests {
     }
 
     /// Tests the edge case where block < `lowest_available_block_number`.
-    /// This case cannot be tested via `HistoricalStateProviderRef` (which errors before lookup),
-    /// so we keep this RocksDB-specific test to verify the low-level behavior.
+    ///
+    /// State queries reject this before the `RocksDB` lookup, so this verifies the low-level
+    /// behavior directly.
     #[test]
     fn test_account_history_info_pruned_before_first_entry() {
         let temp_dir = TempDir::new().unwrap();
