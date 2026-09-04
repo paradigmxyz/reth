@@ -9,9 +9,9 @@ use alloy_primitives::map::AddressSet;
 use core::fmt;
 use imbl::OrdMap;
 use reth_primitives_traits::transaction::error::InvalidTransactionError;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::{
-    collections::{BTreeSet, VecDeque},
+    collections::{BinaryHeap, VecDeque},
     sync::Arc,
 };
 use tokio::sync::broadcast::{error::TryRecvError, Receiver};
@@ -98,9 +98,21 @@ pub struct BestTransactions<T: TransactionOrdering> {
     pub(crate) all: OrdMap<TransactionId, PendingTransaction<T>>,
     /// Transactions that can be executed right away: these have the expected nonce.
     ///
-    /// Once an `independent` transaction with the nonce `N` is returned, it unlocks `N+1`, which
-    /// then can be moved from the `all` set to the `independent` set.
-    pub(crate) independent: BTreeSet<PendingTransaction<T>>,
+    /// This is sorted when the iterator is created so removing the best transaction is constant
+    /// time.
+    pub(crate) independent: Vec<PendingTransaction<T>>,
+    /// Transactions unlocked or received after this iterator was created.
+    pub(crate) unlocked: BinaryHeap<PendingTransaction<T>>,
+    /// Dependent transactions in sender and nonce order.
+    pub(crate) dependents: Vec<PendingTransaction<T>>,
+    /// Index of each sender's next transaction in `dependents`.
+    pub(crate) next_dependent: FxHashMap<SenderId, usize>,
+    /// Whether transactions have been added after the static snapshot was created.
+    pub(crate) has_updates: bool,
+    /// Transactions that have already been yielded from this snapshot.
+    pub(crate) yielded: FxHashSet<TransactionId>,
+    /// Number of transactions yielded from this snapshot.
+    pub(crate) yielded_count: usize,
     /// There might be the case where a yielded transactions is invalid, this will track it.
     pub(crate) invalid: FxHashSet<SenderId>,
     /// Used to receive any new pending transactions that have been added to the pool after this
@@ -134,7 +146,8 @@ impl<T: TransactionOrdering> BestTransactions<T> {
     /// Note: for a transaction with nonce higher than the current on chain nonce this will always
     /// return an ancestor since all transactions in this pool are gapless.
     pub(crate) fn ancestor(&self, id: &TransactionId) -> Option<&PendingTransaction<T>> {
-        self.all.get(&id.unchecked_ancestor()?)
+        let ancestor = id.unchecked_ancestor()?;
+        (!self.yielded.contains(&ancestor)).then(|| self.all.get(&ancestor)).flatten()
     }
 
     /// Non-blocking read on the new pending transactions subscription channel
@@ -169,12 +182,40 @@ impl<T: TransactionOrdering> BestTransactions<T> {
         }
     }
 
-    /// Removes the currently best independent transaction from the independent set and the total
-    /// set.
+    /// Removes the best transaction from the initial transactions or transactions unlocked later.
     fn pop_best(&mut self) -> Option<PendingTransaction<T>> {
-        self.independent.pop_last().inspect(|best| {
-            self.all.remove(best.transaction.id());
+        let best = match (self.independent.last(), self.unlocked.peek()) {
+            (Some(independent), Some(unlocked)) if unlocked > independent => self.unlocked.pop(),
+            (Some(_), _) => self.independent.pop(),
+            (None, _) => self.unlocked.pop(),
+        };
+        best.inspect(|best| {
+            self.yielded_count += 1;
+            if self.new_transaction_receiver.is_some() {
+                self.yielded.insert(*best.transaction.id());
+            }
         })
+    }
+
+    /// Returns the next transaction of a sender from the static snapshot.
+    fn next_dependent(&mut self, expected: &TransactionId) -> Option<PendingTransaction<T>> {
+        let sender = expected.sender;
+        let index = *self.next_dependent.get(&sender)?;
+        let dependent = self.dependents.get(index)?.clone();
+        if self.has_updates && dependent.transaction.id() != expected {
+            return None
+        }
+        let next_index = index + 1;
+        if self
+            .dependents
+            .get(next_index)
+            .is_some_and(|transaction| transaction.transaction.sender_id() == sender)
+        {
+            self.next_dependent.insert(sender, next_index);
+        } else {
+            self.next_dependent.remove(&sender);
+        }
+        Some(dependent)
     }
 
     /// Checks for new transactions that have come into the `PendingPool` after this iterator was
@@ -186,13 +227,15 @@ impl<T: TransactionOrdering> BestTransactions<T> {
 
                 match pending_tx {
                     IncomingTransaction::Process(tx) => {
+                        self.has_updates = true;
                         let tx_id = *tx.transaction.id();
                         if self.ancestor(&tx_id).is_none() {
-                            self.independent.insert(tx.clone());
+                            self.unlocked.push(tx.clone());
                         }
                         self.all.insert(tx_id, tx);
                     }
                     IncomingTransaction::Stash(tx) => {
+                        self.has_updates = true;
                         let tx_id = *tx.transaction.id();
                         self.all.insert(tx_id, tx);
                     }
@@ -225,8 +268,12 @@ impl<T: TransactionOrdering> BestTransactions<T> {
             }
 
             // Insert transactions that just got unlocked.
-            if let Some(unlocked) = self.all.get(&best.unlocks()) {
-                self.independent.insert(unlocked.clone());
+            let unlocks = best.unlocks();
+            let snapshot_unlocked = self.next_dependent(&unlocks);
+            let unlocked =
+                if self.has_updates { self.all.get(&unlocks).cloned() } else { snapshot_unlocked };
+            if let Some(unlocked) = unlocked {
+                self.unlocked.push(unlocked);
             }
 
             if self.skip_blobs && best.transaction.is_eip4844() {
@@ -306,7 +353,12 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (0, self.new_transaction_receiver.is_none().then_some(self.all.len()))
+        (
+            0,
+            self.new_transaction_receiver
+                .is_none()
+                .then_some(self.all.len().saturating_sub(self.yielded_count)),
+        )
     }
 }
 
@@ -510,7 +562,7 @@ mod tests {
 
         // check tx are returned in order
         for nonce in 0..num_tx {
-            assert_eq!(best.independent.len(), 1);
+            assert_eq!(best.independent.len() + best.unlocked.len(), 1);
             let tx = best.next().unwrap();
             assert_eq!(tx.nonce(), nonce);
         }
@@ -855,8 +907,8 @@ mod tests {
         assert!(best.all.contains_key(valid_new_tx.id()));
 
         // Verify that the new transaction has been added to the 'independent' set
-        assert_eq!(best.independent.len(), 2);
-        assert!(best.independent.contains(&pending_tx));
+        assert_eq!(best.independent.len() + best.unlocked.len(), 2);
+        assert!(best.unlocked.iter().any(|transaction| transaction == &pending_tx));
     }
 
     #[test]
@@ -902,8 +954,8 @@ mod tests {
         assert!(best.all.contains_key(valid_new_tx1.id()));
 
         // Verify that the new transaction has been added to the 'independent' set
-        assert_eq!(best.independent.len(), 2);
-        assert!(best.independent.contains(&pending_tx1));
+        assert_eq!(best.independent.len() + best.unlocked.len(), 2);
+        assert!(best.unlocked.iter().any(|transaction| transaction == &pending_tx1));
 
         // Attempt to add a new transaction with a different nonce (not a duplicate)
         let base_tx2 = base_tx1.with_nonce(6);
@@ -925,8 +977,8 @@ mod tests {
         assert!(best.all.contains_key(valid_new_tx2.id()));
 
         // Verify that the new transaction has not been added to the 'independent' set
-        assert_eq!(best.independent.len(), 2);
-        assert!(!best.independent.contains(&pending_tx2));
+        assert_eq!(best.independent.len() + best.unlocked.len(), 2);
+        assert!(!best.unlocked.iter().any(|transaction| transaction == &pending_tx2));
     }
 
     #[test]
