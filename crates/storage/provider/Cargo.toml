@@ -87,10 +87,6 @@ tokio-stream = { workspace = true, features = ["sync"] }
 
 [features]
 jemalloc = ["rocksdb/jemalloc"]
-partial-persistence = [
-    "reth-stages-types/partial-persistence",
-    "reth-storage-overlay/partial-persistence",
-]
 test-utils = [
     "reth-db/test-utils",
     "reth-nippy-jar/test-utils",

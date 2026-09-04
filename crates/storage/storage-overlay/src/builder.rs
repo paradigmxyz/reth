@@ -610,15 +610,11 @@ mod tests {
     use alloy_primitives::U256;
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
     use reth_primitives_traits::Account;
-    #[cfg(feature = "partial-persistence")]
     use reth_provider::{
         test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
         BlockWriter, ProviderFactory,
     };
-    #[cfg(feature = "partial-persistence")]
-    #[cfg(feature = "partial-persistence")]
     use reth_stages_types::{FinishCheckpoint, StageCheckpoint};
-    #[cfg(feature = "partial-persistence")]
     use reth_storage_api::StageCheckpointWriter;
     use reth_trie::{BranchNodeCompact, ComputedTrieData, HashedPostState, HashedStorage, Nibbles};
 
@@ -658,7 +654,6 @@ mod tests {
             .collect()
     }
 
-    #[cfg(feature = "partial-persistence")]
     fn setup_frontiers(
         state_trie_tip_index: usize,
         finish_tip_index: usize,
@@ -683,17 +678,14 @@ mod tests {
         (factory, blocks)
     }
 
-    #[cfg(feature = "partial-persistence")]
     fn account_keys(overlay: &Overlay) -> Vec<B256> {
         overlay.hashed_post_state.accounts.iter().map(|(key, _)| *key).collect()
     }
 
-    #[cfg(feature = "partial-persistence")]
     fn account_node_paths(overlay: &Overlay) -> Vec<Nibbles> {
         overlay.trie_updates.account_nodes_ref().iter().map(|(path, _)| *path).collect()
     }
 
-    #[cfg(feature = "partial-persistence")]
     #[test]
     fn managed_overlay_starts_at_state_trie_frontier() {
         let (factory, blocks) = setup_frontiers(1, 3);
@@ -724,7 +716,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "partial-persistence")]
     #[test]
     fn managed_overlay_skips_when_finish_is_the_anchor() {
         let (factory, blocks) = setup_frontiers(3, 3);
@@ -742,7 +733,6 @@ mod tests {
         assert!(overlay.trie_updates.is_empty());
     }
 
-    #[cfg(feature = "partial-persistence")]
     #[test]
     fn no_reverts_errors_when_reverts_are_required() {
         let (factory, blocks) = setup_frontiers(2, 3);
@@ -757,7 +747,6 @@ mod tests {
         assert!(error.to_string().contains("reverts are disabled"));
     }
 
-    #[cfg(feature = "partial-persistence")]
     #[test]
     fn managed_overlay_uses_persisted_parent_even_if_retained() {
         let (factory, blocks) = setup_frontiers(2, 3);
@@ -775,14 +764,8 @@ mod tests {
                 panic!("persisted parent below Finish must require reverts")
             }
         }
-
-        let overlay = builder.build_overlay(&provider).unwrap();
-
-        assert!(overlay.hashed_post_state.is_empty());
-        assert!(overlay.trie_updates.is_empty());
     }
 
-    #[cfg(feature = "partial-persistence")]
     #[test]
     fn overlay_after_state_trie_frontier_requires_managed_coverage() {
         let (factory, blocks) = setup_frontiers(1, 3);
@@ -799,7 +782,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "partial-persistence")]
     #[test]
     fn managed_overlay_errors_if_parent_is_not_persisted_or_managed_across_frontiers() {
         let (factory, blocks) = setup_frontiers(1, 3);

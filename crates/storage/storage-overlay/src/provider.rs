@@ -250,7 +250,7 @@ where
     }
 }
 
-#[cfg(all(test, feature = "partial-persistence"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::OverlayManager;

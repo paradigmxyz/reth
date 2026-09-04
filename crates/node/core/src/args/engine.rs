@@ -297,7 +297,7 @@ pub struct EngineArgs {
     ///
     /// To persist blocks as fast as the node receives them, set this value to zero. This will
     /// cause more frequent DB writes.
-    #[arg(long = "engine.persistence-threshold", default_value_t = DefaultEngineValues::get_global().persistence_threshold)]
+    #[arg(long = "engine.persistence-threshold", env = "RETH_ENGINE_PERSISTENCE_THRESHOLD", default_value_t = DefaultEngineValues::get_global().persistence_threshold)]
     pub persistence_threshold: u64,
 
     /// Configure the maximum number of blocks beyond the in-memory buffer target that may await
@@ -310,18 +310,12 @@ pub struct EngineArgs {
     #[arg(long = "engine.persistence-backpressure-threshold")]
     pub persistence_backpressure_threshold: Option<u64>,
 
-    /// Configure how many of the blocks being persisted should only mask state/trie writes instead
-    /// of durably persisting their state/trie updates in the current cycle.
-    #[cfg_attr(
-        feature = "partial-persistence",
-        arg(
-            long = "engine.num-state-masking-blocks",
-            default_value_t = DefaultEngineValues::get_global().num_state_masking_blocks
-        )
-    )]
-    #[cfg_attr(
-        not(feature = "partial-persistence"),
-        arg(skip = DefaultEngineValues::get_global().num_state_masking_blocks)
+    /// EXPERIMENTAL: Configure how many of the blocks being persisted should only mask state/trie
+    /// writes instead of durably persisting their state/trie updates in the current cycle.
+    #[arg(
+        long = "engine.num-state-masking-blocks",
+        env = "RETH_ENGINE_NUM_STATE_MASKING_BLOCKS",
+        default_value_t = DefaultEngineValues::get_global().num_state_masking_blocks
     )]
     pub num_state_masking_blocks: u64,
 
@@ -912,7 +906,6 @@ mod tests {
         assert!(err.contains("engine.persistence-threshold"));
     }
 
-    #[cfg(feature = "partial-persistence")]
     #[test]
     fn test_parse_num_state_masking_blocks() {
         let args = CommandParser::<EngineArgs>::parse_from([
@@ -925,17 +918,6 @@ mod tests {
         .args;
 
         assert_eq!(args.tree_config().num_state_masking_blocks(), 7);
-    }
-
-    #[cfg(not(feature = "partial-persistence"))]
-    #[test]
-    fn num_state_masking_blocks_is_hidden_without_partial_persistence() {
-        assert!(CommandParser::<EngineArgs>::try_parse_from([
-            "reth",
-            "--engine.num-state-masking-blocks",
-            "1",
-        ])
-        .is_err());
     }
 
     #[test]
