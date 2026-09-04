@@ -93,7 +93,7 @@ impl From<HistoryInfo> for ReaderHistoryInfo {
 ///
 /// This logic is shared between MDBX cursor-based lookups and `RocksDB` iterator lookups.
 #[inline]
-pub fn compute_history_rank(
+pub(crate) fn compute_history_rank(
     chunk: &BlockNumberList,
     block_number: BlockNumber,
 ) -> (u64, Option<u64>) {
@@ -112,7 +112,7 @@ pub fn compute_history_rank(
 /// Returns `true` when `rank == 0` (first entry in shard) and the found block doesn't match
 /// the target block number. In this case, we need to check if there's a previous shard.
 #[inline]
-pub fn needs_prev_shard_check(
+pub(crate) fn needs_prev_shard_check(
     rank: u64,
     found_block: Option<u64>,
     block_number: BlockNumber,
@@ -124,7 +124,7 @@ pub fn needs_prev_shard_check(
 ///
 /// Seeks to the shard containing `block_number`, verifies the key via `key_filter`,
 /// and checks previous shard to detect if we're before the first write.
-pub fn history_info<T, K, C>(
+pub(crate) fn history_info<T, K, C>(
     cursor: &mut C,
     key: K,
     block_number: BlockNumber,

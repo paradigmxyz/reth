@@ -267,16 +267,6 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
         self.headers.lock().insert(hash, header);
     }
 
-    /// Add multiple headers to local header store
-    pub fn extend_headers(
-        &self,
-        iter: impl IntoIterator<Item = (B256, <T::Block as Block>::Header)>,
-    ) {
-        for (hash, header) in iter {
-            self.add_header(hash, header)
-        }
-    }
-
     /// Add account to local account store
     pub fn add_account(&self, address: Address, account: ExtendedAccount) {
         self.accounts.lock().insert(address, account);
@@ -294,13 +284,6 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
         self.receipts.lock().insert(block_number, receipts);
     }
 
-    /// Add multiple receipts to local receipt store
-    pub fn extend_receipts(&self, iter: impl IntoIterator<Item = (BlockNumber, Vec<T::Receipt>)>) {
-        for (block_number, receipts) in iter {
-            self.add_receipts(block_number, receipts);
-        }
-    }
-
     /// Add block body indices to local store
     pub fn add_block_body_indices(
         &self,
@@ -313,11 +296,6 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
     /// Adds a stage checkpoint to the local store.
     pub fn add_stage_checkpoint(&self, id: StageId, checkpoint: StageCheckpoint) {
         self.stage_checkpoints.lock().insert(id, checkpoint);
-    }
-
-    /// Add state root to local state root store
-    pub fn add_state_root(&self, state_root: B256) {
-        self.state_roots.lock().push(state_root);
     }
 
     /// Set chain spec.

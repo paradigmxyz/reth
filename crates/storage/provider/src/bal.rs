@@ -57,11 +57,6 @@ impl BalConfig {
     /// Default block distance for BALs kept in memory.
     pub const DEFAULT_IN_MEMORY_RETENTION_DISTANCE: u64 = BAL_RETENTION_PERIOD_SLOTS;
 
-    /// Returns a config with no in-memory BAL retention limit.
-    pub const fn unbounded() -> Self {
-        Self { in_memory_retention: None }
-    }
-
     /// Returns a config that keeps BALs within the given block distance in memory.
     pub const fn with_in_memory_retention_distance(blocks: u64) -> Self {
         Self::with_in_memory_retention(PruneMode::Distance(blocks))
@@ -351,7 +346,7 @@ mod tests {
 
     #[test]
     fn unbounded_retention_keeps_old_bals() {
-        let store = InMemoryBalStore::new(BalConfig::unbounded());
+        let store = InMemoryBalStore::new(BalConfig { in_memory_retention: None });
         let old_hash = B256::random();
         let tip_hash = B256::random();
         let old_bal = Bytes::from_static(b"old");
@@ -460,7 +455,7 @@ mod tests {
 
     #[tokio::test]
     async fn bal_stream_skips_lagged_notifications() {
-        let store = InMemoryBalStore::new(BalConfig::unbounded());
+        let store = InMemoryBalStore::new(BalConfig { in_memory_retention: None });
         let mut stream = store.bal_stream();
 
         for number in 0..=DEFAULT_BAL_NOTIFICATION_CHANNEL_SIZE as u64 {

@@ -89,7 +89,7 @@ where
 }
 
 /// Inserts account history indices at the given block.
-pub fn insert_account_history<'a, 'b, Provider>(
+fn insert_account_history<'a, 'b, Provider>(
     provider: &Provider,
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
     block: u64,
@@ -115,7 +115,7 @@ where
 }
 
 /// Inserts storage history indices at the given block.
-pub fn insert_storage_history<'a, 'b, Provider>(
+fn insert_storage_history<'a, 'b, Provider>(
     provider: &Provider,
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
     block: u64,

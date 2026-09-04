@@ -51,8 +51,8 @@ use std::io::BufRead;
 use tracing::{debug, error, info, trace, warn};
 
 pub use reth_provider::init::{
-    insert_account_history, insert_genesis_account_history, insert_genesis_history,
-    insert_genesis_storage_history, insert_history, insert_storage_history,
+    insert_genesis_account_history, insert_genesis_history, insert_genesis_storage_history,
+    insert_history,
 };
 
 /// Default soft limit for number of bytes to read from state dump file, before inserting into

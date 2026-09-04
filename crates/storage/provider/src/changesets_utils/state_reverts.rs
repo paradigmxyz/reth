@@ -4,8 +4,7 @@ use std::iter::Peekable;
 
 /// Iterator over storage reverts.
 /// See [`StorageRevertsIter::next`] for more details.
-#[expect(missing_debug_implementations)]
-pub struct StorageRevertsIter<R: Iterator, W: Iterator> {
+pub(crate) struct StorageRevertsIter<R: Iterator, W: Iterator> {
     reverts: Peekable<R>,
     wiped: Peekable<W>,
 }
@@ -16,7 +15,7 @@ where
     W: Iterator<Item = (B256, U256)>,
 {
     /// Create a new iterator over storage reverts.
-    pub fn new(
+    pub(crate) fn new(
         reverts: impl IntoIterator<IntoIter = R>,
         wiped: impl IntoIterator<IntoIter = W>,
     ) -> Self {

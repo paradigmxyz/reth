@@ -62,7 +62,7 @@ impl<N> ProviderFactoryBuilder<N> {
     ///     let provider_factory = ProviderFactoryBuilder::<N>::default()
     ///         .open_read_only(
     ///             MAINNET.clone(),
-    ///             ReadOnlyConfig::from_datadir("datadir").no_watch(),
+    ///             ReadOnlyConfig { watch: false, ..ReadOnlyConfig::from_datadir("datadir") },
     ///             runtime,
     ///         )
     ///         .unwrap();
@@ -171,72 +171,6 @@ impl ReadOnlyConfig {
     /// changes to the database are made.
     pub const fn disable_long_read_transaction_safety(mut self) -> Self {
         self.db_args.max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded));
-        self
-    }
-
-    /// Derives the [`ReadOnlyConfig`] from the database dir.
-    ///
-    /// By default this assumes the following datadir layout:
-    ///
-    /// ```text
-    ///    - db
-    ///    - rocksdb
-    ///    - static_files
-    /// ```
-    ///
-    /// # Panics
-    ///
-    /// If the path does not exist
-    pub fn from_db_dir(db_dir: impl AsRef<Path>) -> Self {
-        let db_dir = db_dir.as_ref();
-        let datadir = std::fs::canonicalize(db_dir).unwrap().parent().unwrap().to_path_buf();
-        let static_files_dir = datadir.join("static_files");
-        let rocksdb_dir = datadir.join("rocksdb");
-        Self::from_dirs(db_dir, static_files_dir, rocksdb_dir)
-    }
-
-    /// Creates the config for the given paths.
-    ///
-    /// By default this watches the static files directory for changes, see also
-    /// [`ProviderFactory::with_read_only_sync`]
-    pub fn from_dirs(
-        db_dir: impl AsRef<Path>,
-        static_files_dir: impl AsRef<Path>,
-        rocksdb_dir: impl AsRef<Path>,
-    ) -> Self {
-        Self {
-            db_dir: db_dir.as_ref().into(),
-            db_args: Default::default(),
-            static_files_dir: static_files_dir.as_ref().into(),
-            rocksdb_dir: rocksdb_dir.as_ref().into(),
-            watch: true,
-        }
-    }
-
-    /// Configures the db arguments used when opening the database.
-    pub fn with_db_args(mut self, db_args: impl Into<DatabaseArguments>) -> Self {
-        self.db_args = db_args.into();
-        self
-    }
-
-    /// Configures the db directory.
-    pub fn with_db_dir(mut self, db_dir: impl Into<PathBuf>) -> Self {
-        self.db_dir = db_dir.into();
-        self
-    }
-
-    /// Configures the static file directory.
-    pub fn with_static_file_dir(mut self, static_file_dir: impl Into<PathBuf>) -> Self {
-        self.static_files_dir = static_file_dir.into();
-        self
-    }
-
-    /// Don't watch the static files directory for changes.
-    ///
-    /// This is only recommended if this is used without a running node instance that modifies
-    /// the database.
-    pub const fn no_watch(mut self) -> Self {
-        self.watch = false;
         self
     }
 }

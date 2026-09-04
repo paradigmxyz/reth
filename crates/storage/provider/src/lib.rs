@@ -22,13 +22,12 @@ pub use traits::*;
 /// Provider trait implementations.
 pub mod providers;
 pub use providers::{
-    DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, LatestStateProvider,
-    LatestStateProviderRef, ProviderFactory, PruneShardOutcome, PrunedIndices, SaveBlocksInput,
-    StaticFileAccess, StaticFileProviderBuilder, StaticFileWriteCtx, StaticFileWriter,
+    DatabaseProvider, DatabaseProviderRW, LatestStateProvider, LatestStateProviderRef,
+    ProviderFactory, SaveBlocksInput, StaticFileProviderBuilder, StaticFileWriter,
 };
 
 pub mod changeset_walker;
-pub mod changesets_utils;
+mod changesets_utils;
 
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers for mocking the Provider.

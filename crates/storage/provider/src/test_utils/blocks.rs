@@ -1,5 +1,5 @@
 //! Dummy blocks and data for tests
-use crate::{DBProvider, DatabaseProviderRW, ExecutionOutcome};
+use crate::ExecutionOutcome;
 use alloy_consensus::{TxLegacy, EMPTY_OMMER_ROOT_HASH};
 use alloy_primitives::{
     b256, hex_literal::hex, map::HashMap, Address, BlockNumber, Bytes, Log, TxKind, B256, U256,
@@ -8,53 +8,11 @@ use alloy_primitives::{
 use alloy_consensus::Header;
 use alloy_eips::eip4895::{Withdrawal, Withdrawals};
 use alloy_primitives::Signature;
-use reth_db_api::{database::Database, models::StoredBlockBodyIndices, tables};
 use reth_ethereum_primitives::{BlockBody, Receipt, Transaction, TransactionSigned, TxType};
-use reth_node_types::NodeTypes;
 use reth_primitives_traits::{Account, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_trie::root::{state_root_unhashed, storage_root_unhashed};
 use revm::{database::BundleState, state::AccountInfo};
 use std::{str::FromStr, sync::LazyLock};
-
-/// Assert genesis block
-pub fn assert_genesis_block<DB: Database, N: NodeTypes>(
-    provider: &DatabaseProviderRW<DB, N>,
-    g: SealedBlock<reth_ethereum_primitives::Block>,
-) {
-    let n = g.number;
-    let h = B256::ZERO;
-    let tx = provider;
-
-    // check if tables contain only the genesis block data
-    assert_eq!(tx.table::<tables::Headers>().unwrap(), vec![(g.number, g.header().clone())]);
-
-    assert_eq!(tx.table::<tables::HeaderNumbers>().unwrap(), vec![(h, n)]);
-    assert_eq!(tx.table::<tables::CanonicalHeaders>().unwrap(), vec![(n, h)]);
-    assert_eq!(
-        tx.table::<tables::BlockBodyIndices>().unwrap(),
-        vec![(0, StoredBlockBodyIndices::default())]
-    );
-    assert_eq!(tx.table::<tables::BlockOmmers>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::BlockWithdrawals>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::Transactions>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::TransactionBlocks>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::TransactionHashNumbers>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::Receipts>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::PlainAccountState>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::PlainStorageState>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::AccountsHistory>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::StoragesHistory>().unwrap(), vec![]);
-    // Reorged bytecodes are not reverted per https://github.com/paradigmxyz/reth/issues/1588
-    // assert_eq!(tx.table::<tables::Bytecodes>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::AccountChangeSets>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::StorageChangeSets>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::HashedAccounts>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::HashedStorages>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::AccountsTrie>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::StoragesTrie>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::TransactionSenders>().unwrap(), vec![]);
-    // StageCheckpoints is not updated in tests
-}
 
 pub(crate) static TEST_BLOCK: LazyLock<SealedBlock<reth_ethereum_primitives::Block>> =
     LazyLock::new(|| {
@@ -123,22 +81,6 @@ pub struct BlockchainTestData {
     pub blocks: Vec<(RecoveredBlock<reth_ethereum_primitives::Block>, ExecutionOutcome)>,
 }
 
-impl BlockchainTestData {
-    /// Create test data with two blocks that are connected, specifying their block numbers.
-    pub fn default_from_number(first: BlockNumber) -> Self {
-        let one = block1(first);
-        let mut extended_execution_outcome = one.1.clone();
-        let two = block2(first + 1, one.0.hash(), &extended_execution_outcome);
-        extended_execution_outcome.extend(two.1.clone());
-        let three = block3(first + 2, two.0.hash(), &extended_execution_outcome);
-        extended_execution_outcome.extend(three.1.clone());
-        let four = block4(first + 3, three.0.hash(), &extended_execution_outcome);
-        extended_execution_outcome.extend(four.1.clone());
-        let five = block5(first + 4, four.0.hash(), &extended_execution_outcome);
-        Self { genesis: genesis(), blocks: vec![one, two, three, four, five] }
-    }
-}
-
 impl Default for BlockchainTestData {
     fn default() -> Self {
         let one = block1(1);
@@ -155,7 +97,7 @@ impl Default for BlockchainTestData {
 }
 
 /// Genesis block
-pub fn genesis() -> SealedBlock<reth_ethereum_primitives::Block> {
+fn genesis() -> SealedBlock<reth_ethereum_primitives::Block> {
     SealedBlock::from_sealed_parts(
         SealedHeader::new(
             Header { number: 0, difficulty: U256::from(1), ..Default::default() },

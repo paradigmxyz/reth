@@ -7,9 +7,9 @@ use crate::{
     traits::{BlockSource, ReceiptProvider},
     BalProvider, BalStoreHandle, BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider,
     DatabaseProviderFactory, EitherWriterDestination, HeaderProvider, HeaderSyncGapProvider,
-    InMemoryBalStore, MetadataProvider, ProviderError, PruneCheckpointReader,
-    RocksDBProviderFactory, StageCheckpointReader, StateProviderBox, StaticFileProviderFactory,
-    StaticFileWriter, TransactionVariant, TransactionsProvider,
+    InMemoryBalStore, MetadataProvider, PruneCheckpointReader, RocksDBProviderFactory,
+    StageCheckpointReader, StateProviderBox, StaticFileProviderFactory, StaticFileWriter,
+    TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::BlockHashOrNumber;
@@ -45,7 +45,7 @@ use std::{
 use tracing::{info, instrument, trace, warn};
 
 mod provider;
-pub use provider::{CommitOrder, DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
+pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
 
 mod save_blocks;
 pub use save_blocks::SaveBlocksInput;
@@ -163,23 +163,6 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             database_provider_metrics,
             read_only_sync: None,
         })
-    }
-
-    /// Create new database provider factory and perform consistency checks.
-    ///
-    /// This will call [`Self::check_consistency`] internally and return
-    /// [`ProviderError::MustUnwind`] if inconsistencies are found. It may also
-    /// return any [`ProviderError`] that [`Self::new`] may return, or that are
-    /// encountered during consistency checks.
-    pub fn new_checked(
-        db: N::DB,
-        chain_spec: Arc<N::ChainSpec>,
-        static_file_provider: StaticFileProvider<N::Primitives>,
-        rocksdb_provider: RocksDBProvider,
-        runtime: reth_tasks::Runtime,
-    ) -> ProviderResult<Self> {
-        Self::new(db, chain_spec, static_file_provider, rocksdb_provider, runtime)
-            .and_then(Self::assert_consistent)
     }
 }
 
@@ -461,30 +444,6 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     pub fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::db", "Returning latest state provider");
         Ok(Box::new(LatestStateProvider::new(self.database_provider_ro()?)))
-    }
-
-    /// Asserts that the static files and database are consistent. If not,
-    /// returns [`ProviderError::MustUnwind`] with the appropriate unwind
-    /// target. May also return any [`ProviderError`] that
-    /// [`Self::check_consistency`] may return.
-    pub fn assert_consistent(self) -> ProviderResult<Self> {
-        let (rocksdb_unwind, static_file_unwind) = self.check_consistency()?;
-
-        let source = match (rocksdb_unwind, static_file_unwind) {
-            (None, None) => return Ok(self),
-            (Some(_), Some(_)) => "RocksDB and Static Files",
-            (Some(_), None) => "RocksDB",
-            (None, Some(_)) => "Static Files",
-        };
-
-        Err(ProviderError::MustUnwind {
-            data_source: source,
-            unwind_to: rocksdb_unwind
-                .into_iter()
-                .chain(static_file_unwind)
-                .min()
-                .expect("at least one unwind target must be Some"),
-        })
     }
 
     /// Checks the consistency between the static files and the database. This

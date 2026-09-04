@@ -1,13 +1,12 @@
 use crate::{
     providers::{
-        NodeTypesForProvider, ProviderNodeTypes, RocksDBBuilder, StaticFileProvider,
-        StaticFileProviderBuilder,
+        NodeTypesForProvider, ProviderNodeTypes, RocksDBBuilder, StaticFileProviderBuilder,
     },
     HashingWriter, ProviderFactory, TrieWriter,
 };
 use alloy_primitives::B256;
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
-use reth_db::{mdbx::DatabaseArguments, test_utils::TempDatabase, DatabaseEnv};
+use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_errors::ProviderResult;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_node_types::NodeTypesWithDBAdapter;
@@ -28,7 +27,6 @@ mod noop;
 
 pub use mock::{ExtendedAccount, MockEthProvider};
 pub use noop::NoopProvider;
-pub use reth_chain_state::test_utils::TestCanonStateSubscriptions;
 
 /// Mock [`reth_node_types::NodeTypes`] for testing.
 pub type MockNodeTypes = reth_node_types::AnyNodeTypesWithEngine<
@@ -69,13 +67,6 @@ pub fn create_test_provider_factory_with_genesis_block_number(
     create_test_provider_factory_with_chain_spec(chain_spec)
 }
 
-/// Creates test provider factory with provided chain spec.
-pub fn create_test_provider_factory_with_node_types<N: NodeTypesForProvider>(
-    chain_spec: Arc<N::ChainSpec>,
-) -> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<TempDatabase<DatabaseEnv>>>> {
-    create_test_provider_factory_with_node_types_and_genesis(chain_spec, 0)
-}
-
 fn create_test_provider_factory_with_node_types_and_genesis<N: NodeTypesForProvider>(
     chain_spec: Arc<N::ChainSpec>,
     genesis_block_number: u64,
@@ -100,38 +91,6 @@ fn create_test_provider_factory_with_node_types_and_genesis<N: NodeTypesForProvi
             .with_genesis_block_number(genesis_block_number)
             .build()
             .expect("static file provider"),
-        RocksDBBuilder::new(&rocksdb_path)
-            .with_default_tables()
-            .build()
-            .expect("failed to create test RocksDB provider"),
-        reth_tasks::Runtime::test(),
-    )
-    .expect("failed to create test provider factory")
-}
-
-/// Creates test provider factory with provided chain spec and custom database arguments.
-///
-/// Same as [`create_test_provider_factory_with_chain_spec`] but allows overriding the default
-/// test database arguments (e.g. to increase the MDBX geometry for heavy benchmarks).
-pub fn create_test_provider_factory_with_chain_spec_and_db_args(
-    chain_spec: Arc<ChainSpec>,
-    db_args: DatabaseArguments,
-) -> ProviderFactory<MockNodeTypesWithDB> {
-    let datadir_path = reth_db::test_utils::tempdir_path();
-
-    let db_path = datadir_path.join("db");
-    let static_files_path = datadir_path.join("static_files");
-    let rocksdb_path = datadir_path.join("rocksdb");
-
-    std::fs::create_dir_all(&static_files_path).expect("failed to create static_files dir");
-
-    let db = reth_db::init_db(&db_path, db_args).expect("failed to init db");
-    let db = Arc::new(TempDatabase::new(db, datadir_path));
-
-    ProviderFactory::new(
-        db,
-        chain_spec,
-        StaticFileProvider::read_write(static_files_path).expect("static file provider"),
         RocksDBBuilder::new(&rocksdb_path)
             .with_default_tables()
             .build()

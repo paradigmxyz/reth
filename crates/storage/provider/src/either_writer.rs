@@ -492,20 +492,6 @@ where
         }
     }
 
-    /// Deletes a storage history entry.
-    pub fn delete_storage_history(&mut self, key: StorageShardedKey) -> ProviderResult<()> {
-        match self {
-            Self::Database(cursor) => {
-                if cursor.seek_exact(key)?.is_some() {
-                    cursor.delete_current()?;
-                }
-                Ok(())
-            }
-            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
-            Self::RocksDB(batch) => batch.delete::<tables::StoragesHistory>(key),
-        }
-    }
-
     /// Appends a storage history entry (for first sync - more efficient).
     pub fn append_storage_history(
         &mut self,
@@ -588,20 +574,6 @@ where
             }
             Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
             Self::RocksDB(batch) => batch.get::<tables::AccountsHistory>(ShardedKey::last(address)),
-        }
-    }
-
-    /// Deletes an account history entry.
-    pub fn delete_account_history(&mut self, key: ShardedKey<Address>) -> ProviderResult<()> {
-        match self {
-            Self::Database(cursor) => {
-                if cursor.seek_exact(key)?.is_some() {
-                    cursor.delete_current()?;
-                }
-                Ok(())
-            }
-            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
-            Self::RocksDB(batch) => batch.delete::<tables::AccountsHistory>(key),
         }
     }
 }
@@ -834,18 +806,6 @@ impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
 where
     CURSOR: DbCursorRO<tables::StoragesHistory>,
 {
-    /// Gets a storage history shard entry for the given [`StorageShardedKey`], if present.
-    pub fn get_storage_history(
-        &mut self,
-        key: StorageShardedKey,
-    ) -> ProviderResult<Option<BlockNumberList>> {
-        match self {
-            Self::Database(cursor, _) => Ok(cursor.seek_exact(key)?.map(|(_, v)| v)),
-            Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
-            Self::RocksDB(snapshot) => snapshot.get::<tables::StoragesHistory>(key),
-        }
-    }
-
     /// Lookup storage history and return [`HistoryInfo`].
     pub fn storage_history_info(
         &mut self,
@@ -882,18 +842,6 @@ impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
 where
     CURSOR: DbCursorRO<tables::AccountsHistory>,
 {
-    /// Gets an account history shard entry for the given [`ShardedKey`], if present.
-    pub fn get_account_history(
-        &mut self,
-        key: ShardedKey<Address>,
-    ) -> ProviderResult<Option<BlockNumberList>> {
-        match self {
-            Self::Database(cursor, _) => Ok(cursor.seek_exact(key)?.map(|(_, v)| v)),
-            Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
-            Self::RocksDB(snapshot) => snapshot.get::<tables::AccountsHistory>(key),
-        }
-    }
-
     /// Lookup account history and return [`HistoryInfo`].
     pub fn account_history_info(
         &mut self,

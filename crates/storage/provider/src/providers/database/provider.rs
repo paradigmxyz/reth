@@ -88,7 +88,7 @@ use tracing::{debug, instrument, trace};
 
 /// Determines the commit order for database operations.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum CommitOrder {
+pub(crate) enum CommitOrder {
     /// Normal commit order: static files first, then `RocksDB`, then MDBX.
     #[default]
     Normal,
@@ -99,7 +99,7 @@ pub enum CommitOrder {
 
 impl CommitOrder {
     /// Returns true if this is unwind commit order.
-    pub const fn is_unwind(&self) -> bool {
+    pub(crate) const fn is_unwind(&self) -> bool {
         matches!(self, Self::Unwind)
     }
 }
@@ -3681,8 +3681,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
     ///
     /// History indices are written to the appropriate backend based on storage settings:
     /// MDBX when `*_history_in_rocksdb` is false, `RocksDB` when true.
-    ///
-    /// TODO(joshie): this fn should be moved to `UnifiedStorageWriter` eventually
     fn append_blocks_with_state(
         &self,
         blocks: Vec<RecoveredBlock<Self::Block>>,

@@ -14,8 +14,9 @@ pub use static_file::{
 };
 
 mod state;
+pub(crate) use state::historical::{compute_history_rank, history_info, needs_prev_shard_check};
 pub use state::{
-    historical::{compute_history_rank, history_info, needs_prev_shard_check, HistoryInfo},
+    historical::HistoryInfo,
     latest::{LatestStateProvider, LatestStateProviderRef},
 };
 
@@ -29,7 +30,7 @@ pub(crate) mod rocksdb;
 
 pub use rocksdb::{
     PruneShardOutcome, PrunedIndices, RocksDBBatch, RocksDBBuilder, RocksDBIter, RocksDBProvider,
-    RocksDBRawIter, RocksDBStats, RocksDBTableStats, RocksReadSnapshot, RocksTx,
+    RocksDBRawIter, RocksDBTableStats, RocksReadSnapshot, RocksTx,
 };
 
 /// Helper trait to bound [`NodeTypes`] so that combined with database they satisfy

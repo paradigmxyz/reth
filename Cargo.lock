@@ -9780,7 +9780,6 @@ dependencies = [
  "reth-tasks",
  "reth-testing-utils",
  "reth-tokio-util",
- "reth-tracing",
  "reth-trie",
  "reth-trie-db",
  "revm",

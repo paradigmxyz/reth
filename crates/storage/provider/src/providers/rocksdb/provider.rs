@@ -69,19 +69,6 @@ pub struct RocksDBTableStats {
     pub pending_compaction_bytes: u64,
 }
 
-/// Database-level statistics for `RocksDB`.
-///
-/// Contains both per-table statistics and DB-level metrics like WAL size.
-#[derive(Debug, Clone)]
-pub struct RocksDBStats {
-    /// Statistics for each table (column family).
-    pub tables: Vec<RocksDBTableStats>,
-    /// Total size of WAL (Write-Ahead Log) files in bytes.
-    ///
-    /// WAL is shared across all tables and not included in per-table metrics.
-    pub wal_size_bytes: u64,
-}
-
 /// Context for `RocksDB` block writes.
 #[derive(Clone)]
 pub(crate) struct RocksDBWriteCtx {
@@ -689,11 +676,6 @@ impl RocksDBProviderInner {
 
         stats
     }
-
-    /// Returns database-level statistics including per-table stats and WAL size.
-    fn db_stats(&self) -> RocksDBStats {
-        RocksDBStats { tables: self.table_stats(), wal_size_bytes: self.wal_size_bytes() }
-    }
 }
 
 impl fmt::Debug for RocksDBProviderInner {
@@ -1078,13 +1060,6 @@ impl RocksDBProvider {
     /// in `table_size`, `sst_size`, or `memtable_size` metrics.
     pub fn wal_size_bytes(&self) -> u64 {
         self.0.wal_size_bytes()
-    }
-
-    /// Returns database-level statistics including per-table stats and WAL size.
-    ///
-    /// This combines [`Self::table_stats`] and [`Self::wal_size_bytes`] into a single struct.
-    pub fn db_stats(&self) -> RocksDBStats {
-        self.0.db_stats()
     }
 
     /// Flushes pending writes for the specified tables to disk.

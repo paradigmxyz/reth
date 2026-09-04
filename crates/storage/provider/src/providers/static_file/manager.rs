@@ -185,16 +185,6 @@ impl<P: AsRef<Path>> StaticFileProviderBuilder<P> {
         self
     }
 
-    /// Set a custom number of blocks per file for a specific segment.
-    pub fn with_blocks_per_file_for_segment(
-        mut self,
-        segment: StaticFileSegment,
-        blocks_per_file: u64,
-    ) -> Self {
-        self.blocks_per_file.insert(segment, blocks_per_file);
-        self
-    }
-
     /// Enables metrics on the [`StaticFileProvider`].
     pub const fn with_metrics(mut self) -> Self {
         self.use_metrics = true;
