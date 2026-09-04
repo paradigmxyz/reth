@@ -3207,6 +3207,32 @@ mod tests {
     }
 
     #[test]
+    fn test_blinded_local_root_returns_trie_inconsistency() {
+        let key = B256::right_padding_from(&[0x63, 0xaa]);
+        let value = U256::from(1);
+        let hash = storage_leaf_hash(&Nibbles::unpack(key).slice(2..), &value);
+        let mask = TrieMask::from_nibble(3);
+        let cached_branch =
+            BranchNodeCompact::new(mask, TrieMask::default(), mask, vec![hash], None);
+
+        let mut harness = TrieTestHarness::new(BTreeMap::from([(key, value)]));
+        harness.set_trie_nodes(BTreeMap::from([(Nibbles::from_nibbles([6]), cached_branch)]));
+
+        let trie_cursor =
+            harness.trie_cursor_factory().storage_trie_cursor(harness.hashed_address()).unwrap();
+        let hashed_cursor = harness
+            .hashed_cursor_factory()
+            .hashed_storage_cursor(harness.hashed_address())
+            .unwrap();
+        let mut calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
+
+        assert!(matches!(
+            calculator.storage_root_node(harness.hashed_address()),
+            Err(StateProofError::TrieInconsistency(_))
+        ));
+    }
+
+    #[test]
     fn test_cached_hash_with_deleted_leaf() {
         reth_tracing::init_test_tracing();
 

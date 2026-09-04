@@ -90,9 +90,9 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
 
     /// Converts this child into a [`ProofTrieNodeV2`] having the given path.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// If called on a [`Self::RlpNode`].
+    /// Returns [`StateProofError::TrieInconsistency`] if called on a [`Self::RlpNode`].
     pub(crate) fn into_proof_trie_node(
         self,
         path: Nibbles,
@@ -112,7 +112,14 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
                 (TrieNodeV2::Leaf(LeafNode::new(short_key, rlp_val)), None)
             }
             Self::Branch { node, masks } => (TrieNodeV2::Branch(node), masks),
-            Self::RlpNode { .. } => panic!("Cannot call `into_proof_trie_node` on RlpNode"),
+            // Cached hashes cannot be retained as proof nodes: targeted children are recalculated,
+            // while untargeted children are either combined into a branch or discarded. Reaching
+            // this arm means inconsistent cached trie data left a blinded node as the local root.
+            Self::RlpNode { .. } => {
+                return Err(StateProofError::TrieInconsistency(
+                    "local root cannot be a blinded RLP node".to_string(),
+                ))
+            }
         };
 
         Ok(ProofTrieNodeV2 { node, path, masks })
