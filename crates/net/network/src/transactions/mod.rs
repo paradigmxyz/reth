@@ -644,7 +644,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
     fn on_new_pooled_transaction_hashes(
         &mut self,
         peer_id: PeerId,
-        msg: NewPooledTransactionHashes,
+        mut msg: NewPooledTransactionHashes,
     ) {
         // If the node is initially syncing, ignore transactions
         if self.network.is_initially_syncing() {
@@ -652,6 +652,11 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         }
         if self.network.tx_gossip_disabled() {
             return
+        }
+
+        if msg.len() > SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE {
+            self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
+            msg.truncate(SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE);
         }
 
         // get handle to peer's session, if the session is still active
@@ -3451,6 +3456,27 @@ mod tests {
         let peer = tx_manager.peers.get(&peer_id).unwrap();
         assert!(!peer.seen_transactions.contains(&truncated));
         assert!(peer.seen_transactions.contains(&last_sent));
+    }
+
+    #[tokio::test]
+    async fn test_oversized_incoming_hash_announcement_is_truncated() {
+        let (mut tx_manager, _network) = new_tx_manager().await;
+        let peer_id = PeerId::random();
+        let (peer, _session_rx) = new_mock_session(peer_id, EthVersion::Eth66);
+        tx_manager.peers.insert(peer_id, peer);
+
+        let hashes = (0..=SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE)
+            .map(|i| B256::from(U256::from(i)))
+            .collect();
+        tx_manager.on_new_pooled_transaction_hashes(
+            peer_id,
+            NewPooledTransactionHashes::Eth66(NewPooledTransactionHashes66(hashes)),
+        );
+
+        assert_eq!(
+            tx_manager.transaction_fetcher.num_all_hashes(),
+            SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE
+        );
     }
 
     #[tokio::test]
