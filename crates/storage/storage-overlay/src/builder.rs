@@ -374,8 +374,10 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
     /// Builds the effective state trie overlay for the given provider.
     ///
-    /// If `trie_changesets` is false, reverts are represented by hashed-state prefix sets instead
-    /// of trie changesets.
+    /// Set `trie_changesets` only for consumers that produce [`TrieUpdates`], such as
+    /// [`StateRootProvider::state_root_with_updates`]. Other consumers, including roots, proofs,
+    /// multiproofs, and witnesses, should leave it false: reverts are then represented by
+    /// hashed-state prefix sets instead of querying trie changesets.
     #[cfg(test)]
     #[instrument(level = "debug", target = "storage::overlay", skip_all)]
     fn build_state_trie_overlay<Provider>(
