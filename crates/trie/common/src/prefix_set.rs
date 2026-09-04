@@ -341,11 +341,12 @@ impl PrefixSet {
             return true
         }
 
-        while self.index > 0 && &self.keys[self.index] > start {
+        let keys = self.keys.as_deref().map(Vec::as_slice).unwrap_or_default();
+        while self.index > 0 && &keys[self.index] > start {
             self.index -= 1;
         }
 
-        for (idx, key) in self.keys[self.index..].iter().enumerate() {
+        for (idx, key) in keys[self.index..].iter().enumerate() {
             if key >= start {
                 self.index += idx;
                 return true
