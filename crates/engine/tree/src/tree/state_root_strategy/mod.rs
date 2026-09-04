@@ -681,19 +681,13 @@ impl DefaultStateRootStrategy {
 
             if state_root_tx.send(result).is_err() {
                 // A continuation task can take the pending trie during the narrow window between
-                // publishing it and detecting the abandoned receiver here. Returning drops the
-                // completer, so the taker wakes with `ProducerDropped` and its state-root consumer
-                // falls back to serial computation. No partially finalized trie is exposed; the
-                // worst case is a redundant fallback.
+                // publishing it and detecting the abandoned receiver here. Finish publishing a
+                // successfully computed trie even if the original consumer no longer needs its
+                // root: the continuation's proof workers already rely on this trie's anchor.
                 debug!(
                     target: "engine::tree::payload_processor",
-                    "State root receiver dropped, dropping trie"
+                    "State root receiver dropped, finalizing trie task for continuation"
                 );
-                let (trie, deferred) = task.into_cleared_trie();
-                state_trie_overlays.clear_sparse_trie();
-                executor.spawn_drop(trie);
-                executor.spawn_drop(deferred);
-                return;
             }
 
             let _enter =
@@ -1594,6 +1588,15 @@ mod tests {
 
     #[test]
     fn state_root_task_matches_serial_root() {
+        assert_state_root_task_matches_serial_root(false);
+    }
+
+    #[test]
+    fn state_root_task_preserves_completed_trie_after_receiver_dropped() {
+        assert_state_root_task_matches_serial_root(true);
+    }
+
+    fn assert_state_root_task_matches_serial_root(drop_result_receiver: bool) {
         reth_tracing::init_test_tracing();
 
         let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
@@ -1672,14 +1675,35 @@ mod tests {
             },
         );
 
+        if drop_result_receiver {
+            drop(state_root_handle.take_state_root_rx());
+        }
+
         let mut state_hook = state_root_handle.take_execution_hook();
         for update in state_updates {
             state_hook.on_state(update);
         }
         drop(state_hook);
 
-        let root_from_task = state_root_handle.state_root().expect("task failed").state_root;
         let root_from_regular = state_root(accumulated_state);
-        assert_eq!(root_from_task, root_from_regular);
+        if drop_result_receiver {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            let preserved = loop {
+                if let Some(preserved) = state_trie_overlays.take_sparse_trie() {
+                    break preserved;
+                }
+                assert!(std::time::Instant::now() < deadline, "completed trie was not preserved");
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            };
+            assert_eq!(preserved.state_root(), root_from_regular);
+            assert_eq!(preserved.anchor_hash(), genesis_hash);
+            assert!(preserved
+                .into_trie_for(root_from_regular)
+                .expect("producer dropped")
+                .is_some());
+        } else {
+            let root_from_task = state_root_handle.state_root().expect("task failed").state_root;
+            assert_eq!(root_from_task, root_from_regular);
+        }
     }
 }
