@@ -81,6 +81,7 @@ impl LogEmitter {
         node.advance_block().await?;
 
         let receipt = pending.get_receipt().await?;
+        eyre::ensure!(receipt.status(), "log emitter deployment reverted");
         let address = receipt
             .contract_address
             .ok_or_else(|| eyre::eyre!("log emitter deployment did not yield an address"))?;
@@ -94,6 +95,9 @@ impl LogEmitter {
     }
 
     /// A transaction request that emits `count` logs with `topic`.
+    ///
+    /// The gas limit grows with `count`, so counts beyond a few thousand exceed the block gas
+    /// limit of the chains these tests run against.
     pub fn emit_request(&self, from: Address, topic: B256, count: u64) -> TransactionRequest {
         let mut input = Vec::with_capacity(64);
         input.extend_from_slice(topic.as_slice());
@@ -102,7 +106,7 @@ impl LogEmitter {
         TransactionRequest::default()
             .with_from(from)
             .with_to(self.address)
-            .with_gas_limit(100_000 + count * 2_000)
+            .with_gas_limit(100_000 + count.saturating_mul(2_000))
             .with_input(Bytes::from(input))
     }
 
@@ -210,7 +214,11 @@ impl LogFilterPoller {
             self.client.request("eth_getFilterChanges", rpc_params![&self.id]).await?;
 
         for log in &logs {
-            let identity = (log.block_hash.unwrap_or_default(), log.log_index.unwrap_or_default());
+            // mined logs always carry both, and without them duplicates cannot be told apart
+            let identity = (
+                log.block_hash.expect("delivered log without a block hash"),
+                log.log_index.expect("delivered log without a log index"),
+            );
             if !self.seen.insert(identity) {
                 self.duplicates.push(log.clone());
             }
@@ -258,22 +266,26 @@ pub async fn run_concurrent_log_scans(
     filter: Filter,
     concurrency: usize,
 ) -> eyre::Result<LogScanReport> {
-    let provider = ProviderBuilder::new().connect_http(url);
+    let provider = ProviderBuilder::new().connect_http(url.clone());
     let running = Arc::new(AtomicBool::new(true));
 
     let sampler = {
-        let provider = provider.clone();
+        // its own client, so that queueing in the scans' connection pool is not measured as the
+        // node being unresponsive
+        let provider = ProviderBuilder::new().connect_http(url);
         let running = running.clone();
         tokio::spawn(async move {
             let mut samples = Vec::new();
+            let mut failures = 0usize;
             while running.load(Ordering::Relaxed) {
                 let started = Instant::now();
-                if provider.get_block_number().await.is_ok() {
-                    samples.push(started.elapsed());
+                match provider.get_block_number().await {
+                    Ok(_) => samples.push(started.elapsed()),
+                    Err(_) => failures += 1,
                 }
                 tokio::time::sleep(Duration::from_millis(25)).await;
             }
-            samples
+            (samples, failures)
         })
     };
 
@@ -291,7 +303,7 @@ pub async fn run_concurrent_log_scans(
     let elapsed = started.elapsed();
 
     running.store(false, Ordering::Relaxed);
-    let control_latencies = sampler.await?;
+    let (control_latencies, control_failures) = sampler.await?;
 
     let mut durations = Vec::with_capacity(scans.len());
     let mut logs_returned = 0usize;
@@ -304,7 +316,14 @@ pub async fn run_concurrent_log_scans(
         }
     }
 
-    Ok(LogScanReport { durations, logs_returned, failures, elapsed, control_latencies })
+    Ok(LogScanReport {
+        durations,
+        logs_returned,
+        failures,
+        elapsed,
+        control_latencies,
+        control_failures,
+    })
 }
 
 /// The outcome of a [`run_concurrent_log_scans`] run.
@@ -320,14 +339,16 @@ pub struct LogScanReport {
     pub elapsed: Duration,
     /// `eth_blockNumber` round trip times sampled while the scans were in flight.
     pub control_latencies: Vec<Duration>,
+    /// How many of those samples failed outright, the strongest symptom of starvation.
+    pub control_failures: usize,
 }
 
 impl LogScanReport {
     /// The slowest `eth_blockNumber` round trip observed while the scans were running.
     ///
     /// This is the number that tells whether the scans starved the rest of the RPC surface.
-    pub fn max_control_latency(&self) -> Duration {
-        self.control_latencies.iter().copied().max().unwrap_or_default()
+    pub fn max_control_latency(&self) -> Option<Duration> {
+        self.control_latencies.iter().copied().max()
     }
 
     /// The slowest scan.

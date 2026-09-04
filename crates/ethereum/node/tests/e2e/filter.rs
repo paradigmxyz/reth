@@ -161,6 +161,7 @@ async fn test_pending_transaction_filter_polls_within_one_block() -> eyre::Resul
         second.contains(&second_tx),
         "a pending transaction filter must not be gated on head progress"
     );
+    assert!(!second.contains(&first_tx), "a poll must not repeat what the previous one delivered");
 
     // the filter survives being polled on a chain that does not advance
     node.advance_block().await?;
@@ -188,7 +189,12 @@ async fn test_get_logs_pending_to_block_is_stable() -> eyre::Result<()> {
 
     // a payload that has not been made canonical yet is the node's pending block
     emitter.submit_emit(&provider, from, TOPIC, 1).await?;
-    node.build_and_submit_payload().await?;
+    let pending = node.build_and_submit_payload().await?;
+    assert_eq!(
+        pending.block().body().transactions().count(),
+        1,
+        "the pending block must carry the emitted log for this to prove anything"
+    );
     assert!(
         node.inner.provider.pending_block_num_hash()?.is_some(),
         "expected the submitted payload to become the pending block"
@@ -290,17 +296,24 @@ async fn test_get_logs_over_pruned_receipts() -> eyre::Result<()> {
     // the logs of the pruned range are gone, which the node must report instead of answering with
     // a silently incomplete result
     let error = get_logs_error(&client, log_range(&emitter, 0, CHAIN_LENGTH)).await;
+    assert_eq!(error.code(), INVALID_PARAMS_CODE);
     assert!(
         error.message().contains("pruned"),
         "a query over pruned receipts must fail, got: {}",
         error.message()
     );
 
+    // the range whose receipts are retained is still served
+    let retained: Vec<Log> = client
+        .request("eth_getLogs", rpc_params![log_range(&emitter, PRUNE_BEFORE, CHAIN_LENGTH)])
+        .await?;
+    assert!(retained.is_empty());
+
     Ok(())
 }
 
 #[tokio::test]
-#[ignore = "D1: range scans have no concurrency cap, run manually to measure responsiveness"]
+#[ignore = "measures responsiveness under a scan storm, asserts nothing until eth_getLogs has a concurrency cap (#26999)"]
 async fn test_get_logs_concurrent_scan_load() -> eyre::Result<()> {
     let (mut node, provider, emitter, from) = setup(|mut config| {
         config.rpc.rpc_max_logs_per_response = 0u64.into();

@@ -2042,40 +2042,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_poll_keeps_filter_alive_on_stalled_chain() {
-        let provider = MockEthProvider::default();
-        provider.add_header(FixedBytes::random(), alloy_consensus::Header::default());
-        let eth_api = build_test_eth_api(provider);
-
-        let ttl = Duration::from_secs(60);
-        let eth_filter = EthFilter::new(
-            eth_api,
-            EthFilterConfig::default().stale_filter_ttl(ttl),
-            Runtime::test(),
-        );
-
-        let id = eth_filter.new_block_filter().await.unwrap();
-
-        // the state of a filter that was already polled once and whose chain has not moved since
-        {
-            let mut filters = eth_filter.inner.active_filters.inner.lock().await;
-            let filter = filters.get_mut(&id).unwrap();
-            filter.block = 1;
-            filter.last_poll_timestamp =
-                Instant::now().checked_sub(ttl + Duration::from_secs(1)).unwrap();
-        }
-
-        // a poll that finds no new blocks still has to count as a poll
-        let _ = eth_filter.filter_changes(id.clone()).await;
-
-        eth_filter.clear_stale_filters(Instant::now()).await;
-        assert!(
-            eth_filter.active_filters().contains(&id).await,
-            "a filter polled on a chain that does not advance must not be evicted as stale"
-        );
-    }
-
-    #[tokio::test]
     async fn test_block_hash_query_on_expired_block() {
         let provider = MockEthProvider::default();
 
