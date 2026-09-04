@@ -1535,12 +1535,12 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 Self::update_txs(
                     base_fee,
                     changed_accounts,
-                    self.txs.range_mut(range),
                     &mut updates,
+                    self.txs.range_mut(range),
                 );
             }
         } else {
-            Self::update_txs(base_fee, changed_accounts, self.txs.iter_mut(), &mut updates);
+            Self::update_txs(base_fee, changed_accounts, &mut updates, self.txs.iter_mut());
             self.last_full_update_fees = self.pending_fees;
         }
 
@@ -1554,8 +1554,8 @@ impl<T: PoolTransaction> AllTransactions<T> {
     fn update_txs<'a, I>(
         base_fee: u64,
         changed_accounts: &FxHashMap<SenderId, SenderInfo>,
-        txs: I,
         updates: &mut Vec<PoolUpdate>,
+        txs: I,
     ) where
         T: 'a,
         I: Iterator<Item = (&'a TransactionId, &'a mut PoolInternalTransaction<T>)>,
