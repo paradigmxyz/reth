@@ -25,7 +25,13 @@ env:
 permissions: {}
 
 jobs:
+  cargo-cooldown:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/cargo-cooldown.yml
+
   check:
+    needs: cargo-cooldown
     name: Check compilation with patched alloy
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-16' || 'ubuntu-latest' }}
     permissions:

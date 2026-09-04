@@ -14,7 +14,7 @@ env:
 
 jobs:
   cargo-cooldown:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
     permissions:
       contents: read
     uses: ./.github/workflows/cargo-cooldown.yml
@@ -23,7 +23,7 @@ jobs:
 
   extract-version:
     name: extract version
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
