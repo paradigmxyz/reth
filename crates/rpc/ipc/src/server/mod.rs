@@ -395,9 +395,7 @@ where
         trace!("{:?}", request);
 
         let cfg = RpcServiceCfg {
-            bounded_subscriptions: BoundedSubscriptions::new(
-                self.inner.server_cfg.max_subscriptions_per_connection,
-            ),
+            bounded_subscriptions: self.inner.bounded_subscriptions.clone(),
             id_provider: self.inner.id_provider.clone(),
             sink: self.inner.method_sink.clone(),
         };
@@ -985,7 +983,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_rpc_subscription() {
         let endpoint = &dummy_name();
-        let server = Builder::default().build(endpoint.clone());
+        let server = Builder::default().max_subscriptions_per_connection(1).build(endpoint.clone());
         let (tx, _rx) = broadcast::channel::<usize>(16);
 
         let mut module = RpcModule::new(tx.clone());
@@ -1011,6 +1009,10 @@ mod tests {
         let client = IpcClientBuilder::default().build(endpoint).await.unwrap();
         let sub: Subscription<usize> =
             client.subscribe("subscribe_hello", rpc_params![], "unsubscribe_hello").await.unwrap();
+        let second: Result<Subscription<usize>, Error> =
+            client.subscribe("subscribe_hello", rpc_params![], "unsubscribe_hello").await;
+
+        assert!(second.is_err_and(|err| err.to_string().contains("Too many subscriptions")));
 
         let items = sub.take(16).collect::<Vec<_>>().await;
         assert_eq!(items.len(), 16);
