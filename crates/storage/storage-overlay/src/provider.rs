@@ -112,7 +112,7 @@ where
 
         let is_v2 = provider.cached_storage_settings().is_v2();
         self.metrics.database_provider_ro_duration.record(overall_start.elapsed());
-        Ok(OverlayStateProvider::new(
+        Ok(OverlayStateProvider::new_with_caches(
             provider,
             self.overlay_builder.clone(),
             Arc::clone(&self.state_trie_overlay_cache),
@@ -134,7 +134,22 @@ pub struct OverlayStateProvider<Provider, N: NodePrimitives = EthPrimitives> {
 }
 
 impl<Provider, N: NodePrimitives> OverlayStateProvider<OwnedProvider<Provider>, N> {
-    const fn new(
+    /// Creates an overlay state provider over an already-open database provider.
+    pub fn new(provider: Provider, overlay_builder: OverlayBuilder<N>) -> Self
+    where
+        Provider: StorageSettingsCache,
+    {
+        let is_v2 = provider.cached_storage_settings().is_v2();
+        Self::new_with_caches(
+            provider,
+            overlay_builder,
+            Default::default(),
+            Default::default(),
+            is_v2,
+        )
+    }
+
+    const fn new_with_caches(
         provider: Provider,
         overlay_builder: OverlayBuilder<N>,
         state_trie_overlay_cache: StateTrieOverlayCache,
@@ -174,6 +189,23 @@ impl<Provider, N: NodePrimitives> OverlayStateProvider<OwnedProvider<Provider>, 
 }
 
 impl<'a, Provider, N: NodePrimitives> OverlayStateProvider<&'a Provider, N> {
+    /// Creates an overlay state provider over a borrowed database provider.
+    pub fn new_ref(provider: &'a Provider, overlay_builder: OverlayBuilder<N>) -> Self
+    where
+        Provider: StorageSettingsCache,
+    {
+        let is_v2 = provider.cached_storage_settings().is_v2();
+        Self {
+            provider,
+            overlay_builder: Some(overlay_builder),
+            state_trie_overlay_cache: Default::default(),
+            metrics: Default::default(),
+            state_trie_overlay: OnceCell::new(),
+            execution_overlay: OnceCell::new(),
+            is_v2,
+        }
+    }
+
     pub(crate) fn new_with_state_trie(
         provider: &'a Provider,
         state_trie_overlay: StateTrieOverlay,
