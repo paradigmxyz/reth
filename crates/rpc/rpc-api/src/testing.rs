@@ -6,10 +6,26 @@
 //! explicit operator flag.
 
 use alloy_primitives::{Bytes, B256};
-use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV5, PayloadAttributes};
+use alloy_rpc_types_engine::{
+    ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6, PayloadAttributes,
+};
 use jsonrpsee::proc_macros::rpc;
 
 pub use alloy_rpc_types_engine::{TestingBuildBlockRequestV1, TESTING_BUILD_BLOCK_V1};
+
+/// Versioned response returned by `testing_buildBlockV1`.
+///
+/// The endpoint uses the payload attributes timestamp to select the envelope version. Keeping
+/// both variants on the wire is important: decoding an Amsterdam response as V5 would silently
+/// discard the block access list and other V6 payload fields.
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(untagged)]
+pub enum TestingBuildBlockResponse {
+    /// Amsterdam payload, including the block access list.
+    V6(ExecutionPayloadEnvelopeV6),
+    /// Pre-Amsterdam payload.
+    V5(ExecutionPayloadEnvelopeV5),
+}
 
 /// Capability string for `testing_commitBlockV1`.
 pub const TESTING_COMMIT_BLOCK_V1: &str = "testing_commitBlockV1";
@@ -40,7 +56,7 @@ pub trait TestingApi {
         payload_attributes: PayloadAttributes,
         transactions: Option<Vec<Bytes>>,
         extra_data: Option<Bytes>,
-    ) -> jsonrpsee::core::RpcResult<ExecutionPayloadEnvelopeV5>;
+    ) -> jsonrpsee::core::RpcResult<TestingBuildBlockResponse>;
 
     /// Builds a block on top of the current canonical head, inserts it, and makes it canonical.
     ///
