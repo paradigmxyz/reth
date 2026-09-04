@@ -2,13 +2,73 @@
 //! `WebSocket` subscription tests for `eth_subscribe` / `eth_unsubscribe`
 
 use crate::utils::{launch_ws, test_rpc_builder};
-use jsonrpsee::core::client::{Subscription, SubscriptionClientT};
+use jsonrpsee::{
+    core::client::{Error, Subscription, SubscriptionClientT},
+    types::error::ErrorCode,
+};
+use reth_rpc_eth_api::{helpers::EthSubscriptions, types::RpcTypes, EthApiTypes, RpcNodeCore};
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tokio_util::EventSender;
 use serde_json::Value;
 use std::time::Duration;
 
 use reth_rpc_builder::{RpcServerConfig, TransportRpcModuleConfig};
+
+#[derive(Clone)]
+struct PendingLogsEthApi<Eth> {
+    inner: Eth,
+    logs: Vec<alloy_rpc_types_eth::Log>,
+}
+
+impl<Eth: EthApiTypes> EthApiTypes for PendingLogsEthApi<Eth> {
+    type Error = Eth::Error;
+    type NetworkTypes = Eth::NetworkTypes;
+    type RpcConvert = Eth::RpcConvert;
+
+    fn converter(&self) -> &Self::RpcConvert {
+        self.inner.converter()
+    }
+}
+
+impl<Eth: RpcNodeCore> RpcNodeCore for PendingLogsEthApi<Eth> {
+    type Primitives = Eth::Primitives;
+    type Provider = Eth::Provider;
+    type Pool = Eth::Pool;
+    type Evm = Eth::Evm;
+    type Network = Eth::Network;
+
+    fn pool(&self) -> &Self::Pool {
+        self.inner.pool()
+    }
+
+    fn evm_config(&self) -> &Self::Evm {
+        self.inner.evm_config()
+    }
+
+    fn network(&self) -> &Self::Network {
+        self.inner.network()
+    }
+
+    fn provider(&self) -> &Self::Provider {
+        self.inner.provider()
+    }
+}
+
+impl<Eth> EthSubscriptions for PendingLogsEthApi<Eth>
+where
+    Eth: EthSubscriptions,
+    Eth::NetworkTypes: RpcTypes<Log = alloy_rpc_types_eth::Log>,
+{
+    fn log_stream(
+        &self,
+        _filter: alloy_rpc_types_eth::Filter,
+    ) -> Result<
+        impl futures::Stream<Item = alloy_rpc_types_eth::Log> + Send + Unpin,
+        jsonrpsee::types::ErrorObject<'static>,
+    > {
+        Ok(futures::stream::iter(self.logs.iter().cloned()))
+    }
+}
 
 /// Helper to launch a WS server with the Eth module.
 async fn launch_ws_eth() -> reth_rpc_builder::RpcServerHandle {
@@ -26,7 +86,10 @@ async fn test_eth_subscribe_all_supported_kinds_accept() {
         ("newHeads", vec![]),
         ("newPendingTransactions", vec![]),
         ("newPendingTransactions", vec![serde_json::json!(true)]),
+        ("logs", vec![]),
+        ("logs", vec![Value::Null]),
         ("logs", vec![serde_json::json!({})]),
+        ("logs", vec![serde_json::json!({"fromBlock": "latest", "toBlock": "latest"})]),
         (
             "logs",
             vec![serde_json::json!({"address": "0x0000000000000000000000000000000000000001"})],
@@ -101,6 +164,98 @@ async fn test_eth_subscribe_invalid_kind_rejected() {
         .await;
 
     assert!(result.is_err(), "invalid subscription kind must be rejected");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_subscribe_logs_pending_block_filter_rejected() {
+    reth_tracing::init_test_tracing();
+
+    let handle = launch_ws_eth().await;
+    let client = handle.ws_client().await.unwrap();
+
+    let cases = [
+        serde_json::json!({"fromBlock": "pending"}),
+        serde_json::json!({"toBlock": "pending"}),
+        serde_json::json!({"fromBlock": "pending", "toBlock": "pending"}),
+    ];
+
+    for filter in cases {
+        let err = client
+            .subscribe::<Value, _>(
+                "eth_subscribe",
+                jsonrpsee::rpc_params!["logs", filter],
+                "eth_unsubscribe",
+            )
+            .await
+            .unwrap_err();
+
+        let Error::Call(err) = err else {
+            panic!("pending logs filter returned unexpected error: {err}")
+        };
+        assert_eq!(err.code(), ErrorCode::InvalidParams.code());
+        assert_eq!(err.message(), "pending block filters are not supported for logs subscriptions");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_subscribe_logs_pending_block_filter_can_be_overridden() {
+    use jsonrpsee::{server::ServerBuilder, ws_client::WsClientBuilder};
+    use reth_rpc_eth_api::EthPubSubApiServer;
+    use reth_tasks::Runtime;
+
+    reth_tracing::init_test_tracing();
+
+    let log = alloy_rpc_types_eth::Log::default();
+    let eth_api = PendingLogsEthApi {
+        inner: test_rpc_builder().bootstrap_eth_api(),
+        logs: vec![log.clone()],
+    };
+    let module = reth_rpc::EthPubSub::new(eth_api, Runtime::test()).into_rpc();
+    let server = ServerBuilder::default().build(crate::utils::test_address()).await.unwrap();
+    let addr = server.local_addr().unwrap();
+    let _handle = server.start(module);
+    let client = WsClientBuilder::default().build(format!("ws://{addr}")).await.unwrap();
+
+    let mut sub: Subscription<Value> = client
+        .subscribe(
+            "eth_subscribe",
+            jsonrpsee::rpc_params!["logs", serde_json::json!({ "fromBlock": "pending" })],
+            "eth_unsubscribe",
+        )
+        .await
+        .unwrap();
+
+    let received = tokio::time::timeout(Duration::from_secs(5), sub.next())
+        .await
+        .expect("timed out waiting for pending log")
+        .expect("subscription ended unexpectedly")
+        .expect("failed to deserialize pending log");
+    assert_eq!(received, serde_json::to_value(log).unwrap());
+
+    sub.unsubscribe().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_subscribe_logs_transaction_receipts_params_rejected() {
+    reth_tracing::init_test_tracing();
+
+    let handle = launch_ws_eth().await;
+    let client = handle.ws_client().await.unwrap();
+
+    let err = client
+        .subscribe::<Value, _>(
+            "eth_subscribe",
+            jsonrpsee::rpc_params!["logs", serde_json::json!({"transactionHashes": []})],
+            "eth_unsubscribe",
+        )
+        .await
+        .unwrap_err();
+
+    let Error::Call(err) = err else {
+        panic!("transaction receipts params returned unexpected error: {err}")
+    };
+    assert_eq!(err.code(), ErrorCode::InvalidParams.code());
+    assert_eq!(err.message(), "Invalid params for logs");
 }
 
 #[tokio::test(flavor = "multi_thread")]
