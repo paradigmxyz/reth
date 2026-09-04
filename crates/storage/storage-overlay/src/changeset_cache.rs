@@ -409,10 +409,11 @@ impl ChangesetCache {
             overlay,
             provider.cached_storage_settings().is_v2(),
         );
+        let (state_trie_factory, _) = state_trie_provider.cursor_factories(true)?;
 
         let accumulated_reverts = Arc::new(reth_trie_db::compute_range_trie_changesets(
             provider,
-            &state_trie_provider,
+            &state_trie_factory,
             start_block..=end_block,
             finish.number,
         )?);
@@ -912,8 +913,9 @@ mod tests {
                 overlay,
                 provider.cached_storage_settings().is_v2(),
             );
+        let (state_trie_factory, _) = state_trie_provider.cursor_factories(true).unwrap();
         let actual =
-            reth_trie_db::compute_range_trie_changesets(&*provider, &state_trie_provider, 1..=3, 3)
+            reth_trie_db::compute_range_trie_changesets(&*provider, &state_trie_factory, 1..=3, 3)
                 .unwrap();
         assert!(actual.storage_tries_ref().get(&hashed_address).is_none());
 
@@ -999,8 +1001,9 @@ mod tests {
                 overlay,
                 provider.cached_storage_settings().is_v2(),
             );
+        let (state_trie_factory, _) = state_trie_provider.cursor_factories(true).unwrap();
         let actual =
-            reth_trie_db::compute_range_trie_changesets(&*provider, &state_trie_provider, 2..=3, 3)
+            reth_trie_db::compute_range_trie_changesets(&*provider, &state_trie_factory, 2..=3, 3)
                 .unwrap();
         assert_eq!(actual, expected);
     }

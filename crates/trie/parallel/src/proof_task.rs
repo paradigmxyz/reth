@@ -46,7 +46,9 @@ use reth_tasks::Runtime;
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor, InstrumentedHashedCursor},
     proof_v2,
-    trie_cursor::{InstrumentedTrieCursor, TrieCursorFactory, TrieStorageCursor},
+    trie_cursor::{
+        CursorFactoryProvider, InstrumentedTrieCursor, TrieCursorFactory, TrieStorageCursor,
+    },
     DecodedMultiProofV2, HashedPostState, MultiProofTargetsV2, ProofTrieNodeV2, ProofV2Target,
 };
 use std::{
@@ -173,11 +175,9 @@ impl ProofWorkerHandle {
         proof_result_tx: ProofResultSender,
     ) -> Self
     where
-        Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
-            + Clone
-            + Send
-            + Sync
-            + 'static,
+        Factory: DatabaseProviderROFactory + Clone + Send + Sync + 'static,
+        Factory::Provider: CursorFactoryProvider,
+        ProviderError: From<<Factory::Provider as CursorFactoryProvider>::Error>,
     {
         let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
         let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
@@ -601,7 +601,9 @@ struct StorageProofWorker<Factory> {
 
 impl<Factory> StorageProofWorker<Factory>
 where
-    Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>,
+    Factory: DatabaseProviderROFactory,
+    Factory::Provider: CursorFactoryProvider,
+    ProviderError: From<<Factory::Provider as CursorFactoryProvider>::Error>,
 {
     /// Creates a new storage proof worker.
     const fn new(
@@ -646,7 +648,8 @@ where
     fn run(mut self) -> ProviderResult<()> {
         // Create provider from factory
         let provider = self.task_ctx.factory.database_provider_ro()?;
-        let proof_tx = ProofTaskTx::new(provider, self.worker_id);
+        let (cursor_factories, _) = provider.cursor_factories(true).map_err(ProviderError::from)?;
+        let proof_tx = ProofTaskTx::new(cursor_factories, self.worker_id);
 
         trace!(
             target: "trie::proof_task",
@@ -816,7 +819,9 @@ struct AccountProofWorker<Factory> {
 
 impl<Factory> AccountProofWorker<Factory>
 where
-    Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>,
+    Factory: DatabaseProviderROFactory,
+    Factory::Provider: CursorFactoryProvider,
+    ProviderError: From<<Factory::Provider as CursorFactoryProvider>::Error>,
 {
     /// Creates a new account proof worker.
     #[expect(clippy::too_many_arguments)]
@@ -863,6 +868,7 @@ where
     /// continue operating and the system degrades gracefully.
     fn run(mut self) -> ProviderResult<()> {
         let provider = self.task_ctx.factory.database_provider_ro()?;
+        let (cursor_factories, _) = provider.cursor_factories(true).map_err(ProviderError::from)?;
 
         trace!(
             target: "trie::proof_task",
@@ -875,11 +881,11 @@ where
 
         // Create both account and storage calculators for V2 proofs.
         // The storage calculator is wrapped in Rc<RefCell<...>> for sharing with value encoders.
-        let account_trie_cursor = provider.account_trie_cursor()?;
-        let account_hashed_cursor = provider.hashed_account_cursor()?;
+        let account_trie_cursor = cursor_factories.account_trie_cursor()?;
+        let account_hashed_cursor = cursor_factories.hashed_account_cursor()?;
 
-        let storage_trie_cursor = provider.storage_trie_cursor(B256::ZERO)?;
-        let storage_hashed_cursor = provider.hashed_storage_cursor(B256::ZERO)?;
+        let storage_trie_cursor = cursor_factories.storage_trie_cursor(B256::ZERO)?;
+        let storage_hashed_cursor = cursor_factories.hashed_storage_cursor(B256::ZERO)?;
 
         let instrumented_account_trie_cursor = InstrumentedTrieCursor::new(
             account_trie_cursor,
@@ -905,11 +911,11 @@ where
                 AsyncAccountValueEncoder<
                     InstrumentedTrieCursor<
                         '_,
-                        <Factory::Provider as TrieCursorFactory>::StorageTrieCursor<'_>,
+                        <<Factory::Provider as CursorFactoryProvider>::CursorFactories<'_> as TrieCursorFactory>::StorageTrieCursor<'_>,
                     >,
                     InstrumentedHashedCursor<
                         '_,
-                        <Factory::Provider as HashedCursorFactory>::StorageCursor<'_>,
+                        <<Factory::Provider as CursorFactoryProvider>::CursorFactories<'_> as HashedCursorFactory>::StorageCursor<'_>,
                     >,
                 >,
             >::new(instrumented_account_trie_cursor, instrumented_account_hashed_cursor);
@@ -947,7 +953,7 @@ where
 
             match job {
                 AccountWorkerJob::AccountMultiproof { input } => {
-                    let value_encoder_stats = self.process_account_multiproof::<Factory::Provider>(
+                    let value_encoder_stats = self.process_account_multiproof::<<Factory::Provider as CursorFactoryProvider>::CursorFactories<'_>>(
                         &mut v2_account_calculator,
                         v2_storage_calculator.clone(),
                         *input,
