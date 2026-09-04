@@ -572,7 +572,10 @@ where
                     .map(|num| self.provider().convert_block_number(num))
                     .transpose()?
                     .flatten();
+                // `pending` as the upper bound ends at the head, whether or not the node has a
+                // pending block, its logs are only served when `fromBlock` is pending as well
                 let to = to_block
+                    .filter(|num| !num.is_pending())
                     .map(|num| self.provider().convert_block_number(num))
                     .transpose()?
                     .flatten();
