@@ -1543,42 +1543,51 @@ mod tests {
     #[test]
     fn partial_trie_restart_resumes_durable_marker_after_checkpoint_rewinds() {
         use super::{delete_partial_trie_unwind_marker, write_partial_trie_unwind_marker};
-        use reth_provider::{test_utils::create_test_provider_factory, StageCheckpointWriter};
+        use reth_provider::{
+            test_utils::create_test_provider_factory_with_chain_spec_and_db_args,
+            StageCheckpointWriter,
+        };
 
-        let factory = create_test_provider_factory();
-        let marker =
-            PartialStateTrieUnwindMarker { finish_block_number: 53, partial_state_trie: 13 };
-        let provider = factory.provider_rw().unwrap();
-        provider
-            .save_stage_checkpoint(
-                StageId::Finish,
-                StageCheckpoint::new(53).with_finish_stage_checkpoint(FinishCheckpoint {
-                    partial_state_trie: Some(13),
-                }),
-            )
-            .unwrap();
-        provider.commit().unwrap();
-        let provider = factory.provider().unwrap();
-        assert_eq!(get_partial_trie_unwind_marker(&provider).unwrap(), (Some(marker), false));
-        drop(provider);
+        for write_map in [true, false] {
+            let factory = create_test_provider_factory_with_chain_spec_and_db_args(
+                reth_chainspec::MAINNET.clone(),
+                reth_db::mdbx::DatabaseArguments::test().with_write_map(write_map),
+            );
+            assert_eq!(factory.db_ref().db().is_write_map(), write_map);
+            let marker =
+                PartialStateTrieUnwindMarker { finish_block_number: 53, partial_state_trie: 13 };
+            let provider = factory.provider_rw().unwrap();
+            provider
+                .save_stage_checkpoint(
+                    StageId::Finish,
+                    StageCheckpoint::new(53).with_finish_stage_checkpoint(FinishCheckpoint {
+                        partial_state_trie: Some(13),
+                    }),
+                )
+                .unwrap();
+            provider.commit().unwrap();
+            let provider = factory.provider().unwrap();
+            assert_eq!(get_partial_trie_unwind_marker(&provider).unwrap(), (Some(marker), false));
+            drop(provider);
 
-        // Startup persists its intention before stage unwinds change Finish. A subsequent
-        // reader must resume the original plan even if the checkpoint has already rewound.
-        let provider = factory.provider_rw().unwrap();
-        write_partial_trie_unwind_marker(&*provider, marker).unwrap();
-        provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(13)).unwrap();
-        provider.commit().unwrap();
-        let provider = factory.provider().unwrap();
-        assert_eq!(get_partial_trie_unwind_marker(&provider).unwrap(), (Some(marker), true));
-        drop(provider);
+            // Startup persists its intention before stage unwinds change Finish. A subsequent
+            // reader must resume the original plan even if the checkpoint has already rewound.
+            let provider = factory.provider_rw().unwrap();
+            write_partial_trie_unwind_marker(&*provider, marker).unwrap();
+            provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(13)).unwrap();
+            provider.commit().unwrap();
+            let provider = factory.provider().unwrap();
+            assert_eq!(get_partial_trie_unwind_marker(&provider).unwrap(), (Some(marker), true));
+            drop(provider);
 
-        let provider = factory.provider_rw().unwrap();
-        delete_partial_trie_unwind_marker(&*provider).unwrap();
-        provider.commit().unwrap();
-        assert_eq!(
-            get_partial_trie_unwind_marker(&factory.provider().unwrap()).unwrap(),
-            (None, false)
-        );
+            let provider = factory.provider_rw().unwrap();
+            delete_partial_trie_unwind_marker(&*provider).unwrap();
+            provider.commit().unwrap();
+            assert_eq!(
+                get_partial_trie_unwind_marker(&factory.provider().unwrap()).unwrap(),
+                (None, false)
+            );
+        }
     }
 
     #[test]

@@ -4744,11 +4744,17 @@ mod tests {
 
     #[test]
     fn partial_50_40_mask_unwind_and_flush_match_full_persistence_roots() {
-        run_partial_50_40_root_equivalence(false);
-        run_partial_50_40_root_equivalence(true);
+        run_partial_50_40_root_equivalence(false, true);
+        run_partial_50_40_root_equivalence(true, true);
     }
 
-    fn run_partial_50_40_root_equivalence(is_v2: bool) {
+    #[test]
+    fn partial_50_40_without_write_map_matches_full_persistence_roots() {
+        run_partial_50_40_root_equivalence(false, false);
+        run_partial_50_40_root_equivalence(true, false);
+    }
+
+    fn run_partial_50_40_root_equivalence(is_v2: bool, write_map: bool) {
         use reth_storage_overlay::OverlayStateProvider;
         use reth_trie::{
             root::{state_root_unhashed, storage_root_unhashed},
@@ -4759,7 +4765,11 @@ mod tests {
         };
 
         let reference = create_test_provider_factory();
-        let partial = create_test_provider_factory();
+        let partial = crate::test_utils::create_test_provider_factory_with_chain_spec_and_db_args(
+            reth_chainspec::MAINNET.clone(),
+            reth_db::mdbx::DatabaseArguments::test().with_write_map(write_map),
+        );
+        assert_eq!(partial.db_ref().db().is_write_map(), write_map);
         let settings = if is_v2 { StorageSettings::v2() } else { StorageSettings::v1() };
         reference.set_storage_settings_cache(settings);
         partial.set_storage_settings_cache(settings);
