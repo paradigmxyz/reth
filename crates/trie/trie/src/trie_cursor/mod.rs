@@ -1,7 +1,6 @@
-use crate::{hashed_cursor::HashedCursorFactory, BranchNodeCompact, Nibbles};
+use crate::{BranchNodeCompact, Nibbles};
 use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
-use reth_trie_common::prefix_set::TriePrefixSetsMut;
 
 /// In-memory implementations of trie cursors.
 mod in_memory;
@@ -48,23 +47,6 @@ pub trait TrieCursorFactory {
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError>;
-}
-
-/// Provides trie and hashed cursor factories for a selected state view.
-pub trait CursorFactoryProvider {
-    /// The cursor factories for a selected state view.
-    type CursorFactories<'a>: TrieCursorFactory + HashedCursorFactory
-    where
-        Self: 'a;
-
-    /// Error returned while resolving the selected state view.
-    type Error;
-
-    /// Returns cursor factories and their matching prefix sets.
-    fn cursor_factories(
-        &self,
-        trie_changesets: bool,
-    ) -> Result<(Self::CursorFactories<'_>, TriePrefixSetsMut), Self::Error>;
 }
 
 /// A cursor for traversing stored trie nodes. The cursor must iterate over keys in

@@ -259,9 +259,7 @@ impl<N: ProviderNodeTypes> StateRangeProvider for HistoricalStateRangeView<N> {
         limit: B256,
         response_bytes: usize,
     ) -> RangeResult<(B256, Account)> {
-        let (cursor_factories, _) = self.provider.cursor_factories(false)?;
-        let mut cursor =
-            cursor_factories.hashed_account_cursor().map_err(ProviderError::Database)?;
+        let mut cursor = self.provider.hashed_account_cursor().map_err(ProviderError::Database)?;
 
         let mut accounts = Vec::new();
         let mut total_bytes = 0usize;
@@ -288,14 +286,11 @@ impl<N: ProviderNodeTypes> StateRangeProvider for HistoricalStateRangeView<N> {
     }
 
     fn storage_root_by_hash(&self, hashed_address: B256) -> ProviderResult<B256> {
-        let (cursor_factories, mut prefix_sets) = self.provider.cursor_factories(false)?;
-        let prefix_set =
-            prefix_sets.storage_prefix_sets.remove(&hashed_address).unwrap_or_default().freeze();
         let root = StorageRoot::new_hashed(
-            &cursor_factories,
-            &cursor_factories,
+            &self.provider,
+            &self.provider,
             hashed_address,
-            prefix_set,
+            Default::default(),
             TrieRootMetrics::new(TrieType::Storage),
         )
         .root()
@@ -312,17 +307,15 @@ impl<N: ProviderNodeTypes> StateRangeProvider for HistoricalStateRangeView<N> {
     ) -> StorageRangeResult {
         // Distinguish an absent account from one with no storage, so callers don't silently
         // omit it and shift later accounts' positions.
-        let (cursor_factories, _) = self.provider.cursor_factories(false)?;
         let mut account_cursor =
-            cursor_factories.hashed_account_cursor().map_err(ProviderError::Database)?;
+            self.provider.hashed_account_cursor().map_err(ProviderError::Database)?;
         let found = account_cursor.seek(hashed_address).map_err(ProviderError::Database)?;
         if found.map(|(hash, _)| hash) != Some(hashed_address) {
             return Ok(None)
         }
 
-        let mut cursor = cursor_factories
-            .hashed_storage_cursor(hashed_address)
-            .map_err(ProviderError::Database)?;
+        let mut cursor =
+            self.provider.hashed_storage_cursor(hashed_address).map_err(ProviderError::Database)?;
 
         let mut slots = Vec::new();
         let mut total_bytes = 0usize;
@@ -349,9 +342,7 @@ impl<N: ProviderNodeTypes> StateRangeProvider for HistoricalStateRangeView<N> {
     }
 
     fn account_range_proof(&self, keys: &[B256]) -> ProviderResult<Vec<Bytes>> {
-        let (cursor_factories, prefix_sets) = self.provider.cursor_factories(false)?;
-        let multiproof = Proof::new(&cursor_factories, &cursor_factories)
-            .with_prefix_sets_mut(prefix_sets)
+        let multiproof = Proof::new(&self.provider, &self.provider)
             .multiproof(MultiProofTargets::accounts(keys.iter().copied()))
             .map_err(ProviderError::from)?;
         Ok(multiproof
@@ -367,14 +358,9 @@ impl<N: ProviderNodeTypes> StateRangeProvider for HistoricalStateRangeView<N> {
         hashed_address: B256,
         keys: &[B256],
     ) -> ProviderResult<Vec<Bytes>> {
-        let (cursor_factories, mut prefix_sets) = self.provider.cursor_factories(false)?;
-        let prefix_set =
-            prefix_sets.storage_prefix_sets.remove(&hashed_address).unwrap_or_default();
-        let multiproof =
-            StorageProof::new_hashed(&cursor_factories, &cursor_factories, hashed_address)
-                .with_prefix_set_mut(prefix_set)
-                .storage_multiproof(keys.iter().copied().collect())
-                .map_err(ProviderError::from)?;
+        let multiproof = StorageProof::new_hashed(&self.provider, &self.provider, hashed_address)
+            .storage_multiproof(keys.iter().copied().collect())
+            .map_err(ProviderError::from)?;
         Ok(multiproof.subtree.into_nodes_sorted().into_iter().map(|(_, bytes)| bytes).collect())
     }
 }

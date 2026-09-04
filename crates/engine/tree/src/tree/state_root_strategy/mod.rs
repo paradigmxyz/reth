@@ -72,7 +72,10 @@ use reth_provider::{
 };
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_tasks::utils::increase_thread_priority;
-use reth_trie::{trie_cursor::CursorFactoryProvider, updates::TrieUpdates, HashedPostState};
+use reth_trie::{
+    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
+    HashedPostState,
+};
 use reth_trie_parallel::proof_task::{ProofResultMessage, ProofTaskCtx, ProofWorkerHandle};
 pub use reth_trie_parallel::{
     error::StateRootTaskError,
@@ -494,9 +497,11 @@ impl DefaultStateRootStrategy {
     ) -> StateRootHandle
     where
         N: NodePrimitives,
-        F: DatabaseProviderROFactory + Clone + Send + Sync + 'static,
-        F::Provider: CursorFactoryProvider,
-        ProviderError: From<<F::Provider as CursorFactoryProvider>::Error>,
+        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
     {
         let StateRootTaskOptions {
             parent_header,
@@ -796,7 +801,8 @@ where
         + StorageSettingsCache
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
-            Provider: CursorFactoryProvider<Error = ProviderError>
+            Provider: TrieCursorFactory
+                          + HashedCursorFactory
                           + HashedPostStateProvider
                           + StateRootProvider
                           + Send,
@@ -1012,7 +1018,8 @@ where
         + StorageSettingsCache
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
-            Provider: CursorFactoryProvider<Error = ProviderError>
+            Provider: TrieCursorFactory
+                          + HashedCursorFactory
                           + HashedPostStateProvider
                           + StateRootProvider
                           + Send,
@@ -1112,7 +1119,8 @@ where
         + StorageSettingsCache
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
-            Provider: CursorFactoryProvider<Error = ProviderError>
+            Provider: TrieCursorFactory
+                          + HashedCursorFactory
                           + HashedPostStateProvider
                           + StateRootProvider
                           + Send,
@@ -1221,7 +1229,8 @@ where
         + StorageSettingsCache
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
-        Provider: CursorFactoryProvider<Error = ProviderError>
+        Provider: TrieCursorFactory
+                      + HashedCursorFactory
                       + HashedPostStateProvider
                       + StateRootProvider,
     >,
@@ -1240,26 +1249,21 @@ where
             );
 
             match state_provider_factory.database_provider_ro() {
-                Ok(provider) => {
-                    match provider.cursor_factories(true).and_then(|(cursor_factories, _)| {
-                        super::trie_updates::compare_trie_updates(
-                            &cursor_factories,
-                            task_trie_updates,
-                            serial_trie_updates,
-                        )
-                        .map_err(ProviderError::from)
-                    }) {
-                        Ok(has_diff) => return has_diff,
-                        Err(err) => {
-                            warn!(
-                                target: "engine::tree::state_root_strategy",
-                                %err,
-                                "Error comparing trie updates"
-                            );
-                            return true;
-                        }
+                Ok(provider) => match super::trie_updates::compare_trie_updates(
+                    &provider,
+                    task_trie_updates,
+                    serial_trie_updates,
+                ) {
+                    Ok(has_diff) => return has_diff,
+                    Err(err) => {
+                        warn!(
+                            target: "engine::tree::state_root_strategy",
+                            %err,
+                            "Error comparing trie updates"
+                        );
+                        return true;
                     }
-                }
+                },
                 Err(err) => {
                     warn!(
                         target: "engine::tree::state_root_strategy",
