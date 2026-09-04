@@ -22,10 +22,6 @@ pub struct ExExLauncher<Node: FullNodeComponents> {
     extensions: Vec<(String, Box<dyn BoxedLaunchExEx<Node>>)>,
     components: Node,
     config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec>,
-    /// The threshold for the number of blocks in the WAL before emitting a warning.
-    wal_blocks_warning: usize,
-    /// The max notification buffer capacity for the ExEx manager.
-    capacity: usize,
 }
 
 impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
@@ -36,30 +32,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
         extensions: Vec<(String, Box<dyn BoxedLaunchExEx<Node>>)>,
         config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec>,
     ) -> Self {
-        Self {
-            head,
-            extensions,
-            components,
-            config_container,
-            wal_blocks_warning: DEFAULT_WAL_BLOCKS_WARNING,
-            capacity: DEFAULT_EXEX_MANAGER_CAPACITY,
-        }
-    }
-
-    /// Sets the threshold for the number of blocks in the WAL before emitting a warning.
-    ///
-    /// For L2 chains with faster block times, this value should be increased proportionally
-    /// to avoid excessive warnings. For example, a chain with 2-second block times might use
-    /// a value 6x higher than the default (768 instead of 128).
-    pub const fn with_wal_blocks_warning(mut self, threshold: usize) -> Self {
-        self.wal_blocks_warning = threshold;
-        self
-    }
-
-    /// Sets the max notification buffer capacity for the [`ExExManager`].
-    pub const fn with_capacity(mut self, capacity: usize) -> Self {
-        self.capacity = capacity;
-        self
+        Self { head, extensions, components, config_container }
     }
 
     /// Launches all execution extensions.
@@ -69,8 +42,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
     pub async fn launch(
         self,
     ) -> eyre::Result<Option<ExExManagerHandle<PrimitivesTy<Node::Types>>>> {
-        let Self { head, extensions, components, config_container, wal_blocks_warning, capacity } =
-            self;
+        let Self { head, extensions, components, config_container } = self;
         let head = BlockNumHash::new(head.number, head.hash);
 
         if extensions.is_empty() {
@@ -144,11 +116,11 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
         let exex_manager = ExExManager::new(
             components.provider().clone(),
             exex_handles,
-            capacity,
+            DEFAULT_EXEX_MANAGER_CAPACITY,
             exex_wal,
             components.provider().finalized_block_stream(),
         )
-        .with_wal_blocks_warning(wal_blocks_warning);
+        .with_wal_blocks_warning(DEFAULT_WAL_BLOCKS_WARNING);
         let exex_manager_handle = exex_manager.handle();
         components.task_executor().spawn_critical_task("exex manager", async move {
             exex_manager.await.expect("exex manager crashed");
@@ -182,7 +154,6 @@ impl<Node: FullNodeComponents> Debug for ExExLauncher<Node> {
             .field("extensions", &self.extensions.iter().map(|(id, _)| id).collect::<Vec<_>>())
             .field("components", &"...")
             .field("config_container", &self.config_container)
-            .field("wal_blocks_warning", &self.wal_blocks_warning)
             .finish()
     }
 }

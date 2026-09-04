@@ -85,12 +85,11 @@ impl EngineNodeLauncher {
         let Self { ctx, engine_tree_config } = self;
         let NodeBuilderWithComponents {
             adapter: NodeTypesAdapter { database },
-            rocksdb_provider,
             components_builder,
             add_ons: AddOns { hooks, exexs: installed_exex, add_ons },
             config,
         } = target;
-        let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
+        let NodeHooks { on_component_initialized, on_node_started } = hooks;
 
         // Create the overlay manager that will be shared across the provider and engine.
         let overlay_manager = OverlayManager::<N::Primitives>::new(
@@ -112,7 +111,6 @@ impl EngineNodeLauncher {
             // Create the provider factory with the shared overlay manager
             .with_provider_factory::<_, <CB::Components as NodeComponents<T>>::Evm>(
                 overlay_manager.clone(),
-                rocksdb_provider,
                 disabled_stages,
             )
             .await?

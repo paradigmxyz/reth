@@ -8,15 +8,11 @@ use crate::{
     BuilderContext, ConfigureEvm, FullNodeTypes,
 };
 use reth_chainspec::EthChainSpec;
-use reth_consensus::{noop::NoopConsensus, FullConsensus};
+use reth_consensus::FullConsensus;
 use reth_network::{types::NetPrimitivesFor, EthNetworkPrimitives, NetworkPrimitives};
 use reth_network_api::{noop::NoopNetwork, FullNetwork};
-use reth_node_api::{BlockTy, BodyTy, HeaderTy, NodeTypes, PrimitivesTy, ReceiptTy, TxTy};
-use reth_payload_builder::PayloadBuilderHandle;
-use reth_transaction_pool::{
-    noop::NoopTransactionPool, EthPoolTransaction, EthPooledTransaction, PoolPooledTx,
-    PoolTransaction, TransactionPool,
-};
+use reth_node_api::{BlockTy, BodyTy, HeaderTy, PrimitivesTy, ReceiptTy, TxTy};
+use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
 use std::{future::Future, marker::PhantomData};
 
 /// A generic, general purpose and customizable [`NodeComponentsBuilder`] implementation.
@@ -75,66 +71,6 @@ impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB>
             _marker: Default::default(),
         }
     }
-
-    /// Apply a function to the pool builder.
-    pub fn map_pool(self, f: impl FnOnce(PoolB) -> PoolB) -> Self {
-        Self {
-            pool_builder: f(self.pool_builder),
-            payload_builder: self.payload_builder,
-            network_builder: self.network_builder,
-            executor_builder: self.executor_builder,
-            consensus_builder: self.consensus_builder,
-            _marker: self._marker,
-        }
-    }
-
-    /// Apply a function to the payload builder.
-    pub fn map_payload(self, f: impl FnOnce(PayloadB) -> PayloadB) -> Self {
-        Self {
-            pool_builder: self.pool_builder,
-            payload_builder: f(self.payload_builder),
-            network_builder: self.network_builder,
-            executor_builder: self.executor_builder,
-            consensus_builder: self.consensus_builder,
-            _marker: self._marker,
-        }
-    }
-
-    /// Apply a function to the network builder.
-    pub fn map_network(self, f: impl FnOnce(NetworkB) -> NetworkB) -> Self {
-        Self {
-            pool_builder: self.pool_builder,
-            payload_builder: self.payload_builder,
-            network_builder: f(self.network_builder),
-            executor_builder: self.executor_builder,
-            consensus_builder: self.consensus_builder,
-            _marker: self._marker,
-        }
-    }
-
-    /// Apply a function to the executor builder.
-    pub fn map_executor(self, f: impl FnOnce(ExecB) -> ExecB) -> Self {
-        Self {
-            pool_builder: self.pool_builder,
-            payload_builder: self.payload_builder,
-            network_builder: self.network_builder,
-            executor_builder: f(self.executor_builder),
-            consensus_builder: self.consensus_builder,
-            _marker: self._marker,
-        }
-    }
-
-    /// Apply a function to the consensus builder.
-    pub fn map_consensus(self, f: impl FnOnce(ConsB) -> ConsB) -> Self {
-        Self {
-            pool_builder: self.pool_builder,
-            payload_builder: self.payload_builder,
-            network_builder: self.network_builder,
-            executor_builder: self.executor_builder,
-            consensus_builder: f(self.consensus_builder),
-            _marker: self._marker,
-        }
-    }
 }
 
 impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB>
@@ -165,21 +101,6 @@ where
             executor_builder,
             consensus_builder,
             _marker,
-        }
-    }
-
-    /// Sets [`NoopTransactionPoolBuilder`].
-    pub fn noop_pool<Tx>(
-        self,
-    ) -> ComponentsBuilder<Node, NoopTransactionPoolBuilder<Tx>, PayloadB, NetworkB, ExecB, ConsB>
-    {
-        ComponentsBuilder {
-            pool_builder: NoopTransactionPoolBuilder::<Tx>::default(),
-            payload_builder: self.payload_builder,
-            network_builder: self.network_builder,
-            executor_builder: self.executor_builder,
-            consensus_builder: self.consensus_builder,
-            _marker: self._marker,
         }
     }
 
@@ -320,34 +241,6 @@ where
             _marker: self._marker,
         }
     }
-
-    /// Sets [`NoopPayloadBuilder`].
-    pub fn noop_payload(
-        self,
-    ) -> ComponentsBuilder<Node, PoolB, NoopPayloadBuilder, NetworkB, ExecB, ConsB> {
-        ComponentsBuilder {
-            pool_builder: self.pool_builder,
-            payload_builder: NoopPayloadBuilder,
-            network_builder: self.network_builder,
-            executor_builder: self.executor_builder,
-            consensus_builder: self.consensus_builder,
-            _marker: self._marker,
-        }
-    }
-
-    /// Sets [`NoopConsensusBuilder`].
-    pub fn noop_consensus(
-        self,
-    ) -> ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, NoopConsensusBuilder> {
-        ComponentsBuilder {
-            pool_builder: self.pool_builder,
-            payload_builder: self.payload_builder,
-            network_builder: self.network_builder,
-            executor_builder: self.executor_builder,
-            consensus_builder: NoopConsensusBuilder,
-            _marker: self._marker,
-        }
-    }
 }
 
 impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB> NodeComponentsBuilder<Node>
@@ -463,33 +356,6 @@ where
     }
 }
 
-/// Builds [`NoopTransactionPool`].
-#[derive(Debug, Clone)]
-pub struct NoopTransactionPoolBuilder<Tx = EthPooledTransaction>(PhantomData<Tx>);
-
-impl<N, Tx, Evm> PoolBuilder<N, Evm> for NoopTransactionPoolBuilder<Tx>
-where
-    N: FullNodeTypes,
-    Tx: EthPoolTransaction<Consensus = TxTy<N::Types>> + Unpin,
-    Evm: Send,
-{
-    type Pool = NoopTransactionPool<Tx>;
-
-    async fn build_pool(
-        self,
-        _ctx: &BuilderContext<N>,
-        _evm_config: Evm,
-    ) -> eyre::Result<Self::Pool> {
-        Ok(NoopTransactionPool::<Tx>::new())
-    }
-}
-
-impl<Tx> Default for NoopTransactionPoolBuilder<Tx> {
-    fn default() -> Self {
-        Self(PhantomData)
-    }
-}
-
 /// Builds [`NoopNetwork`].
 #[derive(Debug, Clone)]
 pub struct NoopNetworkBuilder<Net = EthNetworkPrimitives>(PhantomData<Net>);
@@ -526,40 +392,5 @@ where
 impl<Net> Default for NoopNetworkBuilder<Net> {
     fn default() -> Self {
         Self(PhantomData)
-    }
-}
-
-/// Builds [`NoopConsensus`].
-#[derive(Debug, Clone, Default)]
-pub struct NoopConsensusBuilder;
-
-impl<N> ConsensusBuilder<N> for NoopConsensusBuilder
-where
-    N: FullNodeTypes,
-{
-    type Consensus = NoopConsensus;
-
-    async fn build_consensus(self, _ctx: &BuilderContext<N>) -> eyre::Result<Self::Consensus> {
-        Ok(NoopConsensus::default())
-    }
-}
-
-/// Builds [`PayloadBuilderHandle::noop`].
-#[derive(Debug, Clone, Default)]
-pub struct NoopPayloadBuilder;
-
-impl<N, Pool, EVM> PayloadServiceBuilder<N, Pool, EVM> for NoopPayloadBuilder
-where
-    N: FullNodeTypes,
-    Pool: TransactionPool,
-    EVM: ConfigureEvm<Primitives = PrimitivesTy<N::Types>> + 'static,
-{
-    async fn spawn_payload_builder_service(
-        self,
-        _ctx: &BuilderContext<N>,
-        _pool: Pool,
-        _evm_config: EVM,
-    ) -> eyre::Result<PayloadBuilderHandle<<N::Types as NodeTypes>::Payload>> {
-        Ok(PayloadBuilderHandle::<<N::Types as NodeTypes>::Payload>::noop())
     }
 }

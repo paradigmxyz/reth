@@ -17,8 +17,6 @@ use reth_rpc_api::EngineApiClient;
 use reth_rpc_builder::{auth::AuthServerHandle, RpcServerHandle};
 use reth_tasks::TaskExecutor;
 use std::{
-    fmt::Debug,
-    marker::PhantomData,
     ops::{Deref, DerefMut},
     sync::Arc,
 };
@@ -48,60 +46,6 @@ pub trait Node<N: FullNodeTypes>: NodeTypes + Clone {
     /// Returns the stages that should be disabled for this node.
     fn disabled_stages() -> &'static [reth_stages::StageId] {
         &[]
-    }
-}
-
-/// A [`Node`] type builder
-#[derive(Clone, Default, Debug)]
-pub struct AnyNode<N = (), C = (), AO = ()>(PhantomData<N>, C, AO);
-
-impl<N, C, AO> AnyNode<N, C, AO> {
-    /// Configures the types of the node.
-    pub fn types<T>(self) -> AnyNode<T, C, AO> {
-        AnyNode(PhantomData, self.1, self.2)
-    }
-
-    /// Sets the node components builder.
-    pub fn components_builder<T>(self, value: T) -> AnyNode<N, T, AO> {
-        AnyNode(PhantomData, value, self.2)
-    }
-
-    /// Sets the node add-ons.
-    pub fn add_ons<T>(self, value: T) -> AnyNode<N, C, T> {
-        AnyNode(PhantomData, self.1, value)
-    }
-}
-
-impl<N, C, AO> NodeTypes for AnyNode<N, C, AO>
-where
-    N: FullNodeTypes,
-    C: Clone + Debug + Send + Sync + Unpin + 'static,
-    AO: Clone + Debug + Send + Sync + Unpin + 'static,
-{
-    type Primitives = <N::Types as NodeTypes>::Primitives;
-
-    type ChainSpec = <N::Types as NodeTypes>::ChainSpec;
-
-    type Storage = <N::Types as NodeTypes>::Storage;
-
-    type Payload = <N::Types as NodeTypes>::Payload;
-}
-
-impl<N, C, AO> Node<N> for AnyNode<N, C, AO>
-where
-    N: FullNodeTypes + Clone,
-    C: NodeComponentsBuilder<N> + Clone + Debug + Sync + Unpin + 'static,
-    AO: NodeAddOns<NodeAdapter<N, C::Components>> + Clone + Debug + Sync + Unpin + 'static,
-{
-    type ComponentsBuilder = C;
-    type AddOns = AO;
-
-    fn components_builder(&self) -> Self::ComponentsBuilder {
-        self.1.clone()
-    }
-
-    fn add_ons(&self) -> Self::AddOns {
-        self.2.clone()
     }
 }
 
@@ -181,22 +125,6 @@ where
     Node: FullNodeComponents<Types: NodeTypes<Payload = Engine>>,
     AddOns: RethRpcAddOns<Node>,
 {
-    /// Returns the [`EngineApiClient`] interface for the authenticated engine API.
-    ///
-    /// This will send authenticated http requests to the node's auth server.
-    pub fn engine_http_client(&self) -> impl EngineApiClient<Engine> + use<Engine, Node, AddOns> {
-        self.auth_server_handle().http_client()
-    }
-
-    /// Returns the [`EngineApiClient`] interface for the authenticated engine API.
-    ///
-    /// This will send authenticated ws requests to the node's auth server.
-    pub async fn engine_ws_client(
-        &self,
-    ) -> impl EngineApiClient<Engine> + use<Engine, Node, AddOns> {
-        self.auth_server_handle().ws_client().await
-    }
-
     /// Returns the [`EngineApiClient`] interface for the authenticated engine API.
     ///
     /// This will send not authenticated IPC requests to the node's auth server.

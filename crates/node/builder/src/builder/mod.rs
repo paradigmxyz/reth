@@ -16,12 +16,8 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_exex::ExExContext;
 use reth_network::{
-    transactions::{
-        config::{AnnouncementFilteringPolicy, StrictEthAnnouncementFilter},
-        TransactionPropagationPolicy, TransactionsManagerConfig,
-    },
-    NetworkBuilder, NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
-    NetworkPrimitives,
+    transactions::config::StrictEthAnnouncementFilter, NetworkBuilder, NetworkConfig,
+    NetworkConfigBuilder, NetworkHandle, NetworkManager, NetworkPrimitives,
 };
 use reth_node_api::{
     FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes, NodeTypesWithDBAdapter,
@@ -33,7 +29,7 @@ use reth_node_core::{
     primitives::Head,
 };
 use reth_provider::{
-    providers::{BlockchainProvider, NodeTypesForProvider, RocksDBProvider},
+    providers::{BlockchainProvider, NodeTypesForProvider},
     ChainSpecProvider, FullProvider,
 };
 use reth_tasks::TaskExecutor;
@@ -155,14 +151,12 @@ pub struct NodeBuilder<DB, ChainSpec> {
     config: NodeConfig<ChainSpec>,
     /// The configured database for the node.
     database: DB,
-    /// An optional [`RocksDBProvider`] to use instead of creating one during launch.
-    rocksdb_provider: Option<RocksDBProvider>,
 }
 
 impl<ChainSpec> NodeBuilder<(), ChainSpec> {
     /// Create a new [`NodeBuilder`].
     pub const fn new(config: NodeConfig<ChainSpec>) -> Self {
-        Self { config, database: (), rocksdb_provider: None }
+        Self { config, database: () }
     }
 }
 
@@ -172,41 +166,6 @@ impl<DB, ChainSpec> NodeBuilder<DB, ChainSpec> {
         &self.config
     }
 
-    /// Returns a mutable reference to the node builder's config.
-    pub const fn config_mut(&mut self) -> &mut NodeConfig<ChainSpec> {
-        &mut self.config
-    }
-
-    /// Returns a reference to the node's database
-    pub const fn db(&self) -> &DB {
-        &self.database
-    }
-
-    /// Returns a mutable reference to the node's database
-    pub const fn db_mut(&mut self) -> &mut DB {
-        &mut self.database
-    }
-
-    /// Applies a fallible function to the builder.
-    pub fn try_apply<F, R>(self, f: F) -> Result<Self, R>
-    where
-        F: FnOnce(Self) -> Result<Self, R>,
-    {
-        f(self)
-    }
-
-    /// Applies a fallible function to the builder, if the condition is `true`.
-    pub fn try_apply_if<F, R>(self, cond: bool, f: F) -> Result<Self, R>
-    where
-        F: FnOnce(Self) -> Result<Self, R>,
-    {
-        if cond {
-            f(self)
-        } else {
-            Ok(self)
-        }
-    }
-
     /// Apply a function to the builder
     pub fn apply<F>(self, f: F) -> Self
     where
@@ -214,30 +173,12 @@ impl<DB, ChainSpec> NodeBuilder<DB, ChainSpec> {
     {
         f(self)
     }
-
-    /// Apply a function to the builder, if the condition is `true`.
-    pub fn apply_if<F>(self, cond: bool, f: F) -> Self
-    where
-        F: FnOnce(Self) -> Self,
-    {
-        if cond {
-            f(self)
-        } else {
-            self
-        }
-    }
 }
 
 impl<DB, ChainSpec: EthChainSpec> NodeBuilder<DB, ChainSpec> {
     /// Configures the underlying database that the node will use.
     pub fn with_database<D>(self, database: D) -> NodeBuilder<D, ChainSpec> {
-        NodeBuilder { config: self.config, database, rocksdb_provider: self.rocksdb_provider }
-    }
-
-    /// Sets the [`RocksDBProvider`] to use instead of creating one during launch.
-    pub fn with_rocksdb_provider(mut self, rocksdb_provider: RocksDBProvider) -> Self {
-        self.rocksdb_provider = Some(rocksdb_provider);
-        self
+        NodeBuilder { config: self.config, database }
     }
 
     /// Preconfigure the builder with the context to launch the node.
@@ -283,33 +224,6 @@ impl<DB, ChainSpec: EthChainSpec> NodeBuilder<DB, ChainSpec> {
 
         WithLaunchContext { builder: self.with_database(db), task_executor }
     }
-
-    /// Creates a preconfigured test node whose datadir is preserved when the node is dropped.
-    ///
-    /// The caller owns cleanup of `datadir`. This is useful for tests that stop a node and launch
-    /// a new instance against the same database and static files.
-    #[cfg(feature = "test-utils")]
-    pub fn testing_node_with_persistent_datadir(
-        mut self,
-        task_executor: TaskExecutor,
-        datadir: impl Into<std::path::PathBuf>,
-    ) -> WithLaunchContext<NodeBuilder<Arc<reth_db::DatabaseEnv>, ChainSpec>> {
-        let path = reth_node_core::dirs::MaybePlatformPath::<DataDirPath>::from(datadir.into());
-        self.config = self.config.with_datadir_args(reth_node_core::args::DatadirArgs {
-            datadir: path.clone(),
-            ..Default::default()
-        });
-
-        let data_dir =
-            path.unwrap_or_chain_default(self.config.chain.chain(), self.config.datadir.clone());
-        let db_path = data_dir.data_dir().join("db");
-        let db = reth_db::init_db(&db_path, reth_db::mdbx::DatabaseArguments::test())
-            .unwrap_or_else(|error| {
-                panic!("could not create test database at {db_path:?}: {error}")
-            });
-
-        WithLaunchContext { builder: self.with_database(Arc::new(db)), task_executor }
-    }
 }
 
 impl<DB, ChainSpec> NodeBuilder<DB, ChainSpec>
@@ -333,7 +247,7 @@ where
         T: NodeTypesForProvider<ChainSpec = ChainSpec>,
         P: FullProvider<NodeTypesWithDBAdapter<T, DB>>,
     {
-        NodeBuilderWithTypes::new(self.config, self.database, self.rocksdb_provider)
+        NodeBuilderWithTypes::new(self.config, self.database)
     }
 
     /// Preconfigures the node with a specific node implementation.
@@ -371,11 +285,6 @@ impl<DB, ChainSpec> WithLaunchContext<NodeBuilder<DB, ChainSpec>> {
     pub const fn config(&self) -> &NodeConfig<ChainSpec> {
         self.builder.config()
     }
-
-    /// Returns a mutable reference to the node builder's config.
-    pub const fn config_mut(&mut self) -> &mut NodeConfig<ChainSpec> {
-        self.builder.config_mut()
-    }
 }
 
 impl<DB, ChainSpec> WithLaunchContext<NodeBuilder<DB, ChainSpec>>
@@ -383,12 +292,6 @@ where
     DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
     ChainSpec: EthChainSpec + EthereumHardforks,
 {
-    /// Sets the [`RocksDBProvider`] to use instead of creating one during launch.
-    pub fn with_rocksdb_provider(mut self, rocksdb_provider: RocksDBProvider) -> Self {
-        self.builder.rocksdb_provider = Some(rocksdb_provider);
-        self
-    }
-
     /// Configures the types of the node.
     pub fn with_types<T>(self) -> WithLaunchContext<NodeBuilderWithTypes<RethFullAdapter<DB, T>>>
     where
@@ -503,39 +406,9 @@ where
         &self.builder.config
     }
 
-    /// Returns a mutable reference to the node builder's config.
-    pub const fn config_mut(&mut self) -> &mut NodeConfig<<T::Types as NodeTypes>::ChainSpec> {
-        &mut self.builder.config
-    }
-
     /// Returns a reference to node's database.
     pub const fn db(&self) -> &T::DB {
         &self.builder.adapter.database
-    }
-
-    /// Returns a mutable reference to node's database.
-    pub const fn db_mut(&mut self) -> &mut T::DB {
-        &mut self.builder.adapter.database
-    }
-
-    /// Applies a fallible function to the builder.
-    pub fn try_apply<F, R>(self, f: F) -> Result<Self, R>
-    where
-        F: FnOnce(Self) -> Result<Self, R>,
-    {
-        f(self)
-    }
-
-    /// Applies a fallible function to the builder, if the condition is `true`.
-    pub fn try_apply_if<F, R>(self, cond: bool, f: F) -> Result<Self, R>
-    where
-        F: FnOnce(Self) -> Result<Self, R>,
-    {
-        if cond {
-            f(self)
-        } else {
-            Ok(self)
-        }
     }
 
     /// Apply a function to the builder
@@ -544,18 +417,6 @@ where
         F: FnOnce(Self) -> Self,
     {
         f(self)
-    }
-
-    /// Apply a function to the builder, if the condition is `true`.
-    pub fn apply_if<F>(self, cond: bool, f: F) -> Self
-    where
-        F: FnOnce(Self) -> Self,
-    {
-        if cond {
-            f(self)
-        } else {
-            self
-        }
     }
 
     /// Sets the hook that is run once the node's components are initialized.
@@ -681,24 +542,6 @@ where
         }
     }
 
-    /// Installs an `ExEx` (Execution Extension) in the node if the condition is true.
-    ///
-    /// # Note
-    ///
-    /// The `ExEx` ID must be unique.
-    pub fn install_exex_if<F, R, E>(self, cond: bool, exex_id: impl Into<String>, exex: F) -> Self
-    where
-        F: FnOnce(ExExContext<NodeAdapter<T, CB::Components>>) -> R + Send + 'static,
-        R: Future<Output = eyre::Result<E>> + Send,
-        E: Future<Output = eyre::Result<()>> + Send,
-    {
-        if cond {
-            self.install_exex(exex_id, exex)
-        } else {
-            self
-        }
-    }
-
     /// Launches the node with the given launcher.
     pub async fn launch_with<L>(self, launcher: L) -> eyre::Result<L::Node>
     where
@@ -818,11 +661,6 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         &mut self.config_container.config
     }
 
-    /// Returns the loaded reh.toml config.
-    pub const fn reth_config(&self) -> &reth_config::Config {
-        &self.config_container.toml_config
-    }
-
     /// Returns the executor of the node.
     ///
     /// This can be used to execute async tasks or functions during the setup.
@@ -862,6 +700,9 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
 
     /// Convenience function to start the network tasks.
     ///
+    /// Uses the transaction manager config and propagation policy from the node config and the
+    /// default [`StrictEthAnnouncementFilter`] for announcement filtering.
+    ///
     /// Spawns the configured network and associated tasks and returns the [`NetworkHandle`]
     /// connected to that network.
     pub fn start_network<N, Pool>(
@@ -880,84 +721,12 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
             + 'static,
         Node::Provider: BlockReaderFor<N>,
     {
-        self.start_network_with(
-            builder,
-            pool,
-            self.config().network.transactions_manager_config(),
-            self.config().network.tx_propagation_policy,
-        )
-    }
-
-    /// Convenience function to start the network tasks.
-    ///
-    /// Accepts the config for the transaction task and the policy for propagation.
-    /// Uses the default [`StrictEthAnnouncementFilter`] for announcement filtering.
-    ///
-    /// Spawns the configured network and associated tasks and returns the [`NetworkHandle`]
-    /// connected to that network.
-    pub fn start_network_with<Pool, N, Policy>(
-        &self,
-        builder: NetworkBuilder<(), (), N>,
-        pool: Pool,
-        tx_config: TransactionsManagerConfig,
-        propagation_policy: Policy,
-    ) -> NetworkHandle<N>
-    where
-        N: NetworkPrimitives,
-        Pool: TransactionPool<
-                Transaction: PoolTransaction<
-                    Consensus = N::BroadcastedTransaction,
-                    Pooled = N::PooledTransaction,
-                >,
-            > + Unpin
-            + 'static,
-        Node::Provider: BlockReaderFor<N>,
-        Policy: TransactionPropagationPolicy<N>,
-    {
-        self.start_network_with_policies(
-            builder,
-            pool,
-            tx_config,
-            propagation_policy,
-            StrictEthAnnouncementFilter::default(),
-        )
-    }
-
-    /// Convenience function to start the network tasks with custom policies.
-    ///
-    /// Accepts the config for the transaction task, the policy for propagation,
-    /// and a custom announcement filter. This is useful for configuring which tx types are accepted
-    /// in announcements.
-    ///
-    /// Spawns the configured network and associated tasks and returns the [`NetworkHandle`]
-    /// connected to that network.
-    pub fn start_network_with_policies<Pool, N, PropPolicy, AnnPolicy>(
-        &self,
-        builder: NetworkBuilder<(), (), N>,
-        pool: Pool,
-        tx_config: TransactionsManagerConfig,
-        propagation_policy: PropPolicy,
-        announcement_policy: AnnPolicy,
-    ) -> NetworkHandle<N>
-    where
-        N: NetworkPrimitives,
-        Pool: TransactionPool<
-                Transaction: PoolTransaction<
-                    Consensus = N::BroadcastedTransaction,
-                    Pooled = N::PooledTransaction,
-                >,
-            > + Unpin
-            + 'static,
-        Node::Provider: BlockReaderFor<N>,
-        PropPolicy: TransactionPropagationPolicy<N>,
-        AnnPolicy: AnnouncementFilteringPolicy<N>,
-    {
         let (handle, network, txpool, eth) = builder
             .transactions_with_policies(
                 pool.clone(),
-                tx_config,
-                propagation_policy,
-                announcement_policy,
+                self.config().network.transactions_manager_config(),
+                self.config().network.tx_propagation_policy,
+                StrictEthAnnouncementFilter::default(),
             )
             .map_transactions(|transactions| {
                 if let Some(cache) = self.sender_recovery_cache.clone() {
@@ -1002,18 +771,6 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         let secret_key = self.config().network.secret_key(data_dir.p2p_secret())?;
         Ok(secret_key)
     }
-
-    /// Builds the [`NetworkConfig`].
-    pub fn build_network_config<N>(
-        &self,
-        network_builder: NetworkConfigBuilder<N>,
-    ) -> NetworkConfig<Node::Provider, N>
-    where
-        N: NetworkPrimitives,
-        Node::Types: NodeTypes<ChainSpec: Hardforks>,
-    {
-        network_builder.build(self.provider.clone())
-    }
 }
 
 impl<Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>> BuilderContext<Node> {
@@ -1032,8 +789,7 @@ impl<Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>> BuilderContext
     where
         N: NetworkPrimitives,
     {
-        let network_builder = self.network_config_builder();
-        Ok(self.build_network_config(network_builder?))
+        Ok(self.network_config_builder()?.build(self.provider.clone()))
     }
 
     /// Get the [`NetworkConfigBuilder`].
@@ -1047,7 +803,7 @@ impl<Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>> BuilderContext
             .config()
             .network
             .network_config(
-                self.reth_config(),
+                &self.config_container.toml_config,
                 self.config().chain.clone(),
                 secret_key,
                 default_peers_path,
@@ -1067,31 +823,5 @@ impl<Node: FullNodeTypes> std::fmt::Debug for BuilderContext<Node> {
             .field("executor", &self.executor)
             .field("config", &self.config())
             .finish()
-    }
-}
-
-#[cfg(all(test, feature = "test-utils"))]
-mod tests {
-    use super::*;
-    use reth_chainspec::ChainSpec;
-    use reth_tasks::Runtime;
-
-    #[test]
-    fn persistent_test_datadir_can_be_reopened() {
-        let root = tempfile::tempdir().unwrap();
-        let datadir = root.path().join("node");
-        let runtime = Runtime::test();
-
-        let config = || NodeConfig::new(Arc::new(ChainSpec::<alloy_consensus::Header>::default()));
-        let first = NodeBuilder::new(config())
-            .testing_node_with_persistent_datadir(runtime.clone(), datadir.clone());
-        assert!(datadir.join("db").exists());
-        drop(first);
-        assert!(datadir.join("db").exists());
-
-        let reopened = NodeBuilder::new(config())
-            .testing_node_with_persistent_datadir(runtime, datadir.clone());
-        drop(reopened);
-        assert!(datadir.join("db").exists());
     }
 }

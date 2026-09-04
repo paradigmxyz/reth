@@ -44,11 +44,8 @@ use reth_consensus::noop::NoopConsensus;
 use reth_db_api::{
     database::Database, database_metrics::DatabaseMetrics, models::PartialStateTrieUnwindMarker,
 };
-use reth_db_common::init::{
-    init_genesis_with_settings, init_genesis_with_settings_and_validate, InitStorageError,
-};
+use reth_db_common::init::{init_genesis_with_settings_and_validate, InitStorageError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
-use reth_engine_local::MiningMode;
 use reth_evm::{noop::NoopEvmConfig, ConfigureEvm};
 use reth_exex::ExExManagerHandle;
 use reth_fs_util as fs;
@@ -70,7 +67,7 @@ use reth_node_metrics::{
     version::VersionInfo,
 };
 use reth_provider::{
-    providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
+    providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider},
     BalConfig, BalStoreHandle, BlockHashReader, BlockNumReader, DBProvider,
     DatabaseProviderFactory, InMemoryBalStore, MetadataProvider, MetadataWriter, ProviderError,
     ProviderFactory, ProviderResult, RocksDBProviderFactory, StageCheckpointReader,
@@ -88,7 +85,6 @@ use reth_static_file::{blocks_per_file_for_prune_distance, StaticFileProducer, S
 use reth_storage_overlay::OverlayManager;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, error, info, warn};
-use reth_transaction_pool::TransactionPool;
 use std::{num::NonZeroUsize, sync::Arc, thread::available_parallelism, time::Duration};
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedSender},
@@ -266,14 +262,6 @@ pub struct LaunchContextWith<T> {
 }
 
 impl<T> LaunchContextWith<T> {
-    /// Configure global settings this includes:
-    ///
-    /// - Raising the file descriptor limit
-    /// - Configuring the global rayon thread pool
-    pub fn configure_globals(&self, reserved_cpu_cores: u64) {
-        self.inner.configure_globals(reserved_cpu_cores.try_into().unwrap());
-    }
-
     /// Returns the data directory.
     pub const fn data_dir(&self) -> &ChainPath<DataDirPath> {
         &self.inner.data_dir
@@ -456,14 +444,6 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
         let secret = self.node_config().rpc.auth_jwt_secret(default_jwt_path)?;
         Ok(secret)
     }
-
-    /// Returns the [`MiningMode`] intended for --dev mode.
-    pub fn dev_mining_mode<Pool>(&self, pool: Pool) -> MiningMode<Pool>
-    where
-        Pool: TransactionPool + Unpin,
-    {
-        self.node_config().dev_mining_mode(pool)
-    }
 }
 
 impl<DB, ChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpec>, DB>>
@@ -477,7 +457,6 @@ where
     pub async fn create_provider_factory<N, Evm>(
         &self,
         overlay_manager: OverlayManager<N::Primitives>,
-        rocksdb_provider: Option<RocksDBProvider>,
         disabled_stages: &[StageId],
     ) -> eyre::Result<ProviderFactory<N>>
     where
@@ -510,16 +489,11 @@ where
                 .with_genesis_block_number(self.chain_spec().genesis().number.unwrap_or_default())
                 .build()?;
 
-        // Use the provided RocksDB provider or create a new one
-        let rocksdb_provider = if let Some(provider) = rocksdb_provider {
-            provider
-        } else {
-            RocksDBProvider::builder(self.data_dir().rocksdb())
-                .with_default_tables()
-                .with_metrics()
-                .with_statistics()
-                .build()?
-        };
+        let rocksdb_provider = RocksDBProvider::builder(self.data_dir().rocksdb())
+            .with_default_tables()
+            .with_metrics()
+            .with_statistics()
+            .build()?;
 
         let balstore_cache_size = self
             .node_config()
@@ -670,16 +644,14 @@ where
     pub async fn with_provider_factory<N, Evm>(
         self,
         overlay_manager: OverlayManager<N::Primitives>,
-        rocksdb_provider: Option<RocksDBProvider>,
         disabled_stages: &[StageId],
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<ChainSpec>, ProviderFactory<N>>>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
         Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
-        let factory = self
-            .create_provider_factory::<N, Evm>(overlay_manager, rocksdb_provider, disabled_stages)
-            .await?;
+        let factory =
+            self.create_provider_factory::<N, Evm>(overlay_manager, disabled_stages).await?;
         let ctx = LaunchContextWith {
             inner: self.inner,
             attachment: self.attachment.map_right(|_| factory),
@@ -693,19 +665,9 @@ impl<T> LaunchContextWith<Attached<WithConfigs<T::ChainSpec>, ProviderFactory<T>
 where
     T: ProviderNodeTypes,
 {
-    /// Returns access to the underlying database.
-    pub const fn database(&self) -> &T::DB {
-        self.right().db_ref()
-    }
-
     /// Returns the configured `ProviderFactory`.
     pub const fn provider_factory(&self) -> &ProviderFactory<T> {
         self.right()
-    }
-
-    /// Returns the static file provider to interact with the static files.
-    pub fn static_file_provider(&self) -> StaticFileProvider<T::Primitives> {
-        self.right().static_file_provider()
     }
 
     /// This launches the prometheus endpoint.
@@ -773,7 +735,7 @@ where
         Ok(())
     }
 
-    /// Convenience function to [`Self::init_genesis`]
+    /// Writes the genesis block and state if it has not already been written and validates it.
     pub fn with_genesis(self) -> Result<Self, InitStorageError> {
         init_genesis_with_settings_and_validate(
             self.provider_factory(),
@@ -781,11 +743,6 @@ where
             !self.node_config().debug.skip_genesis_validation,
         )?;
         Ok(self)
-    }
-
-    /// Write the genesis block and state if it has not already been written
-    pub fn init_genesis(&self) -> Result<B256, InitStorageError> {
-        init_genesis_with_settings(self.provider_factory(), self.node_config().storage_settings())
     }
 
     /// Creates a new `WithMeteredProvider` container and attaches it to the
@@ -867,11 +824,6 @@ impl<T>
 where
     T: FullNodeTypes<Types: NodeTypesForProvider>,
 {
-    /// Returns access to the underlying database.
-    pub const fn database(&self) -> &T::DB {
-        self.provider_factory().db_ref()
-    }
-
     /// Returns the configured `ProviderFactory`.
     pub const fn provider_factory(
         &self,
@@ -979,11 +931,6 @@ where
         self.node_config().max_block(client, self.provider_factory().clone()).await
     }
 
-    /// Returns the static file provider to interact with the static files.
-    pub fn static_file_provider(&self) -> StaticFileProvider<<T::Types as NodeTypes>::Primitives> {
-        self.provider_factory().static_file_provider()
-    }
-
     /// Creates a new [`StaticFileProducer`] with the attached database.
     pub fn static_file_producer(
         &self,
@@ -999,11 +946,6 @@ where
     /// Returns the configured `NodeAdapter`.
     pub const fn node_adapter(&self) -> &NodeAdapter<T, CB::Components> {
         &self.right().node_adapter
-    }
-
-    /// Returns mutable reference to the configured `NodeAdapter`.
-    pub const fn node_adapter_mut(&mut self) -> &mut NodeAdapter<T, CB::Components> {
-        &mut self.right_mut().node_adapter
     }
 
     /// Returns a reference to the blockchain provider.
@@ -1147,34 +1089,14 @@ where
             Box<dyn crate::exex::BoxedLaunchExEx<NodeAdapter<T, CB::Components>>>,
         )>,
     ) -> eyre::Result<Option<ExExManagerHandle<PrimitivesTy<T::Types>>>> {
-        self.exex_launcher(installed_exex).launch().await
-    }
-
-    /// Creates an [`ExExLauncher`] for the installed ExExes.
-    ///
-    /// This returns the launcher before calling `.launch()`, allowing custom configuration
-    /// such as setting the WAL blocks warning threshold for L2 chains with faster block times:
-    ///
-    /// ```ignore
-    /// ctx.exex_launcher(exexes)
-    ///     .with_wal_blocks_warning(768)  // For 2-second block times
-    ///     .launch()
-    ///     .await
-    /// ```
-    #[expect(clippy::type_complexity)]
-    pub fn exex_launcher(
-        &self,
-        installed_exex: Vec<(
-            String,
-            Box<dyn crate::exex::BoxedLaunchExEx<NodeAdapter<T, CB::Components>>>,
-        )>,
-    ) -> ExExLauncher<NodeAdapter<T, CB::Components>> {
         ExExLauncher::new(
             self.head(),
             self.node_adapter().clone(),
             installed_exex,
             self.configs().clone(),
         )
+        .launch()
+        .await
     }
 
     /// Creates the ERA import source based on node configuration.
@@ -1285,14 +1207,6 @@ impl<L, R> Attached<L, R> {
     /// Creates a new `Attached` with the given values.
     pub const fn new(left: L, right: R) -> Self {
         Self { left, right }
-    }
-
-    /// Maps the left value to a new value.
-    pub fn map_left<F, T>(self, f: F) -> Attached<T, R>
-    where
-        F: FnOnce(L) -> T,
-    {
-        Attached::new(f(self.left), self.right)
     }
 
     /// Maps the right value to a new value.

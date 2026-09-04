@@ -97,32 +97,12 @@ where
         self
     }
 
-    /// Sets the hook that is run once the rpc server is started.
-    #[expect(unused)]
-    pub(crate) fn on_rpc_started<F>(mut self, hook: F) -> Self
-    where
-        F: OnRpcStarted<Node, EthApi> + 'static,
-    {
-        self.set_on_rpc_started(hook);
-        self
-    }
-
     /// Sets the hook that is run to configure the rpc modules.
     pub(crate) fn set_extend_rpc_modules<F>(&mut self, hook: F) -> &mut Self
     where
         F: ExtendRpcModules<Node, EthApi> + 'static,
     {
         self.extend_rpc_modules = Box::new(hook);
-        self
-    }
-
-    /// Sets the hook that is run to configure the rpc modules.
-    #[expect(unused)]
-    pub(crate) fn extend_rpc_modules<F>(mut self, hook: F) -> Self
-    where
-        F: ExtendRpcModules<Node, EthApi> + 'static,
-    {
-        self.set_extend_rpc_modules(hook);
         self
     }
 }
@@ -418,46 +398,6 @@ impl<Node: FullNodeComponents, EthApi: EthApiTypes> RpcHandle<Node, EthApi> {
     }
 }
 
-/// Handle returned when only the regular RPC server (HTTP/WS/IPC) is launched.
-///
-/// This handle provides access to the RPC server endpoints and registry, but does not
-/// include an authenticated Engine API server. Use this when you only need regular
-/// RPC functionality.
-#[derive(Debug, Clone)]
-pub struct RpcServerOnlyHandle<Node: FullNodeComponents, EthApi: EthApiTypes> {
-    /// Handle to the RPC server
-    pub rpc_server_handle: RpcServerHandle,
-    /// Configured RPC modules.
-    pub rpc_registry: RpcRegistry<Node, EthApi>,
-    /// Notification channel for engine API events
-    pub engine_events: EventSender<ConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>>,
-    /// Handle to the consensus engine.
-    pub engine_handle: ConsensusEngineHandle<<Node::Types as NodeTypes>::Payload>,
-}
-
-impl<Node: FullNodeComponents, EthApi: EthApiTypes> RpcServerOnlyHandle<Node, EthApi> {
-    /// Returns the RPC server handle.
-    pub const fn rpc_server_handle(&self) -> &RpcServerHandle {
-        &self.rpc_server_handle
-    }
-
-    /// Returns the consensus engine handle.
-    ///
-    /// This handle can be used to interact with the engine service directly.
-    pub const fn consensus_engine_handle(
-        &self,
-    ) -> &ConsensusEngineHandle<<Node::Types as NodeTypes>::Payload> {
-        &self.engine_handle
-    }
-
-    /// Returns the consensus engine events sender.
-    pub const fn consensus_engine_events(
-        &self,
-    ) -> &EventSender<ConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>> {
-        &self.engine_events
-    }
-}
-
 /// Handle returned when only the authenticated Engine API server is launched.
 ///
 /// This handle provides access to the Engine API server and registry, but does not
@@ -651,33 +591,6 @@ where
         }
     }
 
-    /// Maps the [`EngineValidatorBuilder`] builder type.
-    pub fn with_engine_validator<T>(
-        self,
-        engine_validator_builder: T,
-    ) -> RpcAddOns<Node, EthB, PVB, EB, T, RpcMiddleware, AuthHttpMiddleware> {
-        let Self {
-            hooks,
-            eth_api_builder,
-            payload_validator_builder,
-            engine_api_builder,
-            rpc_middleware,
-            auth_http_middleware,
-            tokio_runtime,
-            ..
-        } = self;
-        RpcAddOns {
-            hooks,
-            eth_api_builder,
-            payload_validator_builder,
-            engine_api_builder,
-            engine_validator_builder,
-            rpc_middleware,
-            auth_http_middleware,
-            tokio_runtime,
-        }
-    }
-
     /// Sets the RPC middleware stack for processing RPC requests.
     ///
     /// This method configures a custom middleware stack that will be applied to all RPC requests
@@ -844,52 +757,6 @@ where
         }
     }
 
-    /// Add a new layer `T` to the configured [`RpcServiceBuilder`].
-    pub fn layer_rpc_middleware<T>(
-        self,
-        layer: T,
-    ) -> RpcAddOns<Node, EthB, PVB, EB, EVB, Stack<RpcMiddleware, T>, AuthHttpMiddleware> {
-        let Self {
-            hooks,
-            eth_api_builder,
-            payload_validator_builder,
-            engine_api_builder,
-            engine_validator_builder,
-            rpc_middleware,
-            auth_http_middleware,
-            tokio_runtime,
-        } = self;
-        let rpc_middleware = Stack::new(rpc_middleware, layer);
-        RpcAddOns {
-            hooks,
-            eth_api_builder,
-            payload_validator_builder,
-            engine_api_builder,
-            engine_validator_builder,
-            rpc_middleware,
-            auth_http_middleware,
-            tokio_runtime,
-        }
-    }
-
-    /// Optionally adds a new layer `T` to the configured [`RpcServiceBuilder`].
-    #[expect(clippy::type_complexity)]
-    pub fn option_layer_rpc_middleware<T>(
-        self,
-        layer: Option<T>,
-    ) -> RpcAddOns<
-        Node,
-        EthB,
-        PVB,
-        EB,
-        EVB,
-        Stack<RpcMiddleware, Either<T, Identity>>,
-        AuthHttpMiddleware,
-    > {
-        let layer = layer.map(Either::Left).unwrap_or(Either::Right(Identity::new()));
-        self.layer_rpc_middleware(layer)
-    }
-
     /// Sets the hook that is run once the rpc server is started.
     pub fn on_rpc_started<F>(mut self, hook: F) -> Self
     where
@@ -943,63 +810,11 @@ where
     RpcMiddleware: RethRpcMiddleware,
     AuthHttpMiddleware: RethAuthHttpMiddleware<Identity>,
 {
-    /// Launches only the regular RPC server (HTTP/WS/IPC), without the authenticated Engine API
-    /// server.
-    ///
-    /// This is useful when you only need the regular RPC functionality and want to avoid
-    /// starting the auth server.
-    pub async fn launch_rpc_server<F>(
-        self,
-        ctx: AddOnsContext<'_, N>,
-        ext: F,
-    ) -> eyre::Result<RpcServerOnlyHandle<N, EthB::EthApi>>
-    where
-        F: FnOnce(RpcModuleContainer<'_, N, EthB::EthApi>) -> eyre::Result<()>,
-    {
-        let rpc_middleware = self.rpc_middleware.clone();
-        let tokio_runtime = self.tokio_runtime.clone();
-        let setup_ctx = self.setup_rpc_components(ctx, ext).await?;
-        let RpcSetupContext {
-            node,
-            config,
-            mut modules,
-            mut auth_module,
-            auth_config: _,
-            mut registry,
-            on_rpc_started,
-            engine_events,
-            engine_handle,
-        } = setup_ctx;
-
-        let server_config = config
-            .rpc
-            .rpc_server_config()
-            .set_rpc_middleware(rpc_middleware)
-            .with_tokio_runtime(tokio_runtime);
-        let rpc_server_handle = Self::launch_rpc_server_internal(server_config, &modules).await?;
-
-        let handles =
-            RethRpcServerHandles { rpc: rpc_server_handle.clone(), auth: AuthServerHandle::noop() };
-        Self::finalize_rpc_setup(
-            &mut registry,
-            &mut modules,
-            &mut auth_module,
-            &node,
-            config,
-            on_rpc_started,
-            handles,
-        )?;
-
-        Ok(RpcServerOnlyHandle {
-            rpc_server_handle,
-            rpc_registry: registry,
-            engine_events,
-            engine_handle,
-        })
-    }
-
     /// Launches the RPC servers with the given context and an additional hook for extending
     /// modules. Whether the auth server is launched depends on the CLI configuration.
+    ///
+    /// When the auth server is disabled, it will not be started and a noop handle will be used
+    /// instead.
     pub async fn launch_add_ons_with<F>(
         self,
         ctx: AddOnsContext<'_, N>,
@@ -1008,25 +823,7 @@ where
     where
         F: FnOnce(RpcModuleContainer<'_, N, EthB::EthApi>) -> eyre::Result<()>,
     {
-        // Check CLI config to determine if auth server should be disabled
         let disable_auth = ctx.config.rpc.disable_auth_server;
-        self.launch_add_ons_with_opt_engine(ctx, ext, disable_auth).await
-    }
-
-    /// Launches the RPC servers with the given context and an additional hook for extending
-    /// modules. Optionally disables the auth server based on the `disable_auth` parameter.
-    ///
-    /// When `disable_auth` is true, the auth server will not be started and a noop handle
-    /// will be used instead.
-    pub async fn launch_add_ons_with_opt_engine<F>(
-        self,
-        ctx: AddOnsContext<'_, N>,
-        ext: F,
-        disable_auth: bool,
-    ) -> eyre::Result<RpcHandle<N, EthB::EthApi>>
-    where
-        F: FnOnce(RpcModuleContainer<'_, N, EthB::EthApi>) -> eyre::Result<()>,
-    {
         let rpc_middleware = self.rpc_middleware.clone();
         let auth_http_middleware = self.auth_http_middleware.clone();
         let tokio_runtime = self.tokio_runtime.clone();

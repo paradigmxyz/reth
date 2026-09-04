@@ -7,8 +7,7 @@ use reth_chainspec::EthereumHardforks;
 use reth_node_api::{BlockTy, NodeTypes, TxTy};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, BlobStore, CoinbaseTipOrdering, PoolConfig, PoolTransaction,
-    SubPoolLimit, TransactionOrdering, TransactionPool, TransactionValidationTaskExecutor,
-    TransactionValidator,
+    SubPoolLimit, TransactionPool, TransactionValidationTaskExecutor, TransactionValidator,
 };
 use std::future::Future;
 
@@ -175,42 +174,20 @@ where
     where
         BS: BlobStore + Clone,
     {
-        self.build_with_ordering_and_spawn_maintenance_task(
-            CoinbaseTipOrdering::default(),
-            blob_store,
-            pool_config,
-        )
-    }
-
-    /// Build the transaction pool with a custom [`TransactionOrdering`] and spawn its maintenance
-    /// tasks.
-    pub fn build_with_ordering_and_spawn_maintenance_task<BS, O>(
-        self,
-        ordering: O,
-        blob_store: BS,
-        pool_config: PoolConfig,
-    ) -> eyre::Result<reth_transaction_pool::Pool<TransactionValidationTaskExecutor<V>, O, BS>>
-    where
-        BS: BlobStore + Clone,
-        O: TransactionOrdering<Transaction = V::Transaction>,
-    {
         let TxPoolBuilder { ctx, validator, .. } = self;
 
-        let transaction_pool =
-            reth_transaction_pool::Pool::new(validator, ordering, blob_store, pool_config.clone());
+        let transaction_pool = reth_transaction_pool::Pool::new(
+            validator,
+            CoinbaseTipOrdering::default(),
+            blob_store,
+            pool_config.clone(),
+        );
 
-        spawn_maintenance_tasks(ctx, transaction_pool.clone(), &pool_config)?;
+        spawn_local_backup_task(ctx, transaction_pool.clone())?;
+        spawn_pool_maintenance_task(ctx, transaction_pool.clone(), &pool_config)?;
 
         Ok(transaction_pool)
     }
-}
-
-/// Create blob store with default configuration.
-pub fn create_blob_store<Node: FullNodeTypes>(
-    ctx: &BuilderContext<Node>,
-) -> eyre::Result<DiskFileBlobStore> {
-    let cache_size = Some(ctx.config().txpool.max_cached_entries);
-    create_blob_store_with_cache(ctx, cache_size)
 }
 
 /// Create blob store with custom cache size configuration for how many blobs should be cached in
@@ -293,22 +270,6 @@ where
         ),
     );
 
-    Ok(())
-}
-
-/// Spawn all maintenance tasks for a transaction pool (backup + main maintenance).
-pub fn spawn_maintenance_tasks<Node, Pool>(
-    ctx: &BuilderContext<Node>,
-    pool: Pool,
-    pool_config: &PoolConfig,
-) -> eyre::Result<()>
-where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
-    Pool: reth_transaction_pool::TransactionPoolExt<Block = BlockTy<Node::Types>> + Clone + 'static,
-    Pool::Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>,
-{
-    spawn_local_backup_task(ctx, pool.clone())?;
-    spawn_pool_maintenance_task(ctx, pool, pool_config)?;
     Ok(())
 }
 

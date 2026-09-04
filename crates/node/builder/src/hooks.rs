@@ -34,32 +34,12 @@ where
         self
     }
 
-    /// Sets the hook that is run once the node's components are initialized.
-    #[expect(unused)]
-    pub(crate) fn on_component_initialized<F>(mut self, hook: F) -> Self
-    where
-        F: OnComponentInitializedHook<Node> + 'static,
-    {
-        self.set_on_component_initialized(hook);
-        self
-    }
-
     /// Sets the hook that is run once the node has started.
     pub(crate) fn set_on_node_started<F>(&mut self, hook: F) -> &mut Self
     where
         F: OnNodeStartedHook<Node, AddOns> + 'static,
     {
         self.on_node_started = Box::new(hook);
-        self
-    }
-
-    /// Sets the hook that is run once the node has started.
-    #[expect(unused)]
-    pub(crate) fn on_node_started<F>(mut self, hook: F) -> Self
-    where
-        F: OnNodeStartedHook<Node, AddOns> + 'static,
-    {
-        self.set_on_node_started(hook);
         self
     }
 }
