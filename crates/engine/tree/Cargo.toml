@@ -35,7 +35,7 @@ reth-tasks = { workspace = true, features = ["rayon"] }
 reth-trie-parallel.workspace = true
 reth-trie-sparse = { workspace = true, features = ["std", "metrics"] }
 reth-trie.workspace = true
-reth-trie-common.workspace = true
+reth-trie-common = { workspace = true, features = ["eip7928"] }
 
 # alloy
 alloy-evm.workspace = true
