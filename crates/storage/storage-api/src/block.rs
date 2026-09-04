@@ -320,14 +320,6 @@ pub trait BlockReaderIdExt: BlockReader + ReceiptProviderIdExt {
         self.convert_block_number(id)?.map_or_else(|| Ok(None), |num| self.block(num.into()))
     }
 
-    /// Returns the pending block header if available
-    ///
-    /// Note: This returns a [`SealedHeader`] because it's expected that this is sealed by the
-    /// provider and the caller does not know the hash.
-    fn pending_header(&self) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
-        self.sealed_header_by_id(BlockNumberOrTag::Pending.into())
-    }
-
     /// Returns the latest block header if available
     ///
     /// Note: This returns a [`SealedHeader`] because it's expected that this is sealed by the

@@ -86,16 +86,6 @@ pub trait DBProvider: DbTxProvider + Sized {
         self.cursor_collect_with_capacity(&mut cursor, range, capacity)
     }
 
-    /// Iterates over read only values in the given table and collects them into a vector.
-    fn cursor_collect<T: Table<Key = u64>>(
-        &self,
-        cursor: &mut impl DbCursorRO<T>,
-        range: impl RangeBounds<T::Key>,
-    ) -> ProviderResult<Vec<T::Value>> {
-        let capacity = range_size_hint(&range).unwrap_or(0);
-        self.cursor_collect_with_capacity(cursor, range, capacity)
-    }
-
     /// Iterates over read only values in the given table and collects them into a vector with
     /// capacity.
     fn cursor_collect_with_capacity<T: Table<Key = u64>>(

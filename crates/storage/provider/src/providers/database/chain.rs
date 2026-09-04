@@ -2,19 +2,23 @@ use crate::{providers::NodeTypesForProvider, DatabaseProvider};
 use reth_db_api::transaction::{DbTx, DbTxMut};
 use reth_node_types::NodePrimitives;
 
-use reth_primitives_traits::{FullBlockHeader, FullSignedTx};
-use reth_storage_api::{ChainStorageReader, ChainStorageWriter, EmptyBodyStorage, EthStorage};
+use reth_primitives_traits::{Block, FullBlockHeader, FullSignedTx};
+use reth_storage_api::{BlockBodyReader, BlockBodyWriter, EmptyBodyStorage, EthStorage};
 
 /// Trait that provides access to implementations of [`ChainStorage`]
 pub trait ChainStorage<Primitives: NodePrimitives>: Send + Sync {
     /// Provides access to the chain reader.
-    fn reader<TX, Types>(&self) -> impl ChainStorageReader<DatabaseProvider<TX, Types>, Primitives>
+    fn reader<TX, Types>(
+        &self,
+    ) -> impl BlockBodyReader<DatabaseProvider<TX, Types>, Block = Primitives::Block>
     where
         TX: DbTx + 'static,
         Types: NodeTypesForProvider<Primitives = Primitives>;
 
     /// Provides access to the chain writer.
-    fn writer<TX, Types>(&self) -> impl ChainStorageWriter<DatabaseProvider<TX, Types>, Primitives>
+    fn writer<TX, Types>(
+        &self,
+    ) -> impl BlockBodyWriter<DatabaseProvider<TX, Types>, <Primitives::Block as Block>::Body>
     where
         TX: DbTxMut + DbTx + 'static,
         Types: NodeTypesForProvider<Primitives = Primitives>;
@@ -31,7 +35,9 @@ where
         SignedTx = T,
     >,
 {
-    fn reader<TX, Types>(&self) -> impl ChainStorageReader<DatabaseProvider<TX, Types>, N>
+    fn reader<TX, Types>(
+        &self,
+    ) -> impl BlockBodyReader<DatabaseProvider<TX, Types>, Block = N::Block>
     where
         TX: DbTx + 'static,
         Types: NodeTypesForProvider<Primitives = N>,
@@ -39,7 +45,9 @@ where
         self
     }
 
-    fn writer<TX, Types>(&self) -> impl ChainStorageWriter<DatabaseProvider<TX, Types>, N>
+    fn writer<TX, Types>(
+        &self,
+    ) -> impl BlockBodyWriter<DatabaseProvider<TX, Types>, <N::Block as Block>::Body>
     where
         TX: DbTxMut + DbTx + 'static,
         Types: NodeTypesForProvider<Primitives = N>,
@@ -59,7 +67,9 @@ where
         SignedTx = T,
     >,
 {
-    fn reader<TX, Types>(&self) -> impl ChainStorageReader<DatabaseProvider<TX, Types>, N>
+    fn reader<TX, Types>(
+        &self,
+    ) -> impl BlockBodyReader<DatabaseProvider<TX, Types>, Block = N::Block>
     where
         TX: DbTx + 'static,
         Types: NodeTypesForProvider<Primitives = N>,
@@ -67,7 +77,9 @@ where
         self
     }
 
-    fn writer<TX, Types>(&self) -> impl ChainStorageWriter<DatabaseProvider<TX, Types>, N>
+    fn writer<TX, Types>(
+        &self,
+    ) -> impl BlockBodyWriter<DatabaseProvider<TX, Types>, <N::Block as Block>::Body>
     where
         TX: DbTxMut + DbTx + 'static,
         Types: NodeTypesForProvider<Primitives = N>,

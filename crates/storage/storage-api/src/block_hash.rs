@@ -1,5 +1,4 @@
 use alloc::vec::Vec;
-use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{BlockNumber, B256};
 use reth_storage_errors::provider::ProviderResult;
 
@@ -9,18 +8,6 @@ pub trait BlockHashReader {
     /// Get the hash of the block with the given number. Returns `None` if no block with this number
     /// exists.
     fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>>;
-
-    /// Get the hash of the block with the given number. Returns `None` if no block with this number
-    /// exists.
-    fn convert_block_hash(
-        &self,
-        hash_or_number: BlockHashOrNumber,
-    ) -> ProviderResult<Option<B256>> {
-        match hash_or_number {
-            BlockHashOrNumber::Hash(hash) => Ok(Some(hash)),
-            BlockHashOrNumber::Number(num) => self.block_hash(num),
-        }
-    }
 
     /// Get headers in range of block hashes or numbers
     ///

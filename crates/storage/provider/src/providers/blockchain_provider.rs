@@ -826,14 +826,6 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         }
         Ok(None)
     }
-
-    fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox>> {
-        if let Some(pending) = self.canonical_in_memory_state.pending_state() {
-            return self.state_provider_at_block_hash(pending.hash()).map(Some)
-        }
-
-        Ok(None)
-    }
 }
 
 impl<N: ProviderNodeTypes> CanonChainTracker for BlockchainProvider<N> {

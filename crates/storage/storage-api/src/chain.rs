@@ -13,9 +13,7 @@ use reth_db_api::{
 };
 use reth_db_models::StoredBlockWithdrawals;
 use reth_ethereum_primitives::TransactionSigned;
-use reth_primitives_traits::{
-    Block, BlockBody, FullBlockHeader, NodePrimitives, SignedTransaction,
-};
+use reth_primitives_traits::{Block, BlockBody, FullBlockHeader, SignedTransaction};
 use reth_storage_errors::provider::ProviderResult;
 
 /// Trait that implements how block bodies are written to the storage.
@@ -39,16 +37,6 @@ pub trait BlockBodyWriter<Provider, Body: BlockBody> {
     ) -> ProviderResult<()>;
 }
 
-/// Trait that implements how chain-specific types are written to the storage.
-pub trait ChainStorageWriter<Provider, Primitives: NodePrimitives>:
-    BlockBodyWriter<Provider, <Primitives::Block as Block>::Body>
-{
-}
-impl<T, Provider, Primitives: NodePrimitives> ChainStorageWriter<Provider, Primitives> for T where
-    T: BlockBodyWriter<Provider, <Primitives::Block as Block>::Body>
-{
-}
-
 /// Input for reading a block body. Contains a header of block being read and a list of pre-fetched
 /// transactions.
 pub type ReadBodyInput<'a, B> =
@@ -70,16 +58,6 @@ pub trait BlockBodyReader<Provider> {
         provider: &Provider,
         inputs: Vec<ReadBodyInput<'_, Self::Block>>,
     ) -> ProviderResult<Vec<<Self::Block as Block>::Body>>;
-}
-
-/// Trait that implements how chain-specific types are read from storage.
-pub trait ChainStorageReader<Provider, Primitives: NodePrimitives>:
-    BlockBodyReader<Provider, Block = Primitives::Block>
-{
-}
-impl<T, Provider, Primitives: NodePrimitives> ChainStorageReader<Provider, Primitives> for T where
-    T: BlockBodyReader<Provider, Block = Primitives::Block>
-{
 }
 
 /// Ethereum storage implementation.

@@ -801,10 +801,6 @@ where
         // RPC provider doesn't support pending state by hash
         Err(ProviderError::UnsupportedProvider)
     }
-
-    fn maybe_pending(&self) -> Result<Option<StateProviderBox>, ProviderError> {
-        Ok(None)
-    }
 }
 
 impl<P, Node, N> DatabaseProviderFactory for RpcBlockchainProvider<P, Node, N>
@@ -1225,13 +1221,6 @@ where
         }
 
         Ok(results)
-    }
-
-    fn changed_storages_with_range(
-        &self,
-        _range: RangeInclusive<BlockNumber>,
-    ) -> Result<BTreeMap<Address, std::collections::BTreeSet<StorageKey>>, ProviderError> {
-        Ok(BTreeMap::new())
     }
 
     fn changed_storages_and_blocks_with_range(
@@ -1849,10 +1838,6 @@ where
     ) -> Result<Option<StateProviderBox>, ProviderError> {
         // RPC provider doesn't support pending state by hash
         Err(ProviderError::UnsupportedProvider)
-    }
-
-    fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox>> {
-        Ok(None)
     }
 }
 

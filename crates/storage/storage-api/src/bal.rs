@@ -1,5 +1,4 @@
 use alloc::{sync::Arc, vec::Vec};
-use alloy_eip7928::bal::DecodedBal;
 pub use alloy_eip7928::bal::RawBal;
 use alloy_eips::NumHash;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes};
@@ -75,14 +74,6 @@ pub trait BalStore: Send + Sync + 'static {
     /// Fetches the BAL for the given block hash.
     fn get_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<Bytes>> {
         Ok(self.get_by_hashes(&[block_hash])?.into_iter().next().flatten())
-    }
-
-    /// Fetches and decodes the BAL for the given block hash.
-    fn get_decoded_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<DecodedBal>> {
-        self.get_by_hash(block_hash)?
-            .map(DecodedBal::from_rlp_bytes)
-            .transpose()
-            .map_err(Into::into)
     }
 
     /// Fetch BAL response entries for the given block hashes, stopping after the soft limit is
@@ -201,12 +192,6 @@ impl BalStoreHandle {
     #[inline]
     pub fn get_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<Bytes>> {
         self.inner.get_by_hash(block_hash)
-    }
-
-    /// Fetches and decodes the BAL for the given block hash.
-    #[inline]
-    pub fn get_decoded_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<DecodedBal>> {
-        self.inner.get_decoded_by_hash(block_hash)
     }
 
     /// Fetch BAL response entries for the given block hashes, stopping after the soft limit is
@@ -370,26 +355,6 @@ mod tests {
     }
 
     #[test]
-    fn noop_store_decoded_lookup_returns_none() {
-        let store = BalStoreHandle::default();
-
-        assert!(store.get_decoded_by_hash(B256::random()).unwrap().is_none());
-    }
-
-    #[test]
-    fn decoded_lookup_decodes_raw_bal() {
-        let hash = B256::random();
-        let raw_bal = Bytes::from_static(&[EMPTY_LIST_CODE]);
-        let store = BalStoreHandle::new(TestBalStore { hash, raw_bal: raw_bal.clone() });
-
-        assert_eq!(store.get_by_hash(hash).unwrap(), Some(raw_bal.clone()));
-
-        let decoded = store.get_decoded_by_hash(hash).unwrap().unwrap();
-
-        assert_eq!(decoded.as_raw(), &raw_bal);
-    }
-
-    #[test]
     fn noop_store_limited_lookup_returns_prefix() {
         let store = BalStoreHandle::default();
         let hashes = [B256::random(), B256::random(), B256::random()];
@@ -410,6 +375,16 @@ mod tests {
         assert!(!size_limit_2mb.exceeds(1024 * 1024));
         assert!(!size_limit_2mb.exceeds(2 * 1024 * 1024));
         assert!(size_limit_2mb.exceeds(3 * 1024 * 1024));
+    }
+
+    #[test]
+    fn handle_lookup_returns_raw_bal() {
+        let hash = B256::random();
+        let raw_bal = Bytes::from_static(&[EMPTY_LIST_CODE]);
+        let store = BalStoreHandle::new(TestBalStore { hash, raw_bal: raw_bal.clone() });
+
+        assert_eq!(store.get_by_hash(hash).unwrap(), Some(raw_bal));
+        assert!(store.get_by_hash(B256::random()).unwrap().is_none());
     }
 
     #[cfg(feature = "std")]

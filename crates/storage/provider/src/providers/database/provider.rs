@@ -49,7 +49,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     BlockNumberList,
 };
-use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome};
+use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, ExecutionOutcome};
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, Block as _, BlockBody as _, Bytecode, FastInstant as Instant, RecoveredBlock,
@@ -2352,36 +2352,6 @@ impl<TX: DbTx + 'static, N: NodeTypes> StorageReader for DatabaseProvider<TX, N>
         }
     }
 
-    fn changed_storages_with_range(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<BTreeMap<Address, BTreeSet<B256>>> {
-        if self.cached_storage_settings().storage_v2 {
-            self.storage_changesets_range(range)?.into_iter().try_fold(
-                BTreeMap::new(),
-                |mut accounts: BTreeMap<Address, BTreeSet<B256>>, entry| {
-                    let (BlockNumberAddress((_, address)), storage_entry) = entry;
-                    accounts.entry(address).or_default().insert(storage_entry.key);
-                    Ok(accounts)
-                },
-            )
-        } else {
-            self.tx
-                .cursor_read::<tables::StorageChangeSets>()?
-                .walk_range(BlockNumberAddress::range(range))?
-                // fold all storages and save its old state so we can remove it from HashedStorage
-                // it is needed as it is dup table.
-                .try_fold(
-                    BTreeMap::new(),
-                    |mut accounts: BTreeMap<Address, BTreeSet<B256>>, entry| {
-                        let (BlockNumberAddress((_, address)), storage_entry) = entry?;
-                        accounts.entry(address).or_default().insert(storage_entry.key);
-                        Ok(accounts)
-                    },
-                )
-        }
-    }
-
     fn changed_storages_and_blocks_with_range(
         &self,
         range: RangeInclusive<BlockNumber>,
@@ -3450,29 +3420,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockExecutionWriter
     for DatabaseProvider<TX, N>
 {
-    fn take_block_and_execution_above(
-        &self,
-        block: BlockNumber,
-    ) -> ProviderResult<Chain<Self::Primitives>> {
-        let range = block + 1..=self.last_block_number()?;
-
-        self.unwind_trie_state_from(block + 1)?;
-
-        // get execution res
-        let execution_state = self.take_state_above(block)?;
-
-        let blocks = self.recovered_block_range(range)?;
-
-        // remove block bodies it is needed for both get block range and get block execution results
-        // that is why it is deleted afterwards.
-        self.remove_blocks_above(block)?;
-
-        // Update pipeline progress
-        self.update_pipeline_stages_after_unwind(block)?;
-
-        Ok(Chain::new(blocks, execution_state, BTreeMap::new()))
-    }
-
     fn remove_block_and_execution_above(
         &self,
         block: BlockNumber,

@@ -1,7 +1,4 @@
-use alloc::{
-    collections::{BTreeMap, BTreeSet},
-    vec::Vec,
-};
+use alloc::{collections::BTreeMap, vec::Vec};
 use alloy_primitives::{Address, BlockNumber, B256};
 use core::ops::RangeInclusive;
 use reth_primitives_traits::StorageEntry;
@@ -15,12 +12,6 @@ pub trait StorageReader: Send {
         &self,
         addresses_with_keys: impl IntoIterator<Item = (Address, impl IntoIterator<Item = B256>)>,
     ) -> ProviderResult<Vec<(Address, Vec<StorageEntry>)>>;
-
-    /// Iterate over storage changesets and return all storage slots that were changed.
-    fn changed_storages_with_range(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<BTreeMap<Address, BTreeSet<B256>>>;
 
     /// Iterate over storage changesets and return all storage slots that were changed alongside
     /// each specific set of blocks.
@@ -57,23 +48,4 @@ pub trait StorageChangeSetReader: Send {
         &self,
         range: impl core::ops::RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>>;
-
-    /// Get storage changesets for a block as static-file rows.
-    ///
-    /// Default implementation uses `storage_changeset` and maps to `StorageBeforeTx`.
-    fn storage_block_changeset(
-        &self,
-        block_number: BlockNumber,
-    ) -> ProviderResult<Vec<reth_db_models::StorageBeforeTx>> {
-        self.storage_changeset(block_number).map(|changesets| {
-            changesets
-                .into_iter()
-                .map(|(block_address, entry)| reth_db_models::StorageBeforeTx {
-                    address: block_address.address(),
-                    key: entry.key,
-                    value: entry.value,
-                })
-                .collect()
-        })
-    }
 }

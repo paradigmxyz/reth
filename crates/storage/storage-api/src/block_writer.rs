@@ -2,7 +2,7 @@ use crate::NodePrimitivesProvider;
 use alloc::vec::Vec;
 use alloy_primitives::BlockNumber;
 use reth_db_models::StoredBlockBodyIndices;
-use reth_execution_types::{Chain, ExecutionOutcome};
+use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::HashedPostStateSorted;
@@ -11,14 +11,6 @@ use reth_trie_common::HashedPostStateSorted;
 pub trait BlockExecutionWriter:
     NodePrimitivesProvider<Primitives: NodePrimitives<Block = Self::Block>> + BlockWriter
 {
-    /// Take all of the blocks above the provided number and their execution result
-    ///
-    /// The passed block number will stay in the database.
-    fn take_block_and_execution_above(
-        &self,
-        block: BlockNumber,
-    ) -> ProviderResult<Chain<Self::Primitives>>;
-
     /// Remove all of the blocks above the provided number and their execution result
     ///
     /// The passed block number will stay in the database.
@@ -31,13 +23,6 @@ pub trait BlockExecutionWriter:
 }
 
 impl<T: BlockExecutionWriter> BlockExecutionWriter for &T {
-    fn take_block_and_execution_above(
-        &self,
-        block: BlockNumber,
-    ) -> ProviderResult<Chain<Self::Primitives>> {
-        (*self).take_block_and_execution_above(block)
-    }
-
     fn remove_block_and_execution_above(
         &self,
         block: BlockNumber,
