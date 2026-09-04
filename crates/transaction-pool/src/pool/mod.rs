@@ -1055,6 +1055,20 @@ where
         }
     }
 
+    /// Returns all transactions of the given sender, collected under a single read guard so that
+    /// both sides reflect the same pool state.
+    pub fn all_transactions_by_sender(
+        &self,
+        sender: Address,
+    ) -> AllPoolTransactions<T::Transaction> {
+        let Some(sender_id) = self.sender_id(&sender) else { return Default::default() };
+        let pool = self.get_pool_data();
+        AllPoolTransactions {
+            pending: pool.pending_txs_by_sender(sender_id),
+            queued: pool.queued_txs_by_sender(sender_id),
+        }
+    }
+
     /// Returns _all_ transactions in the pool
     pub fn all_transaction_hashes(&self) -> Vec<TxHash> {
         self.get_pool_data().all().transactions_iter().map(|tx| *tx.hash()).collect()
@@ -1668,13 +1682,48 @@ mod tests {
     use crate::{
         blobstore::{BlobStore, InMemoryBlobStore, PooledBlobSidecar},
         identifier::SenderId,
-        test_utils::{MockTransaction, TestPoolBuilder},
+        test_utils::{testing_pool, MockTransaction, TestPoolBuilder},
         validate::ValidTransaction,
-        BlockInfo, PoolConfig, SubPoolLimit, TransactionOrigin, TransactionValidationOutcome, U256,
+        BlockInfo, PoolConfig, SubPoolLimit, TransactionOrigin, TransactionPool,
+        TransactionPoolExt, TransactionValidationOutcome, ValidPoolTransaction, U256,
     };
+    use alloy_consensus::Transaction;
     use alloy_eips::{eip4844::BlobTransactionSidecar, eip7594::BlobTransactionSidecarVariant};
     use alloy_primitives::Address;
-    use std::{fs, path::PathBuf};
+    use std::{fs, path::PathBuf, sync::Arc};
+
+    #[tokio::test]
+    async fn all_transactions_by_sender_across_reclassification() {
+        let pool = testing_pool();
+        let sender = Address::with_last_byte(1);
+        // nonces 0 and 1 are pending, the gapped nonce 9 is queued
+        for nonce in [0, 1, 9] {
+            let tx =
+                MockTransaction::legacy().with_sender(sender).with_nonce(nonce).with_gas_price(100);
+            pool.add_transaction(TransactionOrigin::External, tx).await.unwrap();
+        }
+        let nonces = |txs: &[Arc<ValidPoolTransaction<MockTransaction>>]| {
+            let mut nonces: Vec<_> = txs.iter().map(|tx| tx.transaction.nonce()).collect();
+            nonces.sort_unstable();
+            nonces
+        };
+
+        let txs = pool.all_transactions_by_sender(sender);
+        assert_eq!(nonces(&txs.pending), [0, 1]);
+        assert_eq!(nonces(&txs.queued), [9]);
+
+        // a higher base fee reclassifies the pending transactions as queued; the snapshot must
+        // report each of them on exactly one side
+        pool.set_block_info(BlockInfo {
+            pending_basefee: 200,
+            block_gas_limit: 30_000_000,
+            ..Default::default()
+        });
+        let txs = pool.all_transactions_by_sender(sender);
+        assert!(txs.pending.is_empty());
+        assert_eq!(nonces(&txs.queued), [0, 1, 9]);
+        assert_eq!(nonces(&pool.get_transactions_by_sender(sender)), [0, 1, 9]);
+    }
 
     #[test]
     fn test_discard_blobs_on_blob_tx_eviction() {
