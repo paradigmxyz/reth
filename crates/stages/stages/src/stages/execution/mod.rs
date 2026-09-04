@@ -1210,7 +1210,7 @@ mod tests {
             // Test Unwind
             provider = factory.database_provider_rw().unwrap();
             let mut stage = stage();
-            provider.set_prune_modes(mode.clone().unwrap_or_default());
+            provider.set_prune_modes(mode.unwrap_or_default());
 
             let result = stage
                 .unwind(

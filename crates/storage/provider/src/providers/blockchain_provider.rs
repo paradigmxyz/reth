@@ -3,8 +3,8 @@ use crate::{
         ConsistentProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider,
         StaticFileProviderRWRefMut,
     },
-    BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
-    BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
+    AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
+    BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
     CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
     DatabaseProviderFactory, HeaderProvider, ProviderError, ProviderFactory, PruneCheckpointReader,
     ReceiptProvider, ReceiptProviderIdExt, RocksDBProviderFactory, StageCheckpointReader,
@@ -158,14 +158,14 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         Ok(Box::new(state_provider_factory.database_provider_ro()?))
     }
 
-    /// Returns an overlay state provider using the database snapshot captured by `provider`.
-    fn state_provider_from_consistent(
+    /// Returns a historical state provider using an existing database snapshot.
+    pub fn state_provider_from_database(
         &self,
-        provider: ConsistentProvider<N>,
+        provider: StateRangeDbProvider<N>,
         block_hash: B256,
     ) -> StateProviderBox {
         Box::new(OverlayStateProvider::new(
-            provider.into_database_provider(),
+            provider,
             self.database.overlay_manager().overlay_builder(block_hash),
         ))
     }
@@ -776,18 +776,14 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         let hash = provider
             .block_hash(block_number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        provider.ensure_canonical_block(block_number)?;
-        Ok(self.state_provider_from_consistent(provider, hash))
+        Ok(self.state_provider_from_database(provider.into_database_provider(), hash))
     }
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
         let provider = self.consistent_provider()?;
-        let block_number = provider
-            .block_number(block_hash)?
-            .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-        provider.ensure_canonical_block(block_number)?;
-        Ok(self.state_provider_from_consistent(provider, block_hash))
+        provider.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
+        Ok(self.state_provider_from_database(provider.into_database_provider(), block_hash))
     }
 
     fn state_by_block_hash(&self, hash: BlockHash) -> ProviderResult<StateProviderBox> {
@@ -1009,7 +1005,10 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
         let storage_changeset = provider.storage_changeset(block)?;
 
         let Some(block_hash) = provider.block_hash(block)? else { return Ok(None) };
-        let state_provider = self.history_by_block_hash(block_hash)?;
+        let state_provider = OverlayStateProvider::<&_, N::Primitives>::new_ref(
+            &provider,
+            self.database.overlay_manager().overlay_builder(block_hash),
+        );
         let (state, reverts) = provider.populate_bundle_state(
             account_changeset,
             storage_changeset,
