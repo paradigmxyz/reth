@@ -244,12 +244,17 @@ impl<T: TransactionOrdering> TxPool<T> {
                         let meta =
                             self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
 
-                        meta.state.set(
-                            TxState::ENOUGH_BLOB_FEE_CAP_BLOCK,
-                            tx.max_fee_per_blob_gas().is_none_or(|fee| fee >= blob_fee),
-                        );
-                        if kind == PendingRemovalKind::Descendant {
-                            meta.state.remove(TxState::NO_PARKED_ANCESTORS);
+                        match kind {
+                            PendingRemovalKind::Trigger => {
+                                meta.state.remove(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
+                            }
+                            PendingRemovalKind::Descendant => {
+                                meta.state.set(
+                                    TxState::ENOUGH_BLOB_FEE_CAP_BLOCK,
+                                    tx.max_fee_per_blob_gas().is_none_or(|fee| fee >= blob_fee),
+                                );
+                                meta.state.remove(TxState::NO_PARKED_ANCESTORS);
+                            }
                         }
                         meta.subpool = meta.state.into();
                         meta.subpool
@@ -303,12 +308,17 @@ impl<T: TransactionOrdering> TxPool<T> {
                     let to = {
                         let meta =
                             self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
-                        meta.state.set(
-                            TxState::ENOUGH_FEE_CAP_BLOCK,
-                            tx.max_fee_per_gas() >= base_fee as u128,
-                        );
-                        if kind == PendingRemovalKind::Descendant {
-                            meta.state.remove(TxState::NO_PARKED_ANCESTORS);
+                        match kind {
+                            PendingRemovalKind::Trigger => {
+                                meta.state.remove(TxState::ENOUGH_FEE_CAP_BLOCK);
+                            }
+                            PendingRemovalKind::Descendant => {
+                                meta.state.set(
+                                    TxState::ENOUGH_FEE_CAP_BLOCK,
+                                    tx.max_fee_per_gas() >= base_fee as u128,
+                                );
+                                meta.state.remove(TxState::NO_PARKED_ANCESTORS);
+                            }
                         }
                         meta.subpool = meta.state.into();
                         meta.subpool
