@@ -704,19 +704,24 @@ where
         Ok(updates_len_after < updates_len_before)
     }
 
-    /// Computes storage roots for accounts whose storage updates are fully drained.
+    /// Computes storage roots needed to promote pending account updates.
     ///
     /// For each storage trie T that:
-    /// 1. was modified in the current block,
+    /// 1. has a pending account update,
     /// 2. all the storage updates are fully drained,
     /// 3. but the storage root hasn't been updated yet,
     ///
     /// we trigger state root computation on a rayon pool.
     fn compute_drained_storage_roots(&mut self) {
+        // Prewarming can reveal uncached roots without changing an account. Those roots are
+        // only needed once an actual account or storage update is ready for promotion.
         let addresses_to_compute_roots: Vec<_> = self
-            .storage_updates
-            .iter()
-            .filter_map(|(address, updates)| updates.is_empty().then_some(*address))
+            .pending_account_updates
+            .keys()
+            .filter(|address| {
+                self.storage_updates.get(*address).is_some_and(|updates| updates.is_empty())
+            })
+            .copied()
             .collect();
 
         struct SendStorageTriePtr<S>(*mut RevealableSparseTrie<S>);
@@ -1118,6 +1123,7 @@ mod tests {
     use reth_db_common::init::init_genesis;
     use reth_provider::test_utils::create_test_provider_factory;
     use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
+    use reth_trie_common::{LeafNode, Nibbles, ProofTrieNodeV2, TrieNodeV2};
     use reth_trie_parallel::proof_task::ProofTaskCtx;
     use reth_trie_sparse::ArenaParallelSparseTrie;
 
@@ -1125,6 +1131,196 @@ mod tests {
         for task_name in ["trie-hashing", "storage-workers", "account-workers"] {
             runtime.spawn_blocking_named(task_name, || {}).get();
         }
+    }
+
+    fn with_revealed_sparse_task(test: impl FnOnce(&mut SparseTrieCacheTask)) {
+        let runtime = Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor = init_genesis(&provider_factory).unwrap();
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayManager::<reth_chain_state::EthPrimitives>::default().overlay_builder(anchor),
+        );
+        let (proof_tx, proof_rx) = crossbeam_channel::unbounded();
+        let proof_worker = ProofWorkerHandle::new(
+            &runtime,
+            ProofTaskCtx::new(state_provider_factory),
+            false,
+            proof_tx.clone(),
+        );
+        let mut accounts = RevealableSparseTrie::blind();
+        accounts.reveal_root(TrieNodeV2::EmptyRoot, None, true).unwrap();
+        let trie = SparseStateTrie::default().with_accounts_trie(accounts).with_updates(true);
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (_cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
+        let mut task = SparseTrieCacheTask::new_with_trie(
+            &runtime,
+            updates_rx,
+            cancel_rx,
+            std::sync::mpsc::channel().0,
+            proof_worker,
+            proof_tx,
+            proof_rx,
+            SparseTrieTaskMetrics::default(),
+            trie,
+            EMPTY_ROOT_HASH,
+            TrieNodeEpoch::new(10),
+            1,
+        );
+        test(&mut task);
+        drop(updates_tx);
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
+    }
+
+    #[test]
+    fn drained_storage_roots_require_pending_accounts_and_drained_updates() {
+        with_revealed_sparse_task(|task| {
+            let addresses = [0, 1, 2, 3, 4].map(B256::repeat_byte);
+            for address in addresses {
+                let mut trie = RevealableSparseTrie::blind();
+                trie.reveal_root(TrieNodeV2::EmptyRoot, None, true).unwrap();
+                task.trie.insert_storage_trie(address, trie);
+                task.storage_updates.insert(address, B256Map::default());
+            }
+            // Storage-only, account change, and deletion all require promotion. The remaining
+            // tries are an optional prewarm and an account whose storage proof is still pending.
+            task.pending_account_updates.insert(addresses[0], None);
+            task.pending_account_updates.insert(addresses[1], Some(Some(Account::default())));
+            task.pending_account_updates.insert(addresses[2], Some(None));
+            task.pending_account_updates.insert(addresses[4], None);
+            task.storage_updates
+                .get_mut(&addresses[4])
+                .unwrap()
+                .insert(B256::ZERO, LeafUpdate::Touched);
+
+            task.compute_drained_storage_roots();
+
+            for address in &addresses[..3] {
+                let trie = task.trie.storage_trie_ref(address).unwrap();
+                assert!(trie.is_root_cached());
+                assert_eq!(trie.root_epoch(), Some(TrieNodeEpoch::UNMODIFIED));
+            }
+            for address in &addresses[3..] {
+                let trie = task.trie.storage_trie_ref(address).unwrap();
+                assert!(!trie.is_root_cached());
+                assert_eq!(trie.root_epoch(), Some(TrieNodeEpoch::UNMODIFIED));
+            }
+            assert!(task.trie.storage_trie_updates().is_empty());
+        });
+    }
+
+    #[test]
+    fn storage_roots_follow_real_updates_after_prewarming_and_promotion() {
+        with_revealed_sparse_task(|task| {
+            let address = B256::repeat_byte(1);
+            let prewarmed = B256::repeat_byte(2);
+            let slot = B256::ZERO;
+            let account = Account { nonce: 1, ..Default::default() };
+            let storage_node = |value: u64| {
+                TrieNodeV2::Leaf(LeafNode::new(
+                    Nibbles::unpack(slot),
+                    alloy_rlp::encode(U256::from(value)),
+                ))
+            };
+            let storage_root = |value| keccak256(alloy_rlp::encode(storage_node(value)));
+
+            task.trie
+                .get_or_create_storage_trie_mut(address)
+                .reveal_root(storage_node(1), None, true)
+                .unwrap();
+            task.trie
+                .get_or_create_storage_trie_mut(prewarmed)
+                .reveal_root(TrieNodeV2::EmptyRoot, None, true)
+                .unwrap();
+            let initial_account =
+                encode_account_leaf_value(Some(account), storage_root(1), &mut Vec::new());
+            let mut initial_updates =
+                B256Map::from_iter([(address, LeafUpdate::Changed(initial_account))]);
+            task.trie
+                .trie_mut()
+                .update_leaves(&mut initial_updates, |_, _| panic!("revealed accounts"))
+                .unwrap();
+            assert!(initial_updates.is_empty());
+            task.trie.root(TrieNodeEpoch::new(1)).unwrap();
+
+            let hints = || MultiProofTargetsV2 {
+                storage_targets: B256Map::from_iter([
+                    (address, vec![ProofV2Target::new(slot)]),
+                    (prewarmed, vec![ProofV2Target::new(slot)]),
+                ]),
+                ..Default::default()
+            };
+            task.on_prewarm_targets(hints());
+            task.pending_updates = 1;
+            task.process_new_updates().unwrap();
+            task.promote_pending_account_updates().unwrap();
+            assert!(!task.trie.storage_trie_ref(&address).unwrap().is_root_cached());
+
+            for value in [2, 3] {
+                let mut state = HashedPostState::default();
+                state.storages.entry(address).or_default().storage.insert(slot, U256::from(value));
+                task.on_hashed_state_update(state);
+                assert_eq!(task.pending_account_updates[&address], None);
+                task.pending_updates = 1;
+                task.process_new_updates().unwrap();
+                task.promote_pending_account_updates().unwrap();
+
+                assert!(task.pending_account_updates.is_empty());
+                assert_eq!(
+                    task.trie.storage_root(&address, task.new_epoch),
+                    Some(storage_root(value))
+                );
+                let encoded = task.trie.get_account_value(&address).unwrap();
+                let updated_account = TrieAccount::decode(&mut &encoded[..]).unwrap();
+                assert_eq!(updated_account.storage_root, storage_root(value));
+                assert_eq!(updated_account.nonce, account.nonce);
+                assert_eq!(
+                    task.trie.storage_trie_ref(&address).unwrap().root_epoch(),
+                    Some(task.new_epoch)
+                );
+                assert!(!task.trie.storage_trie_ref(&prewarmed).unwrap().is_root_cached());
+
+                // Late hints and an overlapping parent-state proof must not replace a modified
+                // leaf or make an already promoted account pending again.
+                task.on_prewarm_targets(hints());
+                task.on_proof_result(DecodedMultiProofV2 {
+                    storage_proofs: B256Map::from_iter([(
+                        address,
+                        vec![ProofTrieNodeV2 {
+                            path: Nibbles::default(),
+                            node: storage_node(1),
+                            masks: None,
+                        }],
+                    )]),
+                    ..Default::default()
+                })
+                .unwrap();
+                task.pending_updates = 1;
+                task.process_new_updates().unwrap();
+                task.promote_pending_account_updates().unwrap();
+                assert!(task.pending_account_updates.is_empty());
+                assert!(task.trie.storage_trie_ref(&address).unwrap().is_root_cached());
+                assert_eq!(
+                    task.trie.storage_root(&address, task.new_epoch),
+                    Some(storage_root(value))
+                );
+            }
+
+            let account_value =
+                encode_account_leaf_value(Some(account), storage_root(3), &mut Vec::new());
+            let expected_root = keccak256(alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
+                Nibbles::unpack(address),
+                account_value,
+            ))));
+            let (root, _) = task.trie.root_with_updates(task.new_epoch).unwrap();
+            assert_eq!(root, expected_root);
+            assert!(!task.trie.storage_trie_ref(&prewarmed).unwrap().is_root_cached());
+            task.trie.prune(task.new_epoch);
+            assert!(task.trie.storage_trie_ref(&prewarmed).is_none());
+            assert!(task.trie.storage_trie_ref(&address).is_some());
+            assert_eq!(task.trie.root(task.new_epoch).unwrap(), expected_root);
+        });
     }
 
     #[test]
