@@ -4764,26 +4764,39 @@ mod tests {
         reference.set_storage_settings_cache(settings);
         partial.set_storage_settings_cache(settings);
         let address = Address::with_last_byte(0x42);
-        let slot = U256::ONE;
+        let addresses = [0x42, 0x43, 0x44, 0x45].map(Address::with_last_byte);
+        let slots: Vec<_> = (1..=8).map(U256::from).collect();
         let mut parent_hash = B256::ZERO;
         let mut blocks = Vec::new();
         let mut expected_roots = Vec::new();
 
-        // Every block overwrites the same account and slot. The forty-block suffix must
-        // suppress obsolete prefix writes while still exposing the exact canonical root.
+        // Every block overwrites the same accounts and slots. Multiple accounts and slots
+        // produce actual branch nodes, exercising masked trie updates and changeset reverts.
+        // The forty-block suffix must suppress obsolete prefix writes while still exposing
+        // the exact canonical root.
         for number in 0..=55u64 {
             let account =
                 Account { nonce: number + 1, balance: U256::from(1000), ..Default::default() };
             let original = (number > 0).then_some(Account { nonce: number, ..account });
             let state = execution_state_from_init(
-                [(
-                    address,
+                addresses.map(|address| {
                     (
-                        original,
-                        Some(account),
-                        BTreeMap::from([(slot, (U256::from(number), U256::from(number + 1)))]),
-                    ),
-                )],
+                        address,
+                        (
+                            original,
+                            Some(account),
+                            slots
+                                .iter()
+                                .map(|&slot| {
+                                    (
+                                        slot,
+                                        (U256::from(number) * slot, U256::from(number + 1) * slot),
+                                    )
+                                })
+                                .collect(),
+                        ),
+                    )
+                }),
                 [],
             );
             let hashed =
@@ -4796,13 +4809,14 @@ mod tests {
                 >;
                 Root::overlay_root_with_updates(provider.tx_ref(), &hashed).unwrap()
             });
-            let expected = state_root_unhashed([(
-                address,
-                account.into_trie_account(storage_root_unhashed([(
-                    B256::from(slot),
-                    U256::from(number + 1),
-                )])),
-            )]);
+            let expected = state_root_unhashed(addresses.map(|address| {
+                (
+                    address,
+                    account.into_trie_account(storage_root_unhashed(
+                        slots.iter().map(|&slot| (B256::from(slot), U256::from(number + 1) * slot)),
+                    )),
+                )
+            }));
             assert_eq!(root, expected, "reference block {number}");
             let block = SealedBlock::<reth_ethereum_primitives::Block>::seal_parts(
                 Header {

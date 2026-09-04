@@ -1209,6 +1209,7 @@ fn benchmark_50_40_persistence_retains_mask_and_flushes_on_shutdown() {
     let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(0..56).collect();
     harness = harness.with_blocks(blocks.clone());
     harness.tree.config = TreeConfig::default()
+        .with_persistence_backpressure_threshold(100)
         .with_persistence_threshold(50)
         .with_memory_block_buffer_target(2)
         .with_num_state_masking_blocks(40);
