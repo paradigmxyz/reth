@@ -470,6 +470,8 @@ impl DatabaseEnv {
             // worsens it for random access (which is our access pattern outside of sync)
             no_rdahead: true,
             coalesce: true,
+            // Reuse the newest pages allowed by active readers to shorten page circulation.
+            liforeclaim: true,
             exclusive: args.exclusive.unwrap_or_default(),
             ..Default::default()
         });
@@ -727,6 +729,80 @@ mod tests {
     #[test]
     fn db_creation() {
         let _tempdir = create_test_db(DatabaseEnvKind::RW);
+    }
+
+    #[test]
+    fn durable_lifo_reclaim_preserves_readers_and_reopens_fifo_database() {
+        let open_fifo = |path: &Path| {
+            let mut builder = Environment::builder();
+            builder.write_map().set_max_dbs(256).set_flags(EnvironmentFlags {
+                mode: Mode::ReadWrite { sync_mode: SyncMode::Durable },
+                no_rdahead: true,
+                ..Default::default()
+            });
+            let mut db = DatabaseEnv {
+                inner: builder.open(path).unwrap(),
+                path: path.to_path_buf(),
+                dbis: Arc::default(),
+                metrics: None,
+                _lock_file: None,
+            };
+            db.create_tables().unwrap();
+            db
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let db = open_fifo(dir.path());
+        let tx = db.tx_mut().unwrap();
+        for key in 0..8192 {
+            tx.put::<CanonicalHeaders>(key, B256::ZERO).unwrap();
+        }
+        tx.commit().unwrap();
+        drop(db);
+
+        let db = create_test_db_with_path(DatabaseEnvKind::RW, dir.path());
+        assert!(db.is_write_map());
+        assert!(matches!(
+            db.info().unwrap().mode(),
+            Mode::ReadWrite { sync_mode: SyncMode::Durable }
+        ));
+        db.with_raw_env_ptr(|env| {
+            let mut flags = 0;
+            // SAFETY: The environment and output pointer remain valid during the call.
+            assert_eq!(unsafe { ffi::mdbx_env_get_flags(env, &raw mut flags) }, 0);
+            assert_ne!(flags & ffi::MDBX_LIFORECLAIM, 0);
+        });
+        let reader = db.tx().unwrap();
+        for round in 1..=8 {
+            let tx = db.tx_mut().unwrap();
+            for key in 0..8192 {
+                tx.put::<CanonicalHeaders>(key, B256::repeat_byte(round)).unwrap();
+            }
+            tx.commit().unwrap();
+            assert_eq!(reader.get::<CanonicalHeaders>(0).unwrap(), Some(B256::ZERO));
+            assert_eq!(reader.get::<CanonicalHeaders>(8191).unwrap(), Some(B256::ZERO));
+        }
+        drop(reader);
+        // Continue after the old snapshot releases its pages for reclamation.
+        for round in 9..=16 {
+            let tx = db.tx_mut().unwrap();
+            for key in 0..8192 {
+                tx.put::<CanonicalHeaders>(key, B256::repeat_byte(round)).unwrap();
+            }
+            tx.commit().unwrap();
+        }
+        let tx = db.tx_mut().unwrap();
+        tx.delete::<CanonicalHeaders>(0, None).unwrap();
+        tx.put::<CanonicalHeaders>(1, B256::repeat_byte(0xff)).unwrap();
+        tx.put::<CanonicalHeaders>(8192, B256::repeat_byte(0xff)).unwrap();
+        drop(tx);
+        drop(db);
+
+        let reopened = open_fifo(dir.path());
+        let tx = reopened.tx().unwrap();
+        for key in 0..8192 {
+            assert_eq!(tx.get::<CanonicalHeaders>(key).unwrap(), Some(B256::repeat_byte(16)));
+        }
+        assert_eq!(tx.get::<CanonicalHeaders>(8192).unwrap(), None);
     }
 
     #[test]
