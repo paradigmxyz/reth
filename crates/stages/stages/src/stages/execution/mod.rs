@@ -448,7 +448,6 @@ where
             let prune_modes = provider.prune_modes_ref();
 
             if !blocks.is_empty() &&
-                exex_state.is_none() &&
                 prune_modes.account_history.is_some() &&
                 prune_modes.storage_history.is_some()
             {
