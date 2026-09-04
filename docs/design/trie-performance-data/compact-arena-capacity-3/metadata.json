@@ -1,0 +1,82 @@
+{
+  "base_commit": "2042e313a2b7cb0e7606dceeca75005612702d8f",
+  "control_source": "f4fb30dfaf9ff55f27f87b0376b2d7b910221cf3",
+  "candidate_parent": "8f5a8fb98c",
+  "candidate_change": "Inline branch-child capacity3 plus Array-generic dense child indexing; no other production differences from2042",
+  "rustc": "1.98.1",
+  "profile": "profiling",
+  "rustflags": "-C target-cpu=native",
+  "features": [
+    "alloy-primitives/asm-keccak",
+    "alloy-primitives/keccak-cache-global"
+  ],
+  "binaries": {
+    "cursor_reveal": {
+      "source": "/tmp/reth-hash-mask-native-target/profiling/examples/cursor_reveal",
+      "binary": "/home/ubuntu/reth/bench-work/trie-derek-20260904/arena-three-experiment/cursor_reveal",
+      "sha256": "1a93fe558aa9f907703381d48300d6154b86ec6a228378aac2b97a8c2acafc68"
+    },
+    "state_root": {
+      "source": "/tmp/reth-hash-mask-native-target/profiling/deps/state_root-521d70bf2f87bdb5",
+      "binary": "/home/ubuntu/reth/bench-work/trie-derek-20260904/arena-three-experiment/state_root",
+      "sha256": "a816a2171369119ec8151ba853df1ffc51e4fd84484a7c3464b5b25f1f3a8773"
+    }
+  },
+  "size_scope": "DWARF sizeof from actual frozen executables, not total heap/RSS. Additional spilled children allocate separately.",
+  "tests_passed": 180,
+  "differential": {
+    "seed": 1,
+    "sequences": 10000,
+    "operations": 4448976,
+    "root_checks": 641072,
+    "persistence_checks": 255536,
+    "proof_rounds": 100022,
+    "in_memory_rebuilds": 90000,
+    "prunes": 40000,
+    "occupancy_masks": 65536
+  },
+  "reveal_smoke_cases": 6,
+  "predeclared_timing": {
+    "workers": [
+      1,
+      15
+    ],
+    "affinity_for_both": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "ABBA_rounds": 2,
+    "processes_per_variant": 4,
+    "samples_per_case": 100,
+    "root_cases": 28,
+    "reveal_cases": 6
+  },
+  "scope": "System allocator; repeated synthetic fixtures warm the global Keccak cache. Setup/cloning/reference checks are excluded from timing. No database persistence, execution, retained-overlapping proof routing or mainnet claim.",
+  "patch_sha256": "6c09a4a0cc49995bf679e19534c88af810699e26e6c06c6eaa522bc882beca43",
+  "candidate_commit": "b65d76b06d930fa39fe70d842812490bba350222",
+  "adoption": "Held pending runtime qualification; not included in main. Small fresh-proof reveals regress up to2.94% for full1k, while large root/reveal cases improve. No Derek result for this capacity change.",
+  "arena_node_bytes": {
+    "control4": 248,
+    "candidate3": 216,
+    "previous_candidate2": 176
+  },
+  "arena_slot_entry_bytes": {
+    "control4": 256,
+    "candidate3": 224,
+    "previous_candidate2": 184
+  },
+  "layout_evidence": "layout-sizes.json; node type sizes differ from actual slotmap arena-entry stride"
+}

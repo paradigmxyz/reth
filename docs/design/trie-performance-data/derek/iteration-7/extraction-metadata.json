@@ -1,0 +1,71 @@
+{
+  "artifact": "/home/ubuntu/reth/bench-work/trie-derek-20260904/iteration-7-results",
+  "helper_sha256": "0cdef717c31827b4341faf1d1c21b0a955ee50fef170cce7e09b8b66eee7d72c",
+  "summary_script_sha256": "1caa774f77120d3f71a618a7efde67ac51d6c3bf779149bf67bb5bb93bd84405",
+  "config_sha256": "7490c1ccfed458298e8a5197877019086bf73fc67f83b30c056486c3d6649bcf",
+  "scope": "diagnostic only; original Derek verdict and production config unchanged",
+  "runs": {
+    "baseline-1": {
+      "archive_sha256": "16654ff9ca7142d77499145567fc4541f54f511220a1a90a318b6d08228735f6",
+      "retained_samples": 2261,
+      "missing_requested_metrics": []
+    },
+    "baseline-2": {
+      "archive_sha256": "4b10d09cf1667ed01e015f8990a40ed5432ae6cca3df478ed3919073c970905a",
+      "retained_samples": 2278,
+      "missing_requested_metrics": []
+    },
+    "baseline-3": {
+      "archive_sha256": "d25c86add16fcdc4d5468698d33a1aa60cd687d20689961551f725bb57c1933b",
+      "retained_samples": 2278,
+      "missing_requested_metrics": []
+    },
+    "baseline-4": {
+      "archive_sha256": "73cef28f224a8c69a1aa554f6d2ea38f2bc9e204e9858889f490f70f85a916ad",
+      "retained_samples": 2261,
+      "missing_requested_metrics": []
+    },
+    "baseline-5": {
+      "archive_sha256": "33fcdac37a2a53ad982e03fe3ee118d7b294cff41a41a51956b7834d491a9711",
+      "retained_samples": 2261,
+      "missing_requested_metrics": []
+    },
+    "baseline-6": {
+      "archive_sha256": "8738fc7b2b8dd7d61fbf42455299aae10eccaaff006f7c594a6c8d1b17029ebc",
+      "retained_samples": 2261,
+      "missing_requested_metrics": []
+    },
+    "feature-1": {
+      "archive_sha256": "7dcefb35c407d2ae3531e20edf53b88dbad6cb47d7c473fb601c11b555fc0005",
+      "retained_samples": 2244,
+      "missing_requested_metrics": []
+    },
+    "feature-2": {
+      "archive_sha256": "4beac0153f63098208c5bb8fa7e3185573ec029c2e694ae5d7d9258a12315b36",
+      "retained_samples": 2227,
+      "missing_requested_metrics": []
+    },
+    "feature-3": {
+      "archive_sha256": "f6fbfe0e0efd18e58de209b0ebe9bde6dc9714d15d81dc59804738615cedad7c",
+      "retained_samples": 2244,
+      "missing_requested_metrics": []
+    },
+    "feature-4": {
+      "archive_sha256": "7459f2720cbda7c5e930d588a6a760de43f3f145fad55374328e3e83cefd5d5b",
+      "retained_samples": 2244,
+      "missing_requested_metrics": []
+    },
+    "feature-5": {
+      "archive_sha256": "dea18231ffd2d86529a54879636f8bcd5276532db0a320a0a7e24b77fda277c5",
+      "retained_samples": 2244,
+      "missing_requested_metrics": []
+    },
+    "feature-6": {
+      "archive_sha256": "aa134766a104e5d5ca33e5ba020d2de871f1856d42c228abb1dd9be4d927d8e1",
+      "retained_samples": 2261,
+      "missing_requested_metrics": []
+    }
+  },
+  "official_summary_sha256": "2048f810787bd5a5d3fa057cd90a16571bc1fc87d8efcde2bb35ffba81f7c8c9",
+  "official_overall_changes_match": true
+}

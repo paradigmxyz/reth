@@ -1,0 +1,124 @@
+{
+  "helper_sha256": "855220a2347a3421d85390c5b6befbb8df64b252c8c6f1ab4a39118549eb0fcf",
+  "payload_sha256": "70c2694e3941f5de87c466907b13f2f3bbb93d4f5bc1bcbb6455485600573c50",
+  "interval": [
+    25883613,
+    25884112
+  ],
+  "measured_blocks": 500,
+  "total_txs": 150862,
+  "total_gas": 15020694260,
+  "runs": [
+    {
+      "run": "baseline-1",
+      "side": "baseline",
+      "source_ref": "eadb887f1c1698e7bd932f60a0c654dccccd081f",
+      "report_sha256": "84e2f0322091d1aec2a86196e74964312a9162d8faee4c117121d22de8651271",
+      "log_sha256": "69ba8fc0550074a8a780f7e266d3aad397f05df3a1fa7df90022bd0db1a9ce9d",
+      "ordered_workload_matches": true,
+      "received_block_hashes_match": true
+    },
+    {
+      "run": "baseline-2",
+      "side": "baseline",
+      "source_ref": "eadb887f1c1698e7bd932f60a0c654dccccd081f",
+      "report_sha256": "36b7c16ad05a98312cdc96e6b8a9e416722c3779622a5587d39e503c75626692",
+      "log_sha256": "f54a2715de1e45dc4c4fa0b0ce64230d87c0a1c19df91dee5fe6bfd70904d94f",
+      "ordered_workload_matches": true,
+      "received_block_hashes_match": true
+    },
+    {
+      "run": "baseline-3",
+      "side": "baseline",
+      "source_ref": "eadb887f1c1698e7bd932f60a0c654dccccd081f",
+      "report_sha256": "50af6973f66c840c7d6a9f5f67f0bf48adf62b258b0ec96120217e8be91e68e7",
+      "log_sha256": "8160fff92b9e0360b503d6b9473e80c753a3fa55eba5bbb1e9238db6c4435810",
+      "ordered_workload_matches": true,
+      "received_block_hashes_match": true
+    },
+    {
+      "run": "baseline-4",
+      "side": "baseline",
+      "source_ref": "eadb887f1c1698e7bd932f60a0c654dccccd081f",
+      "report_sha256": "6956f550561e2812939599e791b9c86f75ccdbd06fb81054ed607622ebbebef0",
+      "log_sha256": "b65bb846bdc2bda3353458565b47532b404d4fbeac1cc3fd82d09777dfb6eb3e",
+      "ordered_workload_matches": true,
+      "received_block_hashes_match": true
+    },
+    {
+      "run": "baseline-5",
+      "side": "baseline",
+      "source_ref": "eadb887f1c1698e7bd932f60a0c654dccccd081f",
+      "report_sha256": "bf3fac514645f097d02b54b9af992293638bd3531bd83ab9d2a0456ffc6d6a5f",
+      "log_sha256": "9484ae6658cf24d0b359da85e8210bb12c3978b3a1e585bfd06bc3735b5d659c",
+      "ordered_workload_matches": true,
+      "received_block_hashes_match": true
+    },
+    {
+      "run": "baseline-6",
+      "side": "baseline",
+      "source_ref": "eadb887f1c1698e7bd932f60a0c654dccccd081f",
+      "report_sha256": "275e3046e60ab2abb907d041eeb0151b80bd91a0060ac6c0eb379a14dd6701ef",
+      "log_sha256": "cbc712f2bf6c6349f35b9ffef44d6f5eb78c802d3261e747ae1479bb6d6729de",
+      "ordered_workload_matches": true,
+      "received_block_hashes_match": true
+    },
+    {
+      "run": "feature-1",
+      "side": "feature",
+      "source_ref": "8c2ab90521c046f00a1f20b56adabe623c1e3fce",
+      "report_sha256": "826fea6210402af30e9263b974e30b1d9028349e72c90685c7bb64922413fade",
+      "log_sha256": "8d431acec8d1229928cdfb228ceba82cd2d83e34bfa424776e764a034a7ab6d1",
+      "ordered_workload_matches": true,
+      "received_block_hashes_match": true
+    },
+    {
+      "run": "feature-2",
+      "side": "feature",
+      "source_ref": "8c2ab90521c046f00a1f20b56adabe623c1e3fce",
+      "report_sha256": "4e336379a8ab41f603a241bd6cc34a97ca793a8a82a8d683002f006c1bc3cfe2",
+      "log_sha256": "cf6931686fd6ca72a42c0d9cb723c6478181e91fd813e17e0ed90c6a3c1aefc9",
+      "ordered_workload_matches": true,
+      "received_block_hashes_match": true
+    },
+    {
+      "run": "feature-3",
+      "side": "feature",
+      "source_ref": "8c2ab90521c046f00a1f20b56adabe623c1e3fce",
+      "report_sha256": "bafd1f2cf00f50c9788cd8cc6aa0b546fc846c92a0550683039ac8278e9fd41a",
+      "log_sha256": "a6892fef714df5b993b466b00233813a64cf48ef2379903f4d1d5a74ef5ca96d",
+      "ordered_workload_matches": true,
+      "received_block_hashes_match": true
+    },
+    {
+      "run": "feature-4",
+      "side": "feature",
+      "source_ref": "8c2ab90521c046f00a1f20b56adabe623c1e3fce",
+      "report_sha256": "033b338e74a433f6f0eafa2c7718eac05fd13f10e5fdbedfc00d0b90f105c773",
+      "log_sha256": "4556a01032a4c45dd0a07fba91575cbad9079df581b8bba73a7d8f15b0599274",
+      "ordered_workload_matches": true,
+      "received_block_hashes_match": true
+    },
+    {
+      "run": "feature-5",
+      "side": "feature",
+      "source_ref": "8c2ab90521c046f00a1f20b56adabe623c1e3fce",
+      "report_sha256": "ad61b06a515a36aebf3b21b9a50b2a5cb9a7aded87e02ee29c7f920455b09228",
+      "log_sha256": "8300c4cdf29b77593474ebefa7339663614813e9c4ed40f6ac28e6711abfd00f",
+      "ordered_workload_matches": true,
+      "received_block_hashes_match": true
+    },
+    {
+      "run": "feature-6",
+      "side": "feature",
+      "source_ref": "8c2ab90521c046f00a1f20b56adabe623c1e3fce",
+      "report_sha256": "168b1c084cf1394b6edd2ec3e0af866ff73ba5ac59660df491d19473f9b01045",
+      "log_sha256": "15cee1086df7f01496b2dd3883e86f96fa1b3189ddf912df489c0210d55c2308",
+      "ordered_workload_matches": true,
+      "received_block_hashes_match": true
+    }
+  ],
+  "scope": "Received payload hashes, ordered report workloads and reported source refs; this helper does not independently recompute Ethereum state roots.",
+  "reference_payload_sha256": "70c2694e3941f5de87c466907b13f2f3bbb93d4f5bc1bcbb6455485600573c50",
+  "same_payload_bytes_as_reference": true
+}

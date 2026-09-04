@@ -1,0 +1,1862 @@
+{
+  "scope": "Descriptive equal-run endpoint deltas; no acceptance verdict. Cache histograms are recorded once per completed task and count offered updates across passes, including retries. Process calls can visit many tries. These aggregates do not recover per-sort batch sizes, unique keys, or pure CPU time.",
+  "runs": [
+    {
+      "run": "baseline-1",
+      "side": "baseline",
+      "first_scrape_ms": 1788526540642,
+      "last_scrape_ms": 1788526567042,
+      "common_scrapes": 133,
+      "canonical_blocks": 498.0,
+      "missing_metrics": [],
+      "metrics": {
+        "account_cache_hits": {
+          "status": "observed",
+          "sum_first": 261113.0,
+          "sum_last": 1166728.0,
+          "sum_delta": 905615.0,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 1818.504016064257,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 1818.504016064257
+        },
+        "account_cache_misses": {
+          "status": "observed",
+          "sum_first": 448763.0,
+          "sum_last": 853118.0,
+          "sum_delta": 404355.0,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 811.9578313253012,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 811.9578313253012
+        },
+        "storage_cache_hits": {
+          "status": "observed",
+          "sum_first": 197729.0,
+          "sum_last": 933727.0,
+          "sum_delta": 735998.0,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 1477.9076305220883,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 1477.9076305220883
+        },
+        "storage_cache_misses": {
+          "status": "observed",
+          "sum_first": 419355.0,
+          "sum_last": 964021.0,
+          "sum_delta": 544666.0,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 1093.706827309237,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 1093.706827309237
+        },
+        "process_updates_duration_histogram": {
+          "status": "observed",
+          "sum_first": 1.3992818950000074,
+          "sum_last": 5.6885874889998735,
+          "sum_delta": 4.289305593999866,
+          "count_first": 22224.0,
+          "count_last": 63814.0,
+          "count_delta": 41590.0,
+          "sum_per_canonical_block": 0.0086130634417668,
+          "calls_per_canonical_block": 83.5140562248996,
+          "mean_per_call": 0.00010313309915844833
+        },
+        "reveal_multiproof_duration_histogram": {
+          "status": "observed",
+          "sum_first": 0.650107485999999,
+          "sum_last": 2.8919591849999855,
+          "sum_delta": 2.2418516989999864,
+          "count_first": 10786.0,
+          "count_last": 28499.0,
+          "count_delta": 17713.0,
+          "sum_per_canonical_block": 0.004501710238955796,
+          "calls_per_canonical_block": 35.56827309236948,
+          "mean_per_call": 0.00012656533049172847
+        },
+        "final_update_duration_histogram": {
+          "status": "observed",
+          "sum_first": 0.03983312400000002,
+          "sum_last": 0.20992644500000007,
+          "sum_delta": 0.17009332100000005,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 0.0003415528534136547,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 0.0003415528534136547
+        },
+        "total_duration_histogram": {
+          "status": "observed",
+          "sum_first": 4.437201281000002,
+          "sum_last": 15.826090653999985,
+          "sum_delta": 11.388889372999984,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 0.022869255769076273,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 0.022869255769076273
+        }
+      },
+      "all_four_cache_observation_counts_equal": true
+    },
+    {
+      "run": "baseline-2",
+      "side": "baseline",
+      "first_scrape_ms": 1788526609790,
+      "last_scrape_ms": 1788526636389,
+      "common_scrapes": 134,
+      "canonical_blocks": 498.0,
+      "missing_metrics": [],
+      "metrics": {
+        "account_cache_hits": {
+          "status": "observed",
+          "sum_first": 260993.0,
+          "sum_last": 1167116.0,
+          "sum_delta": 906123.0,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 1819.5240963855422,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 1819.5240963855422
+        },
+        "account_cache_misses": {
+          "status": "observed",
+          "sum_first": 427142.0,
+          "sum_last": 836595.0,
+          "sum_delta": 409453.0,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 822.1947791164658,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 822.1947791164658
+        },
+        "storage_cache_hits": {
+          "status": "observed",
+          "sum_first": 197870.0,
+          "sum_last": 935366.0,
+          "sum_delta": 737496.0,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 1480.9156626506024,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 1480.9156626506024
+        },
+        "storage_cache_misses": {
+          "status": "observed",
+          "sum_first": 413162.0,
+          "sum_last": 966511.0,
+          "sum_delta": 553349.0,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 1111.1425702811246,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 1111.1425702811246
+        },
+        "process_updates_duration_histogram": {
+          "status": "observed",
+          "sum_first": 1.3950646880000017,
+          "sum_last": 5.69497050799986,
+          "sum_delta": 4.299905819999858,
+          "count_first": 22146.0,
+          "count_last": 63718.0,
+          "count_delta": 41572.0,
+          "sum_per_canonical_block": 0.008634349036144294,
+          "calls_per_canonical_block": 83.47791164658635,
+          "mean_per_call": 0.00010343273886269264
+        },
+        "reveal_multiproof_duration_histogram": {
+          "status": "observed",
+          "sum_first": 0.6680330290000018,
+          "sum_last": 2.930534917000018,
+          "sum_delta": 2.262501888000016,
+          "count_first": 10804.0,
+          "count_last": 28619.0,
+          "count_delta": 17815.0,
+          "sum_per_canonical_block": 0.004543176481927743,
+          "calls_per_canonical_block": 35.773092369477915,
+          "mean_per_call": 0.00012699982531574606
+        },
+        "final_update_duration_histogram": {
+          "status": "observed",
+          "sum_first": 0.03998970799999999,
+          "sum_last": 0.20256658399999977,
+          "sum_delta": 0.1625768759999998,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 0.00032645959036144536,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 0.00032645959036144536
+        },
+        "total_duration_histogram": {
+          "status": "observed",
+          "sum_first": 4.443512945000002,
+          "sum_last": 15.863562506000006,
+          "sum_delta": 11.420049561000004,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 0.022931826427710852,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 0.022931826427710852
+        }
+      },
+      "all_four_cache_observation_counts_equal": true
+    },
+    {
+      "run": "baseline-3",
+      "side": "baseline",
+      "first_scrape_ms": 1788526816720,
+      "last_scrape_ms": 1788526843319,
+      "common_scrapes": 134,
+      "canonical_blocks": 499.0,
+      "missing_metrics": [],
+      "metrics": {
+        "account_cache_hits": {
+          "status": "observed",
+          "sum_first": 261920.0,
+          "sum_last": 1170017.0,
+          "sum_delta": 908097.0,
+          "count_first": 125.0,
+          "count_last": 624.0,
+          "count_delta": 499.0,
+          "sum_per_canonical_block": 1819.8336673346694,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 1819.8336673346694
+        },
+        "account_cache_misses": {
+          "status": "observed",
+          "sum_first": 442567.0,
+          "sum_last": 875351.0,
+          "sum_delta": 432784.0,
+          "count_first": 125.0,
+          "count_last": 624.0,
+          "count_delta": 499.0,
+          "sum_per_canonical_block": 867.3026052104209,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 867.3026052104209
+        },
+        "storage_cache_hits": {
+          "status": "observed",
+          "sum_first": 198127.0,
+          "sum_last": 937224.0,
+          "sum_delta": 739097.0,
+          "count_first": 125.0,
+          "count_last": 624.0,
+          "count_delta": 499.0,
+          "sum_per_canonical_block": 1481.1563126252504,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 1481.1563126252504
+        },
+        "storage_cache_misses": {
+          "status": "observed",
+          "sum_first": 427798.0,
+          "sum_last": 999148.0,
+          "sum_delta": 571350.0,
+          "count_first": 125.0,
+          "count_last": 624.0,
+          "count_delta": 499.0,
+          "sum_per_canonical_block": 1144.9899799599198,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 1144.9899799599198
+        },
+        "process_updates_duration_histogram": {
+          "status": "observed",
+          "sum_first": 1.3729369200000108,
+          "sum_last": 5.68901237199988,
+          "sum_delta": 4.316075451999869,
+          "count_first": 22332.0,
+          "count_last": 64255.0,
+          "count_delta": 41923.0,
+          "sum_per_canonical_block": 0.008649449803606952,
+          "calls_per_canonical_block": 84.01402805611222,
+          "mean_per_call": 0.00010295244739164347
+        },
+        "reveal_multiproof_duration_histogram": {
+          "status": "observed",
+          "sum_first": 0.6784077150000013,
+          "sum_last": 2.938930959999987,
+          "sum_delta": 2.2605232449999857,
+          "count_first": 10865.0,
+          "count_last": 29102.0,
+          "count_delta": 18237.0,
+          "sum_per_canonical_block": 0.004530106703406785,
+          "calls_per_canonical_block": 36.547094188376754,
+          "mean_per_call": 0.0001239525823874533
+        },
+        "final_update_duration_histogram": {
+          "status": "observed",
+          "sum_first": 0.040322682999999984,
+          "sum_last": 0.21013904800000013,
+          "sum_delta": 0.16981636500000014,
+          "count_first": 125.0,
+          "count_last": 624.0,
+          "count_delta": 499.0,
+          "sum_per_canonical_block": 0.0003403133567134271,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 0.0003403133567134271
+        },
+        "total_duration_histogram": {
+          "status": "observed",
+          "sum_first": 4.417929921999999,
+          "sum_last": 15.897919100999976,
+          "sum_delta": 11.479989178999977,
+          "count_first": 125.0,
+          "count_last": 624.0,
+          "count_delta": 499.0,
+          "sum_per_canonical_block": 0.02300599033867731,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 0.02300599033867731
+        }
+      },
+      "all_four_cache_observation_counts_equal": true
+    },
+    {
+      "run": "baseline-4",
+      "side": "baseline",
+      "first_scrape_ms": 1788526885884,
+      "last_scrape_ms": 1788526912284,
+      "common_scrapes": 133,
+      "canonical_blocks": 498.0,
+      "missing_metrics": [],
+      "metrics": {
+        "account_cache_hits": {
+          "status": "observed",
+          "sum_first": 262394.0,
+          "sum_last": 1168417.0,
+          "sum_delta": 906023.0,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 1819.3232931726907,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 1819.3232931726907
+        },
+        "account_cache_misses": {
+          "status": "observed",
+          "sum_first": 432927.0,
+          "sum_last": 858839.0,
+          "sum_delta": 425912.0,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 855.2449799196787,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 855.2449799196787
+        },
+        "storage_cache_hits": {
+          "status": "observed",
+          "sum_first": 198770.0,
+          "sum_last": 937001.0,
+          "sum_delta": 738231.0,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 1482.3915662650602,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 1482.3915662650602
+        },
+        "storage_cache_misses": {
+          "status": "observed",
+          "sum_first": 419308.0,
+          "sum_last": 983540.0,
+          "sum_delta": 564232.0,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 1132.995983935743,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 1132.995983935743
+        },
+        "process_updates_duration_histogram": {
+          "status": "observed",
+          "sum_first": 1.3680595970000025,
+          "sum_last": 5.695571013999823,
+          "sum_delta": 4.327511416999821,
+          "count_first": 22289.0,
+          "count_last": 64262.0,
+          "count_delta": 41973.0,
+          "sum_per_canonical_block": 0.00868978196184703,
+          "calls_per_canonical_block": 84.28313253012048,
+          "mean_per_call": 0.0001031022661472809
+        },
+        "reveal_multiproof_duration_histogram": {
+          "status": "observed",
+          "sum_first": 0.6709495449999969,
+          "sum_last": 2.8924462979999936,
+          "sum_delta": 2.2214967529999967,
+          "count_first": 10738.0,
+          "count_last": 28579.0,
+          "count_delta": 17841.0,
+          "sum_per_canonical_block": 0.004460836853413648,
+          "calls_per_canonical_block": 35.825301204819276,
+          "mean_per_call": 0.0001245163809764025
+        },
+        "final_update_duration_histogram": {
+          "status": "observed",
+          "sum_first": 0.03713260099999998,
+          "sum_last": 0.20135982399999985,
+          "sum_delta": 0.16422722299999987,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 0.0003297735401606423,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 0.0003297735401606423
+        },
+        "total_duration_histogram": {
+          "status": "observed",
+          "sum_first": 4.429736451999999,
+          "sum_last": 15.799717937000002,
+          "sum_delta": 11.369981485000004,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 0.022831288122489968,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 0.022831288122489968
+        }
+      },
+      "all_four_cache_observation_counts_equal": true
+    },
+    {
+      "run": "baseline-5",
+      "side": "baseline",
+      "first_scrape_ms": 1788527092193,
+      "last_scrape_ms": 1788527118593,
+      "common_scrapes": 133,
+      "canonical_blocks": 498.0,
+      "missing_metrics": [],
+      "metrics": {
+        "account_cache_hits": {
+          "status": "observed",
+          "sum_first": 260288.0,
+          "sum_last": 1166701.0,
+          "sum_delta": 906413.0,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 1820.1064257028113,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 1820.1064257028113
+        },
+        "account_cache_misses": {
+          "status": "observed",
+          "sum_first": 427059.0,
+          "sum_last": 845097.0,
+          "sum_delta": 418038.0,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 839.433734939759,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 839.433734939759
+        },
+        "storage_cache_hits": {
+          "status": "observed",
+          "sum_first": 197667.0,
+          "sum_last": 934418.0,
+          "sum_delta": 736751.0,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 1479.4196787148594,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 1479.4196787148594
+        },
+        "storage_cache_misses": {
+          "status": "observed",
+          "sum_first": 414746.0,
+          "sum_last": 974012.0,
+          "sum_delta": 559266.0,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 1123.0240963855422,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 1123.0240963855422
+        },
+        "process_updates_duration_histogram": {
+          "status": "observed",
+          "sum_first": 1.3838282570000024,
+          "sum_last": 5.681450653999865,
+          "sum_delta": 4.297622396999863,
+          "count_first": 21793.0,
+          "count_last": 64155.0,
+          "count_delta": 42362.0,
+          "sum_per_canonical_block": 0.008629763849397315,
+          "calls_per_canonical_block": 85.06425702811245,
+          "mean_per_call": 0.00010144994091402348
+        },
+        "reveal_multiproof_duration_histogram": {
+          "status": "observed",
+          "sum_first": 0.6697383510000005,
+          "sum_last": 2.895638541000018,
+          "sum_delta": 2.2259001900000177,
+          "count_first": 10630.0,
+          "count_last": 28836.0,
+          "count_delta": 18206.0,
+          "sum_per_canonical_block": 0.004469679096385577,
+          "calls_per_canonical_block": 36.558232931726906,
+          "mean_per_call": 0.00012226190212018113
+        },
+        "final_update_duration_histogram": {
+          "status": "observed",
+          "sum_first": 0.03819087800000001,
+          "sum_last": 0.20160945099999977,
+          "sum_delta": 0.16341857299999976,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 0.0003281497449799192,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 0.0003281497449799192
+        },
+        "total_duration_histogram": {
+          "status": "observed",
+          "sum_first": 4.472472527999998,
+          "sum_last": 15.89519505400001,
+          "sum_delta": 11.422722526000012,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 0.02293719382730926,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 0.02293719382730926
+        }
+      },
+      "all_four_cache_observation_counts_equal": true
+    },
+    {
+      "run": "baseline-6",
+      "side": "baseline",
+      "first_scrape_ms": 1788527161260,
+      "last_scrape_ms": 1788527187659,
+      "common_scrapes": 133,
+      "canonical_blocks": 499.0,
+      "missing_metrics": [],
+      "metrics": {
+        "account_cache_hits": {
+          "status": "observed",
+          "sum_first": 261503.0,
+          "sum_last": 1172404.0,
+          "sum_delta": 910901.0,
+          "count_first": 125.0,
+          "count_last": 625.0,
+          "count_delta": 500.0,
+          "sum_per_canonical_block": 1825.4529058116232,
+          "calls_per_canonical_block": 1.002004008016032,
+          "mean_per_call": 1821.802
+        },
+        "account_cache_misses": {
+          "status": "observed",
+          "sum_first": 437782.0,
+          "sum_last": 857355.0,
+          "sum_delta": 419573.0,
+          "count_first": 125.0,
+          "count_last": 624.0,
+          "count_delta": 499.0,
+          "sum_per_canonical_block": 840.8276553106213,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 840.8276553106213
+        },
+        "storage_cache_hits": {
+          "status": "observed",
+          "sum_first": 198232.0,
+          "sum_last": 939448.0,
+          "sum_delta": 741216.0,
+          "count_first": 125.0,
+          "count_last": 624.0,
+          "count_delta": 499.0,
+          "sum_per_canonical_block": 1485.4028056112224,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 1485.4028056112224
+        },
+        "storage_cache_misses": {
+          "status": "observed",
+          "sum_first": 419423.0,
+          "sum_last": 979686.0,
+          "sum_delta": 560263.0,
+          "count_first": 125.0,
+          "count_last": 625.0,
+          "count_delta": 500.0,
+          "sum_per_canonical_block": 1122.7715430861724,
+          "calls_per_canonical_block": 1.002004008016032,
+          "mean_per_call": 1120.526
+        },
+        "process_updates_duration_histogram": {
+          "status": "observed",
+          "sum_first": 1.3896535419999991,
+          "sum_last": 5.746818509999927,
+          "sum_delta": 4.357164967999928,
+          "count_first": 22173.0,
+          "count_last": 64040.0,
+          "count_delta": 41867.0,
+          "sum_per_canonical_block": 0.008731793523045948,
+          "calls_per_canonical_block": 83.90180360721443,
+          "mean_per_call": 0.00010407158306064271
+        },
+        "reveal_multiproof_duration_histogram": {
+          "status": "observed",
+          "sum_first": 0.6339012269999967,
+          "sum_last": 2.931942566999966,
+          "sum_delta": 2.298041339999969,
+          "count_first": 10759.0,
+          "count_last": 28684.0,
+          "count_delta": 17925.0,
+          "sum_per_canonical_block": 0.004605293266533004,
+          "calls_per_canonical_block": 35.921843687374746,
+          "mean_per_call": 0.00012820314309623258
+        },
+        "final_update_duration_histogram": {
+          "status": "observed",
+          "sum_first": 0.039947310000000014,
+          "sum_last": 0.20543356200000004,
+          "sum_delta": 0.16548625200000003,
+          "count_first": 125.0,
+          "count_last": 624.0,
+          "count_delta": 499.0,
+          "sum_per_canonical_block": 0.0003316357755511023,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 0.0003316357755511023
+        },
+        "total_duration_histogram": {
+          "status": "observed",
+          "sum_first": 4.4351825080000005,
+          "sum_last": 15.904070988999989,
+          "sum_delta": 11.468888480999988,
+          "count_first": 125.0,
+          "count_last": 624.0,
+          "count_delta": 499.0,
+          "sum_per_canonical_block": 0.022983744450901778,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 0.022983744450901778
+        }
+      },
+      "all_four_cache_observation_counts_equal": false
+    },
+    {
+      "run": "feature-1",
+      "side": "feature",
+      "first_scrape_ms": 1788526472013,
+      "last_scrape_ms": 1788526498214,
+      "common_scrapes": 132,
+      "canonical_blocks": 499.0,
+      "missing_metrics": [],
+      "metrics": {
+        "account_cache_hits": {
+          "status": "observed",
+          "sum_first": 264994.0,
+          "sum_last": 1185694.0,
+          "sum_delta": 920700.0,
+          "count_first": 125.0,
+          "count_last": 624.0,
+          "count_delta": 499.0,
+          "sum_per_canonical_block": 1845.0901803607214,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 1845.0901803607214
+        },
+        "account_cache_misses": {
+          "status": "observed",
+          "sum_first": 494577.0,
+          "sum_last": 954664.0,
+          "sum_delta": 460087.0,
+          "count_first": 125.0,
+          "count_last": 624.0,
+          "count_delta": 499.0,
+          "sum_per_canonical_block": 922.0180360721442,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 922.0180360721442
+        },
+        "storage_cache_hits": {
+          "status": "observed",
+          "sum_first": 198845.0,
+          "sum_last": 943307.0,
+          "sum_delta": 744462.0,
+          "count_first": 125.0,
+          "count_last": 624.0,
+          "count_delta": 499.0,
+          "sum_per_canonical_block": 1491.9078156312626,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 1491.9078156312626
+        },
+        "storage_cache_misses": {
+          "status": "observed",
+          "sum_first": 466225.0,
+          "sum_last": 1072980.0,
+          "sum_delta": 606755.0,
+          "count_first": 125.0,
+          "count_last": 624.0,
+          "count_delta": 499.0,
+          "sum_per_canonical_block": 1215.941883767535,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 1215.941883767535
+        },
+        "process_updates_duration_histogram": {
+          "status": "observed",
+          "sum_first": 1.293931323999998,
+          "sum_last": 5.397295739999875,
+          "sum_delta": 4.103364415999877,
+          "count_first": 23976.0,
+          "count_last": 69140.0,
+          "count_delta": 45164.0,
+          "sum_per_canonical_block": 0.008223175182364484,
+          "calls_per_canonical_block": 90.50901803607215,
+          "mean_per_call": 9.085476078292174e-05
+        },
+        "reveal_multiproof_duration_histogram": {
+          "status": "observed",
+          "sum_first": 0.6837894110000012,
+          "sum_last": 2.9140788210000217,
+          "sum_delta": 2.2302894100000206,
+          "count_first": 11597.0,
+          "count_last": 30600.0,
+          "count_delta": 19003.0,
+          "sum_per_canonical_block": 0.0044695178557114645,
+          "calls_per_canonical_block": 38.08216432865731,
+          "mean_per_call": 0.00011736512182287115
+        },
+        "final_update_duration_histogram": {
+          "status": "observed",
+          "sum_first": 0.035143442000000004,
+          "sum_last": 0.1866583920000002,
+          "sum_delta": 0.1515149500000002,
+          "count_first": 125.0,
+          "count_last": 624.0,
+          "count_delta": 499.0,
+          "sum_per_canonical_block": 0.0003036371743486978,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 0.0003036371743486978
+        },
+        "total_duration_histogram": {
+          "status": "observed",
+          "sum_first": 4.460703561000002,
+          "sum_last": 15.920646905999995,
+          "sum_delta": 11.459943344999992,
+          "count_first": 125.0,
+          "count_last": 624.0,
+          "count_delta": 499.0,
+          "sum_per_canonical_block": 0.02296581832665329,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 0.02296581832665329
+        }
+      },
+      "all_four_cache_observation_counts_equal": true
+    },
+    {
+      "run": "feature-2",
+      "side": "feature",
+      "first_scrape_ms": 1788526679304,
+      "last_scrape_ms": 1788526705304,
+      "common_scrapes": 131,
+      "canonical_blocks": 498.0,
+      "missing_metrics": [],
+      "metrics": {
+        "account_cache_hits": {
+          "status": "observed",
+          "sum_first": 263358.0,
+          "sum_last": 1180175.0,
+          "sum_delta": 916817.0,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 1840.9979919678715,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 1840.9979919678715
+        },
+        "account_cache_misses": {
+          "status": "observed",
+          "sum_first": 494225.0,
+          "sum_last": 954530.0,
+          "sum_delta": 460305.0,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 924.3072289156627,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 924.3072289156627
+        },
+        "storage_cache_hits": {
+          "status": "observed",
+          "sum_first": 198535.0,
+          "sum_last": 940586.0,
+          "sum_delta": 742051.0,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 1490.062248995984,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 1490.062248995984
+        },
+        "storage_cache_misses": {
+          "status": "observed",
+          "sum_first": 477480.0,
+          "sum_last": 1082188.0,
+          "sum_delta": 604708.0,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 1214.2730923694778,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 1214.2730923694778
+        },
+        "process_updates_duration_histogram": {
+          "status": "observed",
+          "sum_first": 1.3103257910000095,
+          "sum_last": 5.363928534999968,
+          "sum_delta": 4.053602743999959,
+          "count_first": 23630.0,
+          "count_last": 68604.0,
+          "count_delta": 44974.0,
+          "sum_per_canonical_block": 0.008139764546184657,
+          "calls_per_canonical_block": 90.30923694779116,
+          "mean_per_call": 9.013213732378617e-05
+        },
+        "reveal_multiproof_duration_histogram": {
+          "status": "observed",
+          "sum_first": 0.6488855310000019,
+          "sum_last": 2.937335205000021,
+          "sum_delta": 2.2884496740000193,
+          "count_first": 11495.0,
+          "count_last": 30384.0,
+          "count_delta": 18889.0,
+          "sum_per_canonical_block": 0.0045952804698795565,
+          "calls_per_canonical_block": 37.929718875502004,
+          "mean_per_call": 0.00012115250537349882
+        },
+        "final_update_duration_histogram": {
+          "status": "observed",
+          "sum_first": 0.03948205700000001,
+          "sum_last": 0.19195576700000014,
+          "sum_delta": 0.15247371000000012,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 0.0003061721084337352,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 0.0003061721084337352
+        },
+        "total_duration_histogram": {
+          "status": "observed",
+          "sum_first": 4.407576589000002,
+          "sum_last": 15.860874413000005,
+          "sum_delta": 11.453297824000003,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 0.022998590008032137,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 0.022998590008032137
+        }
+      },
+      "all_four_cache_observation_counts_equal": true
+    },
+    {
+      "run": "feature-3",
+      "side": "feature",
+      "first_scrape_ms": 1788526747825,
+      "last_scrape_ms": 1788526774025,
+      "common_scrapes": 132,
+      "canonical_blocks": 499.0,
+      "missing_metrics": [],
+      "metrics": {
+        "account_cache_hits": {
+          "status": "observed",
+          "sum_first": 265105.0,
+          "sum_last": 1181852.0,
+          "sum_delta": 916747.0,
+          "count_first": 125.0,
+          "count_last": 624.0,
+          "count_delta": 499.0,
+          "sum_per_canonical_block": 1837.1683366733466,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 1837.1683366733466
+        },
+        "account_cache_misses": {
+          "status": "observed",
+          "sum_first": 486639.0,
+          "sum_last": 938488.0,
+          "sum_delta": 451849.0,
+          "count_first": 125.0,
+          "count_last": 624.0,
+          "count_delta": 499.0,
+          "sum_per_canonical_block": 905.5090180360721,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 905.5090180360721
+        },
+        "storage_cache_hits": {
+          "status": "observed",
+          "sum_first": 198989.0,
+          "sum_last": 941161.0,
+          "sum_delta": 742172.0,
+          "count_first": 125.0,
+          "count_last": 624.0,
+          "count_delta": 499.0,
+          "sum_per_canonical_block": 1487.318637274549,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 1487.318637274549
+        },
+        "storage_cache_misses": {
+          "status": "observed",
+          "sum_first": 464071.0,
+          "sum_last": 1058005.0,
+          "sum_delta": 593934.0,
+          "count_first": 125.0,
+          "count_last": 624.0,
+          "count_delta": 499.0,
+          "sum_per_canonical_block": 1190.248496993988,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 1190.248496993988
+        },
+        "process_updates_duration_histogram": {
+          "status": "observed",
+          "sum_first": 1.310163048000001,
+          "sum_last": 5.428966421999852,
+          "sum_delta": 4.118803373999851,
+          "count_first": 23655.0,
+          "count_last": 68063.0,
+          "count_delta": 44408.0,
+          "sum_per_canonical_block": 0.008254114977955614,
+          "calls_per_canonical_block": 88.99398797595191,
+          "mean_per_call": 9.27491302017621e-05
+        },
+        "reveal_multiproof_duration_histogram": {
+          "status": "observed",
+          "sum_first": 0.6565493029999989,
+          "sum_last": 2.9132642419999826,
+          "sum_delta": 2.2567149389999837,
+          "count_first": 11355.0,
+          "count_last": 30014.0,
+          "count_delta": 18659.0,
+          "sum_per_canonical_block": 0.004522474827655278,
+          "calls_per_canonical_block": 37.392785571142284,
+          "mean_per_call": 0.00012094511704807244
+        },
+        "final_update_duration_histogram": {
+          "status": "observed",
+          "sum_first": 0.03876325199999999,
+          "sum_last": 0.20030238700000005,
+          "sum_delta": 0.16153913500000006,
+          "count_first": 125.0,
+          "count_last": 624.0,
+          "count_delta": 499.0,
+          "sum_per_canonical_block": 0.00032372572144288587,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 0.00032372572144288587
+        },
+        "total_duration_histogram": {
+          "status": "observed",
+          "sum_first": 4.487410762999998,
+          "sum_last": 15.938176900999983,
+          "sum_delta": 11.450766137999985,
+          "count_first": 125.0,
+          "count_last": 624.0,
+          "count_delta": 499.0,
+          "sum_per_canonical_block": 0.02294742713026049,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 0.02294742713026049
+        }
+      },
+      "all_four_cache_observation_counts_equal": true
+    },
+    {
+      "run": "feature-4",
+      "side": "feature",
+      "first_scrape_ms": 1788526954845,
+      "last_scrape_ms": 1788526981044,
+      "common_scrapes": 132,
+      "canonical_blocks": 498.0,
+      "missing_metrics": [],
+      "metrics": {
+        "account_cache_hits": {
+          "status": "observed",
+          "sum_first": 264132.0,
+          "sum_last": 1178935.0,
+          "sum_delta": 914803.0,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 1836.9538152610442,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 1836.9538152610442
+        },
+        "account_cache_misses": {
+          "status": "observed",
+          "sum_first": 496472.0,
+          "sum_last": 936297.0,
+          "sum_delta": 439825.0,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 883.1827309236947,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 883.1827309236947
+        },
+        "storage_cache_hits": {
+          "status": "observed",
+          "sum_first": 199036.0,
+          "sum_last": 938629.0,
+          "sum_delta": 739593.0,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 1485.1265060240964,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 1485.1265060240964
+        },
+        "storage_cache_misses": {
+          "status": "observed",
+          "sum_first": 467685.0,
+          "sum_last": 1060709.0,
+          "sum_delta": 593024.0,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 1190.8112449799196,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 1190.8112449799196
+        },
+        "process_updates_duration_histogram": {
+          "status": "observed",
+          "sum_first": 1.303121802000002,
+          "sum_last": 5.4202441399999,
+          "sum_delta": 4.1171223379998985,
+          "count_first": 23462.0,
+          "count_last": 67948.0,
+          "count_delta": 44486.0,
+          "sum_per_canonical_block": 0.008267313931726705,
+          "calls_per_canonical_block": 89.3293172690763,
+          "mean_per_call": 9.254871955221639e-05
+        },
+        "reveal_multiproof_duration_histogram": {
+          "status": "observed",
+          "sum_first": 0.6744947780000008,
+          "sum_last": 2.943238018999995,
+          "sum_delta": 2.268743240999994,
+          "count_first": 11347.0,
+          "count_last": 29999.0,
+          "count_delta": 18652.0,
+          "sum_per_canonical_block": 0.004555709319277096,
+          "calls_per_canonical_block": 37.45381526104418,
+          "mean_per_call": 0.00012163538714346954
+        },
+        "final_update_duration_histogram": {
+          "status": "observed",
+          "sum_first": 0.03630443999999999,
+          "sum_last": 0.19977342000000012,
+          "sum_delta": 0.16346898000000012,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 0.00032825096385542195,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 0.00032825096385542195
+        },
+        "total_duration_histogram": {
+          "status": "observed",
+          "sum_first": 4.458715643,
+          "sum_last": 15.90333656799998,
+          "sum_delta": 11.444620924999981,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 0.02298116651606422,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 0.02298116651606422
+        }
+      },
+      "all_four_cache_observation_counts_equal": true
+    },
+    {
+      "run": "feature-5",
+      "side": "feature",
+      "first_scrape_ms": 1788527023539,
+      "last_scrape_ms": 1788527049738,
+      "common_scrapes": 132,
+      "canonical_blocks": 498.0,
+      "missing_metrics": [],
+      "metrics": {
+        "account_cache_hits": {
+          "status": "observed",
+          "sum_first": 264004.0,
+          "sum_last": 1181503.0,
+          "sum_delta": 917499.0,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 1842.367469879518,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 1842.367469879518
+        },
+        "account_cache_misses": {
+          "status": "observed",
+          "sum_first": 475820.0,
+          "sum_last": 936257.0,
+          "sum_delta": 460437.0,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 924.5722891566265,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 924.5722891566265
+        },
+        "storage_cache_hits": {
+          "status": "observed",
+          "sum_first": 198718.0,
+          "sum_last": 940960.0,
+          "sum_delta": 742242.0,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 1490.44578313253,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 1490.44578313253
+        },
+        "storage_cache_misses": {
+          "status": "observed",
+          "sum_first": 463788.0,
+          "sum_last": 1068983.0,
+          "sum_delta": 605195.0,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 1215.2510040160641,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 1215.2510040160641
+        },
+        "process_updates_duration_histogram": {
+          "status": "observed",
+          "sum_first": 1.301878026000005,
+          "sum_last": 5.453590430999903,
+          "sum_delta": 4.1517124049998975,
+          "count_first": 23455.0,
+          "count_last": 68493.0,
+          "count_delta": 45038.0,
+          "sum_per_canonical_block": 0.008336771897590155,
+          "calls_per_canonical_block": 90.43775100401606,
+          "mean_per_call": 9.218243272347567e-05
+        },
+        "reveal_multiproof_duration_histogram": {
+          "status": "observed",
+          "sum_first": 0.6642425070000006,
+          "sum_last": 2.9198954290000025,
+          "sum_delta": 2.255652922000002,
+          "count_first": 11363.0,
+          "count_last": 30316.0,
+          "count_delta": 18953.0,
+          "sum_per_canonical_block": 0.004529423538152615,
+          "calls_per_canonical_block": 38.058232931726906,
+          "mean_per_call": 0.00011901297536010142
+        },
+        "final_update_duration_histogram": {
+          "status": "observed",
+          "sum_first": 0.03789069299999998,
+          "sum_last": 0.18846421500000016,
+          "sum_delta": 0.15057352200000018,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 0.0003023564698795184,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 0.0003023564698795184
+        },
+        "total_duration_histogram": {
+          "status": "observed",
+          "sum_first": 4.427550397000002,
+          "sum_last": 15.873035016000005,
+          "sum_delta": 11.445484619000002,
+          "count_first": 125.0,
+          "count_last": 623.0,
+          "count_delta": 498.0,
+          "sum_per_canonical_block": 0.022982900841365464,
+          "calls_per_canonical_block": 1.0,
+          "mean_per_call": 0.022982900841365464
+        }
+      },
+      "all_four_cache_observation_counts_equal": true
+    },
+    {
+      "run": "feature-6",
+      "side": "feature",
+      "first_scrape_ms": 1788527230233,
+      "last_scrape_ms": 1788527256632,
+      "common_scrapes": 133,
+      "canonical_blocks": 499.0,
+      "missing_metrics": [],
+      "metrics": {
+        "account_cache_hits": {
+          "status": "observed",
+          "sum_first": 263585.0,
+          "sum_last": 1185281.0,
+          "sum_delta": 921696.0,
+          "count_first": 125.0,
+          "count_last": 625.0,
+          "count_delta": 500.0,
+          "sum_per_canonical_block": 1847.0861723446894,
+          "calls_per_canonical_block": 1.002004008016032,
+          "mean_per_call": 1843.392
+        },
+        "account_cache_misses": {
+          "status": "observed",
+          "sum_first": 481801.0,
+          "sum_last": 943770.0,
+          "sum_delta": 461969.0,
+          "count_first": 125.0,
+          "count_last": 625.0,
+          "count_delta": 500.0,
+          "sum_per_canonical_block": 925.7895791583167,
+          "calls_per_canonical_block": 1.002004008016032,
+          "mean_per_call": 923.938
+        },
+        "storage_cache_hits": {
+          "status": "observed",
+          "sum_first": 198467.0,
+          "sum_last": 947210.0,
+          "sum_delta": 748743.0,
+          "count_first": 125.0,
+          "count_last": 625.0,
+          "count_delta": 500.0,
+          "sum_per_canonical_block": 1500.4869739478959,
+          "calls_per_canonical_block": 1.002004008016032,
+          "mean_per_call": 1497.486
+        },
+        "storage_cache_misses": {
+          "status": "observed",
+          "sum_first": 458036.0,
+          "sum_last": 1060668.0,
+          "sum_delta": 602632.0,
+          "count_first": 125.0,
+          "count_last": 625.0,
+          "count_delta": 500.0,
+          "sum_per_canonical_block": 1207.679358717435,
+          "calls_per_canonical_block": 1.002004008016032,
+          "mean_per_call": 1205.264
+        },
+        "process_updates_duration_histogram": {
+          "status": "observed",
+          "sum_first": 1.3012328500000112,
+          "sum_last": 5.471465109999878,
+          "sum_delta": 4.1702322599998665,
+          "count_first": 23470.0,
+          "count_last": 68543.0,
+          "count_delta": 45073.0,
+          "sum_per_canonical_block": 0.008357178877755243,
+          "calls_per_canonical_block": 90.32665330661322,
+          "mean_per_call": 9.252173718190195e-05
+        },
+        "reveal_multiproof_duration_histogram": {
+          "status": "observed",
+          "sum_first": 0.6762957470000027,
+          "sum_last": 2.8979555740000347,
+          "sum_delta": 2.221659827000032,
+          "count_first": 11411.0,
+          "count_last": 30462.0,
+          "count_delta": 19051.0,
+          "sum_per_canonical_block": 0.004452224102204473,
+          "calls_per_canonical_block": 38.17835671342685,
+          "mean_per_call": 0.00011661644149913557
+        },
+        "final_update_duration_histogram": {
+          "status": "observed",
+          "sum_first": 0.03807563500000001,
+          "sum_last": 0.1889973829999998,
+          "sum_delta": 0.1509217479999998,
+          "count_first": 125.0,
+          "count_last": 625.0,
+          "count_delta": 500.0,
+          "sum_per_canonical_block": 0.00030244839278557075,
+          "calls_per_canonical_block": 1.002004008016032,
+          "mean_per_call": 0.0003018434959999996
+        },
+        "total_duration_histogram": {
+          "status": "observed",
+          "sum_first": 4.505378896999999,
+          "sum_last": 16.02146528299999,
+          "sum_delta": 11.51608638599999,
+          "count_first": 125.0,
+          "count_last": 625.0,
+          "count_delta": 500.0,
+          "sum_per_canonical_block": 0.023078329430861706,
+          "calls_per_canonical_block": 1.002004008016032,
+          "mean_per_call": 0.02303217277199998
+        }
+      },
+      "all_four_cache_observation_counts_equal": true
+    }
+  ],
+  "comparisons": {
+    "account_cache_hits": {
+      "sum_per_canonical_block": {
+        "baseline_run_values": [
+          1818.504016064257,
+          1819.5240963855422,
+          1819.8336673346694,
+          1819.3232931726907,
+          1820.1064257028113,
+          1825.4529058116232
+        ],
+        "feature_run_values": [
+          1845.0901803607214,
+          1840.9979919678715,
+          1837.1683366733466,
+          1836.9538152610442,
+          1842.367469879518,
+          1847.0861723446894
+        ],
+        "baseline_mean": 1820.4574007452657,
+        "feature_mean": 1841.6106610811985,
+        "change_percent": 1.1619750249180827
+      },
+      "calls_per_canonical_block": {
+        "baseline_run_values": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.002004008016032
+        ],
+        "feature_run_values": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.002004008016032
+        ],
+        "baseline_mean": 1.0003340013360054,
+        "feature_mean": 1.0003340013360054,
+        "change_percent": 0.0
+      },
+      "mean_per_call": {
+        "baseline_run_values": [
+          1818.504016064257,
+          1819.5240963855422,
+          1819.8336673346694,
+          1819.3232931726907,
+          1820.1064257028113,
+          1821.802
+        ],
+        "feature_run_values": [
+          1845.0901803607214,
+          1840.9979919678715,
+          1837.1683366733466,
+          1836.9538152610442,
+          1842.367469879518,
+          1843.392
+        ],
+        "baseline_mean": 1819.8489164433283,
+        "feature_mean": 1840.9949656904168,
+        "change_percent": 1.161967296077293
+      }
+    },
+    "account_cache_misses": {
+      "sum_per_canonical_block": {
+        "baseline_run_values": [
+          811.9578313253012,
+          822.1947791164658,
+          867.3026052104209,
+          855.2449799196787,
+          839.433734939759,
+          840.8276553106213
+        ],
+        "feature_run_values": [
+          922.0180360721442,
+          924.3072289156627,
+          905.5090180360721,
+          883.1827309236947,
+          924.5722891566265,
+          925.7895791583167
+        ],
+        "baseline_mean": 839.4935976370411,
+        "feature_mean": 914.2298137104195,
+        "change_percent": 8.902535562360647
+      },
+      "calls_per_canonical_block": {
+        "baseline_run_values": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "feature_run_values": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.002004008016032
+        ],
+        "baseline_mean": 1.0,
+        "feature_mean": 1.0003340013360054,
+        "change_percent": 0.033400133600536286
+      },
+      "mean_per_call": {
+        "baseline_run_values": [
+          811.9578313253012,
+          822.1947791164658,
+          867.3026052104209,
+          855.2449799196787,
+          839.433734939759,
+          840.8276553106213
+        ],
+        "feature_run_values": [
+          922.0180360721442,
+          924.3072289156627,
+          905.5090180360721,
+          883.1827309236947,
+          924.5722891566265,
+          923.938
+        ],
+        "baseline_mean": 839.4935976370411,
+        "feature_mean": 913.9212171840334,
+        "change_percent": 8.865775719610824
+      }
+    },
+    "storage_cache_hits": {
+      "sum_per_canonical_block": {
+        "baseline_run_values": [
+          1477.9076305220883,
+          1480.9156626506024,
+          1481.1563126252504,
+          1482.3915662650602,
+          1479.4196787148594,
+          1485.4028056112224
+        ],
+        "feature_run_values": [
+          1491.9078156312626,
+          1490.062248995984,
+          1487.318637274549,
+          1485.1265060240964,
+          1490.44578313253,
+          1500.4869739478959
+        ],
+        "baseline_mean": 1481.1989427315139,
+        "feature_mean": 1490.891327501053,
+        "change_percent": 0.6543607674783569
+      },
+      "calls_per_canonical_block": {
+        "baseline_run_values": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "feature_run_values": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.002004008016032
+        ],
+        "baseline_mean": 1.0,
+        "feature_mean": 1.0003340013360054,
+        "change_percent": 0.033400133600536286
+      },
+      "mean_per_call": {
+        "baseline_run_values": [
+          1477.9076305220883,
+          1480.9156626506024,
+          1481.1563126252504,
+          1482.3915662650602,
+          1479.4196787148594,
+          1485.4028056112224
+        ],
+        "feature_run_values": [
+          1491.9078156312626,
+          1490.062248995984,
+          1487.318637274549,
+          1485.1265060240964,
+          1490.44578313253,
+          1497.486
+        ],
+        "baseline_mean": 1481.1989427315139,
+        "feature_mean": 1490.3911651764038,
+        "change_percent": 0.6205933706608269
+      }
+    },
+    "storage_cache_misses": {
+      "sum_per_canonical_block": {
+        "baseline_run_values": [
+          1093.706827309237,
+          1111.1425702811246,
+          1144.9899799599198,
+          1132.995983935743,
+          1123.0240963855422,
+          1122.7715430861724
+        ],
+        "feature_run_values": [
+          1215.941883767535,
+          1214.2730923694778,
+          1190.248496993988,
+          1190.8112449799196,
+          1215.2510040160641,
+          1207.679358717435
+        ],
+        "baseline_mean": 1121.4385001596231,
+        "feature_mean": 1205.7008468074032,
+        "change_percent": 7.513773304179083
+      },
+      "calls_per_canonical_block": {
+        "baseline_run_values": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.002004008016032
+        ],
+        "feature_run_values": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.002004008016032
+        ],
+        "baseline_mean": 1.0003340013360054,
+        "feature_mean": 1.0003340013360054,
+        "change_percent": 0.0
+      },
+      "mean_per_call": {
+        "baseline_run_values": [
+          1093.706827309237,
+          1111.1425702811246,
+          1144.9899799599198,
+          1132.995983935743,
+          1123.0240963855422,
+          1120.526
+        ],
+        "feature_run_values": [
+          1215.941883767535,
+          1214.2730923694778,
+          1190.248496993988,
+          1190.8112449799196,
+          1215.2510040160641,
+          1205.264
+        ],
+        "baseline_mean": 1121.0642429785944,
+        "feature_mean": 1205.298287021164,
+        "change_percent": 7.513757090206119
+      }
+    },
+    "process_updates_duration_histogram": {
+      "sum_per_canonical_block": {
+        "baseline_run_values": [
+          0.0086130634417668,
+          0.008634349036144294,
+          0.008649449803606952,
+          0.00868978196184703,
+          0.008629763849397315,
+          0.008731793523045948
+        ],
+        "feature_run_values": [
+          0.008223175182364484,
+          0.008139764546184657,
+          0.008254114977955614,
+          0.008267313931726705,
+          0.008336771897590155,
+          0.008357178877755243
+        ],
+        "baseline_mean": 0.008658033602634722,
+        "feature_mean": 0.008263053235596143,
+        "change_percent": -4.562010095668645
+      },
+      "calls_per_canonical_block": {
+        "baseline_run_values": [
+          83.5140562248996,
+          83.47791164658635,
+          84.01402805611222,
+          84.28313253012048,
+          85.06425702811245,
+          83.90180360721443
+        ],
+        "feature_run_values": [
+          90.50901803607215,
+          90.30923694779116,
+          88.99398797595191,
+          89.3293172690763,
+          90.43775100401606,
+          90.32665330661322
+        ],
+        "baseline_mean": 84.04253151550759,
+        "feature_mean": 89.98432742325346,
+        "change_percent": 7.0699868276213
+      },
+      "mean_per_call": {
+        "baseline_run_values": [
+          0.00010313309915844833,
+          0.00010343273886269264,
+          0.00010295244739164347,
+          0.0001031022661472809,
+          0.00010144994091402348,
+          0.00010407158306064271
+        ],
+        "feature_run_values": [
+          9.085476078292174e-05,
+          9.013213732378617e-05,
+          9.27491302017621e-05,
+          9.254871955221639e-05,
+          9.218243272347567e-05,
+          9.252173718190195e-05
+        ],
+        "baseline_mean": 0.00010302367925578859,
+        "feature_mean": 9.1831486294344e-05,
+        "change_percent": -10.863709238782338
+      }
+    },
+    "reveal_multiproof_duration_histogram": {
+      "sum_per_canonical_block": {
+        "baseline_run_values": [
+          0.004501710238955796,
+          0.004543176481927743,
+          0.004530106703406785,
+          0.004460836853413648,
+          0.004469679096385577,
+          0.004605293266533004
+        ],
+        "feature_run_values": [
+          0.0044695178557114645,
+          0.0045952804698795565,
+          0.004522474827655278,
+          0.004555709319277096,
+          0.004529423538152615,
+          0.004452224102204473
+        ],
+        "baseline_mean": 0.004518467106770426,
+        "feature_mean": 0.0045207716854800805,
+        "change_percent": 0.051003551762085486
+      },
+      "calls_per_canonical_block": {
+        "baseline_run_values": [
+          35.56827309236948,
+          35.773092369477915,
+          36.547094188376754,
+          35.825301204819276,
+          36.558232931726906,
+          35.921843687374746
+        ],
+        "feature_run_values": [
+          38.08216432865731,
+          37.929718875502004,
+          37.392785571142284,
+          37.45381526104418,
+          38.058232931726906,
+          38.17835671342685
+        ],
+        "baseline_mean": 36.03230624569085,
+        "feature_mean": 37.84917894691659,
+        "change_percent": 5.0423436369494645
+      },
+      "mean_per_call": {
+        "baseline_run_values": [
+          0.00012656533049172847,
+          0.00012699982531574606,
+          0.0001239525823874533,
+          0.0001245163809764025,
+          0.00012226190212018113,
+          0.00012820314309623258
+        ],
+        "feature_run_values": [
+          0.00011736512182287115,
+          0.00012115250537349882,
+          0.00012094511704807244,
+          0.00012163538714346954,
+          0.00011901297536010142,
+          0.00011661644149913557
+        ],
+        "baseline_mean": 0.00012541652739795733,
+        "feature_mean": 0.00011945459137452483,
+        "change_percent": -4.753708420354174
+      }
+    },
+    "final_update_duration_histogram": {
+      "sum_per_canonical_block": {
+        "baseline_run_values": [
+          0.0003415528534136547,
+          0.00032645959036144536,
+          0.0003403133567134271,
+          0.0003297735401606423,
+          0.0003281497449799192,
+          0.0003316357755511023
+        ],
+        "feature_run_values": [
+          0.0003036371743486978,
+          0.0003061721084337352,
+          0.00032372572144288587,
+          0.00032825096385542195,
+          0.0003023564698795184,
+          0.00030244839278557075
+        ],
+        "baseline_mean": 0.0003329808101966985,
+        "feature_mean": 0.0003110984717909717,
+        "change_percent": -6.571651499316278
+      },
+      "calls_per_canonical_block": {
+        "baseline_run_values": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "feature_run_values": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.002004008016032
+        ],
+        "baseline_mean": 1.0,
+        "feature_mean": 1.0003340013360054,
+        "change_percent": 0.033400133600536286
+      },
+      "mean_per_call": {
+        "baseline_run_values": [
+          0.0003415528534136547,
+          0.00032645959036144536,
+          0.0003403133567134271,
+          0.0003297735401606423,
+          0.0003281497449799192,
+          0.0003316357755511023
+        ],
+        "feature_run_values": [
+          0.0003036371743486978,
+          0.0003061721084337352,
+          0.00032372572144288587,
+          0.00032825096385542195,
+          0.0003023564698795184,
+          0.0003018434959999996
+        ],
+        "baseline_mean": 0.0003329808101966985,
+        "feature_mean": 0.0003109976556600431,
+        "change_percent": -6.601928358474918
+      }
+    },
+    "total_duration_histogram": {
+      "sum_per_canonical_block": {
+        "baseline_run_values": [
+          0.022869255769076273,
+          0.022931826427710852,
+          0.02300599033867731,
+          0.022831288122489968,
+          0.02293719382730926,
+          0.022983744450901778
+        ],
+        "feature_run_values": [
+          0.02296581832665329,
+          0.022998590008032137,
+          0.02294742713026049,
+          0.02298116651606422,
+          0.022982900841365464,
+          0.023078329430861706
+        ],
+        "baseline_mean": 0.02292654982269424,
+        "feature_mean": 0.022992372042206218,
+        "change_percent": 0.2871004142403599
+      },
+      "calls_per_canonical_block": {
+        "baseline_run_values": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "feature_run_values": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.002004008016032
+        ],
+        "baseline_mean": 1.0,
+        "feature_mean": 1.0003340013360054,
+        "change_percent": 0.033400133600536286
+      },
+      "mean_per_call": {
+        "baseline_run_values": [
+          0.022869255769076273,
+          0.022931826427710852,
+          0.02300599033867731,
+          0.022831288122489968,
+          0.02293719382730926,
+          0.022983744450901778
+        ],
+        "feature_run_values": [
+          0.02296581832665329,
+          0.022998590008032137,
+          0.02294742713026049,
+          0.02298116651606422,
+          0.022982900841365464,
+          0.02303217277199998
+        ],
+        "baseline_mean": 0.02292654982269424,
+        "feature_mean": 0.022984679265729262,
+        "change_percent": 0.2535464057373371
+      }
+    }
+  },
+  "task_observation_count_skews": [
+    {
+      "run": "baseline-6",
+      "counts": {
+        "account_cache_hits": {
+          "count_first": 125.0,
+          "count_last": 625.0,
+          "count_delta": 500.0
+        },
+        "account_cache_misses": {
+          "count_first": 125.0,
+          "count_last": 624.0,
+          "count_delta": 499.0
+        },
+        "storage_cache_hits": {
+          "count_first": 125.0,
+          "count_last": 624.0,
+          "count_delta": 499.0
+        },
+        "storage_cache_misses": {
+          "count_first": 125.0,
+          "count_last": 625.0,
+          "count_delta": 500.0
+        },
+        "final_update_duration_histogram": {
+          "count_first": 125.0,
+          "count_last": 624.0,
+          "count_delta": 499.0
+        },
+        "total_duration_histogram": {
+          "count_first": 125.0,
+          "count_last": 624.0,
+          "count_delta": 499.0
+        }
+      }
+    }
+  ],
+  "count_skew_scope": "No adjustments are made. Separate histogram observations and scrape endpoints are not atomic; one-observation discrepancies are retained as boundary uncertainty, not treated as identical sampled tasks.",
+  "helper_sha256": "83fdd7330353fecb006c3f7aa9b3107d14b568cd533bb12b5fe8b4946f9c8cff"
+}

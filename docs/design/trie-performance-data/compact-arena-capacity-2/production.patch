@@ -1,0 +1,44 @@
+diff --git a/crates/trie/sparse/src/arena/branch_child_idx.rs b/crates/trie/sparse/src/arena/branch_child_idx.rs
+index c09b7129d9..a37fe049a4 100644
+--- a/crates/trie/sparse/src/arena/branch_child_idx.rs
++++ b/crates/trie/sparse/src/arena/branch_child_idx.rs
+@@ -1,6 +1,6 @@
+ use alloy_trie::{TrieMask, TrieMaskIter};
+ use core::ops::{Index, IndexMut};
+-use smallvec::SmallVec;
++use smallvec::{Array, SmallVec};
+ 
+ /// A dense index into a branch node's children array.
+ ///
+@@ -46,15 +46,15 @@ impl BranchChildIdx {
+     }
+ }
+ 
+-impl<T> Index<BranchChildIdx> for SmallVec<[T; 4]> {
+-    type Output = T;
++impl<A: Array> Index<BranchChildIdx> for SmallVec<A> {
++    type Output = A::Item;
+ 
+     fn index(&self, idx: BranchChildIdx) -> &Self::Output {
+         &self.as_slice()[idx.get()]
+     }
+ }
+ 
+-impl<T> IndexMut<BranchChildIdx> for SmallVec<[T; 4]> {
++impl<A: Array> IndexMut<BranchChildIdx> for SmallVec<A> {
+     fn index_mut(&mut self, idx: BranchChildIdx) -> &mut Self::Output {
+         &mut self.as_mut_slice()[idx.get()]
+     }
+diff --git a/crates/trie/sparse/src/arena/nodes.rs b/crates/trie/sparse/src/arena/nodes.rs
+index 6d2f206952..7e2bd3dcfc 100644
+--- a/crates/trie/sparse/src/arena/nodes.rs
++++ b/crates/trie/sparse/src/arena/nodes.rs
+@@ -72,7 +72,7 @@ pub(super) struct ArenaSparseNodeBranch {
+     pub(super) state: ArenaSparseNodeState,
+     /// Revealed or blinded children, packed densely. The `state_mask` tracks which
+     /// nibble positions have entries in this `SmallVec`.
+-    pub(super) children: SmallVec<[ArenaSparseNodeBranchChild; 4]>,
++    pub(super) children: SmallVec<[ArenaSparseNodeBranchChild; 2]>,
+     /// Bitmask indicating which of the 16 child slots are occupied (have an entry
+     /// in `children`).
+     pub(super) state_mask: TrieMask,

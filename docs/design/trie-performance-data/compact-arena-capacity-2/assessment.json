@@ -1,0 +1,60 @@
+{
+  "candidate_commit": "8f5a8fb98cd01b4614b730a34944f3253e79d80e",
+  "verdict": "hold",
+  "adopt": false,
+  "reason": "Consistent full 1000-leaf fresh-proof reveal regressions of11.98%/12.49% outweigh otherwise useful large-root gains; representative node benefit remains unverified.",
+  "root_comparisons": 56,
+  "reveal_comparisons": 12,
+  "root_cases_with_lower_candidate_median": 46,
+  "preserved_one_worker_full_1000_discard_candidate_processes": [
+    {
+      "threads": "1",
+      "round": "1",
+      "position": "2",
+      "mode": "candidate",
+      "case": "update_root/1000/1000/discard",
+      "samples": "100",
+      "median_ns": "351008",
+      "p25_ns": "349355",
+      "p75_ns": "352932",
+      "root": "0x3529a08afc217f6980d8fdd5321858a165c307eed79002b8be42ac2fa4f22f49"
+    },
+    {
+      "threads": "1",
+      "round": "1",
+      "position": "3",
+      "mode": "candidate",
+      "case": "update_root/1000/1000/discard",
+      "samples": "100",
+      "median_ns": "597891",
+      "p25_ns": "346681",
+      "p75_ns": "600286",
+      "root": "0x3529a08afc217f6980d8fdd5321858a165c307eed79002b8be42ac2fa4f22f49"
+    },
+    {
+      "threads": "1",
+      "round": "2",
+      "position": "2",
+      "mode": "candidate",
+      "case": "update_root/1000/1000/discard",
+      "samples": "100",
+      "median_ns": "347722",
+      "p25_ns": "346119",
+      "p75_ns": "348623",
+      "root": "0x3529a08afc217f6980d8fdd5321858a165c307eed79002b8be42ac2fa4f22f49"
+    },
+    {
+      "threads": "1",
+      "round": "2",
+      "position": "3",
+      "mode": "candidate",
+      "case": "update_root/1000/1000/discard",
+      "samples": "100",
+      "median_ns": "362960",
+      "p25_ns": "359124",
+      "p75_ns": "370675",
+      "root": "0x3529a08afc217f6980d8fdd5321858a165c307eed79002b8be42ac2fa4f22f49"
+    }
+  ],
+  "separate_followup": "Capacity3 is a separately declared candidate; these capacity2 observations remain unchanged."
+}

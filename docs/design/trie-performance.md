@@ -22,8 +22,8 @@ encoding is described in the [Merkle Patricia Trie specification overview](https
   finding the last storage proof target.
 
 Candidate `a0d8b420cd`, retained at merge `2042e313a2`, adds two changes to these trie improvements.
-It sorts sparse-trie leaf updates by their fixed `B256` keys instead of comparing unpacked
-64-nibble paths. These orders are equivalent for the unique, fixed-length input keys, so
+It sorts sparse-trie leaf updates by their fixed `B256` keys instead of comparing
+`Nibbles` paths. These orders are equivalent for the unique, fixed-length input keys, so
 update grouping and proof callback order remain unchanged. Each MDBX cursor write also
 borrows its cached operation metrics instead of cloning and dropping their `Arc`; metrics
 counts and duration boundaries remain enabled and unchanged. This applies to all MDBX
@@ -134,6 +134,45 @@ execute the changed leaf sort or directly measure hashing CPU. Exported cache an
 counters also cannot reconstruct individual sort batch sizes. The
 [sixth-run assessment](trie-performance-data/derek/iteration-6/assessment.md) preserves the
 official verdict, phase details, completed-work checks, and attribution limits.
+
+A seventh candidate restricted storage-root calculation to accounts awaiting an account
+update. It was not adopted: [run 33874668983](https://github.com/paradigmxyz/reth/actions/runs/33874668983)
+remained neutral, with mean payload latency +0.184% ±0.182%, reported wall clock
++0.124% ±0.341%, and persistence wait −2.69% ±1.18%. Processing updates decreased
+4.56% ±0.76%, while channel wait increased 7.06% ±1.08%; total root-task elapsed time
+was neutral. Both variants completed 3,024 persisted blocks in 378 batches, and all
+twelve append-log/counter checks agree. The [seventh-run assessment](trie-performance-data/derek/iteration-7/assessment.md)
+preserves the separate task-count scrape ambiguity and all phase results. Startup logs
+also confirm that the canonical replay uses packed storage-trie keys.
+
+## Arena memory experiments
+
+Two separate candidates reduced the inline branch-child capacity from four to two or
+three. Neither is included in the retained implementation. The smaller types reduce
+padding in leaf slots but make branches spill their children to separate allocations
+sooner. DWARF inspection distinguishes the Rust node type from the actual SlotMap entry:
+
+| Inline children | Node bytes | SlotMap entry bytes |
+| ---: | ---: | ---: |
+| 4 (retained) | 248 | 256 |
+| 2 | 176 | 184 |
+| 3 | 216 | 224 |
+
+These sizes exclude spilled children and do not establish a total heap or RSS saving.
+Both experiments use native rustc 1.98.1, assembly Keccak, global hash caching, two ABBA
+rounds and 100 samples per case. Each process allows CPUs 1–15, including the one-worker
+runs. Root and fresh-proof benchmarks retain every comparison and process quartile.
+
+Capacity two improved retained update + root + take work at 32,768 leaves by 4.70% with
+one worker and 4.42% with fifteen. Fresh revelation of all 1,000 leaves was 11.98% and
+12.49% slower, with disjoint process quartiles. Capacity three reduced the large combined
+case by 2.68% and 1.92%, while fresh full revelation at 1,000 leaves was 1.60% and 2.94%
+slower. These mixed results have no Derek qualification and remain held. The
+[capacity-two assessment](trie-performance-data/compact-arena-capacity-2/assessment.md)
+and [capacity-three assessment](trie-performance-data/compact-arena-capacity-3/assessment.md)
+include all controls, correctness checks, source patches, binary provenance, and fixture
+limitations. The two experiments were each compared with capacity four, not directly
+randomized against each other.
 
 ## Choosing the database write mode
 

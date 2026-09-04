@@ -1,0 +1,24 @@
+{
+  "candidate_commit": "8f5a8fb98cd01b4614b730a34944f3253e79d80e",
+  "sparse_tests_passed": 180,
+  "sparse_tests_skipped": 0,
+  "differential": {
+    "seed": 1,
+    "sequences": 10000,
+    "operations": 4448976,
+    "root_checks": 641072,
+    "persistence_checks": 255536,
+    "proof_rounds": 100022,
+    "reopens": 90000,
+    "prunes": 40000,
+    "occupancy_masks": 65536
+  },
+  "evidence_sha256": {
+    "tests.log": "78cfcb92adf232c697ed1c5860d611f7bfacfd49b200edc1f039f051c1c08c7a",
+    "differential.log": "cd7813d903f1fbaa8546cafe5e781477fe0a78d0616d8ef3e75379fb4d808b94",
+    "production.patch": "326ef2a04290e7923076e177af81f1b30872732a9bf7d4058c91c97ee13022c6",
+    "cursor_reveal.rs": "5f1c56aed06fbec6e5ac5817758e8bf428a3113faf07933a9c004fad8c3714ea",
+    "reveal-control-plan.md": "28f2afec6725b432126d2af6cdadd2f69acb1211155932e2a578e0e453360ea8"
+  },
+  "scope": "Targeted validation passed; synthetic reconstruction/reopen operations are not real MDBX reopen or full-node acceptance benchmarks."
+}

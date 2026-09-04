@@ -1,0 +1,80 @@
+{
+  "compiler": "rustc 1.98.1 (48a229cea 2026-09-01)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1\nLLVM version: 22.1.8\n",
+  "env": {
+    "CARGO_TARGET_DIR": "/tmp/reth-hash-mask-native-target",
+    "CARGO_BUILD_JOBS": "8",
+    "RUSTFLAGS": "-C target-cpu=native"
+  },
+  "variants": [
+    {
+      "label": "capacity-4",
+      "source": "/tmp/reth-packed-sort-33c4916",
+      "head": "f4fb30dfaf9ff55f27f87b0376b2d7b910221cf3",
+      "binary": "/home/ubuntu/reth/bench-work/trie-derek-20260904/compact-arena-experiment/reveal-capacity-4",
+      "sha256": "1a60b3701ab40780c286ea335e3b7063f1ad3119ed068338208233f962dbec30",
+      "commands": [
+        [
+          "cargo",
+          "+1.98.1",
+          "clean",
+          "--profile",
+          "profiling",
+          "-p",
+          "reth-trie-sparse",
+          "-p",
+          "reth-trie"
+        ],
+        [
+          "cargo",
+          "+1.98.1",
+          "build",
+          "--locked",
+          "--profile",
+          "profiling",
+          "-p",
+          "reth-trie-sparse",
+          "--features",
+          "alloy-primitives/asm-keccak,alloy-primitives/keccak-cache-global",
+          "--example",
+          "cursor_reveal"
+        ]
+      ],
+      "harness_sha256": "5f1c56aed06fbec6e5ac5817758e8bf428a3113faf07933a9c004fad8c3714ea"
+    },
+    {
+      "label": "capacity-2",
+      "source": "/tmp/reth-compact-arena-2042",
+      "head": "2042e313a2b7cb0e7606dceeca75005612702d8f",
+      "binary": "/home/ubuntu/reth/bench-work/trie-derek-20260904/compact-arena-experiment/reveal-capacity-2",
+      "sha256": "be1e47650dceb6db8de0ac121e1746cf23111fa29ead225b17e72bd6b0024b65",
+      "commands": [
+        [
+          "cargo",
+          "+1.98.1",
+          "clean",
+          "--profile",
+          "profiling",
+          "-p",
+          "reth-trie-sparse",
+          "-p",
+          "reth-trie"
+        ],
+        [
+          "cargo",
+          "+1.98.1",
+          "build",
+          "--locked",
+          "--profile",
+          "profiling",
+          "-p",
+          "reth-trie-sparse",
+          "--features",
+          "alloy-primitives/asm-keccak,alloy-primitives/keccak-cache-global",
+          "--example",
+          "cursor_reveal"
+        ]
+      ],
+      "harness_sha256": "5f1c56aed06fbec6e5ac5817758e8bf428a3113faf07933a9c004fad8c3714ea"
+    }
+  ]
+}

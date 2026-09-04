@@ -1,0 +1,15 @@
+{
+  "assessment.json": "9f53a70e0fd5f1a9c25197ad5cf22de07c7c9d821e1d5abd334b25d3f3bf845c",
+  "assessment.md": "a86c30aa42486e9fa2cb205ab32dbe76a126f1e667e3fa61301581aa5e63f0bb",
+  "binaries.json": "6d251806c6b542a72cf87227fca05d0f2137b8ac2b6635fb5f178c7fad76ea2a",
+  "layout-sizes.json": "31929b271082093b5c9aca4dccae8b15c2f759fce78c66fdcb3fb9e8747b5ef8",
+  "metadata.json": "1898ec66b541a5b352709323b934a24c7ba98df7689770a2f92aff39cc8902e7",
+  "production.patch": "6c09a4a0cc49995bf679e19534c88af810699e26e6c06c6eaa522bc882beca43",
+  "reveal-metadata.json": "4011270a24cb2ed2edee9737c211082d9161e6db35334d03443d0c0f56eed544",
+  "reveal-runs.csv": "029c4df4cf61607d55950c2b060b4daa028092edac915e7a6900545236809ca5",
+  "reveal-summary.csv": "45a31bb8ce66b50ccf0883dce83426af073c95925975ff0bc171f793691e37ad",
+  "root-metadata.json": "e1e391cc6d4bdec20b79faf16c3e5db1390df7f1432a7cf6917fff397d2022bd",
+  "root-runs.csv": "0f6c45b2d71032bc386d8d6b57de9832a38e9fe962d50341e19b3411f5ae0ca9",
+  "root-summary.csv": "fb6feb308d7d5cb438b4b5a429714aca803f01c7c5ec382e3e056a940941cf26",
+  "validation-summary.json": "bfc607c5bdeecb600bd03ebc02b3c727f5a1abbab548ddc12f7d76d49c392702"
+}

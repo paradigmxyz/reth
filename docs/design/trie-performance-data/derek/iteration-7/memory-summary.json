@@ -1,0 +1,1235 @@
+{
+  "helper_sha256": "f07bf87cb516b711cf83e9ad083b067b67bd92452e4b8e87b3fcbd4e442ced66",
+  "scope": "Descriptive per-run sampled gauges, no acceptance verdict. Do not add RSS and allocator resident values or equate either with host/cgroup memory.",
+  "quantile_method": "Linear interpolation of scrape values; elapsed-time sampling, not per-block percentiles.",
+  "peak_limitation": "Sampled peaks are lower bounds on true between-scrape peaks; no process high-water or total memory measurement is inferred.",
+  "metric_definitions": {
+    "reth_process_resident_memory_bytes": "Process RSS, including resident mapped file pages; not total host/cgroup memory.",
+    "reth_process_virtual_memory_bytes": "Virtual address space; includes large database reservations, not physical memory.",
+    "reth_process_virtual_memory_max_bytes": "RLIMIT_AS soft address-space limit; zero means unlimited. NOT observed peak memory.",
+    "reth_jemalloc_allocated": "Bytes allocated through jemalloc; not total process or database memory.",
+    "reth_jemalloc_active": "Bytes in active allocator pages; includes allocator slack.",
+    "reth_jemalloc_resident": "Allocator resident-page accounting; overlaps RSS and must not be added to it.",
+    "reth_jemalloc_mapped": "Allocator mapped extents; not necessarily physically resident.",
+    "reth_jemalloc_metadata": "Allocator metadata bytes.",
+    "reth_jemalloc_retained": "Retained virtual allocator mappings; not necessarily physically resident."
+  },
+  "descriptive_comparisons": {
+    "reth_process_resident_memory_bytes": {
+      "sampled_peak_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 10983301120.0,
+            "baseline-2": 10968125440.0,
+            "baseline-3": 10999607296.0,
+            "baseline-4": 10980098048.0,
+            "baseline-5": 11013390336.0,
+            "baseline-6": 10984898560.0
+          },
+          "feature": {
+            "feature-1": 10966720512.0,
+            "feature-2": 10977386496.0,
+            "feature-3": 11016798208.0,
+            "feature-4": 10952527872.0,
+            "feature-5": 10988003328.0,
+            "feature-6": 11002806272.0
+          }
+        },
+        "baseline_run_mean_bytes": 10988236800.0,
+        "feature_run_mean_bytes": 10984040448.0,
+        "difference_bytes": -4196352.0,
+        "difference_mib": -4.001953125,
+        "change_percent": -0.038189493695661714
+      },
+      "scrape_p50_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 8948817920.0,
+            "baseline-2": 8975060992.0,
+            "baseline-3": 8965181440.0,
+            "baseline-4": 8958234624.0,
+            "baseline-5": 8953720832.0,
+            "baseline-6": 8950673408.0
+          },
+          "feature": {
+            "feature-1": 8961236992.0,
+            "feature-2": 8953909248.0,
+            "feature-3": 8981889024.0,
+            "feature-4": 8955336704.0,
+            "feature-5": 8961204224.0,
+            "feature-6": 8963760128.0
+          }
+        },
+        "baseline_run_mean_bytes": 8958614869.333334,
+        "feature_run_mean_bytes": 8962889386.666666,
+        "difference_bytes": 4274517.333332062,
+        "difference_mib": 4.076497395832121,
+        "change_percent": 0.04771404280325964
+      },
+      "scrape_p95_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 10745375948.8,
+            "baseline-2": 10741092352.0,
+            "baseline-3": 10758672998.4,
+            "baseline-4": 10732507136.0,
+            "baseline-5": 10752848691.199999,
+            "baseline-6": 10758733004.8
+          },
+          "feature": {
+            "feature-1": 10761672294.4,
+            "feature-2": 10742171648.0,
+            "feature-3": 10756850073.599998,
+            "feature-4": 10735935897.6,
+            "feature-5": 10743783219.199999,
+            "feature-6": 10759430144.0
+          }
+        },
+        "baseline_run_mean_bytes": 10748205021.866667,
+        "feature_run_mean_bytes": 10749973879.466667,
+        "difference_bytes": 1768857.6000003815,
+        "difference_mib": 1.6869140625003638,
+        "change_percent": 0.016457237244749123
+      },
+      "first_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 5831823360.0,
+            "baseline-2": 5829324800.0,
+            "baseline-3": 5833531392.0,
+            "baseline-4": 5835886592.0,
+            "baseline-5": 5840048128.0,
+            "baseline-6": 5819764736.0
+          },
+          "feature": {
+            "feature-1": 5857771520.0,
+            "feature-2": 5816180736.0,
+            "feature-3": 5817438208.0,
+            "feature-4": 5844619264.0,
+            "feature-5": 5844353024.0,
+            "feature-6": 5840293888.0
+          }
+        },
+        "baseline_run_mean_bytes": 5831729834.666667,
+        "feature_run_mean_bytes": 5836776106.666667,
+        "difference_bytes": 5046272.0,
+        "difference_mib": 4.8125,
+        "change_percent": 0.08653130620013272
+      },
+      "last_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 10982289408.0,
+            "baseline-2": 10968125440.0,
+            "baseline-3": 10999607296.0,
+            "baseline-4": 10980098048.0,
+            "baseline-5": 11013390336.0,
+            "baseline-6": 10984898560.0
+          },
+          "feature": {
+            "feature-1": 10966720512.0,
+            "feature-2": 10977386496.0,
+            "feature-3": 11016798208.0,
+            "feature-4": 10952527872.0,
+            "feature-5": 10988003328.0,
+            "feature-6": 11002806272.0
+          }
+        },
+        "baseline_run_mean_bytes": 10988068181.333334,
+        "feature_run_mean_bytes": 10984040448.0,
+        "difference_bytes": -4027733.333333969,
+        "difference_mib": -3.8411458333339397,
+        "change_percent": -0.03665551821180335
+      },
+      "change_from_first_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 5150466048.0,
+            "baseline-2": 5138800640.0,
+            "baseline-3": 5166075904.0,
+            "baseline-4": 5144211456.0,
+            "baseline-5": 5173342208.0,
+            "baseline-6": 5165133824.0
+          },
+          "feature": {
+            "feature-1": 5108948992.0,
+            "feature-2": 5161205760.0,
+            "feature-3": 5199360000.0,
+            "feature-4": 5107908608.0,
+            "feature-5": 5143650304.0,
+            "feature-6": 5162512384.0
+          }
+        },
+        "baseline_run_mean_bytes": 5156338346.666667,
+        "feature_run_mean_bytes": 5147264341.333333,
+        "difference_bytes": -9074005.33333397,
+        "difference_mib": -8.65364583333394,
+        "change_percent": -0.1759776943109248
+      }
+    },
+    "reth_process_virtual_memory_bytes": {
+      "sampled_peak_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 8825509859328.0,
+            "baseline-2": 8825489412096.0,
+            "baseline-3": 8825498849280.0,
+            "baseline-4": 8825561763840.0,
+            "baseline-5": 8825495179264.0,
+            "baseline-6": 8826242244608.0
+          },
+          "feature": {
+            "feature-1": 8825499901952.0,
+            "feature-2": 8825464250368.0,
+            "feature-3": 8825470541824.0,
+            "feature-4": 8825517203456.0,
+            "feature-5": 8825527164928.0,
+            "feature-6": 8825455861760.0
+          }
+        },
+        "baseline_run_mean_bytes": 8825632884736.0,
+        "feature_run_mean_bytes": 8825489154048.0,
+        "difference_bytes": -143730688.0,
+        "difference_mib": -137.072265625,
+        "change_percent": -0.0016285595591525315
+      },
+      "scrape_p50_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 8824893177856.0,
+            "baseline-2": 8824895029248.0,
+            "baseline-3": 8824864620544.0,
+            "baseline-4": 8824868012032.0,
+            "baseline-5": 8824879546368.0,
+            "baseline-6": 8824807751680.0
+          },
+          "feature": {
+            "feature-1": 8824874061824.0,
+            "feature-2": 8824853860352.0,
+            "feature-3": 8824868818944.0,
+            "feature-4": 8824817963008.0,
+            "feature-5": 8824875110400.0,
+            "feature-6": 8824819290112.0
+          }
+        },
+        "baseline_run_mean_bytes": 8824868022954.666,
+        "feature_run_mean_bytes": 8824851517440.0,
+        "difference_bytes": -16505514.666015625,
+        "difference_mib": -15.740885416045785,
+        "change_percent": -0.00018703412474341263
+      },
+      "scrape_p95_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 8825318985728.0,
+            "baseline-2": 8825361243340.8,
+            "baseline-3": 8825370785382.4,
+            "baseline-4": 8825339104460.8,
+            "baseline-5": 8825347297280.0,
+            "baseline-6": 8825381482496.0
+          },
+          "feature": {
+            "feature-1": 8825340642918.4,
+            "feature-2": 8825304647680.0,
+            "feature-3": 8825341534208.0,
+            "feature-4": 8825305625190.4,
+            "feature-5": 8825344155648.0,
+            "feature-6": 8825315529523.2
+          }
+        },
+        "baseline_run_mean_bytes": 8825353149781.334,
+        "feature_run_mean_bytes": 8825325355861.334,
+        "difference_bytes": -27793920.0,
+        "difference_mib": -26.50634765625,
+        "change_percent": -0.0003149326664675378
+      },
+      "first_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 8809667080192.0,
+            "baseline-2": 8809650302976.0,
+            "baseline-3": 8809696440320.0,
+            "baseline-4": 8809694343168.0,
+            "baseline-5": 8809675468800.0,
+            "baseline-6": 8809631952896.0
+          },
+          "feature": {
+            "feature-1": 8809706930176.0,
+            "feature-2": 8809672327168.0,
+            "feature-3": 8809671278592.0,
+            "feature-4": 8809673900032.0,
+            "feature-5": 8809689628672.0,
+            "feature-6": 8809678094336.0
+          }
+        },
+        "baseline_run_mean_bytes": 8809669264725.334,
+        "feature_run_mean_bytes": 8809682026496.0,
+        "difference_bytes": 12761770.666015625,
+        "difference_mib": 12.170572916045785,
+        "change_percent": 0.0001448609508791776
+      },
+      "last_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 8825509859328.0,
+            "baseline-2": 8825489412096.0,
+            "baseline-3": 8825498849280.0,
+            "baseline-4": 8825561763840.0,
+            "baseline-5": 8825495179264.0,
+            "baseline-6": 8825528733696.0
+          },
+          "feature": {
+            "feature-1": 8825499901952.0,
+            "feature-2": 8825464250368.0,
+            "feature-3": 8825470541824.0,
+            "feature-4": 8825517203456.0,
+            "feature-5": 8825527164928.0,
+            "feature-6": 8825455861760.0
+          }
+        },
+        "baseline_run_mean_bytes": 8825513966250.666,
+        "feature_run_mean_bytes": 8825489154048.0,
+        "difference_bytes": -24812202.666015625,
+        "difference_mib": -23.662760416045785,
+        "change_percent": -0.00028114173022952826
+      },
+      "change_from_first_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 15842779136.0,
+            "baseline-2": 15839109120.0,
+            "baseline-3": 15802408960.0,
+            "baseline-4": 15867420672.0,
+            "baseline-5": 15819710464.0,
+            "baseline-6": 15896780800.0
+          },
+          "feature": {
+            "feature-1": 15792971776.0,
+            "feature-2": 15791923200.0,
+            "feature-3": 15799263232.0,
+            "feature-4": 15843303424.0,
+            "feature-5": 15837536256.0,
+            "feature-6": 15777767424.0
+          }
+        },
+        "baseline_run_mean_bytes": 15844701525.333334,
+        "feature_run_mean_bytes": 15807127552.0,
+        "difference_bytes": -37573973.33333397,
+        "difference_mib": -35.83333333333394,
+        "change_percent": -0.23713904154810672
+      }
+    },
+    "reth_jemalloc_allocated": {
+      "sampled_peak_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 4169374720.0,
+            "baseline-2": 4170048760.0,
+            "baseline-3": 4170467128.0,
+            "baseline-4": 4171651368.0,
+            "baseline-5": 4172445504.0,
+            "baseline-6": 4174145160.0
+          },
+          "feature": {
+            "feature-1": 4169165152.0,
+            "feature-2": 4165915704.0,
+            "feature-3": 4161212024.0,
+            "feature-4": 4169530256.0,
+            "feature-5": 4176220920.0,
+            "feature-6": 4168778512.0
+          }
+        },
+        "baseline_run_mean_bytes": 4171355440.0,
+        "feature_run_mean_bytes": 4168470428.0,
+        "difference_bytes": -2885012.0,
+        "difference_mib": -2.751361846923828,
+        "change_percent": -0.06916245909747154
+      },
+      "scrape_p50_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 3918470336.0,
+            "baseline-2": 3913212476.0,
+            "baseline-3": 3913402628.0,
+            "baseline-4": 3913658952.0,
+            "baseline-5": 3925769648.0,
+            "baseline-6": 3922442064.0
+          },
+          "feature": {
+            "feature-1": 3933703496.0,
+            "feature-2": 3925452264.0,
+            "feature-3": 3925224472.0,
+            "feature-4": 3925535996.0,
+            "feature-5": 3938043128.0,
+            "feature-6": 3928889616.0
+          }
+        },
+        "baseline_run_mean_bytes": 3917826017.3333335,
+        "feature_run_mean_bytes": 3929474828.6666665,
+        "difference_bytes": 11648811.333333015,
+        "difference_mib": 11.109172185261741,
+        "change_percent": 0.2973284490377148
+      },
+      "scrape_p95_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 4120026267.2,
+            "baseline-2": 4124664699.6,
+            "baseline-3": 4112387255.2,
+            "baseline-4": 4114741184.0,
+            "baseline-5": 4128504745.6,
+            "baseline-6": 4127198944.0
+          },
+          "feature": {
+            "feature-1": 4134060454.0,
+            "feature-2": 4126138240.0,
+            "feature-3": 4130875511.6,
+            "feature-4": 4117955008.8,
+            "feature-5": 4138488500.8,
+            "feature-6": 4118031192.0
+          }
+        },
+        "baseline_run_mean_bytes": 4121253849.2666664,
+        "feature_run_mean_bytes": 4127591484.5333333,
+        "difference_bytes": 6337635.266666889,
+        "difference_mib": 6.0440399805706875,
+        "change_percent": 0.15377929869073714
+      },
+      "first_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 3594822056.0,
+            "baseline-2": 3595332656.0,
+            "baseline-3": 3587952184.0,
+            "baseline-4": 3592578872.0,
+            "baseline-5": 3594111960.0,
+            "baseline-6": 3591510384.0
+          },
+          "feature": {
+            "feature-1": 3590848184.0,
+            "feature-2": 3590831536.0,
+            "feature-3": 3590951696.0,
+            "feature-4": 3593668168.0,
+            "feature-5": 3598185880.0,
+            "feature-6": 3589157728.0
+          }
+        },
+        "baseline_run_mean_bytes": 3592718018.6666665,
+        "feature_run_mean_bytes": 3592273865.3333335,
+        "difference_bytes": -444153.33333301544,
+        "difference_mib": -0.4235776265459208,
+        "change_percent": -0.012362599319659662
+      },
+      "last_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 4119987128.0,
+            "baseline-2": 4122131912.0,
+            "baseline-3": 4078016816.0,
+            "baseline-4": 4121408728.0,
+            "baseline-5": 4089171032.0,
+            "baseline-6": 4100981840.0
+          },
+          "feature": {
+            "feature-1": 4083272776.0,
+            "feature-2": 4117056312.0,
+            "feature-3": 4094583488.0,
+            "feature-4": 4116585144.0,
+            "feature-5": 4104161672.0,
+            "feature-6": 4093204808.0
+          }
+        },
+        "baseline_run_mean_bytes": 4105282909.3333335,
+        "feature_run_mean_bytes": 4101477366.6666665,
+        "difference_bytes": -3805542.6666669846,
+        "difference_mib": -3.629248301188454,
+        "change_percent": -0.09269867024304101
+      },
+      "change_from_first_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 525165072.0,
+            "baseline-2": 526799256.0,
+            "baseline-3": 490064632.0,
+            "baseline-4": 528829856.0,
+            "baseline-5": 495059072.0,
+            "baseline-6": 509471456.0
+          },
+          "feature": {
+            "feature-1": 492424592.0,
+            "feature-2": 526224776.0,
+            "feature-3": 503631792.0,
+            "feature-4": 522916976.0,
+            "feature-5": 505975792.0,
+            "feature-6": 504047080.0
+          }
+        },
+        "baseline_run_mean_bytes": 512564890.6666667,
+        "feature_run_mean_bytes": 509203501.3333333,
+        "difference_bytes": -3361389.333333373,
+        "difference_mib": -3.205670674641965,
+        "change_percent": -0.6557978110754648
+      }
+    },
+    "reth_jemalloc_active": {
+      "sampled_peak_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 4274069504.0,
+            "baseline-2": 4275290112.0,
+            "baseline-3": 4273479680.0,
+            "baseline-4": 4276264960.0,
+            "baseline-5": 4276473856.0,
+            "baseline-6": 4278304768.0
+          },
+          "feature": {
+            "feature-1": 4273909760.0,
+            "feature-2": 4268572672.0,
+            "feature-3": 4264628224.0,
+            "feature-4": 4274003968.0,
+            "feature-5": 4280569856.0,
+            "feature-6": 4273532928.0
+          }
+        },
+        "baseline_run_mean_bytes": 4275647146.6666665,
+        "feature_run_mean_bytes": 4272536234.6666665,
+        "difference_bytes": -3110912.0,
+        "difference_mib": -2.966796875,
+        "change_percent": -0.07275885715745112
+      },
+      "scrape_p50_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 4023971840.0,
+            "baseline-2": 4024686592.0,
+            "baseline-3": 4024776704.0,
+            "baseline-4": 4020994048.0,
+            "baseline-5": 4033622016.0,
+            "baseline-6": 4028452864.0
+          },
+          "feature": {
+            "feature-1": 4035794944.0,
+            "feature-2": 4035518464.0,
+            "feature-3": 4030541824.0,
+            "feature-4": 4031952896.0,
+            "feature-5": 4042348544.0,
+            "feature-6": 4033814528.0
+          }
+        },
+        "baseline_run_mean_bytes": 4026084010.6666665,
+        "feature_run_mean_bytes": 4034995200.0,
+        "difference_bytes": 8911189.333333492,
+        "difference_mib": 8.498372395833485,
+        "change_percent": 0.22133639809116534
+      },
+      "scrape_p95_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 4226558361.6,
+            "baseline-2": 4229666201.6,
+            "baseline-3": 4223243673.6,
+            "baseline-4": 4223710003.2,
+            "baseline-5": 4235470438.4,
+            "baseline-6": 4231018905.6
+          },
+          "feature": {
+            "feature-1": 4238131200.0,
+            "feature-2": 4231374848.0,
+            "feature-3": 4234305945.6,
+            "feature-4": 4225995571.2,
+            "feature-5": 4245634252.8,
+            "feature-6": 4225339392.0
+          }
+        },
+        "baseline_run_mean_bytes": 4228277930.6666665,
+        "feature_run_mean_bytes": 4233463534.9333334,
+        "difference_bytes": 5185604.266666889,
+        "difference_mib": 4.945377604166879,
+        "change_percent": 0.12264104563839417
+      },
+      "first_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 3693989888.0,
+            "baseline-2": 3693752320.0,
+            "baseline-3": 3687665664.0,
+            "baseline-4": 3693060096.0,
+            "baseline-5": 3694157824.0,
+            "baseline-6": 3689938944.0
+          },
+          "feature": {
+            "feature-1": 3691954176.0,
+            "feature-2": 3690627072.0,
+            "feature-3": 3690528768.0,
+            "feature-4": 3694460928.0,
+            "feature-5": 3698593792.0,
+            "feature-6": 3689181184.0
+          }
+        },
+        "baseline_run_mean_bytes": 3692094122.6666665,
+        "feature_run_mean_bytes": 3692557653.3333335,
+        "difference_bytes": 463530.66666698456,
+        "difference_mib": 0.44205729166696983,
+        "change_percent": 0.012554681740684082
+      },
+      "last_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 4224823296.0,
+            "baseline-2": 4227399680.0,
+            "baseline-3": 4203212800.0,
+            "baseline-4": 4226912256.0,
+            "baseline-5": 4205510656.0,
+            "baseline-6": 4218245120.0
+          },
+          "feature": {
+            "feature-1": 4205699072.0,
+            "feature-2": 4221952000.0,
+            "feature-3": 4214435840.0,
+            "feature-4": 4222205952.0,
+            "feature-5": 4214857728.0,
+            "feature-6": 4212723712.0
+          }
+        },
+        "baseline_run_mean_bytes": 4217683968.0,
+        "feature_run_mean_bytes": 4215312384.0,
+        "difference_bytes": -2371584.0,
+        "difference_mib": -2.26171875,
+        "change_percent": -0.05622953303267009
+      },
+      "change_from_first_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 530833408.0,
+            "baseline-2": 533647360.0,
+            "baseline-3": 515547136.0,
+            "baseline-4": 533852160.0,
+            "baseline-5": 511352832.0,
+            "baseline-6": 528306176.0
+          },
+          "feature": {
+            "feature-1": 513744896.0,
+            "feature-2": 531324928.0,
+            "feature-3": 523907072.0,
+            "feature-4": 527745024.0,
+            "feature-5": 516263936.0,
+            "feature-6": 523542528.0
+          }
+        },
+        "baseline_run_mean_bytes": 525589845.3333333,
+        "feature_run_mean_bytes": 522754730.6666667,
+        "difference_bytes": -2835114.666666627,
+        "difference_mib": -2.7037760416666288,
+        "change_percent": -0.5394157995705862
+      }
+    },
+    "reth_jemalloc_resident": {
+      "sampled_peak_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 4548907008.0,
+            "baseline-2": 4551643136.0,
+            "baseline-3": 4550217728.0,
+            "baseline-4": 4525436928.0,
+            "baseline-5": 4542951424.0,
+            "baseline-6": 4533850112.0
+          },
+          "feature": {
+            "feature-1": 4524404736.0,
+            "feature-2": 4524437504.0,
+            "feature-3": 4522921984.0,
+            "feature-4": 4543123456.0,
+            "feature-5": 4579905536.0,
+            "feature-6": 4540051456.0
+          }
+        },
+        "baseline_run_mean_bytes": 4542167722.666667,
+        "feature_run_mean_bytes": 4539140778.666667,
+        "difference_bytes": -3026944.0,
+        "difference_mib": -2.88671875,
+        "change_percent": -0.06664095614291599
+      },
+      "scrape_p50_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 4302237696.0,
+            "baseline-2": 4302526464.0,
+            "baseline-3": 4290906112.0,
+            "baseline-4": 4307771392.0,
+            "baseline-5": 4303122432.0,
+            "baseline-6": 4293574656.0
+          },
+          "feature": {
+            "feature-1": 4301412352.0,
+            "feature-2": 4292935680.0,
+            "feature-3": 4305655808.0,
+            "feature-4": 4301707264.0,
+            "feature-5": 4316907520.0,
+            "feature-6": 4301131776.0
+          }
+        },
+        "baseline_run_mean_bytes": 4300023125.333333,
+        "feature_run_mean_bytes": 4303291733.333333,
+        "difference_bytes": 3268608.0,
+        "difference_mib": 3.1171875,
+        "change_percent": 0.07601373073422568
+      },
+      "scrape_p95_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 4505361612.8,
+            "baseline-2": 4508609126.4,
+            "baseline-3": 4497470873.6,
+            "baseline-4": 4496250470.4,
+            "baseline-5": 4529210163.2,
+            "baseline-6": 4471539302.4
+          },
+          "feature": {
+            "feature-1": 4492254617.6,
+            "feature-2": 4492126208.0,
+            "feature-3": 4491726438.4,
+            "feature-4": 4475908915.2,
+            "feature-5": 4531506995.2,
+            "feature-6": 4501267251.2
+          }
+        },
+        "baseline_run_mean_bytes": 4501406924.8,
+        "feature_run_mean_bytes": 4497465070.933333,
+        "difference_bytes": -3941853.866666794,
+        "difference_mib": -3.759244791666788,
+        "change_percent": -0.08756937403169296
+      },
+      "first_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 3890651136.0,
+            "baseline-2": 3886440448.0,
+            "baseline-3": 3880185856.0,
+            "baseline-4": 3901992960.0,
+            "baseline-5": 3899678720.0,
+            "baseline-6": 3878080512.0
+          },
+          "feature": {
+            "feature-1": 3923881984.0,
+            "feature-2": 3878662144.0,
+            "feature-3": 3870117888.0,
+            "feature-4": 3907371008.0,
+            "feature-5": 3914285056.0,
+            "feature-6": 3901509632.0
+          }
+        },
+        "baseline_run_mean_bytes": 3889504938.6666665,
+        "feature_run_mean_bytes": 3899304618.6666665,
+        "difference_bytes": 9799680.0,
+        "difference_mib": 9.345703125,
+        "change_percent": 0.2519518590291092
+      },
+      "last_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 4516315136.0,
+            "baseline-2": 4483993600.0,
+            "baseline-3": 4495376384.0,
+            "baseline-4": 4514492416.0,
+            "baseline-5": 4513148928.0,
+            "baseline-6": 4471267328.0
+          },
+          "feature": {
+            "feature-1": 4452110336.0,
+            "feature-2": 4491956224.0,
+            "feature-3": 4494659584.0,
+            "feature-4": 4475842560.0,
+            "feature-5": 4511956992.0,
+            "feature-6": 4481961984.0
+          }
+        },
+        "baseline_run_mean_bytes": 4499098965.333333,
+        "feature_run_mean_bytes": 4484747946.666667,
+        "difference_bytes": -14351018.66666603,
+        "difference_mib": -13.68619791666606,
+        "change_percent": -0.3189753943454887
+      },
+      "change_from_first_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 625664000.0,
+            "baseline-2": 597553152.0,
+            "baseline-3": 615190528.0,
+            "baseline-4": 612499456.0,
+            "baseline-5": 613470208.0,
+            "baseline-6": 593186816.0
+          },
+          "feature": {
+            "feature-1": 528228352.0,
+            "feature-2": 613294080.0,
+            "feature-3": 624541696.0,
+            "feature-4": 568471552.0,
+            "feature-5": 597671936.0,
+            "feature-6": 580452352.0
+          }
+        },
+        "baseline_run_mean_bytes": 609594026.6666666,
+        "feature_run_mean_bytes": 585443328.0,
+        "difference_bytes": -24150698.666666627,
+        "difference_mib": -23.03190104166663,
+        "change_percent": -3.9617676043719685
+      }
+    },
+    "reth_jemalloc_mapped": {
+      "sampled_peak_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 4678033408.0,
+            "baseline-2": 4680790016.0,
+            "baseline-3": 4679430144.0,
+            "baseline-4": 4654628864.0,
+            "baseline-5": 4672188416.0,
+            "baseline-6": 4663259136.0
+          },
+          "feature": {
+            "feature-1": 4653584384.0,
+            "feature-2": 4653621248.0,
+            "feature-3": 4652081152.0,
+            "feature-4": 4670218240.0,
+            "feature-5": 4706951168.0,
+            "feature-6": 4669329408.0
+          }
+        },
+        "baseline_run_mean_bytes": 4671388330.666667,
+        "feature_run_mean_bytes": 4667630933.333333,
+        "difference_bytes": -3757397.333333969,
+        "difference_mib": -3.5833333333339397,
+        "change_percent": -0.0804342749385123
+      },
+      "scrape_p50_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 4432318464.0,
+            "baseline-2": 4432588800.0,
+            "baseline-3": 4419983360.0,
+            "baseline-4": 4437872640.0,
+            "baseline-5": 4433309696.0,
+            "baseline-6": 4423942144.0
+          },
+          "feature": {
+            "feature-1": 4431511552.0,
+            "feature-2": 4422795264.0,
+            "feature-3": 4434984960.0,
+            "feature-4": 4427620352.0,
+            "feature-5": 4446976000.0,
+            "feature-6": 4431335424.0
+          }
+        },
+        "baseline_run_mean_bytes": 4430002517.333333,
+        "feature_run_mean_bytes": 4432537258.666667,
+        "difference_bytes": 2534741.333333969,
+        "difference_mib": 2.4173177083339397,
+        "change_percent": 0.057217604807591194
+      },
+      "scrape_p95_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 4634809139.2,
+            "baseline-2": 4637967974.4,
+            "baseline-3": 4624549888.0,
+            "baseline-4": 4625272012.8,
+            "baseline-5": 4656459776.0,
+            "baseline-6": 4599083008.0
+          },
+          "feature": {
+            "feature-1": 4621639884.8,
+            "feature-2": 4619083776.0,
+            "feature-3": 4619499929.6,
+            "feature-4": 4603955814.4,
+            "feature-5": 4658793267.2,
+            "feature-6": 4630790963.2
+          }
+        },
+        "baseline_run_mean_bytes": 4629690299.733334,
+        "feature_run_mean_bytes": 4625627272.533333,
+        "difference_bytes": -4063027.200000763,
+        "difference_mib": -3.8748046875007276,
+        "change_percent": -0.08776023744471173
+      },
+      "first_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 4014669824.0,
+            "baseline-2": 4010508288.0,
+            "baseline-3": 4013191168.0,
+            "baseline-4": 4026019840.0,
+            "baseline-5": 4023730176.0,
+            "baseline-6": 4002271232.0
+          },
+          "feature": {
+            "feature-1": 4047863808.0,
+            "feature-2": 4002684928.0,
+            "feature-3": 3994238976.0,
+            "feature-4": 4031365120.0,
+            "feature-5": 4038254592.0,
+            "feature-6": 4025651200.0
+          }
+        },
+        "baseline_run_mean_bytes": 4015065088.0,
+        "feature_run_mean_bytes": 4023343104.0,
+        "difference_bytes": 8278016.0,
+        "difference_mib": 7.89453125,
+        "change_percent": 0.2061738930395185
+      },
+      "last_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 4642160640.0,
+            "baseline-2": 4609916928.0,
+            "baseline-3": 4621180928.0,
+            "baseline-4": 4640288768.0,
+            "baseline-5": 4650442752.0,
+            "baseline-6": 4597411840.0
+          },
+          "feature": {
+            "feature-1": 4578021376.0,
+            "feature-2": 4617895936.0,
+            "feature-3": 4620509184.0,
+            "feature-4": 4599635968.0,
+            "feature-5": 4637888512.0,
+            "feature-6": 4607922176.0
+          }
+        },
+        "baseline_run_mean_bytes": 4626900309.333333,
+        "feature_run_mean_bytes": 4610312192.0,
+        "difference_bytes": -16588117.333333015,
+        "difference_mib": -15.81966145833303,
+        "change_percent": -0.3585146907071124
+      },
+      "change_from_first_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 627490816.0,
+            "baseline-2": 599408640.0,
+            "baseline-3": 607989760.0,
+            "baseline-4": 614268928.0,
+            "baseline-5": 626712576.0,
+            "baseline-6": 595140608.0
+          },
+          "feature": {
+            "feature-1": 530157568.0,
+            "feature-2": 615211008.0,
+            "feature-3": 626270208.0,
+            "feature-4": 568270848.0,
+            "feature-5": 599633920.0,
+            "feature-6": 582270976.0
+          }
+        },
+        "baseline_run_mean_bytes": 611835221.3333334,
+        "feature_run_mean_bytes": 586969088.0,
+        "difference_bytes": -24866133.333333373,
+        "difference_mib": -23.71419270833337,
+        "change_percent": -4.06418794902722
+      }
+    },
+    "reth_jemalloc_metadata": {
+      "sampled_peak_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 53913472.0,
+            "baseline-2": 53855232.0,
+            "baseline-3": 53969024.0,
+            "baseline-4": 53954560.0,
+            "baseline-5": 53799168.0,
+            "baseline-6": 53614464.0
+          },
+          "feature": {
+            "feature-1": 53858432.0,
+            "feature-2": 53830528.0,
+            "feature-3": 53917056.0,
+            "feature-4": 55976320.0,
+            "feature-5": 53857408.0,
+            "feature-6": 53807360.0
+          }
+        },
+        "baseline_run_mean_bytes": 53850986.666666664,
+        "feature_run_mean_bytes": 54207850.666666664,
+        "difference_bytes": 356864.0,
+        "difference_mib": 0.34033203125,
+        "change_percent": 0.6626879507500183
+      },
+      "scrape_p50_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 49694208.0,
+            "baseline-2": 49636992.0,
+            "baseline-3": 49644800.0,
+            "baseline-4": 49656832.0,
+            "baseline-5": 49626496.0,
+            "baseline-6": 49468032.0
+          },
+          "feature": {
+            "feature-1": 49636736.0,
+            "feature-2": 49696256.0,
+            "feature-3": 49699456.0,
+            "feature-4": 49616576.0,
+            "feature-5": 49707200.0,
+            "feature-6": 49571584.0
+          }
+        },
+        "baseline_run_mean_bytes": 49621226.666666664,
+        "feature_run_mean_bytes": 49654634.666666664,
+        "difference_bytes": 33408.0,
+        "difference_mib": 0.0318603515625,
+        "change_percent": 0.06732602606627225
+      },
+      "scrape_p95_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 53681049.6,
+            "baseline-2": 53598412.8,
+            "baseline-3": 53685952.0,
+            "baseline-4": 53637913.6,
+            "baseline-5": 53550540.8,
+            "baseline-6": 53351091.2
+          },
+          "feature": {
+            "feature-1": 53600544.0,
+            "feature-2": 51454912.0,
+            "feature-3": 51546483.2,
+            "feature-4": 55683430.4,
+            "feature-5": 53592435.199999996,
+            "feature-6": 53515084.8
+          }
+        },
+        "baseline_run_mean_bytes": 53584160.0,
+        "feature_run_mean_bytes": 53232148.266666666,
+        "difference_bytes": -352011.7333333343,
+        "difference_mib": -0.3357045491536468,
+        "change_percent": -0.6569324467031623
+      },
+      "first_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 43170800.0,
+            "baseline-2": 43130992.0,
+            "baseline-3": 43196528.0,
+            "baseline-4": 43165680.0,
+            "baseline-5": 43137392.0,
+            "baseline-6": 42994928.0
+          },
+          "feature": {
+            "feature-1": 43210608.0,
+            "feature-2": 43162352.0,
+            "feature-3": 43067632.0,
+            "feature-4": 43191536.0,
+            "feature-5": 43210736.0,
+            "feature-6": 43061104.0
+          }
+        },
+        "baseline_run_mean_bytes": 43132720.0,
+        "feature_run_mean_bytes": 43150661.333333336,
+        "difference_bytes": 17941.333333335817,
+        "difference_mib": 0.017110188802085702,
+        "change_percent": 0.04159564556405204
+      },
+      "last_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 53913472.0,
+            "baseline-2": 53855232.0,
+            "baseline-3": 53969024.0,
+            "baseline-4": 53954560.0,
+            "baseline-5": 53799168.0,
+            "baseline-6": 53614464.0
+          },
+          "feature": {
+            "feature-1": 53858432.0,
+            "feature-2": 53830528.0,
+            "feature-3": 53917056.0,
+            "feature-4": 55976320.0,
+            "feature-5": 53857408.0,
+            "feature-6": 53807360.0
+          }
+        },
+        "baseline_run_mean_bytes": 53850986.666666664,
+        "feature_run_mean_bytes": 54207850.666666664,
+        "difference_bytes": 356864.0,
+        "difference_mib": 0.34033203125,
+        "change_percent": 0.6626879507500183
+      },
+      "change_from_first_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 10742672.0,
+            "baseline-2": 10724240.0,
+            "baseline-3": 10772496.0,
+            "baseline-4": 10788880.0,
+            "baseline-5": 10661776.0,
+            "baseline-6": 10619536.0
+          },
+          "feature": {
+            "feature-1": 10647824.0,
+            "feature-2": 10668176.0,
+            "feature-3": 10849424.0,
+            "feature-4": 12784784.0,
+            "feature-5": 10646672.0,
+            "feature-6": 10746256.0
+          }
+        },
+        "baseline_run_mean_bytes": 10718266.666666666,
+        "feature_run_mean_bytes": 11057189.333333334,
+        "difference_bytes": 338922.6666666679,
+        "difference_mib": 0.32322184244791785,
+        "change_percent": 3.1621033251645336
+      }
+    },
+    "reth_jemalloc_retained": {
+      "sampled_peak_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 2872369152.0,
+            "baseline-2": 2885541888.0,
+            "baseline-3": 2864738304.0,
+            "baseline-4": 2892406784.0,
+            "baseline-5": 2823000064.0,
+            "baseline-6": 2899894272.0
+          },
+          "feature": {
+            "feature-1": 2887315456.0,
+            "feature-2": 2835185664.0,
+            "feature-3": 2851524608.0,
+            "feature-4": 2887892992.0,
+            "feature-5": 2854711296.0,
+            "feature-6": 2813374464.0
+          }
+        },
+        "baseline_run_mean_bytes": 2872991744.0,
+        "feature_run_mean_bytes": 2855000746.6666665,
+        "difference_bytes": -17990997.333333492,
+        "difference_mib": -17.157552083333485,
+        "change_percent": -0.6262112437637968
+      },
+      "scrape_p50_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 2456612864.0,
+            "baseline-2": 2443376640.0,
+            "baseline-3": 2436644864.0,
+            "baseline-4": 2449600512.0,
+            "baseline-5": 2454188032.0,
+            "baseline-6": 2430148608.0
+          },
+          "feature": {
+            "feature-1": 2445201408.0,
+            "feature-2": 2441097216.0,
+            "feature-3": 2440171520.0,
+            "feature-4": 2406406144.0,
+            "feature-5": 2455465984.0,
+            "feature-6": 2413858816.0
+          }
+        },
+        "baseline_run_mean_bytes": 2445095253.3333335,
+        "feature_run_mean_bytes": 2433700181.3333335,
+        "difference_bytes": -11395072.0,
+        "difference_mib": -10.8671875,
+        "change_percent": -0.46603795841758666
+      },
+      "scrape_p95_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 2796465356.8,
+            "baseline-2": 2787901235.2,
+            "baseline-3": 2780386918.4,
+            "baseline-4": 2792162099.2,
+            "baseline-5": 2764454297.6,
+            "baseline-6": 2812066201.6
+          },
+          "feature": {
+            "feature-1": 2768486809.6,
+            "feature-2": 2792439808.0,
+            "feature-3": 2810048102.4,
+            "feature-4": 2767790899.2,
+            "feature-5": 2815836364.7999997,
+            "feature-6": 2752918323.2
+          }
+        },
+        "baseline_run_mean_bytes": 2788906018.133333,
+        "feature_run_mean_bytes": 2784586717.866667,
+        "difference_bytes": -4319300.266666412,
+        "difference_mib": -4.119205729166424,
+        "change_percent": -0.15487435713439357
+      },
+      "first_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 2277834752.0,
+            "baseline-2": 2265219072.0,
+            "baseline-3": 2308673536.0,
+            "baseline-4": 2293747712.0,
+            "baseline-5": 2277163008.0,
+            "baseline-6": 2255106048.0
+          },
+          "feature": {
+            "feature-1": 2284486656.0,
+            "feature-2": 2295062528.0,
+            "feature-3": 2302459904.0,
+            "feature-4": 2267955200.0,
+            "feature-5": 2276794368.0,
+            "feature-6": 2277863424.0
+          }
+        },
+        "baseline_run_mean_bytes": 2279624021.3333335,
+        "feature_run_mean_bytes": 2284103680.0,
+        "difference_bytes": 4479658.666666508,
+        "difference_mib": 4.272135416666515,
+        "change_percent": 0.19650866216291973
+      },
+      "last_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 2833137664.0,
+            "baseline-2": 2844934144.0,
+            "baseline-3": 2843107328.0,
+            "baseline-4": 2886914048.0,
+            "baseline-5": 2810757120.0,
+            "baseline-6": 2896760832.0
+          },
+          "feature": {
+            "feature-1": 2887315456.0,
+            "feature-2": 2811789312.0,
+            "feature-3": 2815467520.0,
+            "feature-4": 2883002368.0,
+            "feature-5": 2854711296.0,
+            "feature-6": 2813374464.0
+          }
+        },
+        "baseline_run_mean_bytes": 2852601856.0,
+        "feature_run_mean_bytes": 2844276736.0,
+        "difference_bytes": -8325120.0,
+        "difference_mib": -7.939453125,
+        "change_percent": -0.29184304085372315
+      },
+      "change_from_first_bytes": {
+        "run_values": {
+          "baseline": {
+            "baseline-1": 555302912.0,
+            "baseline-2": 579715072.0,
+            "baseline-3": 534433792.0,
+            "baseline-4": 593166336.0,
+            "baseline-5": 533594112.0,
+            "baseline-6": 641654784.0
+          },
+          "feature": {
+            "feature-1": 602828800.0,
+            "feature-2": 516726784.0,
+            "feature-3": 513007616.0,
+            "feature-4": 615047168.0,
+            "feature-5": 577916928.0,
+            "feature-6": 535511040.0
+          }
+        },
+        "baseline_run_mean_bytes": 572977834.6666666,
+        "feature_run_mean_bytes": 560173056.0,
+        "difference_bytes": -12804778.666666627,
+        "difference_mib": -12.211588541666629,
+        "change_percent": -2.234777314573766
+      }
+    }
+  }
+}

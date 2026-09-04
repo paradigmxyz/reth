@@ -1,0 +1,149 @@
+{
+  "source": "Completed GitHub job log; allowlisted fields only",
+  "job_log_sha256": "1d0a5613a45d0b63860d0fbd3f9556058c299376b07b762c19a819af0151564f",
+  "runner_name": "ghr-euw-10",
+  "cpu_model": "AMD EPYC 4585PX 16-Core Processor",
+  "compiler": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "snapshot_manifest_hash_prefix": "1de6440dc1acb2a5",
+  "launches": {
+    "feature-1": {
+      "memory_max_bytes": 127918040268,
+      "allowed_cpus": "1-15"
+    },
+    "baseline-1": {
+      "memory_max_bytes": 127918040268,
+      "allowed_cpus": "1-15"
+    },
+    "baseline-2": {
+      "memory_max_bytes": 127918040268,
+      "allowed_cpus": "1-15"
+    },
+    "feature-2": {
+      "memory_max_bytes": 127918040268,
+      "allowed_cpus": "1-15"
+    },
+    "feature-3": {
+      "memory_max_bytes": 127918040268,
+      "allowed_cpus": "1-15"
+    },
+    "baseline-3": {
+      "memory_max_bytes": 127918040268,
+      "allowed_cpus": "1-15"
+    },
+    "baseline-4": {
+      "memory_max_bytes": 127918040268,
+      "allowed_cpus": "1-15"
+    },
+    "feature-4": {
+      "memory_max_bytes": 127918040268,
+      "allowed_cpus": "1-15"
+    },
+    "feature-5": {
+      "memory_max_bytes": 127918040268,
+      "allowed_cpus": "1-15"
+    },
+    "baseline-5": {
+      "memory_max_bytes": 127918040268,
+      "allowed_cpus": "1-15"
+    },
+    "baseline-6": {
+      "memory_max_bytes": 127918040268,
+      "allowed_cpus": "1-15"
+    },
+    "feature-6": {
+      "memory_max_bytes": 127918040268,
+      "allowed_cpus": "1-15"
+    }
+  },
+  "storage_settings": [
+    {
+      "run": null,
+      "storage_v2": true,
+      "job_log_line": 5284,
+      "evidence": "Loaded storage settings settings=StorageSettings { storage_v2: true } pruning_mode=\"minimal\""
+    },
+    {
+      "run": "feature-1",
+      "storage_v2": true,
+      "job_log_line": 5721,
+      "evidence": "Loaded storage settings settings=StorageSettings { storage_v2: true } pruning_mode=\"minimal\""
+    },
+    {
+      "run": "baseline-1",
+      "storage_v2": true,
+      "job_log_line": 9503,
+      "evidence": "Loaded storage settings settings=StorageSettings { storage_v2: true } pruning_mode=\"minimal\""
+    },
+    {
+      "run": "baseline-2",
+      "storage_v2": true,
+      "job_log_line": 13287,
+      "evidence": "Loaded storage settings settings=StorageSettings { storage_v2: true } pruning_mode=\"minimal\""
+    },
+    {
+      "run": "feature-2",
+      "storage_v2": true,
+      "job_log_line": 17076,
+      "evidence": "Loaded storage settings settings=StorageSettings { storage_v2: true } pruning_mode=\"minimal\""
+    },
+    {
+      "run": "feature-3",
+      "storage_v2": true,
+      "job_log_line": 20861,
+      "evidence": "Loaded storage settings settings=StorageSettings { storage_v2: true } pruning_mode=\"minimal\""
+    },
+    {
+      "run": "baseline-3",
+      "storage_v2": true,
+      "job_log_line": 24647,
+      "evidence": "Loaded storage settings settings=StorageSettings { storage_v2: true } pruning_mode=\"minimal\""
+    },
+    {
+      "run": "baseline-4",
+      "storage_v2": true,
+      "job_log_line": 28432,
+      "evidence": "Loaded storage settings settings=StorageSettings { storage_v2: true } pruning_mode=\"minimal\""
+    },
+    {
+      "run": "feature-4",
+      "storage_v2": true,
+      "job_log_line": 32215,
+      "evidence": "Loaded storage settings settings=StorageSettings { storage_v2: true } pruning_mode=\"minimal\""
+    },
+    {
+      "run": "feature-5",
+      "storage_v2": true,
+      "job_log_line": 35998,
+      "evidence": "Loaded storage settings settings=StorageSettings { storage_v2: true } pruning_mode=\"minimal\""
+    },
+    {
+      "run": "baseline-5",
+      "storage_v2": true,
+      "job_log_line": 39782,
+      "evidence": "Loaded storage settings settings=StorageSettings { storage_v2: true } pruning_mode=\"minimal\""
+    },
+    {
+      "run": "baseline-6",
+      "storage_v2": true,
+      "job_log_line": 43566,
+      "evidence": "Loaded storage settings settings=StorageSettings { storage_v2: true } pruning_mode=\"minimal\""
+    },
+    {
+      "run": "feature-6",
+      "storage_v2": true,
+      "job_log_line": 47351,
+      "evidence": "Loaded storage settings settings=StorageSettings { storage_v2: true } pruning_mode=\"minimal\""
+    }
+  ],
+  "encoding_inference": "All twelve measured processes log cached storage_v2=true. with_adapter! dispatches is_v2() to PackedKeyAdapter, whose storage subkey encoding is33 bytes. This is independent of database.version.",
+  "source_locations": [
+    "crates/node/builder/src/launch/engine.rs:132",
+    "crates/trie/db/src/lib.rs:44",
+    "crates/trie/db/src/trie_cursor.rs:120"
+  ],
+  "limitations": [
+    "An additional pre-replay startup storage-setting record is retained with run=null; it is not one of the twelve measured processes.",
+    "Snapshot manifest identifier is a16-character prefix, not a complete snapshot checksum.",
+    "AllowedCPUs and MemoryMax are recorded launch constraints; no independent runtime affinity/cgroup snapshot was retained."
+  ]
+}

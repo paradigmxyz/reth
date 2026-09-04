@@ -1,0 +1,96 @@
+{
+  "counters": [],
+  "histograms": [
+    {
+      "query": "reth_tree_root_sparse_trie_final_update_duration_histogram",
+      "target": "decrease",
+      "floor_pct": 5.0,
+      "min_value_pct_total_latency": 0.0,
+      "unit": "seconds"
+    },
+    {
+      "query": "reth_tree_root_sparse_trie_process_updates_duration_histogram",
+      "target": "decrease",
+      "floor_pct": 5.0,
+      "min_value_pct_total_latency": 0.0,
+      "unit": "seconds"
+    },
+    {
+      "query": "reth_tree_root_sparse_trie_total_duration_histogram",
+      "target": "decrease",
+      "floor_pct": 5.0,
+      "min_value_pct_total_latency": 0.0,
+      "unit": "seconds"
+    },
+    {
+      "query": "reth_tree_root_sparse_trie_reveal_multiproof_duration_histogram",
+      "target": "decrease",
+      "floor_pct": 5.0,
+      "min_value_pct_total_latency": 0.0,
+      "unit": "seconds"
+    },
+    {
+      "query": "reth_tree_root_sparse_trie_channel_wait_duration_histogram",
+      "target": "decrease",
+      "floor_pct": 5.0,
+      "min_value_pct_total_latency": 0.0,
+      "unit": "seconds"
+    },
+    {
+      "query": "reth_storage_providers_database_save_blocks_write_trie_updates",
+      "target": "decrease",
+      "floor_pct": 5.0,
+      "min_value_pct_total_latency": 0.0,
+      "unit": "seconds"
+    },
+    {
+      "query": "reth_storage_providers_database_save_blocks_total",
+      "target": "decrease",
+      "floor_pct": 5.0,
+      "min_value_pct_total_latency": 0.0,
+      "unit": "seconds"
+    },
+    {
+      "query": "reth_storage_providers_database_save_blocks_commit_mdbx",
+      "target": "decrease",
+      "floor_pct": 5.0,
+      "min_value_pct_total_latency": 0.0,
+      "unit": "seconds"
+    },
+    {
+      "query": "reth_storage_providers_database_save_blocks_write_hashed_state",
+      "target": "decrease",
+      "floor_pct": 5.0,
+      "min_value_pct_total_latency": 0.0,
+      "unit": "seconds"
+    },
+    {
+      "query": "reth_storage_providers_database_save_blocks_write_state",
+      "target": "decrease",
+      "floor_pct": 5.0,
+      "min_value_pct_total_latency": 0.0,
+      "unit": "seconds"
+    },
+    {
+      "query": "reth_storage_providers_database_save_blocks_insert_block",
+      "target": "decrease",
+      "floor_pct": 5.0,
+      "min_value_pct_total_latency": 0.0,
+      "unit": "seconds"
+    },
+    {
+      "query": "reth_storage_providers_database_save_blocks_update_history_indices",
+      "target": "decrease",
+      "floor_pct": 5.0,
+      "min_value_pct_total_latency": 0.0,
+      "unit": "seconds"
+    },
+    {
+      "query": "reth_storage_providers_database_save_blocks_update_pipeline_stages",
+      "target": "decrease",
+      "floor_pct": 5.0,
+      "min_value_pct_total_latency": 0.0,
+      "unit": "seconds"
+    }
+  ]
+}

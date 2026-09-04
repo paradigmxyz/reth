@@ -1,0 +1,26 @@
+{
+  "candidate_commit": "b65d76b06d930fa39fe70d842812490bba350222",
+  "sparse_tests_passed": 180,
+  "sparse_tests_skipped": 0,
+  "differential": {
+    "seed": 1,
+    "sequences": 10000,
+    "operations": 4448976,
+    "root_checks": 641072,
+    "persistence_checks": 255536,
+    "proof_rounds": 100022,
+    "in_memory_rebuilds": 90000,
+    "prunes": 40000,
+    "occupancy_masks": 65536
+  },
+  "reveal_smoke_cases": 6,
+  "format": "passed, reported by parent; fmt.log retained locally",
+  "evidence_sha256": {
+    "tests.log": "495af048713a93fbfc49aa80e6aa840c249c5a0fbcfb48b7185d51dd324d3a67",
+    "differential.log": "b3c4f9c54a52084ad7caebb8cbfda6365c30eb4bbe8fe90b48b6971fed2b40c8",
+    "fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "reveal-smoke.csv": "5ff11ab5eed4c3695cd9e5ba6f770dc1af17867ef68c0a47d39476ab37e99acb",
+    "production.patch": "6c09a4a0cc49995bf679e19534c88af810699e26e6c06c6eaa522bc882beca43"
+  },
+  "scope": "Sparse-kernel correctness and reconstructed trie reopen tests; no full-node or durable MDBX acceptance is inferred."
+}

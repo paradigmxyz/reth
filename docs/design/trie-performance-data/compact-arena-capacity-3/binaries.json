@@ -1,0 +1,12 @@
+{
+  "cursor_reveal": {
+    "source": "/tmp/reth-hash-mask-native-target/profiling/examples/cursor_reveal",
+    "binary": "/home/ubuntu/reth/bench-work/trie-derek-20260904/arena-three-experiment/cursor_reveal",
+    "sha256": "1a93fe558aa9f907703381d48300d6154b86ec6a228378aac2b97a8c2acafc68"
+  },
+  "state_root": {
+    "source": "/tmp/reth-hash-mask-native-target/profiling/deps/state_root-521d70bf2f87bdb5",
+    "binary": "/home/ubuntu/reth/bench-work/trie-derek-20260904/arena-three-experiment/state_root",
+    "sha256": "a816a2171369119ec8151ba853df1ffc51e4fd84484a7c3464b5b25f1f3a8773"
+  }
+}

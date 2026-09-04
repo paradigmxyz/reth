@@ -1,0 +1,12 @@
+{
+  "candidate_commit": "b65d76b06d930fa39fe70d842812490bba350222",
+  "verdict": "hold",
+  "adopt": false,
+  "reason": "Mixed component results; large root/reveal cases improve but full 1000-leaf fresh reveals regress1.60%/2.94%. No representative full-node evidence or Derek result exists for this candidate.",
+  "root_comparisons": 56,
+  "reveal_comparisons": 12,
+  "root_cases_with_lower_candidate_median": 40,
+  "reveal_cases_with_lower_candidate_median": 7,
+  "normal_workload_verdict": "Unchanged; this candidate is not on main.",
+  "followup_scope": "Separately declared capacity3 experiment; does not overwrite capacity2 results."
+}

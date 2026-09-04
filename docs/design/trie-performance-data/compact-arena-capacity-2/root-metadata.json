@@ -1,0 +1,47 @@
+{
+  "started_utc": "2026-09-04T13:13:01.726077+00:00",
+  "platform": "Linux-6.8.0-117-generic-x86_64-with-glibc2.39",
+  "cpu_affinity": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+  ],
+  "rayon_threads": [
+    1,
+    15
+  ],
+  "samples_per_case": 100,
+  "rounds": 2,
+  "order_per_round": [
+    "baseline",
+    "candidate",
+    "candidate",
+    "baseline"
+  ],
+  "filter": "",
+  "binaries": {
+    "baseline": {
+      "path": "/home/ubuntu/reth/bench-work/trie-derek-20260904/packed-sort-experiment/state-root-packed-sort",
+      "sha256": "1d6159c11db4f188911a8f1e0224507e1f2a7889d4ddf3c534374a08eab4d67b"
+    },
+    "candidate": {
+      "path": "/home/ubuntu/reth/bench-work/trie-derek-20260904/compact-arena-experiment/state-root-capacity-2",
+      "sha256": "5ad2712536f6c5b487710796761275855d1ca8041db8594e1a9e165aef0ea70d"
+    }
+  },
+  "summary_statistics": "median and inclusive quartiles of process-level sample medians",
+  "cpu_model": "AMD EPYC 4585PX 16-Core Processor",
+  "finished_utc": "2026-09-04T13:15:21.773039+00:00"
+}

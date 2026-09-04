@@ -1,0 +1,19 @@
+{
+  "node_type_bytes": {
+    "control_capacity4": 248,
+    "capacity2": 176,
+    "capacity3": 216
+  },
+  "slotmap_entry_bytes": {
+    "control_capacity4": 256,
+    "capacity2": 184,
+    "capacity3": 224
+  },
+  "type": "slotmap::basic::Slot<ArenaSparseNode>",
+  "scope": "DWARF sizeof queried from actual frozen executables. Entry stride includes slotmap metadata/alignment. Separate child allocations are excluded. Node size, stride and child spills all change; these sizes do not isolate a cause or establish total heap/RSS savings.",
+  "logs_sha256": {
+    "compact-arena-experiment/slot-layout-baseline.log": "2774f734a66f1773dbf9c96292d8937fa687de4d7b5ba5c69253e377abdd172e",
+    "compact-arena-experiment/slot-layout-candidate.log": "a6645a2fb2952264bc187bca1054f037fbf63c2dd4e4387d007167d3fc812883",
+    "arena-three-experiment/slot-layout.log": "3d59232c642902647e9ccb75dcdfc9f4bec666f05052051fc8f734747c265fbb"
+  }
+}
