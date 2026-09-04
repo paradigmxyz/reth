@@ -71,6 +71,7 @@ db-api = [
 ]
 
 serde = [
+    "reth-chain-state/serde",
     "reth-ethereum-primitives/serde",
     "reth-db-models/serde",
     "reth-execution-types/serde",
