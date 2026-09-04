@@ -1,0 +1,173 @@
+{
+  "warmup_blocks": "125",
+  "run_pairs": 6,
+  "mode": "engine",
+  "baseline": {
+    "name": "eadb887f1c1698e7bd932f60a0c654dccccd081f",
+    "ref": "eadb887f1c1698e7bd932f60a0c654dccccd081f",
+    "stats": {
+      "n": 3000,
+      "mean_ms": 24.126229000000002,
+      "stddev_ms": 13.797088740085458,
+      "p50_ms": 21.610666666666663,
+      "p90_ms": 37.85566666666667,
+      "p99_ms": 70.02533333333334,
+      "mean_mgas_s": 1301.485183567243,
+      "wall_clock_s": 72.787687,
+      "mean_total_lat_ms": 24.262562333333335,
+      "mean_persist_ms": 27.156466666666663
+    }
+  },
+  "feature": {
+    "name": "4355f17739405d5eb13088b45bbdcae4ba15c52d",
+    "ref": "4355f17739405d5eb13088b45bbdcae4ba15c52d",
+    "stats": {
+      "n": 3000,
+      "mean_ms": 23.94342633333333,
+      "stddev_ms": 13.029913332343748,
+      "p50_ms": 21.46966666666667,
+      "p90_ms": 37.87433333333333,
+      "p99_ms": 73.85000000000001,
+      "mean_mgas_s": 1309.7756178711268,
+      "wall_clock_s": 72.346279,
+      "mean_total_lat_ms": 24.115426333333332,
+      "mean_persist_ms": 29.668306
+    }
+  },
+  "changes": {
+    "mean": {
+      "pct": -0.7577,
+      "ci_pct": 0.7271,
+      "floor_pct": 1.2,
+      "sig": "neutral"
+    },
+    "p50": {
+      "pct": -0.6525,
+      "ci_pct": 1.003,
+      "floor_pct": 1.2,
+      "sig": "neutral"
+    },
+    "p90": {
+      "pct": 0.0493,
+      "ci_pct": 1.2962,
+      "floor_pct": 1.35,
+      "sig": "neutral"
+    },
+    "p99": {
+      "pct": 5.4618,
+      "ci_pct": 5.8234,
+      "floor_pct": 5.0,
+      "sig": "neutral"
+    },
+    "mgas_s": {
+      "pct": 0.637,
+      "ci_pct": 0.5532,
+      "floor_pct": 1.2,
+      "sig": "neutral"
+    },
+    "wall_clock": {
+      "pct": -0.6064,
+      "ci_pct": 0.7074,
+      "floor_pct": 0.7,
+      "sig": "neutral"
+    },
+    "persist_wait": {
+      "pct": 9.2495,
+      "ci_pct": 1.3314,
+      "floor_pct": 5.0,
+      "sig": "bad"
+    }
+  },
+  "target_metrics": {
+    "config": "bench-work/trie-derek-20260904/iteration-5-extra-save-phases/diagnostic-targets.json",
+    "improvements": [],
+    "regressions": [
+      "reth_storage_providers_database_save_blocks_write_state",
+      "reth_storage_providers_database_save_blocks_insert_block"
+    ],
+    "metrics": [
+      {
+        "name": "reth_storage_providers_database_save_blocks_write_state",
+        "changes": {
+          "mean": {
+            "baseline": 0.0006011544563947172,
+            "feature": 0.00215270959254721,
+            "diff": 0.001552,
+            "pct": 258.0959,
+            "ci": 0.000108,
+            "ci_pct": 17.9971,
+            "floor_pct": 5.0,
+            "sig": "bad",
+            "ci_method": "run_cluster_bootstrap",
+            "runs": {
+              "baseline": 6,
+              "feature": 6
+            }
+          }
+        }
+      },
+      {
+        "name": "reth_storage_providers_database_save_blocks_insert_block",
+        "changes": {
+          "mean": {
+            "baseline": 2.977234804951268e-05,
+            "feature": 3.69380247006731e-05,
+            "diff": 7e-06,
+            "pct": 24.0682,
+            "ci": 3e-06,
+            "ci_pct": 8.494,
+            "floor_pct": 5.0,
+            "sig": "bad",
+            "ci_method": "run_cluster_bootstrap",
+            "runs": {
+              "baseline": 6,
+              "feature": 6
+            }
+          }
+        }
+      },
+      {
+        "name": "reth_storage_providers_database_save_blocks_update_history_indices",
+        "changes": {
+          "mean": {
+            "baseline": 3.64630156564803e-07,
+            "feature": 3.6959211193471277e-07,
+            "diff": 0.0,
+            "pct": 1.3608,
+            "ci": 0.0,
+            "ci_pct": 2.9644,
+            "floor_pct": 5.0,
+            "sig": "neutral",
+            "ci_method": "run_cluster_bootstrap",
+            "runs": {
+              "baseline": 6,
+              "feature": 6
+            }
+          }
+        }
+      },
+      {
+        "name": "reth_storage_providers_database_save_blocks_update_pipeline_stages",
+        "changes": {
+          "mean": {
+            "baseline": 3.242145508553923e-06,
+            "feature": 3.19310953634176e-06,
+            "diff": -0.0,
+            "pct": -1.5125,
+            "ci": 0.0,
+            "ci_pct": 0.8674,
+            "floor_pct": 5.0,
+            "sig": "neutral",
+            "ci_method": "run_cluster_bootstrap",
+            "runs": {
+              "baseline": 6,
+              "feature": 6
+            }
+          }
+        }
+      }
+    ]
+  },
+  "source_sha256": "873cc17af3aecea60a626c8c1350557e6e42e144febe3949d0964db69c0f5fc3",
+  "scope": "Compact unchanged summary fields; per-run raw artifacts retained under bench-work."
+}

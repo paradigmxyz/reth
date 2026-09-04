@@ -1,0 +1,74 @@
+{
+  "runs": {
+    "baseline": [
+      {
+        "run": "baseline-1",
+        "duration_ms": 26440,
+        "report_sha256": "44dfdeccd05a311c38139558eda74dd6867cfa41862e8cfb4a3429a79a9405f6"
+      },
+      {
+        "run": "baseline-2",
+        "duration_ms": 26640,
+        "report_sha256": "4d6f85b692f6de6d67fbb59b950d13da6b15087ecfc8bfde60448f40c51347b9"
+      },
+      {
+        "run": "baseline-3",
+        "duration_ms": 26643,
+        "report_sha256": "138af48ef073ae795ec46d1d022c0e47525cada632e171af53d61d80c2c10726"
+      },
+      {
+        "run": "baseline-4",
+        "duration_ms": 26550,
+        "report_sha256": "feaf93c8594c2e668a15b9d26a32a10413422b31cae001731bcf1d836b3e5b52"
+      },
+      {
+        "run": "baseline-5",
+        "duration_ms": 26840,
+        "report_sha256": "58de2e7bdfc0f7e23c5f427ac8e12b0421b4471fb5ac83ea815052b72cbae976"
+      },
+      {
+        "run": "baseline-6",
+        "duration_ms": 26533,
+        "report_sha256": "77e48572745921b4235d670f372aca5a75c76d8ca2390e19eed021195f3af335"
+      }
+    ],
+    "feature": [
+      {
+        "run": "feature-1",
+        "duration_ms": 26155,
+        "report_sha256": "f3a7555d17658c442a031287f8651ca42d4e3de368cd066adeaa306f8d5cd3e8"
+      },
+      {
+        "run": "feature-2",
+        "duration_ms": 26128,
+        "report_sha256": "5d73c08734f2028e668ac5696e562f1f83da1188cb4bf53f9337fd1ddb8ab68b"
+      },
+      {
+        "run": "feature-3",
+        "duration_ms": 26307,
+        "report_sha256": "ac0f195748682829159f295176964806e5bc88f09b5a6d642cb2148cc50624c7"
+      },
+      {
+        "run": "feature-4",
+        "duration_ms": 26150,
+        "report_sha256": "439f53e40c2676fbdf15d86c7e11a825256cbccb11ab11a079a17e1015f51aef"
+      },
+      {
+        "run": "feature-5",
+        "duration_ms": 26308,
+        "report_sha256": "a565e9a05bb497a485a0c881507d6427df917da1d8615746644f3f054f368471"
+      },
+      {
+        "run": "feature-6",
+        "duration_ms": 26098,
+        "report_sha256": "f89860a8017b8a5d8f00c57558ff509048cb7dd87203ce364dade67bcb3653b1"
+      }
+    ]
+  },
+  "baseline_mean_ms": 26607.666666666668,
+  "feature_mean_ms": 26191,
+  "change_percent": -1.565964696891875,
+  "ci_half_width_percent": 0.44692632449293834,
+  "method": "Derek run-cluster bootstrap primitive, supplementary raw replay elapsed time; no official verdict or changed thresholds",
+  "seed": "elapsed-diagnostic"
+}

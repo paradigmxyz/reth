@@ -1,0 +1,295 @@
+diff --git a/crates/storage/db/src/implementation/mdbx/mod.rs b/crates/storage/db/src/implementation/mdbx/mod.rs
+index 24c7a7e684..be9835cc6f 100644
+--- a/crates/storage/db/src/implementation/mdbx/mod.rs
++++ b/crates/storage/db/src/implementation/mdbx/mod.rs
+@@ -121,6 +121,8 @@ pub struct DatabaseArguments {
+     sync_mode: SyncMode,
+     /// Whether to probe and prewrite nonresident pages before modifying their mappings.
+     prefault_write: bool,
++    /// Whether read-write transactions modify database mappings directly.
++    write_map: bool,
+ }
+ 
+ impl Default for DatabaseArguments {
+@@ -146,6 +148,7 @@ impl DatabaseArguments {
+             max_readers: None,
+             sync_mode: SyncMode::Durable,
+             prefault_write: false,
++            write_map: true,
+         }
+     }
+ 
+@@ -202,6 +205,12 @@ impl DatabaseArguments {
+         self
+     }
+ 
++    /// Controls whether read-write transactions use writable mappings or page shadow buffers.
++    pub const fn with_write_map(mut self, enabled: bool) -> Self {
++        self.write_map = enabled;
++        self
++    }
++
+     /// Configures the database growth step in bytes.
+     pub const fn with_growth_step(mut self, growth_step: Option<usize>) -> Self {
+         if let Some(growth_step) = growth_step {
+@@ -420,7 +429,9 @@ impl DatabaseEnv {
+             DatabaseEnvKind::RO => Mode::ReadOnly,
+             DatabaseEnvKind::RW => {
+                 // enable writemap mode in RW mode
+-                inner_env.write_map();
++                if args.write_map {
++                    inner_env.write_map();
++                }
+                 Mode::ReadWrite { sync_mode: args.sync_mode }
+             }
+         };
+diff --git a/crates/trie/db/Cargo.toml b/crates/trie/db/Cargo.toml
+index ae09316b34..f3431038be 100644
+--- a/crates/trie/db/Cargo.toml
++++ b/crates/trie/db/Cargo.toml
+@@ -56,6 +56,10 @@ tempfile.workspace = true
+ name = "storage_persistence"
+ harness = false
+ 
++[[bench]]
++name = "prefault_write"
++harness = false
++
+ [features]
+ metrics = ["reth-trie/metrics"]
+ serde = [
+diff --git a/crates/trie/db/benches/prefault_write.rs b/crates/trie/db/benches/prefault_write.rs
+new file mode 100644
+index 0000000000..f0c8ed3578
+--- /dev/null
++++ b/crates/trie/db/benches/prefault_write.rs
+@@ -0,0 +1,229 @@
++//! Compare MDBX prefault writes with identical trie updates and durable commits.
++//!
++//! `MPT_PREFAULT_SAMPLES` sets repetitions (default 12). On Linux, the cold case asks the kernel
++//! to evict only the disposable database file after closing its mappings, then verifies residency;
++//! it never drops global caches. Warm refers to the file cache, with mappings reopened per sample.
++//! Snapshot equality is checked after every commit and reopen.
++
++#[path = "../tests/persistence_support/mod.rs"]
++mod persistence_support;
++
++use alloy_primitives::B256;
++use persistence_support::{node, path, snapshot};
++use reth_db::{
++    mdbx::{DatabaseArguments, SyncMode},
++    DatabaseEnv, DatabaseEnvKind,
++};
++use reth_db_api::{
++    cursor::{DbCursorRO, DbCursorRW},
++    transaction::{DbTx, DbTxMut},
++    Database,
++};
++use reth_trie::{updates::StorageTrieUpdatesSorted, BranchNodeCompact, Nibbles};
++use reth_trie_db::{DatabaseStorageTrieCursor, PackedKeyAdapter, TrieTableAdapter};
++use std::{collections::BTreeMap, path::Path, time::Instant};
++
++type Adapter = PackedKeyAdapter;
++type Accounts = <Adapter as TrieTableAdapter>::AccountTrieTable;
++type Storages = <Adapter as TrieTableAdapter>::StorageTrieTable;
++
++fn open(path: &Path, mode: usize) -> DatabaseEnv {
++    let mut db = DatabaseEnv::open(
++        path,
++        DatabaseEnvKind::RW,
++        DatabaseArguments::test()
++            .with_geometry_max_size(Some(512 * 1024 * 1024))
++            .with_sync_mode(Some(SyncMode::Durable))
++            .with_prefault_write(mode == 1)
++            .with_write_map(mode != 2),
++    )
++    .unwrap();
++    db.create_tables().unwrap();
++    db
++}
++
++fn address(index: u32) -> B256 {
++    let mut value = B256::ZERO;
++    value[..4].copy_from_slice(&index.to_be_bytes());
++    value
++}
++
++fn accounts(db: &DatabaseEnv) -> BTreeMap<Nibbles, BranchNodeCompact> {
++    db.tx()
++        .unwrap()
++        .cursor_read::<Accounts>()
++        .unwrap()
++        .walk(None)
++        .unwrap()
++        .map(|row| {
++            let (key, node) = row.unwrap();
++            (key.0, node)
++        })
++        .collect()
++}
++
++struct Updates {
++    accounts: Vec<(Nibbles, BranchNodeCompact)>,
++    storages: Vec<(B256, StorageTrieUpdatesSorted)>,
++}
++
++fn updates(round: u32, large: bool, initial: bool) -> Updates {
++    let account_count = if large { 32768 } else { 1024 };
++    let stride = if initial { 1 } else { 8 };
++    let accounts = (0..account_count)
++        .step_by(stride)
++        .map(|index| (path(index), node(u64::from(index) + (u64::from(round) << 32), 8)))
++        .collect();
++    let addresses = if large { 128 } else { 1 };
++    let storages = (0..addresses)
++        .map(|account| {
++            (
++                address(account),
++                StorageTrieUpdatesSorted {
++                    storage_nodes: (0..512)
++                        .step_by(stride)
++                        .map(|index| {
++                            (
++                                path(index),
++                                Some(node(u64::from(index) + (u64::from(round) << 32), 8)),
++                            )
++                        })
++                        .collect(),
++                },
++            )
++        })
++        .collect();
++    Updates { accounts, storages }
++}
++
++fn write(db: &DatabaseEnv, updates: &Updates) {
++    let tx = db.tx_mut().unwrap();
++    let mut cursor = tx.cursor_write::<Accounts>().unwrap();
++    for (path, node) in &updates.accounts {
++        cursor.upsert((*path).into(), node).unwrap();
++    }
++    drop(cursor);
++    for (account, updates) in &updates.storages {
++        DatabaseStorageTrieCursor::<_, Adapter>::new(
++            tx.cursor_dup_write::<Storages>().unwrap(),
++            *account,
++        )
++        .write_storage_trie_updates_sorted(updates)
++        .unwrap();
++    }
++    tx.commit().unwrap();
++}
++
++#[cfg(target_os = "linux")]
++fn evict_file(path: &Path) -> (i64, i64) {
++    let output = std::process::Command::new("python3")
++        .args([
++            "-c",
++            r#"
++import ctypes,mmap,os,sys
++f=os.open(sys.argv[1],os.O_RDONLY)
++os.posix_fadvise(f,0,0,os.POSIX_FADV_DONTNEED)
++size=os.fstat(f).st_size
++mapping=mmap.mmap(f,size,access=mmap.ACCESS_COPY)
++pages=(size+mmap.PAGESIZE-1)//mmap.PAGESIZE
++vector=(ctypes.c_ubyte*pages)()
++libc=ctypes.CDLL(None,use_errno=True)
++libc.mincore.argtypes=[ctypes.c_void_p,ctypes.c_size_t,ctypes.POINTER(ctypes.c_ubyte)]
++rc=libc.mincore(ctypes.addressof(ctypes.c_char.from_buffer(mapping)),size,vector)
++assert rc==0,ctypes.get_errno()
++print(sum(x&1 for x in vector),pages)
++mapping.close()
++os.close(f)
++"#,
++        ])
++        .arg(path.join("mdbx.dat"))
++        .output()
++        .unwrap();
++    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
++    let values = String::from_utf8(output.stdout).unwrap();
++    let mut values = values.split_whitespace().map(|v| v.parse().unwrap());
++    (values.next().unwrap(), values.next().unwrap())
++}
++
++#[cfg(not(target_os = "linux"))]
++fn evict_file(_: &Path) -> (i64, i64) {
++    panic!("file-local cold-cache benchmark requires Linux");
++}
++
++#[cfg(target_os = "linux")]
++fn major_faults() -> u64 {
++    let stat = std::fs::read_to_string("/proc/self/stat").unwrap();
++    stat.rsplit_once(')').unwrap().1.split_whitespace().nth(9).unwrap().parse().unwrap()
++}
++
++#[cfg(not(target_os = "linux"))]
++fn major_faults() -> u64 {
++    0
++}
++
++fn run(case: &str, samples: u32) {
++    let mut dirs =
++        [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
++    let large = case != "fresh";
++    let initial = updates(0, large, true);
++    for (index, dir) in dirs.iter().enumerate() {
++        let db = open(dir.path(), index);
++        if large {
++            write(&db, &initial);
++        }
++    }
++    for round in 1..samples + 5 {
++        let updates = updates(round, large, !large);
++        let mut expected_storage = None;
++        let mut expected_accounts = None;
++        for turn in 0..3 {
++            let index = ((turn + round) % 3) as usize;
++            if case == "fresh" {
++                dirs[index] = tempfile::tempdir().unwrap();
++            }
++            let dir = &dirs[index];
++            let (resident, pages) = if case == "cold" { evict_file(dir.path()) } else { (-1, -1) };
++            let db = open(dir.path(), index);
++            let before = db.info().unwrap().page_ops();
++            let faults = major_faults();
++            let start = Instant::now();
++            write(&db, &updates);
++            let elapsed = start.elapsed().as_nanos();
++            let faults = major_faults() - faults;
++            let after = db.info().unwrap().page_ops();
++            drop(db);
++            let reopened = open(dir.path(), index);
++            let actual = snapshot::<Adapter>(&reopened.tx().unwrap());
++            let actual_accounts = accounts(&reopened);
++            if let Some(expected) = &expected_storage {
++                assert_eq!(&actual, expected);
++            } else {
++                expected_storage = Some(actual);
++            }
++            if let Some(expected) = &expected_accounts {
++                assert_eq!(&actual_accounts, expected);
++            } else {
++                expected_accounts = Some(actual_accounts);
++            }
++            if round >= 5 {
++                println!(
++                    "{case},{},{},{elapsed},{},{},{faults},{resident},{pages}",
++                    ["off", "on", "shadow"][index],
++                    round - 4,
++                    after.mincore - before.mincore,
++                    after.prefault - before.prefault
++                );
++            }
++        }
++    }
++}
++
++fn main() {
++    let samples =
++        std::env::var("MPT_PREFAULT_SAMPLES").map(|v| v.parse::<u32>().unwrap()).unwrap_or(12);
++    assert!(samples > 0);
++    println!("case,prefault,sample,durable_ns,mincore_calls,prefault_writes,major_faults,resident_pages_before,total_pages");
++    for case in ["fresh", "warm", "cold"] {
++        run(case, samples);
++    }
++}

@@ -1,0 +1,127 @@
+{
+  "prepared_utc": "2026-09-04T11:42:01.214600+00:00",
+  "baseline_commit": "eadb887f1c1698e7bd932f60a0c654dccccd081f",
+  "candidate_commit": "33c491663d96c545e49e8af4cb6edc233132f0ce",
+  "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1\nLLVM version: 22.1.8\n",
+  "profile": "profiling (inherits release: opt-level=3, lto=thin, codegen-units=16, panic=unwind; debug=full, strip=none)",
+  "RUSTFLAGS": "-C target-cpu=native",
+  "features": [
+    "default",
+    "alloy-primitives/asm-keccak",
+    "alloy-primitives/keccak-cache-global"
+  ],
+  "harness_sha256": "fede8b3ab85dc11baf03a586b385c02010680b387e9f7f4be28dd3f3bc8d84c2",
+  "baseline_worktree": "/tmp/reth-mpt-baseline-20260904",
+  "baseline_target": "/tmp/reth-root-baseline-native-target",
+  "candidate_build_worktree": "/tmp/reth-hash-mask-33-native (clean33 before subsequent experimental edits)",
+  "candidate_build_target": "/tmp/reth-hash-mask-native-target",
+  "candidate_binary": "/tmp/reth-mpt-bench/state-root-retained33-native-cache",
+  "candidate_binary_sha256": "2445b0cdc518be7de6fa10ceb94816890b34f4491129917a5830d73e168294d8",
+  "candidate_build_log": "build-logs/retained33.log",
+  "source_sha256_at_commits": {
+    "eadb887f1c1698e7bd932f60a0c654dccccd081f": {
+      "crates/trie/sparse/src/arena/branch_child_idx.rs": "0d132691b7047ccc4c4fe4f8f5d8e8fffc75192c9e2e9fabd6d42cb39b6ceefe",
+      "crates/trie/sparse/src/arena/cursor.rs": "13aae6496dd50d392d2360e2efbe84f243e73dd42c355816be8324aee2deb85b",
+      "crates/trie/sparse/src/arena/mod.rs": "1844dbd0be22639456e7c4f819a2723ed894a1c299b676d3f23a3c8ce6c22a88",
+      "crates/trie/sparse/src/arena/nodes.rs": "5bd364c53d2ceda5c84533386860d72d2a2428a2aad8a5d09f6009be2ff78b2f",
+      "crates/trie/sparse/src/lib.rs": "f428531c1ae2472f6d62b0cdcdcab3b01ae222f3c88d74b305e88f03cbb54664",
+      "crates/trie/sparse/src/metrics.rs": "1da1589bb80d64de796c8d1f51658e705f9be43697a70b03651846280f0235b2",
+      "crates/trie/sparse/src/state.rs": "2b8621c741f56c414ac8503e6341e9e7ae5e16c3902579c8f4321e1301c2d303",
+      "crates/trie/sparse/src/traits.rs": "568f085e2e3b16305dab322523e0d1bfa5d9f446ddc16abffa363d6d65039da3",
+      "crates/trie/sparse/src/trie.rs": "a4e197c60a81c34c05ef826039af3be821d74b0083545b9f68cf8c09c55d612e",
+      "Cargo.lock": "0c5760aa7b1404351f24a8aa585298f8697bb4a4ac2344b65a3d38b46b7812a3",
+      "Cargo.toml": "da1c2c5fc728fdf2bd67806962ee97d5115e431088aadeb4239306a2286dadb2",
+      "crates/trie/sparse/Cargo.toml": "5f844bed23307e9bf0faa2a28c27116f67eb827003e7ba82f06cc187129351e6"
+    },
+    "33c491663d96c545e49e8af4cb6edc233132f0ce": {
+      "crates/trie/sparse/src/arena/branch_child_idx.rs": "fddb3408e3eb67ed36cbc47a7b26a8185e4c40dee14259f8a6892442e3cdb74c",
+      "crates/trie/sparse/src/arena/cursor.rs": "b32baa20261f3a66b703e5771858d5bf8082f59619827635d4f80af6c6e315ef",
+      "crates/trie/sparse/src/arena/mod.rs": "b33827bb20fa032f67edf3981d0eb8492240c20068ad7645dcfe8c17dc7e76b9",
+      "crates/trie/sparse/src/arena/nodes.rs": "f0a6bd1075b6994c7dd18f70c1d0229606cce267ce300354872d4c7dfe5f1dc6",
+      "crates/trie/sparse/src/lib.rs": "f428531c1ae2472f6d62b0cdcdcab3b01ae222f3c88d74b305e88f03cbb54664",
+      "crates/trie/sparse/src/metrics.rs": "1da1589bb80d64de796c8d1f51658e705f9be43697a70b03651846280f0235b2",
+      "crates/trie/sparse/src/state.rs": "bc0bd4df1ef268b251f401b4912e713ca6a3e47cbf2dfb011d6222886d4cb85f",
+      "crates/trie/sparse/src/traits.rs": "568f085e2e3b16305dab322523e0d1bfa5d9f446ddc16abffa363d6d65039da3",
+      "crates/trie/sparse/src/trie.rs": "a4e197c60a81c34c05ef826039af3be821d74b0083545b9f68cf8c09c55d612e",
+      "Cargo.lock": "a2eed0e7fefc427bc2de88180fc151c1cb2549f863cd73b54fe2880059b2d9b4",
+      "Cargo.toml": "da1c2c5fc728fdf2bd67806962ee97d5115e431088aadeb4239306a2286dadb2",
+      "crates/trie/sparse/Cargo.toml": "efd740923b0effc4af7087f5d64435d8aca86db650edbd0b59571d4942b2cf3b",
+      "crates/trie/sparse/benches/state_root.rs": "fede8b3ab85dc11baf03a586b385c02010680b387e9f7f4be28dd3f3bc8d84c2"
+    }
+  },
+  "scope": "Synthetic storage-trie kernel; no database I/O. Fixtures, updates input allocation, cloning and HashBuilder checks excluded. Timed update_root includes apply+root+take_updates. Both executables use default system allocator, not node jemalloc. Global Keccak cache is warmed by repeated fixture/reference hashing and five untimed samples; repeats reuse identical input values; hit ratio unavailable. This tests a repeated, cache-warm kernel, not independently changing blocks or full Reth.",
+  "candidate_build_log_sha256": "d0fed4953652b3ac34a8dc97832292b1b07257ab633d8b6b0a9b588ca14a5d17",
+  "baseline_binary": "/tmp/reth-mpt-bench/state-root-baseline-native-cache",
+  "baseline_binary_sha256": "3c9e82bc045b08378e49630f5ad7c897bb977ffbe487f4121cc1b218ac9974d8",
+  "baseline_build_log": "build-logs/baseline.log",
+  "baseline_build_log_sha256": "82739b15b6588ad34d0a52c8a401c3d0ec6d66136225c921cbc41e63836bc062",
+  "baseline_build_command": "CARGO_TARGET_DIR=/tmp/reth-root-baseline-native-target CARGO_BUILD_JOBS=8 RUSTFLAGS='-C target-cpu=native' cargo +1.98.1 bench --locked --profile profiling -p reth-trie-sparse --features alloy-primitives/asm-keccak,alloy-primitives/keccak-cache-global --bench state_root --no-run",
+  "effective_alloy_features": [
+    {
+      "target": "/tmp/reth-root-baseline-native-target",
+      "fingerprint": "/tmp/reth-root-baseline-native-target/profiling/.fingerprint/alloy-primitives-71586b2a6bf59922/lib-alloy_primitives.json",
+      "fingerprint_sha256": "10bd83b747dd37e4551136ad641be4fbbed047ec49bf8f6ab2fd1587baed2399",
+      "features": [
+        "arbitrary",
+        "asm-keccak",
+        "k256",
+        "keccak-cache",
+        "keccak-cache-global",
+        "map",
+        "map-foldhash",
+        "map-indexmap",
+        "rlp",
+        "serde",
+        "std"
+      ],
+      "rustflags": [
+        "-C",
+        "target-cpu=native"
+      ]
+    },
+    {
+      "target": "/tmp/reth-hash-mask-native-target",
+      "fingerprint": "/tmp/reth-hash-mask-native-target/profiling/.fingerprint/alloy-primitives-1f69ff247c20e9c8/lib-alloy_primitives.json",
+      "fingerprint_sha256": "9af6be9f72e76b5d12ec0405678895f8158df3af07280b1459cc826205b6019d",
+      "features": [
+        "arbitrary",
+        "asm-keccak",
+        "k256",
+        "keccak-cache",
+        "keccak-cache-global",
+        "map",
+        "map-foldhash",
+        "map-indexmap",
+        "rlp",
+        "serde",
+        "std"
+      ],
+      "rustflags": [
+        "-C",
+        "target-cpu=native"
+      ]
+    },
+    {
+      "target": "/tmp/reth-hash-mask-native-target",
+      "fingerprint": "/tmp/reth-hash-mask-native-target/profiling/.fingerprint/alloy-primitives-71586b2a6bf59922/lib-alloy_primitives.json",
+      "fingerprint_sha256": "10bd83b747dd37e4551136ad641be4fbbed047ec49bf8f6ab2fd1587baed2399",
+      "features": [
+        "arbitrary",
+        "asm-keccak",
+        "k256",
+        "keccak-cache",
+        "keccak-cache-global",
+        "map",
+        "map-foldhash",
+        "map-indexmap",
+        "rlp",
+        "serde",
+        "std"
+      ],
+      "rustflags": [
+        "-C",
+        "target-cpu=native"
+      ]
+    }
+  ]
+}

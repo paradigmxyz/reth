@@ -1,0 +1,53 @@
+{
+  "compiler": "rustc 1.96.1 (31fca3adb 2026-06-26)\nbinary: rustc\ncommit-hash: 31fca3adb283cc9dfd56b49cdee9a96eb9c96ffd\ncommit-date: 2026-06-26\nhost: x86_64-unknown-linux-gnu\nrelease: 1.96.1\nLLVM version: 22.1.2",
+  "profile": "profiling",
+  "base_commit": "eadb887f1c1698e7bd932f60a0c654dccccd081f",
+  "artifacts": {
+    "baseline-asm": {
+      "workspace": "/tmp/reth-mpt-baseline-20260904",
+      "binary": "/tmp/reth-mpt-bench/state-root-baseline-asm",
+      "sha256": "c7ab4e638c28e43c802d6e89c7fc697c6a4e34b3bc209ee027a858038a045f50",
+      "features": "default,alloy-primitives/asm-keccak",
+      "source_sha256": {
+        "crates/trie/sparse/src/arena/branch_child_idx.rs": "0d132691b7047ccc4c4fe4f8f5d8e8fffc75192c9e2e9fabd6d42cb39b6ceefe",
+        "crates/trie/sparse/src/arena/cursor.rs": "13aae6496dd50d392d2360e2efbe84f243e73dd42c355816be8324aee2deb85b",
+        "crates/trie/sparse/src/arena/mod.rs": "1844dbd0be22639456e7c4f819a2723ed894a1c299b676d3f23a3c8ce6c22a88",
+        "crates/trie/sparse/src/arena/nodes.rs": "5bd364c53d2ceda5c84533386860d72d2a2428a2aad8a5d09f6009be2ff78b2f",
+        "crates/trie/sparse/src/lib.rs": "f428531c1ae2472f6d62b0cdcdcab3b01ae222f3c88d74b305e88f03cbb54664",
+        "crates/trie/sparse/src/metrics.rs": "1da1589bb80d64de796c8d1f51658e705f9be43697a70b03651846280f0235b2",
+        "crates/trie/sparse/src/state.rs": "2b8621c741f56c414ac8503e6341e9e7ae5e16c3902579c8f4321e1301c2d303",
+        "crates/trie/sparse/src/traits.rs": "568f085e2e3b16305dab322523e0d1bfa5d9f446ddc16abffa363d6d65039da3",
+        "crates/trie/sparse/src/trie.rs": "a4e197c60a81c34c05ef826039af3be821d74b0083545b9f68cf8c09c55d612e",
+        "crates/trie/sparse/Cargo.toml": "efd740923b0effc4af7087f5d64435d8aca86db650edbd0b59571d4942b2cf3b",
+        "crates/trie/sparse/benches/state_root.rs": "fede8b3ab85dc11baf03a586b385c02010680b387e9f7f4be28dd3f3bc8d84c2",
+        "Cargo.lock": "0c5760aa7b1404351f24a8aa585298f8697bb4a4ac2344b65a3d38b46b7812a3",
+        "Cargo.toml": "da1c2c5fc728fdf2bd67806962ee97d5115e431088aadeb4239306a2286dadb2"
+      },
+      "build_log": "build-logs/build-baseline-asm.log",
+      "build_log_sha256": "f9bb7b1b1f6b629de4a2ef21df4009f6d2ac91fe18ac13a0aaae916b9a178403"
+    },
+    "final-asm": {
+      "workspace": "/home/ubuntu/reth",
+      "binary": "/tmp/reth-mpt-bench/state-root-final-asm",
+      "sha256": "fd4059b39e9c0339e36a119806dd70d46a88c1e99c0c4cd09a9bb9da9a441cd3",
+      "features": "default,alloy-primitives/asm-keccak",
+      "source_sha256": {
+        "crates/trie/sparse/src/arena/branch_child_idx.rs": "fddb3408e3eb67ed36cbc47a7b26a8185e4c40dee14259f8a6892442e3cdb74c",
+        "crates/trie/sparse/src/arena/cursor.rs": "b32baa20261f3a66b703e5771858d5bf8082f59619827635d4f80af6c6e315ef",
+        "crates/trie/sparse/src/arena/mod.rs": "b33827bb20fa032f67edf3981d0eb8492240c20068ad7645dcfe8c17dc7e76b9",
+        "crates/trie/sparse/src/arena/nodes.rs": "f0a6bd1075b6994c7dd18f70c1d0229606cce267ce300354872d4c7dfe5f1dc6",
+        "crates/trie/sparse/src/lib.rs": "f428531c1ae2472f6d62b0cdcdcab3b01ae222f3c88d74b305e88f03cbb54664",
+        "crates/trie/sparse/src/metrics.rs": "1da1589bb80d64de796c8d1f51658e705f9be43697a70b03651846280f0235b2",
+        "crates/trie/sparse/src/state.rs": "2b8621c741f56c414ac8503e6341e9e7ae5e16c3902579c8f4321e1301c2d303",
+        "crates/trie/sparse/src/traits.rs": "568f085e2e3b16305dab322523e0d1bfa5d9f446ddc16abffa363d6d65039da3",
+        "crates/trie/sparse/src/trie.rs": "a4e197c60a81c34c05ef826039af3be821d74b0083545b9f68cf8c09c55d612e",
+        "crates/trie/sparse/Cargo.toml": "efd740923b0effc4af7087f5d64435d8aca86db650edbd0b59571d4942b2cf3b",
+        "crates/trie/sparse/benches/state_root.rs": "fede8b3ab85dc11baf03a586b385c02010680b387e9f7f4be28dd3f3bc8d84c2",
+        "Cargo.lock": "a2eed0e7fefc427bc2de88180fc151c1cb2549f863cd73b54fe2880059b2d9b4",
+        "Cargo.toml": "da1c2c5fc728fdf2bd67806962ee97d5115e431088aadeb4239306a2286dadb2"
+      },
+      "build_log": "build-logs/build-final-asm.log",
+      "build_log_sha256": "1cf74fd11118c658ef847e1e1a264bab0d51a6587e8ad66f5cd35206a76cac29"
+    }
+  }
+}

@@ -1,0 +1,1391 @@
+{
+  "scope": "Read-write committed MDBX transactions, including other writers such as pruning. Diagnostic only; no acceptance verdict. CPU GC time overlaps wall-clock GC and must not be added to it.",
+  "runs": [
+    {
+      "run": "baseline-1",
+      "side": "baseline",
+      "archive_sha256": "9b66de91ebb8b4dbc216992772e14ffe2a03b0ad76c40a588c51dceac7c8343e",
+      "missing_metrics": [],
+      "common_scrapes": 133,
+      "first_scrape_ms": 1788523917602,
+      "last_scrape_ms": 1788523944001,
+      "canonical_blocks": 499.0,
+      "stages": {
+        "preparation": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 168.0,
+          "completed_calls": 126.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "gc_wallclock": {
+          "status": "observed",
+          "sum_first": 0.011565563999999999,
+          "sum_last": 0.052533294000000064,
+          "seconds": 0.04096773000000006,
+          "count_first": 42.0,
+          "count_last": 168.0,
+          "completed_calls": 126.0,
+          "ms_per_canonical_block": 0.0820996593186374,
+          "ms_per_commit": 0.3251407142857148
+        },
+        "gc_cputime": {
+          "status": "observed",
+          "sum_first": 0.0010070279999999999,
+          "sum_last": 0.00770529,
+          "seconds": 0.006698262,
+          "count_first": 42.0,
+          "count_last": 168.0,
+          "completed_calls": 126.0,
+          "ms_per_canonical_block": 0.013423370741482966,
+          "ms_per_commit": 0.05316080952380952
+        },
+        "audit": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 168.0,
+          "completed_calls": 126.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "write": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 168.0,
+          "completed_calls": 126.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "sync": {
+          "status": "observed",
+          "sum_first": 1.495848546,
+          "sum_last": 8.963357874000002,
+          "seconds": 7.467509328000002,
+          "count_first": 42.0,
+          "count_last": 168.0,
+          "completed_calls": 126.0,
+          "ms_per_canonical_block": 14.964948553106217,
+          "ms_per_commit": 59.265947047619065
+        },
+        "ending": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 168.0,
+          "completed_calls": 126.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "whole": {
+          "status": "observed",
+          "sum_first": 1.507963398,
+          "sum_last": 9.018485027999997,
+          "seconds": 7.510521629999997,
+          "count_first": 42.0,
+          "count_last": 168.0,
+          "completed_calls": 126.0,
+          "ms_per_canonical_block": 15.051145551102197,
+          "ms_per_commit": 59.6073145238095
+        }
+      }
+    },
+    {
+      "run": "baseline-2",
+      "side": "baseline",
+      "archive_sha256": "5c5cd58b10554a0b4c1e5386ce191b06c061d8f8b6ddd7f283824e9cddc91cba",
+      "missing_metrics": [],
+      "common_scrapes": 134,
+      "first_scrape_ms": 1788523986635,
+      "last_scrape_ms": 1788524013235,
+      "canonical_blocks": 499.0,
+      "stages": {
+        "preparation": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "gc_wallclock": {
+          "status": "observed",
+          "sum_first": 0.011336693999999998,
+          "sum_last": 0.05125162200000001,
+          "seconds": 0.039914928000000016,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.07998983567134273,
+          "ms_per_commit": 0.31931942400000013
+        },
+        "gc_cputime": {
+          "status": "observed",
+          "sum_first": 0.000793416,
+          "sum_last": 0.010238118000000001,
+          "seconds": 0.009444702000000001,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.01892725851703407,
+          "ms_per_commit": 0.07555761600000001
+        },
+        "audit": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "write": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "sync": {
+          "status": "observed",
+          "sum_first": 1.52938563,
+          "sum_last": 9.008063814,
+          "seconds": 7.478678184,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 14.987331030060119,
+          "ms_per_commit": 59.829425472
+        },
+        "ending": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 1.5258e-05,
+          "seconds": 1.5258e-05,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 3.057715430861724e-05,
+          "ms_per_commit": 0.000122064
+        },
+        "whole": {
+          "status": "observed",
+          "sum_first": 1.5413479020000005,
+          "sum_last": 9.061894037999995,
+          "seconds": 7.520546135999995,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 15.071234741482955,
+          "ms_per_commit": 60.16436908799996
+        }
+      }
+    },
+    {
+      "run": "baseline-3",
+      "side": "baseline",
+      "archive_sha256": "81372eb57cba33ad20e32cb6c5ad3feb6433d1cca2549ec179028a74a4abd870",
+      "missing_metrics": [],
+      "common_scrapes": 134,
+      "first_scrape_ms": 1788524192982,
+      "last_scrape_ms": 1788524219582,
+      "canonical_blocks": 499.0,
+      "stages": {
+        "preparation": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "gc_wallclock": {
+          "status": "observed",
+          "sum_first": 0.011443499999999999,
+          "sum_last": 0.05048872200000006,
+          "seconds": 0.03904522200000006,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.07824693787575163,
+          "ms_per_commit": 0.3123617760000005
+        },
+        "gc_cputime": {
+          "status": "observed",
+          "sum_first": 0.00205983,
+          "sum_last": 0.007903644000000001,
+          "seconds": 0.005843814000000001,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.011711050100200402,
+          "ms_per_commit": 0.04675051200000001
+        },
+        "audit": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "write": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "sync": {
+          "status": "observed",
+          "sum_first": 1.56371613,
+          "sum_last": 9.03243084,
+          "seconds": 7.46871471,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 14.967364148296594,
+          "ms_per_commit": 59.74971768
+        },
+        "ending": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 1.5258e-05,
+          "seconds": 1.5258e-05,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 3.057715430861724e-05,
+          "ms_per_commit": 0.000122064
+        },
+        "whole": {
+          "status": "observed",
+          "sum_first": 1.5757241760000003,
+          "sum_last": 9.085360841999993,
+          "seconds": 7.5096366659999925,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 15.049372076152288,
+          "ms_per_commit": 60.07709332799994
+        }
+      }
+    },
+    {
+      "run": "baseline-4",
+      "side": "baseline",
+      "archive_sha256": "8860a6fb129e862cfb9b29a02b79d6de63337881b0f62680adc4e98652be2bfb",
+      "missing_metrics": [],
+      "common_scrapes": 133,
+      "first_scrape_ms": 1788524262394,
+      "last_scrape_ms": 1788524288794,
+      "canonical_blocks": 498.0,
+      "stages": {
+        "preparation": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 166.0,
+          "completed_calls": 124.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "gc_wallclock": {
+          "status": "observed",
+          "sum_first": 0.011321435999999999,
+          "sum_last": 0.049588500000000035,
+          "seconds": 0.03826706400000004,
+          "count_first": 42.0,
+          "count_last": 166.0,
+          "completed_calls": 124.0,
+          "ms_per_canonical_block": 0.0768414939759037,
+          "ms_per_commit": 0.30860535483871
+        },
+        "gc_cputime": {
+          "status": "observed",
+          "sum_first": 0.0018614760000000001,
+          "sum_last": 0.0083919,
+          "seconds": 0.006530424000000001,
+          "count_first": 42.0,
+          "count_last": 166.0,
+          "completed_calls": 124.0,
+          "ms_per_canonical_block": 0.013113301204819279,
+          "ms_per_commit": 0.05266470967741936
+        },
+        "audit": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 166.0,
+          "completed_calls": 124.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "write": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 166.0,
+          "completed_calls": 124.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "sync": {
+          "status": "observed",
+          "sum_first": 1.459442958,
+          "sum_last": 8.710441266000002,
+          "seconds": 7.250998308000002,
+          "count_first": 42.0,
+          "count_last": 166.0,
+          "completed_calls": 124.0,
+          "ms_per_canonical_block": 14.560237566265064,
+          "ms_per_commit": 58.47579280645163
+        },
+        "ending": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 166.0,
+          "completed_calls": 124.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "whole": {
+          "status": "observed",
+          "sum_first": 1.4713441980000002,
+          "sum_last": 8.762486303999998,
+          "seconds": 7.291142105999997,
+          "count_first": 42.0,
+          "count_last": 166.0,
+          "completed_calls": 124.0,
+          "ms_per_canonical_block": 14.640847602409632,
+          "ms_per_commit": 58.7995331129032
+        }
+      }
+    },
+    {
+      "run": "baseline-5",
+      "side": "baseline",
+      "archive_sha256": "9cc6f18d7b9b49e97a6971ca51c0bfdbedc1cac2b65b328d021b947738264eda",
+      "missing_metrics": [],
+      "common_scrapes": 135,
+      "first_scrape_ms": 1788524469047,
+      "last_scrape_ms": 1788524495846,
+      "canonical_blocks": 499.0,
+      "stages": {
+        "preparation": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 168.0,
+          "completed_calls": 126.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "gc_wallclock": {
+          "status": "observed",
+          "sum_first": 0.011001018000000001,
+          "sum_last": 0.04969530600000005,
+          "seconds": 0.03869428800000005,
+          "count_first": 42.0,
+          "count_last": 168.0,
+          "completed_calls": 126.0,
+          "ms_per_canonical_block": 0.07754366332665341,
+          "ms_per_commit": 0.3070975238095242
+        },
+        "gc_cputime": {
+          "status": "observed",
+          "sum_first": 0.000366192,
+          "sum_last": 0.0070034220000000005,
+          "seconds": 0.006637230000000001,
+          "count_first": 42.0,
+          "count_last": 168.0,
+          "completed_calls": 126.0,
+          "ms_per_canonical_block": 0.013301062124248498,
+          "ms_per_commit": 0.052676428571428575
+        },
+        "audit": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 168.0,
+          "completed_calls": 126.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "write": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 168.0,
+          "completed_calls": 126.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "sync": {
+          "status": "observed",
+          "sum_first": 1.7384202300000005,
+          "sum_last": 9.388232142000001,
+          "seconds": 7.6498119120000005,
+          "count_first": 42.0,
+          "count_last": 168.0,
+          "completed_calls": 126.0,
+          "ms_per_canonical_block": 15.330284392785572,
+          "ms_per_commit": 60.71279295238095
+        },
+        "ending": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 168.0,
+          "completed_calls": 126.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "whole": {
+          "status": "observed",
+          "sum_first": 1.7501231159999997,
+          "sum_last": 9.440628113999992,
+          "seconds": 7.690504997999993,
+          "count_first": 42.0,
+          "count_last": 168.0,
+          "completed_calls": 126.0,
+          "ms_per_canonical_block": 15.41183366332664,
+          "ms_per_commit": 61.035753952380894
+        }
+      }
+    },
+    {
+      "run": "baseline-6",
+      "side": "baseline",
+      "archive_sha256": "835d37e1eaeaffb6949213726ebbb04250e64b361ebfbda26132f1dca47deb35",
+      "missing_metrics": [],
+      "common_scrapes": 133,
+      "first_scrape_ms": 1788524538691,
+      "last_scrape_ms": 1788524565091,
+      "canonical_blocks": 497.0,
+      "stages": {
+        "preparation": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "gc_wallclock": {
+          "status": "observed",
+          "sum_first": 0.011687628000000002,
+          "sum_last": 0.05254855200000006,
+          "seconds": 0.04086092400000006,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.08221513883299811,
+          "ms_per_commit": 0.3268873920000005
+        },
+        "gc_cputime": {
+          "status": "observed",
+          "sum_first": 0.002319216,
+          "sum_last": 0.008361384000000003,
+          "seconds": 0.006042168000000003,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.012157279678068416,
+          "ms_per_commit": 0.048337344000000025
+        },
+        "audit": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "write": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "sync": {
+          "status": "observed",
+          "sum_first": 1.5532491420000005,
+          "sum_last": 8.946726654,
+          "seconds": 7.3934775120000005,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 14.87621229778672,
+          "ms_per_commit": 59.147820096000004
+        },
+        "ending": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "whole": {
+          "status": "observed",
+          "sum_first": 1.565592864,
+          "sum_last": 9.001777517999995,
+          "seconds": 7.436184653999995,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 14.962142160965785,
+          "ms_per_commit": 59.48947723199996
+        }
+      }
+    },
+    {
+      "run": "feature-1",
+      "side": "feature",
+      "archive_sha256": "55061e9b3b39bb8f9f540f590f0ad7fdd6a98e3cab316499932acc207a3cff5d",
+      "missing_metrics": [],
+      "common_scrapes": 131,
+      "first_scrape_ms": 1788523849259,
+      "last_scrape_ms": 1788523875259,
+      "canonical_blocks": 498.0,
+      "stages": {
+        "preparation": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 166.0,
+          "completed_calls": 124.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "gc_wallclock": {
+          "status": "observed",
+          "sum_first": 0.012679398000000001,
+          "sum_last": 0.052060296000000034,
+          "seconds": 0.03938089800000003,
+          "count_first": 42.0,
+          "count_last": 166.0,
+          "completed_calls": 124.0,
+          "ms_per_canonical_block": 0.079078108433735,
+          "ms_per_commit": 0.31758788709677443
+        },
+        "gc_cputime": {
+          "status": "observed",
+          "sum_first": 0.003143148,
+          "sum_last": 0.012084336000000001,
+          "seconds": 0.008941188000000001,
+          "count_first": 42.0,
+          "count_last": 166.0,
+          "completed_calls": 124.0,
+          "ms_per_canonical_block": 0.01795419277108434,
+          "ms_per_commit": 0.07210635483870968
+        },
+        "audit": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 166.0,
+          "completed_calls": 124.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "write": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 166.0,
+          "completed_calls": 124.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "sync": {
+          "status": "observed",
+          "sum_first": 1.5191322540000005,
+          "sum_last": 8.655817625999997,
+          "seconds": 7.136685371999997,
+          "count_first": 42.0,
+          "count_last": 166.0,
+          "completed_calls": 124.0,
+          "ms_per_canonical_block": 14.330693518072284,
+          "ms_per_commit": 57.55391429032256
+        },
+        "ending": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 166.0,
+          "completed_calls": 124.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "whole": {
+          "status": "observed",
+          "sum_first": 1.5325440360000002,
+          "sum_last": 8.710532813999993,
+          "seconds": 7.177988777999993,
+          "count_first": 42.0,
+          "count_last": 166.0,
+          "completed_calls": 124.0,
+          "ms_per_canonical_block": 14.413632084337337,
+          "ms_per_commit": 57.887006274193496
+        }
+      }
+    },
+    {
+      "run": "feature-2",
+      "side": "feature",
+      "archive_sha256": "1fa8ab196704c5c6cc16e38636a97dd6635143b3e3d7705e83ef3505503da00b",
+      "missing_metrics": [],
+      "common_scrapes": 131,
+      "first_scrape_ms": 1788524055828,
+      "last_scrape_ms": 1788524081827,
+      "canonical_blocks": 498.0,
+      "stages": {
+        "preparation": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 166.0,
+          "completed_calls": 124.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "gc_wallclock": {
+          "status": "observed",
+          "sum_first": 0.012740429999999999,
+          "sum_last": 0.052273908000000056,
+          "seconds": 0.03953347800000006,
+          "count_first": 42.0,
+          "count_last": 166.0,
+          "completed_calls": 124.0,
+          "ms_per_canonical_block": 0.07938449397590373,
+          "ms_per_commit": 0.3188183709677424
+        },
+        "gc_cputime": {
+          "status": "observed",
+          "sum_first": 0.004043370000000001,
+          "sum_last": 0.009749862000000003,
+          "seconds": 0.005706492000000002,
+          "count_first": 42.0,
+          "count_last": 166.0,
+          "completed_calls": 124.0,
+          "ms_per_canonical_block": 0.011458819277108439,
+          "ms_per_commit": 0.04602009677419357
+        },
+        "audit": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 166.0,
+          "completed_calls": 124.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "write": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 166.0,
+          "completed_calls": 124.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "sync": {
+          "status": "observed",
+          "sum_first": 1.5668745360000003,
+          "sum_last": 8.767170509999996,
+          "seconds": 7.200295973999996,
+          "count_first": 42.0,
+          "count_last": 166.0,
+          "completed_calls": 124.0,
+          "ms_per_canonical_block": 14.458425650602402,
+          "ms_per_commit": 58.066903016129
+        },
+        "ending": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 166.0,
+          "completed_calls": 124.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "whole": {
+          "status": "observed",
+          "sum_first": 1.58019477,
+          "sum_last": 8.821961987999996,
+          "seconds": 7.241767217999996,
+          "count_first": 42.0,
+          "count_last": 166.0,
+          "completed_calls": 124.0,
+          "ms_per_canonical_block": 14.541701240963848,
+          "ms_per_commit": 58.401348532258034
+        }
+      }
+    },
+    {
+      "run": "feature-3",
+      "side": "feature",
+      "archive_sha256": "ebadb6797e3129fe2f2c5c5a3d7dcfb1d9c3488074e97e56768ba76ce4de0e16",
+      "missing_metrics": [],
+      "common_scrapes": 132,
+      "first_scrape_ms": 1788524124367,
+      "last_scrape_ms": 1788524150566,
+      "canonical_blocks": 497.0,
+      "stages": {
+        "preparation": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "gc_wallclock": {
+          "status": "observed",
+          "sum_first": 0.011885982000000003,
+          "sum_last": 0.049741080000000035,
+          "seconds": 0.03785509800000003,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.07616719919517109,
+          "ms_per_commit": 0.30284078400000025
+        },
+        "gc_cputime": {
+          "status": "observed",
+          "sum_first": 0.0025633440000000004,
+          "sum_last": 0.011245146000000001,
+          "seconds": 0.008681802,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.017468414486921532,
+          "ms_per_commit": 0.069454416
+        },
+        "audit": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "write": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "sync": {
+          "status": "observed",
+          "sum_first": 1.7387559060000002,
+          "sum_last": 9.349156404,
+          "seconds": 7.610400498000001,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 15.312677058350102,
+          "ms_per_commit": 60.883203984000005
+        },
+        "ending": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "whole": {
+          "status": "observed",
+          "sum_first": 1.751252208,
+          "sum_last": 9.401399796,
+          "seconds": 7.650147587999999,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 15.39265108249497,
+          "ms_per_commit": 61.201180703999995
+        }
+      }
+    },
+    {
+      "run": "feature-4",
+      "side": "feature",
+      "archive_sha256": "19203122da2b8dc15dff9e668573120b9f53b26fc7c24430cc749e697d33db22",
+      "missing_metrics": [],
+      "common_scrapes": 131,
+      "first_scrape_ms": 1788524331461,
+      "last_scrape_ms": 1788524357460,
+      "canonical_blocks": 497.0,
+      "stages": {
+        "preparation": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "gc_wallclock": {
+          "status": "observed",
+          "sum_first": 0.011855466,
+          "sum_last": 0.05071759200000003,
+          "seconds": 0.038862126000000025,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.07819341247484915,
+          "ms_per_commit": 0.3108970080000002
+        },
+        "gc_cputime": {
+          "status": "observed",
+          "sum_first": 0.000900222,
+          "sum_last": 0.007552710000000001,
+          "seconds": 0.006652488000000001,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.01338528772635815,
+          "ms_per_commit": 0.053219904000000005
+        },
+        "audit": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "write": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "sync": {
+          "status": "observed",
+          "sum_first": 1.4839778220000004,
+          "sum_last": 8.969125398000001,
+          "seconds": 7.485147576000001,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 15.060659106639841,
+          "ms_per_commit": 59.88118060800001
+        },
+        "ending": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "whole": {
+          "status": "observed",
+          "sum_first": 1.496382576,
+          "sum_last": 9.022223237999993,
+          "seconds": 7.525840661999993,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 15.142536543259544,
+          "ms_per_commit": 60.206725295999945
+        }
+      }
+    },
+    {
+      "run": "feature-5",
+      "side": "feature",
+      "archive_sha256": "427449bdaae9ed1392f3d623423bfc88bb1742f49d391760946cbb6463a299ea",
+      "missing_metrics": [],
+      "common_scrapes": 132,
+      "first_scrape_ms": 1788524399993,
+      "last_scrape_ms": 1788524426193,
+      "canonical_blocks": 498.0,
+      "stages": {
+        "preparation": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 1.5258e-05,
+          "seconds": 1.5258e-05,
+          "count_first": 42.0,
+          "count_last": 166.0,
+          "completed_calls": 124.0,
+          "ms_per_canonical_block": 3.0638554216867474e-05,
+          "ms_per_commit": 0.0001230483870967742
+        },
+        "gc_wallclock": {
+          "status": "observed",
+          "sum_first": 0.012954041999999997,
+          "sum_last": 0.05106852600000003,
+          "seconds": 0.03811448400000003,
+          "count_first": 42.0,
+          "count_last": 166.0,
+          "completed_calls": 124.0,
+          "ms_per_canonical_block": 0.07653510843373501,
+          "ms_per_commit": 0.3073748709677422
+        },
+        "gc_cputime": {
+          "status": "observed",
+          "sum_first": 0.005248752,
+          "sum_last": 0.014998614000000002,
+          "seconds": 0.009749862000000001,
+          "count_first": 42.0,
+          "count_last": 166.0,
+          "completed_calls": 124.0,
+          "ms_per_canonical_block": 0.019578036144578318,
+          "ms_per_commit": 0.07862791935483873
+        },
+        "audit": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 166.0,
+          "completed_calls": 124.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "write": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 166.0,
+          "completed_calls": 124.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "sync": {
+          "status": "observed",
+          "sum_first": 1.5002581080000006,
+          "sum_last": 8.759480478000002,
+          "seconds": 7.259222370000002,
+          "count_first": 42.0,
+          "count_last": 166.0,
+          "completed_calls": 124.0,
+          "ms_per_canonical_block": 14.576751746987954,
+          "ms_per_commit": 58.542115887096784
+        },
+        "ending": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 166.0,
+          "completed_calls": 124.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "whole": {
+          "status": "observed",
+          "sum_first": 1.5138529860000003,
+          "sum_last": 8.813234411999996,
+          "seconds": 7.2993814259999965,
+          "count_first": 42.0,
+          "count_last": 166.0,
+          "completed_calls": 124.0,
+          "ms_per_canonical_block": 14.65739242168674,
+          "ms_per_commit": 58.865979241935456
+        }
+      }
+    },
+    {
+      "run": "feature-6",
+      "side": "feature",
+      "archive_sha256": "d382bfd00a37e85e3efc3cb4d7e44bfd582475662ebbe9d1badb6dd8dc6580cc",
+      "missing_metrics": [],
+      "common_scrapes": 131,
+      "first_scrape_ms": 1788524607943,
+      "last_scrape_ms": 1788524633943,
+      "canonical_blocks": 498.0,
+      "stages": {
+        "preparation": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "gc_wallclock": {
+          "status": "observed",
+          "sum_first": 0.012816719999999998,
+          "sum_last": 0.053067324000000034,
+          "seconds": 0.04025060400000004,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.08082450602409647,
+          "ms_per_commit": 0.3220048320000003
+        },
+        "gc_cputime": {
+          "status": "observed",
+          "sum_first": 0.0023802479999999997,
+          "sum_last": 0.009047994,
+          "seconds": 0.0066677460000000004,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.013389048192771084,
+          "ms_per_commit": 0.053341968000000003
+        },
+        "audit": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "write": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 0.0,
+          "seconds": 0.0,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 0.0,
+          "ms_per_commit": 0.0
+        },
+        "sync": {
+          "status": "observed",
+          "sum_first": 1.5380521740000004,
+          "sum_last": 8.918041614000003,
+          "seconds": 7.379989440000003,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 14.819255903614463,
+          "ms_per_commit": 59.03991552000002
+        },
+        "ending": {
+          "status": "observed",
+          "sum_first": 0.0,
+          "sum_last": 1.5258e-05,
+          "seconds": 1.5258e-05,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 3.0638554216867474e-05,
+          "ms_per_commit": 0.000122064
+        },
+        "whole": {
+          "status": "observed",
+          "sum_first": 1.5515249880000002,
+          "sum_last": 8.973763829999998,
+          "seconds": 7.422238841999997,
+          "count_first": 42.0,
+          "count_last": 167.0,
+          "completed_calls": 125.0,
+          "ms_per_canonical_block": 14.904094060240958,
+          "ms_per_commit": 59.377910735999976
+        }
+      }
+    }
+  ],
+  "comparisons": {
+    "preparation": {
+      "baseline_run_values": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "feature_run_values": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        3.0638554216867474e-05,
+        0.0
+      ],
+      "baseline_ms_per_block": 0.0,
+      "feature_ms_per_block": 5.106425702811246e-06,
+      "difference_ms_per_block": 5.106425702811246e-06,
+      "change_percent": null,
+      "ci_half_width_ms_per_block": 7.659638554216869e-06
+    },
+    "gc_wallclock": {
+      "baseline_run_values": [
+        0.0820996593186374,
+        0.07998983567134273,
+        0.07824693787575163,
+        0.0768414939759037,
+        0.07754366332665341,
+        0.08221513883299811
+      ],
+      "feature_run_values": [
+        0.079078108433735,
+        0.07938449397590373,
+        0.07616719919517109,
+        0.07819341247484915,
+        0.07653510843373501,
+        0.08082450602409647
+      ],
+      "baseline_ms_per_block": 0.07948945483354783,
+      "feature_ms_per_block": 0.0783638047562484,
+      "difference_ms_per_block": -0.0011256500772994227,
+      "change_percent": -1.4160998835085148,
+      "ci_half_width_ms_per_block": 0.0021342827187266766
+    },
+    "gc_cputime": {
+      "baseline_run_values": [
+        0.013423370741482966,
+        0.01892725851703407,
+        0.011711050100200402,
+        0.013113301204819279,
+        0.013301062124248498,
+        0.012157279678068416
+      ],
+      "feature_run_values": [
+        0.01795419277108434,
+        0.011458819277108439,
+        0.017468414486921532,
+        0.01338528772635815,
+        0.019578036144578318,
+        0.013389048192771084
+      ],
+      "baseline_ms_per_block": 0.013772220394308938,
+      "feature_ms_per_block": 0.015538966433136977,
+      "difference_ms_per_block": 0.0017667460388280393,
+      "change_percent": 12.828331149551664,
+      "ci_half_width_ms_per_block": 0.0030415217301102424
+    },
+    "audit": {
+      "baseline_run_values": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "feature_run_values": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "baseline_ms_per_block": 0.0,
+      "feature_ms_per_block": 0.0,
+      "difference_ms_per_block": 0.0,
+      "change_percent": null,
+      "ci_half_width_ms_per_block": 0.0
+    },
+    "write": {
+      "baseline_run_values": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "feature_run_values": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "baseline_ms_per_block": 0.0,
+      "feature_ms_per_block": 0.0,
+      "difference_ms_per_block": 0.0,
+      "change_percent": null,
+      "ci_half_width_ms_per_block": 0.0
+    },
+    "sync": {
+      "baseline_run_values": [
+        14.964948553106217,
+        14.987331030060119,
+        14.967364148296594,
+        14.560237566265064,
+        15.330284392785572,
+        14.87621229778672
+      ],
+      "feature_run_values": [
+        14.330693518072284,
+        14.458425650602402,
+        15.312677058350102,
+        15.060659106639841,
+        14.576751746987954,
+        14.819255903614463
+      ],
+      "baseline_ms_per_block": 14.947729664716714,
+      "feature_ms_per_block": 14.759743830711175,
+      "difference_ms_per_block": -0.1879858340055396,
+      "change_percent": -1.2576213125480185,
+      "ci_half_width_ms_per_block": 0.32634602043858685
+    },
+    "ending": {
+      "baseline_run_values": [
+        0.0,
+        3.057715430861724e-05,
+        3.057715430861724e-05,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "feature_run_values": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        3.0638554216867474e-05
+      ],
+      "baseline_ms_per_block": 1.0192384769539079e-05,
+      "feature_ms_per_block": 5.106425702811246e-06,
+      "difference_ms_per_block": -5.085959066727833e-06,
+      "change_percent": -49.899598393574294,
+      "ci_half_width_ms_per_block": 1.5298810472350326e-05
+    },
+    "whole": {
+      "baseline_run_values": [
+        15.051145551102197,
+        15.071234741482955,
+        15.049372076152288,
+        14.640847602409632,
+        15.41183366332664,
+        14.962142160965785
+      ],
+      "feature_run_values": [
+        14.413632084337337,
+        14.541701240963848,
+        15.39265108249497,
+        15.142536543259544,
+        14.65739242168674,
+        14.904094060240958
+      ],
+      "baseline_ms_per_block": 15.031095965906584,
+      "feature_ms_per_block": 14.842001238830566,
+      "difference_ms_per_block": -0.18909472707601793,
+      "change_percent": -1.2580235500120662,
+      "ci_half_width_ms_per_block": 0.33147475441439767
+    }
+  }
+}

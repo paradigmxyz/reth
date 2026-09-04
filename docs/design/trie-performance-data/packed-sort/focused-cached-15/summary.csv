@@ -1,0 +1,3 @@
+threads,case,runs_per_mode,samples_per_run,baseline_median_ns,baseline_p25_ns,baseline_p75_ns,candidate_median_ns,candidate_p25_ns,candidate_p75_ns,speedup,reduction_percent
+15,root_cached/32768/discard,8,200,90.0,77.75,102.5,90.5,85.25,110.0,0.9945,-0.56
+15,root_cached/32768/retain,8,200,85.5,77.5,100.0,90.0,77.5,98.25,0.95,-5.26

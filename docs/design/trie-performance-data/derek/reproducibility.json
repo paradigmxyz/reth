@@ -1,0 +1,901 @@
+{
+  "scope": "Existing run metadata, artifacts, and allowlisted log excerpts only. No snapshots/nodes/replays started.",
+  "runs": [
+    {
+      "name": "iteration-1",
+      "run_id": 33862537836,
+      "url": "https://github.com/paradigmxyz/reth/actions/runs/33862537836",
+      "workflow": {
+        "path": ".github/workflows/bench.yml",
+        "source_commit": "d14a096bbf042943b52815fa9a135e2b2112f917",
+        "source_branch": "perf/trie-root-persistence",
+        "file_sha256": "444d1500a1a08388d496b69e485f74d7dcbe7a6631478f14b612bade7e583908",
+        "attempt": 1,
+        "created_at": "2026-09-04T10:17:44Z",
+        "completed_at": "2026-09-04T10:38:08Z"
+      },
+      "runner": {
+        "runner_name": "ghr-euw-10",
+        "host_name": "ghr-euw-10",
+        "labels": [
+          "self-hosted",
+          "Linux",
+          "X64",
+          "available"
+        ],
+        "cpu_model": "AMD EPYC 4585PX 16-Core Processor",
+        "physical_cores": 16,
+        "logical_cpus_total": 32,
+        "online_cpus": "0-15",
+        "offline_smt_cpus": "16-31",
+        "node_allowed_cpus": "1-15",
+        "driver_affinity": "0 (workflow taskset)",
+        "numa_nodes": 1,
+        "scaling_min_khz": 4300000,
+        "scaling_max_khz": 4300000,
+        "kernel": "6.8.0-107-generic",
+        "memory_total_display": "125 GiB",
+        "memory_limit_log_display": "121992MB (95% of 128412MB)",
+        "memory_max_bytes": 127918040268
+      },
+      "build": {
+        "compiler": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "toolchain": "stable-x86_64-unknown-linux-gnu",
+        "command": "cargo build --locked --profile profiling --bin reth",
+        "rustflags": "-C target-cpu=native",
+        "profiling_profile": {
+          "inherits": "release",
+          "debug": "full",
+          "strip": "none"
+        },
+        "observed_binary_info": {
+          "baseline": {
+            "build_profile": "profiling",
+            "build_timestamp": "2026-09-04T10:18:43.701636176Z",
+            "cargo_features": "asm_keccak,jemalloc,keccak_cache_global,min_trace_logs,otlp,otlp_logs",
+            "git_sha": "eadb887f",
+            "target_triple": "x86_64-unknown-linux-gnu",
+            "version": "2.5.2"
+          },
+          "feature": {
+            "build_profile": "profiling",
+            "build_timestamp": "2026-09-04T10:18:41.836995854Z",
+            "cargo_features": "asm_keccak,jemalloc,keccak_cache_global,min_trace_logs,otlp,otlp_logs",
+            "git_sha": "d14a096b",
+            "target_triple": "x86_64-unknown-linux-gnu",
+            "version": "2.5.2"
+          }
+        },
+        "binary_sha256": null,
+        "binary_sha256_status": "executable not retained in artifact"
+      },
+      "snapshot": {
+        "manifest_hash_prefix": "1de6440dc1acb2a5",
+        "full_manifest_sha256": null,
+        "full_manifest_sha256_status": "only 16-character prefix exposed in log",
+        "manifest_url": "omitted; configured through secret",
+        "base_checkpoint": 25883487
+      },
+      "workload": {
+        "block_first": 25883613,
+        "block_last": 25884112,
+        "blocks": 500,
+        "warmup_first": 25883488,
+        "warmup_last": 25883612,
+        "warmup_blocks": 125,
+        "run_pairs": 6,
+        "run_order": "ABBAABBAABBA",
+        "payload_file_sha256": "70c2694e3941f5de87c466907b13f2f3bbb93d4f5bc1bcbb6455485600573c50",
+        "block_number_hash_pairs_sha256": "10d6131b4b911dddd4cfed5ef5ec98146bab25cecdef8657e1883a989baf9412",
+        "first_block_hash": "0x1ad930cd7fadd735aedccb9ef799bb0065f655e79dc59d269d0dcd75f365892a",
+        "last_block_hash": "0x9c9620f92aa7360cc1d25406767467ad2ba351c8d71b9406bcbc0257ab6a257d",
+        "total_transactions": 150862,
+        "total_gas": 15020694260,
+        "every_run_hash_and_workload_equal": true,
+        "run_verification": [
+          {
+            "run": "baseline-1",
+            "report_sha256": "deeed45b198e9e2ffcd9217cc5e3c6c568572fbb868caa36f62705842cbad691",
+            "log_sha256": "3f77888b1d921a6c4a02d16874541fa7d2d2251636d39b3c9bfabe3a61d9f3b9",
+            "all_block_hashes_match": true,
+            "all_block_gas_tx_counts_match": true,
+            "run_stats": {
+              "start_block": 25883613,
+              "end_block": 25884112,
+              "total_blocks": 500,
+              "total_txs": 150862,
+              "total_gas": 15020694260,
+              "duration_ms": 26696,
+              "avg_blocks_per_second": 18.72939766257117,
+              "avg_tps": 5651.108780341624,
+              "avg_gas_per_second": 562657111.9268804,
+              "block_time_p50_ms": 12000,
+              "block_time_p95_ms": 12000,
+              "block_time_p99_ms": 12000
+            }
+          },
+          {
+            "run": "baseline-2",
+            "report_sha256": "90092b9ad309ca4f17f9c886608c996fee1cbf0ce68b70077d3402f13c493be3",
+            "log_sha256": "02d6e3326fe53eb90e56fd7919bb50de816e70bd9d65aa04a1c50d51c3a37146",
+            "all_block_hashes_match": true,
+            "all_block_gas_tx_counts_match": true,
+            "run_stats": {
+              "start_block": 25883613,
+              "end_block": 25884112,
+              "total_blocks": 500,
+              "total_txs": 150862,
+              "total_gas": 15020694260,
+              "duration_ms": 27041,
+              "avg_blocks_per_second": 18.490440442291334,
+              "avg_tps": 5579.0096520099105,
+              "avg_gas_per_second": 555478505.2327946,
+              "block_time_p50_ms": 12000,
+              "block_time_p95_ms": 12000,
+              "block_time_p99_ms": 12000
+            }
+          },
+          {
+            "run": "baseline-3",
+            "report_sha256": "057ddeca233ce99d1ab99375ae07e8b1a820ae882e6c225f98a84698b2281354",
+            "log_sha256": "cb6901d8adfa4162a94767f14c33130777bc0258acf5e88808186b65989ae8f4",
+            "all_block_hashes_match": true,
+            "all_block_gas_tx_counts_match": true,
+            "run_stats": {
+              "start_block": 25883613,
+              "end_block": 25884112,
+              "total_blocks": 500,
+              "total_txs": 150862,
+              "total_gas": 15020694260,
+              "duration_ms": 26756,
+              "avg_blocks_per_second": 18.687397219315294,
+              "avg_tps": 5638.436238600688,
+              "avg_gas_per_second": 561395360.2930183,
+              "block_time_p50_ms": 12000,
+              "block_time_p95_ms": 12000,
+              "block_time_p99_ms": 12000
+            }
+          },
+          {
+            "run": "baseline-4",
+            "report_sha256": "2970c96181fa9ce5f07b9deb8251f2bae81a19b65cfa0716bda384ad3037fc89",
+            "log_sha256": "adc1f05c3fefc76f365a474660594af3a7617d85696deb6f8bff6cbb708b3204",
+            "all_block_hashes_match": true,
+            "all_block_gas_tx_counts_match": true,
+            "run_stats": {
+              "start_block": 25883613,
+              "end_block": 25884112,
+              "total_blocks": 500,
+              "total_txs": 150862,
+              "total_gas": 15020694260,
+              "duration_ms": 26797,
+              "avg_blocks_per_second": 18.65880509012203,
+              "avg_tps": 5629.8093070119785,
+              "avg_gas_per_second": 560536413.0313095,
+              "block_time_p50_ms": 12000,
+              "block_time_p95_ms": 12000,
+              "block_time_p99_ms": 12000
+            }
+          },
+          {
+            "run": "baseline-5",
+            "report_sha256": "12ec6a519c4224b58aef8f48e76c115fa18edd9da6ae71aa2b1e13350f2911fa",
+            "log_sha256": "21c02801b05f9f0402efa9ab43e74ff5c121ea42249c6ef42a1bba727b777838",
+            "all_block_hashes_match": true,
+            "all_block_gas_tx_counts_match": true,
+            "run_stats": {
+              "start_block": 25883613,
+              "end_block": 25884112,
+              "total_blocks": 500,
+              "total_txs": 150862,
+              "total_gas": 15020694260,
+              "duration_ms": 26536,
+              "avg_blocks_per_second": 18.842327404280976,
+              "avg_tps": 5685.182393729273,
+              "avg_gas_per_second": 566049678.1730479,
+              "block_time_p50_ms": 12000,
+              "block_time_p95_ms": 12000,
+              "block_time_p99_ms": 12000
+            }
+          },
+          {
+            "run": "baseline-6",
+            "report_sha256": "858a95f6d0cde6a0a5654606781fe82b1bd474e822bbca33179108d1a7301d68",
+            "log_sha256": "4b0ed4c907830bb5ca58dd1eb9365c991817181ac3438f4e7c1b0802fa782a5b",
+            "all_block_hashes_match": true,
+            "all_block_gas_tx_counts_match": true,
+            "run_stats": {
+              "start_block": 25883613,
+              "end_block": 25884112,
+              "total_blocks": 500,
+              "total_txs": 150862,
+              "total_gas": 15020694260,
+              "duration_ms": 26510,
+              "avg_blocks_per_second": 18.86080724254998,
+              "avg_tps": 5690.75820445115,
+              "avg_gas_per_second": 566604838.1742738,
+              "block_time_p50_ms": 12000,
+              "block_time_p95_ms": 12000,
+              "block_time_p99_ms": 12000
+            }
+          },
+          {
+            "run": "feature-1",
+            "report_sha256": "f221d42e68b174fad6caa07bea4116663728747e36d724cd4191997efb5d6a0b",
+            "log_sha256": "bd318de1770ed6dbd5355c6c63e1c6b41572191d4da75476299787b0109e6ec7",
+            "all_block_hashes_match": true,
+            "all_block_gas_tx_counts_match": true,
+            "run_stats": {
+              "start_block": 25883613,
+              "end_block": 25884112,
+              "total_blocks": 500,
+              "total_txs": 150862,
+              "total_gas": 15020694260,
+              "duration_ms": 26398,
+              "avg_blocks_per_second": 18.940828850670506,
+              "avg_tps": 5714.902644139707,
+              "avg_gas_per_second": 569008798.3938177,
+              "block_time_p50_ms": 12000,
+              "block_time_p95_ms": 12000,
+              "block_time_p99_ms": 12000
+            }
+          },
+          {
+            "run": "feature-2",
+            "report_sha256": "1ddf0205dfacd513b1aeeda17a0736c5482e4b690870d4bc4b90ad88e8c35bb7",
+            "log_sha256": "f178b8bddb2356f23abb016ea2444aa378a1dbd8563fb56a0620f36b9f73f150",
+            "all_block_hashes_match": true,
+            "all_block_gas_tx_counts_match": true,
+            "run_stats": {
+              "start_block": 25883613,
+              "end_block": 25884112,
+              "total_blocks": 500,
+              "total_txs": 150862,
+              "total_gas": 15020694260,
+              "duration_ms": 26355,
+              "avg_blocks_per_second": 18.971732119142477,
+              "avg_tps": 5724.226901916145,
+              "avg_gas_per_second": 569937175.488522,
+              "block_time_p50_ms": 12000,
+              "block_time_p95_ms": 12000,
+              "block_time_p99_ms": 12000
+            }
+          },
+          {
+            "run": "feature-3",
+            "report_sha256": "00f72084ddc8725e1a2897ad51513a17434212113146b2b8096aef27e3948593",
+            "log_sha256": "d065b6415eaa1e56e2f0f05f0abdc691179ca81e30476dc8b4744886ce9a51d4",
+            "all_block_hashes_match": true,
+            "all_block_gas_tx_counts_match": true,
+            "run_stats": {
+              "start_block": 25883613,
+              "end_block": 25884112,
+              "total_blocks": 500,
+              "total_txs": 150862,
+              "total_gas": 15020694260,
+              "duration_ms": 26271,
+              "avg_blocks_per_second": 19.032393133112556,
+              "avg_tps": 5742.529785695253,
+              "avg_gas_per_second": 571759516.5772144,
+              "block_time_p50_ms": 12000,
+              "block_time_p95_ms": 12000,
+              "block_time_p99_ms": 12000
+            }
+          },
+          {
+            "run": "feature-4",
+            "report_sha256": "056cee23c28acc51cd961ad7d3012c0748c3f5fd960179a16efd9a51ac174a3e",
+            "log_sha256": "11231231ad815ba9e426866e6956fcd2b4d6ff7a4e570a95de7bc4da8439ec32",
+            "all_block_hashes_match": true,
+            "all_block_gas_tx_counts_match": true,
+            "run_stats": {
+              "start_block": 25883613,
+              "end_block": 25884112,
+              "total_blocks": 500,
+              "total_txs": 150862,
+              "total_gas": 15020694260,
+              "duration_ms": 26392,
+              "avg_blocks_per_second": 18.945134889360414,
+              "avg_tps": 5716.201879357382,
+              "avg_gas_per_second": 569138157.7750834,
+              "block_time_p50_ms": 12000,
+              "block_time_p95_ms": 12000,
+              "block_time_p99_ms": 12000
+            }
+          },
+          {
+            "run": "feature-5",
+            "report_sha256": "7acc111f683f22d8334aa3266617cfe0f9bc1e08022429344f8a959a14246fd6",
+            "log_sha256": "2a20a9ad8d9d3279e52b051456ce756e33611332d6527b4f0f86ed53046a2d0c",
+            "all_block_hashes_match": true,
+            "all_block_gas_tx_counts_match": true,
+            "run_stats": {
+              "start_block": 25883613,
+              "end_block": 25884112,
+              "total_blocks": 500,
+              "total_txs": 150862,
+              "total_gas": 15020694260,
+              "duration_ms": 26308,
+              "avg_blocks_per_second": 19.0056256651969,
+              "avg_tps": 5734.453398205869,
+              "avg_gas_per_second": 570955384.6738634,
+              "block_time_p50_ms": 12000,
+              "block_time_p95_ms": 12000,
+              "block_time_p99_ms": 12000
+            }
+          },
+          {
+            "run": "feature-6",
+            "report_sha256": "3e2f49b24846b9f4d4dd767fe331174721a7b7e70fddc149550713e97158e256",
+            "log_sha256": "7c39e63a6c904eecbde1cd342ddafed348bf03cd243df8488a8e720410325be3",
+            "all_block_hashes_match": true,
+            "all_block_gas_tx_counts_match": true,
+            "run_stats": {
+              "start_block": 25883613,
+              "end_block": 25884112,
+              "total_blocks": 500,
+              "total_txs": 150862,
+              "total_gas": 15020694260,
+              "duration_ms": 26243,
+              "avg_blocks_per_second": 19.052699767557066,
+              "avg_tps": 5748.6567846663875,
+              "avg_gas_per_second": 572369556.0720954,
+              "block_time_p50_ms": 12000,
+              "block_time_p95_ms": 12000,
+              "block_time_p99_ms": 12000
+            }
+          }
+        ]
+      },
+      "inputs": {
+        "blocks": 500,
+        "warmup": 125,
+        "run_pairs": 6,
+        "mode": "engine",
+        "slack": "never",
+        "samply": false,
+        "tracing_chrome": false,
+        "otlp": false,
+        "metrics": true
+      },
+      "evidence_files": [
+        "reproducibility-evidence/iteration-1-log-excerpts.json",
+        "iteration-1-results/summary.json"
+      ],
+      "limitations": [
+        "Driver and node affinity recorded from launch configuration; no independent runtime affinity snapshot retained.",
+        "Snapshot content identifier is a manifest-hash prefix, not a complete snapshot checksum.",
+        "No sampled executable SHA256 retained."
+      ]
+    },
+    {
+      "name": "iteration-2",
+      "run_id": 33864115641,
+      "url": "https://github.com/paradigmxyz/reth/actions/runs/33864115641",
+      "workflow": {
+        "path": ".github/workflows/bench.yml",
+        "source_commit": "33c491663d96c545e49e8af4cb6edc233132f0ce",
+        "source_branch": "perf/trie-root-persistence-proof-scan",
+        "file_sha256": "444d1500a1a08388d496b69e485f74d7dcbe7a6631478f14b612bade7e583908",
+        "attempt": 1,
+        "created_at": "2026-09-04T10:37:33Z",
+        "completed_at": "2026-09-04T10:59:17Z"
+      },
+      "runner": {
+        "runner_name": "ghr-euw-08",
+        "host_name": "ghr-euw-08",
+        "labels": [
+          "self-hosted",
+          "Linux",
+          "X64",
+          "available"
+        ],
+        "cpu_model": "AMD EPYC 4585PX 16-Core Processor",
+        "physical_cores": 16,
+        "logical_cpus_total": 32,
+        "online_cpus": "0-15",
+        "offline_smt_cpus": "16-31",
+        "node_allowed_cpus": "1-15",
+        "driver_affinity": "0 (workflow taskset)",
+        "numa_nodes": 1,
+        "scaling_min_khz": 4300000,
+        "scaling_max_khz": 4300000,
+        "kernel": "6.8.0-107-generic",
+        "memory_total_display": "125 GiB",
+        "memory_limit_log_display": "121993MB (95% of 128414MB)",
+        "memory_max_bytes": 127919822438
+      },
+      "build": {
+        "compiler": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "toolchain": "stable-x86_64-unknown-linux-gnu",
+        "command": "cargo build --locked --profile profiling --bin reth",
+        "rustflags": "-C target-cpu=native",
+        "profiling_profile": {
+          "inherits": "release",
+          "debug": "full",
+          "strip": "none"
+        },
+        "observed_binary_info": {
+          "baseline": {
+            "build_profile": "profiling",
+            "build_timestamp": "2026-09-04T10:39:26.924641314Z",
+            "cargo_features": "asm_keccak,jemalloc,keccak_cache_global,min_trace_logs,otlp,otlp_logs",
+            "git_sha": "eadb887f",
+            "target_triple": "x86_64-unknown-linux-gnu",
+            "version": "2.5.2"
+          },
+          "feature": {
+            "build_profile": "profiling",
+            "build_timestamp": "2026-09-04T10:39:25.595645178Z",
+            "cargo_features": "asm_keccak,jemalloc,keccak_cache_global,min_trace_logs,otlp,otlp_logs",
+            "git_sha": "33c49166",
+            "target_triple": "x86_64-unknown-linux-gnu",
+            "version": "2.5.2"
+          }
+        },
+        "binary_sha256": null,
+        "binary_sha256_status": "executable not retained in artifact"
+      },
+      "snapshot": {
+        "manifest_hash_prefix": "1de6440dc1acb2a5",
+        "full_manifest_sha256": null,
+        "full_manifest_sha256_status": "only 16-character prefix exposed in log",
+        "manifest_url": "omitted; configured through secret",
+        "base_checkpoint": 25883487
+      },
+      "workload": {
+        "block_first": 25883613,
+        "block_last": 25884112,
+        "blocks": 500,
+        "warmup_first": 25883488,
+        "warmup_last": 25883612,
+        "warmup_blocks": 125,
+        "run_pairs": 6,
+        "run_order": "ABBAABBAABBA",
+        "payload_file_sha256": "70c2694e3941f5de87c466907b13f2f3bbb93d4f5bc1bcbb6455485600573c50",
+        "block_number_hash_pairs_sha256": "10d6131b4b911dddd4cfed5ef5ec98146bab25cecdef8657e1883a989baf9412",
+        "first_block_hash": "0x1ad930cd7fadd735aedccb9ef799bb0065f655e79dc59d269d0dcd75f365892a",
+        "last_block_hash": "0x9c9620f92aa7360cc1d25406767467ad2ba351c8d71b9406bcbc0257ab6a257d",
+        "total_transactions": 150862,
+        "total_gas": 15020694260,
+        "every_run_hash_and_workload_equal": true,
+        "run_verification": [
+          {
+            "run": "baseline-1",
+            "report_sha256": "e06dad6d157de5516ea37838302dcd37ba91b3705b3bf7c15c3540a5f8ac759c",
+            "log_sha256": "99b9c398f2ace6243c6535ca0e7d137d1214da7f7294534369d0e80fc57d02f2",
+            "all_block_hashes_match": true,
+            "all_block_gas_tx_counts_match": true,
+            "run_stats": {
+              "start_block": 25883613,
+              "end_block": 25884112,
+              "total_blocks": 500,
+              "total_txs": 150862,
+              "total_gas": 15020694260,
+              "duration_ms": 27042,
+              "avg_blocks_per_second": 18.48975667480216,
+              "avg_tps": 5578.8033429480065,
+              "avg_gas_per_second": 555457963.907995,
+              "block_time_p50_ms": 12000,
+              "block_time_p95_ms": 12000,
+              "block_time_p99_ms": 12000
+            }
+          },
+          {
+            "run": "baseline-2",
+            "report_sha256": "6f361284a5dd2886227dd0dd0163768b796663f6935311d903a084a4d91f931f",
+            "log_sha256": "c8ba482ac92dbaa42500f83b4966684bf8929ed493828e8f876ec426a198532f",
+            "all_block_hashes_match": true,
+            "all_block_gas_tx_counts_match": true,
+            "run_stats": {
+              "start_block": 25883613,
+              "end_block": 25884112,
+              "total_blocks": 500,
+              "total_txs": 150862,
+              "total_gas": 15020694260,
+              "duration_ms": 26903,
+              "avg_blocks_per_second": 18.585287886109356,
+              "avg_tps": 5607.62740214846,
+              "avg_gas_per_second": 558327854.1426607,
+              "block_time_p50_ms": 12000,
+              "block_time_p95_ms": 12000,
+              "block_time_p99_ms": 12000
+            }
+          },
+          {
+            "run": "baseline-3",
+            "report_sha256": "0fd83e6229579c4956d6e43b2f0a43ffd1116cbccd155ab3775e307e7040e635",
+            "log_sha256": "32782f69aa6343bb00c1ab5fe5fbc6325653ef5c38b6c8ebbf6be4c210cb92b1",
+            "all_block_hashes_match": true,
+            "all_block_gas_tx_counts_match": true,
+            "run_stats": {
+              "start_block": 25883613,
+              "end_block": 25884112,
+              "total_blocks": 500,
+              "total_txs": 150862,
+              "total_gas": 15020694260,
+              "duration_ms": 27242,
+              "avg_blocks_per_second": 18.354012187064093,
+              "avg_tps": 5537.845973129726,
+              "avg_gas_per_second": 551380011.0124073,
+              "block_time_p50_ms": 12000,
+              "block_time_p95_ms": 12000,
+              "block_time_p99_ms": 12000
+            }
+          },
+          {
+            "run": "baseline-4",
+            "report_sha256": "04dbcd7e4cbacb849c72be3bedbcf5d0a795d4bac001a4923bc726812cdef2b0",
+            "log_sha256": "a386c8bf9c1e8d5366a5d14a36085b4f3ad67d86f0dd00cea30ce349d3dfadc7",
+            "all_block_hashes_match": true,
+            "all_block_gas_tx_counts_match": true,
+            "run_stats": {
+              "start_block": 25883613,
+              "end_block": 25884112,
+              "total_blocks": 500,
+              "total_txs": 150862,
+              "total_gas": 15020694260,
+              "duration_ms": 27243,
+              "avg_blocks_per_second": 18.353338472268106,
+              "avg_tps": 5537.642697206622,
+              "avg_gas_per_second": 551359771.6844695,
+              "block_time_p50_ms": 12000,
+              "block_time_p95_ms": 12000,
+              "block_time_p99_ms": 12000
+            }
+          },
+          {
+            "run": "baseline-5",
+            "report_sha256": "58a2ab8ae36b02d1ebf5e7326648998c85c4e81787b5a5fb176ddcaf87d092f3",
+            "log_sha256": "1dbfadf17e307fd22942eb1eb43fea8172194feb81c6d0bc8118f49086afb255",
+            "all_block_hashes_match": true,
+            "all_block_gas_tx_counts_match": true,
+            "run_stats": {
+              "start_block": 25883613,
+              "end_block": 25884112,
+              "total_blocks": 500,
+              "total_txs": 150862,
+              "total_gas": 15020694260,
+              "duration_ms": 26876,
+              "avg_blocks_per_second": 18.6039589224587,
+              "avg_tps": 5613.260901919928,
+              "avg_gas_per_second": 558888757.9997023,
+              "block_time_p50_ms": 12000,
+              "block_time_p95_ms": 12000,
+              "block_time_p99_ms": 12000
+            }
+          },
+          {
+            "run": "baseline-6",
+            "report_sha256": "1ffa16c48a7ae8ba2b1d02ac010202d45d831bb34a082960236465461945287f",
+            "log_sha256": "76e7743af2720d913ceae7452c50c86ea2eb5c8299b7b6794e5e575d7337a4d5",
+            "all_block_hashes_match": true,
+            "all_block_gas_tx_counts_match": true,
+            "run_stats": {
+              "start_block": 25883613,
+              "end_block": 25884112,
+              "total_blocks": 500,
+              "total_txs": 150862,
+              "total_gas": 15020694260,
+              "duration_ms": 26894,
+              "avg_blocks_per_second": 18.591507399419946,
+              "avg_tps": 5609.503978582584,
+              "avg_gas_per_second": 558514696.9584295,
+              "block_time_p50_ms": 12000,
+              "block_time_p95_ms": 12000,
+              "block_time_p99_ms": 12000
+            }
+          },
+          {
+            "run": "feature-1",
+            "report_sha256": "26472a53de7aaa5b95a0906f3e7e2a71ab59d8b84129b6046b0bcb2d47a07f63",
+            "log_sha256": "ce95eb320389867f06e1f868b00fee9e0df112411f5a9b17a29a76a78a4eaafd",
+            "all_block_hashes_match": true,
+            "all_block_gas_tx_counts_match": true,
+            "run_stats": {
+              "start_block": 25883613,
+              "end_block": 25884112,
+              "total_blocks": 500,
+              "total_txs": 150862,
+              "total_gas": 15020694260,
+              "duration_ms": 26772,
+              "avg_blocks_per_second": 18.67622889586135,
+              "avg_tps": 5635.066487374869,
+              "avg_gas_per_second": 561059848.3490214,
+              "block_time_p50_ms": 12000,
+              "block_time_p95_ms": 12000,
+              "block_time_p99_ms": 12000
+            }
+          },
+          {
+            "run": "feature-2",
+            "report_sha256": "b2c6860906049d349cc1bc6835d786592b777e95a1a086c7ab07f3592a1609eb",
+            "log_sha256": "14de068441638db564dc22223469ba5c8f024c9879f8e4da2313bb5ff7680b87",
+            "all_block_hashes_match": true,
+            "all_block_gas_tx_counts_match": true,
+            "run_stats": {
+              "start_block": 25883613,
+              "end_block": 25884112,
+              "total_blocks": 500,
+              "total_txs": 150862,
+              "total_gas": 15020694260,
+              "duration_ms": 26712,
+              "avg_blocks_per_second": 18.718179095537586,
+              "avg_tps": 5647.723869421982,
+              "avg_gas_per_second": 562320090.5959868,
+              "block_time_p50_ms": 12000,
+              "block_time_p95_ms": 12000,
+              "block_time_p99_ms": 12000
+            }
+          },
+          {
+            "run": "feature-3",
+            "report_sha256": "ed4c0c8b371f345b4d66e28bbf5512e60991349b6c863cd75edfcbdce1ce7bbb",
+            "log_sha256": "468b5068052bb3b267816543f7a1e33efa4383604446b69d9880487f8da7c50f",
+            "all_block_hashes_match": true,
+            "all_block_gas_tx_counts_match": true,
+            "run_stats": {
+              "start_block": 25883613,
+              "end_block": 25884112,
+              "total_blocks": 500,
+              "total_txs": 150862,
+              "total_gas": 15020694260,
+              "duration_ms": 26508,
+              "avg_blocks_per_second": 18.862230270107137,
+              "avg_tps": 5691.187566017806,
+              "avg_gas_per_second": 566647587.8979931,
+              "block_time_p50_ms": 12000,
+              "block_time_p95_ms": 12000,
+              "block_time_p99_ms": 12000
+            }
+          },
+          {
+            "run": "feature-4",
+            "report_sha256": "4ff1617c167a1746c6b3115e59f8c2dbb0031fd984e58fccedaeab303d9f77aa",
+            "log_sha256": "7e6e85135929507ddd25aca0a33887082d0ff31c4752d204fde9a5b547d2695a",
+            "all_block_hashes_match": true,
+            "all_block_gas_tx_counts_match": true,
+            "run_stats": {
+              "start_block": 25883613,
+              "end_block": 25884112,
+              "total_blocks": 500,
+              "total_txs": 150862,
+              "total_gas": 15020694260,
+              "duration_ms": 26787,
+              "avg_blocks_per_second": 18.665770709672604,
+              "avg_tps": 5631.911001605256,
+              "avg_gas_per_second": 560745669.9145108,
+              "block_time_p50_ms": 12000,
+              "block_time_p95_ms": 12000,
+              "block_time_p99_ms": 12000
+            }
+          },
+          {
+            "run": "feature-5",
+            "report_sha256": "0c125ad652328c6baa60e7b93f49b70ce98194a76d7475ae4b3e57752c82a7a2",
+            "log_sha256": "0bc5e70c33b766906eb39937a4362347dd6a94597ddee2e598a1e1edc773c6b0",
+            "all_block_hashes_match": true,
+            "all_block_gas_tx_counts_match": true,
+            "run_stats": {
+              "start_block": 25883613,
+              "end_block": 25884112,
+              "total_blocks": 500,
+              "total_txs": 150862,
+              "total_gas": 15020694260,
+              "duration_ms": 26907,
+              "avg_blocks_per_second": 18.582524993496115,
+              "avg_tps": 5606.793771137623,
+              "avg_gas_per_second": 558244853.0122273,
+              "block_time_p50_ms": 12000,
+              "block_time_p95_ms": 12000,
+              "block_time_p99_ms": 12000
+            }
+          },
+          {
+            "run": "feature-6",
+            "report_sha256": "2638df74bac44916f35e8f9847ad3c2854db319736a5ad5a9cc504c79c7e338c",
+            "log_sha256": "0d16ed265c8ffd8d101f50af8a28a592b129812bda634e388bef4dc7f1d277c9",
+            "all_block_hashes_match": true,
+            "all_block_gas_tx_counts_match": true,
+            "run_stats": {
+              "start_block": 25883613,
+              "end_block": 25884112,
+              "total_blocks": 500,
+              "total_txs": 150862,
+              "total_gas": 15020694260,
+              "duration_ms": 26844,
+              "avg_blocks_per_second": 18.62613619430785,
+              "avg_tps": 5619.952317091343,
+              "avg_gas_per_second": 559554994.0396364,
+              "block_time_p50_ms": 12000,
+              "block_time_p95_ms": 12000,
+              "block_time_p99_ms": 12000
+            }
+          }
+        ]
+      },
+      "inputs": {
+        "blocks": 500,
+        "warmup": 125,
+        "run_pairs": 6,
+        "mode": "engine",
+        "slack": "never",
+        "samply": false,
+        "tracing_chrome": false,
+        "otlp": false,
+        "metrics": true
+      },
+      "evidence_files": [
+        "reproducibility-evidence/iteration-2-log-excerpts.json",
+        "iteration-2-results/summary.json"
+      ],
+      "limitations": [
+        "Driver and node affinity recorded from launch configuration; no independent runtime affinity snapshot retained.",
+        "Snapshot content identifier is a manifest-hash prefix, not a complete snapshot checksum.",
+        "No sampled executable SHA256 retained."
+      ]
+    },
+    {
+      "name": "profile",
+      "run_id": 33864324353,
+      "url": "https://github.com/paradigmxyz/reth/actions/runs/33864324353",
+      "workflow": {
+        "path": ".github/workflows/bench.yml",
+        "source_commit": "33c491663d96c545e49e8af4cb6edc233132f0ce",
+        "source_branch": "perf/trie-root-persistence-proof-scan",
+        "file_sha256": "444d1500a1a08388d496b69e485f74d7dcbe7a6631478f14b612bade7e583908",
+        "attempt": 1,
+        "created_at": "2026-09-04T10:40:18Z",
+        "completed_at": "2026-09-04T10:48:38Z"
+      },
+      "runner": {
+        "runner_name": "ghr-euw-01",
+        "host_name": "ghr-euw-01",
+        "labels": [
+          "self-hosted",
+          "Linux",
+          "X64",
+          "available"
+        ],
+        "cpu_model": "AMD EPYC 4585PX 16-Core Processor",
+        "physical_cores": 16,
+        "logical_cpus_total": 32,
+        "online_cpus": "0-15",
+        "offline_smt_cpus": "16-31",
+        "node_allowed_cpus": "1-15",
+        "driver_affinity": "0 (workflow taskset)",
+        "numa_nodes": 1,
+        "scaling_min_khz": 4300000,
+        "scaling_max_khz": 4300000,
+        "kernel": "6.8.0-101-generic",
+        "memory_total_display": "125 GiB",
+        "memory_limit_log_display": "121992MB (95% of 128412MB)",
+        "memory_max_bytes": 127917911859
+      },
+      "build": {
+        "compiler": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "toolchain": "stable-x86_64-unknown-linux-gnu",
+        "command": "cargo build --locked --profile profiling --bin reth",
+        "rustflags": "-C target-cpu=native",
+        "profiling_profile": {
+          "inherits": "release",
+          "debug": "full",
+          "strip": "none"
+        },
+        "observed_binary_info": {
+          "baseline": {
+            "build_profile": "profiling",
+            "build_timestamp": "2026-09-04T10:41:21.800467525Z",
+            "cargo_features": "asm_keccak,jemalloc,keccak_cache_global,min_trace_logs,otlp,otlp_logs",
+            "git_sha": "eadb887f",
+            "target_triple": "x86_64-unknown-linux-gnu",
+            "version": "2.5.2"
+          },
+          "feature": {
+            "build_profile": "profiling",
+            "build_timestamp": "2026-09-04T10:41:16.034494384Z",
+            "cargo_features": "asm_keccak,jemalloc,keccak_cache_global,min_trace_logs,otlp,otlp_logs",
+            "git_sha": "33c49166",
+            "target_triple": "x86_64-unknown-linux-gnu",
+            "version": "2.5.2"
+          }
+        },
+        "binary_sha256": null,
+        "binary_sha256_status": "executable not retained in artifact"
+      },
+      "snapshot": {
+        "manifest_hash_prefix": "1de6440dc1acb2a5",
+        "full_manifest_sha256": null,
+        "full_manifest_sha256_status": "only 16-character prefix exposed in log",
+        "manifest_url": "omitted; configured through secret",
+        "base_checkpoint": 25883487
+      },
+      "workload": {
+        "block_first": 25883613,
+        "block_last": 25883862,
+        "blocks": 250,
+        "warmup_first": 25883488,
+        "warmup_last": 25883612,
+        "warmup_blocks": 125,
+        "run_pairs": 1,
+        "run_order": "AB",
+        "payload_file_sha256": "8467932b8660b295a64ad7865b382a50046c3fbceb3cf13042abddcbd96178f3",
+        "block_number_hash_pairs_sha256": "5de52252a66d74ee88984070b57381a5164abdc5e69bae7b693782094dcacbac",
+        "first_block_hash": "0x1ad930cd7fadd735aedccb9ef799bb0065f655e79dc59d269d0dcd75f365892a",
+        "last_block_hash": "0xc142ad4937f35b203a946525d5c569e37788a9d08625b8ea6d27b1bc9c2f1786",
+        "total_transactions": 76259,
+        "total_gas": 7414146567,
+        "every_run_hash_and_workload_equal": true,
+        "run_verification": [
+          {
+            "run": "baseline-1",
+            "report_sha256": "8a2229249e6bd3a0b7afb46af014c94089ef96ba8595851dcfbd7dc5ef3bd17d",
+            "log_sha256": "3cca3222bc2036df8860e9fe380a60fa5c2dd2d67de1f6a898d071d303b33940",
+            "all_block_hashes_match": true,
+            "all_block_gas_tx_counts_match": true,
+            "run_stats": {
+              "start_block": 25883613,
+              "end_block": 25883862,
+              "total_blocks": 250,
+              "total_txs": 76259,
+              "total_gas": 7414146567,
+              "duration_ms": 13674,
+              "avg_blocks_per_second": 18.28287260494369,
+              "avg_tps": 5576.934327921604,
+              "avg_gas_per_second": 542207588.6353664,
+              "block_time_p50_ms": 12000,
+              "block_time_p95_ms": 12000,
+              "block_time_p99_ms": 12000
+            }
+          },
+          {
+            "run": "feature-1",
+            "report_sha256": "064419f216ec85adb6242c092670bd91cbf6359735ded38d9842a99ce8f497e0",
+            "log_sha256": "21beefa549ccedb66de65e5d0a35c9e1c19d00534a11a6ae5f520b53ac500956",
+            "all_block_hashes_match": true,
+            "all_block_gas_tx_counts_match": true,
+            "run_stats": {
+              "start_block": 25883613,
+              "end_block": 25883862,
+              "total_blocks": 250,
+              "total_txs": 76259,
+              "total_gas": 7414146567,
+              "duration_ms": 13436,
+              "avg_blocks_per_second": 18.60672819291456,
+              "avg_tps": 5675.7219410538855,
+              "avg_gas_per_second": 551812039.8183984,
+              "block_time_p50_ms": 12000,
+              "block_time_p95_ms": 12000,
+              "block_time_p99_ms": 12000
+            }
+          }
+        ]
+      },
+      "inputs": {
+        "blocks": 250,
+        "warmup": 125,
+        "run_pairs": 1,
+        "mode": "engine",
+        "slack": "never",
+        "samply": true,
+        "tracing_chrome": false,
+        "otlp": false,
+        "metrics": true
+      },
+      "evidence_files": [
+        "reproducibility-evidence/profile-log-excerpts.json",
+        "profile-results/summary.json"
+      ],
+      "limitations": [
+        "Driver and node affinity recorded from launch configuration; no independent runtime affinity snapshot retained.",
+        "Snapshot content identifier is a manifest-hash prefix, not a complete snapshot checksum.",
+        "No sampled executable SHA256 retained.",
+        "One pair with 10 kHz Samply; exact Samply version absent; baseline Reth symbols missing; attribution only."
+      ]
+    }
+  ],
+  "cross_run_workload_checks": {
+    "iteration_1_and_2_payload_records_identical": true,
+    "profile_is_exact_first_250_payload_records": true
+  }
+}

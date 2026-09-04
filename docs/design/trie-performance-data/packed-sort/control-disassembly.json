@@ -1,0 +1,14 @@
+{
+  "root": {
+    "virtual_address": "0x54690",
+    "size_bytes": 1271,
+    "instruction_count": 278,
+    "identical_instructions_ignoring_rip_displacements_and_direct_call_addresses": true
+  },
+  "benchmark": {
+    "virtual_address": "0x757d0",
+    "size_bytes": 4360,
+    "instruction_count": 946,
+    "identical_instructions_ignoring_rip_displacements_and_direct_call_addresses": true
+  }
+}

@@ -1,0 +1,264 @@
+{
+  "branch": "perf/trie-root-persistence-proof-scan",
+  "baseline": "eadb887f1c1698e7bd932f60a0c654dccccd081f",
+  "candidate": "33c491663d96c545e49e8af4cb6edc233132f0ce",
+  "run_id": 33864115641,
+  "url": "https://github.com/paradigmxyz/reth/actions/runs/33864115641",
+  "inputs": {
+    "blocks": 500,
+    "warmup": 125,
+    "run_pairs": 6,
+    "mode": "engine",
+    "slack": "never",
+    "samply": false,
+    "tracing_chrome": false,
+    "otlp": false,
+    "metrics": true
+  },
+  "status": "completed",
+  "assessment": {
+    "method": "Unchanged Derek run-cluster bootstrap; 10000 resamples; six independent runs per variant",
+    "primary": "mean newPayload latency and reported wall-clock; confidence interval must clear default practical floor",
+    "floors_percent": {
+      "mean": 1.2,
+      "wall_clock": 0.7,
+      "p90": 1.35,
+      "p99": 5.0
+    },
+    "secondary": "Check tail regressions, root phase timings, direct trie-write time, and completed persistence work; preserve async window caveats"
+  },
+  "change": "Skip empty storage-proof batches and stop scanning after the final proof target",
+  "workflow_conclusion": "success",
+  "verdict": "neutral",
+  "clear_improvement": false,
+  "results": {
+    "headline_changes": {
+      "mean": {
+        "pct": 0.1555,
+        "ci_pct": 0.8372,
+        "floor_pct": 1.2,
+        "sig": "neutral"
+      },
+      "p50": {
+        "pct": -0.4312,
+        "ci_pct": 0.8022,
+        "floor_pct": 1.2,
+        "sig": "neutral"
+      },
+      "p90": {
+        "pct": 0.4313,
+        "ci_pct": 0.4895,
+        "floor_pct": 1.35,
+        "sig": "neutral"
+      },
+      "p99": {
+        "pct": -0.143,
+        "ci_pct": 1.4596,
+        "floor_pct": 5.0,
+        "sig": "neutral"
+      },
+      "mgas_s": {
+        "pct": 0.0241,
+        "ci_pct": 0.4781,
+        "floor_pct": 1.2,
+        "sig": "neutral"
+      },
+      "wall_clock": {
+        "pct": 0.1793,
+        "ci_pct": 0.8419,
+        "floor_pct": 0.7,
+        "sig": "neutral"
+      },
+      "persist_wait": {
+        "pct": -2.138,
+        "ci_pct": 1.2026,
+        "floor_pct": 5.0,
+        "sig": "neutral"
+      }
+    },
+    "official_summary_sha256": "42282206dd879c8c981ad2b6851184e30b95c730206bce1e0b0e68365d76675d",
+    "official_overall_changes_reproduced": true,
+    "significant_official_regressions": [],
+    "diagnostic_phase_changes": {
+      "reth_tree_root_sparse_trie_final_update_duration_histogram": {
+        "baseline": 0.0003481528150705695,
+        "feature": 0.00032348976455568167,
+        "diff": -2.5e-05,
+        "pct": -7.084,
+        "ci": 8e-06,
+        "ci_pct": 2.3749,
+        "floor_pct": 5.0,
+        "sig": "neutral",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_tree_root_sparse_trie_process_updates_duration_histogram": {
+        "baseline": 0.008915608802956937,
+        "feature": 0.00877959723224935,
+        "diff": -0.000136,
+        "pct": -1.5255,
+        "ci": 5.3e-05,
+        "ci_pct": 0.5997,
+        "floor_pct": 5.0,
+        "sig": "neutral",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_tree_root_sparse_trie_total_duration_histogram": {
+        "baseline": 0.02329134317215958,
+        "feature": 0.023321971604921176,
+        "diff": 3.1e-05,
+        "pct": 0.1315,
+        "ci": 0.00018,
+        "ci_pct": 0.7721,
+        "floor_pct": 5.0,
+        "sig": "neutral",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_tree_root_sparse_trie_reveal_multiproof_duration_histogram": {
+        "baseline": 0.004556096397515262,
+        "feature": 0.0045177387184456115,
+        "diff": -3.8e-05,
+        "pct": -0.8419,
+        "ci": 6.7e-05,
+        "ci_pct": 1.4668,
+        "floor_pct": 5.0,
+        "sig": "neutral",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_tree_root_sparse_trie_channel_wait_duration_histogram": {
+        "baseline": 0.004899503790305235,
+        "feature": 0.005134726091094657,
+        "diff": 0.000235,
+        "pct": 4.8009,
+        "ci": 0.00019,
+        "ci_pct": 3.8784,
+        "floor_pct": 5.0,
+        "sig": "neutral",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_storage_providers_database_save_blocks_write_trie_updates": {
+        "baseline": 0.019719023343766514,
+        "feature": 0.019449293885745688,
+        "diff": -0.00027,
+        "pct": -1.3679,
+        "ci": 0.000174,
+        "ci_pct": 0.882,
+        "floor_pct": 5.0,
+        "sig": "neutral",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_storage_providers_database_save_blocks_total": {
+        "baseline": 0.028803878446349854,
+        "feature": 0.028636723521938152,
+        "diff": -0.000167,
+        "pct": -0.5803,
+        "ci": 0.000218,
+        "ci_pct": 0.7579,
+        "floor_pct": 5.0,
+        "sig": "neutral",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_storage_providers_database_save_blocks_commit_mdbx": {
+        "baseline": 0.015343492877381272,
+        "feature": 0.01501498145694549,
+        "diff": -0.000329,
+        "pct": -2.141,
+        "ci": 0.000192,
+        "ci_pct": 1.2525,
+        "floor_pct": 5.0,
+        "sig": "neutral",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_storage_providers_database_save_blocks_write_hashed_state": {
+        "baseline": 0.008385811462074082,
+        "feature": 0.008483520549630419,
+        "diff": 9.8e-05,
+        "pct": 1.1652,
+        "ci": 8.3e-05,
+        "ci_pct": 0.995,
+        "floor_pct": 5.0,
+        "sig": "neutral",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      }
+    },
+    "persistence_work": {
+      "baseline_completed_blocks": 3016.0,
+      "feature_completed_blocks": 3024.0,
+      "baseline_completed_batches": 377.0,
+      "feature_completed_batches": 378.0,
+      "all_log_counter_checks_pass": true,
+      "equal_aggregate_block_coverage": false,
+      "normalized_trie_phase": {
+        "baseline_runs": [
+          19404.590496031735,
+          19565.915361111107,
+          19750.09587301587,
+          19665.129543650793,
+          19489.033010080646,
+          19458.09922420635
+        ],
+        "feature_runs": [
+          19179.44028769842,
+          19244.400384920635,
+          19065.416119047622,
+          19058.360863095244,
+          19324.426424603178,
+          19395.74992261905
+        ],
+        "baseline_mean": 19555.477251349417,
+        "feature_mean": 19211.29900033069,
+        "change_percent": -1.7600094673985822,
+        "ci_half_width": 137.2798478702607,
+        "ci_percent": 0.70200203301501,
+        "ci_method": "Derek run-cluster bootstrap; diagnostic only, no verdict"
+      },
+      "caveat": "baseline-5 spans 496 blocks, all other runs 504; asynchronous sampled persistence includes pending warmup and excludes measured tail. Normalization does not make different block ranges identical."
+    },
+    "supplementary_replay_elapsed": {
+      "baseline_mean_ms": 27033.333333333332,
+      "feature_mean_ms": 26755,
+      "change_percent": -1.0295930949445031,
+      "ci_half_width_percent": 0.5989519112207129,
+      "method": "Derek run-cluster bootstrap primitive, supplementary raw replay elapsed time; no official verdict or changed thresholds",
+      "seed": "elapsed-diagnostic"
+    },
+    "assessment": "No clear win or significant regression under unchanged Derek rules. Modest root finalization and trie-persistence gains remain below practical significance requirements; six-pair whole-run measurements remain neutral.",
+    "assessment_file": "iteration-2-assessment.md",
+    "diagnostics_directory": "iteration-2-phases"
+  }
+}

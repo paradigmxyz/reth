@@ -1,0 +1,83 @@
+{
+  "payload_sha256": "70c2694e3941f5de87c466907b13f2f3bbb93d4f5bc1bcbb6455485600573c50",
+  "same_payload_bytes_as_iteration2": true,
+  "interval": [
+    25883613,
+    25884112
+  ],
+  "runs": [
+    {
+      "run": "baseline-1",
+      "measured_block_hashes_match_payload": true,
+      "measured_blocks": 500,
+      "log_sha256": "da2ab4c8d298a5ce1396252a6634df4a3a73a91aebff2825bdd5a5ef4b461466"
+    },
+    {
+      "run": "baseline-2",
+      "measured_block_hashes_match_payload": true,
+      "measured_blocks": 500,
+      "log_sha256": "0db1a172196cfb07e3b93b7e7b919926ab436749eaeefcd1447aebb0cd9d7d0c"
+    },
+    {
+      "run": "baseline-3",
+      "measured_block_hashes_match_payload": true,
+      "measured_blocks": 500,
+      "log_sha256": "0d1fb13346f0d921d5b57862b65c8d3ad406f258b2adbc3e833e789476521ce0"
+    },
+    {
+      "run": "baseline-4",
+      "measured_block_hashes_match_payload": true,
+      "measured_blocks": 500,
+      "log_sha256": "fb486d9b49e37f63cbb30f589dffa66236ec3b39958703432c03826af9444fcd"
+    },
+    {
+      "run": "baseline-5",
+      "measured_block_hashes_match_payload": true,
+      "measured_blocks": 500,
+      "log_sha256": "97d4d8dfa9798b4f03bdac43e64af68a8736e22610507229443c02a90ae93abe"
+    },
+    {
+      "run": "baseline-6",
+      "measured_block_hashes_match_payload": true,
+      "measured_blocks": 500,
+      "log_sha256": "f0a0f0c2651be493b9f837f4e416d5f5d674f82ee8c97d8d6d51ff18f60d71df"
+    },
+    {
+      "run": "feature-1",
+      "measured_block_hashes_match_payload": true,
+      "measured_blocks": 500,
+      "log_sha256": "3b7ae4674211543d947eedf1dc7ef86096914d2431c78b1a0675e5845ff31fe3"
+    },
+    {
+      "run": "feature-2",
+      "measured_block_hashes_match_payload": true,
+      "measured_blocks": 500,
+      "log_sha256": "4d7f5e6a5d66edeb9482c332fb25d42c605b45c92d69dcd6bbef3d0de0e4595e"
+    },
+    {
+      "run": "feature-3",
+      "measured_block_hashes_match_payload": true,
+      "measured_blocks": 500,
+      "log_sha256": "a5970bf59280db0034907c4c6664d17df7b7ddecf01f7773dbfa0a0ffc5a7c95"
+    },
+    {
+      "run": "feature-4",
+      "measured_block_hashes_match_payload": true,
+      "measured_blocks": 500,
+      "log_sha256": "0745ac22e10c3168d6df171e37b3aedf694a3dd2eb1a2807758c4c0871a6ae04"
+    },
+    {
+      "run": "feature-5",
+      "measured_block_hashes_match_payload": true,
+      "measured_blocks": 500,
+      "log_sha256": "fb95da94d0eaec5726b44da053bf247cd39af11fcd1308e1a115670535cea1e3"
+    },
+    {
+      "run": "feature-6",
+      "measured_block_hashes_match_payload": true,
+      "measured_blocks": 500,
+      "log_sha256": "ae3043f778977898d6e2f53123c2d39eeb813d2dc1e8bf7f70c61e0c1c7265dd"
+    }
+  ],
+  "scope": "Received newPayload log hashes match the exact benchmark payload sequence; report block/gas/transaction counts and ordered CSV workload also checked separately."
+}

@@ -1,0 +1,1 @@
+This compact export preserves the original component report, metadata and measurements. The referenced executable files and full build/test logs remain in bench-work/trie-derek-20260904. No binaries or full logs are included here. Full-matrix results and focused repeats remain separate; they are not pooled or substituted.

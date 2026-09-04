@@ -1,0 +1,611 @@
+{
+  "branch": "perf/trie-root-persistence-shadow",
+  "baseline": "eadb887f1c1698e7bd932f60a0c654dccccd081f",
+  "candidate": "8c1f054c7e71ea13c290c112480a84120207b8cc",
+  "run_id": 33866784894,
+  "url": "https://github.com/paradigmxyz/reth/actions/runs/33866784894",
+  "inputs": {
+    "blocks": 500,
+    "warmup": 125,
+    "run_pairs": 6,
+    "mode": "engine",
+    "slack": "never",
+    "samply": false,
+    "tracing_chrome": false,
+    "otlp": false,
+    "metrics": true
+  },
+  "status": "completed",
+  "assessment": {
+    "method": "Unchanged Derek run-cluster bootstrap; 10000 resamples; six independent runs per variant",
+    "primary": "mean newPayload latency and reported wall-clock; confidence interval must clear default practical floor",
+    "floors_percent": {
+      "mean": 1.2,
+      "wall_clock": 0.7,
+      "p90": 1.35,
+      "p99": 5.0
+    },
+    "secondary": "Check tail regressions, root phase timings, direct trie-write time, and completed persistence work; preserve async window caveats"
+  },
+  "change": "Use MDBX transaction page buffers instead of WRITEMAP; preserve synchronization, geometry, readahead, and database format",
+  "workflow_conclusion": "success",
+  "verdict": "regression",
+  "clear_improvement": false,
+  "adopt": false,
+  "adoption": "Rejected: persistence wait regressed 32.55%, trie persistence 28.77% per completed block, and MDBX commit 49.42%; payload metrics remained neutral.",
+  "results": {
+    "headline_changes": {
+      "mean": {
+        "pct": -0.1616,
+        "ci_pct": 0.4595,
+        "floor_pct": 1.2,
+        "sig": "neutral"
+      },
+      "p50": {
+        "pct": -0.7161,
+        "ci_pct": 0.9095,
+        "floor_pct": 1.2,
+        "sig": "neutral"
+      },
+      "p90": {
+        "pct": -0.7255,
+        "ci_pct": 1.2425,
+        "floor_pct": 1.35,
+        "sig": "neutral"
+      },
+      "p99": {
+        "pct": -1.2517,
+        "ci_pct": 1.8335,
+        "floor_pct": 5.0,
+        "sig": "neutral"
+      },
+      "mgas_s": {
+        "pct": 0.0944,
+        "ci_pct": 0.382,
+        "floor_pct": 1.2,
+        "sig": "neutral"
+      },
+      "wall_clock": {
+        "pct": 0.104,
+        "ci_pct": 0.4901,
+        "floor_pct": 0.7,
+        "sig": "neutral"
+      },
+      "persist_wait": {
+        "pct": 32.5533,
+        "ci_pct": 2.6169,
+        "floor_pct": 5.0,
+        "sig": "bad"
+      }
+    },
+    "official_summary_sha256": "da48ac74834d5ffab2adbeca8af91b563d28b863f0bf4ed2f05d746cb69bed41",
+    "official_overall_changes_reproduced": true,
+    "significant_headline_regressions": [
+      "persist_wait"
+    ],
+    "significant_official_target_regressions": [
+      "reth_database_transaction_close_duration_seconds{mode=\"read-write\",outcome=\"commit\"}",
+      "reth_storage_providers_database_save_blocks_commit_mdbx"
+    ],
+    "diagnostic_phase_changes": {
+      "reth_tree_root_sparse_trie_final_update_duration_histogram": {
+        "baseline": 0.0003248868990488147,
+        "feature": 0.0003160097268738371,
+        "diff": -9e-06,
+        "pct": -2.7324,
+        "ci": 8e-06,
+        "ci_pct": 2.4939,
+        "floor_pct": 5.0,
+        "sig": "neutral",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_tree_root_sparse_trie_process_updates_duration_histogram": {
+        "baseline": 0.008648991051718053,
+        "feature": 0.008568845940542491,
+        "diff": -8e-05,
+        "pct": -0.9266,
+        "ci": 7.6e-05,
+        "ci_pct": 0.8743,
+        "floor_pct": 5.0,
+        "sig": "neutral",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_tree_root_sparse_trie_total_duration_histogram": {
+        "baseline": 0.022999973580451433,
+        "feature": 0.022924160908751823,
+        "diff": -7.6e-05,
+        "pct": -0.3296,
+        "ci": 0.00012,
+        "ci_pct": 0.5226,
+        "floor_pct": 5.0,
+        "sig": "neutral",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_tree_root_sparse_trie_reveal_multiproof_duration_histogram": {
+        "baseline": 0.004484497248459674,
+        "feature": 0.004449634350330751,
+        "diff": -3.5e-05,
+        "pct": -0.7774,
+        "ci": 5.1e-05,
+        "ci_pct": 1.14,
+        "floor_pct": 5.0,
+        "sig": "neutral",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_tree_root_sparse_trie_channel_wait_duration_histogram": {
+        "baseline": 0.004971539794815552,
+        "feature": 0.005053575820067958,
+        "diff": 8.2e-05,
+        "pct": 1.6501,
+        "ci": 6.9e-05,
+        "ci_pct": 1.3909,
+        "floor_pct": 5.0,
+        "sig": "neutral",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_storage_providers_database_save_blocks_write_trie_updates": {
+        "baseline": 0.019424155157163173,
+        "feature": 0.025028239214440345,
+        "diff": 0.005604,
+        "pct": 28.8511,
+        "ci": 0.000684,
+        "ci_pct": 3.5227,
+        "floor_pct": 5.0,
+        "sig": "bad",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_storage_providers_database_save_blocks_total": {
+        "baseline": 0.0283722607997073,
+        "feature": 0.02953703829876397,
+        "diff": 0.001165,
+        "pct": 4.1053,
+        "ci": 0.000642,
+        "ci_pct": 2.2631,
+        "floor_pct": 5.0,
+        "sig": "neutral",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_storage_providers_database_save_blocks_commit_mdbx": {
+        "baseline": 0.014965627338447847,
+        "feature": 0.022361187435519212,
+        "diff": 0.007396,
+        "pct": 49.417,
+        "ci": 0.000299,
+        "ci_pct": 1.9961,
+        "floor_pct": 5.0,
+        "sig": "bad",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_storage_providers_database_save_blocks_write_hashed_state": {
+        "baseline": 0.008262141723067993,
+        "feature": 0.003926619869524867,
+        "diff": -0.004336,
+        "pct": -52.4746,
+        "ci": 4.8e-05,
+        "ci_pct": 0.5834,
+        "floor_pct": 5.0,
+        "sig": "good",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      }
+    },
+    "commit_subphases": {
+      "preparation": {
+        "baseline_run_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          9.173146292585171e-05
+        ],
+        "feature_run_values": [
+          0.0002751943887775551,
+          0.0002451084337349398,
+          0.00042980281690140846,
+          0.00036766265060240967,
+          0.0003063855421686747,
+          0.0002757469879518072
+        ],
+        "baseline_ms_per_block": 1.528857715430862e-05,
+        "feature_ms_per_block": 0.0003166501366894658,
+        "difference_ms_per_block": 0.0003013615595351572,
+        "change_percent": 1971.1550427060351,
+        "ci_half_width_ms_per_block": 5.8883088536935865e-05
+      },
+      "gc_wallclock": {
+        "baseline_run_values": [
+          0.07883811670020126,
+          0.07975215662650612,
+          0.07527892771084345,
+          0.0772091566265061,
+          0.08112119038076158,
+          0.07950060120240483
+        ],
+        "feature_run_values": [
+          0.08509622044088176,
+          0.08067131325301202,
+          0.09274530784708244,
+          0.08869861445783118,
+          0.08195813253012046,
+          0.08986287951807224
+        ],
+        "baseline_ms_per_block": 0.07861669154120389,
+        "feature_ms_per_block": 0.08650541134116668,
+        "difference_ms_per_block": 0.007888719799962793,
+        "change_percent": 10.034408272991534,
+        "ci_half_width_ms_per_block": 0.0038123910305155884
+      },
+      "gc_cputime": {
+        "baseline_run_values": [
+          0.010867871227364191,
+          0.01822993975903614,
+          0.012806915662650607,
+          0.019210373493975905,
+          0.012169707414829659,
+          0.011221815631262528
+        ],
+        "feature_run_values": [
+          0.03653969939879761,
+          0.03462156626506023,
+          0.041046169014084526,
+          0.03308963855421687,
+          0.03526497590361447,
+          0.03676626506024097
+        ],
+        "baseline_ms_per_block": 0.014084437198186505,
+        "feature_ms_per_block": 0.03622138569933578,
+        "difference_ms_per_block": 0.02213694850114927,
+        "change_percent": 157.1731137684337,
+        "ci_half_width_ms_per_block": 0.0033236920914951357
+      },
+      "audit": {
+        "baseline_run_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "feature_run_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "baseline_ms_per_block": 0.0,
+        "feature_ms_per_block": 0.0,
+        "difference_ms_per_block": 0.0,
+        "change_percent": null,
+        "ci_half_width_ms_per_block": 0.0
+      },
+      "write": {
+        "baseline_run_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "feature_run_values": [
+          8.922474781563132,
+          8.612681421686753,
+          8.871621344064392,
+          8.715136746987957,
+          8.689522915662657,
+          8.758459662650603
+        ],
+        "baseline_ms_per_block": 0.0,
+        "feature_ms_per_block": 8.761649478769248,
+        "difference_ms_per_block": 8.761649478769248,
+        "change_percent": null,
+        "ci_half_width_ms_per_block": 0.08408526522747284
+      },
+      "sync": {
+        "baseline_run_values": [
+          14.71279512676056,
+          15.072636746987952,
+          14.623506180722876,
+          14.957497060240959,
+          14.646151142284564,
+          15.173301282565138
+        ],
+        "feature_run_values": [
+          13.748161274549105,
+          13.352251289156623,
+          13.80529717907444,
+          13.399128277108435,
+          13.305772602409636,
+          13.302463638554222
+        ],
+        "baseline_ms_per_block": 14.864314589927009,
+        "feature_ms_per_block": 13.485512376808744,
+        "difference_ms_per_block": -1.3788022131182647,
+        "change_percent": -9.275921905290051,
+        "ci_half_width_ms_per_block": 0.23578634946665922
+      },
+      "ending": {
+        "baseline_run_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "feature_run_values": [
+          0.0,
+          3.0638554216867474e-05,
+          0.0,
+          0.00036766265060240967,
+          0.0009497951807228915,
+          6.127710843373495e-05
+        ],
+        "baseline_ms_per_block": 0.0,
+        "feature_ms_per_block": 0.00023489558232931727,
+        "difference_ms_per_block": 0.00023489558232931727,
+        "change_percent": null,
+        "ci_half_width_ms_per_block": 0.0002629809236947791
+      },
+      "whole": {
+        "baseline_run_values": [
+          14.795317267605624,
+          15.156218722891559,
+          14.702768120481917,
+          15.038658590361443,
+          14.731063899799597,
+          15.256960376753502
+        ],
+        "feature_run_values": [
+          22.7617559759519,
+          22.051915566265063,
+          22.776172273641844,
+          22.209397734939763,
+          22.08423924096388,
+          22.157067084337363
+        ],
+        "baseline_ms_per_block": 14.946831162982274,
+        "feature_ms_per_block": 22.340091312683303,
+        "difference_ms_per_block": 7.393260149701028,
+        "change_percent": 49.46372959648715,
+        "ci_half_width_ms_per_block": 0.2948693970895979
+      }
+    },
+    "commit_scope": "Read-write committed MDBX transactions, including other writers such as pruning. Diagnostic only; no acceptance verdict. CPU GC time overlaps wall-clock GC and must not be added to it.",
+    "persistence_work": {
+      "baseline_completed_blocks": 3023.0,
+      "feature_completed_blocks": 3024.0,
+      "baseline_completed_batches": 378.0,
+      "feature_completed_batches": 378.0,
+      "all_log_counter_checks_pass": true,
+      "equal_aggregate_block_coverage": false,
+      "normalized_trie_phase": {
+        "baseline_runs": [
+          19129.940801587298,
+          19141.092482142856,
+          19370.60317261906,
+          19274.515155069585,
+          19215.589823412698,
+          19102.291454365084
+        ],
+        "feature_runs": [
+          25632.61300198413,
+          23920.244049603174,
+          24246.545912698417,
+          24177.756976190463,
+          24199.859974206352,
+          26207.26615476192
+        ],
+        "baseline_mean": 19205.672148199432,
+        "feature_mean": 24730.71434490741,
+        "change_percent": 28.76776274256021,
+        "ci_half_width": 679.4065445031611,
+        "ci_percent": 3.5375306797937642,
+        "ci_method": "Derek run-cluster bootstrap; diagnostic only, no verdict"
+      },
+      "caveat": "Baseline completed 3,023 blocks, candidate 3,024; 378 batches each. Windows include pending warmup and omit measured tail, and individual batching differs."
+    },
+    "memory_summary": {
+      "reth_process_resident_memory_bytes": {
+        "sampled_peak_bytes": {
+          "baseline_run_mean_bytes": 10972820138.666666,
+          "feature_run_mean_bytes": 11145018026.666666,
+          "difference_bytes": 172197888.0,
+          "difference_mib": 164.220703125,
+          "change_percent": 1.5693129553194796
+        },
+        "scrape_p50_bytes": {
+          "baseline_run_mean_bytes": 8959138474.666666,
+          "feature_run_mean_bytes": 9033175722.666666,
+          "difference_bytes": 74037248.0,
+          "difference_mib": 70.607421875,
+          "change_percent": 0.8263880306053073
+        },
+        "scrape_p95_bytes": {
+          "baseline_run_mean_bytes": 10742622651.733334,
+          "feature_run_mean_bytes": 10823953578.666666,
+          "difference_bytes": 81330926.93333244,
+          "difference_mib": 77.56321614583248,
+          "change_percent": 0.7570863239826142
+        },
+        "first_bytes": {
+          "baseline_run_mean_bytes": 5829214208.0,
+          "feature_run_mean_bytes": 5888286037.333333,
+          "difference_bytes": 59071829.333333015,
+          "difference_mib": 56.33528645833303,
+          "change_percent": 1.0133755121275678
+        },
+        "last_bytes": {
+          "baseline_run_mean_bytes": 10971891029.333334,
+          "feature_run_mean_bytes": 10997056853.333334,
+          "difference_bytes": 25165824.0,
+          "difference_mib": 24.0,
+          "change_percent": 0.2293663319542505
+        }
+      },
+      "reth_jemalloc_allocated": {
+        "sampled_peak_bytes": {
+          "baseline_run_mean_bytes": 4171077914.6666665,
+          "feature_run_mean_bytes": 4443001806.666667,
+          "difference_bytes": 271923892.0000005,
+          "difference_mib": 259.3268318176274,
+          "change_percent": 6.519271458436227
+        },
+        "scrape_p50_bytes": {
+          "baseline_run_mean_bytes": 3922421488.0,
+          "feature_run_mean_bytes": 4033540204.0,
+          "difference_bytes": 111118716.0,
+          "difference_mib": 105.97106552124023,
+          "change_percent": 2.8329111580677635
+        },
+        "scrape_p95_bytes": {
+          "baseline_run_mean_bytes": 4123007619.8,
+          "feature_run_mean_bytes": 4357751405.266666,
+          "difference_bytes": 234743785.46666622,
+          "difference_mib": 223.8691191355383,
+          "change_percent": 5.693508407293546
+        },
+        "first_bytes": {
+          "baseline_run_mean_bytes": 3593350074.6666665,
+          "feature_run_mean_bytes": 3936476692.0,
+          "difference_bytes": 343126617.3333335,
+          "difference_mib": 327.23104222615575,
+          "change_percent": 9.548933730459396
+        },
+        "last_bytes": {
+          "baseline_run_mean_bytes": 4100956201.3333335,
+          "feature_run_mean_bytes": 4114266405.3333335,
+          "difference_bytes": 13310204.0,
+          "difference_mib": 12.693599700927734,
+          "change_percent": 0.32456342732147814
+        }
+      },
+      "reth_jemalloc_active": {
+        "sampled_peak_bytes": {
+          "baseline_run_mean_bytes": 4275035477.3333335,
+          "feature_run_mean_bytes": 4547358720.0,
+          "difference_bytes": 272323242.6666665,
+          "difference_mib": 259.7076822916665,
+          "change_percent": 6.370081467406563
+        },
+        "scrape_p50_bytes": {
+          "baseline_run_mean_bytes": 4031692800.0,
+          "feature_run_mean_bytes": 4141000021.3333335,
+          "difference_bytes": 109307221.33333349,
+          "difference_mib": 104.24348958333348,
+          "change_percent": 2.7111991601476593
+        },
+        "scrape_p95_bytes": {
+          "baseline_run_mean_bytes": 4230138982.4,
+          "feature_run_mean_bytes": 4460794709.333333,
+          "difference_bytes": 230655726.93333292,
+          "difference_mib": 219.97044270833294,
+          "change_percent": 5.45267490957162
+        },
+        "first_bytes": {
+          "baseline_run_mean_bytes": 3692679850.6666665,
+          "feature_run_mean_bytes": 4034568874.6666665,
+          "difference_bytes": 341889024.0,
+          "difference_mib": 326.05078125,
+          "change_percent": 9.258561202869409
+        },
+        "last_bytes": {
+          "baseline_run_mean_bytes": 4213903360.0,
+          "feature_run_mean_bytes": 4225036970.6666665,
+          "difference_bytes": 11133610.666666508,
+          "difference_mib": 10.617838541666515,
+          "change_percent": 0.264211343153975
+        }
+      },
+      "reth_jemalloc_resident": {
+        "sampled_peak_bytes": {
+          "baseline_run_mean_bytes": 4542738432.0,
+          "feature_run_mean_bytes": 4855356757.333333,
+          "difference_bytes": 312618325.333333,
+          "difference_mib": 298.13606770833303,
+          "change_percent": 6.8817152916219815
+        },
+        "scrape_p50_bytes": {
+          "baseline_run_mean_bytes": 4304477525.333333,
+          "feature_run_mean_bytes": 4485669546.666667,
+          "difference_bytes": 181192021.33333397,
+          "difference_mib": 172.79817708333394,
+          "change_percent": 4.209384768928559
+        },
+        "scrape_p95_bytes": {
+          "baseline_run_mean_bytes": 4498240853.333333,
+          "feature_run_mean_bytes": 4746628608.0,
+          "difference_bytes": 248387754.66666698,
+          "difference_mib": 236.88102213541697,
+          "change_percent": 5.521886505534801
+        },
+        "first_bytes": {
+          "baseline_run_mean_bytes": 3889911125.3333335,
+          "feature_run_mean_bytes": 4275710634.6666665,
+          "difference_bytes": 385799509.333333,
+          "difference_mib": 367.92708333333303,
+          "change_percent": 9.917951770691747
+        },
+        "last_bytes": {
+          "baseline_run_mean_bytes": 4489135445.333333,
+          "feature_run_mean_bytes": 4635424085.333333,
+          "difference_bytes": 146288640.0,
+          "difference_mib": 139.51171875,
+          "change_percent": 3.258726357924302
+        }
+      }
+    },
+    "memory_scope": "Descriptive means of per-run sampled RSS and allocator gauges at 200 ms cadence; no true peak, cgroup/page-cache total, or MDBX buffer measurement. Allocator values overlap RSS.",
+    "supplementary_replay_elapsed": {
+      "baseline_mean_ms": 26579.666666666668,
+      "feature_mean_ms": 30876.166666666668,
+      "change_percent": 16.164612046802684,
+      "ci_half_width_percent": 1.3334127591266483,
+      "method": "Derek run-cluster bootstrap primitive, supplementary raw replay elapsed time; no official verdict or changed thresholds",
+      "seed": "elapsed-diagnostic"
+    },
+    "assessment": "Rejected. Hashed-state writes improve, but trie writes and commit regress. Explicit commit-write time increases 8.762 ms per canonical block and sync decreases 1.379 ms; GC contributes only 0.0079 ms extra wall time. Payload metrics are neutral, while persistence backpressure and actual replay duration regress.",
+    "assessment_file": "iteration-4-assessment.md",
+    "diagnostics_directory": "iteration-4-phases",
+    "memory_directory": "iteration-4-memory"
+  }
+}

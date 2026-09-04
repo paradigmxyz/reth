@@ -1,0 +1,163 @@
+{
+  "commit": "a0d8b420cd949b41cf93893300b494aa35e57d47",
+  "workspace": "/tmp/reth-sort-metrics-33",
+  "environment": {
+    "LLVM_SYS_221_PREFIX": "/usr/lib/llvm-22",
+    "CARGO_BUILD_JOBS": "8",
+    "CARGO_TARGET_DIR": "/home/ubuntu/reth/target"
+  },
+  "cache": "Reuse prior workspace dependency artifacts; explicitly clean changed DB/sparse and dependent provider/trie-db packages before all checks.",
+  "commands": [
+    {
+      "name": "cache-invalidation",
+      "command": [
+        "cargo",
+        "+nightly",
+        "clean",
+        "-p",
+        "reth-db",
+        "-p",
+        "reth-trie-sparse",
+        "-p",
+        "reth-provider",
+        "-p",
+        "reth-trie-db"
+      ],
+      "start": "2026-09-04T12:09:38.915787+00:00",
+      "exit_code": 0,
+      "end": "2026-09-04T12:09:40.015245+00:00"
+    },
+    {
+      "name": "fmt",
+      "command": [
+        "cargo",
+        "+nightly",
+        "fmt",
+        "--all",
+        "--check"
+      ],
+      "start": "2026-09-04T12:09:40.015494+00:00",
+      "exit_code": 0,
+      "end": "2026-09-04T12:09:42.355730+00:00"
+    },
+    {
+      "name": "clippy",
+      "command": [
+        "cargo",
+        "+nightly",
+        "clippy",
+        "--locked",
+        "--workspace",
+        "--lib",
+        "--examples",
+        "--tests",
+        "--benches",
+        "--all-features",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "start": "2026-09-04T12:09:42.355991+00:00",
+      "exit_code": 0,
+      "end": "2026-09-04T12:10:27.300351+00:00"
+    },
+    {
+      "name": "nextest",
+      "command": [
+        "cargo",
+        "+1.98.1",
+        "nextest",
+        "run",
+        "--locked",
+        "--workspace",
+        "--no-fail-fast"
+      ],
+      "start": "2026-09-04T12:10:27.300662+00:00",
+      "exit_code": 0,
+      "end": "2026-09-04T12:14:58.596829+00:00"
+    },
+    {
+      "name": "docs",
+      "command": [
+        "cargo",
+        "+nightly",
+        "docs",
+        "--locked",
+        "--document-private-items"
+      ],
+      "start": "2026-09-04T12:14:58.597229+00:00",
+      "exit_code": 0,
+      "end": "2026-09-04T12:28:37.706423+00:00"
+    },
+    {
+      "name": "zepter",
+      "command": [
+        "zepter"
+      ],
+      "start": "2026-09-04T12:28:37.706626+00:00",
+      "exit_code": 0,
+      "end": "2026-09-04T12:28:38.827193+00:00"
+    },
+    {
+      "name": "lint-toml",
+      "command": [
+        "bash",
+        "-c",
+        "dprint() {\n    local -a reth_lint_tomls\n    mapfile -d '' -t reth_lint_tomls < <(git ls-files -z '*.toml')\n    command dprint \"$@\" --includes-override \"${reth_lint_tomls[@]}\"\n}\nexport -f dprint\nmake SHELL=bash lint-toml\n"
+      ],
+      "start": "2026-09-04T12:28:38.827408+00:00",
+      "exit_code": 0,
+      "end": "2026-09-04T12:28:38.879137+00:00"
+    },
+    {
+      "name": "diff-check",
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "start": "2026-09-04T12:28:38.879293+00:00",
+      "exit_code": 0,
+      "end": "2026-09-04T12:28:38.881527+00:00"
+    },
+    {
+      "name": "source-unchanged",
+      "command": [
+        "git",
+        "diff",
+        "--exit-code"
+      ],
+      "start": "2026-09-04T12:28:38.881774+00:00",
+      "exit_code": 0,
+      "end": "2026-09-04T12:28:38.883633+00:00"
+    },
+    {
+      "name": "git-status",
+      "command": [
+        "git",
+        "status",
+        "--short"
+      ],
+      "start": "2026-09-04T12:28:38.883833+00:00",
+      "exit_code": 0,
+      "end": "2026-09-04T12:28:38.889016+00:00"
+    }
+  ],
+  "finished": "2026-09-04T12:28:38.889254+00:00",
+  "results": {
+    "tests_passed": 3819,
+    "tests_skipped": 38,
+    "focused_tests_passed": 236,
+    "flaky_tests": [
+      {
+        "test": "reth-node-ethereum::it testing::testing_rpc_build_block_works",
+        "attempts": 2,
+        "reason": "HTTP-RPC127.0.0.1:8545 already in use, os error98"
+      }
+    ],
+    "docs_outputs": 141,
+    "docs_warnings": 0,
+    "tracked_source_changed": false,
+    "equivalent_main_merge": "2042e313a2b7cb0e7606dceeca75005612702d8f"
+  }
+}

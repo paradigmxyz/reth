@@ -1,0 +1,28 @@
+{
+  "started_utc": "2026-09-04T12:30:03.476731+00:00",
+  "cpu_affinity": [
+    1
+  ],
+  "samples": 12,
+  "rounds": 2,
+  "filter": "",
+  "order": [
+    "baseline",
+    "candidate",
+    "candidate",
+    "baseline"
+  ],
+  "platform": "Linux-6.8.0-117-generic-x86_64-with-glibc2.39",
+  "binaries": {
+    "baseline": {
+      "path": "/home/ubuntu/reth/bench-work/trie-derek-20260904/mincore-experiment/mincore-default",
+      "sha256": "6070e5e8ae1eea575d7770d5b21708097d873192339404d5e776f2f3f87a9791"
+    },
+    "candidate": {
+      "path": "/home/ubuntu/reth/bench-work/trie-derek-20260904/mincore-experiment/mincore-disabled",
+      "sha256": "a31bdb5604fe6db2b71e2310ae39ec48e7a5cacbbc518661ede892f085a7838b"
+    }
+  },
+  "statistics": "median and inclusive quartiles of process-level medians; not confidence intervals",
+  "finished_utc": "2026-09-04T12:31:00.239294+00:00"
+}

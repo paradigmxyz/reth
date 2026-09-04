@@ -1,0 +1,27 @@
+{
+  "production_commit": "6f1a3a2fe047df40b374a9881fd51360df6963d2",
+  "base_commit": "33c491663d96c545e49e8af4cb6edc233132f0ce",
+  "worktree": "/tmp/reth-prefault-option",
+  "diagnostic_patch_sha256": "4828d332638f419adb61b75230481b7e680d134a4d16290ce789bd69eb21d476",
+  "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1\nLLVM version: 22.1.8\n",
+  "RUSTFLAGS": "-C target-cpu=native",
+  "CARGO_TARGET_DIR": "/home/ubuntu/reth/target-prefault-1.98.1",
+  "profile": "profiling",
+  "planned_cpu": 0,
+  "planned_repeats": 3,
+  "planned_samples_per_case_mode": 12,
+  "cases": {
+    "fresh": "1536firstinserts into fresh emptyDB",
+    "warm": "98304seedednodes;12288updates/round;filecachewarm,mappingsreopened",
+    "cold": "same seededDB;allmappingclosed;onlytemp mdbx.dat advisedDONTNEED;residencyobservedwithmincore before DBopen"
+  },
+  "validation": "full account/storage snapshot equality across all3modes after everydurablecommit and reopen",
+  "host": "Linux-6.8.0-117-generic-x86_64-with-glibc2.39",
+  "binary_sha256": "2283605ef09366833e90974eec50f90a05fdc155e5d90594679815cb1fe4c4c5",
+  "shadow_production_commit": "8c1f054c7e71ea13c290c112480a84120207b8cc",
+  "completed_measured_rows": 324,
+  "cold_residency_histogram": {
+    "0": 107,
+    "4": 1
+  }
+}

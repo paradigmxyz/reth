@@ -1,0 +1,1279 @@
+{
+  "blocks": 500,
+  "big_blocks": false,
+  "warmup_blocks": "125",
+  "run_pairs": 6,
+  "wait_time": null,
+  "block_time": null,
+  "bal_mode": null,
+  "mode": "engine",
+  "baseline": {
+    "name": "eadb887f1c1698e7bd932f60a0c654dccccd081f",
+    "ref": "eadb887f1c1698e7bd932f60a0c654dccccd081f",
+    "stats": {
+      "n": 3000,
+      "mean_ms": 24.096535999999997,
+      "stddev_ms": 13.865432833149764,
+      "p50_ms": 21.56583333333333,
+      "p90_ms": 37.910666666666664,
+      "p99_ms": 68.87583333333333,
+      "mean_mgas_s": 1304.0059805753633,
+      "wall_clock_s": 72.75160799999999,
+      "mean_total_lat_ms": 24.250535999999997,
+      "mean_persist_ms": 27.01369366666667
+    }
+  },
+  "feature": {
+    "name": "33c491663d96c545e49e8af4cb6edc233132f0ce",
+    "ref": "33c491663d96c545e49e8af4cb6edc233132f0ce",
+    "stats": {
+      "n": 3000,
+      "mean_ms": 24.134006999999997,
+      "stddev_ms": 14.039029510362006,
+      "p50_ms": 21.47283333333333,
+      "p90_ms": 38.07416666666666,
+      "p99_ms": 68.77733333333333,
+      "mean_mgas_s": 1304.3198750639149,
+      "wall_clock_s": 72.882021,
+      "mean_total_lat_ms": 24.294006999999997,
+      "mean_persist_ms": 26.436138666666665
+    }
+  },
+  "changes": {
+    "mean": {
+      "pct": 0.1555,
+      "ci_pct": 0.8372,
+      "floor_pct": 1.2,
+      "sig": "neutral"
+    },
+    "p50": {
+      "pct": -0.4312,
+      "ci_pct": 0.8022,
+      "floor_pct": 1.2,
+      "sig": "neutral"
+    },
+    "p90": {
+      "pct": 0.4313,
+      "ci_pct": 0.4895,
+      "floor_pct": 1.35,
+      "sig": "neutral"
+    },
+    "p99": {
+      "pct": -0.143,
+      "ci_pct": 1.4596,
+      "floor_pct": 5.0,
+      "sig": "neutral"
+    },
+    "mgas_s": {
+      "pct": 0.0241,
+      "ci_pct": 0.4781,
+      "floor_pct": 1.2,
+      "sig": "neutral"
+    },
+    "wall_clock": {
+      "pct": 0.1793,
+      "ci_pct": 0.8419,
+      "floor_pct": 0.7,
+      "sig": "neutral"
+    },
+    "persist_wait": {
+      "pct": -2.138,
+      "ci_pct": 1.2026,
+      "floor_pct": 5.0,
+      "sig": "neutral"
+    }
+  },
+  "wait_times": {
+    "persistence_wait_us": {
+      "title": "Persistence Wait",
+      "baseline": {
+        "mean_ms": 27.01369366666667,
+        "p50_ms": 0.018,
+        "p95_ms": 234.522
+      },
+      "feature": {
+        "mean_ms": 26.436138666666665,
+        "p50_ms": 0.018,
+        "p95_ms": 227.748
+      }
+    },
+    "sparse_trie_wait_us": {
+      "title": "Trie Cache Update Wait",
+      "baseline": {
+        "mean_ms": 0.0,
+        "p50_ms": 0.0,
+        "p95_ms": 0.0
+      },
+      "feature": {
+        "mean_ms": 0.0,
+        "p50_ms": 0.0,
+        "p95_ms": 0.0
+      }
+    },
+    "execution_cache_wait_us": {
+      "title": "Execution Cache Update Wait",
+      "baseline": {
+        "mean_ms": 0.002845666666666667,
+        "p50_ms": 0.0,
+        "p95_ms": 0.0
+      },
+      "feature": {
+        "mean_ms": 0.0016786666666666666,
+        "p50_ms": 0.0,
+        "p95_ms": 0.0
+      }
+    }
+  },
+  "target_metrics": {
+    "config": "bench-work/trie-derek-20260904/iteration-2-phases/diagnostic-targets.json",
+    "block_latency_ms": 24.294007,
+    "metrics": [
+      {
+        "kind": "histogram",
+        "name": "reth_tree_root_sparse_trie_final_update_duration_histogram",
+        "query": "reth_tree_root_sparse_trie_final_update_duration_histogram",
+        "configured_query": "reth_tree_root_sparse_trie_final_update_duration_histogram",
+        "identity_labels": {},
+        "target": "decrease",
+        "floor_pct": 5.0,
+        "display_stats": [
+          "mean"
+        ],
+        "baseline": {
+          "mean": 0.0003481528150705695,
+          "runs": [
+            {
+              "run": "baseline-1",
+              "mean": 0.0003598637154308619
+            },
+            {
+              "run": "baseline-2",
+              "mean": 0.0003470784879518071
+            },
+            {
+              "run": "baseline-3",
+              "mean": 0.00034697497795591124
+            },
+            {
+              "run": "baseline-4",
+              "mean": 0.0003546368757515026
+            },
+            {
+              "run": "baseline-5",
+              "mean": 0.000332353449799197
+            },
+            {
+              "run": "baseline-6",
+              "mean": 0.0003480093835341371
+            }
+          ]
+        },
+        "feature": {
+          "mean": 0.00032348976455568167,
+          "runs": [
+            {
+              "run": "feature-1",
+              "mean": 0.0003208944116465863
+            },
+            {
+              "run": "feature-2",
+              "mean": 0.0003221161670020121
+            },
+            {
+              "run": "feature-3",
+              "mean": 0.0003296430622489956
+            },
+            {
+              "run": "feature-4",
+              "mean": 0.00032928690963855424
+            },
+            {
+              "run": "feature-5",
+              "mean": 0.00031243518108651906
+            },
+            {
+              "run": "feature-6",
+              "mean": 0.0003265628557114229
+            }
+          ]
+        },
+        "changes": {
+          "mean": {
+            "baseline": 0.0003481528150705695,
+            "feature": 0.00032348976455568167,
+            "diff": -2.5e-05,
+            "pct": -7.084,
+            "ci": 8e-06,
+            "ci_pct": 2.3749,
+            "floor_pct": 5.0,
+            "sig": "neutral",
+            "ci_method": "run_cluster_bootstrap",
+            "runs": {
+              "baseline": 6,
+              "feature": 6
+            }
+          }
+        },
+        "change": {
+          "sig": "neutral",
+          "significant_stats": []
+        },
+        "unit": "seconds",
+        "materiality": {
+          "min_value_pct_total_latency": 0.0
+        },
+        "pairs": [
+          {
+            "baseline_run": "baseline-1",
+            "feature_run": "feature-1",
+            "mean_diff": -3.896930378427559e-05
+          },
+          {
+            "baseline_run": "baseline-2",
+            "feature_run": "feature-2",
+            "mean_diff": -2.4962320949795016e-05
+          },
+          {
+            "baseline_run": "baseline-3",
+            "feature_run": "feature-3",
+            "mean_diff": -1.7331915706915663e-05
+          },
+          {
+            "baseline_run": "baseline-4",
+            "feature_run": "feature-4",
+            "mean_diff": -2.5349966112948354e-05
+          },
+          {
+            "baseline_run": "baseline-5",
+            "feature_run": "feature-5",
+            "mean_diff": -1.991826871267793e-05
+          },
+          {
+            "baseline_run": "baseline-6",
+            "feature_run": "feature-6",
+            "mean_diff": -2.144652782271419e-05
+          }
+        ]
+      },
+      {
+        "kind": "histogram",
+        "name": "reth_tree_root_sparse_trie_process_updates_duration_histogram",
+        "query": "reth_tree_root_sparse_trie_process_updates_duration_histogram",
+        "configured_query": "reth_tree_root_sparse_trie_process_updates_duration_histogram",
+        "identity_labels": {},
+        "target": "decrease",
+        "floor_pct": 5.0,
+        "display_stats": [
+          "mean"
+        ],
+        "baseline": {
+          "mean": 0.008915608802956937,
+          "runs": [
+            {
+              "run": "baseline-1",
+              "mean": 0.009024246270540933
+            },
+            {
+              "run": "baseline-2",
+              "mean": 0.008882463222891181
+            },
+            {
+              "run": "baseline-3",
+              "mean": 0.00896019882965902
+            },
+            {
+              "run": "baseline-4",
+              "mean": 0.008890132663326073
+            },
+            {
+              "run": "baseline-5",
+              "mean": 0.008900595158634105
+            },
+            {
+              "run": "baseline-6",
+              "mean": 0.008836016672690315
+            }
+          ]
+        },
+        "feature": {
+          "mean": 0.00877959723224935,
+          "runs": [
+            {
+              "run": "feature-1",
+              "mean": 0.008819892789156248
+            },
+            {
+              "run": "feature-2",
+              "mean": 0.00875895293561329
+            },
+            {
+              "run": "feature-3",
+              "mean": 0.008751078819276694
+            },
+            {
+              "run": "feature-4",
+              "mean": 0.008748635608433399
+            },
+            {
+              "run": "feature-5",
+              "mean": 0.008812588633802321
+            },
+            {
+              "run": "feature-6",
+              "mean": 0.008786434607214145
+            }
+          ]
+        },
+        "changes": {
+          "mean": {
+            "baseline": 0.008915608802956937,
+            "feature": 0.00877959723224935,
+            "diff": -0.000136,
+            "pct": -1.5255,
+            "ci": 5.3e-05,
+            "ci_pct": 0.5997,
+            "floor_pct": 5.0,
+            "sig": "neutral",
+            "ci_method": "run_cluster_bootstrap",
+            "runs": {
+              "baseline": 6,
+              "feature": 6
+            }
+          }
+        },
+        "change": {
+          "sig": "neutral",
+          "significant_stats": []
+        },
+        "unit": "seconds",
+        "materiality": {
+          "min_value_pct_total_latency": 0.0
+        },
+        "pairs": [
+          {
+            "baseline_run": "baseline-1",
+            "feature_run": "feature-1",
+            "mean_diff": -0.00020435348138468472
+          },
+          {
+            "baseline_run": "baseline-2",
+            "feature_run": "feature-2",
+            "mean_diff": -0.000123510287277891
+          },
+          {
+            "baseline_run": "baseline-3",
+            "feature_run": "feature-3",
+            "mean_diff": -0.00020912001038232535
+          },
+          {
+            "baseline_run": "baseline-4",
+            "feature_run": "feature-4",
+            "mean_diff": -0.00014149705489267458
+          },
+          {
+            "baseline_run": "baseline-5",
+            "feature_run": "feature-5",
+            "mean_diff": -8.800652483178378e-05
+          },
+          {
+            "baseline_run": "baseline-6",
+            "feature_run": "feature-6",
+            "mean_diff": -4.9582065476170764e-05
+          }
+        ]
+      },
+      {
+        "kind": "histogram",
+        "name": "reth_tree_root_sparse_trie_total_duration_histogram",
+        "query": "reth_tree_root_sparse_trie_total_duration_histogram",
+        "configured_query": "reth_tree_root_sparse_trie_total_duration_histogram",
+        "identity_labels": {},
+        "target": "decrease",
+        "floor_pct": 5.0,
+        "display_stats": [
+          "mean"
+        ],
+        "baseline": {
+          "mean": 0.02329134317215958,
+          "runs": [
+            {
+              "run": "baseline-1",
+              "mean": 0.023320462400801573
+            },
+            {
+              "run": "baseline-2",
+              "mean": 0.023064595178714894
+            },
+            {
+              "run": "baseline-3",
+              "mean": 0.023150101847695403
+            },
+            {
+              "run": "baseline-4",
+              "mean": 0.023600722338677355
+            },
+            {
+              "run": "baseline-5",
+              "mean": 0.02319217228915663
+            },
+            {
+              "run": "baseline-6",
+              "mean": 0.023420004977911624
+            }
+          ]
+        },
+        "feature": {
+          "mean": 0.023321971604921176,
+          "runs": [
+            {
+              "run": "feature-1",
+              "mean": 0.023106235479919683
+            },
+            {
+              "run": "feature-2",
+              "mean": 0.023413095259557336
+            },
+            {
+              "run": "feature-3",
+              "mean": 0.02331037556224902
+            },
+            {
+              "run": "feature-4",
+              "mean": 0.023330963363453826
+            },
+            {
+              "run": "feature-5",
+              "mean": 0.02355351710462778
+            },
+            {
+              "run": "feature-6",
+              "mean": 0.023217642859719417
+            }
+          ]
+        },
+        "changes": {
+          "mean": {
+            "baseline": 0.02329134317215958,
+            "feature": 0.023321971604921176,
+            "diff": 3.1e-05,
+            "pct": 0.1315,
+            "ci": 0.00018,
+            "ci_pct": 0.7721,
+            "floor_pct": 5.0,
+            "sig": "neutral",
+            "ci_method": "run_cluster_bootstrap",
+            "runs": {
+              "baseline": 6,
+              "feature": 6
+            }
+          }
+        },
+        "change": {
+          "sig": "neutral",
+          "significant_stats": []
+        },
+        "unit": "seconds",
+        "materiality": {
+          "min_value_pct_total_latency": 0.0
+        },
+        "pairs": [
+          {
+            "baseline_run": "baseline-1",
+            "feature_run": "feature-1",
+            "mean_diff": -0.0002142269208818895
+          },
+          {
+            "baseline_run": "baseline-2",
+            "feature_run": "feature-2",
+            "mean_diff": 0.00034850008084244197
+          },
+          {
+            "baseline_run": "baseline-3",
+            "feature_run": "feature-3",
+            "mean_diff": 0.00016027371455361664
+          },
+          {
+            "baseline_run": "baseline-4",
+            "feature_run": "feature-4",
+            "mean_diff": -0.0002697589752235288
+          },
+          {
+            "baseline_run": "baseline-5",
+            "feature_run": "feature-5",
+            "mean_diff": 0.00036134481547115196
+          },
+          {
+            "baseline_run": "baseline-6",
+            "feature_run": "feature-6",
+            "mean_diff": -0.0002023621181922071
+          }
+        ]
+      },
+      {
+        "kind": "histogram",
+        "name": "reth_tree_root_sparse_trie_reveal_multiproof_duration_histogram",
+        "query": "reth_tree_root_sparse_trie_reveal_multiproof_duration_histogram",
+        "configured_query": "reth_tree_root_sparse_trie_reveal_multiproof_duration_histogram",
+        "identity_labels": {},
+        "target": "decrease",
+        "floor_pct": 5.0,
+        "display_stats": [
+          "mean"
+        ],
+        "baseline": {
+          "mean": 0.004556096397515262,
+          "runs": [
+            {
+              "run": "baseline-1",
+              "mean": 0.004529414655310666
+            },
+            {
+              "run": "baseline-2",
+              "mean": 0.004535306680722913
+            },
+            {
+              "run": "baseline-3",
+              "mean": 0.004556474713426823
+            },
+            {
+              "run": "baseline-4",
+              "mean": 0.004556925855711484
+            },
+            {
+              "run": "baseline-5",
+              "mean": 0.004597473867469862
+            },
+            {
+              "run": "baseline-6",
+              "mean": 0.004560982612449826
+            }
+          ]
+        },
+        "feature": {
+          "mean": 0.0045177387184456115,
+          "runs": [
+            {
+              "run": "feature-1",
+              "mean": 0.004381521248995974
+            },
+            {
+              "run": "feature-2",
+              "mean": 0.004499645124748445
+            },
+            {
+              "run": "feature-3",
+              "mean": 0.004615060905622462
+            },
+            {
+              "run": "feature-4",
+              "mean": 0.00455263181526103
+            },
+            {
+              "run": "feature-5",
+              "mean": 0.00445859890342052
+            },
+            {
+              "run": "feature-6",
+              "mean": 0.004598974312625236
+            }
+          ]
+        },
+        "changes": {
+          "mean": {
+            "baseline": 0.004556096397515262,
+            "feature": 0.0045177387184456115,
+            "diff": -3.8e-05,
+            "pct": -0.8419,
+            "ci": 6.7e-05,
+            "ci_pct": 1.4668,
+            "floor_pct": 5.0,
+            "sig": "neutral",
+            "ci_method": "run_cluster_bootstrap",
+            "runs": {
+              "baseline": 6,
+              "feature": 6
+            }
+          }
+        },
+        "change": {
+          "sig": "neutral",
+          "significant_stats": []
+        },
+        "unit": "seconds",
+        "materiality": {
+          "min_value_pct_total_latency": 0.0
+        },
+        "pairs": [
+          {
+            "baseline_run": "baseline-1",
+            "feature_run": "feature-1",
+            "mean_diff": -0.0001478934063146916
+          },
+          {
+            "baseline_run": "baseline-2",
+            "feature_run": "feature-2",
+            "mean_diff": -3.566155597446805e-05
+          },
+          {
+            "baseline_run": "baseline-3",
+            "feature_run": "feature-3",
+            "mean_diff": 5.858619219563897e-05
+          },
+          {
+            "baseline_run": "baseline-4",
+            "feature_run": "feature-4",
+            "mean_diff": -4.294040450453923e-06
+          },
+          {
+            "baseline_run": "baseline-5",
+            "feature_run": "feature-5",
+            "mean_diff": -0.00013887496404934186
+          },
+          {
+            "baseline_run": "baseline-6",
+            "feature_run": "feature-6",
+            "mean_diff": 3.799170017541008e-05
+          }
+        ]
+      },
+      {
+        "kind": "histogram",
+        "name": "reth_tree_root_sparse_trie_channel_wait_duration_histogram",
+        "query": "reth_tree_root_sparse_trie_channel_wait_duration_histogram",
+        "configured_query": "reth_tree_root_sparse_trie_channel_wait_duration_histogram",
+        "identity_labels": {},
+        "target": "decrease",
+        "floor_pct": 5.0,
+        "display_stats": [
+          "mean"
+        ],
+        "baseline": {
+          "mean": 0.004899503790305235,
+          "runs": [
+            {
+              "run": "baseline-1",
+              "mean": 0.004867415010052798
+            },
+            {
+              "run": "baseline-2",
+              "mean": 0.004768204249035598
+            },
+            {
+              "run": "baseline-3",
+              "mean": 0.0047618952164719805
+            },
+            {
+              "run": "baseline-4",
+              "mean": 0.005207663442910059
+            },
+            {
+              "run": "baseline-5",
+              "mean": 0.004781885092410259
+            },
+            {
+              "run": "baseline-6",
+              "mean": 0.005009959730950716
+            }
+          ]
+        },
+        "feature": {
+          "mean": 0.005134726091094657,
+          "runs": [
+            {
+              "run": "feature-1",
+              "mean": 0.004938267642596067
+            },
+            {
+              "run": "feature-2",
+              "mean": 0.005306674307868154
+            },
+            {
+              "run": "feature-3",
+              "mean": 0.005107525443797417
+            },
+            {
+              "run": "feature-4",
+              "mean": 0.005149076506044984
+            },
+            {
+              "run": "feature-5",
+              "mean": 0.005390846231407939
+            },
+            {
+              "run": "feature-6",
+              "mean": 0.004915966414853381
+            }
+          ]
+        },
+        "changes": {
+          "mean": {
+            "baseline": 0.004899503790305235,
+            "feature": 0.005134726091094657,
+            "diff": 0.000235,
+            "pct": 4.8009,
+            "ci": 0.00019,
+            "ci_pct": 3.8784,
+            "floor_pct": 5.0,
+            "sig": "neutral",
+            "ci_method": "run_cluster_bootstrap",
+            "runs": {
+              "baseline": 6,
+              "feature": 6
+            }
+          }
+        },
+        "change": {
+          "sig": "neutral",
+          "significant_stats": []
+        },
+        "unit": "seconds",
+        "materiality": {
+          "min_value_pct_total_latency": 0.0
+        },
+        "pairs": [
+          {
+            "baseline_run": "baseline-1",
+            "feature_run": "feature-1",
+            "mean_diff": 7.085263254326922e-05
+          },
+          {
+            "baseline_run": "baseline-2",
+            "feature_run": "feature-2",
+            "mean_diff": 0.0005384700588325552
+          },
+          {
+            "baseline_run": "baseline-3",
+            "feature_run": "feature-3",
+            "mean_diff": 0.00034563022732543667
+          },
+          {
+            "baseline_run": "baseline-4",
+            "feature_run": "feature-4",
+            "mean_diff": -5.858693686507446e-05
+          },
+          {
+            "baseline_run": "baseline-5",
+            "feature_run": "feature-5",
+            "mean_diff": 0.0006089611389976804
+          },
+          {
+            "baseline_run": "baseline-6",
+            "feature_run": "feature-6",
+            "mean_diff": -9.399331609733549e-05
+          }
+        ]
+      },
+      {
+        "kind": "histogram",
+        "name": "reth_storage_providers_database_save_blocks_write_trie_updates",
+        "query": "reth_storage_providers_database_save_blocks_write_trie_updates",
+        "configured_query": "reth_storage_providers_database_save_blocks_write_trie_updates",
+        "identity_labels": {},
+        "target": "decrease",
+        "floor_pct": 5.0,
+        "display_stats": [
+          "mean"
+        ],
+        "baseline": {
+          "mean": 0.019719023343766514,
+          "runs": [
+            {
+              "run": "baseline-1",
+              "mean": 0.01959902527054107
+            },
+            {
+              "run": "baseline-2",
+              "mean": 0.019801649281124496
+            },
+            {
+              "run": "baseline-3",
+              "mean": 0.019947992625250502
+            },
+            {
+              "run": "baseline-4",
+              "mean": 0.019862174929859717
+            },
+            {
+              "run": "baseline-5",
+              "mean": 0.01941076380120482
+            },
+            {
+              "run": "baseline-6",
+              "mean": 0.01969253415461848
+            }
+          ]
+        },
+        "feature": {
+          "mean": 0.019449293885745688,
+          "runs": [
+            {
+              "run": "feature-1",
+              "mean": 0.019410517881526104
+            },
+            {
+              "run": "feature-2",
+              "mean": 0.019515448277665992
+            },
+            {
+              "run": "feature-3",
+              "mean": 0.019295119927710845
+            },
+            {
+              "run": "feature-4",
+              "mean": 0.019287979668674706
+            },
+            {
+              "run": "feature-5",
+              "mean": 0.019596601444668012
+            },
+            {
+              "run": "feature-6",
+              "mean": 0.019590096114228458
+            }
+          ]
+        },
+        "changes": {
+          "mean": {
+            "baseline": 0.019719023343766514,
+            "feature": 0.019449293885745688,
+            "diff": -0.00027,
+            "pct": -1.3679,
+            "ci": 0.000174,
+            "ci_pct": 0.882,
+            "floor_pct": 5.0,
+            "sig": "neutral",
+            "ci_method": "run_cluster_bootstrap",
+            "runs": {
+              "baseline": 6,
+              "feature": 6
+            }
+          }
+        },
+        "change": {
+          "sig": "neutral",
+          "significant_stats": []
+        },
+        "unit": "seconds",
+        "materiality": {
+          "min_value_pct_total_latency": 0.0
+        },
+        "pairs": [
+          {
+            "baseline_run": "baseline-1",
+            "feature_run": "feature-1",
+            "mean_diff": -0.00018850738901496703
+          },
+          {
+            "baseline_run": "baseline-2",
+            "feature_run": "feature-2",
+            "mean_diff": -0.00028620100345850413
+          },
+          {
+            "baseline_run": "baseline-3",
+            "feature_run": "feature-3",
+            "mean_diff": -0.0006528726975396568
+          },
+          {
+            "baseline_run": "baseline-4",
+            "feature_run": "feature-4",
+            "mean_diff": -0.0005741952611850107
+          },
+          {
+            "baseline_run": "baseline-5",
+            "feature_run": "feature-5",
+            "mean_diff": 0.00018583764346319365
+          },
+          {
+            "baseline_run": "baseline-6",
+            "feature_run": "feature-6",
+            "mean_diff": -0.00010243804039002102
+          }
+        ]
+      },
+      {
+        "kind": "histogram",
+        "name": "reth_storage_providers_database_save_blocks_total",
+        "query": "reth_storage_providers_database_save_blocks_total",
+        "configured_query": "reth_storage_providers_database_save_blocks_total",
+        "identity_labels": {},
+        "target": "decrease",
+        "floor_pct": 5.0,
+        "display_stats": [
+          "mean"
+        ],
+        "baseline": {
+          "mean": 0.028803878446349854,
+          "runs": [
+            {
+              "run": "baseline-1",
+              "mean": 0.028742824146292575
+            },
+            {
+              "run": "baseline-2",
+              "mean": 0.02891304806827307
+            },
+            {
+              "run": "baseline-3",
+              "mean": 0.029045374436873755
+            },
+            {
+              "run": "baseline-4",
+              "mean": 0.02905568072344689
+            },
+            {
+              "run": "baseline-5",
+              "mean": 0.028294136957831322
+            },
+            {
+              "run": "baseline-6",
+              "mean": 0.028772206345381513
+            }
+          ]
+        },
+        "feature": {
+          "mean": 0.028636723521938152,
+          "runs": [
+            {
+              "run": "feature-1",
+              "mean": 0.02854732215461847
+            },
+            {
+              "run": "feature-2",
+              "mean": 0.028664189674044268
+            },
+            {
+              "run": "feature-3",
+              "mean": 0.028504202524096384
+            },
+            {
+              "run": "feature-4",
+              "mean": 0.02857831894779116
+            },
+            {
+              "run": "feature-5",
+              "mean": 0.028705518354124736
+            },
+            {
+              "run": "feature-6",
+              "mean": 0.028820789476953906
+            }
+          ]
+        },
+        "changes": {
+          "mean": {
+            "baseline": 0.028803878446349854,
+            "feature": 0.028636723521938152,
+            "diff": -0.000167,
+            "pct": -0.5803,
+            "ci": 0.000218,
+            "ci_pct": 0.7579,
+            "floor_pct": 5.0,
+            "sig": "neutral",
+            "ci_method": "run_cluster_bootstrap",
+            "runs": {
+              "baseline": 6,
+              "feature": 6
+            }
+          }
+        },
+        "change": {
+          "sig": "neutral",
+          "significant_stats": []
+        },
+        "unit": "seconds",
+        "materiality": {
+          "min_value_pct_total_latency": 0.0
+        },
+        "pairs": [
+          {
+            "baseline_run": "baseline-1",
+            "feature_run": "feature-1",
+            "mean_diff": -0.00019550199167410465
+          },
+          {
+            "baseline_run": "baseline-2",
+            "feature_run": "feature-2",
+            "mean_diff": -0.0002488583942288035
+          },
+          {
+            "baseline_run": "baseline-3",
+            "feature_run": "feature-3",
+            "mean_diff": -0.0005411719127773711
+          },
+          {
+            "baseline_run": "baseline-4",
+            "feature_run": "feature-4",
+            "mean_diff": -0.0004773617756557297
+          },
+          {
+            "baseline_run": "baseline-5",
+            "feature_run": "feature-5",
+            "mean_diff": 0.0004113813962934136
+          },
+          {
+            "baseline_run": "baseline-6",
+            "feature_run": "feature-6",
+            "mean_diff": 4.858313157239322e-05
+          }
+        ]
+      },
+      {
+        "kind": "histogram",
+        "name": "reth_storage_providers_database_save_blocks_commit_mdbx",
+        "query": "reth_storage_providers_database_save_blocks_commit_mdbx",
+        "configured_query": "reth_storage_providers_database_save_blocks_commit_mdbx",
+        "identity_labels": {},
+        "target": "decrease",
+        "floor_pct": 5.0,
+        "display_stats": [
+          "mean"
+        ],
+        "baseline": {
+          "mean": 0.015343492877381272,
+          "runs": [
+            {
+              "run": "baseline-1",
+              "mean": 0.015423996823647299
+            },
+            {
+              "run": "baseline-2",
+              "mean": 0.015131483479919687
+            },
+            {
+              "run": "baseline-3",
+              "mean": 0.015498914086172351
+            },
+            {
+              "run": "baseline-4",
+              "mean": 0.0154587834749499
+            },
+            {
+              "run": "baseline-5",
+              "mean": 0.015338123560240969
+            },
+            {
+              "run": "baseline-6",
+              "mean": 0.015209655839357425
+            }
+          ]
+        },
+        "feature": {
+          "mean": 0.01501498145694549,
+          "runs": [
+            {
+              "run": "feature-1",
+              "mean": 0.014967430253012047
+            },
+            {
+              "run": "feature-2",
+              "mean": 0.015012257975855125
+            },
+            {
+              "run": "feature-3",
+              "mean": 0.014698642773092359
+            },
+            {
+              "run": "feature-4",
+              "mean": 0.014980049857429721
+            },
+            {
+              "run": "feature-5",
+              "mean": 0.015365527629778676
+            },
+            {
+              "run": "feature-6",
+              "mean": 0.015065980252505013
+            }
+          ]
+        },
+        "changes": {
+          "mean": {
+            "baseline": 0.015343492877381272,
+            "feature": 0.01501498145694549,
+            "diff": -0.000329,
+            "pct": -2.141,
+            "ci": 0.000192,
+            "ci_pct": 1.2525,
+            "floor_pct": 5.0,
+            "sig": "neutral",
+            "ci_method": "run_cluster_bootstrap",
+            "runs": {
+              "baseline": 6,
+              "feature": 6
+            }
+          }
+        },
+        "change": {
+          "sig": "neutral",
+          "significant_stats": []
+        },
+        "unit": "seconds",
+        "materiality": {
+          "min_value_pct_total_latency": 0.0
+        },
+        "pairs": [
+          {
+            "baseline_run": "baseline-1",
+            "feature_run": "feature-1",
+            "mean_diff": -0.0004565665706352511
+          },
+          {
+            "baseline_run": "baseline-2",
+            "feature_run": "feature-2",
+            "mean_diff": -0.0001192255040645615
+          },
+          {
+            "baseline_run": "baseline-3",
+            "feature_run": "feature-3",
+            "mean_diff": -0.0008002713130799925
+          },
+          {
+            "baseline_run": "baseline-4",
+            "feature_run": "feature-4",
+            "mean_diff": -0.00047873361752017937
+          },
+          {
+            "baseline_run": "baseline-5",
+            "feature_run": "feature-5",
+            "mean_diff": 2.740406953770716e-05
+          },
+          {
+            "baseline_run": "baseline-6",
+            "feature_run": "feature-6",
+            "mean_diff": -0.0001436755868524115
+          }
+        ]
+      },
+      {
+        "kind": "histogram",
+        "name": "reth_storage_providers_database_save_blocks_write_hashed_state",
+        "query": "reth_storage_providers_database_save_blocks_write_hashed_state",
+        "configured_query": "reth_storage_providers_database_save_blocks_write_hashed_state",
+        "identity_labels": {},
+        "target": "decrease",
+        "floor_pct": 5.0,
+        "display_stats": [
+          "mean"
+        ],
+        "baseline": {
+          "mean": 0.008385811462074082,
+          "runs": [
+            {
+              "run": "baseline-1",
+              "mean": 0.008354443488977958
+            },
+            {
+              "run": "baseline-2",
+              "mean": 0.008464385931726905
+            },
+            {
+              "run": "baseline-3",
+              "mean": 0.008479483547094187
+            },
+            {
+              "run": "baseline-4",
+              "mean": 0.008452533286573149
+            },
+            {
+              "run": "baseline-5",
+              "mean": 0.008203780807228918
+            },
+            {
+              "run": "baseline-6",
+              "mean": 0.008360241710843375
+            }
+          ]
+        },
+        "feature": {
+          "mean": 0.008483520549630419,
+          "runs": [
+            {
+              "run": "feature-1",
+              "mean": 0.00848188713855422
+            },
+            {
+              "run": "feature-2",
+              "mean": 0.008455962032193162
+            },
+            {
+              "run": "feature-3",
+              "mean": 0.008432849216867468
+            },
+            {
+              "run": "feature-4",
+              "mean": 0.008522447690763057
+            },
+            {
+              "run": "feature-5",
+              "mean": 0.008441211241448695
+            },
+            {
+              "run": "feature-6",
+              "mean": 0.008566765977955911
+            }
+          ]
+        },
+        "changes": {
+          "mean": {
+            "baseline": 0.008385811462074082,
+            "feature": 0.008483520549630419,
+            "diff": 9.8e-05,
+            "pct": 1.1652,
+            "ci": 8.3e-05,
+            "ci_pct": 0.995,
+            "floor_pct": 5.0,
+            "sig": "neutral",
+            "ci_method": "run_cluster_bootstrap",
+            "runs": {
+              "baseline": 6,
+              "feature": 6
+            }
+          }
+        },
+        "change": {
+          "sig": "neutral",
+          "significant_stats": []
+        },
+        "unit": "seconds",
+        "materiality": {
+          "min_value_pct_total_latency": 0.0
+        },
+        "pairs": [
+          {
+            "baseline_run": "baseline-1",
+            "feature_run": "feature-1",
+            "mean_diff": 0.00012744364957626222
+          },
+          {
+            "baseline_run": "baseline-2",
+            "feature_run": "feature-2",
+            "mean_diff": -8.42389953374309e-06
+          },
+          {
+            "baseline_run": "baseline-3",
+            "feature_run": "feature-3",
+            "mean_diff": -4.663433022671949e-05
+          },
+          {
+            "baseline_run": "baseline-4",
+            "feature_run": "feature-4",
+            "mean_diff": 6.991440418990802e-05
+          },
+          {
+            "baseline_run": "baseline-5",
+            "feature_run": "feature-5",
+            "mean_diff": 0.00023743043421977673
+          },
+          {
+            "baseline_run": "baseline-6",
+            "feature_run": "feature-6",
+            "mean_diff": 0.00020652426711253655
+          }
+        ]
+      }
+    ],
+    "changed": [],
+    "improvements": [],
+    "regressions": []
+  }
+}

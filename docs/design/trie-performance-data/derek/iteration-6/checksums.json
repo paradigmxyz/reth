@@ -1,0 +1,18 @@
+{
+  "assessment.md": "c46b65b43fedaa0af7e59889d1353bc1297febe1bc8aaa46da7999b9dd93140d",
+  "commit-subphases.json": "7d9c1cd8d34adcef2397cdeb7a7f1f6449d61c93884e9889d33aa9f6c7a4eeed",
+  "diagnostic-targets.json": "7490c1ccfed458298e8a5197877019086bf73fc67f83b30c056486c3d6649bcf",
+  "extraction-metadata.json": "184959ab47e9325285b1071a56b0933f1e31420deabfa71cf38ff71b40478d19",
+  "iteration-metadata.json": "8a470b06f7cc9a3520e15d4dfed696c00456893f57685dcd80e4c7b43a825aa7",
+  "memory-per-run.csv": "3b4e252f658cdd310f74965f73031d4768e1cf7dc1fa9e8abddb6c14876f9a03",
+  "memory-summary.json": "06f7ae12c9147ef27831be2d3d0ddedef96c679aba6918722e840c5ebc808370",
+  "persistence-log-boundaries.json": "bec80d3ff5c9d1c61ce051e5666addafc0c36017bde1b4f7656265b5beaf396d",
+  "persistence-work-audit.json": "7bec2a045f4f68b35a6f5d299598a094a80fa77483e4f67717f3af2d6e82e6c9",
+  "phase-comparison.csv": "96acf67d527e977c831df3afc082a553279df4536c389c294298847fa658d2cc",
+  "phases.json": "333aa08a7ffbd9d5e8c1048b1fe14d637a4ee17ca1c286fe82aec098e4d87f94",
+  "raw-replay-duration.json": "58036ad18ece69836fbf44a60e16497b8046de35961e2284b607b21a00604ce2",
+  "root-work-audit.json": "9631f2f2f080c22da49654b372e17853a2835ddeed9e317dd46c426575dcff08",
+  "summary.json": "d0040e8bac7b0f85da41b627cfe4cb397a46d47d96f650fe1c8a47064921b005",
+  "worker-source-audit.md": "239d07de575032864c068726135fed5e004d605f965533310c92bb4fc7f90490",
+  "workload-source-audit.json": "842cac803ee03022e4268e848b25176ea765b1434cc4cdaac2111be1ad4fc0e4"
+}

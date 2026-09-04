@@ -1,0 +1,167 @@
+cargo:rerun-if-changed=/tmp/reth-mincore-diagnostic-33/crates/storage/libmdbx-rs/mdbx-sys/libmdbx
+cargo:rerun-if-env-changed=CC_x86_64-unknown-linux-gnu
+CC_x86_64-unknown-linux-gnu = None
+cargo:rerun-if-env-changed=CC_x86_64_unknown_linux_gnu
+CC_x86_64_unknown_linux_gnu = None
+cargo:rerun-if-env-changed=HOST_CC
+HOST_CC = None
+cargo:rerun-if-env-changed=CC
+CC = None
+cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+running: "cc" "-E" "/tmp/reth-mincore-default-native-target/profiling/build/reth-mdbx-sys-1384b96c6e272a39/out/8573492950297244245detect_compiler_family.c"
+# 0 "/tmp/reth-mincore-default-native-target/profiling/build/reth-mdbx-sys-1384b96c6e272a39/out/8573492950297244245detect_compiler_family.c"
+# 0 "<built-in>"
+# 0 "<command-line>"
+# 1 "/usr/include/stdc-predef.h" 1 3 4
+# 0 "<command-line>" 2
+# 1 "/tmp/reth-mincore-default-native-target/profiling/build/reth-mdbx-sys-1384b96c6e272a39/out/8573492950297244245detect_compiler_family.c"
+
+
+
+
+
+#pragma message "gcc"
+
+running: "cc" "-?"
+cargo:warning=cc: error: unrecognized command-line option ‘-?’
+cargo:warning=cc: fatal error: no input files
+cargo:warning=compilation terminated.
+exit status: 1
+cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+CRATE_CC_NO_DEFAULTS = None
+cargo:rerun-if-env-changed=CFLAGS
+CFLAGS = Some()
+cargo:rerun-if-env-changed=CC_SHELL_ESCAPED_FLAGS
+CC_SHELL_ESCAPED_FLAGS = None
+cargo:rerun-if-env-changed=HOST_CFLAGS
+HOST_CFLAGS = None
+cargo:rerun-if-env-changed=CFLAGS_x86_64_unknown_linux_gnu
+CFLAGS_x86_64_unknown_linux_gnu = None
+cargo:rerun-if-env-changed=CFLAGS_x86_64-unknown-linux-gnu
+CFLAGS_x86_64-unknown-linux-gnu = None
+cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+running: "cc" "-E" "/tmp/reth-mincore-default-native-target/profiling/build/reth-mdbx-sys-1384b96c6e272a39/out/14482488825899839566detect_compiler_family.c"
+# 0 "/tmp/reth-mincore-default-native-target/profiling/build/reth-mdbx-sys-1384b96c6e272a39/out/14482488825899839566detect_compiler_family.c"
+# 0 "<built-in>"
+# 0 "<command-line>"
+# 1 "/usr/include/stdc-predef.h" 1 3 4
+# 0 "<command-line>" 2
+# 1 "/tmp/reth-mincore-default-native-target/profiling/build/reth-mdbx-sys-1384b96c6e272a39/out/14482488825899839566detect_compiler_family.c"
+
+
+
+
+
+#pragma message "gcc"
+
+running: "cc" "-?"
+cargo:warning=cc: error: unrecognized command-line option ‘-?’
+cargo:warning=cc: fatal error: no input files
+cargo:warning=compilation terminated.
+exit status: 1
+cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+CRATE_CC_NO_DEFAULTS = None
+cargo:rerun-if-env-changed=CFLAGS
+CFLAGS = Some()
+cargo:rerun-if-env-changed=CC_SHELL_ESCAPED_FLAGS
+CC_SHELL_ESCAPED_FLAGS = None
+cargo:rerun-if-env-changed=HOST_CFLAGS
+HOST_CFLAGS = None
+cargo:rerun-if-env-changed=CFLAGS_x86_64_unknown_linux_gnu
+CFLAGS_x86_64_unknown_linux_gnu = None
+cargo:rerun-if-env-changed=CFLAGS_x86_64-unknown-linux-gnu
+CFLAGS_x86_64-unknown-linux-gnu = None
+cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+running: "cc" "-E" "/tmp/reth-mincore-default-native-target/profiling/build/reth-mdbx-sys-1384b96c6e272a39/out/17829436324899591864detect_compiler_family.c"
+# 0 "/tmp/reth-mincore-default-native-target/profiling/build/reth-mdbx-sys-1384b96c6e272a39/out/17829436324899591864detect_compiler_family.c"
+# 0 "<built-in>"
+# 0 "<command-line>"
+# 1 "/usr/include/stdc-predef.h" 1 3 4
+# 0 "<command-line>" 2
+# 1 "/tmp/reth-mincore-default-native-target/profiling/build/reth-mdbx-sys-1384b96c6e272a39/out/17829436324899591864detect_compiler_family.c"
+
+
+
+
+
+#pragma message "gcc"
+
+running: "cc" "-?"
+cargo:warning=cc: error: unrecognized command-line option ‘-?’
+cargo:warning=cc: fatal error: no input files
+cargo:warning=compilation terminated.
+exit status: 1
+cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+CRATE_CC_NO_DEFAULTS = None
+cargo:rerun-if-env-changed=CFLAGS
+CFLAGS = Some()
+cargo:rerun-if-env-changed=CC_SHELL_ESCAPED_FLAGS
+CC_SHELL_ESCAPED_FLAGS = None
+cargo:rerun-if-env-changed=HOST_CFLAGS
+HOST_CFLAGS = None
+cargo:rerun-if-env-changed=CFLAGS_x86_64_unknown_linux_gnu
+CFLAGS_x86_64_unknown_linux_gnu = None
+cargo:rerun-if-env-changed=CFLAGS_x86_64-unknown-linux-gnu
+CFLAGS_x86_64-unknown-linux-gnu = None
+cargo:rerun-if-env-changed=CC_FORCE_DISABLE
+CC_FORCE_DISABLE = None
+cargo:rerun-if-env-changed=CC_x86_64-unknown-linux-gnu
+CC_x86_64-unknown-linux-gnu = None
+cargo:rerun-if-env-changed=CC_x86_64_unknown_linux_gnu
+CC_x86_64_unknown_linux_gnu = None
+cargo:rerun-if-env-changed=HOST_CC
+HOST_CC = None
+cargo:rerun-if-env-changed=CC
+CC = None
+cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+CRATE_CC_NO_DEFAULTS = None
+cargo:rerun-if-env-changed=CFLAGS
+CFLAGS = Some()
+cargo:rerun-if-env-changed=CC_SHELL_ESCAPED_FLAGS
+CC_SHELL_ESCAPED_FLAGS = None
+cargo:rerun-if-env-changed=HOST_CFLAGS
+HOST_CFLAGS = None
+cargo:rerun-if-env-changed=CFLAGS_x86_64_unknown_linux_gnu
+CFLAGS_x86_64_unknown_linux_gnu = None
+cargo:rerun-if-env-changed=CFLAGS_x86_64-unknown-linux-gnu
+CFLAGS_x86_64-unknown-linux-gnu = None
+running: LC_ALL="C" "cc" "-O3" "-ffunction-sections" "-fdata-sections" "-fPIC" "-g" "-gdwarf-4" "-fno-omit-frame-pointer" "-m64" "-march=native" "-Wno-unused-parameter" "-Wuninitialized" "-DMDBX_BUILD_FLAGS=\"-O3 -ffunction-sections -fdata-sections -fPIC -g -gdwarf-4 -fno-omit-frame-pointer -m64 -Wno-unused-parameter -Wuninitialized\"" "-DMDBX_TXN_CHECKOWNER=0" "-DMDBX_USE_FALLOCATE=0" "-DMDBX_DEBUG=0" "-DNDEBUG" "-o" "/tmp/reth-mincore-default-native-target/profiling/build/reth-mdbx-sys-1384b96c6e272a39/out/98e59b3378c30fa4-mdbx.o" "-c" "/tmp/reth-mincore-diagnostic-33/crates/storage/libmdbx-rs/mdbx-sys/libmdbx/mdbx.c"
+exit status: 0
+cargo:rerun-if-env-changed=AR_x86_64-unknown-linux-gnu
+AR_x86_64-unknown-linux-gnu = None
+cargo:rerun-if-env-changed=AR_x86_64_unknown_linux_gnu
+AR_x86_64_unknown_linux_gnu = None
+cargo:rerun-if-env-changed=HOST_AR
+HOST_AR = None
+cargo:rerun-if-env-changed=AR
+AR = None
+cargo:rerun-if-env-changed=ARFLAGS
+ARFLAGS = None
+cargo:rerun-if-env-changed=HOST_ARFLAGS
+HOST_ARFLAGS = None
+cargo:rerun-if-env-changed=ARFLAGS_x86_64_unknown_linux_gnu
+ARFLAGS_x86_64_unknown_linux_gnu = None
+cargo:rerun-if-env-changed=ARFLAGS_x86_64-unknown-linux-gnu
+ARFLAGS_x86_64-unknown-linux-gnu = None
+running: ZERO_AR_DATE="1" "ar" "cqD" "/tmp/reth-mincore-default-native-target/profiling/build/reth-mdbx-sys-1384b96c6e272a39/out/libmdbx.a" "/tmp/reth-mincore-default-native-target/profiling/build/reth-mdbx-sys-1384b96c6e272a39/out/98e59b3378c30fa4-mdbx.o"
+exit status: 0
+cargo:rerun-if-env-changed=AR_x86_64-unknown-linux-gnu
+AR_x86_64-unknown-linux-gnu = None
+cargo:rerun-if-env-changed=AR_x86_64_unknown_linux_gnu
+AR_x86_64_unknown_linux_gnu = None
+cargo:rerun-if-env-changed=HOST_AR
+HOST_AR = None
+cargo:rerun-if-env-changed=AR
+AR = None
+cargo:rerun-if-env-changed=ARFLAGS
+ARFLAGS = None
+cargo:rerun-if-env-changed=HOST_ARFLAGS
+HOST_ARFLAGS = None
+cargo:rerun-if-env-changed=ARFLAGS_x86_64_unknown_linux_gnu
+ARFLAGS_x86_64_unknown_linux_gnu = None
+cargo:rerun-if-env-changed=ARFLAGS_x86_64-unknown-linux-gnu
+ARFLAGS_x86_64-unknown-linux-gnu = None
+running: "ar" "sD" "/tmp/reth-mincore-default-native-target/profiling/build/reth-mdbx-sys-1384b96c6e272a39/out/libmdbx.a"
+exit status: 0
+cargo:rustc-link-lib=static=mdbx
+cargo:rustc-link-search=native=/tmp/reth-mincore-default-native-target/profiling/build/reth-mdbx-sys-1384b96c6e272a39/out

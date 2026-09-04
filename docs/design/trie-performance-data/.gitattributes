@@ -1,0 +1,3 @@
+# Preserve the exact CSV exports and unified-patch context lines used as evidence.
+*.csv -text whitespace=cr-at-eol
+*.patch -text whitespace=-blank-at-eol

@@ -1,0 +1,35 @@
+{
+  "candidate": "0798ad069ca8566be6a783b2acebf7ad9504b321",
+  "baseline": "33c491663d96c545e49e8af4cb6edc233132f0ce",
+  "baseline_note": "Same harness/graph as candidate with cursor.rs restored exactly from33; metrics.rs added regression is cfg(test) only",
+  "RUSTFLAGS": "-C target-cpu=native",
+  "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1\nLLVM version: 22.1.8\n",
+  "target": "/tmp/reth-metrics-borrow-native-target",
+  "cache_note": "Copied identical-toolchain LIFO dependency target; forcibly cargo clean --profile profiling reth-db/reth-provider/reth-trie-db before compiling; effective FIFO+WRITEMAP flags asserted at benchmark startup",
+  "profile": "profiling",
+  "cpu": 0,
+  "planned_order": [
+    "baseline",
+    "candidate",
+    "candidate",
+    "baseline",
+    "baseline",
+    "candidate",
+    "candidate",
+    "baseline"
+  ],
+  "samples_per_process_per_mode": 40,
+  "modes": [
+    "off",
+    "on"
+  ],
+  "fixture": "32768 account +65536 storage nodes;4096 account +8192 storage replacements per round;4 warmups;persistent mappings;Durable commits;full live snapshots warm all live pages each round",
+  "counter_control": "real metrics AtomicU64 handles; exactly20480 cursor-operation counts per enabled sample and0 disabled; histograms no-op in benchmark (operation values below4096 bytes)",
+  "validation": "full snapshot equality after every commit,final reopen equality, focused56tests incllarge-valuemetrics duration/errorcount",
+  "hashes": {
+    "cursor-metrics-candidate": "a6d8151196e6e061897e0e5d0cea1af8b9bfa4eddd8df37057a2d703214645e3",
+    "cursor-metrics-baseline": "e63f7241f331a5f2b1632a2a4fc6a61465a44649dd01fbca760f651cc7e3ca64"
+  },
+  "diagnostic_patch_sha256": "46d5747b3b34f5961d1e7fb583834f61b63d123f2ab1f1b15213df773d153093",
+  "host": "Linux-6.8.0-117-generic-x86_64-with-glibc2.39"
+}

@@ -1,0 +1,45 @@
+{
+  "baseline": "eadb887f1c1698e7bd932f60a0c654dccccd081f",
+  "inputs": {
+    "blocks": 500,
+    "warmup": 125,
+    "run_pairs": 6,
+    "mode": "engine",
+    "slack": "never",
+    "samply": false,
+    "tracing_chrome": false,
+    "otlp": false,
+    "metrics": true
+  },
+  "assessment": {
+    "method": "Unchanged Derek run-cluster bootstrap; 10000 resamples; six independent runs per variant",
+    "primary": "mean newPayload latency and reported wall-clock; confidence interval must clear default practical floor",
+    "floors_percent": {
+      "mean": 1.2,
+      "wall_clock": 0.7,
+      "p90": 1.35,
+      "p99": 5.0
+    },
+    "secondary": "Check tail regressions, root phase timings, direct trie-write time, and completed persistence work; preserve async window caveats"
+  },
+  "branch": "perf/trie-root-persistence-sort-metrics",
+  "candidate": "a0d8b420cd949b41cf93893300b494aa35e57d47",
+  "run_id": 33870980404,
+  "url": "https://github.com/paradigmxyz/reth/actions/runs/33870980404",
+  "status": "completed",
+  "profile": false,
+  "change": "Sort sparse-trie leaf updates by their fixed B256 keys; borrow cached operation metrics on each MDBX cursor write instead of cloning the Arc. Retain original FIFO, WRITEMAP and prefault settings.",
+  "verdict": "neutral",
+  "clear_improvement": false,
+  "adopt": true,
+  "build_started_at": "2026-09-04T12:05:15Z",
+  "workflow_conclusion": "success",
+  "completed_at": "2026-09-04T12:24:59Z",
+  "replay_started_at": "2026-09-04T12:10:24Z",
+  "adoption": {
+    "status": "component changes retained; overall goal remains unqualified",
+    "main_commit": "2042e313a2b7cb0e7606dceeca75005612702d8f",
+    "source_equals_tested_candidate": true,
+    "reason": "Verified local component improvements and neutral overall Derek metrics; this is not acceptance of an overall performance win."
+  }
+}

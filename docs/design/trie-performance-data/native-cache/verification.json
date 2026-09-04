@@ -1,0 +1,87 @@
+{
+  "completed_utc": "2026-09-04T11:54:21.691687+00:00",
+  "comparison_count": 56,
+  "process_count": 16,
+  "process_case_rows": 448,
+  "timed_samples_total": 44800,
+  "all_root_and_case_sets_equal": true,
+  "per_thread": {
+    "1": {
+      "cases": 28,
+      "lower_medians": 27,
+      "higher_medians": 1,
+      "groups": {
+        "root_cached": {
+          "cases": 4,
+          "min_reduction_percent": 88.44,
+          "max_reduction_percent": 90.02
+        },
+        "root_dirty": {
+          "cases": 12,
+          "min_reduction_percent": 1.46,
+          "max_reduction_percent": 16.82
+        },
+        "update_root": {
+          "cases": 12,
+          "min_reduction_percent": -0.08,
+          "max_reduction_percent": 10.81
+        }
+      }
+    },
+    "15": {
+      "cases": 28,
+      "lower_medians": 27,
+      "higher_medians": 1,
+      "groups": {
+        "root_cached": {
+          "cases": 4,
+          "min_reduction_percent": 84.1,
+          "max_reduction_percent": 92.71
+        },
+        "root_dirty": {
+          "cases": 12,
+          "min_reduction_percent": 0.71,
+          "max_reduction_percent": 30.19
+        },
+        "update_root": {
+          "cases": 12,
+          "min_reduction_percent": -0.65,
+          "max_reduction_percent": 16.32
+        }
+      }
+    }
+  },
+  "slower_median_cases": [
+    {
+      "threads": "1",
+      "case": "update_root/32768/1/discard",
+      "runs_per_mode": "4",
+      "samples_per_run": "100",
+      "baseline_median_ns": "6627.5",
+      "baseline_p25_ns": "6529.5",
+      "baseline_p75_ns": "6720.5",
+      "candidate_median_ns": "6632.5",
+      "candidate_p25_ns": "6598.0",
+      "candidate_p75_ns": "6664.5",
+      "speedup": "0.9992",
+      "reduction_percent": "-0.08"
+    },
+    {
+      "threads": "15",
+      "case": "update_root/32768/32768/retain",
+      "runs_per_mode": "4",
+      "samples_per_run": "100",
+      "baseline_median_ns": "9436537.5",
+      "baseline_p25_ns": "9394491.25",
+      "baseline_p75_ns": "9511009.0",
+      "candidate_median_ns": "9497782.0",
+      "candidate_p25_ns": "9461959.5",
+      "candidate_p75_ns": "9541426.75",
+      "speedup": "0.9936",
+      "reduction_percent": "-0.65"
+    }
+  ],
+  "confidence_intervals": false,
+  "statistic": "Median and inclusive quartiles across four process medians per version,100 timed samples/case/process",
+  "scope": "Repeated-fixture cache-warm kernel, system allocator, no database I/O; does not change neutral Derek results for retained candidate."
+}

@@ -1,0 +1,66 @@
+Validation for a0d8b420cd949b41cf93893300b494aa35e57d47
+Finished UTC: 2026-09-04T12:28:38.889254+00:00
+Workspace: /tmp/reth-sort-metrics-33
+Environment: LLVM_SYS_221_PREFIX=/usr/lib/llvm-22 CARGO_BUILD_JOBS=8
+CARGO_TARGET_DIR=/home/ubuntu/reth/target; RUSTFLAGS/CARGO_ENCODED_RUSTFLAGS unset.
+
+rustc 1.98.1 (48a229cea 2026-09-01)
+cargo 1.98.1 (797e8a9bc 2026-08-05)
+rustc 1.97.0-nightly (67bcaa9c4 2026-05-01)
+cargo 1.97.0-nightly (eb9b60f1f 2026-04-24)
+cargo-nextest 0.9.133 (65e806bd5 2026-04-14)
+zepter 1.88.1
+dprint 0.54.0
+
+Cache reuse safeguard (exit 0 before checks):
+cargo +nightly clean -p reth-db -p reth-trie-sparse -p reth-provider -p reth-trie-db
+Removed 28,287 package artifacts / 7.3 GiB. Clippy and test logs verify each changed
+crate compiled from /tmp/reth-sort-metrics-33. No other agent used this target.
+
+Commands (all exit 0):
+cargo +nightly fmt --all --check
+cargo +nightly clippy --locked --workspace --lib --examples --tests --benches --all-features -- -D warnings
+cargo +1.98.1 nextest run --locked --workspace --no-fail-fast
+cargo +nightly docs --locked --document-private-items
+RUSTUP_TOOLCHAIN=1.98.1 zepter
+make SHELL=bash lint-toml
+git diff --check
+git diff --exit-code
+git status --short
+
+Results:
+- Formatting and strict all-feature workspace clippy passed without source fixes.
+- Full workspace nextest: 3,819 passed, 38 skipped; one flaky test passed on attempt 2.
+  reth-node-ethereum::it testing::testing_rpc_build_block_works first failed because
+  HTTP-RPC address 127.0.0.1:8545 was already in use (os error 98). This test had
+  a similar port-conflict flake in prior validation. No persistent test failures.
+- Nightly private documentation passed without warnings: index plus 140 other outputs. The docs alias expands to
+  doc --workspace --all-features --no-deps.
+- Zepter and tracked-TOML formatting passed without tracked changes.
+- Diff checks passed; the isolated worktree is clean. Production source remained
+  unchanged throughout validation. Main user-untracked files were untouched.
+
+Before full validation, exact a0 also passed 236 focused native-CPU tests:
+LLVM_SYS_221_PREFIX=/usr/lib/llvm-22 CARGO_BUILD_JOBS=8 CARGO_TARGET_DIR=/tmp/reth-combined-native-target RUSTFLAGS="-C target-cpu=native" cargo +1.98.1 nextest run --locked --cargo-profile profiling -p reth-db -p reth-trie-db -p reth-trie-sparse --lib --test storage_persistence --test sparse_root_persistence
+(66 tests passed; explicit integration target selection excludes the sparse suite.)
+LLVM_SYS_221_PREFIX=/usr/lib/llvm-22 CARGO_BUILD_JOBS=8 CARGO_TARGET_DIR=/tmp/reth-combined-native-target RUSTFLAGS="-C target-cpu=native" cargo +1.98.1 nextest run --locked --cargo-profile profiling -p reth-trie-sparse --test suite
+(170 tests passed.)
+
+TOML safeguard: make invokes dprint fmt. This exported function restricts
+formatting to every git-tracked TOML file:
+dprint() {
+    local -a reth_lint_tomls
+    mapfile -d '' -t reth_lint_tomls < <(git ls-files -z '*.toml')
+    command dprint "$@" --includes-override "${reth_lint_tomls[@]}"
+}
+export -f dprint
+
+Logs: a0d8-{cache-invalidation,fmt,clippy,nextest,docs,zepter,lint-toml,diff-check,
+source-unchanged,git-status,focused-tests,sparse-suite}.log.
+Structured metadata: a0d8-status.json and a0d8-toolchains.json.
+Reproducible runner: validate-a0.py. No production changes were needed.
+The older incomplete e567 log is a cancelled LIFO experiment, not validation.
+
+Main merge 2042e313a2b7cb0e7606dceeca75005612702d8f has identical source:
+git diff --exit-code a0d8b420cd949b41cf93893300b494aa35e57d47 2042e313a2b7cb0e7606dceeca75005612702d8f
+returned exit 0. Validation applies to that merge without repetition.

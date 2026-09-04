@@ -1,0 +1,14 @@
+{
+  "base_commit": "33c491663d96c545e49e8af4cb6edc233132f0ce",
+  "change": "Sort full-length update paths by their original B256 key instead of Nibbles",
+  "rustc": "1.98.1",
+  "profile": "profiling",
+  "rustflags": "-C target-cpu=native",
+  "features": [
+    "alloy-primitives/asm-keccak",
+    "alloy-primitives/keccak-cache-global"
+  ],
+  "binary_sha256": "1d6159c11db4f188911a8f1e0224507e1f2a7889d4ddf3c534374a08eab4d67b",
+  "candidate_commit": "f4fb30dfaf9ff55f27f87b0376b2d7b910221cf3",
+  "validation": "180 sparse tests passed with same compiler and features; nightly fmt and git diff --check passed"
+}

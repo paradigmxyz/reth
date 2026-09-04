@@ -1,0 +1,72 @@
+[
+  {
+    "command": [
+      "rustc",
+      "+1.98.1",
+      "--version",
+      "--verbose"
+    ],
+    "exit_code": 0,
+    "stdout": "rustc 1.98.1 (48a229cea 2026-09-01)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1\nLLVM version: 22.1.8\n",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "cargo",
+      "+1.98.1",
+      "--version"
+    ],
+    "exit_code": 0,
+    "stdout": "cargo 1.98.1 (797e8a9bc 2026-08-05)\n",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "rustc",
+      "+nightly",
+      "--version",
+      "--verbose"
+    ],
+    "exit_code": 0,
+    "stdout": "rustc 1.97.0-nightly (67bcaa9c4 2026-05-01)\nbinary: rustc\ncommit-hash: 67bcaa9c4b1b1015efae3d591155c79760b1e0a5\ncommit-date: 2026-05-01\nhost: x86_64-unknown-linux-gnu\nrelease: 1.97.0-nightly\nLLVM version: 22.1.4\n",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "cargo",
+      "+nightly",
+      "--version"
+    ],
+    "exit_code": 0,
+    "stdout": "cargo 1.97.0-nightly (eb9b60f1f 2026-04-24)\n",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "cargo",
+      "nextest",
+      "--version"
+    ],
+    "exit_code": 0,
+    "stdout": "cargo-nextest 0.9.133 (65e806bd5 2026-04-14)\nrelease: 0.9.133\ncommit-hash: 65e806bd589d12c4341d3696a02a9788bd437c3c\ncommit-date: 2026-04-14\nhost: x86_64-unknown-linux-gnu\n",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "zepter",
+      "--version"
+    ],
+    "exit_code": 0,
+    "stdout": "zepter 1.88.1\n",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "dprint",
+      "--version"
+    ],
+    "exit_code": 0,
+    "stdout": "dprint 0.54.0\n",
+    "stderr": ""
+  }
+]

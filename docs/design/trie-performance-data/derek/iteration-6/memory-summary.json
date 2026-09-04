@@ -1,0 +1,357 @@
+{
+  "scope": "Sampled peaks and last available samples, not true high-water marks or end-of-window/post-drain memory. Raw gauge samples stop 8.59\u20138.84 seconds before target window end. RSS includes mapped pages and overlaps jemalloc; no total-host/cgroup-memory inference.",
+  "descriptive_comparisons": {
+    "reth_process_resident_memory_bytes": {
+      "sampled_peak_bytes": {
+        "baseline_run_mean_bytes": 10992947882.666666,
+        "feature_run_mean_bytes": 10961662634.666666,
+        "difference_bytes": -31285248.0,
+        "difference_mib": -29.8359375,
+        "change_percent": -0.28459379898753134
+      },
+      "scrape_p50_bytes": {
+        "baseline_run_mean_bytes": 8963642026.666666,
+        "feature_run_mean_bytes": 8941509290.666666,
+        "difference_bytes": -22132736.0,
+        "difference_mib": -21.107421875,
+        "change_percent": -0.2469167770662417
+      },
+      "scrape_p95_bytes": {
+        "baseline_run_mean_bytes": 10755178257.066666,
+        "feature_run_mean_bytes": 10733776179.2,
+        "difference_bytes": -21402077.866664886,
+        "difference_mib": -20.41061197916497,
+        "change_percent": -0.19899324172152344
+      },
+      "first_bytes": {
+        "baseline_run_mean_bytes": 5828822357.333333,
+        "feature_run_mean_bytes": 5817092778.666667,
+        "difference_bytes": -11729578.66666603,
+        "difference_mib": -11.18619791666606,
+        "change_percent": -0.20123410781096585
+      },
+      "last_bytes": {
+        "baseline_run_mean_bytes": 10992947882.666666,
+        "feature_run_mean_bytes": 10958912853.333334,
+        "difference_bytes": -34035029.33333206,
+        "difference_mib": -32.45833333333212,
+        "change_percent": -0.309607847654747
+      },
+      "change_from_first_bytes": {
+        "baseline_run_mean_bytes": 5164125525.333333,
+        "feature_run_mean_bytes": 5141820074.666667,
+        "difference_bytes": -22305450.66666603,
+        "difference_mib": -21.27213541666606,
+        "change_percent": -0.43193083818825473
+      }
+    },
+    "reth_process_virtual_memory_bytes": {
+      "sampled_peak_bytes": {
+        "baseline_run_mean_bytes": 8825487402325.334,
+        "feature_run_mean_bytes": 8825485114026.666,
+        "difference_bytes": -2288298.66796875,
+        "difference_mib": -2.18229166790843,
+        "change_percent": -2.592829793091056e-05
+      },
+      "scrape_p50_bytes": {
+        "baseline_run_mean_bytes": 8824853370197.334,
+        "feature_run_mean_bytes": 8824857768618.666,
+        "difference_bytes": 4398421.33203125,
+        "difference_mib": 4.19466145709157,
+        "change_percent": 4.9841296467789675e-05
+      },
+      "scrape_p95_bytes": {
+        "baseline_run_mean_bytes": 8825350897937.066,
+        "feature_run_mean_bytes": 8825324543317.334,
+        "difference_bytes": -26354619.732421875,
+        "difference_mib": -25.1337239574641,
+        "change_percent": -0.0002986240438151988
+      },
+      "first_bytes": {
+        "baseline_run_mean_bytes": 8809660788736.0,
+        "feature_run_mean_bytes": 8809665226069.334,
+        "difference_bytes": 4437333.333984375,
+        "difference_mib": 4.231770833954215,
+        "change_percent": 5.036894654697477e-05
+      },
+      "last_bytes": {
+        "baseline_run_mean_bytes": 8825487402325.334,
+        "feature_run_mean_bytes": 8825485114026.666,
+        "difference_bytes": -2288298.66796875,
+        "difference_mib": -2.18229166790843,
+        "change_percent": -2.592829793091056e-05
+      },
+      "change_from_first_bytes": {
+        "baseline_run_mean_bytes": 15826613589.333334,
+        "feature_run_mean_bytes": 15819887957.333334,
+        "difference_bytes": -6725632.0,
+        "difference_mib": -6.4140625,
+        "change_percent": -0.042495711176859796
+      }
+    },
+    "reth_jemalloc_allocated": {
+      "sampled_peak_bytes": {
+        "baseline_run_mean_bytes": 4173638465.3333335,
+        "feature_run_mean_bytes": 4170624016.0,
+        "difference_bytes": -3014449.3333334923,
+        "difference_mib": -2.8748029073080943,
+        "change_percent": -0.07222593328032323
+      },
+      "scrape_p50_bytes": {
+        "baseline_run_mean_bytes": 3918383057.3333335,
+        "feature_run_mean_bytes": 3918975607.3333335,
+        "difference_bytes": 592550.0,
+        "difference_mib": 0.5650997161865234,
+        "change_percent": 0.015122309159920633
+      },
+      "scrape_p95_bytes": {
+        "baseline_run_mean_bytes": 4123809348.7333336,
+        "feature_run_mean_bytes": 4118061277.0,
+        "difference_bytes": -5748071.733333588,
+        "difference_mib": -5.481788380940998,
+        "change_percent": -0.13938742670291937
+      },
+      "first_bytes": {
+        "baseline_run_mean_bytes": 3593587374.6666665,
+        "feature_run_mean_bytes": 3590559082.6666665,
+        "difference_bytes": -3028292.0,
+        "difference_mib": -2.8880043029785156,
+        "change_percent": -0.08426932989993308
+      },
+      "last_bytes": {
+        "baseline_run_mean_bytes": 4092411392.0,
+        "feature_run_mean_bytes": 4102541784.0,
+        "difference_bytes": 10130392.0,
+        "difference_mib": 9.661094665527344,
+        "change_percent": 0.24754090020868702
+      },
+      "change_from_first_bytes": {
+        "baseline_run_mean_bytes": 498824017.3333333,
+        "feature_run_mean_bytes": 511982701.3333333,
+        "difference_bytes": 13158684.0,
+        "difference_mib": 12.54909896850586,
+        "change_percent": 2.637941146127054
+      }
+    },
+    "reth_jemalloc_active": {
+      "sampled_peak_bytes": {
+        "baseline_run_mean_bytes": 4277802325.3333335,
+        "feature_run_mean_bytes": 4274271573.3333335,
+        "difference_bytes": -3530752.0,
+        "difference_mib": -3.3671875,
+        "change_percent": -0.08253658611316883
+      },
+      "scrape_p50_bytes": {
+        "baseline_run_mean_bytes": 4028861098.6666665,
+        "feature_run_mean_bytes": 4028328618.6666665,
+        "difference_bytes": -532480.0,
+        "difference_mib": -0.5078125,
+        "change_percent": -0.013216638324320407
+      },
+      "scrape_p95_bytes": {
+        "baseline_run_mean_bytes": 4230770210.133333,
+        "feature_run_mean_bytes": 4224465032.5333333,
+        "difference_bytes": -6305177.599999905,
+        "difference_mib": -6.013085937499909,
+        "change_percent": -0.14903143604675373
+      },
+      "first_bytes": {
+        "baseline_run_mean_bytes": 3693512704.0,
+        "feature_run_mean_bytes": 3689426944.0,
+        "difference_bytes": -4085760.0,
+        "difference_mib": -3.896484375,
+        "change_percent": -0.1106198983849449
+      },
+      "last_bytes": {
+        "baseline_run_mean_bytes": 4211575466.6666665,
+        "feature_run_mean_bytes": 4211734528.0,
+        "difference_bytes": 159061.33333349228,
+        "difference_mib": 0.15169270833348492,
+        "change_percent": 0.00377676559739637
+      },
+      "change_from_first_bytes": {
+        "baseline_run_mean_bytes": 518062762.6666667,
+        "feature_run_mean_bytes": 522307584.0,
+        "difference_bytes": 4244821.333333313,
+        "difference_mib": 4.048177083333314,
+        "change_percent": 0.8193643008587603
+      }
+    },
+    "reth_jemalloc_resident": {
+      "sampled_peak_bytes": {
+        "baseline_run_mean_bytes": 4533879466.666667,
+        "feature_run_mean_bytes": 4539245226.666667,
+        "difference_bytes": 5365760.0,
+        "difference_mib": 5.1171875,
+        "change_percent": 0.11834809547650593
+      },
+      "scrape_p50_bytes": {
+        "baseline_run_mean_bytes": 4301358421.333333,
+        "feature_run_mean_bytes": 4288806912.0,
+        "difference_bytes": -12551509.333333015,
+        "difference_mib": -11.97005208333303,
+        "change_percent": -0.29180338171963527
+      },
+      "scrape_p95_bytes": {
+        "baseline_run_mean_bytes": 4495257156.266666,
+        "feature_run_mean_bytes": 4493255133.866667,
+        "difference_bytes": -2002022.3999996185,
+        "difference_mib": -1.9092773437496362,
+        "change_percent": -0.04453632640812888
+      },
+      "first_bytes": {
+        "baseline_run_mean_bytes": 3891137877.3333335,
+        "feature_run_mean_bytes": 3878836224.0,
+        "difference_bytes": -12301653.333333492,
+        "difference_mib": -11.731770833333485,
+        "change_percent": -0.3161453981107454
+      },
+      "last_bytes": {
+        "baseline_run_mean_bytes": 4494039722.666667,
+        "feature_run_mean_bytes": 4486825301.333333,
+        "difference_bytes": -7214421.333333969,
+        "difference_mib": -6.88020833333394,
+        "change_percent": -0.16053310114163555
+      },
+      "change_from_first_bytes": {
+        "baseline_run_mean_bytes": 602901845.3333334,
+        "feature_run_mean_bytes": 607989077.3333334,
+        "difference_bytes": 5087232.0,
+        "difference_mib": 4.8515625,
+        "change_percent": 0.8437910813139604
+      }
+    },
+    "reth_jemalloc_mapped": {
+      "sampled_peak_bytes": {
+        "baseline_run_mean_bytes": 4662438570.666667,
+        "feature_run_mean_bytes": 4667073877.333333,
+        "difference_bytes": 4635306.666666031,
+        "difference_mib": 4.42057291666606,
+        "change_percent": 0.099418074820945
+      },
+      "scrape_p50_bytes": {
+        "baseline_run_mean_bytes": 4431292757.333333,
+        "feature_run_mean_bytes": 4416371712.0,
+        "difference_bytes": -14921045.333333015,
+        "difference_mib": -14.22981770833303,
+        "change_percent": -0.33671991787589395
+      },
+      "scrape_p95_bytes": {
+        "baseline_run_mean_bytes": 4623169843.2,
+        "feature_run_mean_bytes": 4620794606.933333,
+        "difference_bytes": -2375236.2666664124,
+        "difference_mib": -2.265201822916424,
+        "change_percent": -0.051376790107771075
+      },
+      "first_bytes": {
+        "baseline_run_mean_bytes": 4015220736.0,
+        "feature_run_mean_bytes": 4002940245.3333335,
+        "difference_bytes": -12280490.666666508,
+        "difference_mib": -11.711588541666515,
+        "change_percent": -0.3058484570116149
+      },
+      "last_bytes": {
+        "baseline_run_mean_bytes": 4620358314.666667,
+        "feature_run_mean_bytes": 4612792320.0,
+        "difference_bytes": -7565994.666666985,
+        "difference_mib": -7.21549479166697,
+        "change_percent": -0.1637534180552569
+      },
+      "change_from_first_bytes": {
+        "baseline_run_mean_bytes": 605137578.6666666,
+        "feature_run_mean_bytes": 609852074.6666666,
+        "difference_bytes": 4714496.0,
+        "difference_mib": 4.49609375,
+        "change_percent": 0.7790783726219219
+      }
+    },
+    "reth_jemalloc_metadata": {
+      "sampled_peak_bytes": {
+        "baseline_run_mean_bytes": 53450432.0,
+        "feature_run_mean_bytes": 53800170.666666664,
+        "difference_bytes": 349738.6666666642,
+        "difference_mib": 0.3335367838541643,
+        "change_percent": 0.6543233676140625
+      },
+      "scrape_p50_bytes": {
+        "baseline_run_mean_bytes": 49581088.0,
+        "feature_run_mean_bytes": 49602216.0,
+        "difference_bytes": 21128.0,
+        "difference_mib": 0.02014923095703125,
+        "change_percent": 0.042613022126491984
+      },
+      "scrape_p95_bytes": {
+        "baseline_run_mean_bytes": 53168381.86666667,
+        "feature_run_mean_bytes": 53180856.53333333,
+        "difference_bytes": 12474.666666664183,
+        "difference_mib": 0.011896769205726798,
+        "change_percent": 0.02346256596250651
+      },
+      "first_bytes": {
+        "baseline_run_mean_bytes": 43100122.666666664,
+        "feature_run_mean_bytes": 43080880.0,
+        "difference_bytes": -19242.666666664183,
+        "difference_mib": -0.018351236979164298,
+        "change_percent": -0.04464643132338075
+      },
+      "last_bytes": {
+        "baseline_run_mean_bytes": 53450432.0,
+        "feature_run_mean_bytes": 53800170.666666664,
+        "difference_bytes": 349738.6666666642,
+        "difference_mib": 0.3335367838541643,
+        "change_percent": 0.6543233676140625
+      },
+      "change_from_first_bytes": {
+        "baseline_run_mean_bytes": 10350309.333333334,
+        "feature_run_mean_bytes": 10719290.666666666,
+        "difference_bytes": 368981.3333333321,
+        "difference_mib": 0.35188802083333215,
+        "change_percent": 3.5649304909663115
+      }
+    },
+    "reth_jemalloc_retained": {
+      "sampled_peak_bytes": {
+        "baseline_run_mean_bytes": 2854318080.0,
+        "feature_run_mean_bytes": 2845913770.6666665,
+        "difference_bytes": -8404309.333333492,
+        "difference_mib": -8.014973958333485,
+        "change_percent": -0.2944419331616155
+      },
+      "scrape_p50_bytes": {
+        "baseline_run_mean_bytes": 2434570581.3333335,
+        "feature_run_mean_bytes": 2447458986.6666665,
+        "difference_bytes": 12888405.333333015,
+        "difference_mib": 12.29134114583303,
+        "change_percent": 0.5293913198554545
+      },
+      "scrape_p95_bytes": {
+        "baseline_run_mean_bytes": 2778520337.0666666,
+        "feature_run_mean_bytes": 2782841651.2,
+        "difference_bytes": 4321314.133333206,
+        "difference_mib": 4.121126302083212,
+        "change_percent": 0.15552573345190002
+      },
+      "first_bytes": {
+        "baseline_run_mean_bytes": 2270992384.0,
+        "feature_run_mean_bytes": 2287117653.3333335,
+        "difference_bytes": 16125269.333333492,
+        "difference_mib": 15.378255208333485,
+        "change_percent": 0.7100538710275828
+      },
+      "last_bytes": {
+        "baseline_run_mean_bytes": 2832482986.6666665,
+        "feature_run_mean_bytes": 2837951829.3333335,
+        "difference_bytes": 5468842.666666985,
+        "difference_mib": 5.21549479166697,
+        "change_percent": 0.19307592287087783
+      },
+      "change_from_first_bytes": {
+        "baseline_run_mean_bytes": 561490602.6666666,
+        "feature_run_mean_bytes": 550834176.0,
+        "difference_bytes": -10656426.666666627,
+        "difference_mib": -10.162760416666629,
+        "change_percent": -1.8978815702447083
+      }
+    }
+  }
+}

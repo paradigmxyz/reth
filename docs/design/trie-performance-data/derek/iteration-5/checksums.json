@@ -1,0 +1,14 @@
+{
+  "assessment.md": "92f912295ea58af6d60d09bfea20e986de49239248ce41dcd8b65bc63b8dbbc3",
+  "commit-subphases.json": "50bf593413447c0dee5b8256d4910ad06c195f53fb2e785a03ff7f5c03785b22",
+  "extra-save-phases.json": "87ea660244e31661375dab2f68d22f93d7a29b4c4480b8e5239a8351bd998061",
+  "log-boundary-ambiguity.json": "020eafe7221d203ab5839ef4582c5f0d8c0be9c9abdc265773e45afd94e6ae7c",
+  "memory-summary.json": "92e22e085a7d5cb5474d26c679bdf07dbb9891651a37b2d24e328ddae49a3492",
+  "metric-inventory.json": "44a67f47b5f33b74cd669ea5ab5523cdfe3c71e11adb920d5ca7966db5907084",
+  "persistence-log-boundaries.json": "fa6088de80582b4ed3ddbcdc127e9b9b5abfabdef33654f27ca2d2457f409b55",
+  "persistence-work-audit.json": "adbf2d54a3c4812265f7827009862a1d8bd9eee82b87b5b2f7b98b9e83457810",
+  "phases.json": "d18824c13e98118414850eca408a55a4ae1a61c0619a43d000787a7648f5e239",
+  "raw-replay-duration.json": "86a65f5b7f563e16300f54829e0952b3dbd70a916d37a387402963a86829ab0b",
+  "summary.json": "ac798d1741f6adfdee466f6c3775ce0661988ea1cbae927795dcb0b559cebee9",
+  "workload-hash-audit.json": "24095adfa63a58af659b2d7158ecaa340dd13a9fb18e018d25a8cb13ed9e0492"
+}

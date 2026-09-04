@@ -1,0 +1,885 @@
+{
+  "baseline": "eadb887f1c1698e7bd932f60a0c654dccccd081f",
+  "inputs": {
+    "blocks": 500,
+    "warmup": 125,
+    "run_pairs": 6,
+    "mode": "engine",
+    "slack": "never",
+    "samply": false,
+    "tracing_chrome": false,
+    "otlp": false,
+    "metrics": true
+  },
+  "assessment": {
+    "method": "Unchanged Derek run-cluster bootstrap; 10000 resamples; six independent runs per variant",
+    "primary": "mean newPayload latency and reported wall-clock; confidence interval must clear default practical floor",
+    "floors_percent": {
+      "mean": 1.2,
+      "wall_clock": 0.7,
+      "p90": 1.35,
+      "p99": 5.0
+    },
+    "secondary": "Check tail regressions, root phase timings, direct trie-write time, and completed persistence work; preserve async window caveats"
+  },
+  "branch": "perf/trie-root-persistence-lifo",
+  "candidate": "4355f17739405d5eb13088b45bbdcae4ba15c52d",
+  "run_id": 33869169639,
+  "url": "https://github.com/paradigmxyz/reth/actions/runs/33869169639",
+  "status": "completed",
+  "profile": false,
+  "change": "Enable supported MDBX LIFO reclaim policy at environment open, retaining WRITEMAP, prefault, synchronization, geometry, readahead and database format.",
+  "verdict": "regression",
+  "clear_improvement": false,
+  "adopt": false,
+  "replay_started_at": "2026-09-04T11:47:59Z",
+  "workflow_conclusion": "success",
+  "adoption": "Rejected: persistence wait regressed 9.25% and save-blocks MDBX work 8.76%; payload metrics neutral. Plain-state and hashed-state persistence account for added time; commit is flat.",
+  "results": {
+    "headline_changes": {
+      "mean": {
+        "pct": -0.7577,
+        "ci_pct": 0.7271,
+        "floor_pct": 1.2,
+        "sig": "neutral"
+      },
+      "p50": {
+        "pct": -0.6525,
+        "ci_pct": 1.003,
+        "floor_pct": 1.2,
+        "sig": "neutral"
+      },
+      "p90": {
+        "pct": 0.0493,
+        "ci_pct": 1.2962,
+        "floor_pct": 1.35,
+        "sig": "neutral"
+      },
+      "p99": {
+        "pct": 5.4618,
+        "ci_pct": 5.8234,
+        "floor_pct": 5.0,
+        "sig": "neutral"
+      },
+      "mgas_s": {
+        "pct": 0.637,
+        "ci_pct": 0.5532,
+        "floor_pct": 1.2,
+        "sig": "neutral"
+      },
+      "wall_clock": {
+        "pct": -0.6064,
+        "ci_pct": 0.7074,
+        "floor_pct": 0.7,
+        "sig": "neutral"
+      },
+      "persist_wait": {
+        "pct": 9.2495,
+        "ci_pct": 1.3314,
+        "floor_pct": 5.0,
+        "sig": "bad"
+      }
+    },
+    "official_summary_sha256": "495945d89226d864c2206f4236224b387900570da613a3b398e2d3d8e2af5766",
+    "official_overall_changes_reproduced": true,
+    "significant_headline_regressions": [
+      "persist_wait"
+    ],
+    "significant_official_target_regressions": [
+      "reth_storage_providers_database_save_blocks_mdbx"
+    ],
+    "diagnostic_phase_changes": {
+      "reth_tree_root_sparse_trie_final_update_duration_histogram": {
+        "baseline": 0.00034370050990535276,
+        "feature": 0.00031878343038352466,
+        "diff": -2.5e-05,
+        "pct": -7.2496,
+        "ci": 6e-06,
+        "ci_pct": 1.738,
+        "floor_pct": 5.0,
+        "sig": "good",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_tree_root_sparse_trie_process_updates_duration_histogram": {
+        "baseline": 0.008931993171855375,
+        "feature": 0.008790978376791379,
+        "diff": -0.000141,
+        "pct": -1.5788,
+        "ci": 6.2e-05,
+        "ci_pct": 0.6939,
+        "floor_pct": 5.0,
+        "sig": "neutral",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_tree_root_sparse_trie_total_duration_histogram": {
+        "baseline": 0.023308375488745897,
+        "feature": 0.0231506233228968,
+        "diff": -0.000158,
+        "pct": -0.6768,
+        "ci": 0.000197,
+        "ci_pct": 0.8434,
+        "floor_pct": 5.0,
+        "sig": "neutral",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_tree_root_sparse_trie_reveal_multiproof_duration_histogram": {
+        "baseline": 0.004537595087944299,
+        "feature": 0.004510036296554976,
+        "diff": -2.8e-05,
+        "pct": -0.6073,
+        "ci": 7.8e-05,
+        "ci_pct": 1.7221,
+        "floor_pct": 5.0,
+        "sig": "neutral",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_tree_root_sparse_trie_channel_wait_duration_histogram": {
+        "baseline": 0.0049055559957023424,
+        "feature": 0.004981792735345,
+        "diff": 7.6e-05,
+        "pct": 1.5541,
+        "ci": 0.000119,
+        "ci_pct": 2.4357,
+        "floor_pct": 5.0,
+        "sig": "neutral",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_storage_providers_database_save_blocks_write_trie_updates": {
+        "baseline": 0.019766989991160364,
+        "feature": 0.019574768232603762,
+        "diff": -0.000192,
+        "pct": -0.9724,
+        "ci": 0.000175,
+        "ci_pct": 0.8863,
+        "floor_pct": 5.0,
+        "sig": "neutral",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_storage_providers_database_save_blocks_total": {
+        "baseline": 0.02884212617589396,
+        "feature": 0.03136847582457753,
+        "diff": 0.002526,
+        "pct": 8.7592,
+        "ci": 0.000257,
+        "ci_pct": 0.8921,
+        "floor_pct": 5.0,
+        "sig": "bad",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_storage_providers_database_save_blocks_commit_mdbx": {
+        "baseline": 0.015378342036850809,
+        "feature": 0.015413653199589941,
+        "diff": 3.5e-05,
+        "pct": 0.2296,
+        "ci": 0.000248,
+        "ci_pct": 1.6133,
+        "floor_pct": 5.0,
+        "sig": "neutral",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_storage_providers_database_save_blocks_write_hashed_state": {
+        "baseline": 0.00840600756913358,
+        "feature": 0.009564918163823632,
+        "diff": 0.001159,
+        "pct": 13.7867,
+        "ci": 0.000109,
+        "ci_pct": 1.3006,
+        "floor_pct": 5.0,
+        "sig": "bad",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_storage_providers_database_save_blocks_write_state": {
+        "baseline": 0.0006011544563947172,
+        "feature": 0.00215270959254721,
+        "diff": 0.001552,
+        "pct": 258.0959,
+        "ci": 0.000108,
+        "ci_pct": 17.9971,
+        "floor_pct": 5.0,
+        "sig": "bad",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_storage_providers_database_save_blocks_insert_block": {
+        "baseline": 2.977234804951268e-05,
+        "feature": 3.69380247006731e-05,
+        "diff": 7e-06,
+        "pct": 24.0682,
+        "ci": 3e-06,
+        "ci_pct": 8.494,
+        "floor_pct": 5.0,
+        "sig": "bad",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_storage_providers_database_save_blocks_update_history_indices": {
+        "baseline": 3.64630156564803e-07,
+        "feature": 3.6959211193471277e-07,
+        "diff": 0.0,
+        "pct": 1.3608,
+        "ci": 0.0,
+        "ci_pct": 2.9644,
+        "floor_pct": 5.0,
+        "sig": "neutral",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_storage_providers_database_save_blocks_update_pipeline_stages": {
+        "baseline": 3.242145508553923e-06,
+        "feature": 3.19310953634176e-06,
+        "diff": -0.0,
+        "pct": -1.5125,
+        "ci": 0.0,
+        "ci_pct": 0.8674,
+        "floor_pct": 5.0,
+        "sig": "neutral",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      }
+    },
+    "commit_subphases": {
+      "preparation": {
+        "baseline_run_values": [
+          0.0,
+          3.063855421686747e-05,
+          0.0,
+          0.0,
+          0.0016544819277108434,
+          0.0
+        ],
+        "feature_run_values": [
+          0.0,
+          3.057715430861724e-05,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "baseline_ms_per_block": 0.0002808534136546185,
+        "feature_ms_per_block": 5.0961923847695395e-06,
+        "difference_ms_per_block": -0.00027575722126984897,
+        "change_percent": -98.18546183275643,
+        "ci_half_width_ms_per_block": 0.0004187166743124804
+      },
+      "gc_wallclock": {
+        "baseline_run_values": [
+          0.07974521843687384,
+          0.07849597590361458,
+          0.07934771543086179,
+          0.08321431325301205,
+          0.08174366265060243,
+          0.08656392384769547
+        ],
+        "feature_run_values": [
+          0.08622757515030073,
+          0.08598295791583184,
+          0.08686030120481937,
+          0.08542028915662657,
+          0.08209965931863734,
+          0.08420948296593188
+        ],
+        "baseline_ms_per_block": 0.08151846825377669,
+        "feature_ms_per_block": 0.08513337761869129,
+        "difference_ms_per_block": 0.003614909364914598,
+        "change_percent": 4.434466743978738,
+        "ci_half_width_ms_per_block": 0.002526979740605728
+      },
+      "gc_cputime": {
+        "baseline_run_values": [
+          0.011772204408817639,
+          0.015748216867469876,
+          0.014248953907815633,
+          0.01565630120481928,
+          0.014522674698795179,
+          0.024125374749499003
+        ],
+        "feature_run_values": [
+          0.01513569138276553,
+          0.016450509018036068,
+          0.015932048192771085,
+          0.019057180722891566,
+          0.011252392785571143,
+          0.024369991983967932
+        ],
+        "baseline_ms_per_block": 0.0160122876395361,
+        "feature_ms_per_block": 0.017032969014333887,
+        "difference_ms_per_block": 0.0010206813747977855,
+        "change_percent": 6.374363225137247,
+        "ci_half_width_ms_per_block": 0.004452731579625112
+      },
+      "audit": {
+        "baseline_run_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "feature_run_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "baseline_ms_per_block": 0.0,
+        "feature_ms_per_block": 0.0,
+        "difference_ms_per_block": 0.0,
+        "change_percent": null,
+        "ci_half_width_ms_per_block": 0.0
+      },
+      "write": {
+        "baseline_run_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "feature_run_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "baseline_ms_per_block": 0.0,
+        "feature_ms_per_block": 0.0,
+        "difference_ms_per_block": 0.0,
+        "change_percent": null,
+        "ci_half_width_ms_per_block": 0.0
+      },
+      "sync": {
+        "baseline_run_values": [
+          15.336858480961927,
+          15.393790072289153,
+          15.09743936272546,
+          15.26743667469878,
+          15.279661457831327,
+          15.256440565130262
+        ],
+        "feature_run_values": [
+          15.754267214428864,
+          15.519893326653305,
+          14.870789951807227,
+          15.287413012048198,
+          15.0224336032064,
+          15.364928308617237
+        ],
+        "baseline_ms_per_block": 15.271937768939486,
+        "feature_ms_per_block": 15.303287569460206,
+        "difference_ms_per_block": 0.03134980052072045,
+        "change_percent": 0.20527716256466544,
+        "ci_half_width_ms_per_block": 0.24572005357100402
+      },
+      "ending": {
+        "baseline_run_values": [
+          6.115430861723447e-05,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "feature_run_values": [
+          0.0,
+          0.0,
+          3.0638554216867474e-05,
+          3.0638554216867474e-05,
+          3.057715430861724e-05,
+          0.0
+        ],
+        "baseline_ms_per_block": 1.0192384769539079e-05,
+        "feature_ms_per_block": 1.530904379039203e-05,
+        "difference_ms_per_block": 5.116659020852951e-06,
+        "change_percent": 50.20080321285141,
+        "ci_half_width_ms_per_block": 2.293798239048378e-05
+      },
+      "whole": {
+        "baseline_run_values": [
+          15.42076219238476,
+          15.476391614457832,
+          15.181067879759514,
+          15.354664638554217,
+          15.36731836144579,
+          15.347071250501001
+        ],
+        "feature_run_values": [
+          15.844469819639272,
+          15.609912468937873,
+          14.961663903614456,
+          15.376816313253007,
+          15.108661178356702,
+          15.453235130260527
+        ],
+        "baseline_ms_per_block": 15.357879322850518,
+        "feature_ms_per_block": 15.39245980234364,
+        "difference_ms_per_block": 0.03458047949312082,
+        "change_percent": 0.22516441734028447,
+        "ci_half_width_ms_per_block": 0.24658708679205965
+      }
+    },
+    "commit_scope": "Read-write committed MDBX transactions, including other writers such as pruning. Diagnostic only; no acceptance verdict. CPU GC time overlaps wall-clock GC and must not be added to it.",
+    "completed_work": {
+      "baseline_blocks": 3008,
+      "feature_blocks": 3022,
+      "baseline_batches": 376,
+      "feature_batches": 378,
+      "trie_time_per_completed_block": {
+        "baseline_runs": [
+          19764.03887103174,
+          19750.793872983875,
+          19760.31900992063,
+          19577.195057539688,
+          19587.047714285716,
+          19491.153163306448
+        ],
+        "feature_runs": [
+          19285.705972222226,
+          19305.078527777783,
+          19477.354408730163,
+          19260.507775793656,
+          19487.8194194831,
+          19466.48192445327
+        ],
+        "baseline_mean": 19655.091281511348,
+        "feature_mean": 19380.4913380767,
+        "change_percent": -1.397093198406829,
+        "ci_half_width": 115.33847578868881,
+        "ci_percent": 0.5868122113336735,
+        "ci_method": "Derek run-cluster bootstrap; diagnostic only, no verdict"
+      },
+      "strict_log_match_runs": 11,
+      "strict_log_mismatches": [
+        "baseline-6"
+      ],
+      "boundary_caveat_file": "iteration-5-phases/log-boundary-ambiguity.json",
+      "same_aggregate_block_coverage": false,
+      "counter_missing_or_reset_runs": [],
+      "log_audit_helper_sha256": "b1caf4e79fde34bfff39adf08ca28b42f3c6e2c5ba07b58c1cf7e32a24ccf3d7"
+    },
+    "memory_descriptive": {
+      "reth_process_resident_memory_bytes": {
+        "sampled_peak_bytes": {
+          "baseline_run_mean_bytes": 11000853845.333334,
+          "feature_run_mean_bytes": 10292420608.0,
+          "difference_bytes": -708433237.333334,
+          "difference_mib": -675.6145833333339,
+          "change_percent": -6.439802285291318
+        },
+        "scrape_p50_bytes": {
+          "baseline_run_mean_bytes": 8975528960.0,
+          "feature_run_mean_bytes": 8292765354.666667,
+          "difference_bytes": -682763605.333333,
+          "difference_mib": -651.134114583333,
+          "change_percent": -7.606945600377557
+        },
+        "scrape_p95_bytes": {
+          "baseline_run_mean_bytes": 10769084996.266666,
+          "feature_run_mean_bytes": 10053056375.466667,
+          "difference_bytes": -716028620.7999992,
+          "difference_mib": -682.8581054687493,
+          "change_percent": -6.648927193426612
+        },
+        "first_bytes": {
+          "baseline_run_mean_bytes": 5821882368.0,
+          "feature_run_mean_bytes": 5117006506.666667,
+          "difference_bytes": -704875861.333333,
+          "difference_mib": -672.222005208333,
+          "change_percent": -12.107353202594506
+        },
+        "last_bytes": {
+          "baseline_run_mean_bytes": 10999771818.666666,
+          "feature_run_mean_bytes": 10285953706.666666,
+          "difference_bytes": -713818112.0,
+          "difference_mib": -680.75,
+          "change_percent": -6.489390177973031
+        },
+        "change_from_first_bytes": {
+          "baseline_run_mean_bytes": 5177889450.666667,
+          "feature_run_mean_bytes": 5168947200.0,
+          "difference_bytes": -8942250.666666985,
+          "difference_mib": -8.52799479166697,
+          "change_percent": -0.1727006872561887
+        }
+      },
+      "reth_process_virtual_memory_bytes": {
+        "sampled_peak_bytes": {
+          "baseline_run_mean_bytes": 8825517325653.334,
+          "feature_run_mean_bytes": 8826564053674.666,
+          "difference_bytes": 1046728021.3320312,
+          "difference_mib": 998.2376302070916,
+          "change_percent": 0.011860245498462874
+        },
+        "scrape_p50_bytes": {
+          "baseline_run_mean_bytes": 8824870111232.0,
+          "feature_run_mean_bytes": 8825419142485.334,
+          "difference_bytes": 549031253.3339844,
+          "difference_mib": 523.5970052089542,
+          "change_percent": 0.00622140888664191
+        },
+        "scrape_p95_bytes": {
+          "baseline_run_mean_bytes": 8825377174425.6,
+          "feature_run_mean_bytes": 8826407409049.6,
+          "difference_bytes": 1030234624.0,
+          "difference_mib": 982.50830078125,
+          "change_percent": 0.011673547811485996
+        },
+        "first_bytes": {
+          "baseline_run_mean_bytes": 8809668188842.666,
+          "feature_run_mean_bytes": 8809675135658.666,
+          "difference_bytes": 6946816.0,
+          "difference_mib": 6.625,
+          "change_percent": 7.885445685307246e-05
+        },
+        "last_bytes": {
+          "baseline_run_mean_bytes": 8825517325653.334,
+          "feature_run_mean_bytes": 8826564053674.666,
+          "difference_bytes": 1046728021.3320312,
+          "difference_mib": 998.2376302070916,
+          "change_percent": 0.011860245498462874
+        },
+        "change_from_first_bytes": {
+          "baseline_run_mean_bytes": 15849136810.666666,
+          "feature_run_mean_bytes": 16888918016.0,
+          "difference_bytes": 1039781205.333334,
+          "difference_mib": 991.6126302083339,
+          "change_percent": 6.5604910712459
+        }
+      },
+      "reth_jemalloc_allocated": {
+        "sampled_peak_bytes": {
+          "baseline_run_mean_bytes": 4170517348.0,
+          "feature_run_mean_bytes": 4164607814.6666665,
+          "difference_bytes": -5909533.333333492,
+          "difference_mib": -5.635770161946766,
+          "change_percent": -0.14169784801800756
+        },
+        "scrape_p50_bytes": {
+          "baseline_run_mean_bytes": 3922881410.6666665,
+          "feature_run_mean_bytes": 3914756959.3333335,
+          "difference_bytes": -8124451.333333015,
+          "difference_mib": -7.74808057149221,
+          "change_percent": -0.2071041788630601
+        },
+        "scrape_p95_bytes": {
+          "baseline_run_mean_bytes": 4123643744.4,
+          "feature_run_mean_bytes": 4115028948.2,
+          "difference_bytes": -8614796.200000286,
+          "difference_mib": -8.215709877014433,
+          "change_percent": -0.20891223233576728
+        },
+        "first_bytes": {
+          "baseline_run_mean_bytes": 3590832813.3333335,
+          "feature_run_mean_bytes": 3589251922.6666665,
+          "difference_bytes": -1580890.6666669846,
+          "difference_mib": -1.5076548258466573,
+          "change_percent": -0.04402573856395753
+        },
+        "last_bytes": {
+          "baseline_run_mean_bytes": 4093895048.0,
+          "feature_run_mean_bytes": 4082666296.0,
+          "difference_bytes": -11228752.0,
+          "difference_mib": -10.708572387695312,
+          "change_percent": -0.27428040700471223
+        },
+        "change_from_first_bytes": {
+          "baseline_run_mean_bytes": 503062234.6666667,
+          "feature_run_mean_bytes": 493414373.3333333,
+          "difference_bytes": -9647861.333333373,
+          "difference_mib": -9.200917561848996,
+          "change_percent": -1.9178265964898245
+        }
+      },
+      "reth_jemalloc_active": {
+        "sampled_peak_bytes": {
+          "baseline_run_mean_bytes": 4274842282.6666665,
+          "feature_run_mean_bytes": 4268755626.6666665,
+          "difference_bytes": -6086656.0,
+          "difference_mib": -5.8046875,
+          "change_percent": -0.14238317106293197
+        },
+        "scrape_p50_bytes": {
+          "baseline_run_mean_bytes": 4028752554.6666665,
+          "feature_run_mean_bytes": 4020768768.0,
+          "difference_bytes": -7983786.666666508,
+          "difference_mib": -7.613932291666515,
+          "change_percent": -0.19817019184805718
+        },
+        "scrape_p95_bytes": {
+          "baseline_run_mean_bytes": 4230407475.2,
+          "feature_run_mean_bytes": 4222593024.0,
+          "difference_bytes": -7814451.199999809,
+          "difference_mib": -7.452441406249818,
+          "change_percent": -0.18472100491053745
+        },
+        "first_bytes": {
+          "baseline_run_mean_bytes": 3689485653.3333335,
+          "feature_run_mean_bytes": 3687083349.3333335,
+          "difference_bytes": -2402304.0,
+          "difference_mib": -2.291015625,
+          "change_percent": -0.06511216537268272
+        },
+        "last_bytes": {
+          "baseline_run_mean_bytes": 4210653866.6666665,
+          "feature_run_mean_bytes": 4198124202.6666665,
+          "difference_bytes": -12529664.0,
+          "difference_mib": -11.94921875,
+          "change_percent": -0.29757050559748865
+        },
+        "change_from_first_bytes": {
+          "baseline_run_mean_bytes": 521168213.3333333,
+          "feature_run_mean_bytes": 511040853.3333333,
+          "difference_bytes": -10127360.0,
+          "difference_mib": -9.658203125,
+          "change_percent": -1.9432036990948753
+        }
+      },
+      "reth_jemalloc_resident": {
+        "sampled_peak_bytes": {
+          "baseline_run_mean_bytes": 4544116053.333333,
+          "feature_run_mean_bytes": 4522924714.666667,
+          "difference_bytes": -21191338.66666603,
+          "difference_mib": -20.20963541666606,
+          "change_percent": -0.4663467749931538
+        },
+        "scrape_p50_bytes": {
+          "baseline_run_mean_bytes": 4328958976.0,
+          "feature_run_mean_bytes": 4313401344.0,
+          "difference_bytes": -15557632.0,
+          "difference_mib": -14.8369140625,
+          "change_percent": -0.3593850643134444
+        },
+        "scrape_p95_bytes": {
+          "baseline_run_mean_bytes": 4512466397.866667,
+          "feature_run_mean_bytes": 4487806259.2,
+          "difference_bytes": -24660138.666666985,
+          "difference_mib": -23.51774088541697,
+          "change_percent": -0.5464891368127556
+        },
+        "first_bytes": {
+          "baseline_run_mean_bytes": 3880086869.3333335,
+          "feature_run_mean_bytes": 3881491114.6666665,
+          "difference_bytes": 1404245.3333330154,
+          "difference_mib": 1.3391927083330302,
+          "change_percent": 0.03619107975214586
+        },
+        "last_bytes": {
+          "baseline_run_mean_bytes": 4506842453.333333,
+          "feature_run_mean_bytes": 4485249024.0,
+          "difference_bytes": -21593429.333333015,
+          "difference_mib": -20.59309895833303,
+          "change_percent": -0.4791254532840905
+        },
+        "change_from_first_bytes": {
+          "baseline_run_mean_bytes": 626755584.0,
+          "feature_run_mean_bytes": 603757909.3333334,
+          "difference_bytes": -22997674.666666627,
+          "difference_mib": -21.93229166666663,
+          "change_percent": -3.6693210645039276
+        }
+      },
+      "reth_jemalloc_mapped": {
+        "sampled_peak_bytes": {
+          "baseline_run_mean_bytes": 4671568554.666667,
+          "feature_run_mean_bytes": 4648058197.333333,
+          "difference_bytes": -23510357.33333397,
+          "difference_mib": -22.42122395833394,
+          "change_percent": -0.5032647398452106
+        },
+        "scrape_p50_bytes": {
+          "baseline_run_mean_bytes": 4457105408.0,
+          "feature_run_mean_bytes": 4439652693.333333,
+          "difference_bytes": -17452714.666666985,
+          "difference_mib": -16.64420572916697,
+          "change_percent": -0.3915706062356361
+        },
+        "scrape_p95_bytes": {
+          "baseline_run_mean_bytes": 4638479769.6,
+          "feature_run_mean_bytes": 4611402376.533333,
+          "difference_bytes": -27077393.066667557,
+          "difference_mib": -25.823014322917516,
+          "change_percent": -0.5837557650704706
+        },
+        "first_bytes": {
+          "baseline_run_mean_bytes": 4004061184.0,
+          "feature_run_mean_bytes": 4005517312.0,
+          "difference_bytes": 1456128.0,
+          "difference_mib": 1.388671875,
+          "change_percent": 0.0363662774639506
+        },
+        "last_bytes": {
+          "baseline_run_mean_bytes": 4631282346.666667,
+          "feature_run_mean_bytes": 4610134016.0,
+          "difference_bytes": -21148330.666666985,
+          "difference_mib": -20.16861979166697,
+          "change_percent": -0.45664092757998764
+        },
+        "change_from_first_bytes": {
+          "baseline_run_mean_bytes": 627221162.6666666,
+          "feature_run_mean_bytes": 604616704.0,
+          "difference_bytes": -22604458.666666627,
+          "difference_mib": -21.55729166666663,
+          "change_percent": -3.6039056097154742
+        }
+      },
+      "reth_jemalloc_metadata": {
+        "sampled_peak_bytes": {
+          "baseline_run_mean_bytes": 55335168.0,
+          "feature_run_mean_bytes": 54885120.0,
+          "difference_bytes": -450048.0,
+          "difference_mib": -0.42919921875,
+          "change_percent": -0.8133127923276584
+        },
+        "scrape_p50_bytes": {
+          "baseline_run_mean_bytes": 51456714.666666664,
+          "feature_run_mean_bytes": 50366032.0,
+          "difference_bytes": -1090682.6666666642,
+          "difference_mib": -1.0401560465494768,
+          "change_percent": -2.1196119373963818
+        },
+        "scrape_p95_bytes": {
+          "baseline_run_mean_bytes": 54356630.4,
+          "feature_run_mean_bytes": 54592057.6,
+          "difference_bytes": 235427.20000000298,
+          "difference_mib": 0.22452087402344034,
+          "change_percent": 0.43311588350407604
+        },
+        "first_bytes": {
+          "baseline_run_mean_bytes": 43206810.666666664,
+          "feature_run_mean_bytes": 43162309.333333336,
+          "difference_bytes": -44501.333333328366,
+          "difference_mib": -0.042439778645828596,
+          "change_percent": -0.1029961078975461
+        },
+        "last_bytes": {
+          "baseline_run_mean_bytes": 55335168.0,
+          "feature_run_mean_bytes": 54885120.0,
+          "difference_bytes": -450048.0,
+          "difference_mib": -0.42919921875,
+          "change_percent": -0.8133127923276584
+        },
+        "change_from_first_bytes": {
+          "baseline_run_mean_bytes": 12128357.333333334,
+          "feature_run_mean_bytes": 11722810.666666666,
+          "difference_bytes": -405546.6666666679,
+          "difference_mib": -0.38675944010416785,
+          "change_percent": -3.3437889033172796
+        }
+      },
+      "reth_jemalloc_retained": {
+        "sampled_peak_bytes": {
+          "baseline_run_mean_bytes": 2867802794.6666665,
+          "feature_run_mean_bytes": 3947585536.0,
+          "difference_bytes": 1079782741.3333335,
+          "difference_mib": 1029.7610677083335,
+          "change_percent": 37.65191746592325
+        },
+        "scrape_p50_bytes": {
+          "baseline_run_mean_bytes": 2445393920.0,
+          "feature_run_mean_bytes": 2986347861.3333335,
+          "difference_bytes": 540953941.3333335,
+          "difference_mib": 515.8938802083335,
+          "change_percent": 22.12134155193015
+        },
+        "scrape_p95_bytes": {
+          "baseline_run_mean_bytes": 2776504046.9333334,
+          "feature_run_mean_bytes": 3863717649.0666666,
+          "difference_bytes": 1087213602.1333332,
+          "difference_mib": 1036.8476888020832,
+          "change_percent": 39.15764514495008
+        },
+        "first_bytes": {
+          "baseline_run_mean_bytes": 2291239594.6666665,
+          "feature_run_mean_bytes": 2295026346.6666665,
+          "difference_bytes": 3786752.0,
+          "difference_mib": 3.611328125,
+          "change_percent": 0.16527088693887304
+        },
+        "last_bytes": {
+          "baseline_run_mean_bytes": 2851268608.0,
+          "feature_run_mean_bytes": 3919420074.6666665,
+          "difference_bytes": 1068151466.6666665,
+          "difference_mib": 1018.6686197916665,
+          "change_percent": 37.46232339070688
+        },
+        "change_from_first_bytes": {
+          "baseline_run_mean_bytes": 560029013.3333334,
+          "feature_run_mean_bytes": 1624393728.0,
+          "difference_bytes": 1064364714.6666666,
+          "difference_mib": 1015.0572916666666,
+          "change_percent": 190.05528094544434
+        }
+      }
+    },
+    "memory_scope": "Sampled peaks and last available samples, not true high-water marks or end-of-window/post-drain memory. Raw gauge samples stop 8.9\u20139.4 seconds before target window end. RSS includes mapped pages and overlaps jemalloc; no total-host/cgroup-memory inference.",
+    "actual_replay_elapsed": {
+      "baseline_mean_ms": 27098.833333333332,
+      "feature_mean_ms": 28345.5,
+      "change_percent": 4.60044405355704,
+      "ci_half_width_percent": 0.5855110613618031,
+      "method": "Derek run-cluster bootstrap primitive, supplementary raw replay elapsed time; no official verdict or changed thresholds",
+      "seed": "elapsed-diagnostic"
+    },
+    "pgops_status": "Unavailable: full baseline-1 and feature-1 raw archives each contain 912 metric names and no mincore, prefault, pgops or page-operation exports. Source confirms DatabaseEnv::gauge_metrics does not export page_ops. Other ten raw archives were not independently inventoried for this check; missing counters are not zero.",
+    "artifacts": {
+      "assessment": "iteration-5-assessment.md",
+      "phases": "iteration-5-phases",
+      "extra_save_phases": "iteration-5-extra-save-phases",
+      "memory": "iteration-5-memory"
+    },
+    "pgops_inventory": "lifo-experiment/derek-5-metric-inventory.json"
+  }
+}

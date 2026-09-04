@@ -1,0 +1,26 @@
+{
+  "run": "baseline-6",
+  "strict_log_match": false,
+  "scrape_timestamp_precision_ms": 1,
+  "event": {
+    "timestamp": "2026-09-04T12:00:21.309005Z",
+    "range": [
+      25883594,
+      25883600
+    ],
+    "boundary": "first_scrape_ms",
+    "relative_ms": 0.005126953125
+  },
+  "event_after_first_scrape_integer_ms_microseconds": 5,
+  "strict_logged_blocks": 503,
+  "strict_logged_batches": 63,
+  "sampled_counter_blocks": 496,
+  "sampled_counter_batches": 62,
+  "same_millisecond_batch_blocks": 7,
+  "counts_if_same_millisecond_batch_excluded": {
+    "blocks": 496,
+    "batches": 62
+  },
+  "adjustment_applied": false,
+  "interpretation": "The scrape timestamp cannot establish ordering within its first millisecond. A seven-block append at +5us is already represented in the first sampled counters. Excluding it reconciles the independent counts, but strict windows/counters are retained and the mismatch remains flagged."
+}

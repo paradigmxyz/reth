@@ -1,0 +1,459 @@
+{
+  "branch": "perf/trie-root-persistence-prefault",
+  "baseline": "eadb887f1c1698e7bd932f60a0c654dccccd081f",
+  "candidate": "6f1a3a2fe047df40b374a9881fd51360df6963d2",
+  "run_id": 33866279619,
+  "url": "https://github.com/paradigmxyz/reth/actions/runs/33866279619",
+  "inputs": {
+    "blocks": 500,
+    "warmup": 125,
+    "run_pairs": 6,
+    "mode": "engine",
+    "slack": "never",
+    "samply": false,
+    "tracing_chrome": false,
+    "otlp": false,
+    "metrics": true
+  },
+  "status": "completed",
+  "assessment": {
+    "method": "Unchanged Derek run-cluster bootstrap; 10000 resamples; six independent runs per variant",
+    "primary": "mean newPayload latency and reported wall-clock; confidence interval must clear default practical floor",
+    "floors_percent": {
+      "mean": 1.2,
+      "wall_clock": 0.7,
+      "p90": 1.35,
+      "p99": 5.0
+    },
+    "secondary": "Check tail regressions, root phase timings, direct trie-write time, and completed persistence work; preserve async window caveats"
+  },
+  "change": "Disable optional MDBX residency probes and prefault writes; retain WRITEMAP and durable synchronization",
+  "adoption": "Rejected as a global default: local file-cold writes regressed 6.69x; remote run retained as diagnostic evidence.",
+  "workflow_conclusion": "success",
+  "verdict": "regression",
+  "clear_improvement": false,
+  "adopt": false,
+  "results": {
+    "headline_changes": {
+      "mean": {
+        "pct": 2.4762,
+        "ci_pct": 0.6506,
+        "floor_pct": 1.2,
+        "sig": "bad"
+      },
+      "p50": {
+        "pct": -0.5848,
+        "ci_pct": 0.7535,
+        "floor_pct": 1.2,
+        "sig": "neutral"
+      },
+      "p90": {
+        "pct": 3.4593,
+        "ci_pct": 1.5616,
+        "floor_pct": 1.35,
+        "sig": "bad"
+      },
+      "p99": {
+        "pct": 49.7294,
+        "ci_pct": 7.5568,
+        "floor_pct": 5.0,
+        "sig": "bad"
+      },
+      "mgas_s": {
+        "pct": -0.2585,
+        "ci_pct": 0.3023,
+        "floor_pct": 1.2,
+        "sig": "neutral"
+      },
+      "wall_clock": {
+        "pct": 2.4782,
+        "ci_pct": 0.6922,
+        "floor_pct": 0.7,
+        "sig": "bad"
+      },
+      "persist_wait": {
+        "pct": -33.998,
+        "ci_pct": 0.9946,
+        "floor_pct": 5.0,
+        "sig": "good"
+      }
+    },
+    "official_summary_sha256": "bd9a0c16de5d33324126279a84d9248288a194d12111b6c88ec6a785ed579ae3",
+    "official_overall_changes_reproduced": true,
+    "significant_headline_regressions": [
+      "mean",
+      "p90",
+      "p99",
+      "wall_clock"
+    ],
+    "significant_official_target_regressions": [
+      "reth_consensus_engine_beacon_new_payload_thread_system_cpu_seconds"
+    ],
+    "diagnostic_phase_changes": {
+      "reth_tree_root_sparse_trie_final_update_duration_histogram": {
+        "baseline": 0.00033792458504507654,
+        "feature": 0.0003323969531620537,
+        "diff": -6e-06,
+        "pct": -1.6358,
+        "ci": 9e-06,
+        "ci_pct": 2.7517,
+        "floor_pct": 5.0,
+        "sig": "neutral",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_tree_root_sparse_trie_process_updates_duration_histogram": {
+        "baseline": 0.008897696598379825,
+        "feature": 0.008994916942627953,
+        "diff": 9.7e-05,
+        "pct": 1.0926,
+        "ci": 7.2e-05,
+        "ci_pct": 0.8148,
+        "floor_pct": 5.0,
+        "sig": "neutral",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_tree_root_sparse_trie_total_duration_histogram": {
+        "baseline": 0.023668702384103818,
+        "feature": 0.024303381191472868,
+        "diff": 0.000635,
+        "pct": 2.6815,
+        "ci": 0.000163,
+        "ci_pct": 0.6876,
+        "floor_pct": 5.0,
+        "sig": "neutral",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_tree_root_sparse_trie_reveal_multiproof_duration_histogram": {
+        "baseline": 0.0045452907009621325,
+        "feature": 0.004569845156768677,
+        "diff": 2.5e-05,
+        "pct": 0.5402,
+        "ci": 5.6e-05,
+        "ci_pct": 1.2272,
+        "floor_pct": 5.0,
+        "sig": "neutral",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_tree_root_sparse_trie_channel_wait_duration_histogram": {
+        "baseline": 0.005102362949935196,
+        "feature": 0.005795059547787795,
+        "diff": 0.000693,
+        "pct": 13.576,
+        "ci": 0.000122,
+        "ci_pct": 2.3843,
+        "floor_pct": 5.0,
+        "sig": "bad",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_storage_providers_database_save_blocks_write_trie_updates": {
+        "baseline": 0.019679620871966067,
+        "feature": 0.013453084158249072,
+        "diff": -0.006227,
+        "pct": -31.6395,
+        "ci": 0.000197,
+        "ci_pct": 0.9989,
+        "floor_pct": 5.0,
+        "sig": "good",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_storage_providers_database_save_blocks_total": {
+        "baseline": 0.02865906338641151,
+        "feature": 0.01938141982289061,
+        "diff": -0.009278,
+        "pct": -32.3725,
+        "ci": 0.000316,
+        "ci_pct": 1.1024,
+        "floor_pct": 5.0,
+        "sig": "good",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_storage_providers_database_save_blocks_commit_mdbx": {
+        "baseline": 0.015244711591012606,
+        "feature": 0.01585034258678774,
+        "diff": 0.000606,
+        "pct": 3.9727,
+        "ci": 0.000181,
+        "ci_pct": 1.187,
+        "floor_pct": 5.0,
+        "sig": "neutral",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_storage_providers_database_save_blocks_write_hashed_state": {
+        "baseline": 0.00830124042774384,
+        "feature": 0.005363118331106667,
+        "diff": -0.002938,
+        "pct": -35.3938,
+        "ci": 0.000125,
+        "ci_pct": 1.5057,
+        "floor_pct": 5.0,
+        "sig": "good",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      }
+    },
+    "new_payload_thread_fault_diagnostics": {
+      "reth_consensus_engine_beacon_new_payload_thread_minor_page_faults": {
+        "baseline": 78.7429745810876,
+        "feature": 87.1069738566781,
+        "diff": 8.363999,
+        "pct": 10.6219,
+        "ci": 7.258006,
+        "ci_pct": 9.2173,
+        "floor_pct": 5.0,
+        "sig": "neutral",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      },
+      "reth_consensus_engine_beacon_new_payload_thread_major_page_faults": {
+        "baseline": 63.14562205899386,
+        "feature": 64.73434798181063,
+        "diff": 1.588726,
+        "pct": 2.516,
+        "ci": 0.560071,
+        "ci_pct": 0.887,
+        "floor_pct": 5.0,
+        "sig": "neutral",
+        "ci_method": "run_cluster_bootstrap",
+        "runs": {
+          "baseline": 6,
+          "feature": 6
+        }
+      }
+    },
+    "fault_scope": "Only newPayload thread faults are exposed; no persistence-thread or MDBX mincore/prefault counters. These observations do not establish the cause of tail latency regressions.",
+    "persistence_work": {
+      "baseline_completed_blocks": 3008.0,
+      "feature_completed_blocks": 2976.0,
+      "baseline_completed_batches": 376.0,
+      "feature_completed_batches": 379.0,
+      "all_log_counter_checks_pass": true,
+      "equal_aggregate_block_coverage": false,
+      "normalized_trie_phase": {
+        "baseline_runs": [
+          19513.98832936508,
+          19381.84067857144,
+          19645.37570436508,
+          19463.652754032253,
+          19408.896342741937,
+          19680.546775793657
+        ],
+        "feature_runs": [
+          13360.669290060845,
+          13469.08065384614,
+          13412.863634538175,
+          13531.191807228888,
+          13634.023449799184,
+          13527.22442222222
+        ],
+        "baseline_mean": 19515.71676414491,
+        "feature_mean": 13489.175542949242,
+        "change_percent": -30.880450326415275,
+        "ci_half_width": 113.65844931319589,
+        "ci_percent": 0.5823944397574674,
+        "ci_method": "Derek run-cluster bootstrap; diagnostic only, no verdict"
+      },
+      "caveat": "Candidate completed fewer blocks in more, smaller batches within the sampled window. Boundaries include pending warmup and omit measured tail; normalized work is not an identical-block replay of the persistence phase."
+    },
+    "memory_summary": {
+      "reth_process_resident_memory_bytes": {
+        "sampled_peak_bytes": {
+          "baseline_run_mean_bytes": 10954530133.333334,
+          "feature_run_mean_bytes": 10990133930.666666,
+          "difference_bytes": 35603797.33333206,
+          "difference_mib": 33.95442708333212,
+          "change_percent": 0.3250143721362786
+        },
+        "scrape_p50_bytes": {
+          "baseline_run_mean_bytes": 8952326144.0,
+          "feature_run_mean_bytes": 8937719466.666666,
+          "difference_bytes": -14606677.33333397,
+          "difference_mib": -13.93001302083394,
+          "change_percent": -0.16316069252150234
+        },
+        "scrape_p95_bytes": {
+          "baseline_run_mean_bytes": 10738966050.133333,
+          "feature_run_mean_bytes": 10776151278.933332,
+          "difference_bytes": 37185228.79999924,
+          "difference_mib": 35.46259765624927,
+          "change_percent": 0.3462645158426314
+        },
+        "first_bytes": {
+          "baseline_run_mean_bytes": 5830601386.666667,
+          "feature_run_mean_bytes": 5789364224.0,
+          "difference_bytes": -41237162.666666985,
+          "difference_mib": -39.32682291666697,
+          "change_percent": -0.7072540194733135
+        },
+        "last_bytes": {
+          "baseline_run_mean_bytes": 10952022016.0,
+          "feature_run_mean_bytes": 10989337258.666666,
+          "difference_bytes": 37315242.66666603,
+          "difference_mib": 35.58658854166606,
+          "change_percent": 0.3407155556494734
+        }
+      },
+      "reth_jemalloc_allocated": {
+        "sampled_peak_bytes": {
+          "baseline_run_mean_bytes": 4171708302.6666665,
+          "feature_run_mean_bytes": 4200398725.3333335,
+          "difference_bytes": 28690422.666666985,
+          "difference_mib": 27.361319224040017,
+          "change_percent": 0.68773798609858
+        },
+        "scrape_p50_bytes": {
+          "baseline_run_mean_bytes": 3917794536.6666665,
+          "feature_run_mean_bytes": 3950779396.6666665,
+          "difference_bytes": 32984860.0,
+          "difference_mib": 31.45681381225586,
+          "change_percent": 0.8419241920752718
+        },
+        "scrape_p95_bytes": {
+          "baseline_run_mean_bytes": 4118113938.0,
+          "feature_run_mean_bytes": 4154515449.133333,
+          "difference_bytes": 36401511.133333206,
+          "difference_mib": 34.715186246236044,
+          "change_percent": 0.8839364738657984
+        },
+        "first_bytes": {
+          "baseline_run_mean_bytes": 3591089924.0,
+          "feature_run_mean_bytes": 3556161012.0,
+          "difference_bytes": -34928912.0,
+          "difference_mib": -33.31080627441406,
+          "change_percent": -0.9726548969593574
+        },
+        "last_bytes": {
+          "baseline_run_mean_bytes": 4092249209.3333335,
+          "feature_run_mean_bytes": 4122240465.3333335,
+          "difference_bytes": 29991256.0,
+          "difference_mib": 28.601890563964844,
+          "change_percent": 0.7328795111401831
+        }
+      },
+      "reth_jemalloc_active": {
+        "sampled_peak_bytes": {
+          "baseline_run_mean_bytes": 4276159829.3333335,
+          "feature_run_mean_bytes": 4305214805.333333,
+          "difference_bytes": 29054975.999999523,
+          "difference_mib": 27.708984374999545,
+          "change_percent": 0.6794642192906375
+        },
+        "scrape_p50_bytes": {
+          "baseline_run_mean_bytes": 4027285845.3333335,
+          "feature_run_mean_bytes": 4058693632.0,
+          "difference_bytes": 31407786.666666508,
+          "difference_mib": 29.952799479166515,
+          "change_percent": 0.7798747810032092
+        },
+        "scrape_p95_bytes": {
+          "baseline_run_mean_bytes": 4226464529.0666666,
+          "feature_run_mean_bytes": 4264929553.0666666,
+          "difference_bytes": 38465024.0,
+          "difference_mib": 36.68310546875,
+          "change_percent": 0.9100992977810307
+        },
+        "first_bytes": {
+          "baseline_run_mean_bytes": 3689114965.3333335,
+          "feature_run_mean_bytes": 3661306538.6666665,
+          "difference_bytes": -27808426.666666985,
+          "difference_mib": -26.52018229166697,
+          "change_percent": -0.7537966945455277
+        },
+        "last_bytes": {
+          "baseline_run_mean_bytes": 4204713301.3333335,
+          "feature_run_mean_bytes": 4234302122.6666665,
+          "difference_bytes": 29588821.333333015,
+          "difference_mib": 28.21809895833303,
+          "change_percent": 0.7037060368408454
+        }
+      },
+      "reth_jemalloc_resident": {
+        "sampled_peak_bytes": {
+          "baseline_run_mean_bytes": 4543552853.333333,
+          "feature_run_mean_bytes": 4615990613.333333,
+          "difference_bytes": 72437760.0,
+          "difference_mib": 69.08203125,
+          "change_percent": 1.5942977299550298
+        },
+        "scrape_p50_bytes": {
+          "baseline_run_mean_bytes": 4317518506.666667,
+          "feature_run_mean_bytes": 4394098005.333333,
+          "difference_bytes": 76579498.66666603,
+          "difference_mib": 73.03190104166606,
+          "change_percent": 1.7736924242112595
+        },
+        "scrape_p95_bytes": {
+          "baseline_run_mean_bytes": 4487946854.4,
+          "feature_run_mean_bytes": 4584985326.933333,
+          "difference_bytes": 97038472.53333378,
+          "difference_mib": 92.54309895833376,
+          "change_percent": 2.162201908389294
+        },
+        "first_bytes": {
+          "baseline_run_mean_bytes": 3888841386.6666665,
+          "feature_run_mean_bytes": 3860496384.0,
+          "difference_bytes": -28345002.666666508,
+          "difference_mib": -27.031901041666515,
+          "change_percent": -0.7288804003128146
+        },
+        "last_bytes": {
+          "baseline_run_mean_bytes": 4482075306.666667,
+          "feature_run_mean_bytes": 4582561109.333333,
+          "difference_bytes": 100485802.66666603,
+          "difference_mib": 95.83072916666606,
+          "change_percent": 2.241948110894132
+        }
+      }
+    },
+    "memory_scope": "Descriptive means of per-run sampled RSS and allocator gauges at 200 ms cadence; no true peak, cgroup/page-cache total, or MDBX buffer measurement. Allocator values overlap RSS.",
+    "supplementary_replay_elapsed": {
+      "baseline_mean_ms": 26907.833333333332,
+      "feature_mean_ms": 22745.5,
+      "change_percent": -15.468853555656036,
+      "ci_half_width_percent": 0.47322031378718943,
+      "method": "Derek run-cluster bootstrap primitive, supplementary raw replay elapsed time; no official verdict or changed thresholds",
+      "seed": "elapsed-diagnostic"
+    },
+    "assessment": "Rejected. Large persistence phase/backpressure savings coexist with significant mean, P90, P99, and reported wall-clock regressions. The independent 6.69x cold-file regression remains an additional rejection reason.",
+    "assessment_file": "iteration-3-assessment.md",
+    "diagnostics_directory": "iteration-3-phases",
+    "memory_directory": "iteration-3-memory"
+  }
+}

@@ -1,0 +1,249 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index adbd0f8767..295ce53241 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -10712,6 +10712,7 @@ dependencies = [
+  "alloy-consensus",
+  "alloy-primitives",
+  "alloy-rlp",
++ "metrics",
+  "proptest",
+  "proptest-arbitrary-interop",
+  "reth-chainspec",
+diff --git a/crates/trie/db/Cargo.toml b/crates/trie/db/Cargo.toml
+index ae09316b34..1cc69e0133 100644
+--- a/crates/trie/db/Cargo.toml
++++ b/crates/trie/db/Cargo.toml
+@@ -46,6 +46,7 @@ revm.workspace = true
+ triehash.workspace = true
+ 
+ # misc
++metrics.workspace = true
+ proptest.workspace = true
+ proptest-arbitrary-interop.workspace = true
+ serde_json.workspace = true
+@@ -56,6 +57,10 @@ tempfile.workspace = true
+ name = "storage_persistence"
+ harness = false
+ 
++[[bench]]
++name = "cursor_metrics"
++harness = false
++
+ [features]
+ metrics = ["reth-trie/metrics"]
+ serde = [
+diff --git a/crates/trie/db/benches/cursor_metrics.rs b/crates/trie/db/benches/cursor_metrics.rs
+new file mode 100644
+index 0000000000..4fe46bd328
+--- /dev/null
++++ b/crates/trie/db/benches/cursor_metrics.rs
+@@ -0,0 +1,208 @@
++//! Compare real cursor metrics with disabled metrics on durable account/storage updates.
++#[path = "../tests/persistence_support/mod.rs"]
++mod persistence_support;
++
++use alloy_primitives::B256;
++use metrics::{
++    atomics::AtomicU64, Counter, Gauge, Histogram, Key, KeyName, Metadata, Recorder, SharedString,
++    Unit,
++};
++use persistence_support::{node, path, snapshot};
++use reth_db::{
++    mdbx::{ffi, DatabaseArguments, SyncMode},
++    DatabaseEnv, DatabaseEnvKind,
++};
++use reth_db_api::{
++    cursor::{DbCursorRO, DbCursorRW},
++    transaction::{DbTx, DbTxMut},
++    Database,
++};
++use reth_trie::{updates::StorageTrieUpdatesSorted, BranchNodeCompact, Nibbles};
++use reth_trie_db::{DatabaseStorageTrieCursor, PackedKeyAdapter, TrieTableAdapter};
++use std::{
++    collections::{BTreeMap, HashMap},
++    path::Path,
++    sync::{atomic::Ordering, Arc, Mutex},
++    time::Instant,
++};
++
++type Adapter = PackedKeyAdapter;
++type Accounts = <Adapter as TrieTableAdapter>::AccountTrieTable;
++type Storages = <Adapter as TrieTableAdapter>::StorageTrieTable;
++
++fn open(path: &Path, enabled: bool) -> DatabaseEnv {
++    let mut db = DatabaseEnv::open(
++        path,
++        DatabaseEnvKind::RW,
++        DatabaseArguments::test()
++            .with_geometry_max_size(Some(512 * 1024 * 1024))
++            .with_sync_mode(Some(SyncMode::Durable)),
++    )
++    .unwrap()
++    .with_metrics_if(enabled);
++    db.with_raw_env_ptr(|env| {
++        let mut flags = 0;
++        // SAFETY: The environment and output pointer remain valid during the call.
++        assert_eq!(unsafe { ffi::mdbx_env_get_flags(env, &raw mut flags) }, 0);
++        assert_ne!(flags & ffi::MDBX_WRITEMAP, 0);
++        assert_eq!(flags & ffi::MDBX_LIFORECLAIM, 0);
++    });
++    db.create_tables().unwrap();
++    db
++}
++
++fn address(index: u32) -> B256 {
++    let mut value = B256::ZERO;
++    value[..4].copy_from_slice(&index.to_be_bytes());
++    value
++}
++
++fn accounts(db: &DatabaseEnv) -> BTreeMap<Nibbles, BranchNodeCompact> {
++    db.tx()
++        .unwrap()
++        .cursor_read::<Accounts>()
++        .unwrap()
++        .walk(None)
++        .unwrap()
++        .map(|row| {
++            let (key, node) = row.unwrap();
++            (key.0, node)
++        })
++        .collect()
++}
++
++struct Updates {
++    accounts: Vec<(Nibbles, BranchNodeCompact)>,
++    storages: Vec<(B256, StorageTrieUpdatesSorted)>,
++}
++
++fn updates(round: u32, large: bool, initial: bool) -> Updates {
++    let account_count = if large { 32768 } else { 1024 };
++    let stride = if initial { 1 } else { 8 };
++    let accounts = (0..account_count)
++        .step_by(stride)
++        .map(|index| (path(index), node(u64::from(index) + (u64::from(round) << 32), 8)))
++        .collect();
++    let addresses = if large { 128 } else { 1 };
++    let storages = (0..addresses)
++        .map(|account| {
++            (
++                address(account),
++                StorageTrieUpdatesSorted {
++                    storage_nodes: (0..512)
++                        .step_by(stride)
++                        .map(|index| {
++                            (
++                                path(index),
++                                Some(node(u64::from(index) + (u64::from(round) << 32), 8)),
++                            )
++                        })
++                        .collect(),
++                },
++            )
++        })
++        .collect();
++    Updates { accounts, storages }
++}
++
++fn write(db: &DatabaseEnv, updates: &Updates) -> (u128, u128) {
++    let started = Instant::now();
++    let tx = db.tx_mut().unwrap();
++    let mut cursor = tx.cursor_write::<Accounts>().unwrap();
++    for (path, node) in &updates.accounts {
++        cursor.upsert((*path).into(), node).unwrap();
++    }
++    drop(cursor);
++    for (account, updates) in &updates.storages {
++        DatabaseStorageTrieCursor::<_, Adapter>::new(
++            tx.cursor_dup_write::<Storages>().unwrap(),
++            *account,
++        )
++        .write_storage_trie_updates_sorted(updates)
++        .unwrap();
++    }
++    let write_ns = started.elapsed().as_nanos();
++    let started = Instant::now();
++    tx.commit().unwrap();
++    (write_ns, started.elapsed().as_nanos())
++}
++
++#[derive(Default)]
++struct CountingRecorder(Mutex<HashMap<Key, Arc<AtomicU64>>>);
++impl CountingRecorder {
++    fn cursor_calls(&self) -> u64 {
++        self.0
++            .lock()
++            .unwrap()
++            .iter()
++            .filter(|(key, _)| {
++                key.labels()
++                    .any(|label| label.key() == "operation" && label.value().starts_with("cursor-"))
++            })
++            .map(|(_, count)| count.load(Ordering::Relaxed))
++            .sum()
++    }
++}
++impl Recorder for CountingRecorder {
++    fn describe_counter(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
++    fn describe_gauge(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
++    fn describe_histogram(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
++    fn register_counter(&self, key: &Key, _: &Metadata<'_>) -> Counter {
++        Counter::from_arc(self.0.lock().unwrap().entry(key.clone()).or_default().clone())
++    }
++    fn register_gauge(&self, _: &Key, _: &Metadata<'_>) -> Gauge {
++        Gauge::noop()
++    }
++    fn register_histogram(&self, _: &Key, _: &Metadata<'_>) -> Histogram {
++        Histogram::noop()
++    }
++}
++
++fn main() {
++    let samples =
++        std::env::var("MPT_METRICS_SAMPLES").map(|v| v.parse::<u32>().unwrap()).unwrap_or(40);
++    let recorder = Arc::<CountingRecorder>::default();
++    metrics::set_global_recorder(recorder.clone()).unwrap();
++    let dirs = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
++    let dbs = [open(dirs[0].path(), false), open(dirs[1].path(), true)];
++    let initial = updates(0, true, true);
++    for db in &dbs {
++        write(db, &initial);
++    }
++    println!("metrics,sample,durable_ns,write_ns,commit_ns,cursor_calls");
++    for round in 1..=samples + 4 {
++        let updates = updates(round, true, false);
++        let mut expected = None;
++        for turn in 0..2 {
++            let index = ((turn + round) % 2) as usize;
++            let db = &dbs[index];
++            let before = recorder.cursor_calls();
++            let start = Instant::now();
++            let (write_ns, commit_ns) = write(db, &updates);
++            let durable_ns = start.elapsed().as_nanos();
++            let calls = recorder.cursor_calls() - before;
++            assert_eq!(calls, if index == 1 { 20480 } else { 0 });
++            let actual = (accounts(db), snapshot::<Adapter>(&db.tx().unwrap()));
++            if let Some(expected) = &expected {
++                assert_eq!(&actual, expected);
++            } else {
++                expected = Some(actual);
++            }
++            if round > 4 {
++                println!(
++                    "{},{},{durable_ns},{write_ns},{commit_ns},{calls}",
++                    ["off", "on"][index],
++                    round - 4
++                );
++            }
++        }
++    }
++    drop(dbs);
++    let first = open(dirs[0].path(), false);
++    let second = open(dirs[1].path(), true);
++    assert_eq!(accounts(&first), accounts(&second));
++    assert_eq!(
++        snapshot::<Adapter>(&first.tx().unwrap()),
++        snapshot::<Adapter>(&second.tx().unwrap())
++    );
++}

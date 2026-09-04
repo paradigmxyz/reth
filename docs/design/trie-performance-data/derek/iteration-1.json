@@ -1,0 +1,76 @@
+{
+  "branch": "perf/trie-root-persistence",
+  "baseline": "eadb887f1c1698e7bd932f60a0c654dccccd081f",
+  "candidate": "d14a096bbf042943b52815fa9a135e2b2112f917",
+  "run_id": 33862537836,
+  "url": "https://github.com/paradigmxyz/reth/actions/runs/33862537836",
+  "inputs": {
+    "blocks": 500,
+    "warmup": 125,
+    "run_pairs": 6,
+    "mode": "engine",
+    "slack": "never",
+    "samply": false,
+    "tracing_chrome": false,
+    "otlp": false,
+    "metrics": true
+  },
+  "status": "completed",
+  "runner": "ghr-euw-10",
+  "assessment": {
+    "method": "Unchanged Derek run-cluster bootstrap; 10000 resamples; six independent runs per variant",
+    "primary": "mean newPayload latency and reported wall-clock; confidence interval must clear default practical floor",
+    "floors_percent": {
+      "mean": 1.2,
+      "wall_clock": 0.7,
+      "p90": 1.35,
+      "p99": 5.0
+    },
+    "secondary": "Check tail regressions, root phase timings, direct trie-write time, and completed persistence work; preserve async window caveats"
+  },
+  "conclusion": "neutral",
+  "changes": {
+    "mean": {
+      "pct": 0.0347,
+      "ci_pct": 0.4587,
+      "floor_pct": 1.2,
+      "sig": "neutral"
+    },
+    "p50": {
+      "pct": -0.599,
+      "ci_pct": 1.0217,
+      "floor_pct": 1.2,
+      "sig": "neutral"
+    },
+    "p90": {
+      "pct": 0.2643,
+      "ci_pct": 1.4745,
+      "floor_pct": 1.35,
+      "sig": "neutral"
+    },
+    "p99": {
+      "pct": -0.9917,
+      "ci_pct": 1.1723,
+      "floor_pct": 5.0,
+      "sig": "neutral"
+    },
+    "mgas_s": {
+      "pct": 0.0986,
+      "ci_pct": 0.5882,
+      "floor_pct": 1.2,
+      "sig": "neutral"
+    },
+    "wall_clock": {
+      "pct": 0.2695,
+      "ci_pct": 0.5974,
+      "floor_pct": 0.7,
+      "sig": "neutral"
+    },
+    "persist_wait": {
+      "pct": -2.8442,
+      "ci_pct": 1.2209,
+      "floor_pct": 5.0,
+      "sig": "neutral"
+    }
+  }
+}
