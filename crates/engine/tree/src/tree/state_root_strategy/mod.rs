@@ -72,7 +72,10 @@ use reth_provider::{
 };
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_tasks::utils::increase_thread_priority;
-use reth_trie::{trie_cursor::CursorFactoryProvider, updates::TrieUpdates, HashedPostState};
+use reth_trie::{
+    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
+    HashedPostState,
+};
 use reth_trie_parallel::proof_task::{ProofResultMessage, ProofTaskCtx, ProofWorkerHandle};
 pub use reth_trie_parallel::{
     error::StateRootTaskError,
@@ -494,9 +497,11 @@ impl DefaultStateRootStrategy {
     ) -> StateRootHandle
     where
         N: NodePrimitives,
-        F: DatabaseProviderROFactory + Clone + Send + Sync + 'static,
-        F::Provider: CursorFactoryProvider,
-        ProviderError: From<<F::Provider as CursorFactoryProvider>::Error>,
+        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
     {
         let StateRootTaskOptions {
             parent_header,
@@ -795,12 +800,8 @@ where
         + StorageChangeSetReader
         + StorageSettingsCache
         + 'static,
-    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
-            Provider: CursorFactoryProvider<Error = ProviderError>
-                          + HashedPostStateProvider
-                          + StateRootProvider
-                          + Send,
-        > + Clone
+    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: HashedPostStateProvider + StateRootProvider + Send>
+        + Clone
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
@@ -847,7 +848,7 @@ where
         let mut handle = self.spawn_state_root(
             executor,
             overlay_manager,
-            proof_state_provider_factory,
+            proof_state_provider_factory.into_cursor_factories_factory(true),
             StateRootTaskOptions {
                 parent_header: parent_header.clone(),
                 preserved_sparse_trie,
@@ -922,7 +923,7 @@ where
             self.spawn_state_root(
                 ctx.executor,
                 ctx.overlay_manager,
-                proof_state_provider_factory,
+                proof_state_provider_factory.into_cursor_factories_factory(true),
                 StateRootTaskOptions {
                     parent_header,
                     preserved_sparse_trie,
@@ -1011,12 +1012,8 @@ where
         + StorageChangeSetReader
         + StorageSettingsCache
         + 'static,
-    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
-            Provider: CursorFactoryProvider<Error = ProviderError>
-                          + HashedPostStateProvider
-                          + StateRootProvider
-                          + Send,
-        > + Clone
+    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: HashedPostStateProvider + StateRootProvider + Send>
+        + Clone
         + 'static,
 {
     fn serial_fallback(
@@ -1111,12 +1108,8 @@ where
         + StorageChangeSetReader
         + StorageSettingsCache
         + 'static,
-    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
-            Provider: CursorFactoryProvider<Error = ProviderError>
-                          + HashedPostStateProvider
-                          + StateRootProvider
-                          + Send,
-        > + Clone
+    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: HashedPostStateProvider + StateRootProvider + Send>
+        + Clone
         + 'static,
 {
     fn name(&self) -> &'static str {
@@ -1220,11 +1213,8 @@ where
         + StorageChangeSetReader
         + StorageSettingsCache
         + 'static,
-    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
-        Provider: CursorFactoryProvider<Error = ProviderError>
-                      + HashedPostStateProvider
-                      + StateRootProvider,
-    >,
+    OverlayStateProviderFactory<P, N>:
+        DatabaseProviderROFactory<Provider: HashedPostStateProvider + StateRootProvider>,
 {
     debug!(target: "engine::tree::state_root_strategy", "Comparing trie updates with serial computation");
 
@@ -1239,16 +1229,14 @@ where
                 "Serial state root computation finished for comparison"
             );
 
-            match state_provider_factory.database_provider_ro() {
-                Ok(provider) => {
-                    match provider.cursor_factories(true).and_then(|(cursor_factories, _)| {
-                        super::trie_updates::compare_trie_updates(
-                            &cursor_factories,
-                            task_trie_updates,
-                            serial_trie_updates,
-                        )
-                        .map_err(ProviderError::from)
-                    }) {
+            match state_provider_factory.into_cursor_factories_factory(true).database_provider_ro()
+            {
+                Ok(cursor_factories) => {
+                    match super::trie_updates::compare_trie_updates(
+                        &cursor_factories,
+                        task_trie_updates,
+                        serial_trie_updates,
+                    ) {
                         Ok(has_diff) => return has_diff,
                         Err(err) => {
                             warn!(
@@ -1458,7 +1446,8 @@ mod tests {
             OverlayStateProviderFactory::new(
                 provider_factory,
                 overlay_manager.overlay_builder(genesis_hash),
-            ),
+            )
+            .into_cursor_factories_factory(true),
             StateRootTaskOptions {
                 parent_header: SealedHeader::new(Default::default(), genesis_hash),
                 preserved_sparse_trie: None,

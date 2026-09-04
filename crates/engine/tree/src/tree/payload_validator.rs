@@ -160,10 +160,7 @@ use reth_provider::{
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
-use reth_trie::{
-    trie_cursor::CursorFactoryProvider, updates::TrieUpdates, HashedPostState, KeccakKeyHasher,
-    LazyTrieData,
-};
+use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, LazyTrieData};
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -326,11 +323,7 @@ where
         + Clone
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
-            Provider: CursorFactoryProvider<Error = ProviderError>
-                          + HashedPostStateProvider
-                          + StateRootProvider
-                          + StateProvider
-                          + Send,
+            Provider: HashedPostStateProvider + StateRootProvider + StateProvider + Send,
         > + Clone
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
@@ -1810,11 +1803,7 @@ where
         + Clone
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
-            Provider: CursorFactoryProvider<Error = ProviderError>
-                          + HashedPostStateProvider
-                          + StateRootProvider
-                          + StateProvider
-                          + Send,
+            Provider: HashedPostStateProvider + StateRootProvider + StateProvider + Send,
         > + Clone
         + 'static,
     N: NodePrimitives,
