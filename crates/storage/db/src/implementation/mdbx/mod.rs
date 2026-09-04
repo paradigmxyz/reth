@@ -52,6 +52,12 @@ const DEFAULT_MAX_READERS: u64 = 32_000;
 /// See [`reth_libmdbx::EnvironmentBuilder::set_handle_slow_readers`] for more information.
 const MAX_SAFE_READER_SPACE: usize = 10 * GIGABYTE;
 
+/// Minimum MDBX underfilled-page merge threshold in 16.16 fixed-point percent units.
+///
+/// The default is 25% (`16384`). Replay persistence rewrites many trie and hashed-state rows,
+/// so keeping partially empty pages unmerged avoids dirtying additional neighbors on the hot path.
+const WRITE_TXN_MERGE_THRESHOLD_16DOT16_PERCENT: u16 = 8192;
+
 /// Environment used when opening a MDBX environment. RO/RW.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DatabaseEnvKind {
@@ -501,6 +507,10 @@ impl DatabaseEnv {
         // because we want to prioritize freelist lookup speed over database growth.
         // https://github.com/paradigmxyz/reth/blob/fa2b9b685ed9787636d962f4366caf34a9186e66/crates/storage/libmdbx-rs/mdbx-sys/libmdbx/mdbx.c#L16017.
         inner_env.set_rp_augment_limit(256 * 1024);
+        if kind.is_rw() {
+            inner_env
+                .set_merge_threshold_16dot16_percent(WRITE_TXN_MERGE_THRESHOLD_16DOT16_PERCENT);
+        }
 
         if let Some(log_level) = args.log_level {
             // Levels higher than [LogLevel::Notice] require libmdbx built with `MDBX_DEBUG` option.
