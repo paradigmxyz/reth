@@ -1,6 +1,49 @@
 use alloy_rpc_types_admin::{NodeInfo, PeerInfo};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_network_peers::{AnyNode, NodeRecord};
+use serde::{Deserialize, Serialize};
+
+/// Reloadable tracing output targeted by an override.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TracingTarget {
+    /// Standard output logs.
+    Stdout,
+    /// File logs.
+    File,
+    /// OTLP traces.
+    OtlpTraces,
+    /// OTLP logs.
+    OtlpLogs,
+}
+
+/// Request parameters for [`AdminApi::tracing_directives`].
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TracingDirectivesRequest {
+    /// `RUST_LOG`-style tracing directives. Ignored when `ttlSecs` is `0`.
+    #[serde(default)]
+    pub directives: String,
+    /// Outputs to override. If omitted, all reloadable outputs are targeted.
+    pub targets: Option<Vec<TracingTarget>>,
+    /// Number of seconds before the startup tracing configuration is restored.
+    ///
+    /// If omitted, the override remains active until explicitly reset. Set to `0` to reset
+    /// immediately.
+    pub ttl_secs: Option<u64>,
+}
+
+/// Result returned by [`AdminApi::tracing_directives`].
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TracingDirectivesResponse {
+    /// The tracing directives that were applied.
+    pub applied: String,
+    /// Number of seconds before the override is reverted, or `None` for an indefinite override.
+    pub ttl_secs: Option<u64>,
+    /// Outputs affected by the override.
+    pub targets: Vec<TracingTarget>,
+}
 
 /// Admin namespace rpc interface that gives access to several non-standard RPC methods.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "admin"))]
@@ -58,4 +101,39 @@ pub trait AdminApi {
     /// Returns the number of transactions that were removed from the pool.
     #[method(name = "clearTxpool")]
     async fn clear_txpool(&self) -> RpcResult<u64>;
+
+    /// Temporarily overrides the node's tracing directives.
+    ///
+    /// The startup tracing configuration is restored after `ttlSecs`. If `ttlSecs` is omitted,
+    /// the override remains active until reset by calling this method with `ttlSecs: 0`.
+    #[method(name = "tracingDirectives")]
+    async fn tracing_directives(
+        &self,
+        request: TracingDirectivesRequest,
+    ) -> RpcResult<TracingDirectivesResponse>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reset_request_only_requires_ttl() {
+        let request: TracingDirectivesRequest =
+            serde_json::from_value(serde_json::json!({ "ttlSecs": 0 })).unwrap();
+        assert!(request.directives.is_empty());
+        assert_eq!(request.ttl_secs, Some(0));
+        assert!(request.targets.is_none());
+    }
+
+    #[test]
+    fn scoped_override_deserializes_targets() {
+        let request: TracingDirectivesRequest = serde_json::from_value(serde_json::json!({
+            "directives": "reth=trace",
+            "targets": ["otlpTraces"]
+        }))
+        .unwrap();
+        assert_eq!(request.targets, Some(vec![TracingTarget::OtlpTraces]));
+        assert_eq!(request.ttl_secs, None);
+    }
 }
