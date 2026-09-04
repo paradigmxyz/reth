@@ -254,11 +254,16 @@ where
             let _ = self.storage.get_or_create_trie_mut(account);
         }
 
-        for (account, trie) in &mut self.storage.tries {
-            if let Some(nodes) = storage_proofs.remove(account) {
-                #[cfg(feature = "metrics")]
-                self.metrics.increment_total_storage_nodes(nodes.len() as u64);
-                targets.push((Some(*account), Either::Right(trie), nodes));
+        if !storage_proofs.is_empty() {
+            for (account, trie) in &mut self.storage.tries {
+                if let Some(nodes) = storage_proofs.remove(account) {
+                    #[cfg(feature = "metrics")]
+                    self.metrics.increment_total_storage_nodes(nodes.len() as u64);
+                    targets.push((Some(*account), Either::Right(trie), nodes));
+                    if storage_proofs.is_empty() {
+                        break;
+                    }
+                }
             }
         }
 
