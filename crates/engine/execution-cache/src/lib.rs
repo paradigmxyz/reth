@@ -18,6 +18,8 @@
 mod cached_state;
 pub use cached_state::*;
 
+mod hasher;
+
 mod txpool;
 pub use txpool::*;
 

@@ -118,7 +118,8 @@ use alloy_primitives::{
     map::{AddressMap, B256Set},
     B256,
 };
-use reth_tasks::LazyHandle;
+use futures::{future::BoxFuture, FutureExt};
+use reth_tasks::{LazyHandle, TaskRuntime};
 
 use crate::tree::{
     payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle},
@@ -186,8 +187,7 @@ const MAX_EXPECTED_GAS_LIMIT_MULTIPLIER: u64 = 2;
 const DEFERRED_TRIE_WORKER_NAME: &str = "deferred-trie";
 
 type ReceiptRootSender<N> =
-    crossbeam_channel::Sender<IndexedReceipt<<N as NodePrimitives>::Receipt>>;
-type ReceiptRootReceiver = tokio::sync::oneshot::Receiver<(B256, alloy_primitives::Bloom)>;
+    tokio::sync::mpsc::UnboundedSender<IndexedReceipt<<N as NodePrimitives>::Receipt>>;
 
 /// Context providing access to tree state during validation.
 ///
@@ -295,11 +295,15 @@ where
     validator: V,
     /// Task runtime for spawning parallel work.
     runtime: reth_tasks::Runtime,
+    /// Execute validation work on the caller without speculative background workers.
+    sequential_execution: bool,
     /// Shared overlay manager.
     overlay_manager: OverlayManager<Evm::Primitives>,
     /// State-root strategy used to prepare per-block commitment tasks.
     #[debug(skip)]
     state_root_strategy: Arc<dyn StateRootStrategy<Evm::Primitives, P, Evm>>,
+    /// Clock used while awaiting cooperatively scheduled state-root work.
+    cooperative_runtime: Option<TaskRuntime>,
     /// Persistent txpool prewarming worker and its latest immutable snapshot.
     ///
     /// None if txpool prewarming is disabled.
@@ -370,8 +374,10 @@ where
             metrics: EngineApiMetrics::default(),
             validator,
             runtime,
+            sequential_execution: false,
             overlay_manager,
             state_root_strategy: Arc::new(DefaultStateRootStrategy::default()),
+            cooperative_runtime: None,
             txpool_prewarm: None,
             bal_hash_buf: Vec::new(),
         }
@@ -386,16 +392,111 @@ where
         self
     }
 
+    /// Runs validation synchronously, including transaction conversion, receipts, state roots,
+    /// and trie-data preparation. All consensus and execution checks remain enabled.
+    ///
+    /// This selects the built-in synchronous state-root strategy and disables speculative
+    /// prewarming and caches. A deterministic caller can schedule an entire block as one unit;
+    /// this mode does not explore interleavings within block execution or database calls.
+    /// Configure it before starting any txpool prewarming worker. A subsequently installed custom
+    /// state-root strategy must also avoid background work to retain this execution contract.
+    pub fn with_sequential_execution(mut self) -> Self {
+        assert!(self.txpool_prewarm.is_none(), "configure execution before starting prewarming");
+        self.sequential_execution = true;
+        self.config = self
+            .config
+            .with_has_enough_parallelism(false)
+            .with_skip_state_root(false)
+            .without_state_cache(true)
+            .without_precompile_cache(true)
+            .without_prewarming(true)
+            .with_txpool_prewarming(false)
+            .with_share_execution_cache_with_payload_builder(false)
+            .with_share_sparse_trie_with_payload_builder(false)
+            .without_bal_parallel_execution(true)
+            .without_bal_parallel_state_root(true);
+        self.payload_processor = self.payload_processor.with_sequential_execution();
+        self.evm_config = self.evm_config.with_jit_support_enabled(false);
+        self.state_root_strategy = Arc::new(DefaultStateRootStrategy::default());
+        self.cooperative_runtime = None;
+        self
+    }
+
+    /// Runs EVM execution synchronously and schedules sparse-trie hashing, proofs, and updates
+    /// through the supplied runtime. Use the asynchronous validation methods with this profile.
+    ///
+    /// Background prewarming and shared payload-builder resources remain disabled. Sparse-trie
+    /// nodes are retained across validations, and all state-root checks remain enabled.
+    pub fn with_cooperative_sparse_trie(self, runtime: TaskRuntime) -> Self {
+        let mut validator = self.with_sequential_execution();
+        validator.state_root_strategy =
+            Arc::new(DefaultStateRootStrategy::with_task_runtime(runtime.clone()));
+        validator.cooperative_runtime = Some(runtime);
+        validator
+    }
+
+    /// Enables execution-cache prewarming on the cooperative runtime installed by
+    /// [`Self::with_cooperative_sparse_trie`].
+    ///
+    /// Speculative transactions run as individually scheduled operations. Authoritative block
+    /// execution remains synchronous, with a scheduling window before it opens its state provider.
+    /// Configure this before installing a txpool prewarming source.
+    pub fn with_cooperative_prewarming(mut self) -> Self {
+        assert!(self.txpool_prewarm.is_none(), "configure execution before starting prewarming");
+        let runtime = self
+            .cooperative_runtime
+            .clone()
+            .expect("cooperative prewarming requires a cooperative validator runtime");
+        self.config = self.config.without_state_cache(false).without_prewarming(false);
+        self.payload_processor = self.payload_processor.with_cooperative_prewarming(runtime);
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn prewarming_counter(&self) -> Arc<AtomicUsize> {
+        self.payload_processor.prewarming_counter()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn txpool_snapshot_observer(
+        &self,
+    ) -> Box<dyn Fn(B256) -> Option<crate::tree::TxPoolPrewarmCacheSnapshot> + Send + Sync> {
+        Box::new(
+            self.txpool_prewarm.as_ref().expect("txpool prewarming enabled").snapshot_observer(),
+        )
+    }
+
+    fn execute_or_spawn<F, R>(&self, name: &'static str, task: F) -> LazyHandle<R>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        if self.sequential_execution {
+            LazyHandle::ready(task())
+        } else {
+            self.runtime.spawn_blocking_named(name, task)
+        }
+    }
+
     /// Installs the txpool source and starts the persistent cache-prewarming worker.
+    ///
+    /// Uses the injected runtime when cooperative validation is configured. Enable
+    /// [`Self::with_cooperative_prewarming`] before installing the source in that profile.
     pub fn with_txpool_prewarming(
         mut self,
         source: impl crate::tree::TxPoolPrewarmSource<N> + 'static,
     ) -> Self {
-        self.txpool_prewarm = Some(txpool_prewarm::Handle::spawn(
-            &self.runtime,
-            Arc::new(source),
-            self.evm_config.clone(),
-        ));
+        self.txpool_prewarm = Some(if let Some(runtime) = &self.cooperative_runtime {
+            assert!(!self.config.disable_state_cache(), "enable cooperative prewarming first");
+            txpool_prewarm::Handle::spawn_with_runtime(
+                runtime,
+                Arc::new(source),
+                self.evm_config.clone(),
+            )
+        } else {
+            assert!(!self.sequential_execution, "sequential execution does not start prewarming");
+            txpool_prewarm::Handle::spawn(&self.runtime, Arc::new(source), self.evm_config.clone())
+        });
         self
     }
 
@@ -488,6 +589,27 @@ where
     pub fn validate_block_with_state<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &mut self,
         input: BlockOrPayload<T>,
+        ctx: TreeCtx<'_, N>,
+    ) -> InsertPayloadResult<N>
+    where
+        V: PayloadValidator<T, Block = N::Block> + Clone,
+        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
+    {
+        assert!(
+            self.cooperative_runtime.is_none(),
+            "cooperative validation requires the async API"
+        );
+        self.validate_block_with_state_async(input, ctx)
+            .now_or_never()
+            .expect("native validation must complete without cooperative waits")
+    }
+
+    /// Executes and validates a block, yielding for cooperative prewarming and state-root work.
+    pub async fn validate_block_with_state_async<
+        T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
+    >(
+        &mut self,
+        input: BlockOrPayload<T>,
         mut ctx: TreeCtx<'_, N>,
     ) -> InsertPayloadResult<N>
     where
@@ -498,7 +620,7 @@ where
         let _txpool_pause = self.txpool_prewarm.as_ref().map(txpool_prewarm::Handle::pause);
         let txpool_snapshot =
             self.txpool_prewarm.as_ref().and_then(|prewarmer| prewarmer.snapshot(parent_hash));
-        let _jit_pause = JitPauseGuard::new(&self.evm_config);
+        let _jit_pause = (!self.sequential_execution).then(|| JitPauseGuard::new(&self.evm_config));
 
         // Fetch parent block. This goes to memory most of the time unless the parent block is
         // beyond the in-memory buffer.
@@ -651,6 +773,14 @@ where
             parallel_bal_execution,
         ));
 
+        if !self.config.disable_prewarming() &&
+            let Some(runtime) = &self.cooperative_runtime
+        {
+            // Let speculative workers warm the shared cache before authoritative execution.
+            // No database transaction or EVM may survive this scheduling boundary.
+            runtime.sleep(Duration::from_millis(1)).await;
+        }
+
         // Create optional cache stats for detailed block logging
         let slow_block_enabled = self.config.slow_block_threshold().is_some();
         let cache_stats = slow_block_enabled.then(|| Arc::new(CacheStats::default()));
@@ -768,14 +898,16 @@ where
         let mut hashed_state_rx = state_root_job.take_hashed_state_rx();
         let parent_span = Span::current();
         let mut hashed_state: LazyHashedPostState =
-            self.runtime.spawn_blocking_named("hash-post-state", move || {
+            self.execute_or_spawn("hash-post-state", move || {
                 let _span = debug_span!(
                     target: "engine::tree::payload_validator",
                     parent: parent_span,
                     "hashed_post_state",
                 )
                 .entered();
-                if let Some(Ok(state)) = hashed_state_rx.as_mut().map(|rx| rx.recv()) {
+                if let Some(state) = cooperative_hashed_state {
+                    state
+                } else if let Some(Ok(state)) = hashed_state_rx.as_mut().map(|rx| rx.recv()) {
                     state
                 } else {
                     Arc::new(HashedPostState::from_bundle_state::<KeccakKeyHasher>(
@@ -795,15 +927,7 @@ where
             )
             .entered();
 
-            receipt_root_rx
-                .blocking_recv()
-                .inspect_err(|_| {
-                    tracing::error!(
-                        target: "engine::tree::payload_validator",
-                        "Receipt root task dropped sender without result, receipt root calculation likely aborted"
-                    );
-                })
-                .ok()
+            receipt_root_rx.recv()
         };
 
         ensure_ok_post_block!(
@@ -836,10 +960,12 @@ where
         });
 
         let root_start = Instant::now();
-        let root_outcome = ensure_ok_post_block!(
-            state_root_job.finish(&block, output.clone(), &hashed_state),
-            block
-        );
+        let root_result = if self.cooperative_runtime.is_some() {
+            state_root_job.finish_async(&block, output.clone(), &hashed_state).await
+        } else {
+            state_root_job.finish(&block, output.clone(), &hashed_state)
+        };
+        let root_outcome = ensure_ok_post_block!(root_result, block);
         let root_elapsed = root_start.elapsed();
 
         info!(
@@ -953,7 +1079,7 @@ where
         let validator = self.validator.clone();
         let consensus = self.consensus.clone();
         let parent_span = Span::current();
-        self.runtime.spawn_blocking_named("payload-convert", move || {
+        self.execute_or_spawn("payload-convert", move || {
             let _span = debug_span!(
                 target: "engine::tree::payload_validator",
                 parent: parent_span,
@@ -1049,7 +1175,8 @@ where
         let (spec_id, mut executor) = {
             let _span = debug_span!(target: "engine::tree", "create_evm").entered();
             let spec_id = *env.evm_env.spec_id();
-            let evm_config = self.evm_config.clone().with_jit_support();
+            let evm_config =
+                self.evm_config.clone().with_jit_support_enabled(!self.sequential_execution);
             let evm = evm_config.evm_with_env(&mut db, env.evm_env);
             let ctx = self
                 .execution_ctx_for(input)
@@ -1225,14 +1352,24 @@ where
     fn spawn_receipt_root_task(
         &self,
         receipts_len: usize,
-    ) -> (ReceiptRootSender<N>, ReceiptRootReceiver) {
+    ) -> (ReceiptRootSender<N>, ReceiptRootReceiver<N::Receipt>) {
         // Unbounded channel is used since tx count bounds capacity anyway.
-        let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
+        let (receipt_tx, receipt_rx) = tokio::sync::mpsc::unbounded_channel();
+        if self.sequential_execution {
+            return (receipt_tx, ReceiptRootReceiver::Inline { receiver: receipt_rx, receipts_len })
+        }
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
-        let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
-        self.runtime.spawn_blocking_named("receipt-root", move || task_handle.run(receipts_len));
+        let task_handle = ReceiptRootTaskHandle::new(
+            tokio_stream::wrappers::UnboundedReceiverStream::new(receipt_rx),
+            result_tx,
+        );
+        let runtime = reth_tasks::TaskRuntime::from(self.runtime.clone());
+        drop(
+            runtime
+                .spawn_named_task("receipt-root", task_handle.run(runtime.clone(), receipts_len)),
+        );
 
-        (receipt_tx, result_rx)
+        (receipt_tx, ReceiptRootReceiver::Background(result_rx))
     }
 
     /// Executes transactions and collects senders, streaming receipts to a background task.
@@ -1249,7 +1386,7 @@ where
         mut executor: E,
         transaction_count: usize,
         transactions: impl Iterator<Item = Result<Tx, Err>>,
-        receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
+        receipt_tx: &ReceiptRootSender<N>,
         executed_tx_index: &AtomicUsize,
         has_bal: bool,
     ) -> Result<(E, Vec<Address>), BlockExecutionError>
@@ -1723,6 +1860,38 @@ where
     }
 }
 
+/// Receipt work is streamed in parallel mode and drained on the caller in sequential mode.
+enum ReceiptRootReceiver<R> {
+    Background(tokio::sync::oneshot::Receiver<(B256, alloy_primitives::Bloom)>),
+    Inline {
+        receiver: tokio::sync::mpsc::UnboundedReceiver<IndexedReceipt<R>>,
+        receipts_len: usize,
+    },
+}
+
+impl<R: reth_primitives_traits::Receipt> ReceiptRootReceiver<R> {
+    fn recv(self) -> Option<(B256, alloy_primitives::Bloom)> {
+        match self {
+            Self::Background(receiver) => receiver
+                .blocking_recv()
+                .inspect_err(|_| {
+                    tracing::error!(
+                        target: "engine::tree::payload_validator",
+                        "Receipt root task dropped sender without result, receipt root calculation likely aborted"
+                    );
+                })
+                .ok(),
+            Self::Inline { mut receiver, receipts_len } => {
+                // Execution has returned and dropped the sole producer before this is called.
+                super::payload_processor::receipt_root_task::receipt_root_from_indexed(
+                    std::iter::from_fn(|| receiver.try_recv().ok()),
+                    receipts_len,
+                )
+            }
+        }
+    }
+}
+
 /// Type that validates the payloads processed by the engine.
 ///
 /// This provides the necessary functions for validating/executing payloads/blocks.
@@ -1772,6 +1941,29 @@ pub trait EngineValidator<
         block: SealedBlockWithAccessList<N::Block>,
         ctx: TreeCtx<'_, N>,
     ) -> ValidationOutcome<N>;
+
+    /// Validates a payload while allowing cooperative background work to make progress.
+    fn validate_payload_async<'a>(
+        &'a mut self,
+        payload: Types::ExecutionData,
+        ctx: TreeCtx<'a, N>,
+    ) -> BoxFuture<'a, ValidationOutcome<N>> {
+        Box::pin(async move { self.validate_payload(payload, ctx) })
+    }
+
+    /// Validates a downloaded block while allowing cooperative background work to make progress.
+    fn validate_block_async<'a>(
+        &'a mut self,
+        block: SealedBlockWithAccessList<N::Block>,
+        ctx: TreeCtx<'a, N>,
+    ) -> BoxFuture<'a, ValidationOutcome<N>> {
+        Box::pin(async move { self.validate_block(block, ctx) })
+    }
+
+    /// Drains background validation work before releasing the node's database handles.
+    fn wait_for_tasks(&mut self) -> BoxFuture<'_, ()> {
+        Box::pin(async {})
+    }
 
     /// Hook called after an executed block is inserted directly into the tree.
     ///
@@ -1863,6 +2055,32 @@ where
         self.validate_block_with_state(BlockOrPayload::Block(block), ctx)
     }
 
+    fn validate_payload_async<'a>(
+        &'a mut self,
+        payload: Types::ExecutionData,
+        ctx: TreeCtx<'a, N>,
+    ) -> BoxFuture<'a, ValidationOutcome<N>> {
+        Box::pin(self.validate_block_with_state_async(BlockOrPayload::Payload(payload), ctx))
+    }
+
+    fn validate_block_async<'a>(
+        &'a mut self,
+        block: SealedBlockWithAccessList<N::Block>,
+        ctx: TreeCtx<'a, N>,
+    ) -> BoxFuture<'a, ValidationOutcome<N>> {
+        Box::pin(self.validate_block_with_state_async(BlockOrPayload::Block(block), ctx))
+    }
+
+    fn wait_for_tasks(&mut self) -> BoxFuture<'_, ()> {
+        Box::pin(async move {
+            if let Some(prewarmer) = &self.txpool_prewarm {
+                prewarmer.shutdown().await;
+            }
+            self.payload_processor.wait_for_tasks().await;
+            self.state_root_strategy.wait_for_tasks().await;
+        })
+    }
+
     fn on_inserted_executed_block(
         &self,
         block: BuiltPayloadExecutedBlock<N>,
@@ -1944,8 +2162,11 @@ where
             .then(|| self.payload_processor.cache_for(parent_hash));
         let state_root_handle =
             self.payload_state_root_handle_for(parent_hash, parent_header, timestamp, state);
-        let mut resources = PayloadBuilderResources::new(execution_cache, state_root_handle)
-            .with_lease(PayloadBuilderLease::new(JitPauseGuard::new(&self.evm_config)));
+        let mut resources = PayloadBuilderResources::new(execution_cache, state_root_handle);
+        if !self.sequential_execution {
+            resources = resources
+                .with_lease(PayloadBuilderLease::new(JitPauseGuard::new(&self.evm_config)));
+        }
         // If the txpool prewarming is enabled then we should disable it for the duration
         // of the payload builder job. This is done by obtaining a lease that will release
         // the txpool prewarm when dropped.
@@ -1962,6 +2183,12 @@ where
     Evm: ConfigureEvm,
 {
     fn wait_for_caches(&self) -> CacheWaitDurations {
+        if self.sequential_execution {
+            return CacheWaitDurations {
+                execution_cache: Duration::ZERO,
+                sparse_trie: Duration::ZERO,
+            }
+        }
         debug!(target: "engine::tree::payload_validator", "Waiting for execution cache and sparse trie locks");
 
         let execution_cache = self.payload_processor.execution_cache();

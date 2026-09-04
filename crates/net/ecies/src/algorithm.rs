@@ -73,6 +73,9 @@ pub struct ECIES {
     remote_init_msg: Option<Bytes>,
 
     body_size: Option<usize>,
+    /// Explicit entropy for simulation; ordinary connections use the production RNGs.
+    #[cfg(feature = "test-utils")]
+    simulation_rng: Option<Box<rand_08::rngs::StdRng>>,
 }
 
 impl core::fmt::Debug for ECIES {
@@ -306,6 +309,8 @@ impl ECIES {
             ingress_aes: None,
             egress_mac: None,
             ingress_mac: None,
+            #[cfg(feature = "test-utils")]
+            simulation_rng: None,
         })
     }
 
@@ -348,6 +353,8 @@ impl ECIES {
             ingress_aes: None,
             egress_mac: None,
             ingress_mac: None,
+            #[cfg(feature = "test-utils")]
+            simulation_rng: None,
         })
     }
 
@@ -359,17 +366,34 @@ impl ECIES {
         Self::new_static_server(secret_key, nonce, ephemeral_secret_key)
     }
 
+    #[cfg(feature = "test-utils")]
+    pub(crate) fn new_seeded(
+        secret_key: SecretKey,
+        remote_id: Option<PeerId>,
+        seed: u64,
+    ) -> Result<Self, ECIESError> {
+        use rand_08::{RngCore, SeedableRng};
+        let mut random = rand_08::rngs::StdRng::seed_from_u64(seed);
+        let mut nonce = B256::ZERO;
+        random.fill_bytes(nonce.as_mut_slice());
+        let ephemeral = SecretKey::new(&mut random);
+        let mut ecies = match remote_id {
+            Some(remote_id) => Self::new_static_client(secret_key, remote_id, nonce, ephemeral)?,
+            None => Self::new_static_server(secret_key, nonce, ephemeral)?,
+        };
+        ecies.simulation_rng = Some(Box::new(random));
+        Ok(ecies)
+    }
+
     /// Return the contained remote peer ID.
     pub const fn remote_id(&self) -> PeerId {
         self.remote_id.unwrap()
     }
 
-    fn encrypt_message(&self, data: &[u8], out: &mut BytesMut) {
-        let mut rng = rng();
-
+    fn encrypt_message(&mut self, data: &[u8], out: &mut BytesMut) {
         out.reserve(secp256k1::constants::UNCOMPRESSED_PUBLIC_KEY_SIZE + 16 + data.len() + 32);
 
-        let secret_key = SecretKey::new(&mut rng);
+        let (secret_key, iv) = self.encryption_entropy();
         out.extend_from_slice(
             &PublicKey::from_secret_key(SECP256K1, &secret_key).serialize_uncompressed(),
         );
@@ -381,7 +405,6 @@ impl ECIES {
         let enc_key = B128::from_slice(&key[..16]);
         let mac_key = sha256(&key[16..32]);
 
-        let iv = B128::random();
         let mut encryptor = Ctr64BE::<Aes128>::new((&enc_key.0).into(), (&iv.0).into());
 
         let mut encrypted = data.to_vec();
@@ -397,6 +420,26 @@ impl ECIES {
         out.extend_from_slice(tag.as_ref());
     }
 
+    fn encryption_entropy(&mut self) -> (SecretKey, B128) {
+        #[cfg(feature = "test-utils")]
+        if let Some(random) = self.simulation_rng.as_mut() {
+            use rand_08::RngCore;
+            let secret = SecretKey::new(random);
+            let mut iv = B128::ZERO;
+            random.fill_bytes(iv.as_mut_slice());
+            return (secret, iv);
+        }
+        (SecretKey::new(&mut rng()), B128::random())
+    }
+
+    fn auth_padding(&mut self) -> usize {
+        #[cfg(feature = "test-utils")]
+        if let Some(random) = self.simulation_rng.as_mut() {
+            return random.gen_range(100..=300);
+        }
+        rng().gen_range(100..=300)
+    }
+
     fn decrypt_message<'a>(&self, data: &'a mut [u8]) -> Result<&'a mut [u8], ECIESError> {
         // parse the encrypted message from bytes
         let encrypted_message = EncryptedMessage::parse(data)?;
@@ -408,7 +451,7 @@ impl ECIES {
         encrypted_message.check_and_decrypt(keys)
     }
 
-    fn create_auth_unencrypted(&self) -> BytesMut {
+    fn create_auth_unencrypted(&self, padding: usize) -> BytesMut {
         let x = ecdh_x(&self.remote_public_key.unwrap(), &self.secret_key);
         let msg = x ^ self.nonce;
         let (rec_id, sig) = SECP256K1
@@ -441,7 +484,7 @@ impl ECIES {
         }
         .encode(&mut out);
 
-        out.resize(out.len() + rng().gen_range(100..=300), 0);
+        out.resize(out.len() + padding, 0);
         out
     }
 
@@ -454,7 +497,8 @@ impl ECIES {
 
     /// Write an auth message to the given buffer.
     pub fn write_auth(&mut self, buf: &mut BytesMut) {
-        let unencrypted = self.create_auth_unencrypted();
+        let padding = self.auth_padding();
+        let unencrypted = self.create_auth_unencrypted(padding);
 
         let mut out = buf.split_off(buf.len());
         out.put_u16(0);
@@ -506,7 +550,7 @@ impl ECIES {
 
     /// Create an `ack` message using the internal nonce, local ephemeral public key, and `RLPx`
     /// ECIES protocol version.
-    fn create_ack_unencrypted(&self) -> impl AsRef<[u8]> {
+    fn create_ack_unencrypted(&self) -> impl AsRef<[u8]> + use<> {
         #[derive(RlpEncodable, RlpMaxEncodedLen)]
         struct S {
             id: PeerId,

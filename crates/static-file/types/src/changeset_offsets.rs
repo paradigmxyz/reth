@@ -12,17 +12,15 @@ use std::{
 };
 
 /// Writer for appending changeset offsets to a sidecar file.
+///
+/// An I/O error may leave a partial mutation. Discard the writer and reopen with the last
+/// committed header length before writing again.
 #[derive(Debug)]
 pub struct ChangesetOffsetWriter {
-    file: File,
-    /// Number of records written.
-    records_written: u64,
+    inner: SidecarWriter<File>,
 }
 
 impl ChangesetOffsetWriter {
-    /// Record size in bytes.
-    const RECORD_SIZE: usize = 16;
-
     /// Opens or creates the changeset offset file for appending.
     ///
     /// The file is healed to match `committed_len` (from the segment header):
@@ -37,86 +35,14 @@ impl ChangesetOffsetWriter {
             .create(true)
             .truncate(false)
             .read(true)
-            .write(true)
+            .append(true)
             .open(path.as_ref())?;
-
-        let file_len = file.metadata()?.len();
-        let remainder = file_len % Self::RECORD_SIZE as u64;
-
-        // First, truncate any partial record from crash mid-write
-        let aligned_len = if remainder != 0 {
-            let truncated_len = file_len - remainder;
-            tracing::warn!(
-                target: "reth::static_file",
-                path = %path.as_ref().display(),
-                original_len = file_len,
-                truncated_len,
-                "Truncating partial changeset offset record"
-            );
-            file.set_len(truncated_len)?;
-            file.sync_all()?; // Sync required for crash safety
-            truncated_len
-        } else {
-            file_len
-        };
-
-        let records_in_file = aligned_len / Self::RECORD_SIZE as u64;
-
-        // Heal sidecar to match committed header length
-        match records_in_file.cmp(&committed_len) {
-            std::cmp::Ordering::Greater => {
-                // Sidecar has uncommitted records from a crash - truncate them
-                let target_len = committed_len * Self::RECORD_SIZE as u64;
-                tracing::warn!(
-                    target: "reth::static_file",
-                    path = %path.as_ref().display(),
-                    sidecar_records = records_in_file,
-                    committed_len,
-                    "Truncating uncommitted changeset offset records after crash recovery"
-                );
-                file.set_len(target_len)?;
-                file.sync_all()?; // Sync required for crash safety
-            }
-            std::cmp::Ordering::Less => {
-                // INVARIANT VIOLATION: This should be impossible if healing ran correctly.
-                //
-                // All code paths call `heal_changeset_sidecar()` before this function, which
-                // validates the sidecar against NippyJar state and corrects the header to match
-                // the actual file size. Therefore, `committed_len` should always equal or exceed
-                // `records_in_file` when this function is called.
-                //
-                // If we reach this error, it indicates:
-                // - A bug in the healing logic (header not corrected properly)
-                // - This function was called directly without going through healing
-                // - External corruption occurred between healing and opening (extremely unlikely)
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!(
-                        "INVARIANT VIOLATION: Changeset offset sidecar has {} records but header expects {} \
-                         (healing should have prevented this - possible bug in healing logic): {}",
-                        records_in_file,
-                        committed_len,
-                        path.as_ref().display()
-                    ),
-                ));
-            }
-            std::cmp::Ordering::Equal => {}
-        }
-
-        let records_written = committed_len;
-        let file = OpenOptions::new().create(true).append(true).open(path)?;
-
-        Ok(Self { file, records_written })
+        Ok(Self { inner: SidecarWriter::recover(file, path.as_ref(), committed_len)? })
     }
 
     /// Appends a single changeset offset record.
     pub fn append(&mut self, offset: &ChangesetOffset) -> io::Result<()> {
-        let mut buf = [0u8; Self::RECORD_SIZE];
-        buf[..8].copy_from_slice(&offset.offset().to_le_bytes());
-        buf[8..].copy_from_slice(&offset.num_changes().to_le_bytes());
-        self.file.write_all(&buf)?;
-        self.records_written += 1;
-        Ok(())
+        self.inner.append(offset)
     }
 
     /// Appends multiple changeset offset records.
@@ -129,7 +55,7 @@ impl ChangesetOffsetWriter {
 
     /// Syncs all data to disk. Must be called before committing the header.
     pub fn sync(&mut self) -> io::Result<()> {
-        self.file.sync_all()
+        self.inner.sync()
     }
 
     /// Truncates the file to contain exactly `len` records and syncs to disk.
@@ -138,20 +64,17 @@ impl ChangesetOffsetWriter {
     /// The sync is required for crash safety - without it, a crash could
     /// resurrect the old file length.
     pub fn truncate(&mut self, len: u64) -> io::Result<()> {
-        self.file.set_len(len * Self::RECORD_SIZE as u64)?;
-        self.file.sync_all()?;
-        self.records_written = len;
-        Ok(())
+        self.inner.truncate(len)
     }
 
     /// Returns the number of records in the file.
     pub const fn len(&self) -> u64 {
-        self.records_written
+        self.inner.records_written
     }
 
     /// Returns true if the file is empty.
     pub const fn is_empty(&self) -> bool {
-        self.records_written == 0
+        self.inner.records_written == 0
     }
 }
 
@@ -164,9 +87,6 @@ pub struct ChangesetOffsetReader {
 }
 
 impl ChangesetOffsetReader {
-    /// Record size in bytes.
-    const RECORD_SIZE: usize = 16;
-
     /// Opens the changeset offset file for reading with an explicit length.
     ///
     /// The `len` parameter (from header metadata) bounds the reader - any records
@@ -183,14 +103,7 @@ impl ChangesetOffsetReader {
             return Ok(None);
         }
 
-        let byte_pos = block_index * Self::RECORD_SIZE as u64;
-        let mut buf = [0u8; Self::RECORD_SIZE];
-        self.file.read_exact_at(&mut buf, byte_pos)?;
-
-        let offset = u64::from_le_bytes(buf[..8].try_into().unwrap());
-        let num_changes = u64::from_le_bytes(buf[8..].try_into().unwrap());
-
-        Ok(Some(ChangesetOffset::new(offset, num_changes)))
+        read_offset(&self.file, block_index).map(Some)
     }
 
     /// Reads a range of changeset offsets.
@@ -201,17 +114,9 @@ impl ChangesetOffsetReader {
         }
 
         let count = (end - start) as usize;
-        let byte_pos = start * Self::RECORD_SIZE as u64;
-
         let mut result = Vec::with_capacity(count);
-        let mut buf = [0u8; Self::RECORD_SIZE];
-
         for i in 0..count {
-            let pos = byte_pos + (i as u64) * Self::RECORD_SIZE as u64;
-            self.file.read_exact_at(&mut buf, pos)?;
-            let offset = u64::from_le_bytes(buf[..8].try_into().unwrap());
-            let num_changes = u64::from_le_bytes(buf[8..].try_into().unwrap());
-            result.push(ChangesetOffset::new(offset, num_changes));
+            result.push(read_offset(&self.file, start + i as u64)?);
         }
 
         Ok(result)
@@ -227,6 +132,131 @@ impl ChangesetOffsetReader {
         self.len == 0
     }
 }
+
+/// The same writer and recovery algorithm runs against files and fault-injecting test storage.
+#[derive(Debug)]
+struct SidecarWriter<F> {
+    file: F,
+    records_written: u64,
+}
+
+impl<F: SidecarFile> SidecarWriter<F> {
+    fn recover(file: F, path: &Path, committed_len: u64) -> io::Result<Self> {
+        let file_len = file.byte_len()?;
+        let remainder = file_len % RECORD_SIZE as u64;
+        let aligned_len = if remainder != 0 {
+            let truncated_len = file_len - remainder;
+            tracing::warn!(
+                target: "reth::static_file",
+                path = %path.display(),
+                original_len = file_len,
+                truncated_len,
+                "Truncating partial changeset offset record"
+            );
+            file.resize(truncated_len)?;
+            file.sync()?;
+            truncated_len
+        } else {
+            file_len
+        };
+
+        let records_in_file = aligned_len / RECORD_SIZE as u64;
+        match records_in_file.cmp(&committed_len) {
+            std::cmp::Ordering::Greater => {
+                tracing::warn!(
+                    target: "reth::static_file",
+                    path = %path.display(),
+                    sidecar_records = records_in_file,
+                    committed_len,
+                    "Truncating uncommitted changeset offset records after crash recovery"
+                );
+                file.resize(committed_len * RECORD_SIZE as u64)?;
+                file.sync()?;
+            }
+            std::cmp::Ordering::Less => {
+                // The segment header may only publish records after the sidecar sync succeeds.
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "INVARIANT VIOLATION: Changeset offset sidecar has {} records but header expects {} \
+                         (healing should have prevented this - possible bug in healing logic): {}",
+                        records_in_file,
+                        committed_len,
+                        path.display()
+                    ),
+                ));
+            }
+            std::cmp::Ordering::Equal => {}
+        }
+        Ok(Self { file, records_written: committed_len })
+    }
+
+    fn append(&mut self, offset: &ChangesetOffset) -> io::Result<()> {
+        let mut buf = [0u8; RECORD_SIZE];
+        buf[..8].copy_from_slice(&offset.offset().to_le_bytes());
+        buf[8..].copy_from_slice(&offset.num_changes().to_le_bytes());
+        self.file.append_all(&buf)?;
+        self.records_written += 1;
+        Ok(())
+    }
+
+    fn sync(&self) -> io::Result<()> {
+        self.file.sync()
+    }
+
+    fn truncate(&mut self, len: u64) -> io::Result<()> {
+        self.file.resize(len * RECORD_SIZE as u64)?;
+        self.file.sync()?;
+        self.records_written = len;
+        Ok(())
+    }
+}
+
+/// Synchronous byte I/O with separate visibility and durability. A failed append may have written
+/// a prefix; failed mutations require dropping the writer and recovering from the committed header.
+trait SidecarFile {
+    fn byte_len(&self) -> io::Result<u64>;
+    fn read_exact_at(&self, bytes: &mut [u8], offset: u64) -> io::Result<()>;
+    fn append_all(&mut self, bytes: &[u8]) -> io::Result<()>;
+    fn resize(&self, len: u64) -> io::Result<()>;
+    fn sync(&self) -> io::Result<()>;
+}
+
+impl SidecarFile for File {
+    fn byte_len(&self) -> io::Result<u64> {
+        Ok(self.metadata()?.len())
+    }
+
+    fn read_exact_at(&self, bytes: &mut [u8], offset: u64) -> io::Result<()> {
+        FileExt::read_exact_at(self, bytes, offset)
+    }
+
+    fn append_all(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.write_all(bytes)
+    }
+
+    fn resize(&self, len: u64) -> io::Result<()> {
+        self.set_len(len)
+    }
+
+    fn sync(&self) -> io::Result<()> {
+        self.sync_all()
+    }
+}
+
+const RECORD_SIZE: usize = 16;
+
+fn read_offset(file: &impl SidecarFile, index: u64) -> io::Result<ChangesetOffset> {
+    let mut buf = [0u8; RECORD_SIZE];
+    file.read_exact_at(&mut buf, index * RECORD_SIZE as u64)?;
+    Ok(ChangesetOffset::new(
+        u64::from_le_bytes(buf[..8].try_into().unwrap()),
+        u64::from_le_bytes(buf[8..].try_into().unwrap()),
+    ))
+}
+
+#[cfg(test)]
+mod deterministic;
 
 #[cfg(test)]
 mod tests {

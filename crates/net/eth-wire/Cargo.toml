@@ -20,6 +20,7 @@ alloy-rlp = { workspace = true, features = ["derive"] }
 reth-eth-wire-types.workspace = true
 reth-network-peers.workspace = true
 reth-ethereum-forks.workspace = true
+reth-tasks = { workspace = true, optional = true }
 
 # ethereum
 alloy-primitives.workspace = true
@@ -39,6 +40,8 @@ tokio-stream.workspace = true
 pin-project.workspace = true
 tracing.workspace = true
 snap.workspace = true
+rand = { workspace = true, optional = true }
+secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"], optional = true }
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
@@ -47,6 +50,9 @@ arbitrary = { workspace = true, features = ["derive"], optional = true }
 reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
 reth-eth-wire-types = { workspace = true, features = ["arbitrary"] }
 reth-tracing.workspace = true
+reth-tasks = { workspace = true, features = ["deterministic"] }
+reth-ecies = { workspace = true, features = ["test-utils"] }
+commonware-runtime.workspace = true
 
 alloy-consensus.workspace = true
 test-fuzz.workspace = true
@@ -63,6 +69,16 @@ serde.workspace = true
 alloy-eips.workspace = true
 
 [features]
+test-utils = [
+    "dep:reth-tasks",
+    "dep:rand",
+    "dep:secp256k1",
+    "reth-ecies/test-utils",
+    "commonware-runtime/test-utils",
+    "reth-codecs/test-utils",
+    "reth-primitives-traits/test-utils",
+    "reth-tasks?/test-utils",
+]
 arbitrary = [
     "reth-eth-wire-types/arbitrary",
     "dep:arbitrary",
@@ -73,6 +89,7 @@ arbitrary = [
     "reth-primitives-traits/arbitrary",
     "reth-ethereum-forks/arbitrary",
     "alloy-consensus/arbitrary",
+    "commonware-runtime/arbitrary",
 ]
 serde = [
     "dep:serde",

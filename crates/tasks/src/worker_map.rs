@@ -68,9 +68,14 @@ impl WorkerThread {
         let task: BoxedTask = Box::new(move || {
             let started_at = Instant::now();
             metrics.record_queue_wait(started_at.saturating_duration_since(queued_at));
-            let _decrement_pending = DecrementPendingOnDrop(pending);
-            let _record_task_duration = RecordTaskDurationOnDrop::new(metrics, started_at);
-            let _ = result_tx.send(f());
+            let result = {
+                let _decrement_pending = DecrementPendingOnDrop(pending);
+                let _record_task_duration = RecordTaskDurationOnDrop::new(metrics, started_at);
+                f()
+            };
+            // Publish completion after releasing the slot, so an awakened caller can submit
+            // work through try_spawn without racing this task's cleanup.
+            let _ = result_tx.send(result);
         });
 
         if self.tx.send(task).is_err() {
@@ -96,9 +101,12 @@ impl WorkerThread {
         let task: BoxedTask = Box::new(move || {
             let started_at = Instant::now();
             metrics.record_queue_wait(started_at.saturating_duration_since(queued_at));
-            let _decrement_pending = DecrementPendingOnDrop(pending);
-            let _record_task_duration = RecordTaskDurationOnDrop::new(metrics, started_at);
-            let _ = result_tx.send(f());
+            let result = {
+                let _decrement_pending = DecrementPendingOnDrop(pending);
+                let _record_task_duration = RecordTaskDurationOnDrop::new(metrics, started_at);
+                f()
+            };
+            let _ = result_tx.send(result);
         });
 
         if self.tx.send(task).is_err() {
@@ -190,10 +198,19 @@ impl WorkerMap {
 
 impl Drop for WorkerMap {
     fn drop(&mut self) {
-        for (_, mut w) in std::mem::take(&mut self.workers) {
-            // Drop sender so the thread's recv loop exits, then join.
-            drop(w.tx);
-            if let Some(handle) = w.handle.take() {
+        // Close every queue before waiting, so all workers can drain and leave their recv loop.
+        let handles: Vec<_> = std::mem::take(&mut self.workers)
+            .into_iter()
+            .filter_map(|(_, mut worker)| {
+                drop(worker.tx);
+                worker.handle.take()
+            })
+            .collect();
+        let current_thread = thread::current().id();
+        for handle in handles {
+            // A task may own the last Runtime, and therefore drop this map on its own worker.
+            // That thread drains its closed queue after this destructor and task return.
+            if handle.thread().id() != current_thread {
                 let _ = handle.join();
             }
         }
@@ -209,6 +226,57 @@ impl std::fmt::Debug for WorkerMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn worker_map_last_owner_dropped_on_worker() {
+        struct ThreadExit(std::sync::mpsc::Sender<()>);
+
+        impl Drop for ThreadExit {
+            fn drop(&mut self) {
+                let _ = self.0.send(());
+            }
+        }
+
+        thread_local! {
+            static THREAD_EXIT: std::cell::RefCell<Option<ThreadExit>> = const {
+                std::cell::RefCell::new(None)
+            };
+        }
+
+        let timeout = std::time::Duration::from_secs(5);
+        let map = Arc::new(WorkerMap::new());
+        let (release_owner, owner_released) = std::sync::mpsc::channel();
+        let (owner_exited, owner_exit) = std::sync::mpsc::channel();
+        let owner = Arc::clone(&map);
+        let completed = map.spawn_on("last-owner", move || {
+            THREAD_EXIT.with_borrow_mut(|signal| *signal = Some(ThreadExit(owner_exited)));
+            owner_released.recv_timeout(timeout).unwrap();
+            drop(owner);
+            true
+        });
+
+        let (release_other, other_released) = std::sync::mpsc::channel();
+        let (other_exited, other_exit) = std::sync::mpsc::channel();
+        let first = map.spawn_on("other-worker", move || {
+            THREAD_EXIT.with_borrow_mut(|signal| *signal = Some(ThreadExit(other_exited)));
+            other_released.recv_timeout(timeout).unwrap();
+        });
+        let queued = map.spawn_on("other-worker", || 42);
+        // Queue work behind the destructor on its own thread too. It must run after the map is
+        // gone, before the worker exits naturally; joining this thread here would deadlock.
+        let owner_queued = map.spawn_on("last-owner", || 7);
+        drop(map);
+        release_owner.send(()).unwrap();
+        release_other.send(()).unwrap();
+
+        // Thread-local teardown proves that both OS threads have actually left their work loop.
+        other_exit.recv_timeout(timeout).expect("other worker did not drain and exit");
+        owner_exit.recv_timeout(timeout).expect("owner worker did not drain and exit");
+        first.blocking_recv().unwrap();
+        assert_eq!(queued.blocking_recv().unwrap(), 42);
+        assert!(completed.blocking_recv().unwrap());
+        assert_eq!(owner_queued.blocking_recv().unwrap(), 7);
+    }
 
     #[tokio::test]
     async fn worker_map_basic() {
@@ -293,5 +361,22 @@ mod tests {
 
         let third = map.try_spawn_on("busy-worker", || 3).expect("worker should be idle");
         assert_eq!(third.await.unwrap(), 3);
+
+        // Unconditionally queued jobs must release their slot before publishing completion too.
+        assert_eq!(map.spawn_on("busy-worker", || 4).await.unwrap(), 4);
+        let fifth = map.try_spawn_on("busy-worker", || 5).expect("worker should be idle");
+        assert_eq!(fifth.await.unwrap(), 5);
+    }
+
+    #[tokio::test]
+    async fn worker_map_panicking_job_releases_slot() {
+        let map = WorkerMap::new();
+        let failed = map
+            .try_spawn_on("panicking-worker", || panic!("injected worker panic"))
+            .expect("worker should be idle");
+        assert!(failed.await.is_err());
+        let recovered =
+            map.try_spawn_on("panicking-worker", || 42).expect("panicked worker retained its slot");
+        assert_eq!(recovered.await.unwrap(), 42);
     }
 }

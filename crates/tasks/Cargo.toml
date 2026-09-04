@@ -13,7 +13,7 @@ workspace = true
 
 [dependencies]
 # async
-tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "time"] }
 tracing-futures.workspace = true
 futures-util = { workspace = true, features = ["std"] }
 
@@ -27,6 +27,7 @@ parking_lot.workspace = true
 thread-priority.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
+commonware-runtime = { workspace = true, optional = true }
 
 # feature `rayon`
 rayon = { workspace = true, optional = true }
@@ -41,4 +42,7 @@ tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "time",
 
 [features]
 rayon = ["dep:rayon", "dep:crossbeam-utils", "pin-project"]
-test-utils = []
+test-utils = [
+    "commonware-runtime?/test-utils",
+]
+deterministic = ["dep:commonware-runtime"]

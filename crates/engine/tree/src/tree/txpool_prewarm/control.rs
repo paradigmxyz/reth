@@ -1,7 +1,7 @@
 use crate::tree::TxPoolPrewarmCacheSnapshot as Snapshot;
 use alloy_primitives::B256;
 use crossbeam_channel::{unbounded, Receiver, Sender};
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use std::{
     fmt::Debug,
     sync::{Arc, Weak},
@@ -11,6 +11,7 @@ use std::{
 pub(super) struct Control<J> {
     commands: Sender<Command<J>>,
     publication: Publication,
+    closed: Mutex<bool>,
 }
 
 impl<J> Debug for Control<J> {
@@ -28,7 +29,7 @@ impl<J> Control<J> {
     pub(super) fn new() -> (Arc<Self>, Receiver<Command<J>>) {
         let (commands, receiver) = unbounded();
         let publication = Arc::new(RwLock::new(None));
-        (Arc::new(Self { commands, publication }), receiver)
+        (Arc::new(Self { commands, publication, closed: Mutex::new(false) }), receiver)
     }
 
     pub(super) fn publication(&self) -> Publication {
@@ -36,7 +37,18 @@ impl<J> Control<J> {
     }
 
     pub(super) fn start(&self, parent_hash: B256, job: J) {
-        let _ = self.commands.send(Command::Start { parent_hash, job });
+        let closed = self.closed.lock();
+        if !*closed {
+            let _ = self.commands.send(Command::Start { parent_hash, job });
+        }
+    }
+
+    pub(super) fn shutdown(&self) {
+        let mut closed = self.closed.lock();
+        if !*closed {
+            *closed = true;
+            let _ = self.commands.send(Command::Shutdown);
+        }
     }
 
     pub(super) fn pause(self: &Arc<Self>) -> PauseGuard<J> {
@@ -67,6 +79,8 @@ pub(super) enum Command<J> {
     Pause,
     /// Releases one active pause.
     Resume,
+    /// Stops after the current transaction and drops the active parent/iterator.
+    Shutdown,
 }
 
 /// One outstanding pause, released when dropped.

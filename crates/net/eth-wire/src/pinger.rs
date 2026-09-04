@@ -1,11 +1,13 @@
-use crate::errors::PingerError;
+use crate::{
+    clock::{ProtocolClock, ProtocolTimer, Timestamp},
+    errors::PingerError,
+};
 use std::{
     future::Future,
     pin::Pin,
     task::{Context, Poll, Waker},
     time::Duration,
 };
-use tokio::time::{Instant, Sleep};
 use tokio_stream::Stream;
 
 /// The pinger is a simple state machine that sends a ping, waits for a pong,
@@ -13,7 +15,7 @@ use tokio_stream::Stream;
 #[derive(Debug)]
 pub(crate) struct Pinger {
     /// The timer used for the next ping.
-    ping_timer: Pin<Box<Sleep>>,
+    ping_timer: ProtocolTimer,
     /// The last task waker registered with the ping timer.
     ///
     /// The pinger is polled on every session poll while its timers only rarely fire, and every
@@ -25,7 +27,7 @@ pub(crate) struct Pinger {
     /// The duration between pings.
     ping_interval: Duration,
     /// The timer used to detect a ping timeout.
-    timeout_timer: Pin<Box<Sleep>>,
+    timeout_timer: ProtocolTimer,
     /// The last task waker registered with the timeout timer.
     ///
     /// See [`Self::ping_waker`] for why the waker is cached.
@@ -42,18 +44,29 @@ impl Pinger {
     /// Creates a new [`Pinger`] with the given ping interval duration,
     /// and timeout duration.
     pub(crate) fn new(ping_interval: Duration, timeout_duration: Duration) -> Self {
-        let now = Instant::now();
-        let ping_timer = tokio::time::sleep_until(now + ping_interval);
-        let timeout_timer = tokio::time::sleep(timeout_duration);
+        Self::with_clock(ping_interval, timeout_duration, ProtocolClock::Native)
+    }
+
+    pub(crate) fn with_clock(
+        ping_interval: Duration,
+        timeout_duration: Duration,
+        clock: ProtocolClock,
+    ) -> Self {
+        let ping_timer = clock.sleep(ping_interval);
+        let timeout_timer = clock.sleep(timeout_duration);
         Self {
             state: PingState::Ready,
-            ping_timer: Box::pin(ping_timer),
+            ping_timer,
             ping_waker: None,
             ping_interval,
-            timeout_timer: Box::pin(timeout_timer),
+            timeout_timer,
             timeout_waker: None,
             timeout: timeout_duration,
         }
+    }
+
+    pub(crate) fn now(&self) -> Timestamp {
+        self.ping_timer.now()
     }
 
     /// Mark a pong as received, and transition the pinger to the `Ready` state if it was in the
@@ -63,7 +76,7 @@ impl Pinger {
             PingState::Ready => Err(PingerError::UnexpectedPong),
             PingState::WaitingForPong => {
                 self.state = PingState::Ready;
-                self.ping_timer.as_mut().reset(Instant::now() + self.ping_interval);
+                self.ping_timer.reset(self.ping_interval);
                 self.ping_waker = None;
                 self.timeout_waker = None;
                 Ok(())
@@ -72,7 +85,7 @@ impl Pinger {
                 // if we receive a pong after timeout then we also reset the state, since the
                 // connection was kept alive after timeout
                 self.state = PingState::Ready;
-                self.ping_timer.as_mut().reset(Instant::now() + self.ping_interval);
+                self.ping_timer.reset(self.ping_interval);
                 self.ping_waker = None;
                 self.timeout_waker = None;
                 Ok(())
@@ -101,8 +114,8 @@ impl Pinger {
                     return Poll::Pending
                 }
 
-                if self.ping_timer.as_mut().poll(cx).is_ready() {
-                    self.timeout_timer.as_mut().reset(Instant::now() + self.timeout);
+                if Pin::new(&mut self.ping_timer).poll(cx).is_ready() {
+                    self.timeout_timer.reset(self.timeout);
                     self.ping_waker = None;
                     self.timeout_waker = None;
                     self.state = PingState::WaitingForPong;
@@ -118,7 +131,7 @@ impl Pinger {
                     return Poll::Pending
                 }
 
-                if self.timeout_timer.as_mut().poll(cx).is_ready() {
+                if Pin::new(&mut self.timeout_timer).poll(cx).is_ready() {
                     self.timeout_waker = None;
                     self.state = PingState::TimedOut;
                     return Poll::Ready(Ok(PingerEvent::Timeout))
@@ -241,5 +254,52 @@ mod tests {
         pinger.on_pong().unwrap();
 
         assert_eq!(pinger.next().await.unwrap().unwrap(), PingerEvent::Ping);
+    }
+
+    #[test]
+    fn deterministic_cached_timer_reset() {
+        use commonware_runtime::{deterministic, Runner, Supervisor};
+
+        fn run() -> String {
+            deterministic::Runner::seeded(0).start(|context| async move {
+                let runtime = reth_tasks::TaskRuntime::deterministic(context.child("pinger"));
+                let interval = Duration::from_millis(10);
+                let timeout = Duration::from_millis(5);
+                let mut pinger =
+                    Pinger::with_clock(interval, timeout, ProtocolClock::Runtime(runtime.clone()));
+
+                // Its first poll happens after the creation-time deadline. Starting a fresh
+                // full interval at that poll would incorrectly delay the first Ping.
+                runtime.sleep(interval * 2).await;
+                assert!(matches!(
+                    futures::poll!(pinger.next()),
+                    Poll::Ready(Some(Ok(PingerEvent::Ping)))
+                ));
+                // A timer must wake an actual executor task. A noop waker would make the
+                // deterministic runtime correctly report a stall at that timer's deadline.
+                let waker = futures::future::poll_fn(|cx| Poll::Ready(cx.waker().clone())).await;
+                let mut cx = Context::from_waker(&waker);
+                for _ in 0..10 {
+                    assert!(pinger.poll_ping(&mut cx).is_pending());
+                }
+                pinger.on_pong().unwrap();
+
+                // Resetting both timers must invalidate cached wakers and preserve their new
+                // deadlines. Reusing the same waker exercises the fast path explicitly.
+                for _ in 0..10 {
+                    assert!(pinger.poll_ping(&mut cx).is_pending());
+                }
+                runtime.sleep(interval * 2).await;
+                assert!(matches!(pinger.poll_ping(&mut cx), Poll::Ready(Ok(PingerEvent::Ping))));
+                for _ in 0..10 {
+                    assert!(pinger.poll_ping(&mut cx).is_pending());
+                }
+                runtime.sleep(timeout * 2).await;
+                assert!(matches!(pinger.poll_ping(&mut cx), Poll::Ready(Ok(PingerEvent::Timeout))));
+                context.auditor().state()
+            })
+        }
+
+        assert_eq!(run(), run());
     }
 }

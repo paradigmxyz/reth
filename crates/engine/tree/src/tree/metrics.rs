@@ -433,7 +433,7 @@ pub(crate) struct NewPayloadStatusMetrics {
 }
 
 impl NewPayloadStatusMetrics {
-    /// Starts measuring resource usage on the current thread.
+    /// Accumulates resource usage across polls of one payload handler.
     pub(crate) fn measure_thread_resource_usage(&self) -> NewPayloadThreadResourceGuard {
         self.thread_resource_usage.measure()
     }
@@ -512,8 +512,7 @@ struct NewPayloadThreadResourceMetrics {
 impl NewPayloadThreadResourceMetrics {
     fn measure(&self) -> NewPayloadThreadResourceGuard {
         let metrics = self.clone();
-        let start = ThreadResourceUsage::now();
-        NewPayloadThreadResourceGuard { start, metrics }
+        NewPayloadThreadResourceGuard { accumulated: None, metrics }
     }
 
     fn record(&self, usage: &ThreadResourceUsageDelta) {
@@ -531,17 +530,53 @@ impl NewPayloadThreadResourceMetrics {
     }
 }
 
-/// Records engine thread resource usage when dropped.
+/// Records accumulated payload resource usage once when dropped.
 pub(crate) struct NewPayloadThreadResourceGuard {
-    start: ThreadResourceUsage,
+    accumulated: Option<ThreadResourceUsageDelta>,
     metrics: NewPayloadThreadResourceMetrics,
+}
+
+impl NewPayloadThreadResourceGuard {
+    /// Samples each poll on its current thread, excluding work performed while suspended.
+    pub(crate) fn measure_poll<T>(&mut self, poll: impl FnOnce() -> T) -> T {
+        let _guard = NewPayloadPollResourceGuard {
+            start: ThreadResourceUsage::now(),
+            accumulated: &mut self.accumulated,
+        };
+        poll()
+    }
 }
 
 impl Drop for NewPayloadThreadResourceGuard {
     fn drop(&mut self) {
-        if let Some(usage) = self.start.elapsed() {
+        if let Some(usage) = self.accumulated {
             self.metrics.record(&usage);
         }
+    }
+}
+
+/// A thread-bound snapshot that is always dropped before a future's poll returns.
+struct NewPayloadPollResourceGuard<'a> {
+    start: ThreadResourceUsage,
+    accumulated: &'a mut Option<ThreadResourceUsageDelta>,
+}
+
+impl Drop for NewPayloadPollResourceGuard<'_> {
+    fn drop(&mut self) {
+        let Some(delta) = self.start.elapsed() else { return };
+        let total = self.accumulated.get_or_insert_default();
+        total.user_cpu_time = total.user_cpu_time.saturating_add(delta.user_cpu_time);
+        total.system_cpu_time = total.system_cpu_time.saturating_add(delta.system_cpu_time);
+        total.minor_page_faults = total.minor_page_faults.saturating_add(delta.minor_page_faults);
+        total.major_page_faults = total.major_page_faults.saturating_add(delta.major_page_faults);
+        total.voluntary_context_switches =
+            total.voluntary_context_switches.saturating_add(delta.voluntary_context_switches);
+        total.involuntary_context_switches =
+            total.involuntary_context_switches.saturating_add(delta.involuntary_context_switches);
+        total.block_input_operations =
+            total.block_input_operations.saturating_add(delta.block_input_operations);
+        total.block_output_operations =
+            total.block_output_operations.saturating_add(delta.block_output_operations);
     }
 }
 

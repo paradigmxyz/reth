@@ -1054,6 +1054,8 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
 #[cfg(test)]
 #[allow(clippy::clone_on_copy)]
 mod tests {
+    mod deterministic;
+
     use super::SNAPSHOT_STATE_RETENTION;
     use crate::{
         providers::BlockchainProvider,

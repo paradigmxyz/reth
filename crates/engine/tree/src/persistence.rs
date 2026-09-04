@@ -10,7 +10,7 @@ use reth_provider::{
 };
 use reth_prune::{PrunerError, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
-use reth_tasks::spawn_os_thread;
+use reth_tasks::{spawn_os_thread, TaskHandle, TaskRuntime};
 use std::{
     sync::{
         mpsc::{Receiver, SendError, Sender},
@@ -20,6 +20,7 @@ use std::{
     time::Duration,
 };
 use thiserror::Error;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::{debug, error, instrument, warn};
 
 /// Unified result of any persistence operation.
@@ -48,7 +49,7 @@ where
     /// The provider factory to use
     provider: ProviderFactory<N>,
     /// Incoming requests
-    incoming: Receiver<PersistenceAction<N::Primitives>>,
+    incoming: PersistenceReceiver<N::Primitives>,
     /// The pruner
     pruner: PrunerWithFactory<ProviderFactory<N>>,
     /// metrics
@@ -74,6 +75,20 @@ where
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
     ) -> Self {
+        Self::with_receiver(
+            provider,
+            PersistenceReceiver::Blocking(incoming),
+            pruner,
+            sync_metrics_tx,
+        )
+    }
+
+    fn with_receiver(
+        provider: ProviderFactory<N>,
+        incoming: PersistenceReceiver<N::Primitives>,
+        pruner: PrunerWithFactory<ProviderFactory<N>>,
+        sync_metrics_tx: MetricEventsSender,
+    ) -> Self {
         Self {
             provider,
             incoming,
@@ -94,39 +109,63 @@ where
     /// database actions
     pub fn run(mut self) -> Result<(), PersistenceError> {
         // If the receiver errors then senders have disconnected, so the loop should then end.
-        while let Ok(action) = self.incoming.recv() {
-            match action {
-                PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
-                    let result = self.on_remove_blocks_above(new_tip_num)?;
-                    // send new sync metrics based on removed blocks
-                    let _ =
-                        self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
-                    let _ = sender.send(result);
-                }
-                PersistenceAction::SaveBlocks(input, sender) => {
-                    let new_db_tip = input.new_db_tip();
-                    let db_tip_advanced = input.prev_db_tip() < new_db_tip;
-                    let result = self.on_save_blocks(input)?;
-
-                    let _ = sender.send(result);
-
-                    if db_tip_advanced {
-                        // send new sync metrics based on saved blocks
-                        let _ = self
-                            .sync_metrics_tx
-                            .send(MetricEvent::SyncHeight { height: new_db_tip });
-                        self.maybe_run_pruner(new_db_tip)?;
-                    }
-                }
-                PersistenceAction::SaveFinalizedBlock(finalized_block) => {
-                    self.pending_finalized_block = Some(finalized_block);
-                }
-                PersistenceAction::SaveSafeBlock(safe_block) => {
-                    self.pending_safe_block = Some(safe_block);
-                }
+        while let Some(action) = self.incoming.recv_blocking() {
+            if let Some(tip) = self.process_action(action)? {
+                self.maybe_run_pruner(tip)?;
             }
         }
         Ok(())
+    }
+
+    async fn run_cooperative(mut self, runtime: TaskRuntime) -> Result<(), PersistenceError> {
+        loop {
+            let action = match &mut self.incoming {
+                PersistenceReceiver::Cooperative(incoming) => incoming.recv().await,
+                PersistenceReceiver::Blocking(_) => {
+                    unreachable!("cooperative services are constructed with an async receiver")
+                }
+            };
+            let Some(action) = action else { return Ok(()) };
+            // Even a ready queue processes at most one operation between scheduling points.
+            runtime.yield_now().await;
+            if let Some(tip) = self.process_action(action)? {
+                // Preserve the production order: the save is acknowledged before pruning.
+                runtime.yield_now().await;
+                self.maybe_run_pruner(tip)?;
+            }
+        }
+    }
+
+    /// Executes one action and returns a tip to prune after acknowledging its committed save.
+    fn process_action(
+        &mut self,
+        action: PersistenceAction<N::Primitives>,
+    ) -> Result<Option<u64>, PersistenceError> {
+        match action {
+            PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
+                let result = self.on_remove_blocks_above(new_tip_num)?;
+                let _ = self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
+                let _ = sender.send(result);
+            }
+            PersistenceAction::SaveBlocks(input, sender) => {
+                let new_db_tip = input.new_db_tip();
+                let db_tip_advanced = input.prev_db_tip() < new_db_tip;
+                let result = self.on_save_blocks(input)?;
+                let _ = sender.send(result);
+                if db_tip_advanced {
+                    let _ =
+                        self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_db_tip });
+                    return Ok(Some(new_db_tip));
+                }
+            }
+            PersistenceAction::SaveFinalizedBlock(finalized_block) => {
+                self.pending_finalized_block = Some(finalized_block);
+            }
+            PersistenceAction::SaveSafeBlock(safe_block) => {
+                self.pending_safe_block = Some(safe_block);
+            }
+        }
+        Ok(None)
     }
 
     #[instrument(level = "debug", target = "engine::persistence", skip_all, fields(%new_tip_num))]
@@ -284,7 +323,7 @@ pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
 #[derive(Debug, Clone)]
 pub struct PersistenceHandle<N: NodePrimitives = EthPrimitives> {
     /// The channel used to communicate with the persistence service
-    sender: Sender<PersistenceAction<N>>,
+    sender: PersistenceSender<N>,
     /// Guard that joins the service thread when all handles are dropped.
     /// Uses `Arc` so the handle remains `Clone`.
     _service_guard: Arc<ServiceGuard>,
@@ -296,7 +335,10 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     /// This is intended for testing purposes where you want to mock the persistence service.
     /// For production use, prefer [`spawn_service`](Self::spawn_service).
     pub fn new(sender: Sender<PersistenceAction<T>>) -> Self {
-        Self { sender, _service_guard: Arc::new(ServiceGuard(None)) }
+        Self {
+            sender: PersistenceSender::Blocking(sender),
+            _service_guard: Arc::new(ServiceGuard(None)),
+        }
     }
 
     /// Create a new [`PersistenceHandle`], and spawn the persistence service.
@@ -325,9 +367,47 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         });
 
         PersistenceHandle {
-            sender: db_service_tx,
+            sender: PersistenceSender::Blocking(db_service_tx),
             _service_guard: Arc::new(ServiceGuard(Some(join_handle))),
         }
+    }
+
+    /// Spawns the persistence worker through an executor-independent task runtime.
+    ///
+    /// Production runs on a dedicated OS thread. Simulation schedules the same action handlers
+    /// cooperatively, with real synchronous storage operations completing between yields. Result
+    /// channels must accommodate their single reply without blocking, as the engine's capacity-one
+    /// channels do. Unwind still waits synchronously for older MDBX readers: simulated callers
+    /// must release snapshots before submitting removal, rather than holding them across an await.
+    ///
+    /// Drop every persistence handle to close the input, then await the returned task to drain
+    /// queued operations and release the provider before reopening storage. Unlike
+    /// [`Self::spawn_service`], dropping the last handle does not synchronously join the
+    /// worker. Dropping the task handle detaches it; aborting it can discard queued work and
+    /// replies, so shutdown should await it.
+    pub fn spawn_service_with_runtime<N>(
+        provider_factory: ProviderFactory<N>,
+        pruner: PrunerWithFactory<ProviderFactory<N>>,
+        sync_metrics_tx: MetricEventsSender,
+        runtime: TaskRuntime,
+    ) -> (PersistenceHandle<N::Primitives>, TaskHandle<Result<(), PersistenceError>>)
+    where
+        N: ProviderNodeTypes,
+    {
+        let (sender, incoming) = tokio::sync::mpsc::unbounded_channel();
+        let service = PersistenceService::with_receiver(
+            provider_factory,
+            PersistenceReceiver::Cooperative(incoming),
+            pruner,
+            sync_metrics_tx,
+        );
+        let task =
+            runtime.spawn_dedicated_task("persistence", service.run_cooperative(runtime.clone()));
+        let handle = PersistenceHandle {
+            sender: PersistenceSender::Cooperative(sender),
+            _service_guard: Arc::new(ServiceGuard(None)),
+        };
+        (handle, task)
     }
 
     /// Sends a specific [`PersistenceAction`] in the contained channel. The caller is responsible
@@ -336,7 +416,12 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         &self,
         action: PersistenceAction<T>,
     ) -> Result<(), SendError<PersistenceAction<T>>> {
-        self.sender.send(action)
+        match &self.sender {
+            PersistenceSender::Blocking(sender) => sender.send(action),
+            PersistenceSender::Cooperative(sender) => {
+                sender.send(action).map_err(|error| SendError(error.0))
+            }
+        }
     }
 
     /// Tells the persistence service to advance its block-data and state/trie frontiers.
@@ -388,6 +473,27 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     }
 }
 
+#[derive(Debug)]
+enum PersistenceReceiver<N: NodePrimitives> {
+    Blocking(Receiver<PersistenceAction<N>>),
+    Cooperative(UnboundedReceiver<PersistenceAction<N>>),
+}
+
+impl<N: NodePrimitives> PersistenceReceiver<N> {
+    fn recv_blocking(&mut self) -> Option<PersistenceAction<N>> {
+        match self {
+            Self::Blocking(receiver) => receiver.recv().ok(),
+            Self::Cooperative(receiver) => receiver.blocking_recv(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+enum PersistenceSender<N: NodePrimitives> {
+    Blocking(Sender<PersistenceAction<N>>),
+    Cooperative(UnboundedSender<PersistenceAction<N>>),
+}
+
 /// Guard that joins the persistence service thread when dropped.
 ///
 /// This ensures graceful shutdown - the service thread completes before resources like
@@ -411,6 +517,8 @@ impl Drop for ServiceGuard {
 
 #[cfg(test)]
 mod tests {
+    mod cooperative;
+
     use super::*;
     use alloy_eips::NumHash;
     use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256, U256};

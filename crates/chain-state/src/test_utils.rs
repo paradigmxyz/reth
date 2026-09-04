@@ -221,10 +221,20 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
     fn get_executed_block(
         &mut self,
         block_number: BlockNumber,
-        mut receipts: Vec<Vec<Receipt>>,
+        receipts: Vec<Vec<Receipt>>,
         parent_hash: B256,
     ) -> ExecutedBlock {
         let block = self.generate_random_block(block_number, parent_hash);
+        self.get_executed_sealed_block(block, receipts)
+    }
+
+    fn get_executed_sealed_block(
+        &mut self,
+        block: SealedBlock<Block>,
+        mut receipts: Vec<Vec<Receipt>>,
+    ) -> ExecutedBlock {
+        let block_number = block.number;
+        let parent_hash = block.parent_hash;
         let senders = vec![self.signer; block.body().transactions.len()];
         let recovered = RecoveredBlock::new_sealed(block, senders);
 
