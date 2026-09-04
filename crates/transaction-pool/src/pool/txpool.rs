@@ -3490,6 +3490,80 @@ mod tests {
     }
 
     #[test]
+    fn changed_sender_update_matches_full_update() {
+        let senders = [
+            address!("0x000000000000000000000000000000000000000a"),
+            address!("0x000000000000000000000000000000000000000b"),
+            address!("0x000000000000000000000000000000000000000c"),
+        ];
+        let starting_nonces = [5, 11, 17];
+
+        let build_pool = || {
+            let mut f = MockTransactionFactory::default();
+            let mut pool = AllTransactions::default();
+            pool.pending_fees.base_fee = 1;
+
+            for (sender, starting_nonce) in senders.into_iter().zip(starting_nonces) {
+                for nonce in starting_nonce..starting_nonce + 3 {
+                    let tx = MockTransaction::eip1559()
+                        .with_sender(sender)
+                        .with_nonce(nonce)
+                        .inc_price_by(10)
+                        .rng_hash();
+                    pool.insert_tx(f.validated(tx), U256::from(1_000_000), starting_nonce).unwrap();
+                }
+            }
+
+            // The fee differs from the initial marker, so this takes the all-transactions path.
+            pool.update(&Default::default());
+            let sender_ids = senders.map(|sender| f.ids.sender_id(&sender).unwrap());
+            (pool, sender_ids)
+        };
+
+        let (mut changed_senders_only, sender_ids) = build_pool();
+        let (mut full_update, full_update_sender_ids) = build_pool();
+        assert_eq!(sender_ids, full_update_sender_ids);
+
+        let mut changed = FxHashMap::default();
+        changed.insert(
+            sender_ids[0],
+            SenderInfo { state_nonce: starting_nonces[0] + 1, balance: U256::from(1_000_000) },
+        );
+        changed.insert(
+            sender_ids[1],
+            SenderInfo { state_nonce: starting_nonces[1], balance: U256::ZERO },
+        );
+
+        let mut changed_sender_updates = changed_senders_only.update(&changed);
+        // Force the reference pool through the all-transactions path with the same pending fees.
+        full_update.last_full_update_fees.base_fee =
+            full_update.last_full_update_fees.base_fee.saturating_add(1);
+        let mut full_updates = full_update.update(&changed);
+
+        let update_key = |update: &PoolUpdate| {
+            let destination = match &update.destination {
+                Destination::Discard => None,
+                Destination::Pool(pool) => Some(*pool),
+            };
+            (update.id, update.current, destination)
+        };
+        changed_sender_updates.sort_unstable_by_key(|update| update.id);
+        full_updates.sort_unstable_by_key(|update| update.id);
+        assert_eq!(
+            changed_sender_updates.iter().map(update_key).collect::<Vec<_>>(),
+            full_updates.iter().map(update_key).collect::<Vec<_>>()
+        );
+
+        let metadata = |pool: &AllTransactions<MockTransaction>| {
+            pool.txs
+                .iter()
+                .map(|(id, tx)| (*id, tx.state, tx.subpool, tx.cumulative_cost))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(metadata(&changed_senders_only), metadata(&full_update));
+    }
+
+    #[test]
     fn update_visits_every_sender_when_the_base_fee_moved() {
         let mut f = MockTransactionFactory::default();
         let mut pool = TxPool::new(MockOrdering::default(), Default::default());
@@ -3523,6 +3597,16 @@ mod tests {
                 .contains(TxState::ENOUGH_FEE_CAP_BLOCK),
             "fee change was not applied to an unchanged sender"
         );
+    }
+
+    #[test]
+    fn blob_fee_change_records_full_update() {
+        let mut pool = AllTransactions::<MockTransaction>::default();
+        pool.pending_fees.blob_fee += 1;
+
+        pool.update(&Default::default());
+
+        assert_eq!(pool.last_full_update_fees, pool.pending_fees);
     }
 
     #[test]
