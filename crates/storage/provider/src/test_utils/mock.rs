@@ -76,6 +76,8 @@ pub struct MockEthProvider<T: NodePrimitives = EthPrimitives, ChainSpec = reth_c
     pub block_body_indices: Arc<Mutex<HashMap<BlockNumber, StoredBlockBodyIndices>>>,
     /// Local stage checkpoints
     stage_checkpoints: Arc<Mutex<HashMap<StageId, StageCheckpoint>>>,
+    /// Local prune checkpoints
+    prune_checkpoints: Arc<Mutex<HashMap<PruneSegment, PruneCheckpoint>>>,
     /// Local BAL store handle
     pub bal_store: BalStoreHandle,
     /// Whether database provider creation succeeds.
@@ -131,6 +133,7 @@ where
             state_roots: self.state_roots.clone(),
             block_body_indices: self.block_body_indices.clone(),
             stage_checkpoints: self.stage_checkpoints.clone(),
+            prune_checkpoints: self.prune_checkpoints.clone(),
             bal_store: self.bal_store.clone(),
             database_provider_available: self.database_provider_available.clone(),
             snap_state_reads_fail: self.snap_state_reads_fail.clone(),
@@ -160,6 +163,7 @@ impl<T: NodePrimitives> MockEthProvider<T, reth_chainspec::ChainSpec> {
             state_roots: Default::default(),
             block_body_indices: Default::default(),
             stage_checkpoints: Default::default(),
+            prune_checkpoints: Default::default(),
             bal_store: Default::default(),
             database_provider_available: Default::default(),
             snap_state_reads_fail: Default::default(),
@@ -315,6 +319,11 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
         self.stage_checkpoints.lock().insert(id, checkpoint);
     }
 
+    /// Sets the prune checkpoint of the given segment
+    pub fn add_prune_checkpoint(&self, segment: PruneSegment, checkpoint: PruneCheckpoint) {
+        self.prune_checkpoints.lock().insert(segment, checkpoint);
+    }
+
     /// Add state root to local state root store
     pub fn add_state_root(&self, state_root: B256) {
         self.state_roots.lock().push(state_root);
@@ -331,6 +340,7 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
             state_roots: self.state_roots,
             block_body_indices: self.block_body_indices,
             stage_checkpoints: self.stage_checkpoints,
+            prune_checkpoints: self.prune_checkpoints,
             bal_store: self.bal_store,
             database_provider_available: self.database_provider_available,
             snap_state_reads_fail: self.snap_state_reads_fail,
@@ -1042,13 +1052,13 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> PruneCheckpointReader
 {
     fn get_prune_checkpoint(
         &self,
-        _segment: PruneSegment,
+        segment: PruneSegment,
     ) -> ProviderResult<Option<PruneCheckpoint>> {
-        Ok(None)
+        Ok(self.prune_checkpoints.lock().get(&segment).copied())
     }
 
     fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
-        Ok(vec![])
+        Ok(self.prune_checkpoints.lock().iter().map(|(segment, cp)| (*segment, *cp)).collect())
     }
 }
 

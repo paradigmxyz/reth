@@ -16,6 +16,7 @@ use itertools::Itertools;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
+use reth_prune_types::PruneSegment;
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadReceipt},
     EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcConvert,
@@ -28,7 +29,7 @@ use reth_rpc_eth_types::{
 use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
 use reth_storage_api::{
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, HeaderProvider, ProviderBlock,
-    ProviderReceipt, ReceiptProvider,
+    ProviderReceipt, PruneCheckpointReader, ReceiptProvider,
 };
 use reth_tasks::Runtime;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
@@ -489,6 +490,17 @@ where
                 let Some((receipts, maybe_block)) =
                     self.eth_cache().get_receipts_and_maybe_block(block_hash).await?
                 else {
+                    // the block may still exist with its receipts pruned
+                    if let Some(number) = self.provider().block_number(block_hash)? &&
+                        let Some(pruned_height) = self.pruned_receipts_height()? &&
+                        number <= pruned_height
+                    {
+                        return Err(EthApiError::PrunedHistoryUnavailable {
+                            requested: number,
+                            earliest_available: pruned_height + 1,
+                        }
+                        .into())
+                    }
                     return Err(ProviderError::HeaderNotFound(block_hash.into()).into())
                 };
 
@@ -600,10 +612,30 @@ where
                     .into());
                 }
 
+                // Receipts pruning keeps the headers, so a range starting at or below the prune
+                // height cannot be served completely and would look like it has no logs
+                if let Some(pruned_height) = self.pruned_receipts_height()? &&
+                    from_block_number <= pruned_height
+                {
+                    return Err(EthApiError::PrunedHistoryUnavailable {
+                        requested: from_block_number,
+                        earliest_available: pruned_height + 1,
+                    }
+                    .into());
+                }
+
                 self.get_logs_in_block_range(filter, from_block_number, to_block_number, limits)
                     .await
             }
         }
+    }
+
+    /// Returns the highest block whose receipts were pruned, if receipts pruning is enabled.
+    fn pruned_receipts_height(&self) -> Result<Option<u64>, ProviderError> {
+        Ok(self
+            .provider()
+            .get_prune_checkpoint(PruneSegment::Receipts)?
+            .and_then(|checkpoint| checkpoint.block_number))
     }
 
     /// Installs a new filter and returns the new identifier.
@@ -2039,5 +2071,71 @@ mod tests {
         // Each block hash should be the hash of its own header, not derived from any other header
         assert_eq!(logs[0].block_hash, Some(expected_hashes[0])); // block 100
         assert_eq!(logs[1].block_hash, Some(expected_hashes[2])); // block 102
+    }
+
+    #[tokio::test]
+    async fn test_logs_for_filter_over_pruned_receipts() {
+        use reth_prune_types::{PruneCheckpoint, PruneMode};
+
+        let provider = MockEthProvider::default();
+        let header = alloy_consensus::Header { number: 10, ..Default::default() };
+        let hash = header.hash_slow();
+        provider.add_header(hash, header);
+        provider.add_prune_checkpoint(
+            PruneSegment::Receipts,
+            PruneCheckpoint { block_number: Some(5), tx_number: None, prune_mode: PruneMode::Full },
+        );
+        let eth_filter = EthFilter::new(
+            build_test_eth_api(provider.clone()),
+            EthFilterConfig::default(),
+            Runtime::test(),
+        );
+
+        // a range reaching into the pruned receipts is rejected instead of served incompletely
+        let err = eth_filter
+            .inner
+            .clone()
+            .logs_for_filter(Filter::new().from_block(3u64).to_block(10u64), QueryLimits::default())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                EthFilterError::EthAPIError(EthApiError::PrunedHistoryUnavailable {
+                    requested: 3,
+                    earliest_available: 6
+                })
+            ),
+            "{err:?}"
+        );
+
+        // so is a block hash whose receipts are gone
+        let pruned = alloy_consensus::Header { number: 4, ..Default::default() };
+        provider.add_header(pruned.hash_slow(), pruned.clone());
+        let err = eth_filter
+            .inner
+            .clone()
+            .logs_for_filter(Filter::new().select(pruned.hash_slow()), QueryLimits::default())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                EthFilterError::EthAPIError(EthApiError::PrunedHistoryUnavailable {
+                    requested: 4,
+                    earliest_available: 6
+                })
+            ),
+            "{err:?}"
+        );
+
+        // above the prune height the range is served
+        let logs = eth_filter
+            .inner
+            .clone()
+            .logs_for_filter(Filter::new().from_block(6u64).to_block(10u64), QueryLimits::default())
+            .await
+            .unwrap();
+        assert!(logs.is_empty());
     }
 }
