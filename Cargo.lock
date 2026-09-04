@@ -8178,6 +8178,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "assert_matches",
+ "codspeed-criterion-compat",
  "discv5",
  "enr",
  "itertools 0.14.0",
