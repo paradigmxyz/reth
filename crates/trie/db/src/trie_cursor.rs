@@ -286,13 +286,16 @@ where
         {
             num_entries += 1;
             let nibbles = A::StorageSubKey::from(*nibbles);
-            // Delete the old entry if it exists.
-            if self
+            // The lookup already returns the old node. Avoid dirtying pages when the compact
+            // branch is unchanged, even if the storage trie was visited by an update.
+            if let Some(existing) = self
                 .cursor
                 .seek_by_key_subkey(self.hashed_address, nibbles.clone())?
-                .as_ref()
-                .is_some_and(|e| *e.nibbles() == nibbles)
+                .filter(|entry| *entry.nibbles() == nibbles)
             {
+                if maybe_updated.as_ref() == Some(existing.node()) {
+                    continue;
+                }
                 self.cursor.delete_current()?;
             }
 
@@ -371,6 +374,93 @@ mod tests {
     use alloy_primitives::hex_literal::hex;
     use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
     use reth_provider::test_utils::create_test_provider_factory;
+
+    #[test]
+    fn test_unchanged_storage_nodes_legacy() {
+        assert_unchanged_storage_nodes::<LegacyKeyAdapter>();
+    }
+
+    #[test]
+    fn test_unchanged_storage_nodes_packed() {
+        assert_unchanged_storage_nodes::<PackedKeyAdapter>();
+    }
+
+    fn assert_unchanged_storage_nodes<A: TrieTableAdapter>() {
+        let factory = create_test_provider_factory();
+        let address = B256::repeat_byte(1);
+        let node = BranchNodeCompact::new(3, 1, 1, vec![B256::repeat_byte(2)], None);
+        let changed = BranchNodeCompact::new(3, 1, 1, vec![B256::repeat_byte(3)], None);
+        let path = |n| Nibbles::from_nibbles([n]);
+
+        let provider = factory.provider_rw().unwrap();
+        {
+            let mut cursor = provider.tx_ref().cursor_dup_write::<A::StorageTrieTable>().unwrap();
+            for n in [1, 3, 4, 6] {
+                cursor
+                    .upsert(address, &A::StorageValue::new(path(n).into(), node.clone()))
+                    .unwrap();
+            }
+        }
+        provider.commit().unwrap();
+
+        // Use a fresh transaction so a redundant delete/reinsert would copy committed pages.
+        let provider = factory.provider_rw().unwrap();
+        let env = provider.tx_ref().inner().env();
+        let before = env.info().unwrap().page_ops();
+        let mut cursor = DatabaseStorageTrieCursor::<_, A>::new(
+            provider.tx_ref().cursor_dup_write::<A::StorageTrieTable>().unwrap(),
+            address,
+        );
+        assert_eq!(
+            cursor
+                .write_storage_trie_updates_sorted(&StorageTrieUpdatesSorted {
+                    storage_nodes: vec![(path(1), Some(node.clone()))],
+                })
+                .unwrap(),
+            1
+        );
+        let after = env.info().unwrap().page_ops();
+        assert_eq!(after.cow, before.cow, "an identical node must not dirty a page");
+        assert_eq!(after.newly, before.newly);
+
+        // Check exact-subkey matching, missing deletes, root skipping, changed hashes, and
+        // duplicate ordering in the same batch as an unchanged node.
+        assert_eq!(
+            cursor
+                .write_storage_trie_updates_sorted(&StorageTrieUpdatesSorted {
+                    storage_nodes: vec![
+                        (Nibbles::default(), Some(node.clone())),
+                        (path(0), Some(node.clone())),
+                        (path(1), Some(node.clone())),
+                        (path(2), None),
+                        (path(3), None),
+                        (path(4), Some(changed.clone())),
+                        (path(5), Some(node.clone())),
+                    ],
+                })
+                .unwrap(),
+            6
+        );
+        drop(cursor);
+        provider.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        let mut cursor = provider.tx_ref().cursor_read::<A::StorageTrieTable>().unwrap();
+        let actual = cursor
+            .walk(Some(address))
+            .unwrap()
+            .map(|entry| {
+                let (key, value) = entry.unwrap();
+                assert_eq!(key, address);
+                (A::subkey_to_nibbles(value.nibbles()), value.node().clone())
+            })
+            .collect::<Vec<_>>();
+        let expected = [0, 1, 4, 5, 6]
+            .into_iter()
+            .map(|n| (path(n), if n == 4 { changed.clone() } else { node.clone() }))
+            .collect::<Vec<_>>();
+        assert_eq!(actual, expected);
+    }
 
     #[test]
     fn test_account_trie_order() {
