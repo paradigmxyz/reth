@@ -1549,6 +1549,9 @@ where
         &mut self,
         value_encoder: &mut VE,
     ) -> Result<ProofTrieNodeV2, StateProofError> {
+        self.trie_cursor.reset();
+        self.hashed_cursor.reset();
+
         // Initialize the variables which track the state of the two cursors. Both indicate the
         // cursors are unseeked.
         let mut trie_cursor_state = TrieCursorState::unseeked();
@@ -1867,10 +1870,15 @@ enum PopCachedBranchOutcome {
 mod tests {
     use super::*;
     use crate::{
-        hashed_cursor::{mock::MockHashedCursorFactory, HashedCursorFactory},
+        hashed_cursor::{
+            mock::MockHashedCursorFactory, noop::NoopHashedCursor, HashedCursorFactory,
+            HashedPostStateCursor,
+        },
         proof::StorageProof as LegacyStorageProof,
         test_utils::TrieTestHarness,
-        trie_cursor::{depth_first, TrieCursorFactory},
+        trie_cursor::{
+            depth_first, noop::NoopStorageTrieCursor, InMemoryTrieCursor, TrieCursorFactory,
+        },
     };
     use alloy_primitives::map::B256Set;
     use alloy_rlp::Decodable;
@@ -1878,7 +1886,9 @@ mod tests {
     use itertools::Itertools;
     use reth_trie_common::{
         prefix_set::{PrefixSet, PrefixSetMut},
-        ProofTrieNode, ProofV2TargetParent, TrieNode, EMPTY_ROOT_HASH,
+        updates::TrieUpdatesSorted,
+        HashedPostState, HashedStorage, ProofTrieNode, ProofV2TargetParent, TrieNode,
+        EMPTY_ROOT_HASH,
     };
     use std::collections::BTreeMap;
 
@@ -2127,6 +2137,41 @@ mod tests {
         let fresh_result = fresh_calculator.storage_proof(hashed_address, &mut targets).unwrap();
 
         pretty_assertions::assert_eq!(fresh_result, result);
+    }
+
+    #[test]
+    fn test_root_node_reuse_with_overlay() {
+        let storage = BTreeMap::from([
+            (B256::right_padding_from(&[0x10]), U256::from(1)),
+            (B256::right_padding_from(&[0x20]), U256::from(2)),
+        ]);
+        let harness = ProofTestHarness::new(storage.clone());
+        let hashed_address = harness.hashed_address();
+        let post_state =
+            HashedPostState::from_hashed_storage(hashed_address, HashedStorage::from_iter(storage))
+                .into_sorted();
+        let trie_updates = TrieUpdatesSorted::default();
+        let trie_cursor = InMemoryTrieCursor::new_storage(
+            NoopStorageTrieCursor::default(),
+            &trie_updates,
+            hashed_address,
+        );
+        let hashed_cursor = HashedPostStateCursor::new_storage(
+            NoopHashedCursor::default(),
+            &post_state,
+            hashed_address,
+        );
+        let mut calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
+
+        let first_root = calculator.root_node(&mut StorageValueEncoder).unwrap();
+        assert!(matches!(first_root.node, TrieNodeV2::Branch(_)));
+        assert_eq!(
+            calculator.compute_root_hash(core::slice::from_ref(&first_root)).unwrap(),
+            Some(harness.original_root())
+        );
+
+        let second_root = calculator.root_node(&mut StorageValueEncoder).unwrap();
+        pretty_assertions::assert_eq!(first_root, second_root);
     }
 
     #[test]
