@@ -12,7 +12,7 @@ use alloy_consensus::{
     transaction::{TransactionMeta, TxHashRef},
     BlockHeader,
 };
-use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
+use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
 use alloy_primitives::{
     keccak256,
     map::{AddressMap, B256Map, HashMap},
@@ -78,6 +78,8 @@ pub struct MockEthProvider<T: NodePrimitives = EthPrimitives, ChainSpec = reth_c
     stage_checkpoints: Arc<Mutex<HashMap<StageId, StageCheckpoint>>>,
     /// Lowest block number that has not been expired
     earliest_block_number: Arc<AtomicU64>,
+    /// The engine's pending block, if any
+    pending_block_num_hash: Arc<Mutex<Option<BlockNumHash>>>,
     /// Local BAL store handle
     pub bal_store: BalStoreHandle,
     /// Whether database provider creation succeeds.
@@ -134,6 +136,7 @@ where
             block_body_indices: self.block_body_indices.clone(),
             stage_checkpoints: self.stage_checkpoints.clone(),
             earliest_block_number: self.earliest_block_number.clone(),
+            pending_block_num_hash: self.pending_block_num_hash.clone(),
             bal_store: self.bal_store.clone(),
             database_provider_available: self.database_provider_available.clone(),
             snap_state_reads_fail: self.snap_state_reads_fail.clone(),
@@ -164,6 +167,7 @@ impl<T: NodePrimitives> MockEthProvider<T, reth_chainspec::ChainSpec> {
             block_body_indices: Default::default(),
             stage_checkpoints: Default::default(),
             earliest_block_number: Default::default(),
+            pending_block_num_hash: Default::default(),
             bal_store: Default::default(),
             database_provider_available: Default::default(),
             snap_state_reads_fail: Default::default(),
@@ -324,6 +328,11 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
         self.earliest_block_number.store(block_number, Ordering::Relaxed);
     }
 
+    /// Sets the pending block the engine holds
+    pub fn set_pending_block_num_hash(&self, num_hash: Option<BlockNumHash>) {
+        *self.pending_block_num_hash.lock() = num_hash;
+    }
+
     /// Add state root to local state root store
     pub fn add_state_root(&self, state_root: B256) {
         self.state_roots.lock().push(state_root);
@@ -341,6 +350,7 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
             block_body_indices: self.block_body_indices,
             stage_checkpoints: self.stage_checkpoints,
             earliest_block_number: self.earliest_block_number,
+            pending_block_num_hash: self.pending_block_num_hash,
             bal_store: self.bal_store,
             database_provider_available: self.database_provider_available,
             snap_state_reads_fail: self.snap_state_reads_fail,
@@ -903,7 +913,7 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> BlockId
     for MockEthProvider<T, ChainSpec>
 {
     fn pending_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
-        Ok(None)
+        Ok(*self.pending_block_num_hash.lock())
     }
 
     fn safe_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {

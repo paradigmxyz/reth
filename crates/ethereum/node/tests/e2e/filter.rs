@@ -296,7 +296,7 @@ async fn test_get_logs_over_pruned_receipts() -> eyre::Result<()> {
     // the logs of the pruned range are gone, which the node must report instead of answering with
     // a silently incomplete result
     let error = get_logs_error(&client, log_range(&emitter, 0, CHAIN_LENGTH)).await;
-    assert_eq!(error.code(), INVALID_PARAMS_CODE);
+    assert_eq!(error.code(), 4444, "pruned data is reported with the EIP-4444 code");
     assert!(
         error.message().contains("pruned"),
         "a query over pruned receipts must fail, got: {}",
