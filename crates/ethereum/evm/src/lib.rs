@@ -477,7 +477,8 @@ where
     <EvmF::Types as evm2::EvmTypesHost>::Tx: alloy_consensus::Transaction
         + alloy_eips::eip2718::Typed2718
         + Clone
-        + From<reth_ethereum_primitives::TransactionSigned>,
+        + From<reth_ethereum_primitives::TransactionSigned>
+        + reth_evm::FromTxWithEncoded<reth_ethereum_primitives::TransactionSigned>,
 {
     type Primitives = EthPrimitives;
     type Error = Infallible;
