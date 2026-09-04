@@ -16,14 +16,15 @@ use crate::{
         PlainStateInputOrder,
     },
     AccountReader, BlockBodyWriter, BlockExecutionWriter, BlockHashReader, BlockNumReader,
-    BlockReader, BlockWriter, ChainStateBlockReader, ChainStateBlockWriter, DBProvider, DbTxProvider,
-    EitherReader, EitherWriter, EitherWriterDestination, EvmStateInit, HashingWriter,
+    BlockReader, BlockWriter, ChainStateBlockReader, ChainStateBlockWriter, DBProvider,
+    DbTxProvider, EitherReader, EitherWriter, EitherWriterDestination, EvmStateInit, HashingWriter,
     HeaderProvider, HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef,
-    HistoryWriter, LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, PersistenceFrontiers, ProviderError,
-    PruneCheckpointReader, PruneCheckpointWriter, RawRocksDBBatch, RevertsInit, RocksBatchArg,
-    RocksDBProviderFactory, StageCheckpointReader, StateProviderBox, StateWriter,
-    StaticFileProviderFactory, StatsReader, StorageReader, StorageTrieWriter, TransactionVariant,
-    TransactionsProvider, TransactionsProviderExt, TrieWriter,
+    HistoryWriter, LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown,
+    PersistenceFrontiers, ProviderError, PruneCheckpointReader, PruneCheckpointWriter,
+    RawRocksDBBatch, RevertsInit, RocksBatchArg, RocksDBProviderFactory, StageCheckpointReader,
+    StateProviderBox, StateWriter, StaticFileProviderFactory, StatsReader, StorageReader,
+    StorageTrieWriter, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
+    TrieWriter,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
@@ -4739,6 +4740,193 @@ mod tests {
             .unwrap();
         assert_eq!(masked_entries.len(), 1);
         assert_eq!(masked_entries[0].1.nibbles.0, masked_storage_node);
+    }
+
+    #[test]
+    fn partial_50_40_mask_unwind_and_flush_match_full_persistence_roots() {
+        run_partial_50_40_root_equivalence(false);
+        run_partial_50_40_root_equivalence(true);
+    }
+
+    fn run_partial_50_40_root_equivalence(is_v2: bool) {
+        use reth_storage_overlay::OverlayStateProvider;
+        use reth_trie::{
+            root::{state_root_unhashed, storage_root_unhashed},
+            StateRoot,
+        };
+        use reth_trie_db::{
+            DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseTrieCursorFactory,
+        };
+
+        let reference = create_test_provider_factory();
+        let partial = create_test_provider_factory();
+        let settings = if is_v2 { StorageSettings::v2() } else { StorageSettings::v1() };
+        reference.set_storage_settings_cache(settings);
+        partial.set_storage_settings_cache(settings);
+        let address = Address::with_last_byte(0x42);
+        let slot = U256::ONE;
+        let mut parent_hash = B256::ZERO;
+        let mut blocks = Vec::new();
+        let mut expected_roots = Vec::new();
+
+        // Every block overwrites the same account and slot. The forty-block suffix must
+        // suppress obsolete prefix writes while still exposing the exact canonical root.
+        for number in 0..=55u64 {
+            let account =
+                Account { nonce: number + 1, balance: U256::from(1000), ..Default::default() };
+            let original = (number > 0).then_some(Account { nonce: number, ..account });
+            let state = execution_state_from_init(
+                [(
+                    address,
+                    (
+                        original,
+                        Some(account),
+                        BTreeMap::from([(slot, (U256::from(number), U256::from(number + 1)))]),
+                    ),
+                )],
+                [],
+            );
+            let hashed =
+                hashed_post_state_from_execution_state::<KeccakKeyHasher>(&state).into_sorted();
+            let provider = reference.provider_rw().unwrap();
+            let (root, trie_updates) = reth_trie_db::with_adapter!(&*provider, |A| {
+                type Root<'a, TX> = StateRoot<
+                    DatabaseTrieCursorFactory<&'a TX, A>,
+                    DatabaseHashedCursorFactory<&'a TX>,
+                >;
+                Root::overlay_root_with_updates(provider.tx_ref(), &hashed).unwrap()
+            });
+            let expected = state_root_unhashed([(
+                address,
+                account.into_trie_account(storage_root_unhashed([(
+                    B256::from(slot),
+                    U256::from(number + 1),
+                )])),
+            )]);
+            assert_eq!(root, expected, "reference block {number}");
+            let block = SealedBlock::<reth_ethereum_primitives::Block>::seal_parts(
+                Header {
+                    number,
+                    parent_hash,
+                    state_root: root,
+                    difficulty: U256::ONE,
+                    ..Default::default()
+                },
+                Default::default(),
+            );
+            parent_hash = block.hash();
+            let executed = ExecutedBlock::new(
+                Arc::new(block.try_recover().unwrap()),
+                Arc::new(BlockExecutionOutput::new(
+                    BlockExecutionResult {
+                        receipts: vec![],
+                        requests: Default::default(),
+                        gas_used: 0,
+                        blob_gas_used: 0,
+                    },
+                    state,
+                )),
+                ComputedTrieData::new(Arc::new(hashed), Arc::new(trie_updates.into_sorted())),
+            );
+            if number == 0 {
+                save_genesis(&provider, &executed).unwrap();
+                let partial_provider = partial.provider_rw().unwrap();
+                save_genesis(&partial_provider, &executed).unwrap();
+                partial_provider.commit().unwrap();
+            } else {
+                provider
+                    .save_blocks(&SaveBlocksInput::new(
+                        vec![executed.clone()],
+                        number - 1,
+                        number - 1,
+                        number,
+                        number,
+                    ))
+                    .unwrap();
+                partial.overlay_manager().insert_block(executed.clone());
+            }
+            provider.commit().unwrap();
+            blocks.push(executed);
+            expected_roots.push(expected);
+        }
+        let provider = partial.provider_rw().unwrap();
+        provider.save_blocks(&SaveBlocksInput::new(blocks[1..=53].to_vec(), 0, 0, 53, 13)).unwrap();
+        provider.commit().unwrap();
+
+        // Reopen a read transaction to verify the durable checkpoint and masked disk contents.
+        let provider = partial.provider().unwrap();
+        let checkpoint = provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
+        assert_eq!(checkpoint.block_number, 53);
+        assert_eq!(checkpoint.finish_stage_checkpoint().unwrap().partial_state_trie(), Some(13));
+        assert_eq!(
+            provider
+                .tx_ref()
+                .get::<tables::HashedAccounts>(keccak256(address))
+                .unwrap()
+                .unwrap()
+                .nonce,
+            1
+        );
+        let overlay = partial
+            .overlay_manager()
+            .overlay_builder(blocks[53].recovered_block().hash())
+            .build_overlay(&provider)
+            .unwrap();
+        let overlay = OverlayStateProvider::new(&provider, overlay, is_v2);
+        assert_eq!(StateRoot::new(&overlay, &overlay).root().unwrap(), expected_roots[53]);
+        drop(overlay);
+        // Historical access inside the gap requires a changeset-cache miss to reconstruct
+        // reverts against the complete masked view, rather than the hybrid disk state alone.
+        let historical = partial
+            .overlay_manager()
+            .overlay_builder(blocks[52].recovered_block().hash())
+            .build_overlay(&provider)
+            .unwrap();
+        let historical = OverlayStateProvider::new(&provider, historical, is_v2);
+        assert_eq!(StateRoot::new(&historical, &historical).root().unwrap(), expected_roots[52]);
+        drop(historical);
+        drop(provider);
+
+        // A reorg into the retained suffix must preserve the earlier hashed/trie frontier.
+        let provider = partial.provider_rw().unwrap();
+        assert_eq!(
+            provider.remove_block_and_execution_above(52).unwrap(),
+            PersistenceFrontiers { db_tip: 52, partial_state_trie: 13 }
+        );
+        provider.commit().unwrap();
+        let provider = partial.provider().unwrap();
+        let overlay = partial
+            .overlay_manager()
+            .overlay_builder(blocks[52].recovered_block().hash())
+            .build_overlay(&provider)
+            .unwrap();
+        let overlay = OverlayStateProvider::new(&provider, overlay, is_v2);
+        assert_eq!(StateRoot::new(&overlay, &overlay).root().unwrap(), expected_roots[52]);
+        drop(overlay);
+        drop(provider);
+
+        // A full flush (the shutdown path) writes the deferred trie range without duplicating
+        // already persisted block data. No in-memory overlay is needed afterward.
+        let provider = partial.provider_rw().unwrap();
+        provider
+            .save_blocks(&SaveBlocksInput::new(blocks[14..=55].to_vec(), 52, 13, 55, 55))
+            .unwrap();
+        provider.commit().unwrap();
+        let provider = partial.provider().unwrap();
+        let checkpoint = provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
+        assert_eq!(checkpoint.block_number, 55);
+        assert_eq!(
+            checkpoint.finish_stage_checkpoint().and_then(|finish| finish.partial_state_trie()),
+            None
+        );
+        let final_root = reth_trie_db::with_adapter!(&provider, |A| {
+            type Root<'a, TX> = StateRoot<
+                DatabaseTrieCursorFactory<&'a TX, A>,
+                DatabaseHashedCursorFactory<&'a TX>,
+            >;
+            Root::from_tx(provider.tx_ref()).root().unwrap()
+        });
+        assert_eq!(final_root, expected_roots[55]);
     }
 
     #[test]

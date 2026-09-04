@@ -1119,10 +1119,7 @@ enum SparseTrieTaskMessage {
 mod tests {
     use super::*;
     use alloy_primitives::{keccak256, Address, B256, U256};
-    use reth_provider::{
-        test_utils::create_test_provider_factory,
-        ChainSpecProvider,
-    };
+    use reth_provider::{test_utils::create_test_provider_factory, ChainSpecProvider};
     use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
     use reth_trie_parallel::proof_task::ProofTaskCtx;
     use reth_trie_sparse::ArenaParallelSparseTrie;
@@ -1213,10 +1210,8 @@ mod tests {
         let anchor_hash = provider_factory.chain_spec().genesis_hash();
         let overlay_factory = OverlayStateProviderFactory::new(
             provider_factory,
-            OverlayBuilder::<reth_chain_state::EthPrimitives>::new(
-                anchor_hash,
-                ChangesetCache::new(),
-            ),
+            OverlayManager::<reth_chain_state::EthPrimitives>::default()
+                .overlay_builder(anchor_hash),
         );
         let proof_worker_handle =
             ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);

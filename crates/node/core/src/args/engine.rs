@@ -921,6 +921,57 @@ mod tests {
     }
 
     #[test]
+    fn benchmark_partial_persistence_environment_is_applied() {
+        const CHILD: &str = "RETH_PARTIAL_PERSISTENCE_ENV_TEST_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
+            args.validate().unwrap();
+            let config = args.tree_config();
+            assert_eq!(config.persistence_threshold(), 50);
+            assert_eq!(config.num_state_masking_blocks(), 40);
+            assert!(config.memory_block_buffer_target() + 40 < 50);
+            return;
+        }
+        // Isolate environment changes from other tests running in this process.
+        let test_name =
+            concat!(module_path!(), "::benchmark_partial_persistence_environment_is_applied");
+        let test_name = test_name.split_once("::").unwrap().1;
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", test_name, "--nocapture"])
+            .env(CHILD, "1")
+            .env("RETH_ENGINE_PERSISTENCE_THRESHOLD", "50")
+            .env("RETH_ENGINE_NUM_STATE_MASKING_BLOCKS", "40")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+    }
+
+    #[test]
+    fn benchmark_masking_window_rejects_ten_block_memory_buffer() {
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.persistence-threshold",
+            "50",
+            "--engine.num-state-masking-blocks",
+            "40",
+            "--engine.memory-block-buffer-target",
+            "10",
+        ])
+        .args;
+        assert!(args
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("engine.num-state-masking-blocks"));
+    }
+
+    #[test]
     fn validate_rejects_state_masking_window_at_or_above_threshold() {
         let args = EngineArgs {
             persistence_threshold: 4,

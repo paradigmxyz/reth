@@ -16,7 +16,10 @@ use reth_evm::{
 };
 use reth_execution_types::EvmState;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
-use reth_provider::{BlockExecutionOutput, BlockReader, StateProviderFactory, StateReader, BlockNumReader, DatabaseProviderFactory, PruneCheckpointReader, StageCheckpointReader, StorageSettingsCache, TryIntoHistoricalStateProvider};
+use reth_provider::{
+    BlockExecutionOutput, BlockNumReader, DatabaseProviderFactory, PruneCheckpointReader,
+    StageCheckpointReader, StorageSettingsCache, TryIntoHistoricalStateProvider,
+};
 use reth_tasks::Runtime;
 pub use reth_trie_parallel::{
     error::StateRootTaskError,

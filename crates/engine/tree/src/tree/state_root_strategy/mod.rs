@@ -1412,7 +1412,6 @@ mod tests {
     use reth_trie::{
         test_utils::state_root, HashedPostState, HashedStorage, LazyTrieData, Nibbles,
     };
-    use reth_storage_overlay::ChangesetCache;
     use std::collections::BTreeMap;
 
     fn with_hashed_state(
@@ -1708,7 +1707,7 @@ mod tests {
         if drop_result_receiver {
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
             let preserved = loop {
-                if let Some(preserved) = state_trie_overlays.take_sparse_trie() {
+                if let Some(preserved) = overlay_manager.take_sparse_trie() {
                     break preserved;
                 }
                 assert!(std::time::Instant::now() < deadline, "completed trie was not preserved");

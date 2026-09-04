@@ -1204,6 +1204,29 @@ async fn test_get_canonical_blocks_to_persist() {
 }
 
 #[test]
+fn benchmark_50_40_persistence_retains_mask_and_flushes_on_shutdown() {
+    let mut harness = TestHarness::new(MAINNET.clone());
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(0..56).collect();
+    harness = harness.with_blocks(blocks.clone());
+    harness.tree.config = TreeConfig::default()
+        .with_persistence_threshold(50)
+        .with_memory_block_buffer_target(2)
+        .with_num_state_masking_blocks(40);
+    let input = harness.tree.get_save_blocks_input(PersistTarget::Threshold).unwrap();
+    assert_eq!((input.new_db_tip(), input.new_partial_state_trie()), (53, 13));
+    assert_eq!(input.state_trie_masking_blocks().len(), 40);
+    harness.tree.persistence_state.last_persisted_block = blocks[53].recovered_block().num_hash();
+    harness.tree.persistence_state.last_state_trie_persisted_block =
+        blocks[13].recovered_block().num_hash();
+    let flush = harness.tree.get_save_blocks_input(PersistTarget::Head).unwrap();
+    assert_eq!((flush.prev_db_tip(), flush.prev_partial_state_trie()), (53, 13));
+    assert_eq!((flush.new_db_tip(), flush.new_partial_state_trie()), (55, 55));
+    assert!(flush.state_trie_masking_blocks().is_empty());
+    assert_eq!(flush.persist_rest_blocks().len(), 2);
+    assert_eq!(flush.state_trie_blocks().len(), 42);
+}
+
+#[test]
 fn test_threshold_persistence_with_state_masking_blocks() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
     let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(0..9).collect();

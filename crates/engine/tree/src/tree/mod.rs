@@ -30,8 +30,8 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockNumReader, BlockReader,
-    ChangeSetReader, DatabaseProviderFactory, LatestStateProvider, HashedPostStateProvider, ProviderError,
-    PruneCheckpointReader, SaveBlocksInput, StageCheckpointReader, StateProviderBox,
+    ChangeSetReader, DatabaseProviderFactory, HashedPostStateProvider, LatestStateProvider,
+    ProviderError, PruneCheckpointReader, SaveBlocksInput, StageCheckpointReader, StateProviderBox,
     StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
     TransactionVariant, TryIntoHistoricalStateProvider,
 };
