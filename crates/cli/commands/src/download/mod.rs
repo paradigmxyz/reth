@@ -108,7 +108,7 @@ use reth_db::{init_db, Database};
 use reth_db_api::transaction::DbTx;
 use reth_fs_util as fs;
 use reth_node_core::args::DefaultPruningValues;
-use reth_prune_types::PruneMode;
+use reth_prune_types::{PruneMode, PruneModes};
 use source::{
     discover_manifest_url, fetch_manifest_from_source, fetch_snapshot_api_entries,
     print_snapshot_listing, resolve_manifest_base_url,
@@ -754,18 +754,32 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         &self,
         manifest: &SnapshotManifest,
     ) -> BTreeMap<SnapshotComponentType, ComponentSelection> {
-        SnapshotComponentType::ALL
-            .iter()
-            .copied()
-            .filter(|ty| manifest.component(*ty).is_some())
-            .map(|ty| (ty, ty.minimal_selection()))
-            .collect()
+        self.pruning_preset_selections(
+            manifest,
+            &DefaultPruningValues::get_global().minimal_prune_modes,
+            false,
+        )
     }
 
     /// Builds the default full-node component selection for the manifest.
     fn full_preset_selections(
         &self,
         manifest: &SnapshotManifest,
+    ) -> BTreeMap<SnapshotComponentType, ComponentSelection> {
+        let defaults = DefaultPruningValues::get_global();
+        self.pruning_preset_selections(
+            manifest,
+            &defaults.full_prune_modes,
+            defaults.full_bodies_history_use_pre_merge,
+        )
+    }
+
+    /// Builds component selections from the configured pruning defaults.
+    fn pruning_preset_selections(
+        &self,
+        manifest: &SnapshotManifest,
+        prune_modes: &PruneModes,
+        bodies_history_use_pre_merge: bool,
     ) -> BTreeMap<SnapshotComponentType, ComponentSelection> {
         let mut selections = BTreeMap::new();
 
@@ -783,7 +797,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                 continue;
             }
 
-            let selection = self.full_selection_for_component(ty, manifest.block);
+            let selection = self.pruning_selection_for_component(
+                ty,
+                manifest.block,
+                prune_modes,
+                bodies_history_use_pre_merge,
+            );
             if selection != ComponentSelection::None {
                 selections.insert(ty, selection);
             }
@@ -792,19 +811,20 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         selections
     }
 
-    /// Returns the full preset selection for one component type.
-    fn full_selection_for_component(
+    /// Returns the component selection for one configured pruning preset.
+    fn pruning_selection_for_component(
         &self,
         ty: SnapshotComponentType,
         snapshot_block: u64,
+        prune_modes: &PruneModes,
+        bodies_history_use_pre_merge: bool,
     ) -> ComponentSelection {
-        let defaults = DefaultPruningValues::get_global();
         match ty {
             SnapshotComponentType::State | SnapshotComponentType::Headers => {
                 ComponentSelection::All
             }
             SnapshotComponentType::Transactions => {
-                if defaults.full_bodies_history_use_pre_merge {
+                if bodies_history_use_pre_merge {
                     match self
                         .env
                         .chain
@@ -816,25 +836,22 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                         None => ComponentSelection::All,
                     }
                 } else {
-                    selection_from_prune_mode(
-                        defaults.full_prune_modes.bodies_history,
-                        snapshot_block,
-                    )
+                    selection_from_prune_mode(prune_modes.bodies_history, snapshot_block)
                 }
             }
             SnapshotComponentType::Receipts => {
-                selection_from_prune_mode(defaults.full_prune_modes.receipts, snapshot_block)
+                selection_from_prune_mode(prune_modes.receipts, snapshot_block)
             }
             SnapshotComponentType::AccountChangesets => {
-                selection_from_prune_mode(defaults.full_prune_modes.account_history, snapshot_block)
+                selection_from_prune_mode(prune_modes.account_history, snapshot_block)
             }
             SnapshotComponentType::StorageChangesets => {
-                selection_from_prune_mode(defaults.full_prune_modes.storage_history, snapshot_block)
+                selection_from_prune_mode(prune_modes.storage_history, snapshot_block)
             }
             SnapshotComponentType::TransactionSenders => {
-                selection_from_prune_mode(defaults.full_prune_modes.sender_recovery, snapshot_block)
+                selection_from_prune_mode(prune_modes.sender_recovery, snapshot_block)
             }
-            // Keep hidden by default in full mode; if users want indices they can use archive.
+            // Keep hidden by default for pruning presets; users can use archive for indices.
             SnapshotComponentType::RocksdbIndices => ComponentSelection::None,
         }
     }
@@ -1278,6 +1295,36 @@ mod tests {
         ]);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn pruning_preset_selection_uses_configured_modes() {
+        let args =
+            CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from(["reth"]).args;
+        let modes = PruneModes {
+            receipts: Some(PruneMode::Distance(128)),
+            account_history: Some(PruneMode::Distance(64_864)),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            args.pruning_selection_for_component(
+                SnapshotComponentType::Receipts,
+                1_000_000,
+                &modes,
+                false,
+            ),
+            ComponentSelection::Distance(128)
+        );
+        assert_eq!(
+            args.pruning_selection_for_component(
+                SnapshotComponentType::AccountChangesets,
+                1_000_000,
+                &modes,
+                false,
+            ),
+            ComponentSelection::Distance(64_864)
+        );
     }
 
     #[test]

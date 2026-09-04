@@ -185,11 +185,16 @@ pub(crate) fn config_for_selections(
         return Config { static_files, ..Default::default() };
     }
 
-    if matches!(preset, Some(SelectionPreset::Full)) {
+    if matches!(preset, Some(SelectionPreset::Minimal | SelectionPreset::Full)) {
         let defaults = DefaultPruningValues::get_global();
-        let mut segments = defaults.full_prune_modes.clone();
+        let is_full = matches!(preset, Some(SelectionPreset::Full));
+        let mut segments = if is_full {
+            defaults.full_prune_modes.clone()
+        } else {
+            defaults.minimal_prune_modes.clone()
+        };
 
-        if defaults.full_bodies_history_use_pre_merge {
+        if is_full && defaults.full_bodies_history_use_pre_merge {
             segments.bodies_history = chain_spec.and_then(|chain_spec| {
                 chain_spec
                     .ethereum_fork_activation(EthereumHardfork::Paris)
@@ -523,6 +528,18 @@ mod tests {
             .block_number()
             .expect("mainnet Paris block should be known");
         assert_eq!(config.prune.segments.bodies_history, Some(PruneMode::Before(paris_block)));
+    }
+
+    #[test]
+    fn minimal_preset_matches_default_minimal_prune_config() {
+        let config = config_for_selections(
+            &BTreeMap::new(),
+            &empty_manifest(),
+            Some(SelectionPreset::Minimal),
+            None::<&reth_chainspec::ChainSpec>,
+        );
+
+        assert_eq!(&config.prune.segments, &DefaultPruningValues::get_global().minimal_prune_modes);
     }
 
     #[test]
