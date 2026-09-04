@@ -223,6 +223,8 @@ impl CustomBlockExecutorFactory {
 }
 
 impl BlockExecutorFactory for CustomBlockExecutorFactory {
+    type PrewarmArtifact = ();
+    type PrewarmContext = ();
     type EvmFactory = RethEvmFactory;
     type EvmTypes = BaseEvmTypes;
     type Transaction = TransactionSigned;

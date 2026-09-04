@@ -11,11 +11,15 @@
 //! 2. Prewarming tasks execute transactions in parallel using shared caches
 //! 3. When actual block execution happens, it benefits from the warmed cache
 
-use super::{bal_prewarm_pool::BalPrewarmPool, StateRootHintStream, StateRootUpdateStream};
+use super::{
+    artifacts::PrewarmArtifacts, bal_prewarm_pool::BalPrewarmPool, StateRootHintStream,
+    StateRootUpdateStream,
+};
 use crate::tree::{
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
     PayloadExecutionCache, SavedCache, StateProviderBuilder,
 };
+use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::{keccak256, Address, B256, U256};
@@ -23,8 +27,8 @@ use core::convert::Infallible;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{
-    database::StateProviderDatabase, ConfigureEvm, Evm as EvmInstance, EvmEnv, EvmFor,
-    ExecutableTxFor, RecoveredTx,
+    database::StateProviderDatabase, BlockExecutorFactory, ConfigureEvm, Evm as EvmInstance,
+    EvmEnv, EvmFor, ExecutableTxFor, PrewarmArtifactFor, PrewarmContextFor, RecoveredTx,
 };
 use reth_execution_types::{EvmStateChangeSink, ExecutionAccountChangeRef, ExecutionStorageChange};
 use reth_metrics::Metrics;
@@ -157,7 +161,7 @@ where
             let state_root_hint_stream = state_root_hint_stream.as_ref();
             pool.in_place_scope(|s| {
                 s.spawn(|_| {
-                    pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
+                    pool.init::<PrewarmEvmState<Evm>>(|_| ctx.worker_state());
                 });
 
                 while let Ok((index, tx)) = pending.recv() {
@@ -219,11 +223,11 @@ where
         Tx: ExecutableTxFor<Evm>,
     {
         WorkerPool::with_worker_mut(|worker| {
-            let Some(evm) =
-                worker.get_or_init::<PrewarmEvmState<Evm>>(|| ctx.evm_for_ctx()).as_mut()
-            else {
-                return;
-            };
+            let state = worker.get_or_init::<PrewarmEvmState<Evm>>(|| ctx.worker_state());
+            if !Arc::ptr_eq(&state.context_id, &ctx.context_id) {
+                *state = ctx.worker_state();
+            }
+            let Some(evm) = state.evm.as_mut() else { return };
 
             if ctx.should_stop() {
                 return;
@@ -235,6 +239,18 @@ where
             }
 
             let start = Instant::now();
+
+            if let Some(artifacts) = &ctx.artifacts {
+                if artifacts.enabled() {
+                    let hash = *tx.tx().tx_hash();
+                    if let Some(artifact) =
+                        ctx.evm_config.block_executor_factory().prewarm_transaction(evm, tx)
+                    {
+                        artifacts.insert(index, hash, artifact);
+                    }
+                }
+                return;
+            }
 
             let (_tx_env, tx) = tx.into_parts();
             let tx_env = ctx.evm_config.tx_env(tx.to_recovered());
@@ -530,6 +546,12 @@ where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N>,
 {
+    /// Unique validation-attempt identity, including its parent, environment and mode.
+    pub(crate) context_id: Arc<()>,
+    /// Context for checked speculative execution, if enabled for this block.
+    pub(crate) checked_context: Option<PrewarmContextFor<Evm>>,
+    /// Bounded per-block result handoff to canonical execution.
+    pub(crate) artifacts: Option<Arc<PrewarmArtifacts<PrewarmArtifactFor<Evm>>>>,
     /// The execution environment.
     pub env: ExecutionEnv<Evm>,
     /// The EVM configuration.
@@ -563,7 +585,10 @@ where
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
 /// [`WorkerPool`] workers via [`Worker::get_or_init`](reth_tasks::pool::Worker::get_or_init).
-type PrewarmEvmState<Evm> = Option<EvmFor<'static, Evm>>;
+struct PrewarmEvmState<Evm: ConfigureEvm> {
+    context_id: Arc<()>,
+    evm: Option<EvmFor<'static, Evm>>,
+}
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
@@ -577,9 +602,13 @@ where
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
+    fn worker_state(&self) -> PrewarmEvmState<Evm> {
+        PrewarmEvmState { context_id: self.context_id.clone(), evm: self.evm_for_ctx() }
+    }
+
     /// Creates a per-thread EVM for prewarming.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
-    fn evm_for_ctx(&self) -> PrewarmEvmState<Evm> {
+    fn evm_for_ctx(&self) -> Option<EvmFor<'static, Evm>> {
         let mut state_provider = match self.provider.build() {
             Ok(provider) => provider,
             Err(err) => {
@@ -598,9 +627,14 @@ where
             state_provider = Box::new(CachedStateProvider::new_prewarm(state_provider, caches));
         }
 
+        if let Some(context) = &self.checked_context {
+            let evm = self
+                .evm_config
+                .evm_with_env(StateProviderDatabase::new(state_provider), self.env.evm_env.clone());
+            return self.evm_config.block_executor_factory().prepare_prewarm_evm(evm, context);
+        }
         let evm_env =
             self.env.evm_env.clone().with_nonce_check_disabled().with_balance_check_disabled();
-
         Some(self.evm_config.evm_with_env(StateProviderDatabase::new(state_provider), evm_env))
     }
 

@@ -12,7 +12,7 @@ use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
 use reth_evm::{
     ConfigureEvm, ConvertTx, ExecutableTxFor, ExecutableTxIterator, ExecutableTxParts,
-    ExecutableTxTuple, TxEnvFor, WithTxEnv,
+    ExecutableTxTuple, PrewarmArtifactFor, PrewarmContextFor, TxEnvFor, WithTxEnv,
 };
 use reth_execution_types::EvmState;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
@@ -38,6 +38,8 @@ use std::{
 };
 use tracing::{debug, instrument, trace, warn, Span};
 
+pub(crate) mod artifacts;
+use artifacts::PrewarmArtifacts;
 pub mod bal;
 pub(crate) mod bal_prewarm_pool;
 pub mod prewarm;
@@ -54,6 +56,7 @@ type IteratorPayloadHandle<Evm, I> = PayloadHandle<
     IteratorTx<Evm, I>,
     <I as ExecutableTxTuple>::Error,
     <<Evm as ConfigureEvm>::Primitives as NodePrimitives>::Receipt,
+    PrewarmArtifactFor<Evm>,
 >;
 
 type IteratorPrewarmTxReceiver<Evm, I> =
@@ -160,6 +163,7 @@ where
         hint_stream: Option<StateRootHintStream>,
         hashed_update_stream: Option<StateRootUpdateStream>,
         parallel_bal_execution: bool,
+        checked_context: Option<PrewarmContextFor<Evm>>,
     ) -> IteratorPayloadHandle<Evm, I>
     where
         P: DatabaseProviderFactory + Clone + 'static,
@@ -170,6 +174,13 @@ where
             + TryIntoHistoricalStateProvider
             + 'static,
     {
+        let checked_context = checked_context
+            .filter(|_| !parallel_bal_execution && !self.disable_transaction_prewarming);
+        let artifacts = checked_context
+            .as_ref()
+            .and_then(|_| PrewarmArtifacts::new(env.transaction_count))
+            .map(Arc::new);
+        let checked_context = checked_context.filter(|_| artifacts.is_some());
         let (prewarm_rx, execution_rx) =
             self.spawn_tx_iterator(transactions, env.transaction_count, parallel_bal_execution);
         let prewarm_handle = self.spawn_caching_with(
@@ -179,8 +190,15 @@ where
             hint_stream,
             hashed_update_stream,
             parallel_bal_execution,
+            checked_context,
+            artifacts.clone(),
         );
-        PayloadHandle { prewarm_handle, transactions: execution_rx, _span: Span::current() }
+        PayloadHandle {
+            prewarm_handle,
+            transactions: execution_rx,
+            artifacts,
+            _span: Span::current(),
+        }
     }
 
     /// Transaction count threshold below which sequential conversion is used.
@@ -330,6 +348,8 @@ where
         hint_stream: Option<StateRootHintStream>,
         hashed_update_stream: Option<StateRootUpdateStream>,
         parallel_bal_execution: bool,
+        checked_context: Option<PrewarmContextFor<Evm>>,
+        artifacts: Option<Arc<PrewarmArtifacts<PrewarmArtifactFor<Evm>>>>,
     ) -> CacheTaskHandle<<Evm::Primitives as NodePrimitives>::Receipt>
     where
         P: DatabaseProviderFactory + Clone + 'static,
@@ -359,6 +379,9 @@ where
         let executed_tx_index = Arc::new(AtomicUsize::new(0));
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
+            context_id: Arc::new(()),
+            checked_context,
+            artifacts,
             env,
             evm_config: self.evm_config.clone(),
             saved_cache: saved_cache.clone(),
@@ -492,7 +515,8 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
 /// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the
 /// caching task without cloning the execution state.
 #[derive(Debug)]
-pub struct PayloadHandle<Tx, Err, R> {
+pub struct PayloadHandle<Tx, Err, R, A = ()> {
+    pub(crate) artifacts: Option<Arc<PrewarmArtifacts<A>>>,
     prewarm_handle: CacheTaskHandle<R>,
     /// Stream of block transactions and their indices in the block.
     transactions: IndexedTxReceiver<Tx, Err>,
@@ -500,7 +524,7 @@ pub struct PayloadHandle<Tx, Err, R> {
     _span: Span,
 }
 
-impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
+impl<Tx, Err, R: Send + Sync + 'static, A> PayloadHandle<Tx, Err, R, A> {
     /// Returns a clone of the caches used by prewarming
     pub fn caches(&self) -> Option<ExecutionCache> {
         self.prewarm_handle.saved_cache.as_ref().map(|cache| cache.cache().clone())
@@ -523,6 +547,9 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     ///
     /// Note: This does not terminate the task yet.
     pub fn stop_prewarming_execution(&self) {
+        if let Some(artifacts) = &self.artifacts {
+            artifacts.disable();
+        }
         self.prewarm_handle.stop_prewarming_execution()
     }
 

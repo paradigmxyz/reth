@@ -26,6 +26,13 @@ pub type TxResultWithStateFor<Evm> = evm2::TxResultWithState<EvmTypesFor<Evm>>;
 /// Type alias for the configured transaction environment.
 pub type TxEnvFor<Evm> = Recovered<<EvmTypesFor<Evm> as evm2::EvmTypesHost>::Tx>;
 
+/// Owned speculative result configured for this EVM.
+pub type PrewarmArtifactFor<Evm> =
+    <<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::PrewarmArtifact;
+/// Owned speculative worker context configured for this EVM.
+pub type PrewarmContextFor<Evm> =
+    <<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::PrewarmContext;
+
 /// Type alias for the consensus transaction consumed by the configured block executor.
 pub type TxFor<Evm> =
     <<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::Transaction;

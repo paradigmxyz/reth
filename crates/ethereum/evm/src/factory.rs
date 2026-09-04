@@ -159,6 +159,8 @@ where
     F: EvmFactory,
     F::Types: evm2::EvmTypes<Tx = evm2::ethereum::TxEnvelope>,
 {
+    type PrewarmArtifact = ();
+    type PrewarmContext = ();
     type EvmFactory = F;
     type EvmTypes = F::Types;
     type Transaction = TransactionSigned;
@@ -366,6 +368,8 @@ where
 
     <F::Types as evm2::EvmTypesHost>::Tx: alloy_eips::eip2718::Typed2718,
 {
+    type PrewarmArtifact = ();
+    type PrewarmContext = ();
     type EvmFactory = F;
     type EvmTypes = F::Types;
     type Transaction = R::Transaction;

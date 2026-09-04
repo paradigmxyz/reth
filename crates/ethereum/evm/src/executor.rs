@@ -161,6 +161,12 @@ where
         &self.ctx
     }
 
+    /// Returns the EVM after applying a worker's pre-execution changes.
+    /// No block result is produced; callers must not use this to finalize canonical execution.
+    pub fn into_evm(self) -> Evm<'a, T> {
+        self.evm
+    }
+
     /// Returns the accumulated block state.
     pub const fn block_state(&self) -> &BlockStateAccumulator {
         &self.block_state

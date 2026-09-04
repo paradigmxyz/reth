@@ -98,12 +98,12 @@
 use crate::tree::{
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
-    payload_processor::PayloadProcessor,
+    payload_processor::{artifacts::PrewarmArtifacts, PayloadProcessor},
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
     PayloadHandle, StateProviderBuilder, TreeConfig, WaitForCaches,
 };
-use alloy_consensus::transaction::Either;
+use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_primitives::{
@@ -130,7 +130,8 @@ use reth_engine_primitives::{
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
     database::StateProviderDatabase, BlockExecutor, BlockExecutorFactory, BlockExecutorFor,
-    ConfigureEvm, EvmEnvFor, ExecutableTxFor, ExecutionCtxFor,
+    ConfigureEvm, EvmEnvFor, ExecutableTxFor, ExecutionCtxFor, PrewarmArtifactFor,
+    PrewarmContextFor,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats};
 use reth_payload_builder::{PayloadBuilderLease, PayloadBuilderResources};
@@ -589,6 +590,14 @@ where
         let hint_stream = state_root_job.take_hint_stream();
         let hashed_update_stream = state_root_job.take_hashed_update_stream();
 
+        // Checked speculation uses owned context and the same canonical pre-execution state.
+        let checked_context = if parallel_bal_execution {
+            None
+        } else {
+            let context =
+                ensure_ok!(self.execution_ctx_for(&input).map_err(BlockExecutionError::other));
+            self.evm_config.block_executor_factory().prewarm_context(&env.evm_env, &context)
+        };
         // Spawn transaction conversion and prewarming.
         let mut handle = ensure_ok!(self.spawn_payload_processor(
             env.clone(),
@@ -597,6 +606,7 @@ where
             hint_stream,
             hashed_update_stream,
             parallel_bal_execution,
+            checked_context,
         ));
 
         // Create optional cache stats for detailed block logging
@@ -946,7 +956,12 @@ where
         state_provider: S,
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
-        handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
+        handle: &mut PayloadHandle<
+            impl ExecutableTxFor<Evm>,
+            Err,
+            N::Receipt,
+            PrewarmArtifactFor<Evm>,
+        >,
         state_hook: Option<Box<dyn FnMut(HashedPostState) + Send + 'static>>,
     ) -> Result<
         (
@@ -985,12 +1000,14 @@ where
                 if let Some(state_hook) = state_hook {
                     executor.set_state_hook(state_hook);
                 }
+                let artifacts = handle.artifacts.clone();
                 let senders = self.execute_transactions(
                     &mut executor,
                     transaction_count,
                     handle.iter_transactions(),
                     &receipt_tx,
                     &executed_tx_index,
+                    artifacts.as_deref(),
                 )?;
 
                 let post_exec_start = Instant::now();
@@ -1045,7 +1062,7 @@ where
         &self,
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
-        handle: &PayloadHandle<Tx, Err, N::Receipt>,
+        handle: &PayloadHandle<Tx, Err, N::Receipt, PrewarmArtifactFor<Evm>>,
         make_state_provider: &MakeStateProvider,
     ) -> Result<
         (
@@ -1130,6 +1147,7 @@ where
         transactions: impl Iterator<Item = Result<Tx, Err>>,
         receipt_tx: &ReceiptRootSender<N>,
         executed_tx_index: &AtomicUsize,
+        artifacts: Option<&PrewarmArtifacts<PrewarmArtifactFor<Evm>>>,
     ) -> Result<Vec<Address>, BlockExecutionError>
     where
         Tx: ExecutableTxFor<Evm>,
@@ -1145,6 +1163,11 @@ where
         let mut senders = Vec::with_capacity(transaction_count);
         let mut transactions = transactions.into_iter();
         let mut last_sent_len = 0usize;
+        let mut replayed_transactions = 0usize;
+        let mut artifact_misses = 0usize;
+        let mut replay_fallbacks = 0usize;
+        let mut artifact_lookup_duration = std::time::Duration::ZERO;
+        let mut transaction_execution_duration = std::time::Duration::ZERO;
         loop {
             let wait_start = Instant::now();
             let Some(tx_result) = transactions.next() else { break };
@@ -1165,8 +1188,30 @@ where
             }
 
             let tx_start = Instant::now();
-            executor.execute_transaction(tx).map_err(BlockExecutionError::other)?;
-            self.metrics.record_transaction_execution(tx_start.elapsed());
+            let mut lookup_elapsed = std::time::Duration::ZERO;
+            if let Some(artifacts) = artifacts.filter(|a| a.enabled()) {
+                let lookup_start = Instant::now();
+                let artifact = artifacts.take(senders.len() - 1, *tx.tx().tx_hash());
+                lookup_elapsed = lookup_start.elapsed();
+                artifact_lookup_duration += lookup_elapsed;
+                let had_artifact = artifact.is_some();
+                artifact_misses += usize::from(!had_artifact);
+                let outcome = self
+                    .evm_config
+                    .block_executor_factory()
+                    .execute_transaction_with_prewarm(executor, tx, artifact)
+                    .map_err(BlockExecutionError::other)?;
+                replayed_transactions += usize::from(outcome.replayed);
+                replay_fallbacks += usize::from(had_artifact && !outcome.replayed);
+                if !outcome.continue_speculation {
+                    artifacts.disable();
+                }
+            } else {
+                executor.execute_transaction(tx).map_err(BlockExecutionError::other)?;
+            }
+            let elapsed = tx_start.elapsed();
+            transaction_execution_duration += elapsed.saturating_sub(lookup_elapsed);
+            self.metrics.record_transaction_execution(elapsed);
             executed_tx_index.store(senders.len(), Ordering::Relaxed);
 
             let current_len = executor.receipts().len();
@@ -1182,6 +1227,9 @@ where
         }
 
         drop(exec_span);
+        if artifacts.is_some() {
+            tracing::info!(target: "engine::tree::payload_validator", transactions = senders.len(), replayed_transactions, artifact_misses, replay_fallbacks, ?artifact_lookup_duration, ?transaction_execution_duration, "Incoming checked replay");
+        }
         Ok(senders)
     }
 
@@ -1263,11 +1311,13 @@ where
         hint_stream: Option<StateRootHintStream>,
         hashed_update_stream: Option<StateRootUpdateStream>,
         parallel_bal_execution: bool,
+        checked_context: Option<PrewarmContextFor<Evm>>,
     ) -> Result<
         PayloadHandle<
             impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
             impl core::error::Error + Send + Sync + 'static + use<N, P, Evm, V, T>,
             N::Receipt,
+            PrewarmArtifactFor<Evm>,
         >,
         InsertBlockErrorKind,
     > {
@@ -1279,6 +1329,7 @@ where
             hint_stream,
             hashed_update_stream,
             parallel_bal_execution,
+            checked_context,
         );
 
         self.metrics.block_validation.spawn_payload_processor.record(start.elapsed().as_secs_f64());

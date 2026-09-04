@@ -420,8 +420,23 @@ pub trait BlockExecutor: Sized {
     }
 }
 
+/// Outcome of a canonical transaction offered an optional speculative artifact.
+#[derive(Debug, Clone, Copy)]
+pub struct PrewarmExecution {
+    /// Gas charged by the committed canonical transaction.
+    pub gas: GasOutput,
+    /// Whether the committed result used validated speculative actions.
+    pub replayed: bool,
+    /// Whether later transactions may still consume speculative actions.
+    pub continue_speculation: bool,
+}
+
 /// A type that creates configured block executors.
 pub trait BlockExecutorFactory {
+    /// Owned, optional result of checked speculative execution. Never contains a worker EVM.
+    type PrewarmArtifact: Debug + Send + 'static;
+    /// Owned block context used to initialize a speculative worker at post-pre-execution state.
+    type PrewarmContext: Debug + Clone + Send + Sync + 'static;
     /// Additional EVM factory configuration owned by this executor factory.
     type EvmFactory;
     /// Runtime EVM type family.
@@ -458,6 +473,57 @@ pub trait BlockExecutorFactory {
     ) -> Self::Executor<'a>
     where
         Self: 'a;
+
+    /// Opts a block into checked speculative execution. The default retains cache-only prewarming.
+    fn prewarm_context(
+        &self,
+        _env: &Self::EvmEnv,
+        _ctx: &Self::ExecutionCtx<'_>,
+    ) -> Option<Self::PrewarmContext> {
+        None
+    }
+
+    /// Initializes a worker with the canonical pre-execution changes, without transaction writes.
+    fn prepare_prewarm_evm<'a>(
+        &self,
+        _evm: Self::Evm<'a>,
+        _ctx: &Self::PrewarmContext,
+    ) -> Option<Self::Evm<'a>> {
+        None
+    }
+
+    /// Records a checked transaction without committing its speculative writes to the worker.
+    fn prewarm_transaction<'a>(
+        &self,
+        _evm: &mut Self::Evm<'a>,
+        _transaction: impl ExecutableTxParts<
+            Recovered<<Self::EvmTypes as evm2::EvmTypesHost>::Tx>,
+            Self::Transaction,
+        >,
+    ) -> Option<Self::PrewarmArtifact> {
+        None
+    }
+
+    /// Executes in canonical order, using a checked artifact when supported.
+    ///
+    /// `PrewarmExecution::continue_speculation` permits further speculation. Returning `false`
+    /// disables it for the suffix when an unsupported transaction may have changed dependencies
+    /// not covered by artifacts.
+    fn execute_transaction_with_prewarm<'a>(
+        &self,
+        executor: &mut Self::Executor<'a>,
+        transaction: impl ExecutorTx<Self::Executor<'a>>,
+        _artifact: Option<Self::PrewarmArtifact>,
+    ) -> Result<PrewarmExecution, BlockExecutionError>
+    where
+        Self: 'a,
+    {
+        executor.execute_transaction(transaction).map(|gas| PrewarmExecution {
+            gas,
+            replayed: false,
+            continue_speculation: false,
+        })
+    }
 
     /// Returns the configured EVM factory state.
     fn evm_factory(&self) -> &Self::EvmFactory;
