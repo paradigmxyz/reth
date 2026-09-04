@@ -2040,4 +2040,71 @@ mod tests {
         assert_eq!(logs[0].block_hash, Some(expected_hashes[0])); // block 100
         assert_eq!(logs[1].block_hash, Some(expected_hashes[2])); // block 102
     }
+
+    #[tokio::test]
+    async fn test_poll_keeps_filter_alive_on_stalled_chain() {
+        let provider = MockEthProvider::default();
+        provider.add_header(FixedBytes::random(), alloy_consensus::Header::default());
+        let eth_api = build_test_eth_api(provider);
+
+        let ttl = Duration::from_secs(60);
+        let eth_filter = EthFilter::new(
+            eth_api,
+            EthFilterConfig::default().stale_filter_ttl(ttl),
+            Runtime::test(),
+        );
+
+        let id = eth_filter.new_block_filter().await.unwrap();
+
+        // the state of a filter that was already polled once and whose chain has not moved since
+        {
+            let mut filters = eth_filter.inner.active_filters.inner.lock().await;
+            let filter = filters.get_mut(&id).unwrap();
+            filter.block = 1;
+            filter.last_poll_timestamp =
+                Instant::now().checked_sub(ttl + Duration::from_secs(1)).unwrap();
+        }
+
+        // a poll that finds no new blocks still has to count as a poll
+        let _ = eth_filter.filter_changes(id.clone()).await;
+
+        eth_filter.clear_stale_filters(Instant::now()).await;
+        assert!(
+            eth_filter.active_filters().contains(&id).await,
+            "a filter polled on a chain that does not advance must not be evicted as stale"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_block_hash_query_on_expired_block() {
+        let provider = MockEthProvider::default();
+
+        let header = alloy_consensus::Header {
+            number: 100,
+            logs_bloom: alloy_primitives::Bloom::from([1u8; 256]),
+            ..Default::default()
+        };
+        let hash = header.hash_slow();
+        provider
+            .add_block(hash, reth_ethereum_primitives::Block { header, body: Default::default() });
+        provider.add_receipts(100, vec![]);
+        provider.set_earliest_block_number(200);
+
+        let eth_api = build_test_eth_api(provider);
+        let eth_filter = EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
+
+        let err = eth_filter
+            .inner
+            .logs_for_filter(Filter::new().select(hash), QueryLimits::default())
+            .await
+            .expect_err("expired history must be reported");
+
+        assert!(
+            matches!(
+                err,
+                EthFilterError::EthAPIError(EthApiError::PrunedHistoryUnavailable { .. })
+            ),
+            "{err:?}"
+        );
+    }
 }

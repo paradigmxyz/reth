@@ -50,7 +50,7 @@ use std::{
     fmt::Debug,
     ops::{RangeBounds, RangeInclusive},
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
 };
@@ -76,6 +76,8 @@ pub struct MockEthProvider<T: NodePrimitives = EthPrimitives, ChainSpec = reth_c
     pub block_body_indices: Arc<Mutex<HashMap<BlockNumber, StoredBlockBodyIndices>>>,
     /// Local stage checkpoints
     stage_checkpoints: Arc<Mutex<HashMap<StageId, StageCheckpoint>>>,
+    /// Lowest block number that has not been expired
+    earliest_block_number: Arc<AtomicU64>,
     /// Local BAL store handle
     pub bal_store: BalStoreHandle,
     /// Whether database provider creation succeeds.
@@ -131,6 +133,7 @@ where
             state_roots: self.state_roots.clone(),
             block_body_indices: self.block_body_indices.clone(),
             stage_checkpoints: self.stage_checkpoints.clone(),
+            earliest_block_number: self.earliest_block_number.clone(),
             bal_store: self.bal_store.clone(),
             database_provider_available: self.database_provider_available.clone(),
             snap_state_reads_fail: self.snap_state_reads_fail.clone(),
@@ -160,6 +163,7 @@ impl<T: NodePrimitives> MockEthProvider<T, reth_chainspec::ChainSpec> {
             state_roots: Default::default(),
             block_body_indices: Default::default(),
             stage_checkpoints: Default::default(),
+            earliest_block_number: Default::default(),
             bal_store: Default::default(),
             database_provider_available: Default::default(),
             snap_state_reads_fail: Default::default(),
@@ -315,6 +319,11 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
         self.stage_checkpoints.lock().insert(id, checkpoint);
     }
 
+    /// Sets the earliest available block number, as history expiry (EIP-4444) would.
+    pub fn set_earliest_block_number(&self, block_number: BlockNumber) {
+        self.earliest_block_number.store(block_number, Ordering::Relaxed);
+    }
+
     /// Add state root to local state root store
     pub fn add_state_root(&self, state_root: B256) {
         self.state_roots.lock().push(state_root);
@@ -331,6 +340,7 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
             state_roots: self.state_roots,
             block_body_indices: self.block_body_indices,
             stage_checkpoints: self.stage_checkpoints,
+            earliest_block_number: self.earliest_block_number,
             bal_store: self.bal_store,
             database_provider_available: self.database_provider_available,
             snap_state_reads_fail: self.snap_state_reads_fail,
@@ -877,6 +887,10 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync + 'static> BlockNumReader
 
     fn last_block_number(&self) -> ProviderResult<BlockNumber> {
         self.best_block_number()
+    }
+
+    fn earliest_block_number(&self) -> ProviderResult<BlockNumber> {
+        Ok(self.earliest_block_number.load(Ordering::Relaxed))
     }
 
     fn block_number(&self, hash: B256) -> ProviderResult<Option<alloy_primitives::BlockNumber>> {
