@@ -445,6 +445,23 @@ pub fn ipv6(listen_config: &ListenConfig) -> Option<SocketAddrV6> {
     }
 }
 
+/// Returns the address for the opposite-family sibling socket in shared-port mode: that
+/// family's configured listen address, rebound to the shared port that discv4 advertises
+/// for both families.
+pub fn sibling_addr(
+    listen_config: &ListenConfig,
+    primary: SocketAddr,
+    shared_port: u16,
+) -> Option<SocketAddr> {
+    let mut addr = if primary.is_ipv4() {
+        SocketAddr::V6(ipv6(listen_config)?)
+    } else {
+        SocketAddr::V4(ipv4(listen_config)?)
+    };
+    addr.set_port(shared_port);
+    Some(addr)
+}
+
 /// Returns the amended [`discv5::ListenConfig`] based on the `RLPx` IP address. The ENR is limited
 /// to one IP address per IP version (atm, may become spec'd how to advertise different addresses).
 /// The `RLPx` address overwrites the discv5 address w.r.t. IP version.
@@ -637,5 +654,22 @@ mod test {
         assert_eq!(*config_socket_ipv6.ip(), rlpx_addr);
         assert_eq!(config_socket_ipv6.port(), DEFAULT_DISCOVERY_V5_PORT);
         assert_eq!(ipv4(&amended_config), ipv4(&listen_config));
+    }
+
+    #[test]
+    fn sibling_addr_uses_shared_port() {
+        let listen_config = ListenConfig::DualStack {
+            ipv4: Ipv4Addr::UNSPECIFIED,
+            ipv4_port: 30303,
+            ipv6: Ipv6Addr::UNSPECIFIED,
+            ipv6_port: 9200,
+        };
+        let primary: SocketAddr = "0.0.0.0:30303".parse().unwrap();
+
+        let addr = sibling_addr(&listen_config, primary, 30303).unwrap();
+        assert_eq!(addr, "[::]:30303".parse::<SocketAddr>().unwrap());
+
+        let listen_config = ListenConfig::Ipv4 { ip: Ipv4Addr::UNSPECIFIED, port: 30303 };
+        assert_eq!(sibling_addr(&listen_config, primary, 30303), None);
     }
 }
