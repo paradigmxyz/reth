@@ -579,6 +579,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 
         info!(target: "reth::cli", source = %manifest_source, "Fetching snapshot manifest");
         let mut manifest = fetch_manifest_from_source(&manifest_source).await?;
+        eyre::ensure!(
+            manifest.chain_id == chain_id,
+            "Snapshot chain ID {} does not match selected chain ID {chain_id}",
+            manifest.chain_id
+        );
         manifest.base_url = Some(resolve_manifest_base_url(&manifest, &manifest_source)?);
 
         info!(target: "reth::cli",

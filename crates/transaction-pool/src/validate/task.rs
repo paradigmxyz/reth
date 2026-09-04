@@ -60,7 +60,11 @@ impl ValidationTask {
     ///
     /// This will run as long as the channel is alive and is expected to be spawned as a task.
     pub async fn run(self) {
-        while let Some(task) = self.validation_jobs.lock().await.next().await {
+        loop {
+            // Release the shared receiver before running the job, so other workers
+            // can dequeue validations while this worker is busy.
+            let task = { self.validation_jobs.lock().await.next().await };
+            let Some(task) = task else { break };
             task.await;
         }
     }
@@ -349,6 +353,47 @@ mod tests {
         TransactionOrigin,
     };
     use alloy_primitives::{Address, U256};
+
+    #[tokio::test]
+    async fn cloned_workers_validate_while_another_job_is_blocked() {
+        let (sender, task) = ValidationTask::new();
+        let first_worker = tokio::spawn(task.clone().run());
+        let second_worker = tokio::spawn(task.run());
+        let (started_tx, started_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        sender
+            .send(Box::pin(async move {
+                started_tx.send(()).unwrap();
+                release_rx.await.unwrap();
+            }))
+            .await
+            .unwrap();
+        started_rx.await.unwrap();
+
+        // The first validation remains blocked. A second configured worker must
+        // independently dequeue and finish this job without releasing the first.
+        let (completed_tx, completed_rx) = oneshot::channel();
+        sender
+            .send(Box::pin(async move {
+                completed_tx.send(()).unwrap();
+            }))
+            .await
+            .unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(1), completed_rx)
+            .await
+            .expect("second worker cannot dequeue while first validation holds receiver lock")
+            .unwrap();
+
+        release_tx.send(()).unwrap();
+        drop(sender);
+        // Closing the bounded channel still shuts every worker down cleanly.
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            first_worker.await.unwrap();
+            second_worker.await.unwrap();
+        })
+        .await
+        .unwrap();
+    }
 
     #[derive(Debug)]
     struct NoopValidator;
