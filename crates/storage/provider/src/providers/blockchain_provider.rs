@@ -40,7 +40,7 @@ use reth_trie::{
     hashed_cursor::{HashedCursor, HashedCursorFactory},
     metrics::TrieRootMetrics,
     proof::{Proof, StorageProof},
-    MultiProofTargets, StorageRoot, TrieInput, TrieInputSorted, TrieType,
+    MultiProofTargets, StorageRoot, TrieType,
 };
 use std::{
     ops::{RangeBounds, RangeInclusive},
@@ -170,8 +170,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         ))
     }
 
-    /// Returns a cursor-backed state view for a state root still only in canonical in-memory
-    /// blocks, overlaying their merged trie state on the persisted anchor.
+    /// Returns a cursor-backed state view for a state root still in canonical in-memory blocks.
     fn block_state_range_provider(
         &self,
         state_root: B256,
@@ -184,23 +183,9 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             return Ok(None)
         };
 
-        // Merge each in-memory block's trie delta, anchor to `matched`, oldest to newest.
-        let blocks: Vec<_> = matched.chain().map(|state| state.block()).collect();
-        let sorted: Vec<_> =
-            blocks.iter().rev().map(|block| (block.hashed_state(), block.trie_updates())).collect();
-        let input = TrieInput::from_blocks_sorted(
-            sorted.iter().map(|(state, nodes)| (state.as_ref(), nodes.as_ref())),
-        );
-        let merged = TrieInputSorted::from_unsorted(input);
-
-        // Anchor at the persisted block; the overlay reverts any db-tip advancement past it
-        // via changesets, then the merged in-memory delta applies on top.
         let state_provider_factory = OverlayStateProviderFactory::new(
             self.database.clone(),
-            self.database
-                .overlay_manager()
-                .overlay_builder(matched.anchor().hash)
-                .with_immediate_state_trie_overlay(merged.state, merged.nodes),
+            self.database.overlay_manager().overlay_builder(matched.hash()),
         );
         state_provider_factory.database_provider_ro().map(Some)
     }
@@ -3132,6 +3117,7 @@ mod tests {
             state: Default::default(),
         };
         let executed = ExecutedBlock::new(Arc::new(block), Arc::new(execution_output), trie_data);
+        provider.database.overlay_manager().insert_block(executed.clone());
         provider
             .canonical_in_memory_state
             .update_chain(NewCanonicalChain::Commit { new: vec![executed] });
@@ -3180,6 +3166,7 @@ mod tests {
             state: Default::default(),
         };
         let executed = ExecutedBlock::new(Arc::new(block), Arc::new(execution_output), trie_data);
+        provider.database.overlay_manager().insert_block(executed.clone());
         provider
             .canonical_in_memory_state
             .update_chain(NewCanonicalChain::Commit { new: vec![executed] });
