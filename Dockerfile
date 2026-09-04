@@ -32,7 +32,7 @@ ARG FEATURES=""
 ENV FEATURES=$FEATURES
 
 # Builds dependencies
-RUN cargo chef cook --profile $BUILD_PROFILE --features "$FEATURES" --recipe-path recipe.json
+RUN cargo chef cook --locked --profile $BUILD_PROFILE --features "$FEATURES" --recipe-path recipe.json
 
 # Build application
 # Platform-specific RUSTFLAGS: amd64 uses x86-64-v3 (Haswell+) with pclmulqdq for rocksdb

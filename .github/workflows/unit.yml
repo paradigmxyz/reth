@@ -20,7 +20,13 @@ concurrency:
 permissions: {}
 
 jobs:
+  cargo-cooldown:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/cargo-cooldown.yml
+
   test:
+    needs: cargo-cooldown
     name: test / ${{ matrix.type }}
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
     permissions:
@@ -56,14 +62,15 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Run tests
         run: |
-          cargo nextest run \
+          cargo nextest run --locked \
             --no-fail-fast \
-            --features "${{ matrix.features }}" --locked \
+            --features "${{ matrix.features }}" \
             ${{ matrix.exclude_args }} --workspace \
             --exclude ef-tests --no-tests=warn \
             -E "!kind(test) and not binary(e2e_testsuite)"
 
   state:
+    needs: cargo-cooldown
     name: Ethereum state tests
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-8' || 'ubuntu-latest' }}
     permissions:
@@ -104,9 +111,10 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-on-failure: true
-      - run: cargo nextest run --no-fail-fast --cargo-profile hivetests -p ef-tests --features "asm-keccak ef-tests"
+      - run: cargo nextest run --locked --no-fail-fast --cargo-profile hivetests -p ef-tests --features "asm-keccak ef-tests"
 
   doc:
+    needs: cargo-cooldown
     name: doc tests
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
     permissions:
@@ -126,7 +134,7 @@ jobs:
         with:
           cache-on-failure: true
       - name: Run doctests
-        run: cargo test --doc --workspace --all-features
+        run: cargo test --locked --doc --workspace --all-features
 
   unit-success:
     name: unit success

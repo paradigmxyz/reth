@@ -32,7 +32,13 @@ on:
 permissions: {}
 
 jobs:
+  cargo-cooldown:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/cargo-cooldown.yml
+
   build:
+    needs: cargo-cooldown
     if: github.repository == 'paradigmxyz/reth'
     name: Build Docker images
     runs-on: ubuntu-24.04

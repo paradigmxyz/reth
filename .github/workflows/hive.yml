@@ -17,7 +17,13 @@ concurrency:
 permissions: {}
 
 jobs:
+  cargo-cooldown:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/cargo-cooldown.yml
+
   build-reth:
+    needs: cargo-cooldown
     permissions:
       contents: read
       id-token: write
@@ -28,6 +34,7 @@ jobs:
     secrets: inherit
 
   prepare-hive:
+    needs: cargo-cooldown
     if: github.repository == 'paradigmxyz/reth'
     timeout-minutes: 45
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-16' || 'ubuntu-latest' }}

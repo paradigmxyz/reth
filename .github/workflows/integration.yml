@@ -23,7 +23,13 @@ concurrency:
 permissions: {}
 
 jobs:
+  cargo-cooldown:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/cargo-cooldown.yml
+
   test:
+    needs: cargo-cooldown
     name: test / ${{ matrix.network }}
     if: github.event_name != 'schedule'
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
@@ -54,9 +60,9 @@ jobs:
           cache-on-failure: true
       - name: Run tests
         run: |
-          cargo nextest run \
+          cargo nextest run --locked \
             --no-fail-fast \
-            --locked --features "asm-keccak" \
+            --features "asm-keccak" \
             --workspace --exclude ef-tests \
             -E "kind(test) and not binary(e2e_testsuite)"
 
@@ -73,6 +79,7 @@ jobs:
           jobs: ${{ toJSON(needs) }}
 
   era-files:
+    needs: cargo-cooldown
     name: era/era1/ere file integration tests once a day
     if: github.event_name == 'schedule' && github.repository == 'paradigmxyz/reth'
     runs-on: ubuntu-latest
@@ -93,4 +100,4 @@ jobs:
         with:
           cache-on-failure: true
       - name: run era/era1/ere files integration tests
-        run: cargo nextest run --no-fail-fast --release --package reth-era --test it -- --ignored
+        run: cargo nextest run --locked --no-fail-fast --release --package reth-era --test it -- --ignored

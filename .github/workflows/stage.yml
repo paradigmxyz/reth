@@ -21,7 +21,14 @@ concurrency:
 permissions: {}
 
 jobs:
+  cargo-cooldown:
+    if: github.event_name == 'merge_group'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/cargo-cooldown.yml
+
   stage:
+    needs: cargo-cooldown
     name: stage-run-test
     # Only run stage commands test in merge groups
     if: github.event_name == 'merge_group'

@@ -404,6 +404,22 @@ jobs:
           prepare_source_dir ../reth-feature "${{ steps.refs.outputs.feature-ref }}"
           prepare_source_dir ../reth-download "${{ steps.refs.outputs.download-ref }}" "${{ steps.refs.outputs.download-name }}"
 
+      - name: Enforce Cargo dependency cooldown for baseline
+        uses: tempoxyz/gh-actions/actions/cargo-cooldown@0aa93238d85fd085d7901320b670cc6adb7a02f3 # gh-actions#101
+        with:
+          working-directory: ../reth-baseline
+
+      - name: Enforce Cargo dependency cooldown for feature
+        uses: tempoxyz/gh-actions/actions/cargo-cooldown@0aa93238d85fd085d7901320b670cc6adb7a02f3 # gh-actions#101
+        with:
+          strict-project-config: true
+          working-directory: ../reth-feature
+
+      - name: Enforce Cargo dependency cooldown for download revision
+        uses: tempoxyz/gh-actions/actions/cargo-cooldown@0aa93238d85fd085d7901320b670cc6adb7a02f3 # gh-actions#101
+        with:
+          working-directory: ../reth-download
+
       - name: Build binaries
         id: build
         env:
