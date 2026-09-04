@@ -1839,7 +1839,7 @@ impl<V> HashedCursorState<V> {
         match self {
             Self::Unseeked => false,
             Self::Available(path, _) => path > key,
-            Self::Exhausted(exhausted_at) => exhausted_at > key,
+            Self::Exhausted(exhausted_at) => exhausted_at >= key,
         }
     }
 
@@ -2314,6 +2314,29 @@ mod tests {
             panic!("root child should be a leaf")
         };
         assert_eq!(child_leaf.key, slot_nibbles.slice(1..));
+    }
+
+    #[test]
+    fn test_exhausted_cursor_resets_at_equal_target_boundary() {
+        let first = B256::ZERO;
+        let last = B256::with_last_byte(1);
+        let last_nibbles = Nibbles::unpack(last);
+        let harness =
+            ProofTestHarness::new(BTreeMap::from([(first, U256::from(1)), (last, U256::from(2))]));
+        let mut targets = [
+            ProofV2Target::new(first),
+            ProofV2Target::new(last).with_parent(ProofV2TargetParent::new(63)),
+        ];
+
+        let (proof, root) = harness.proof_v2(&mut targets);
+
+        assert_eq!(root, Some(harness.original_root()));
+        let child = proof
+            .iter()
+            .find(|node| node.path == last_nibbles)
+            .expect("depth-63 target child proof");
+        let TrieNodeV2::Leaf(leaf) = &child.node else { panic!("target child should be a leaf") };
+        assert!(leaf.key.is_empty());
     }
 
     #[test]
