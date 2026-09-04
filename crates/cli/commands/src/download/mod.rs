@@ -783,16 +783,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         };
         let mut selections = BTreeMap::new();
 
-        for ty in [
-            SnapshotComponentType::State,
-            SnapshotComponentType::Headers,
-            SnapshotComponentType::Transactions,
-            SnapshotComponentType::Receipts,
-            SnapshotComponentType::AccountChangesets,
-            SnapshotComponentType::StorageChangesets,
-            SnapshotComponentType::TransactionSenders,
-            SnapshotComponentType::RocksdbIndices,
-        ] {
+        for &ty in &SnapshotComponentType::ALL {
             if manifest.component(ty).is_none() {
                 continue;
             }
