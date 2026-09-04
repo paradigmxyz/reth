@@ -824,10 +824,10 @@ where
         Ok(PopCachedBranchOutcome::Popped(cached))
     }
 
-    // Pop any under-construction branches that are now complete. Assumes that all trie data prior
-    // to `next_path`, if any, has been computed. Any branches which were under-construction
-    // previously, and which do not share a prefix with `next_path`, can be assumed to be completed;
-    // they will not have any further keys added to them.
+    /// Pop any under-construction branches that are now complete. Assumes that all trie data prior
+    /// to `next_path`, if any, has been computed. Any branches which were under-construction
+    /// previously, and which do not share a prefix with `next_path`, can be assumed to be
+    /// completed; they will not have any further keys added to them.
     ///
     /// Returns a range to calculate if a branch still has dirty keys to process, or popping it
     /// exposes dirty keys which could split its extension. A missing lower bound disables these
