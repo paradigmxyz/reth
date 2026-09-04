@@ -812,29 +812,12 @@ where
     use std::io::Error;
 
     let mut in_mem_chain = in_mem_chain.peekable();
-    let managed_parent_number = in_mem_chain
-        .peek()
-        .filter(|block| block.recovered_block().hash() == parent_hash)
-        .map(|block| block.recovered_block().number());
-    // Managed blocks already carry their number. Blocks above the state trie frontier cannot be a
-    // persisted anchor; for older blocks, verify canonicality with a number-to-hash lookup.
-    let persisted_parent = if let Some(parent_number) = managed_parent_number {
-        if parent_number > partial_state_trie.number {
-            None
-        } else if parent_number == partial_state_trie.number &&
-            parent_hash == partial_state_trie.hash
-        {
-            Some(parent_number)
-        } else {
-            (provider.block_hash(parent_number)? == Some(parent_hash)).then_some(parent_number)
-        }
-    } else if parent_hash == partial_state_trie.hash {
-        Some(partial_state_trie.number)
-    } else {
-        provider
-            .block_number(parent_hash)?
-            .filter(|&parent_number| parent_number <= partial_state_trie.number)
-    };
+    let persisted_parent = persisted_parent_number(
+        parent_hash,
+        in_mem_chain.peek().copied(),
+        partial_state_trie,
+        provider,
+    )?;
 
     let mut finish_seen = parent_hash == finish.hash;
     let anchor = if let Some(parent_number) = persisted_parent {
@@ -897,6 +880,44 @@ where
     }
 
     Ok(AnchorForParent::RevertsRequired { anchor, finish })
+}
+
+/// Returns the parent number when `parent_hash` is a durable anchor.
+fn persisted_parent_number<N, Provider>(
+    parent_hash: B256,
+    managed_parent: Option<&ExecutedBlock<N>>,
+    partial_state_trie: BlockNumHash,
+    provider: &Provider,
+) -> ProviderResult<Option<BlockNumber>>
+where
+    N: NodePrimitives,
+    Provider: BlockNumReader,
+{
+    let managed_parent_number = managed_parent
+        .filter(|block| block.recovered_block().hash() == parent_hash)
+        .map(|block| block.recovered_block().number());
+
+    // Managed blocks already carry their number. Blocks above the state trie frontier cannot be a
+    // persisted anchor; for older blocks, verify canonicality with a number-to-hash lookup.
+    if let Some(parent_number) = managed_parent_number {
+        if parent_number > partial_state_trie.number {
+            return Ok(None)
+        }
+        if parent_number == partial_state_trie.number && parent_hash == partial_state_trie.hash {
+            return Ok(Some(parent_number))
+        }
+        return Ok(
+            (provider.block_hash(parent_number)? == Some(parent_hash)).then_some(parent_number)
+        )
+    }
+
+    if parent_hash == partial_state_trie.hash {
+        Ok(Some(partial_state_trie.number))
+    } else {
+        provider.block_number(parent_hash).map(|parent_number| {
+            parent_number.filter(|&number| number <= partial_state_trie.number)
+        })
+    }
 }
 
 #[cfg(test)]
