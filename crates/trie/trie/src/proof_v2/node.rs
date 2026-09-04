@@ -117,7 +117,7 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
             // this arm means inconsistent cached trie data left a blinded node as the local root.
             Self::RlpNode { .. } => {
                 return Err(StateProofError::TrieInconsistency(
-                    "local root cannot be a blinded RLP node".to_string(),
+                    "cannot convert RLP node to proof node".to_string(),
                 ))
             }
         };
