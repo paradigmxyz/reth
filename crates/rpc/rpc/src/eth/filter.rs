@@ -1168,18 +1168,16 @@ impl<
     > CachedMode<Eth>
 {
     async fn next(&mut self) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
-        for header in self.headers_iter.by_ref() {
-            // Use get_receipts_and_maybe_block which has automatic fallback to provider
-            let Some((receipts, maybe_block)) =
-                self.filter_inner.eth_cache().get_receipts_and_maybe_block(header.hash()).await?
-            else {
-                return Err(EthFilterError::ReceiptsUnavailable(header.number()))
-            };
+        let Some(header) = self.headers_iter.next() else { return Ok(None) };
 
-            return Ok(Some(ReceiptBlockResult { receipts, recovered_block: maybe_block, header }));
-        }
+        // Use get_receipts_and_maybe_block which has automatic fallback to provider
+        let Some((receipts, maybe_block)) =
+            self.filter_inner.eth_cache().get_receipts_and_maybe_block(header.hash()).await?
+        else {
+            return Err(EthFilterError::ReceiptsUnavailable(header.number()))
+        };
 
-        Ok(None) // No more headers
+        Ok(Some(ReceiptBlockResult { receipts, recovered_block: maybe_block, header }))
     }
 }
 
