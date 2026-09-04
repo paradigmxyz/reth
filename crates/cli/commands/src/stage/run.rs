@@ -307,6 +307,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     Box::new(MerkleStage::new_execution(
                         config.stages.merkle.rebuild_threshold,
                         config.stages.merkle.incremental_threshold,
+                        config.stages.merkle.rebuild_change_threshold,
+                        config.stages.merkle.incremental_change_threshold,
                     )),
                     Some(Box::new(MerkleStage::default_unwind())),
                 ),
