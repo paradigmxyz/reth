@@ -409,6 +409,10 @@ impl DatabaseEnv {
             DatabaseEnvKind::RW => {
                 // enable writemap mode in RW mode
                 inner_env.write_map();
+                // Sparse page reuse makes MDBX's mincore residency probes expensive on Linux.
+                // Let the kernel fault pages in on demand instead of pre-faulting reclaimed pages.
+                #[cfg(target_os = "linux")]
+                inner_env.set_prefault_write(false);
                 Mode::ReadWrite { sync_mode: args.sync_mode }
             }
         };
@@ -1344,53 +1348,6 @@ mod tests {
         dup_cursor.upsert(key, &entry2).expect(ERROR_UPSERT);
         assert_eq!(dup_cursor.seek_by_key_subkey(key, subkey).unwrap(), Some(entry1));
         assert_eq!(dup_cursor.next_dup_val().unwrap(), Some(entry2));
-    }
-
-    #[test]
-    fn db_cursor_update_current_duplicates() {
-        let (_tempdir, db) = create_test_db(DatabaseEnvKind::RW);
-        let tx = db.tx_mut().unwrap();
-        let address = Address::with_last_byte(1);
-        let other_address = Address::with_last_byte(2);
-        let mut cursor = tx.cursor_dup_write::<PlainStorageState>().unwrap();
-        let mut expected = (0..256u64)
-            .map(|i| StorageEntry { key: B256::from(U256::from(i)), value: U256::from(i + 1) })
-            .collect::<Vec<_>>();
-        for entry in &expected {
-            cursor.upsert(address, entry).unwrap();
-        }
-        let sentinel = expected[0];
-        cursor.upsert(other_address, &sentinel).unwrap();
-
-        // Exercise shrinking, growing, and unchanged encodings across multiple duplicate pages.
-        for value in [U256::MAX, U256::from(1), U256::from(1), U256::from(1) << 128] {
-            for index in [0, 127, 128, 255] {
-                let entry = &mut expected[index];
-                assert_eq!(cursor.seek_by_key_subkey(address, entry.key).unwrap(), Some(*entry));
-                entry.value = value;
-                cursor.update_current(address, entry).unwrap();
-                assert_eq!(cursor.current().unwrap(), Some((address, *entry)));
-            }
-            let actual = cursor
-                .walk_dup(Some(address), None)
-                .unwrap()
-                .map(|row| row.unwrap().1)
-                .collect::<Vec<_>>();
-            assert_eq!(actual, expected);
-            assert_eq!(cursor.seek_exact(other_address).unwrap(), Some((other_address, sentinel)));
-        }
-        drop(cursor);
-        tx.commit().unwrap();
-
-        let tx = db.tx().unwrap();
-        let actual = tx
-            .cursor_dup_read::<PlainStorageState>()
-            .unwrap()
-            .walk_dup(Some(address), None)
-            .unwrap()
-            .map(|row| row.unwrap().1)
-            .collect::<Vec<_>>();
-        assert_eq!(actual, expected);
     }
 
     #[test]
