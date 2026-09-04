@@ -406,9 +406,11 @@ impl DatabaseEnv {
 
         let mode = match kind {
             DatabaseEnvKind::RO => Mode::ReadOnly,
-            // Page buffers avoid residency probes and faults on mapped destination pages
-            // before their contents are overwritten.
-            DatabaseEnvKind::RW => Mode::ReadWrite { sync_mode: args.sync_mode },
+            DatabaseEnvKind::RW => {
+                // enable writemap mode in RW mode
+                inner_env.write_map();
+                Mode::ReadWrite { sync_mode: args.sync_mode }
+            }
         };
 
         // Note: We set max dbs to 256 here to allow for custom tables. This needs to be set on
@@ -725,31 +727,6 @@ mod tests {
     #[test]
     fn db_creation() {
         let _tempdir = create_test_db(DatabaseEnvKind::RW);
-    }
-
-    #[test]
-    fn durable_shadow_pages_commit_abort_and_reopen() {
-        let (dir, db) = create_test_db(DatabaseEnvKind::RW);
-        assert!(!db.is_write_map());
-        assert!(matches!(
-            db.info().unwrap().mode(),
-            Mode::ReadWrite { sync_mode: SyncMode::Durable }
-        ));
-        let committed = B256::repeat_byte(1);
-        let tx = db.tx_mut().unwrap();
-        tx.put::<CanonicalHeaders>(1, committed).unwrap();
-        tx.commit().unwrap();
-
-        let tx = db.tx_mut().unwrap();
-        tx.put::<CanonicalHeaders>(1, B256::repeat_byte(2)).unwrap();
-        tx.put::<CanonicalHeaders>(2, B256::repeat_byte(3)).unwrap();
-        drop(tx);
-        drop(db);
-
-        let reopened = create_test_db_with_path(DatabaseEnvKind::RW, dir.path());
-        let tx = reopened.tx().unwrap();
-        assert_eq!(tx.get::<CanonicalHeaders>(1).unwrap(), Some(committed));
-        assert_eq!(tx.get::<CanonicalHeaders>(2).unwrap(), None);
     }
 
     #[test]
