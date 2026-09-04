@@ -1684,9 +1684,9 @@ mod rocksdb_tests {
         );
 
         // Scenario 4: Query at pruning boundary
-        // Note: We test block >= lowest_available because HistoricalStateProviderRef
-        // errors on blocks below the pruning boundary before doing the lookup.
-        // The RocksDB implementation doesn't have this check at the same level.
+        // We test block >= lowest_available because state queries reject blocks below the
+        // pruning boundary before doing the lookup. The RocksDB implementation doesn't have
+        // this check at the same level.
         // This tests that when pruning IS available, both backends agree.
         run_account_history_scenario(
             "with_pruning_boundary",
