@@ -32,9 +32,15 @@ impl BeaconOnNewPayloadError {
 
 impl From<InsertBlockFatalError> for BeaconOnNewPayloadError {
     fn from(error: InsertBlockFatalError) -> Self {
+        Self::internal(error)
+    }
+}
+
+impl From<InsertBlockProcessingError> for BeaconOnNewPayloadError {
+    fn from(error: InsertBlockProcessingError) -> Self {
         match error {
-            InsertBlockFatalError::InvalidParams(err) => Self::InvalidParams(err),
-            error => Self::internal(error),
+            InsertBlockProcessingError::MalformedInput(error) => Self::InvalidParams(error),
+            InsertBlockProcessingError::Fatal(error) => Self::internal(error),
         }
     }
 }
@@ -69,6 +75,9 @@ pub enum InsertBlockErrorKind {
     /// Block violated consensus rules.
     #[error(transparent)]
     Consensus(#[from] ConsensusError),
+    /// Supplemental block access list bytes could not be decoded.
+    #[error(transparent)]
+    BlockAccessListDecode(#[from] BlockAccessListDecodeError),
     /// Block execution failed.
     #[error(transparent)]
     Execution(#[from] BlockExecutionError),
@@ -81,58 +90,81 @@ pub enum InsertBlockErrorKind {
 }
 
 impl InsertBlockErrorKind {
-    /// Returns whether the error was caused by an invalid block.
+    /// Returns whether the error must be reported as an invalid payload.
     pub const fn is_validation_error(&self) -> bool {
-        matches!(self, Self::Consensus(_) | Self::Execution(BlockExecutionError::Validation(_)))
+        matches!(
+            self,
+            Self::Consensus(_) |
+                Self::BlockAccessListDecode(_) |
+                Self::Execution(BlockExecutionError::Validation(_))
+        )
     }
 
-    /// Returns an [`InsertBlockValidationError`] if the error is caused by an invalid block.
+    /// Returns an [`InsertBlockValidationError`] if the failure must be reported as an invalid
+    /// payload, or an [`InsertBlockProcessingError`] if block processing itself failed.
     ///
-    /// Returns an [`InsertBlockFatalError`] if the failure is not attributable to the block
-    /// itself, either an internal error or malformed request params.
-    ///
-    /// This split decides how `newPayload` responds: validation errors become an `INVALID`
-    /// payload status and mark the block hash as invalid, while fatal errors are returned as
-    /// actual errors to the caller. This distinction is required because responding `INVALID`
-    /// has consensus meaning (the block is rejected and its hash cached as invalid), which must
-    /// not happen for failures the block is not responsible for.
+    /// This distinction controls whether the payload may be returned as `INVALID`. Errors
+    /// classified as invalid payloads by the Engine API are validation errors; malformed request
+    /// parameters and internal failures remain processing errors instead.
     pub fn ensure_validation_error(
         self,
-    ) -> Result<InsertBlockValidationError, InsertBlockFatalError> {
+    ) -> Result<InsertBlockValidationError, InsertBlockProcessingError> {
         match self {
-            // Undecodable block access list bytes are malformed request params, not an invalid
-            // block, and must be rejected with an invalid params error instead of an `INVALID`
-            // payload status.
-            Self::Consensus(ConsensusError::BlockAccessListDecode(err)) => {
-                Err(InsertBlockFatalError::InvalidParams(Box::new(err)))
+            Self::BlockAccessListDecode(error) => {
+                Ok(InsertBlockValidationError::BlockAccessListDecode(error))
             }
             Self::Consensus(err) => Ok(InsertBlockValidationError::Consensus(err)),
             Self::Execution(err) => match err {
                 BlockExecutionError::Validation(err) => {
                     Ok(InsertBlockValidationError::Validation(err))
                 }
-                BlockExecutionError::Internal(error) => {
-                    Err(InsertBlockFatalError::BlockExecutionError(error))
-                }
+                BlockExecutionError::Internal(error) => Err(InsertBlockProcessingError::Fatal(
+                    InsertBlockFatalError::BlockExecutionError(error),
+                )),
             },
-            Self::Provider(err) => Err(InsertBlockFatalError::Provider(err)),
-            Self::Other(err) => Err(InternalBlockExecutionError::Other(err).into()),
+            Self::Provider(err) => {
+                Err(InsertBlockProcessingError::Fatal(InsertBlockFatalError::Provider(err)))
+            }
+            Self::Other(err) => Err(InsertBlockProcessingError::Fatal(
+                InternalBlockExecutionError::Other(err).into(),
+            )),
         }
     }
 }
 
-/// Error variants that are not caused by invalid blocks.
+/// Error decoding supplemental block access list bytes.
+#[derive(Debug, thiserror::Error)]
+#[error("failed to decode block access list: {0}")]
+pub struct BlockAccessListDecodeError(#[source] Box<dyn core::error::Error + Send + Sync>);
+
+impl BlockAccessListDecodeError {
+    /// Creates a new block access list decode error.
+    pub fn new<E>(error: E) -> Self
+    where
+        E: core::error::Error + Send + Sync + 'static,
+    {
+        Self(Box::new(error))
+    }
+}
+
+/// An error that occurs while processing a block but does not invalidate the block itself.
 ///
-/// "Fatal" means block processing failed for a reason other than the block itself being invalid.
-/// This includes errors caused by additional payload data that is not part of the block, such as
-/// undecodable block access list bytes: their malformation says nothing about the validity of
-/// the block and is therefore treated differently with respect to the `PayloadStatus`.
-///
-/// These failures must not be answered with an `INVALID` payload status or mark the block hash
-/// as invalid. Instead they are propagated as actual errors: for `newPayload` they convert into
-/// [`BeaconOnNewPayloadError`] and are returned as a JSON-RPC error object instead of a
-/// `PayloadStatus` result, [`Self::InvalidParams`] as invalid params (`-32602`) and all other
-/// variants as internal error (`-32603`).
+/// These errors must not produce an `INVALID`
+/// [`PayloadStatus`](alloy_rpc_types_engine::PayloadStatus) or cause the block hash to be cached as
+/// invalid. Malformed supplemental input remains distinct from fatal processing failures so
+/// `newPayload` can reject it as invalid params, while internal ingestion paths can discard it
+/// without terminating the engine task.
+#[derive(Debug, thiserror::Error)]
+pub enum InsertBlockProcessingError {
+    /// Supplemental input is malformed, but the block itself is not known to be invalid.
+    #[error(transparent)]
+    MalformedInput(Box<dyn core::error::Error + Send + Sync>),
+    /// Block processing cannot continue because of an internal failure.
+    #[error(transparent)]
+    Fatal(#[from] InsertBlockFatalError),
+}
+
+/// Internal errors that prevent block processing from continuing.
 #[derive(Debug, thiserror::Error)]
 pub enum InsertBlockFatalError {
     /// A provider error.
@@ -141,10 +173,6 @@ pub enum InsertBlockFatalError {
     /// An internal or fatal block execution error.
     #[error(transparent)]
     BlockExecutionError(#[from] InternalBlockExecutionError),
-    /// The payload params are malformed, e.g. undecodable block access list bytes, and the
-    /// request must be rejected with an invalid params error.
-    #[error(transparent)]
-    InvalidParams(Box<dyn core::error::Error + Send + Sync>),
 }
 
 /// Error variants that are caused by invalid blocks.
@@ -153,6 +181,9 @@ pub enum InsertBlockValidationError {
     /// Block violated consensus rules.
     #[error(transparent)]
     Consensus(#[from] ConsensusError),
+    /// Block access list bytes could not be decoded.
+    #[error(transparent)]
+    BlockAccessListDecode(#[from] BlockAccessListDecodeError),
     /// Validation error, transparently wrapping [`BlockValidationError`].
     #[error(transparent)]
     Validation(#[from] BlockValidationError),
@@ -162,22 +193,27 @@ pub enum InsertBlockValidationError {
 mod tests {
     use super::*;
 
-    // Undecodable block access list bytes are malformed request params and must not be treated
-    // as a block validation error.
     #[test]
-    fn bal_decode_error_is_invalid_params() {
-        let err = InsertBlockErrorKind::Consensus(ConsensusError::BlockAccessListDecode(
+    fn ensure_insert_block_validation_error() {
+        let err = InsertBlockErrorKind::BlockAccessListDecode(BlockAccessListDecodeError::new(
             alloy_rlp::Error::UnexpectedString,
         ));
+        assert!(err.is_validation_error());
         assert!(matches!(
             err.ensure_validation_error(),
-            Err(InsertBlockFatalError::InvalidParams(_))
+            Ok(InsertBlockValidationError::BlockAccessListDecode(_))
         ));
+
         assert!(matches!(
-            BeaconOnNewPayloadError::from(InsertBlockFatalError::InvalidParams(Box::new(
-                alloy_rlp::Error::UnexpectedString
-            ))),
-            BeaconOnNewPayloadError::InvalidParams(_)
+            InsertBlockErrorKind::Consensus(ConsensusError::BlockAccessListHashMissing)
+                .ensure_validation_error(),
+            Ok(InsertBlockValidationError::Consensus(_))
+        ));
+
+        assert!(matches!(
+            InsertBlockErrorKind::Provider(ProviderError::BestBlockNotFound)
+                .ensure_validation_error(),
+            Err(InsertBlockProcessingError::Fatal(InsertBlockFatalError::Provider(_)))
         ));
     }
 }
