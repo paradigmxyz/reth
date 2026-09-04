@@ -100,3 +100,7 @@ serde-bincode-compat = [
 name = "proof_v2"
 required-features = ["test-utils"]
 harness = false
+
+[[example]]
+name = "sparse_differential_fuzz"
+required-features = ["test-utils"]

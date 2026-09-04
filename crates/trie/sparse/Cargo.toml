@@ -84,3 +84,8 @@ arbitrary = [
     "reth-trie-common/arbitrary",
     "smallvec/arbitrary",
 ]
+
+[[bench]]
+name = "state_root"
+harness = false
+required-features = ["std"]

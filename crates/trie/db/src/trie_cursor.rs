@@ -282,24 +282,62 @@ where
         updates: &StorageTrieUpdatesSorted,
     ) -> Result<usize, DatabaseError> {
         let mut num_entries = 0;
+        let mut advance = false;
+        let mut sequential = true;
+        let mut exhausted = false;
+        let mut previous = Nibbles::default();
         for (nibbles, maybe_updated) in updates.storage_nodes.iter().filter(|(n, _)| !n.is_empty())
         {
             num_entries += 1;
-            let nibbles = A::StorageSubKey::from(*nibbles);
-            // Delete the old entry if it exists.
-            if self
-                .cursor
-                .seek_by_key_subkey(self.hashed_address, nibbles.clone())?
-                .as_ref()
-                .is_some_and(|e| *e.nibbles() == nibbles)
-            {
-                self.cursor.delete_current()?;
+            if *nibbles <= previous {
+                // Repeated paths need a fresh lookup of the preceding update.
+                advance = false;
+                sequential = false;
+                exhausted = false;
             }
-
-            // There is an updated version of this node, insert new entry.
-            if let Some(node) = maybe_updated {
-                self.cursor
-                    .upsert(self.hashed_address, &A::StorageValue::new(nibbles, node.clone()))?;
+            previous = *nibbles;
+            let nibbles = A::StorageSubKey::from(*nibbles);
+            let existing = if exhausted {
+                None
+            } else if advance {
+                let next = self.cursor.next_dup()?.map(|(_, entry)| entry);
+                if next
+                    .as_ref()
+                    .is_some_and(|entry| A::subkey_to_nibbles(entry.nibbles()) < previous)
+                {
+                    // Sparse batches should pay for at most one unsuccessful sequential read.
+                    sequential = false;
+                    self.cursor.seek_by_key_subkey(self.hashed_address, nibbles.clone())?
+                } else {
+                    next
+                }
+            } else {
+                self.cursor.seek_by_key_subkey(self.hashed_address, nibbles.clone())?
+            };
+            exhausted = existing.is_none();
+            let existing = existing.filter(|entry| *entry.nibbles() == nibbles);
+            advance = false;
+            match (existing, maybe_updated) {
+                (Some(existing), Some(node)) => {
+                    // Unchanged branches need no dirty pages or duplicate-tree rebalancing.
+                    if existing.node() != node {
+                        self.cursor.delete_current()?;
+                        self.cursor.upsert(
+                            self.hashed_address,
+                            &A::StorageValue::new(nibbles, node.clone()),
+                        )?;
+                    }
+                    advance = sequential;
+                }
+                (Some(_), None) => self.cursor.delete_current()?,
+                (None, Some(node)) => {
+                    self.cursor.upsert(
+                        self.hashed_address,
+                        &A::StorageValue::new(nibbles, node.clone()),
+                    )?;
+                    advance = sequential;
+                }
+                (None, None) => {}
             }
         }
 

@@ -1,8 +1,5 @@
 use alloy_trie::{TrieMask, TrieMaskIter};
-use core::{
-    iter::Enumerate,
-    ops::{Index, IndexMut},
-};
+use core::ops::{Index, IndexMut};
 use smallvec::SmallVec;
 
 /// A dense index into a branch node's children array.
@@ -65,16 +62,27 @@ impl<T> IndexMut<BranchChildIdx> for SmallVec<[T; 4]> {
 
 /// An iterator over a branch's children that yields `(BranchChildIdx, nibble)` pairs.
 ///
-/// Wraps `TrieMask::iter().enumerate()` to produce [`BranchChildIdx`] values instead of raw
-/// `usize` indices.
+/// Tracks the dense index separately so traversal can resume at an arbitrary nibble.
 pub(super) struct BranchChildIter {
-    inner: Enumerate<TrieMaskIter>,
+    inner: TrieMaskIter,
+    dense: u8,
 }
 
 impl BranchChildIter {
     /// Creates a new iterator over the occupied children of the given `state_mask`.
-    pub(super) fn new(state_mask: TrieMask) -> Self {
-        Self { inner: state_mask.iter().enumerate() }
+    pub(super) const fn new(state_mask: TrieMask) -> Self {
+        Self { inner: state_mask.iter(), dense: 0 }
+    }
+
+    /// Resumes iteration at `nibble`, preserving indices in the full dense children array.
+    /// A nibble of 16 produces an empty iterator.
+    pub(super) const fn from_nibble(state_mask: TrieMask, nibble: u8) -> Self {
+        debug_assert!(nibble <= 16);
+        let lower_bits = ((1u32 << nibble) - 1) as u16;
+        Self {
+            inner: TrieMask::new(state_mask.get() & !lower_bits).iter(),
+            dense: (state_mask.get() & lower_bits).count_ones() as u8,
+        }
     }
 }
 
@@ -82,10 +90,37 @@ impl Iterator for BranchChildIter {
     type Item = (BranchChildIdx, u8);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next().map(|(dense, nibble)| (BranchChildIdx(dense as u8), nibble))
+        let nibble = self.inner.next()?;
+        let index = BranchChildIdx(self.dense);
+        self.dense += 1;
+        Some((index, nibble))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.inner.size_hint()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resume_at_every_nibble_for_every_occupancy_mask() {
+        for mask in 0..=u16::MAX {
+            for start in 0..=16 {
+                let mut children = BranchChildIter::from_nibble(TrieMask::new(mask), start);
+                let mut dense = 0;
+                for nibble in 0..16 {
+                    if mask & (1 << nibble) != 0 {
+                        if nibble >= start {
+                            assert_eq!(children.next(), Some((BranchChildIdx(dense), nibble)));
+                        }
+                        dense += 1;
+                    }
+                }
+                assert_eq!(children.next(), None);
+            }
+        }
     }
 }

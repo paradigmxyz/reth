@@ -13,8 +13,8 @@ use crate::{
 };
 use alloc::{borrow::Cow, boxed::Box, collections::VecDeque, vec::Vec};
 use alloy_primitives::{keccak256, map::B256Map, B256};
-use alloy_trie::TrieMask;
-use core::{cmp::Reverse, mem};
+use alloy_trie::{BranchNodeCompact, TrieMask};
+use core::mem;
 use reth_execution_errors::SparseTrieResult;
 use reth_trie_common::{
     BranchNodeMasks, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, ProofTrieNodeV2,
@@ -509,8 +509,8 @@ struct ArenaRequiredProof {
 /// operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ArenaParallelismThresholds {
-    /// Minimum number of dirty leaves in a subtrie before it is eligible for parallel hash
-    /// computation. Subtries with fewer dirty leaves than this are hashed serially during
+    /// Minimum total number of dirty leaves across subtries for parallel hash computation.
+    /// Below this threshold, subtries are hashed serially during
     /// [`ArenaParallelSparseTrie::update_subtrie_hashes`].
     pub min_dirty_leaves: u64,
     /// Minimum number of nodes to reveal in a subtrie before it is eligible for parallel
@@ -578,10 +578,10 @@ impl Default for ArenaParallelismThresholds {
 ///
 /// Root hash computation follows a bottom-up approach:
 ///
-/// 1. **[`SparseTrie::update_subtrie_hashes`]**: Takes dirty subtries from the upper arena and
-///    hashes them in parallel (when dirty leaf count meets
-///    [`ArenaParallelismThresholds::min_dirty_leaves`]), then walks the upper trie to restore
-///    hashed subtries and inline-hash any remaining dirty nodes.
+/// 1. **[`SparseTrie::update_subtrie_hashes`]**: Borrows subtries with dirty leaves from the upper
+///    arena and hashes them in parallel when the dirty leaf count meets
+///    [`ArenaParallelismThresholds::min_dirty_leaves`]. A dirty upper-trie walk then hashes
+///    subtries affected only by deletions. Both passes collect persistence updates directly.
 /// 2. **[`SparseTrie::root`]**: Calls `update_subtrie_hashes`, then RLP-encodes the full upper trie
 ///    depth-first to produce the root hash.
 ///
@@ -920,40 +920,11 @@ impl ArenaParallelSparseTrie {
         B256::from(bytes)
     }
 
-    /// Returns the [`BranchNodeMasks`] for a branch based on the status of its children.
-    fn get_branch_masks(arena: &NodeArena, branch: &ArenaSparseNodeBranch) -> BranchNodeMasks {
-        let mut masks = BranchNodeMasks::default();
-
-        for (nibble, child) in branch.child_iter() {
-            let (hash_bit, tree_bit) = match child {
-                ArenaSparseNodeBranchChild::Blinded(_) => (
-                    branch.branch_masks.hash_mask.is_bit_set(nibble),
-                    branch.branch_masks.tree_mask.is_bit_set(nibble),
-                ),
-                ArenaSparseNodeBranchChild::Revealed(child_idx) => {
-                    let child = &arena[*child_idx];
-                    (child.hash_mask_bit(), child.tree_mask_bit())
-                }
-            };
-
-            masks.set_child_bits(nibble, hash_bit, tree_bit);
-        }
-
-        masks
-    }
-
     /// Computes and caches `RlpNode` for all dirty nodes reachable from `root` in `arena`.
     ///
-    /// Uses the cursor's stack to walk dirty branches depth-first. For each branch,
-    /// children are iterated left-to-right:
-    /// - Blinded, cached, leaf, and `EmptyRoot` children have their `RlpNode` pushed directly onto
-    ///   `rlp_node_buf`.
-    /// - Dirty branch children are pushed onto `stack` and processed recursively first.
-    ///
-    /// When a dirty branch child finishes and is popped, the parent resumes iteration after
-    /// the child's nibble. Once all children of a branch are processed, the branch is encoded
-    /// via `BranchNodeRef` using the last N entries on `rlp_node_buf`, then replaced with a
-    /// single result `RlpNode`.
+    /// Uses the cursor's stack to walk dirty branches depth-first. After caching dirty child
+    /// branches, gathers child RLP encodings, modification epochs, and persistence masks in
+    /// one pass. The child encodings are reused for branch hashing and retained trie updates.
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all, fields(base_path = ?base_path), ret)]
     fn update_cached_rlp(
         arena: &mut NodeArena,
@@ -1037,11 +1008,19 @@ impl ArenaParallelSparseTrie {
 
             rlp_node_buf.clear();
             let mut node_epoch = TrieNodeEpoch::UNMODIFIED;
-            let state_mask = arena[head_idx].branch_ref().state_mask;
-            for (child_idx, _nibble) in BranchChildIter::new(state_mask) {
+            let b = arena[head_idx].branch_ref();
+            let state_mask = b.state_mask;
+            let prev_branch_masks = b.branch_masks;
+            let mut new_branch_masks = BranchNodeMasks::default();
+            for (child_idx, nibble) in BranchChildIter::new(state_mask) {
                 match &arena[head_idx].branch_ref().children[child_idx] {
                     ArenaSparseNodeBranchChild::Blinded(rlp_node) => {
                         rlp_node_buf.push(rlp_node.clone());
+                        new_branch_masks.set_child_bits(
+                            nibble,
+                            prev_branch_masks.hash_mask.is_bit_set(nibble),
+                            prev_branch_masks.tree_mask.is_bit_set(nibble),
+                        );
                     }
                     ArenaSparseNodeBranchChild::Revealed(child_idx) => {
                         let child_idx = *child_idx;
@@ -1083,12 +1062,26 @@ impl ArenaParallelSparseTrie {
                                 unreachable!("Unexpected child {:?}", arena[child_idx]);
                             }
                         }
+                        let child = &arena[child_idx];
                         let Some(ArenaSparseNodeState::Cached { epoch: child_epoch, .. }) =
-                            arena[child_idx].state_ref()
+                            child.state_ref()
                         else {
                             panic!("revealed child must be cached after encoding");
                         };
                         node_epoch = node_epoch.max(*child_epoch);
+                        if let Some(branch) = child.as_branch() {
+                            // Persist hashes only for branches without an extension or inline RLP.
+                            new_branch_masks.set_child_bits(
+                                nibble,
+                                branch.short_key.is_empty() &&
+                                    branch
+                                        .state
+                                        .cached_rlp_node()
+                                        .expect("child is cached")
+                                        .is_hash(),
+                                !branch.branch_masks.is_empty(),
+                            );
+                        }
                     }
                 }
             }
@@ -1097,8 +1090,6 @@ impl ArenaParallelSparseTrie {
             let b = arena[head_idx].branch_ref();
             let short_key = b.short_key;
             let state_mask = b.state_mask;
-            let prev_branch_masks = b.branch_masks;
-            let new_branch_masks = Self::get_branch_masks(arena, b);
             let was_dirty = matches!(b.state, ArenaSparseNodeState::Dirty);
             if was_dirty {
                 node_epoch = node_epoch.max(new_epoch);
@@ -1138,7 +1129,26 @@ impl ArenaParallelSparseTrie {
                         trie_updates.updated_nodes.remove(&logical_path);
                         trie_updates.removed_nodes.insert(logical_path);
                     } else if !new_branch_masks.is_empty() {
-                        let compact = arena[head_idx].branch_ref().branch_node_compact(arena);
+                        let mut hashes =
+                            Vec::with_capacity(new_branch_masks.hash_mask.count_bits() as usize);
+                        hashes.extend(
+                            state_mask
+                                .iter()
+                                .zip(rlp_node_buf.iter())
+                                .filter(|(nibble, _)| {
+                                    new_branch_masks.hash_mask.is_bit_set(*nibble)
+                                })
+                                .map(|(_, rlp_node)| {
+                                    rlp_node.as_hash().expect("hash mask child must be a hash")
+                                }),
+                        );
+                        let compact = BranchNodeCompact::new(
+                            state_mask,
+                            new_branch_masks.tree_mask,
+                            new_branch_masks.hash_mask,
+                            hashes,
+                            None,
+                        );
                         trie_updates.updated_nodes.insert(logical_path, compact);
                         trie_updates.removed_nodes.remove(&logical_path);
                     }
@@ -2079,21 +2089,6 @@ impl Default for ArenaParallelSparseTrie {
     }
 }
 
-impl ArenaParallelSparseTrie {
-    /// Hashes a subtrie at `head_idx` and collects its update actions.
-    fn update_upper_subtrie(&mut self, head_idx: Index, new_epoch: TrieNodeEpoch) {
-        let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[head_idx] else {
-            unreachable!()
-        };
-
-        if !subtrie.arena[subtrie.root].is_cached() {
-            subtrie.update_cached_rlp(new_epoch);
-        }
-
-        Self::merge_subtrie_updates(&mut self.buffers.updates, &mut subtrie.buffers.updates);
-    }
-}
-
 impl SparseTrie for ArenaParallelSparseTrie {
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
     fn set_root(
@@ -2296,6 +2291,12 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all, ret)]
     fn root(&mut self, new_epoch: TrieNodeEpoch) -> B256 {
+        if let Some(rlp_node) =
+            self.upper_arena[self.root].state_ref().and_then(ArenaSparseNodeState::cached_rlp_node)
+        {
+            return rlp_node.as_hash().expect("root RlpNode must be a hash");
+        }
+
         self.update_subtrie_hashes(new_epoch);
 
         let rlp_node = Self::update_cached_rlp(
@@ -2325,90 +2326,69 @@ impl SparseTrie for ArenaParallelSparseTrie {
     fn update_subtrie_hashes(&mut self, new_epoch: TrieNodeEpoch) {
         trace!(target: TRACE_TARGET, "Updating subtrie hashes");
 
-        // Only descend if the root is a branch; otherwise there are no subtries.
-        if !matches!(&self.upper_arena[self.root], ArenaSparseNode::Branch(_)) {
+        // Dirty state propagates to the root, so a cached root has no hashing work.
+        if self.upper_arena[self.root].is_cached() ||
+            !matches!(&self.upper_arena[self.root], ArenaSparseNode::Branch(_))
+        {
             return;
         }
 
-        // Count total dirty leaves across all subtries to make one global parallelism decision.
         let mut total_dirty_leaves: u64 = 0;
-        let mut taken: Vec<(Index, Box<ArenaSparseSubtrie>)> = Vec::new();
-        for (idx, node) in &mut self.upper_arena {
-            let ArenaSparseNode::Subtrie(s) = node else { continue };
-            if s.num_dirty_leaves == 0 {
+        let mut subtries = Vec::new();
+        let mut check_remaining_subtries = false;
+        for node in self.upper_arena.values_mut() {
+            let ArenaSparseNode::Subtrie(subtrie) = node else { continue };
+            if subtrie.num_dirty_leaves == 0 {
+                check_remaining_subtries = true;
                 continue;
             }
-            total_dirty_leaves += s.num_dirty_leaves;
-            let ArenaSparseNode::Subtrie(subtrie) =
-                mem::replace(node, ArenaSparseNode::TakenSubtrie)
-            else {
-                unreachable!()
-            };
-            taken.push((idx, subtrie));
+            total_dirty_leaves += subtrie.num_dirty_leaves;
+            subtries.push(subtrie);
         }
 
-        // Hash taken subtries in parallel if total dirty leaves meet the threshold.
-        if !taken.is_empty() {
-            if taken.len() == 1 || total_dirty_leaves < self.parallelism_thresholds.min_dirty_leaves
-            {
-                for (_, subtrie) in &mut taken {
-                    subtrie.update_cached_rlp(new_epoch);
-                }
-            } else {
-                use rayon::iter::{IntoParallelIterator, ParallelIterator};
-
-                let parent_span = tracing::Span::current();
-                taken = taken
-                    .into_par_iter()
-                    .map(|(idx, mut subtrie)| {
-                        let _guard = parent_span.enter();
-                        subtrie.update_cached_rlp(new_epoch);
-                        (idx, subtrie)
-                    })
-                    .collect();
+        if subtries.len() <= 1 || total_dirty_leaves < self.parallelism_thresholds.min_dirty_leaves
+        {
+            for subtrie in &mut subtries {
+                subtrie.update_cached_rlp(new_epoch);
             }
+        } else {
+            use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
+
+            let parent_span = tracing::Span::current();
+            subtries.par_iter_mut().for_each(|subtrie| {
+                let _guard = parent_span.enter();
+                subtrie.update_cached_rlp(new_epoch);
+            });
         }
 
-        // If the root branch is already cached and nothing was taken for parallel
-        // hashing, there are no dirty subtries to process.
-        if taken.is_empty() && self.upper_arena[self.root].is_cached() {
+        for subtrie in subtries {
+            Self::merge_subtrie_updates(&mut self.buffers.updates, &mut subtrie.buffers.updates);
+        }
+
+        if !check_remaining_subtries {
             return;
         }
 
-        // Walk the upper trie depth-first, restoring hashed subtries and inline-hashing
-        // any remaining dirty subtries. Only descend into dirty branches; clean subtrees
-        // cannot contain dirty subtries since dirty state propagates upward.
-        taken.sort_unstable_by_key(|(_, b)| Reverse(b.path));
-
+        // Deletions can dirty branches without leaving any dirty leaves. Follow dirty upper
+        // branches to find those subtries without loading every unchanged subtrie's root.
         self.buffers.cursor.reset(&self.upper_arena, self.root, Nibbles::default());
-
         loop {
-            let result = self.buffers.cursor.next(&mut self.upper_arena, |_, child| match child {
-                ArenaSparseNode::Branch(_) | ArenaSparseNode::Subtrie(_) => !child.is_cached(),
-                ArenaSparseNode::TakenSubtrie => true,
-                _ => false,
+            let result = self.buffers.cursor.next(&mut self.upper_arena, |_, child| {
+                matches!(child, ArenaSparseNode::Branch(_) | ArenaSparseNode::Subtrie(_)) &&
+                    !child.is_cached()
             });
-
             match result {
                 NextResult::Done => break,
                 NextResult::Branch => continue,
                 NextResult::NonBranch => {}
             }
 
-            // Head is a subtrie or taken-subtrie — process it.
-            let head_idx = self.buffers.cursor.head().expect("cursor is non-empty").index;
-
-            if matches!(&self.upper_arena[head_idx], ArenaSparseNode::TakenSubtrie) {
-                let (_, subtrie) = taken.pop().expect("taken subtries must not be exhausted");
-                debug_assert_eq!(
-                    subtrie.path,
-                    self.buffers.cursor.head().expect("cursor is non-empty").path,
-                    "taken subtrie path mismatch",
-                );
-                self.upper_arena[head_idx] = ArenaSparseNode::Subtrie(subtrie);
-            }
-
-            self.update_upper_subtrie(head_idx, new_epoch);
+            let index = self.buffers.cursor.head().expect("cursor is non-empty").index;
+            let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[index] else {
+                unreachable!("only subtries are visited as non-branch nodes")
+            };
+            subtrie.update_cached_rlp(new_epoch);
+            Self::merge_subtrie_updates(&mut self.buffers.updates, &mut subtrie.buffers.updates);
         }
     }
 
@@ -3002,13 +2982,13 @@ mod tests {
                 .retain(|path| self.storage_trie_updates().storage_nodes.contains_key(path));
 
             pretty_assertions::assert_eq!(
-                expected_trie_updates.storage_nodes.into_iter().collect::<Vec<_>>().sort(),
-                actual_updates.updated_nodes.into_iter().collect::<Vec<_>>().sort(),
+                expected_trie_updates.storage_nodes,
+                actual_updates.updated_nodes,
                 "updated nodes mismatch"
             );
             pretty_assertions::assert_eq!(
-                expected_trie_updates.removed_nodes.into_iter().collect::<Vec<_>>().sort(),
-                actual_updates.removed_nodes.into_iter().collect::<Vec<_>>().sort(),
+                expected_trie_updates.removed_nodes,
+                actual_updates.removed_nodes,
                 "removed nodes mismatch"
             );
             assert_eq!(expected_root, actual_root, "storage root mismatch");
@@ -3017,6 +2997,79 @@ mod tests {
 
     use proptest::prelude::*;
     use proptest_arbitrary_interop::arb;
+
+    #[test]
+    fn hash_subtries_after_deleting_only_cached_leaves() {
+        let mut storage = BTreeMap::new();
+        for prefix in [0x10, 0x11, 0x20, 0x21] {
+            for branch in 0..3 {
+                for leaf in 0..3 {
+                    let mut key = B256::ZERO;
+                    key.0[0] = prefix;
+                    key.0[1] = branch << 4 | leaf;
+                    storage.insert(key, U256::from(1));
+                }
+            }
+        }
+        let harness = ArenaTrieTestHarness::new(storage.clone());
+        let changes: BTreeMap<_, _> = storage
+            .keys()
+            .filter(|key| key.0[1] & 0x0f == 0)
+            .map(|key| (*key, U256::ZERO))
+            .collect();
+        let (expected_root, mut expected_updates) = harness.get_root_with_updates(&changes);
+        harness.minimize_trie_updates(&mut expected_updates);
+
+        for retain_updates in [false, true] {
+            let mut trie = ArenaParallelSparseTrie::default();
+            trie.set_updates(retain_updates);
+            let mut initial = storage
+                .iter()
+                .map(|(key, value)| (*key, LeafUpdate::Changed(alloy_rlp::encode(value))))
+                .collect();
+            trie.update_leaves(&mut initial, |_, _| unreachable!()).unwrap();
+            assert_eq!(trie.root(epoch(1)), harness.original_root());
+            trie.take_updates();
+
+            let mut removals =
+                changes.keys().map(|key| (*key, LeafUpdate::Changed(Vec::new()))).collect();
+            trie.update_leaves(&mut removals, |_, _| unreachable!()).unwrap();
+            let subtries: Vec<_> = trie
+                .upper_arena
+                .values()
+                .filter_map(|node| match node {
+                    super::ArenaSparseNode::Subtrie(subtrie) => Some(subtrie),
+                    _ => None,
+                })
+                .collect();
+            assert!(!subtries.is_empty());
+            assert!(subtries
+                .iter()
+                .all(|subtrie| subtrie.num_dirty_leaves == 0 &&
+                    !subtrie.arena[subtrie.root].is_cached()));
+
+            trie.update_subtrie_hashes(epoch(2));
+            assert_eq!(trie.root(epoch(2)), expected_root);
+            assert_eq!(trie.root_epoch(), Some(epoch(2)));
+            assert_eq!(trie.root(epoch(3)), expected_root);
+            assert_eq!(trie.root_epoch(), Some(epoch(2)));
+
+            let mut actual_updates = trie.take_updates();
+            if retain_updates {
+                actual_updates.updated_nodes.retain(|path, node| {
+                    harness.storage_trie_updates().storage_nodes.get(path) != Some(node)
+                });
+                actual_updates
+                    .removed_nodes
+                    .retain(|path| harness.storage_trie_updates().storage_nodes.contains_key(path));
+                assert_eq!(actual_updates.updated_nodes, expected_updates.storage_nodes);
+                assert_eq!(actual_updates.removed_nodes, expected_updates.removed_nodes);
+            } else {
+                assert!(actual_updates.updated_nodes.is_empty());
+                assert!(actual_updates.removed_nodes.is_empty());
+            }
+        }
+    }
 
     /// Builds a changeset by mixing `new_keys` (fresh insertions) with a fraction of
     /// existing keys from `base` (updates/deletions).

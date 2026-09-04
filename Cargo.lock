@@ -10725,9 +10725,11 @@ dependencies = [
  "reth-storage-errors",
  "reth-trie",
  "reth-trie-common",
+ "reth-trie-sparse",
  "revm",
  "serde_json",
  "similar-asserts",
+ "tempfile",
  "tracing",
  "triehash",
 ]
