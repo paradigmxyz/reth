@@ -370,3 +370,71 @@ impl ArchiveMode {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::download::manifest::{OutputFileChecksum, SnapshotComponentType};
+
+    #[test]
+    fn cached_extraction_failure_does_not_keep_completed_bytes() {
+        failed_archive_can_be_retried(false);
+    }
+
+    #[test]
+    fn cached_verification_failure_does_not_keep_completed_bytes() {
+        failed_archive_can_be_retried(true);
+    }
+
+    fn failed_archive_can_be_retried(valid_archive: bool) {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target");
+        let cache = dir.path().join("cache");
+        fs::create_dir_all(&target).unwrap();
+        fs::create_dir_all(&cache).unwrap();
+        let source = dir.path().join("state.tar.zst");
+        let data = b"snapshot";
+        let mut tar = tar::Builder::new(zstd::Encoder::new(Vec::new(), 0).unwrap());
+        let mut header = tar::Header::new_gnu();
+        header.set_size(data.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        tar.append_data(&mut header, "db/state", data.as_slice()).unwrap();
+        let bytes = tar.into_inner().unwrap().finish().unwrap();
+        fs::write(&source, if valid_archive { bytes.as_slice() } else { b"invalid zstd" }).unwrap();
+        let mut archive = PlannedArchive {
+            ty: SnapshotComponentType::State,
+            component: "state".into(),
+            archive: SnapshotArchive {
+                url: url::Url::from_file_path(&source).unwrap().to_string(),
+                file_name: "state.tar.zst".into(),
+                size: bytes.len() as u64,
+                blake3: None,
+                output_files: vec![OutputFileChecksum {
+                    path: "db/state".into(),
+                    size: data.len() as u64,
+                    blake3: blake3::hash(b"wrong").to_hex().to_string(),
+                }],
+            },
+        };
+        let token = CancellationToken::new();
+        let progress = SharedProgress::new(bytes.len() as u64 + 5, 8, 2, token.clone());
+        progress.record_archive_download_complete(5);
+        let session = DownloadSession::new(
+            Some(Arc::clone(&progress)),
+            Some(DownloadRequestLimiter::new(1)),
+            token,
+        );
+        let ctx = ArchiveProcessContext::new(target.clone(), Some(cache), session);
+        assert!(ArchiveProcessor::new(archive.clone(), ctx.clone()).run().is_err());
+        assert_eq!(progress.logical_downloaded_bytes(), 5);
+
+        fs::write(&source, &bytes).unwrap();
+        archive.archive.output_files[0].blake3 = blake3::hash(data).to_hex().to_string();
+        // Force the second run through extraction even if the first run left its output behind.
+        let _ = fs::remove_file(target.join("db/state"));
+        ArchiveProcessor::new(archive, ctx).run().unwrap();
+        assert_eq!(progress.logical_downloaded_bytes(), bytes.len() as u64 + 5);
+        assert_eq!(fs::read(target.join("db/state")).unwrap(), data);
+    }
+}
