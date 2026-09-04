@@ -1,8 +1,9 @@
 //! Sparse Trie task related functionality.
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use super::{evm_state_to_hashed_post_state, StateRootComputeOutcome, StateRootMessage};
+use alloy_consensus::transaction::Either;
 use alloy_primitives::{
     map::{hash_map::Entry, B256Map},
     B256,
@@ -13,7 +14,7 @@ use metrics::{Gauge, Histogram};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, FastInstant as Instant};
-use reth_tasks::Runtime;
+use reth_tasks::{Runtime, TaskHandle, TaskRuntime};
 use reth_trie::{
     updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, TrieAccount, EMPTY_ROOT_HASH,
     TRIE_ACCOUNT_RLP_MAX_SIZE,
@@ -120,6 +121,10 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// hashing work.
     final_hashed_state: HashedPostState,
 
+    /// Whether operations are driven by a cooperative runtime.
+    cooperative: bool,
+    /// Owned hashing worker and its stop guard. Dropping the guard disconnects its stop channel.
+    hashing_task: Option<(CrossbeamSender<()>, TaskHandle<()>)>,
     /// Metrics for the sparse trie.
     metrics: SparseTrieTaskMetrics,
 }
@@ -154,10 +159,92 @@ where
             Self::run_hashing_task(updates, hashed_state_tx, hashing_metrics)
         });
 
+        Self::with_hashed_updates(
+            hashed_state_rx,
+            cancel_rx,
+            final_hashed_state_tx,
+            proof_worker_handle,
+            proof_result_tx,
+            proof_result_rx,
+            metrics,
+            trie,
+            parent_state_root,
+            new_epoch,
+            chunk_size,
+            None,
+        )
+    }
+
+    /// Creates a cooperative hashing/sparse pipeline without a native worker thread.
+    ///
+    /// The supplied trie and proof worker must also use cooperative execution. Each hashing
+    /// message is one bounded operation; finish, error, and cancellation join its owned worker.
+    #[expect(clippy::too_many_arguments)]
+    pub(super) fn new_with_trie_cooperative(
+        executor: &TaskRuntime,
+        updates: CrossbeamReceiver<StateRootMessage>,
+        cancel_rx: CrossbeamReceiver<()>,
+        final_hashed_state_tx: std::sync::mpsc::Sender<Arc<HashedPostState>>,
+        proof_worker_handle: ProofWorkerHandle,
+        proof_result_tx: ProofResultSender,
+        proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
+        metrics: SparseTrieTaskMetrics,
+        trie: SparseStateTrie<A, S>,
+        parent_state_root: B256,
+        new_epoch: TrieNodeEpoch,
+        chunk_size: usize,
+    ) -> Self {
+        let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
+        let (stop, stopped) = crossbeam_channel::bounded(0);
+        let hashing_runtime = executor.clone();
+        let hashing_metrics = metrics.clone();
+        let hashing_task = executor
+            .spawn("trie-hashing", async move {
+                Self::run_hashing_task_cooperative(
+                    updates,
+                    hashed_state_tx,
+                    stopped,
+                    hashing_runtime,
+                    hashing_metrics,
+                )
+                .await;
+            })
+            .abort_on_drop();
+        Self::with_hashed_updates(
+            hashed_state_rx,
+            cancel_rx,
+            final_hashed_state_tx,
+            proof_worker_handle,
+            proof_result_tx,
+            proof_result_rx,
+            metrics,
+            trie,
+            parent_state_root,
+            new_epoch,
+            chunk_size,
+            Some((stop, hashing_task)),
+        )
+    }
+
+    #[expect(clippy::too_many_arguments)]
+    fn with_hashed_updates(
+        updates: CrossbeamReceiver<SparseTrieTaskMessage>,
+        cancel_rx: CrossbeamReceiver<()>,
+        final_hashed_state_tx: std::sync::mpsc::Sender<Arc<HashedPostState>>,
+        proof_worker_handle: ProofWorkerHandle,
+        proof_result_tx: ProofResultSender,
+        proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
+        metrics: SparseTrieTaskMetrics,
+        trie: SparseStateTrie<A, S>,
+        parent_state_root: B256,
+        new_epoch: TrieNodeEpoch,
+        chunk_size: usize,
+        hashing_task: Option<(CrossbeamSender<()>, TaskHandle<()>)>,
+    ) -> Self {
         Self {
             proof_result_tx,
             proof_result_rx,
-            updates: hashed_state_rx,
+            updates,
             cancel_rx,
             proof_worker_handle,
             final_hashed_state_tx: Some(final_hashed_state_tx),
@@ -183,12 +270,13 @@ where
             in_flight_proof_batches: 0,
             pending_updates: Default::default(),
             final_hashed_state: Default::default(),
+            cooperative: hashing_task.is_some(),
+            hashing_task,
             metrics,
         }
     }
 
-    /// Runs the hashing task that drains updates from the channel and converts them to
-    /// `HashedPostState` in parallel.
+    /// Drains execution updates and hashes their account addresses and storage keys.
     fn run_hashing_task(
         updates: CrossbeamReceiver<StateRootMessage>,
         hashed_state_tx: CrossbeamSender<SparseTrieTaskMessage>,
@@ -200,22 +288,7 @@ where
         while let Ok(message) = updates.recv() {
             total_idle_time += idle_start.elapsed();
 
-            let msg = match message {
-                StateRootMessage::PrefetchProofs(targets) => {
-                    SparseTrieTaskMessage::PrefetchProofs(targets)
-                }
-                StateRootMessage::StateUpdate(state) => {
-                    let _span = trace_span!(target: "engine::tree::payload_processor::sparse_trie", "hashing_state_update", n = state.len()).entered();
-                    let hashed = evm_state_to_hashed_post_state(state);
-                    SparseTrieTaskMessage::HashedState(hashed)
-                }
-                StateRootMessage::FinishedStateUpdates => {
-                    SparseTrieTaskMessage::FinishedStateUpdates
-                }
-                StateRootMessage::HashedStateUpdate(state) => {
-                    SparseTrieTaskMessage::HashedState(state)
-                }
-            };
+            let msg = Self::hash_message(message);
             if hashed_state_tx.send(msg).is_err() {
                 break;
             }
@@ -224,6 +297,54 @@ where
         }
 
         metrics.hashing_task_idle_time_seconds.record(total_idle_time.as_secs_f64());
+    }
+
+    /// Applies the same message conversion in both hashing drivers.
+    fn hash_message(message: StateRootMessage) -> SparseTrieTaskMessage {
+        match message {
+            StateRootMessage::PrefetchProofs(targets) => {
+                SparseTrieTaskMessage::PrefetchProofs(targets)
+            }
+            StateRootMessage::StateUpdate(state) => {
+                let _span = trace_span!(target: "engine::tree::payload_processor::sparse_trie", "hashing_state_update", n = state.len()).entered();
+                let hashed = evm_state_to_hashed_post_state(state);
+                SparseTrieTaskMessage::HashedState(hashed)
+            }
+            StateRootMessage::FinishedStateUpdates => SparseTrieTaskMessage::FinishedStateUpdates,
+            StateRootMessage::HashedStateUpdate(state) => SparseTrieTaskMessage::HashedState(state),
+        }
+    }
+
+    async fn run_hashing_task_cooperative(
+        updates: CrossbeamReceiver<StateRootMessage>,
+        hashed_state_tx: CrossbeamSender<SparseTrieTaskMessage>,
+        stopped: CrossbeamReceiver<()>,
+        runtime: TaskRuntime,
+        metrics: SparseTrieTaskMetrics,
+    ) {
+        let mut idle = Duration::ZERO;
+        loop {
+            let message = crossbeam_channel::select_biased! {
+                recv(stopped) -> _ => break,
+                recv(updates) -> message => match message {
+                    Ok(message) => Some(message),
+                    Err(_) => break,
+                },
+                default => None,
+            };
+            let Some(message) = message else {
+                let start = runtime.now();
+                runtime.sleep(Duration::from_millis(1)).await;
+                idle += runtime.now().duration_since(start).unwrap_or_default();
+                continue;
+            };
+            let finished = matches!(message, StateRootMessage::FinishedStateUpdates);
+            if hashed_state_tx.send(Self::hash_message(message)).is_err() || finished {
+                break;
+            }
+            runtime.yield_now().await;
+        }
+        metrics.hashing_task_idle_time_seconds.record(idle.as_secs_f64());
     }
 
     /// Returns the trie for reuse in the next payload built on top of this one.
@@ -259,81 +380,111 @@ where
         skip_all
     )]
     pub(super) fn run(&mut self) -> Result<StateRootComputeOutcome, StateRootTaskError> {
-        let now = Instant::now();
+        let mut run = SparseTrieRunState::new();
+        while self.step(&mut run, true)? != Some(true) {}
+        self.finish(run)
+    }
 
-        let mut total_idle_time = std::time::Duration::ZERO;
-        let mut idle_start = Instant::now();
-        let mut done = false;
-        let mut finalized_hashed_state = None;
+    /// Drives the same sparse trie state transitions without blocking the runtime thread.
+    ///
+    /// Hashing and proof workers are drained before returning, including on cancellation/error,
+    /// so a completed task no longer owns database readers through its child jobs.
+    pub(super) async fn run_cooperative(
+        &mut self,
+        runtime: &TaskRuntime,
+    ) -> Result<StateRootComputeOutcome, StateRootTaskError> {
+        let result = self.run_cooperative_inner(runtime).await;
+        let hashing_result = if let Some((stop, hashing)) = self.hashing_task.take() {
+            drop(stop);
+            hashing
+                .await
+                .map_err(|error| StateRootTaskError::Other(format!("hashing task failed: {error}")))
+        } else {
+            Ok(())
+        };
+        self.proof_worker_handle.shutdown().await;
+        match result {
+            Ok(outcome) => hashing_result.map(|()| outcome),
+            Err(error) => Err(error),
+        }
+    }
 
-        // Streaming phase: updates are still arriving. Ends when the finish marker is
-        // processed. Only producers hold update senders, so the channel closing before the
-        // marker means they died without finishing the stream.
-        while !self.finished_state_updates {
-            let mut t = Instant::now();
-            crossbeam_channel::select_biased! {
-                recv(self.updates) -> message => {
-                    let wake = Instant::now();
-                    total_idle_time += wake.duration_since(idle_start);
-                    self.metrics
-                        .sparse_trie_channel_wait_duration_histogram
-                        .record(wake.duration_since(t));
+    async fn run_cooperative_inner(
+        &mut self,
+        runtime: &TaskRuntime,
+    ) -> Result<StateRootComputeOutcome, StateRootTaskError> {
+        let mut run = SparseTrieRunState::new();
+        loop {
+            match self.step(&mut run, false)? {
+                Some(true) => return self.finish(run),
+                Some(false) => runtime.yield_now().await,
+                None => runtime.sleep(Duration::from_millis(1)).await,
+            }
+        }
+    }
 
-                    let update = message.map_err(|_| StateRootTaskError::Other(
-                        "updates channel disconnected before state root calculation".to_string(),
-                    ))?;
-                    if let Some(hashed_state) = self.on_message(update) {
-                        finalized_hashed_state = Some(hashed_state);
-                    }
-                    self.pending_updates += 1;
+    /// Reads one event in streaming/draining priority order and advances the shared state machine.
+    /// `None` means a cooperative poll had no ready input; `Some(true)` means work is complete.
+    fn step(
+        &mut self,
+        run: &mut SparseTrieRunState,
+        blocking: bool,
+    ) -> Result<Option<bool>, StateRootTaskError> {
+        let mut t = Instant::now();
+        let Some(event) = self.receive_event(blocking)? else { return Ok(None) };
+        let wake = Instant::now();
+        run.total_idle_time += wake.duration_since(run.idle_start);
+        self.metrics.sparse_trie_channel_wait_duration_histogram.record(wake.duration_since(t));
+        match event {
+            SparseTrieEvent::Update(update) => {
+                if let Some(hashed_state) = self.on_message(update) {
+                    run.finalized_hashed_state = Some(hashed_state);
                 }
-                recv(self.proof_result_rx) -> message => {
-                    let wake = Instant::now();
-                    total_idle_time += wake.duration_since(idle_start);
-                    self.metrics
-                        .sparse_trie_channel_wait_duration_histogram
-                        .record(wake.duration_since(t));
-                    t = wake;
-
-                    let Ok(result) = message else {
-                        unreachable!("we own the sender half")
-                    };
-                    self.on_proof_results(result, &mut t)?;
-                },
-                recv(self.cancel_rx) -> _ => return Err(StateRootTaskError::Canceled),
+                self.pending_updates += 1;
             }
-
-            done = self.make_progress()?;
-            idle_start = Instant::now();
-        }
-
-        // Draining phase: the marker is the last message read from the updates channel, so
-        // after it only proof results and cancellation can occur. The channel closing when
-        // the producers drop their senders is not observed here, and late best-effort hints
-        // are ignored: with all updates known, prefetching has nothing left to help.
-        while !done {
-            let mut t = Instant::now();
-            crossbeam_channel::select_biased! {
-                recv(self.proof_result_rx) -> message => {
-                    let wake = Instant::now();
-                    total_idle_time += wake.duration_since(idle_start);
-                    self.metrics
-                        .sparse_trie_channel_wait_duration_histogram
-                        .record(wake.duration_since(t));
-                    t = wake;
-
-                    let Ok(result) = message else {
-                        unreachable!("we own the sender half")
-                    };
-                    self.on_proof_results(result, &mut t)?;
-                },
-                recv(self.cancel_rx) -> _ => return Err(StateRootTaskError::Canceled),
+            SparseTrieEvent::Proof(result) => {
+                t = wake;
+                self.on_proof_results(result, &mut t)?;
             }
-
-            done = self.make_progress()?;
-            idle_start = Instant::now();
         }
+        let done = self.make_progress()?;
+        run.idle_start = Instant::now();
+        Ok(Some(done))
+    }
 
+    fn receive_event(&self, blocking: bool) -> Result<Option<SparseTrieEvent>, StateRootTaskError> {
+        // After the finish marker the updates channel is deliberately ignored, including its
+        // disconnection and any late best-effort prefetch hints.
+        let never_updates = crossbeam_channel::never();
+        let updates = if self.finished_state_updates { &never_updates } else { &self.updates };
+        macro_rules! receive {
+            ($($default:tt)*) => {
+                crossbeam_channel::select_biased! {
+                    recv(updates) -> message => message
+                        .map(|update| Some(SparseTrieEvent::Update(update)))
+                        .map_err(|_| StateRootTaskError::Other(
+                            "updates channel disconnected before state root calculation".into(),
+                        )),
+                    recv(self.proof_result_rx) -> message => {
+                        Ok(Some(SparseTrieEvent::Proof(message.expect("we own the proof sender"))))
+                    },
+                    recv(self.cancel_rx) -> _ => Err(StateRootTaskError::Canceled),
+                    $($default)*
+                }
+            };
+        }
+        if blocking {
+            receive!()
+        } else {
+            receive!(default => Ok(None))
+        }
+    }
+
+    fn finish(
+        &mut self,
+        run: SparseTrieRunState,
+    ) -> Result<StateRootComputeOutcome, StateRootTaskError> {
+        let SparseTrieRunState { started: now, total_idle_time, finalized_hashed_state, .. } = run;
         self.metrics.sparse_trie_idle_time_seconds.record(total_idle_time.as_secs_f64());
 
         debug!(target: "engine::root", "All proofs processed, ending calculation");
@@ -719,6 +870,20 @@ where
             .filter_map(|(address, updates)| updates.is_empty().then_some(*address))
             .collect();
 
+        if self.cooperative {
+            let mut addresses = addresses_to_compute_roots;
+            addresses.sort_unstable();
+            for address in addresses {
+                if let Some(trie) = self.trie.storage_tries_mut().get_mut(&address) &&
+                    !trie.is_root_cached()
+                {
+                    trie.root(self.new_epoch)
+                        .expect("updates are drained, trie should be revealed by now");
+                }
+            }
+            return;
+        }
+
         struct SendStorageTriePtr<S>(*mut RevealableSparseTrie<S>);
         // SAFETY: this wrapper only forwards the pointer across rayon; deref invariants are
         // documented at the use site below.
@@ -858,7 +1023,11 @@ where
         }
 
         let _span = trace_span!("dispatch_pending_targets").entered();
-        let (targets, chunking_length) = self.pending_targets.take();
+        let (mut targets, chunking_length) = self.pending_targets.take();
+        if self.cooperative {
+            sort_proof_targets(&mut targets);
+        }
+        let cooperative = self.cooperative;
         let mut dispatch_error = None;
         dispatch_with_chunking(
             targets,
@@ -867,7 +1036,13 @@ where
             self.max_targets_for_chunking,
             self.proof_worker_handle.has_multiple_idle_account_workers(),
             self.proof_worker_handle.has_multiple_idle_storage_workers(),
-            MultiProofTargetsV2::chunks,
+            |targets, size| {
+                if cooperative {
+                    Either::Left(ordered_proof_chunks(targets, size).into_iter())
+                } else {
+                    Either::Right(targets.chunks(size))
+                }
+            },
             |proof_targets| {
                 if dispatch_error.is_some() {
                     return;
@@ -1009,6 +1184,31 @@ pub(super) struct SparseTrieTaskMetrics {
     pub(super) sparse_trie_retained_storage_tries: Gauge,
 }
 
+/// State kept by either driver while a sparse calculation is running.
+struct SparseTrieRunState {
+    started: Instant,
+    idle_start: Instant,
+    total_idle_time: Duration,
+    finalized_hashed_state: Option<Arc<HashedPostState>>,
+}
+
+impl SparseTrieRunState {
+    fn new() -> Self {
+        let started = Instant::now();
+        Self {
+            started,
+            idle_start: started,
+            total_idle_time: Duration::ZERO,
+            finalized_hashed_state: None,
+        }
+    }
+}
+
+enum SparseTrieEvent {
+    Update(SparseTrieTaskMessage),
+    Proof(ProofResultMessage),
+}
+
 /// The default max targets, for limiting the number of account and storage proof targets to be
 /// fetched by a single worker. If exceeded, chunking is forced regardless of worker availability.
 const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
@@ -1041,6 +1241,48 @@ fn dispatch_with_chunking<T, I>(
     }
 
     dispatch(items);
+}
+
+/// Canonicalizes targets before they become separately scheduled cooperative proof jobs.
+fn sort_proof_targets(targets: &mut MultiProofTargetsV2) {
+    targets.account_targets.sort_unstable_by_key(|target| (target.key_nibbles, target.parent));
+    for slots in targets.storage_targets.values_mut() {
+        slots.sort_unstable_by_key(|target| (target.key_nibbles, target.parent));
+    }
+}
+
+/// Uses the production chunk size and account/storage grouping with stable storage-only ordering.
+fn ordered_proof_chunks(mut targets: MultiProofTargetsV2, size: usize) -> Vec<MultiProofTargetsV2> {
+    assert!(size > 0, "proof chunk size must be nonzero");
+    sort_proof_targets(&mut targets);
+    let mut ordered = Vec::with_capacity(targets.chunking_length());
+    for account in targets.account_targets {
+        let address = account.key();
+        ordered.push((None, account));
+        if let Some(slots) = targets.storage_targets.remove(&address) {
+            ordered.extend(slots.into_iter().map(|slot| (Some(address), slot)));
+        }
+    }
+    let mut remaining: Vec<_> = targets.storage_targets.into_iter().collect();
+    remaining.sort_unstable_by_key(|(address, _)| *address);
+    for (address, slots) in remaining {
+        ordered.extend(slots.into_iter().map(|slot| (Some(address), slot)));
+    }
+    ordered
+        .chunks(size)
+        .map(|chunk| {
+            let mut targets = MultiProofTargetsV2::default();
+            for &(address, target) in chunk {
+                match address {
+                    None => targets.account_targets.push(target),
+                    Some(address) => {
+                        targets.storage_targets.entry(address).or_default().push(target)
+                    }
+                }
+            }
+            targets
+        })
+        .collect()
 }
 
 /// RLP-encodes the account as a [`TrieAccount`] leaf value, or returns empty for deletions.
@@ -1125,6 +1367,339 @@ mod tests {
         for task_name in ["trie-hashing", "storage-workers", "account-workers"] {
             runtime.spawn_blocking_named(task_name, || {}).get();
         }
+    }
+
+    #[test]
+    fn ordered_proof_chunks_preserve_targets_across_permutations() {
+        let make_targets = |reverse: bool| {
+            let mut accounts = vec![
+                ProofV2Target::new(B256::repeat_byte(1)),
+                ProofV2Target::new(B256::repeat_byte(2)),
+            ];
+            let mut storage = vec![
+                (B256::repeat_byte(1), vec![ProofV2Target::new(B256::repeat_byte(4))]),
+                (
+                    B256::repeat_byte(3),
+                    vec![
+                        ProofV2Target::new(B256::repeat_byte(5)),
+                        ProofV2Target::new(B256::repeat_byte(6))
+                            .with_parent(ProofV2TargetParent::new(2)),
+                    ],
+                ),
+            ];
+            if reverse {
+                accounts.reverse();
+                storage.reverse();
+                for (_, slots) in &mut storage {
+                    slots.reverse();
+                }
+            }
+            MultiProofTargetsV2 {
+                account_targets: accounts,
+                storage_targets: storage.into_iter().collect(),
+            }
+        };
+        let summarize = |chunks: Vec<MultiProofTargetsV2>| {
+            chunks
+                .into_iter()
+                .map(|chunk| {
+                    let mut values: Vec<_> = chunk
+                        .account_targets
+                        .into_iter()
+                        .map(|target| (None, target.key(), target.parent))
+                        .collect();
+                    for (address, slots) in chunk.storage_targets {
+                        values.extend(
+                            slots
+                                .into_iter()
+                                .map(|target| (Some(address), target.key(), target.parent)),
+                        );
+                    }
+                    values.sort_unstable();
+                    values
+                })
+                .collect::<Vec<_>>()
+        };
+        let expected = summarize(ordered_proof_chunks(make_targets(false), 2));
+        assert_eq!(expected, summarize(ordered_proof_chunks(make_targets(true), 2)));
+        assert_eq!(expected.iter().map(Vec::len).collect::<Vec<_>>(), [2, 2, 1]);
+        let mut expected_targets = summarize(vec![make_targets(false)]).pop().unwrap();
+        let mut actual_targets: Vec<_> = expected.into_iter().flatten().collect();
+        expected_targets.sort_unstable();
+        actual_targets.sort_unstable();
+        assert_eq!(actual_targets, expected_targets);
+    }
+
+    fn changed_state() -> HashedPostState {
+        let mut state = HashedPostState::default();
+        for byte in 1..=4 {
+            let address = keccak256(Address::repeat_byte(byte));
+            state.accounts.insert(
+                address,
+                Some(Account {
+                    balance: U256::from(100 + u64::from(byte)),
+                    nonce: 1,
+                    bytecode_hash: None,
+                }),
+            );
+            let mut storage = reth_trie::HashedStorage::default();
+            for slot in 0..3 {
+                storage
+                    .storage
+                    .insert(keccak256(U256::from(slot).to_be_bytes::<32>()), U256::from(slot + 1));
+            }
+            state.storages.insert(address, storage);
+        }
+        state
+    }
+
+    fn empty_sparse_trie() -> SparseStateTrie {
+        let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+        SparseStateTrie::default()
+            .with_accounts_trie(default_trie.clone())
+            .with_default_storage_trie(default_trie)
+            .with_updates(true)
+    }
+
+    fn simulate_sparse_worker(
+        seed: u64,
+        factory: reth_provider::ProviderFactory<reth_provider::test_utils::MockNodeTypesWithDB>,
+        anchor: B256,
+        mode: u8,
+    ) -> (String, Option<B256>) {
+        use commonware_runtime::{deterministic, Runner, Supervisor};
+        let config = deterministic::Config::default()
+            .with_seed(seed)
+            .with_timeout(Some(Duration::from_secs(2)));
+        deterministic::Runner::new(config).start(|context| async move {
+            let runtime = TaskRuntime::deterministic(context.child("sparse_worker"));
+            let overlay = OverlayStateProviderFactory::new(
+                factory,
+                OverlayManager::<reth_chain_state::EthPrimitives>::default()
+                    .overlay_builder(anchor),
+            );
+            let (proof_tx, proof_rx) = crossbeam_channel::unbounded();
+            let proof = ProofWorkerHandle::new_cooperative(
+                &runtime,
+                ProofTaskCtx::new(overlay),
+                proof_tx.clone(),
+            );
+            let mut trie = empty_sparse_trie();
+            trie.set_parallelism_enabled(false);
+            let (updates, updates_rx) = crossbeam_channel::unbounded();
+            let (cancel, cancel_rx) = crossbeam_channel::bounded(0);
+            let mut cancel = Some(cancel);
+            let (hashed, final_hashed) = std::sync::mpsc::channel();
+            let mut task = SparseTrieCacheTask::new_with_trie_cooperative(
+                &runtime,
+                updates_rx,
+                cancel_rx,
+                hashed,
+                proof,
+                proof_tx,
+                proof_rx,
+                SparseTrieTaskMetrics::default(),
+                trie,
+                reth_chainspec::MAINNET.genesis_header().state_root,
+                TrieNodeEpoch::UNMODIFIED,
+                1,
+            );
+            task.max_targets_for_chunking = 1;
+            let expected = changed_state();
+            let producer_updates = updates.clone();
+            let producer_runtime = runtime.clone();
+            let cancellation = if mode == 1 { cancel.take() } else { None };
+            let producer = runtime.spawn("sparse_input", async move {
+                producer_updates
+                    .send(StateRootMessage::HashedStateUpdate(changed_state()))
+                    .unwrap();
+                producer_runtime.sleep(Duration::from_millis(5)).await;
+                if mode == 0 {
+                    producer_updates.send(StateRootMessage::FinishedStateUpdates).unwrap();
+                }
+                drop(cancellation);
+            });
+            // Retain the update sender after the finish marker, as best-effort prefetch producers
+            // may do. For premature-disconnect coverage both senders close without the marker.
+            let updates = if mode == 2 {
+                drop(updates);
+                None
+            } else {
+                Some(updates)
+            };
+            let result = task.run_cooperative(&runtime).await;
+            producer.await.unwrap();
+            assert!(task.hashing_task.is_none(), "hash actor must be joined before returning");
+            let root = match mode {
+                0 => {
+                    let outcome = result.unwrap();
+                    assert_eq!(*outcome.hashed_state, expected);
+                    assert_eq!(*final_hashed.try_recv().unwrap(), expected);
+                    assert!(!outcome.trie_updates.is_empty());
+                    Some(outcome.state_root)
+                }
+                1 => {
+                    assert!(matches!(result, Err(StateRootTaskError::Canceled)), "{result:?}");
+                    None
+                }
+                _ => {
+                    assert!(matches!(result, Err(StateRootTaskError::Other(_))), "{result:?}");
+                    None
+                }
+            };
+            drop(updates);
+            drop(cancel);
+            drop(task);
+            (context.auditor().state(), root)
+        })
+    }
+
+    #[test]
+    fn deterministic_sparse_hashing_proofs_and_cancellation() {
+        let runtime = Runtime::test();
+        let factory = create_test_provider_factory();
+        let anchor = init_genesis(&factory).unwrap();
+        let overlay = OverlayStateProviderFactory::new(
+            factory.clone(),
+            OverlayManager::<reth_chain_state::EthPrimitives>::default().overlay_builder(anchor),
+        );
+        let (proof_tx, proof_rx) = crossbeam_channel::unbounded();
+        let proof =
+            ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay), false, proof_tx.clone());
+        let (updates, updates_rx) = crossbeam_channel::unbounded();
+        let (_cancel, cancel_rx) = crossbeam_channel::bounded(0);
+        let mut task = SparseTrieCacheTask::new_with_trie(
+            &runtime,
+            updates_rx,
+            cancel_rx,
+            std::sync::mpsc::channel().0,
+            proof,
+            proof_tx,
+            proof_rx,
+            SparseTrieTaskMetrics::default(),
+            empty_sparse_trie(),
+            reth_chainspec::MAINNET.genesis_header().state_root,
+            TrieNodeEpoch::UNMODIFIED,
+            1,
+        );
+        task.max_targets_for_chunking = 1;
+        updates.send(StateRootMessage::HashedStateUpdate(changed_state())).unwrap();
+        updates.send(StateRootMessage::FinishedStateUpdates).unwrap();
+        drop(updates);
+        let expected = task.run().unwrap().state_root;
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
+        let seeds: Vec<u64> = match std::env::var("RETH_DST_SEED") {
+            Ok(seed) => vec![seed.parse().expect("RETH_DST_SEED must be a u64")],
+            Err(std::env::VarError::NotPresent) => (0..16).collect(),
+            Err(error) => panic!("invalid RETH_DST_SEED: {error}"),
+        };
+        for seed in seeds {
+            for mode in 0..3 {
+                eprintln!("sparse worker seed={seed}, mode={mode}");
+                let outcome = simulate_sparse_worker(seed, factory.clone(), anchor, mode);
+                assert_eq!(
+                    outcome,
+                    simulate_sparse_worker(seed, factory.clone(), anchor, mode),
+                    "sparse replay seed={seed}, mode={mode}"
+                );
+                if mode == 0 {
+                    assert_eq!(
+                        outcome.1,
+                        Some(expected),
+                        "cooperative and native sparse roots differ"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn cooperative_root_completion_exposes_failures_without_fallback() {
+        use super::super::{
+            CooperativeSparseTrieStateRootJob, LazyHashedPostState, StateRootHandle, StateRootJob,
+            StateRootTaskCancelGuard,
+        };
+        use commonware_runtime::{deterministic, Runner, Supervisor};
+        use reth_ethereum_primitives::{Block, EthPrimitives};
+        use reth_primitives_traits::Block as _;
+
+        let config = deterministic::Config::default()
+            .with_seed(7)
+            .with_timeout(Some(Duration::from_secs(1)));
+        deterministic::Runner::new(config).start(|context| async move {
+            let runtime = TaskRuntime::deterministic(context.child("root_completion"));
+            let block = Block::default().seal_slow().with_senders(Vec::new());
+            let hashed_state = LazyHashedPostState::ready(Arc::new(HashedPostState::default()));
+            let unexpected_root = B256::repeat_byte(0x44);
+
+            for mode in 0..4 {
+                let (updates, _updates_rx) = crossbeam_channel::unbounded();
+                let (cancel, cancel_rx) = StateRootTaskCancelGuard::channel();
+                let (result_tx, result_rx) = std::sync::mpsc::channel();
+                let mut result_tx = Some(result_tx);
+                let mut job = CooperativeSparseTrieStateRootJob {
+                    handle: StateRootHandle::new(
+                        B256::ZERO,
+                        updates,
+                        cancel,
+                        result_rx,
+                        std::sync::mpsc::channel().1,
+                    ),
+                    runtime: runtime.clone(),
+                    timeout: Some(Duration::from_millis(5)),
+                };
+                match mode {
+                    0 => {
+                        result_tx.as_ref().unwrap().send(Err(StateRootTaskError::Stalled)).unwrap()
+                    }
+                    1 => drop(result_tx.take()),
+                    2 => {}
+                    _ => result_tx
+                        .as_ref()
+                        .unwrap()
+                        .send(Ok(StateRootComputeOutcome {
+                            state_root: unexpected_root,
+                            trie_updates: Arc::new(TrieUpdates::default()),
+                            hashed_state: Arc::new(HashedPostState::default()),
+                        }))
+                        .unwrap(),
+                }
+
+                let started = runtime.now();
+                let result = StateRootJob::<EthPrimitives>::finish_async(
+                    &mut job,
+                    &block,
+                    Arc::new(Default::default()),
+                    &hashed_state,
+                )
+                .await;
+                match mode {
+                    0 => assert!(result
+                        .unwrap_err()
+                        .to_string()
+                        .contains("sparse trie task stalled")),
+                    1 => assert!(result.unwrap_err().to_string().contains("task dropped")),
+                    2 => {
+                        assert!(result.unwrap_err().to_string().contains("task timed out"));
+                        assert!(
+                            runtime.now().duration_since(started).unwrap() >=
+                                Duration::from_millis(5)
+                        );
+                    }
+                    _ => {
+                        let outcome = result.unwrap();
+                        assert_eq!(outcome.state_root, unexpected_root);
+                        assert!(outcome.hashed_state.is_none());
+                    }
+                }
+                drop(job);
+                assert!(matches!(
+                    cancel_rx.try_recv(),
+                    Err(crossbeam_channel::TryRecvError::Disconnected)
+                ));
+            }
+        });
     }
 
     #[test]

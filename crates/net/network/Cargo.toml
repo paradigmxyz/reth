@@ -152,4 +152,6 @@ test-utils = [
     "reth-stages-types/test-utils",
     "reth-trie/test-utils",
     "reth-evm/test-utils",
+    "reth-ecies/test-utils",
+    "reth-eth-wire/test-utils",
 ]

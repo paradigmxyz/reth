@@ -1,13 +1,15 @@
 //! BAL read-set prewarming pool.
 
+use alloy_eip7928::bal::DecodedBal;
 use alloy_primitives::{Address, StorageKey};
 use reth_execution_cache::{CachedStateProvider, ExecutionCache, TxPoolPrewarmCacheSnapshot};
 use reth_provider::{
     AccountReader, BytecodeReader, ProviderResult, StateProvider, StateProviderBox,
 };
+use reth_tasks::TaskRuntime;
 use std::{
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
     thread::JoinHandle,
@@ -52,6 +54,56 @@ pub struct BalPrewarmPool {
 }
 
 impl BalPrewarmPool {
+    /// Warms the same BAL targets using bounded jobs whose providers never cross an await.
+    pub(crate) async fn prewarm_cooperative(
+        runtime: &TaskRuntime,
+        build: Arc<BuildProviderFn>,
+        caches: ExecutionCache,
+        txpool_snapshot: Option<TxPoolPrewarmCacheSnapshot>,
+        bal: Arc<DecodedBal>,
+        stopped: Arc<AtomicBool>,
+    ) {
+        let mut workers = std::collections::VecDeque::new();
+        for account in bal.as_bal() {
+            let targets = std::iter::once(PrewarmTarget::Account(account.address, Box::new([])))
+                .chain(account.storage_changes.iter().map(|change| {
+                    PrewarmTarget::Storage(account.address, Box::new([change.slot.into()]))
+                }))
+                .chain(account.storage_reads.iter().map(|slot| {
+                    PrewarmTarget::Storage(account.address, Box::new([(*slot).into()]))
+                }));
+            for target in targets {
+                if stopped.load(Ordering::Relaxed) {
+                    break;
+                }
+                let build = build.clone();
+                let caches = caches.clone();
+                let snapshot = txpool_snapshot.clone();
+                let stopped = stopped.clone();
+                workers.push_back(
+                    runtime
+                        .spawn_cpu("prewarm-bal-read", move || {
+                            if !stopped.load(Ordering::Relaxed) &&
+                                let Ok(inner) = build()
+                            {
+                                let provider = CachedStateProvider::new_prewarm(inner, caches)
+                                    .with_txpool_snapshot(snapshot);
+                                warm_target(&provider, target);
+                            }
+                        })
+                        .abort_on_drop(),
+                );
+                if workers.len() == 2 {
+                    workers.pop_front().unwrap().await.expect("cooperative BAL prefetch failed");
+                }
+                runtime.yield_now().await;
+            }
+        }
+        for worker in workers {
+            worker.await.expect("cooperative BAL prefetch failed");
+        }
+    }
+
     /// Spawns `num_threads` long-lived blocking worker threads. Owned by the
     /// [`PayloadProcessor`](super::PayloadProcessor); the threads exit when the pool is dropped.
     pub fn new(num_threads: usize) -> Arc<Self> {
@@ -180,24 +232,7 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
             }
             PrewarmMsg::Warm(target) => {
                 let Some(provider) = provider.as_ref() else { continue };
-                match target {
-                    PrewarmTarget::Account(addr, slots) => {
-                        if let Ok(Some(account)) = provider.basic_account(&addr) &&
-                            let Some(code_hash) = account.bytecode_hash &&
-                            code_hash != alloy_consensus::constants::KECCAK_EMPTY
-                        {
-                            let _ = provider.bytecode_by_hash(&code_hash);
-                        }
-                        for &slot in &slots {
-                            let _ = provider.storage(addr, slot);
-                        }
-                    }
-                    PrewarmTarget::Storage(addr, slots) => {
-                        for &slot in &slots {
-                            let _ = provider.storage(addr, slot);
-                        }
-                    }
-                }
+                warm_target(provider, target);
             }
             PrewarmMsg::EndBlock(end_tx) => {
                 provider = None;
@@ -206,6 +241,28 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
         }
     }
 }
+
+fn warm_target(provider: &CachedStateProvider<StateProviderBox>, target: PrewarmTarget) {
+    match target {
+        PrewarmTarget::Account(addr, slots) => {
+            if let Ok(Some(account)) = provider.basic_account(&addr) &&
+                let Some(code_hash) = account.bytecode_hash &&
+                code_hash != alloy_consensus::constants::KECCAK_EMPTY
+            {
+                let _ = provider.bytecode_by_hash(&code_hash);
+            }
+            for &slot in &slots {
+                let _ = provider.storage(addr, slot);
+            }
+        }
+        PrewarmTarget::Storage(addr, slots) => {
+            for &slot in &slots {
+                let _ = provider.storage(addr, slot);
+            }
+        }
+    }
+}
+
 struct SendOnDrop {
     sender: Option<oneshot::Sender<()>>,
 }
