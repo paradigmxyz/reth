@@ -18,8 +18,4 @@ git -C "$SOURCE_DIR" checkout --detach "$REVISION"
 
 .github/scripts/verify-cargo-lock-cooldown.sh "$SOURCE_DIR"
 
-INSTALL_ARGS=()
-for package in "$@"; do
-  INSTALL_ARGS+=(--package "$package")
-done
-cargo install --path "$SOURCE_DIR" --locked "${INSTALL_ARGS[@]}"
+cargo install --git "$REPOSITORY" --rev "$REVISION" --locked "$@"

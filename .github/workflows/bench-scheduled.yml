@@ -354,12 +354,15 @@ jobs:
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
 
       - name: Prepare Cargo dependency cooldown verifier
+        id: cargo-cooldown
         uses: tempoxyz/gh-actions/actions/cargo-cooldown@0aa93238d85fd085d7901320b670cc6adb7a02f3 # gh-actions#101
         with:
           strict-project-config: true
 
       - name: Install dependencies
         env:
+          CARGO_COOLDOWN_BIN: ${{ steps.cargo-cooldown.outputs.verifier-path }}
+          CARGO_COOLDOWN_SHA256: ${{ steps.cargo-cooldown.outputs.verifier-sha256 }}
           DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
         run: |
           mkdir -p "$HOME/.local/bin"
@@ -468,6 +471,8 @@ jobs:
       - name: Build binaries
         id: build
         env:
+          CARGO_COOLDOWN_BIN: ${{ steps.cargo-cooldown.outputs.verifier-path }}
+          CARGO_COOLDOWN_SHA256: ${{ steps.cargo-cooldown.outputs.verifier-sha256 }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TXGEN_DEPLOY_KEY: ${{ secrets.TXGEN_DEPLOY_KEY }}
           TXGEN_TOKEN: ${{ secrets.TXGEN_TOKEN }}
