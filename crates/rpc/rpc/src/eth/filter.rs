@@ -62,7 +62,9 @@ where
         limits: QueryLimits,
     ) -> impl Future<Output = RpcResult<Vec<RpcLog<Eth::NetworkTypes>>>> + Send {
         trace!(target: "rpc::eth", "Serving eth_getLogs");
-        self.logs_for_filter(filter, limits).map_err(|e| e.into())
+        // the authenticated endpoint serves a single trusted consumer, so its queries are not
+        // queued behind the public ones
+        self.inner.clone().logs_for_filter(filter, limits, false).map_err(|e| e.into())
     }
 }
 
@@ -299,6 +301,7 @@ where
                         from_block_number,
                         to_block_number,
                         self.inner.query_limits,
+                        true,
                     )
                     .await?;
                 Ok(FilterChanges::Logs(logs))
@@ -337,7 +340,7 @@ where
         filter: Filter,
         limits: QueryLimits,
     ) -> Result<Vec<RpcLog<Eth::NetworkTypes>>, EthFilterError> {
-        self.inner.clone().logs_for_filter(filter, limits).await
+        self.inner.clone().logs_for_filter(filter, limits, true).await
     }
 }
 
@@ -482,6 +485,7 @@ where
         self: Arc<Self>,
         filter: Filter,
         limits: QueryLimits,
+        gated: bool,
     ) -> Result<Vec<RpcLog<Eth::NetworkTypes>>, EthFilterError> {
         match filter.block_option {
             FilterBlockOption::AtBlockHash(block_hash) => {
@@ -600,8 +604,14 @@ where
                     .into());
                 }
 
-                self.get_logs_in_block_range(filter, from_block_number, to_block_number, limits)
-                    .await
+                self.get_logs_in_block_range(
+                    filter,
+                    from_block_number,
+                    to_block_number,
+                    limits,
+                    gated,
+                )
+                .await
             }
         }
     }
@@ -641,6 +651,7 @@ where
         from_block: u64,
         to_block: u64,
         limits: QueryLimits,
+        gated: bool,
     ) -> Result<Vec<RpcLog<Eth::NetworkTypes>>, EthFilterError> {
         trace!(target: "rpc::eth::filter", from=from_block, to=to_block, ?filter, "finding logs in range");
 
@@ -656,12 +667,18 @@ where
         }
 
         // The scan occupies a blocking thread until it completes, so it shares the budget for
-        // blocking IO requests with `eth_call` and friends instead of growing the pool unboundedly.
-        let permit = self
-            .eth_api
-            .acquire_owned_blocking_io()
-            .await
-            .map_err(|_| EthFilterError::InternalError)?;
+        // blocking IO requests with `eth_call` and friends instead of pinning an unbounded number
+        // of pool threads.
+        let permit = if gated {
+            Some(
+                self.eth_api
+                    .acquire_owned_blocking_io()
+                    .await
+                    .map_err(|_| EthFilterError::InternalError)?,
+            )
+        } else {
+            None
+        };
 
         let (mut tx, rx) = oneshot::channel();
         let this = self.clone();
@@ -1444,7 +1461,8 @@ mod tests {
             super::EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
 
         let filter = Filter::new().from_block(100u64).to_block(BlockNumberOrTag::Latest);
-        let result = eth_filter.inner.clone().logs_for_filter(filter, QueryLimits::default()).await;
+        let result =
+            eth_filter.inner.clone().logs_for_filter(filter, QueryLimits::default(), true).await;
         assert!(matches!(result, Err(EthFilterError::InvalidBlockRangeParams)), "{result:?}");
     }
 
@@ -1932,6 +1950,7 @@ mod tests {
                 100,
                 102,
                 QueryLimits { max_blocks_per_filter: None, max_logs_per_response: Some(2) },
+                true,
             )
             .await
             .expect_err("range should exceed max logs");
@@ -2035,7 +2054,7 @@ mod tests {
         let logs = eth_filter
             .inner
             .clone()
-            .get_logs_in_block_range(filter, 100, 103, QueryLimits::default())
+            .get_logs_in_block_range(filter, 100, 103, QueryLimits::default(), true)
             .await
             .expect("should succeed");
 
@@ -2069,6 +2088,7 @@ mod tests {
             0,
             0,
             QueryLimits::default(),
+            true,
         );
         tokio::pin!(scan);
         assert!(
