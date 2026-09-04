@@ -6,7 +6,7 @@ use std::{
     convert::Infallible,
     sync::{Arc, Mutex},
 };
-use tokio::{net::TcpListener, task::JoinHandle};
+use tokio::{net::TcpListener, sync::Semaphore, task::JoinHandle};
 
 /// Loopback snapshot server with optional byte-range support and a request log.
 /// Each test owns its server, so ports and responses are isolated across parallel runs.
@@ -18,6 +18,15 @@ pub(super) struct SnapshotServer {
 
 impl SnapshotServer {
     pub(super) async fn start(files: BTreeMap<String, Vec<u8>>, ranges: bool) -> Self {
+        Self::start_gated(files, ranges, None).await
+    }
+
+    /// Pauses ranges at or above the offset until the test releases permits.
+    pub(super) async fn start_gated(
+        files: BTreeMap<String, Vec<u8>>,
+        ranges: bool,
+        gate: Option<(usize, Arc<Semaphore>)>,
+    ) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let requests = Arc::new(Mutex::new(Vec::new()));
@@ -27,49 +36,67 @@ impl SnapshotServer {
             while let Ok((stream, _)) = listener.accept().await {
                 let files = Arc::clone(&files);
                 let log = Arc::clone(&log);
+                let gate = gate.clone();
                 tokio::spawn(async move {
                     let service = service_fn(move |request: Request<hyper::body::Incoming>| {
-                        let path = request.uri().path().to_owned();
-                        let range =
-                            request.headers().get("range").map(|v| v.to_str().unwrap().to_owned());
-                        log.lock().unwrap().push((path.clone(), range.clone()));
-                        let mut response = Response::builder();
-                        let body = if let Some(data) = files.get(&path) {
-                            let mut bytes = data.as_slice();
-                            if let Some(range) = range.filter(|_| ranges) {
-                                let (start, end) =
-                                    range.strip_prefix("bytes=").unwrap().split_once('-').unwrap();
-                                let start: usize = start.parse().unwrap();
-                                let end = end
-                                    .parse::<usize>()
-                                    .unwrap_or(data.len() - 1)
-                                    .min(data.len() - 1);
-                                if start >= data.len() {
-                                    response = response
-                                        .status(StatusCode::RANGE_NOT_SATISFIABLE)
-                                        .header("content-range", format!("bytes */{}", data.len()));
-                                    bytes = &[];
-                                } else {
-                                    response = response.status(StatusCode::PARTIAL_CONTENT).header(
-                                        "content-range",
-                                        format!("bytes {start}-{end}/{}", data.len()),
-                                    );
-                                    bytes = &data[start..=end];
+                        let files = Arc::clone(&files);
+                        let log = Arc::clone(&log);
+                        let gate = gate.clone();
+                        async move {
+                            let path = request.uri().path().to_owned();
+                            let range = request
+                                .headers()
+                                .get("range")
+                                .map(|v| v.to_str().unwrap().to_owned());
+                            log.lock().unwrap().push((path.clone(), range.clone()));
+                            let mut response = Response::builder();
+                            let body = if let Some(data) = files.get(&path) {
+                                let mut bytes = data.as_slice();
+                                if let Some(range) = range.filter(|_| ranges) {
+                                    let (start, end) = range
+                                        .strip_prefix("bytes=")
+                                        .unwrap()
+                                        .split_once('-')
+                                        .unwrap();
+                                    let start: usize = start.parse().unwrap();
+                                    if let Some((offset, gate)) = &gate &&
+                                        start >= *offset
+                                    {
+                                        gate.acquire().await.unwrap().forget();
+                                    }
+                                    let end = end
+                                        .parse::<usize>()
+                                        .unwrap_or(data.len() - 1)
+                                        .min(data.len() - 1);
+                                    if start >= data.len() {
+                                        response = response
+                                            .status(StatusCode::RANGE_NOT_SATISFIABLE)
+                                            .header(
+                                                "content-range",
+                                                format!("bytes */{}", data.len()),
+                                            );
+                                        bytes = &[];
+                                    } else {
+                                        response =
+                                            response.status(StatusCode::PARTIAL_CONTENT).header(
+                                                "content-range",
+                                                format!("bytes {start}-{end}/{}", data.len()),
+                                            );
+                                        bytes = &data[start..=end];
+                                    }
                                 }
-                            }
-                            response = response.header("content-length", bytes.len());
-                            if request.method() == hyper::Method::HEAD {
-                                Bytes::new()
+                                response = response.header("content-length", bytes.len());
+                                if request.method() == hyper::Method::HEAD {
+                                    Bytes::new()
+                                } else {
+                                    Bytes::copy_from_slice(bytes)
+                                }
                             } else {
-                                Bytes::copy_from_slice(bytes)
-                            }
-                        } else {
-                            response = response.status(StatusCode::NOT_FOUND);
-                            Bytes::new()
-                        };
-                        std::future::ready(Ok::<_, Infallible>(
-                            response.body(Full::new(body)).unwrap(),
-                        ))
+                                response = response.status(StatusCode::NOT_FOUND);
+                                Bytes::new()
+                            };
+                            Ok::<_, Infallible>(response.body(Full::new(body)).unwrap())
+                        }
                     });
                     // Range probes may close the connection without consuming the body.
                     let _ =

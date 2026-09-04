@@ -299,12 +299,17 @@ impl ArchiveFetcher {
 
             let is_partial = response.status() == StatusCode::PARTIAL_CONTENT;
             let size = if is_partial {
-                response
+                let (start, _, total) = response
                     .headers()
                     .get(CONTENT_RANGE)
                     .and_then(|value| value.to_str().ok())
                     .and_then(parse_content_range)
-                    .map(|(_, _, total)| total)
+                    .ok_or_else(|| eyre::eyre!("Server returned invalid Content-Range"))?;
+                eyre::ensure!(
+                    start == existing_size,
+                    "Server returned mismatched Content-Range for resume offset {existing_size}"
+                );
+                Some(total)
             } else {
                 response.content_length()
             };
@@ -1169,7 +1174,8 @@ fn parse_content_range(value: &str) -> Option<(u64, u64, u64)> {
     let value = value.strip_prefix("bytes ")?;
     let (range, total) = value.split_once('/')?;
     let (start, end) = range.split_once('-')?;
-    Some((start.parse().ok()?, end.parse().ok()?, total.parse().ok()?))
+    let (start, end, total) = (start.parse().ok()?, end.parse().ok()?, total.parse().ok()?);
+    (start <= end && end < total).then_some((start, end, total))
 }
 
 /// Returns whether an HTTP status should retry the current piece.
@@ -1230,7 +1236,26 @@ mod tests {
     use super::*;
     use reqwest::StatusCode;
     use reth_cli_util::cancellation::CancellationToken;
-    use std::{io::Write, net::TcpListener, thread::JoinHandle};
+    use std::{
+        io::{BufRead, BufReader, Write},
+        net::{TcpListener, TcpStream},
+        thread::JoinHandle,
+    };
+
+    fn read_request(stream: &TcpStream) -> String {
+        stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let mut reader = BufReader::new(stream);
+        let mut request = String::new();
+        loop {
+            let mut line = String::new();
+            assert_ne!(reader.read_line(&mut line).unwrap(), 0, "incomplete HTTP headers");
+            if line == "\r\n" {
+                break;
+            }
+            request.push_str(&line);
+        }
+        request.to_ascii_lowercase()
+    }
 
     fn spawn_range_server(
         expected_range: &str,
@@ -1244,9 +1269,7 @@ mod tests {
         let expected_range = expected_range.to_ascii_lowercase();
         let handle = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
-            let mut request = [0u8; 4096];
-            let read = stream.read(&mut request).unwrap();
-            let request = String::from_utf8_lossy(&request[..read]).to_ascii_lowercase();
+            let request = read_request(&stream);
             assert!(request.contains(&format!("range: {expected_range}")));
             write!(
                 stream,
@@ -1257,6 +1280,57 @@ mod tests {
             stream.write_all(body).unwrap();
         });
         (format!("http://{address}/state.tar.zst"), handle)
+    }
+
+    #[test]
+    fn sequential_resume_rejects_mismatched_content_range() {
+        let dir = tempfile::tempdir().unwrap();
+        let (url, server) = spawn_range_server("bytes=4-", 0, 3, 8, b"efgh");
+        let part = dir.path().join("state.tar.zst.part");
+        fs::write(&part, b"abcd").unwrap();
+        let session = DownloadSession::new(None, None, CancellationToken::new());
+        let fetcher = ArchiveFetcher::new(url, dir.path(), session, None);
+        let error = fetcher.download_sequential(1, None).unwrap_err();
+        server.join().unwrap();
+        assert!(error.to_string().contains("mismatched Content-Range"));
+        assert_eq!(fs::read(&part).unwrap(), b"abcd");
+        assert!(!dir.path().join("state.tar.zst").exists());
+    }
+
+    #[test]
+    fn stale_segmented_state_is_discarded() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = DownloadPaths::from_url("https://example.com/state.tar.zst", dir.path());
+        let pieces = build_download_pieces(8, 4);
+        let plan = SegmentedDownloadPlan { piece_size: 4, piece_count: 2, worker_count: 1, pieces };
+        for truncated in [false, true] {
+            let mut state = SegmentedResumeState::new(
+                "https://example.com/state.tar.zst",
+                Some("old"),
+                8,
+                4,
+                2,
+            );
+            state.completed[0] = true;
+            SegmentedResumeStateStore::persist(paths.resume_state_path(), &state).unwrap();
+            fs::write(
+                paths.part_path(),
+                if truncated { b"abcd".as_slice() } else { b"abcdefgh".as_slice() },
+            )
+            .unwrap();
+            let checksum = if truncated { "old" } else { "new" };
+            let (_, pending, completed) = SegmentedResumeStateStore::load_or_create(
+                &paths,
+                &state.url,
+                Some(checksum),
+                8,
+                &plan,
+            )
+            .unwrap();
+            assert_eq!(completed, 0);
+            assert_eq!(pending.len(), 2);
+            assert_eq!(fs::read(paths.part_path()).unwrap(), [0; 8]);
+        }
     }
 
     #[test]
@@ -1358,9 +1432,7 @@ mod tests {
             .enumerate()
             {
                 let (mut stream, _) = listener.accept().unwrap();
-                let mut request = [0u8; 4096];
-                let read = stream.read(&mut request).unwrap();
-                let request = String::from_utf8_lossy(&request[..read]).to_ascii_lowercase();
+                let request = read_request(&stream);
                 assert!(request.contains(&format!("range: {expected_range}")));
                 if index == 1 {
                     server_cancel_token.cancel();

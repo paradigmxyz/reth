@@ -143,6 +143,10 @@ impl ArchiveProcessor {
         let mut state = ArchiveAttemptState::RunAttempt;
 
         loop {
+            eyre::ensure!(
+                !self.ctx.session().cancel_token().is_cancelled(),
+                "Snapshot download cancelled"
+            );
             match state {
                 ArchiveAttemptState::RunAttempt => {
                     self.cleanup_outputs();
