@@ -1522,7 +1522,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     ) -> Vec<PoolUpdate> {
         // pre-allocate a few updates
         let mut updates = Vec::with_capacity(64);
-        let base_fee = self.pending_fees.base_fee;
+        let pending_fees = self.pending_fees;
 
         if self.last_full_update_fees == self.pending_fees {
             // Fee eligibility is unchanged, while nonce gaps, ancestors, and cumulative cost are
@@ -1530,14 +1530,14 @@ impl<T: PoolTransaction> AllTransactions<T> {
             for sender in changed_accounts.keys() {
                 let range = TransactionId::new(*sender, 0)..=TransactionId::new(*sender, u64::MAX);
                 Self::update_txs(
-                    base_fee,
+                    pending_fees,
                     changed_accounts,
                     &mut updates,
                     self.txs.range_mut(range),
                 );
             }
         } else {
-            Self::update_txs(base_fee, changed_accounts, &mut updates, self.txs.iter_mut());
+            Self::update_txs(pending_fees, changed_accounts, &mut updates, self.txs.iter_mut());
             self.last_full_update_fees = self.pending_fees;
         }
 
@@ -1549,7 +1549,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     ///
     /// Records a [`PoolUpdate`] for every transaction whose sub-pool changed.
     fn update_txs<'a, I>(
-        base_fee: u64,
+        pending_fees: PendingFees,
         changed_accounts: &FxHashMap<SenderId, SenderInfo>,
         updates: &mut Vec<PoolUpdate>,
         txs: I,
@@ -1622,7 +1622,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             tx.state.insert(TxState::NO_PARKED_ANCESTORS);
 
             // Update the first transaction of this sender.
-            Self::update_tx_base_fee(base_fee, tx);
+            Self::update_tx_fees(pending_fees, tx);
             // Track if the transaction's sub-pool changed.
             Self::record_subpool_update(updates, tx);
 
@@ -1674,11 +1674,11 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 } else {
                     tx.state.insert(TxState::NO_PARKED_ANCESTORS);
                 }
-                has_parked_ancestor = !tx.state.is_pending();
 
                 // Update and record sub-pool changes.
-                Self::update_tx_base_fee(base_fee, tx);
+                Self::update_tx_fees(pending_fees, tx);
                 Self::record_subpool_update(updates, tx);
+                has_parked_ancestor = !tx.state.is_pending();
 
                 // Advance iterator
                 iter.next();
@@ -1702,15 +1702,23 @@ impl<T: PoolTransaction> AllTransactions<T> {
         }
     }
 
-    /// Rechecks the transaction's dynamic fee condition.
-    fn update_tx_base_fee(pending_block_base_fee: u64, tx: &mut PoolInternalTransaction<T>) {
-        // Recheck dynamic fee condition.
-        match tx.transaction.max_fee_per_gas().cmp(&(pending_block_base_fee as u128)) {
+    /// Rechecks the transaction's dynamic fee conditions.
+    fn update_tx_fees(pending_fees: PendingFees, tx: &mut PoolInternalTransaction<T>) {
+        match tx.transaction.max_fee_per_gas().cmp(&(pending_fees.base_fee as u128)) {
             Ordering::Greater | Ordering::Equal => {
                 tx.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
             }
             Ordering::Less => {
                 tx.state.remove(TxState::ENOUGH_FEE_CAP_BLOCK);
+            }
+        }
+
+        match tx.transaction.max_fee_per_blob_gas() {
+            Some(blob_fee_cap) if blob_fee_cap < pending_fees.blob_fee => {
+                tx.state.remove(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
+            }
+            _ => {
+                tx.state.insert(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
             }
         }
     }
@@ -2127,6 +2135,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
         // The next transaction of this sender
         let on_chain_id = TransactionId::new(transaction.sender_id(), on_chain_nonce);
+        let pending_fees = self.pending_fees;
         {
             // Tracks the next nonce we expect if the transactions are gapless
             let mut next_nonce = on_chain_id.nonce;
@@ -2168,10 +2177,12 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 } else {
                     tx.state.insert(TxState::NO_PARKED_ANCESTORS);
                 }
-                has_parked_ancestor = !tx.state.is_pending();
+
+                Self::update_tx_fees(pending_fees, tx);
 
                 // update the pool based on the state
                 tx.subpool = tx.state.into();
+                has_parked_ancestor = !tx.state.is_pending();
 
                 if inserted_tx_id.eq(id) {
                     // if it is the new transaction, track its updated state
@@ -3604,6 +3615,142 @@ mod tests {
         pool.update(&Default::default());
 
         assert_eq!(pool.last_full_update_fees, pool.pending_fees);
+    }
+
+    #[test]
+    fn gap_fill_rechecks_descendant_fee_eligibility() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions::default();
+        let sender = address!("0x000000000000000000000000000000000000000d");
+        let balance = U256::MAX;
+
+        pool.pending_fees.base_fee = 100;
+        let descendant = MockTransaction::eip1559()
+            .with_sender(sender)
+            .with_nonce(1)
+            .with_gas_limit(21_000)
+            .with_max_fee(150)
+            .with_priority_fee(1)
+            .rng_hash();
+        let descendant = f.validated(descendant);
+        let descendant_id = *descendant.id();
+        pool.insert_tx(descendant, balance, 0).unwrap();
+        pool.update(&Default::default());
+
+        // The fee increase cannot affect a nonce-gapped transaction yet, but closing its gap must
+        // evaluate it against the current fee.
+        pool.pending_fees.base_fee = 200;
+        pool.update(&Default::default());
+        assert!(pool.get(&descendant_id).unwrap().state.contains(TxState::ENOUGH_FEE_CAP_BLOCK));
+
+        let predecessor = MockTransaction::eip1559()
+            .with_sender(sender)
+            .with_nonce(0)
+            .with_gas_limit(21_000)
+            .with_max_fee(250)
+            .with_priority_fee(1)
+            .rng_hash();
+        let InsertOk { move_to, .. } =
+            pool.insert_tx(f.validated(predecessor), balance, 0).unwrap();
+
+        assert_eq!(move_to, SubPool::Pending);
+        let descendant = pool.get(&descendant_id).unwrap();
+        assert_eq!(descendant.subpool, SubPool::BaseFee);
+        assert!(!descendant.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK));
+        assert!(descendant.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
+    }
+
+    #[test]
+    fn base_fee_update_unparks_all_descendants() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions::default();
+        let sender = address!("0x000000000000000000000000000000000000000e");
+        let mut ids = Vec::new();
+
+        pool.pending_fees.base_fee = 200;
+        for nonce in 0..3 {
+            let tx = MockTransaction::eip1559()
+                .with_sender(sender)
+                .with_nonce(nonce)
+                .with_gas_limit(21_000)
+                .with_max_fee(150)
+                .with_priority_fee(1)
+                .rng_hash();
+            let tx = f.validated(tx);
+            ids.push(*tx.id());
+            pool.insert_tx(tx, U256::MAX, 0).unwrap();
+        }
+
+        pool.pending_fees.base_fee = 100;
+        pool.update(&Default::default());
+
+        for id in ids {
+            assert_eq!(pool.get(&id).unwrap().subpool, SubPool::Pending);
+        }
+    }
+
+    #[test]
+    fn fee_update_keeps_descendants_of_underpriced_transaction_parked() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions::default();
+        let sender = address!("0x0000000000000000000000000000000000000010");
+        let fee_caps = [150, 50, 150];
+        let mut ids = Vec::new();
+
+        pool.pending_fees.base_fee = 200;
+        for (nonce, fee_cap) in fee_caps.into_iter().enumerate() {
+            let tx = MockTransaction::eip1559()
+                .with_sender(sender)
+                .with_nonce(nonce as u64)
+                .with_gas_limit(21_000)
+                .with_max_fee(fee_cap)
+                .with_priority_fee(1)
+                .rng_hash();
+            let tx = f.validated(tx);
+            ids.push(*tx.id());
+            pool.insert_tx(tx, U256::MAX, 0).unwrap();
+        }
+
+        pool.pending_fees.base_fee = 100;
+        pool.update(&Default::default());
+
+        assert_eq!(pool.get(&ids[0]).unwrap().subpool, SubPool::Pending);
+        assert_eq!(pool.get(&ids[1]).unwrap().subpool, SubPool::BaseFee);
+        assert_eq!(pool.get(&ids[2]).unwrap().subpool, SubPool::Queued);
+    }
+
+    #[test]
+    fn blob_fee_update_unparks_all_descendants() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let sender = address!("0x000000000000000000000000000000000000000f");
+        let mut block_info = pool.block_info();
+        block_info.pending_blob_fee = Some(200);
+        pool.set_block_info(block_info);
+
+        for nonce in 0..3 {
+            let tx = MockTransaction::eip4844()
+                .with_sender(sender)
+                .with_nonce(nonce)
+                .with_gas_limit(21_000)
+                .with_max_fee(1_000)
+                .with_priority_fee(1)
+                .with_blob_fee(150)
+                .rng_hash();
+            pool.add_transaction(f.validated(tx), U256::MAX, 0, None).unwrap();
+        }
+        assert_eq!(pool.blob_pool.len(), 3);
+
+        block_info.pending_blob_fee = Some(100);
+        pool.on_canonical_state_change(
+            block_info,
+            Vec::new(),
+            FxHashMap::default(),
+            PoolUpdateKind::Commit,
+        );
+
+        let nonces = pool.best_transactions().map(|tx| tx.nonce()).collect::<Vec<_>>();
+        assert_eq!(nonces, vec![0, 1, 2]);
     }
 
     #[test]
