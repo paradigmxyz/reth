@@ -25,7 +25,7 @@ alloy-primitives.workspace = true
 # misc
 either = { workspace = true, optional = true }
 rayon = { workspace = true, optional = true }
-smallvec = { workspace = true, optional = true }
+smallvec.workspace = true
 slotmap = { workspace = true, optional = true }
 strum = { workspace = true, features = ["derive"] }
 
@@ -54,7 +54,6 @@ std = [
     "dep:either",
     "dep:rayon",
     "dep:reth-primitives-traits",
-    "dep:smallvec",
     "dep:slotmap",
     "dep:tracing",
     "alloy-primitives/std",

@@ -28,8 +28,8 @@ use reth_trie_parallel::{
 };
 use reth_trie_sparse::{
     errors::{SparseStateTrieErrorKind, SparseTrieErrorKind, SparseTrieResult},
-    ArenaParallelSparseTrie, DeferredDrops, LeafUpdate, RevealableSparseTrie, SparseStateTrie,
-    SparseTrie, TrieNodeEpoch,
+    ArenaParallelSparseTrie, DeferredDrops, LeafUpdate, LeafValue, RevealableSparseTrie,
+    SparseStateTrie, SparseTrie, TrieNodeEpoch,
 };
 use tracing::{debug, debug_span, error, instrument, trace_span};
 
@@ -507,9 +507,9 @@ where
 
                 for (&slot, &value) in &storage.storage {
                     let encoded = if value.is_zero() {
-                        Vec::new()
+                        LeafValue::new()
                     } else {
-                        alloy_rlp::encode_fixed_size(&value).to_vec()
+                        LeafValue::from_slice(&alloy_rlp::encode_fixed_size(&value))
                     };
                     new_updates.insert(slot, LeafUpdate::Changed(encoded));
 
@@ -808,13 +808,13 @@ where
                 }
 
                 // Get the current account state either from the trie or from latest account update.
-                let trie_account = match self.account_updates.get(addr) {
+                let trie_account: Option<&[u8]> = match self.account_updates.get(addr) {
                     Some(LeafUpdate::Changed(encoded)) => {
-                        Some(encoded).filter(|encoded| !encoded.is_empty())
+                        Some(encoded.as_slice()).filter(|encoded| !encoded.is_empty())
                     }
                     // Needs to be revealed first
                     Some(LeafUpdate::Touched) => return true,
-                    None => self.trie.get_account_value(addr),
+                    None => self.trie.get_account_value(addr).map(Vec::as_slice),
                 };
 
                 let trie_account = trie_account.map(|value| TrieAccount::decode(&mut &value[..]).expect("invalid account RLP"));
@@ -1053,14 +1053,14 @@ fn encode_account_leaf_value(
     account: Option<Account>,
     storage_root: B256,
     account_rlp_buf: &mut Vec<u8>,
-) -> Vec<u8> {
+) -> LeafValue {
     if account.is_none_or(|account| account.is_empty()) && storage_root == EMPTY_ROOT_HASH {
-        return Vec::new();
+        return LeafValue::new();
     }
 
     account_rlp_buf.clear();
     account.unwrap_or_default().into_trie_account(storage_root).encode(account_rlp_buf);
-    account_rlp_buf.clone()
+    LeafValue::from_slice(account_rlp_buf)
 }
 
 /// Pending proof targets queued for dispatch to proof workers, along with their count.
@@ -1217,7 +1217,7 @@ mod tests {
         assert_eq!(decoded.nonce, 7);
         assert_eq!(decoded.balance, U256::from(42));
         assert_eq!(decoded.storage_root, storage_root);
-        assert_eq!(account_rlp_buf, encoded);
+        assert_eq!(account_rlp_buf.as_slice(), encoded.as_slice());
     }
 
     #[test]

@@ -12,6 +12,7 @@ use reth_execution_errors::SparseTrieResult;
 use reth_trie_common::{
     BranchNodeMasks, Nibbles, ProofTrieNodeV2, ProofV2TargetParent, TrieNodeV2,
 };
+use smallvec::SmallVec;
 
 /// Modification epoch assigned to cached sparse trie nodes.
 ///
@@ -44,8 +45,8 @@ impl TrieNodeEpoch {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LeafUpdate {
     /// The leaf value has been changed to the given RLP-encoded value.
-    /// Empty Vec indicates the leaf has been removed.
-    Changed(Vec<u8>),
+    /// An empty value indicates the leaf has been removed.
+    Changed(LeafValue),
     /// The leaf value may have changed, but the new value is not yet known.
     /// Used for optimistic prewarming when the actual value is unavailable.
     Touched,
@@ -62,6 +63,13 @@ impl LeafUpdate {
         matches!(self, Self::Touched)
     }
 }
+
+/// RLP-encoded value carried by [`LeafUpdate::Changed`].
+///
+/// The inline capacity fits an RLP-encoded `U256` storage slot value, which dominates by volume: a
+/// block can change tens of thousands of slots, so holding those bytes inline avoids an allocation
+/// per slot. Account leaves are larger and spill to the heap, but are an order of magnitude rarer.
+pub type LeafValue = SmallVec<[u8; 33]>;
 
 /// Trait defining common operations for revealed sparse trie implementations.
 ///

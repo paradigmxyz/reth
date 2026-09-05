@@ -232,7 +232,7 @@ pub(super) fn test_two_leaves_at_adjacent_keys_root_correctness<T: SparseTrie>(
     );
 }
 
-/// Remove a leaf via `LeafUpdate::Changed(vec![])` and verify root.
+/// Remove a leaf via `LeafUpdate::Changed(LeafValue::new())` and verify root.
 ///
 /// Starting from a 3-leaf trie, removing one key should produce a root hash
 /// matching a reference trie containing only the remaining 2 leaves.
@@ -247,7 +247,8 @@ pub(super) fn test_update_leaves_remove_leaf<T: SparseTrie>(new_trie: fn() -> T)
     let harness = SuiteTestHarness::new(base_storage);
     let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
 
-    // Remove key2 by setting its value to U256::ZERO (produces LeafUpdate::Changed(vec![])).
+    // Remove key2 by setting its value to U256::ZERO (produces
+    // LeafUpdate::Changed(LeafValue::new())).
     let mut leaf_updates = SuiteTestHarness::leaf_updates(&BTreeMap::from([(key2, U256::ZERO)]));
     harness.reveal_and_update(&mut trie, &mut leaf_updates);
 
@@ -994,9 +995,9 @@ pub(super) fn test_update_leaves_multiple_mixed_updates<T: SparseTrie>(new_trie:
     let new_value_a = U256::from(100);
     let updated_value_b = U256::from(999);
     let mut leaf_updates: B256Map<LeafUpdate> = [
-        (key_a, LeafUpdate::Changed(encode_fixed_size(&new_value_a).to_vec())),
-        (key_b, LeafUpdate::Changed(encode_fixed_size(&updated_value_b).to_vec())),
-        (key_c, LeafUpdate::Changed(Vec::new())), // removal
+        (key_a, LeafUpdate::Changed(LeafValue::from_slice(&encode_fixed_size(&new_value_a)))),
+        (key_b, LeafUpdate::Changed(LeafValue::from_slice(&encode_fixed_size(&updated_value_b)))),
+        (key_c, LeafUpdate::Changed(LeafValue::new())), // removal
         (key_d, LeafUpdate::Touched),
     ]
     .into_iter()
@@ -1445,8 +1446,8 @@ pub(super) fn test_subtrie_collapse_touched_with_blinded_sibling<T: SparseTrie>(
     // The combination of Touched + removals with a blinded sibling (0xAC) is the
     // trigger for the bug.
     let mut leaf_updates: B256Map<LeafUpdate> = [
-        (key_ab1, LeafUpdate::Changed(Vec::new())),
-        (key_ab2, LeafUpdate::Changed(Vec::new())),
+        (key_ab1, LeafUpdate::Changed(LeafValue::new())),
+        (key_ab2, LeafUpdate::Changed(LeafValue::new())),
         (key_ab3, LeafUpdate::Touched),
     ]
     .into_iter()
@@ -1507,8 +1508,8 @@ pub(super) fn test_subtrie_emptied_by_deletes_with_touched<T: SparseTrie>(new_tr
     // Delete both 0xAB leaves + Touched on a third 0xAB key (not in the trie).
     // Touched is a no-op but must not prevent the might_empty_subtrie guard.
     let mut leaf_updates: B256Map<LeafUpdate> = [
-        (key_ab1, LeafUpdate::Changed(Vec::new())),
-        (key_ab2, LeafUpdate::Changed(Vec::new())),
+        (key_ab1, LeafUpdate::Changed(LeafValue::new())),
+        (key_ab2, LeafUpdate::Changed(LeafValue::new())),
         (key_ab3, LeafUpdate::Touched),
     ]
     .into_iter()
