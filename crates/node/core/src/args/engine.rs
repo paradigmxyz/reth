@@ -313,7 +313,11 @@ pub struct EngineArgs {
     ///
     /// To persist blocks as fast as the node receives them, set this value to zero. This will
     /// cause more frequent DB writes.
-    #[arg(long = "engine.persistence-threshold", default_value_t = DefaultEngineValues::get_global().persistence_threshold)]
+    #[arg(
+        long = "engine.persistence-threshold",
+        env = "RETH_ENGINE_PERSISTENCE_THRESHOLD",
+        default_value_t = DefaultEngineValues::get_global().persistence_threshold
+    )]
     pub persistence_threshold: u64,
 
     /// Configure the maximum number of blocks beyond the in-memory buffer target that may await
@@ -330,6 +334,7 @@ pub struct EngineArgs {
     /// writes instead of durably persisting their state/trie updates in the current cycle.
     #[arg(
         long = "engine.num-state-masking-blocks",
+        env = "RETH_ENGINE_NUM_STATE_MASKING_BLOCKS",
         default_value_t = DefaultEngineValues::get_global().num_state_masking_blocks
     )]
     pub num_state_masking_blocks: u64,

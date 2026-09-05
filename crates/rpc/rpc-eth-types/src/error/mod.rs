@@ -313,7 +313,9 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::InvalidBlockData(_) |
             EthApiError::Internal(_) |
             EthApiError::EvmCustom(_) => internal_rpc_err(error.to_string()),
-            EthApiError::UnknownBlockOrTxIndex | EthApiError::TransactionNotFound => {
+            EthApiError::UnknownBlockOrTxIndex |
+            EthApiError::TransactionNotFound |
+            EthApiError::BlockAccessListNotAvailablePreAmsterdam => {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
             }
             EthApiError::TracingTransactionNotFound | EthApiError::GenesisNotTraceable => {
@@ -379,9 +381,6 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                     ),
                     error.data(),
                 )
-            }
-            EthApiError::BlockAccessListNotAvailablePreAmsterdam => {
-                rpc_error_with_code(4445, error.to_string())
             }
         }
     }

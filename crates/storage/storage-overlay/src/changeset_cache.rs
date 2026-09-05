@@ -224,6 +224,7 @@ impl ChangesetCache {
         P: DBProvider
             + ChangeSetReader
             + StorageChangeSetReader
+            + StageCheckpointReader
             + PruneCheckpointReader
             + BlockNumReader
             + StorageSettingsCache,
@@ -276,6 +277,7 @@ impl ChangesetCache {
         P: DBProvider
             + ChangeSetReader
             + StorageChangeSetReader
+            + StageCheckpointReader
             + PruneCheckpointReader
             + BlockNumReader
             + StorageSettingsCache,
@@ -401,8 +403,8 @@ impl ChangesetCache {
         let overlay = overlay_manager
             .overlay_builder(finish.hash)
             .with_no_reverts()
-            .build_overlay_at_frontiers(provider, partial_state_trie, finish)?;
-        let state_trie_provider = OverlayStateProvider::new(
+            .build_state_trie_overlay_at_frontiers(provider, partial_state_trie, finish, true)?;
+        let state_trie_provider = OverlayStateProvider::<&P, N>::new_with_state_trie(
             provider,
             overlay,
             provider.cached_storage_settings().is_v2(),
@@ -615,7 +617,7 @@ impl ChangesetCacheInner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Overlay;
+    use crate::StateTrieOverlay;
     use alloy_consensus::Header;
     use alloy_primitives::{
         keccak256,
@@ -641,8 +643,8 @@ mod tests {
         Arc::new(TrieUpdatesSorted::new(vec![], B256Map::default()))
     }
 
-    fn empty_overlay() -> Overlay {
-        Overlay { trie_updates: Arc::default(), hashed_post_state: Arc::default() }
+    fn empty_overlay() -> StateTrieOverlay {
+        StateTrieOverlay::new(TrieInputSorted::default())
     }
 
     fn insert_test_changesets(
@@ -772,10 +774,10 @@ mod tests {
                 .into_sorted();
 
         let db_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref());
-        let overlay_factory =
+        let state_provider_factory =
             InMemoryTrieCursorFactory::new(db_cursor_factory, &cumulative_trie_updates_prev);
 
-        compute_trie_changesets(&overlay_factory, &trie_updates).unwrap()
+        compute_trie_changesets(&state_provider_factory, &trie_updates).unwrap()
     }
 
     fn seed_tip_trie_tables<Provider, A>(provider: &Provider)
@@ -904,11 +906,12 @@ mod tests {
         reth_trie_db::with_adapter!(provider, |A| seed_tip_trie_tables::<_, A>(&*provider));
 
         let overlay = empty_overlay();
-        let state_trie_provider = OverlayStateProvider::new(
-            &*provider,
-            overlay,
-            provider.cached_storage_settings().is_v2(),
-        );
+        let state_trie_provider =
+            OverlayStateProvider::<&_, reth_ethereum_primitives::EthPrimitives>::new_with_state_trie(
+                &*provider,
+                overlay,
+                provider.cached_storage_settings().is_v2(),
+            );
         let actual =
             reth_trie_db::compute_range_trie_changesets(&*provider, &state_trie_provider, 1..=3, 3)
                 .unwrap();
@@ -990,11 +993,12 @@ mod tests {
 
         let expected = legacy_compute_range_trie_changesets(&*provider, 2..=3);
         let overlay = empty_overlay();
-        let state_trie_provider = OverlayStateProvider::new(
-            &*provider,
-            overlay,
-            provider.cached_storage_settings().is_v2(),
-        );
+        let state_trie_provider =
+            OverlayStateProvider::<&_, reth_ethereum_primitives::EthPrimitives>::new_with_state_trie(
+                &*provider,
+                overlay,
+                provider.cached_storage_settings().is_v2(),
+            );
         let actual =
             reth_trie_db::compute_range_trie_changesets(&*provider, &state_trie_provider, 2..=3, 3)
                 .unwrap();

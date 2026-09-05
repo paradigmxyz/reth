@@ -22,11 +22,15 @@ use std::{
 };
 use tracing::debug;
 
+mod block_access_list;
+mod bytecode;
 mod request;
 mod storage;
 #[cfg(test)]
 mod test_utils;
 
+pub use block_access_list::*;
+pub use bytecode::*;
 use request::{SnapVerifier, VerifyingRequest};
 pub use storage::*;
 
@@ -119,30 +123,40 @@ impl VerifiedAccountRange {
 
     /// Borrows the accounts together with the root that authenticated them.
     pub fn batch(&self) -> VerifiedAccountBatch<'_> {
-        VerifiedAccountBatch { state_root: self.state_root, accounts: &self.accounts }
+        VerifiedAccountBatch {
+            state_root: self.state_root,
+            accounts: self.accounts.iter().map(|(hash, account)| (*hash, account)).collect(),
+        }
     }
 
-    /// Borrows a positional subrange of the accounts, so a caller can request storage in bounded
-    /// chunks without losing the root that authenticated them.
+    /// Borrows only the accounts that have storage, together with the root that authenticated
+    /// them.
     ///
-    /// `None` when the range falls outside the response.
-    pub fn batch_range(&self, range: Range<usize>) -> Option<VerifiedAccountBatch<'_>> {
-        self.accounts
-            .get(range)
-            .map(|accounts| VerifiedAccountBatch { state_root: self.state_root, accounts })
+    /// Accounts without storage are omitted because snap storage responses do not preserve an
+    /// outer-list position for them. Empty when no account in the range has storage.
+    pub fn storage_batch(&self) -> VerifiedAccountBatch<'_> {
+        VerifiedAccountBatch {
+            state_root: self.state_root,
+            accounts: self
+                .accounts
+                .iter()
+                .filter(|(_, account)| account.storage_root != EMPTY_ROOT_HASH)
+                .map(|(hash, account)| (*hash, account))
+                .collect(),
+        }
     }
 }
 
 /// Accounts and the state root they were authenticated against.
 ///
-/// Only obtainable from [`VerifiedAccountRange::batch`], so requests built from it can always be
-/// checked against the root the accounts came from.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Only obtainable from [`VerifiedAccountRange`], so requests built from it can always be checked
+/// against the root the accounts came from.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VerifiedAccountBatch<'a> {
     // Root and accounts travel together, so neither can be swapped for another generation's.
     state_root: B256,
     // Accounts the root authenticated, in response order.
-    accounts: &'a [(B256, TrieAccount)],
+    accounts: Vec<(B256, &'a TrieAccount)>,
 }
 
 impl<'a> VerifiedAccountBatch<'a> {
@@ -152,8 +166,18 @@ impl<'a> VerifiedAccountBatch<'a> {
     }
 
     /// Accounts in the order the range returned them.
-    pub const fn accounts(&self) -> &'a [(B256, TrieAccount)] {
+    pub fn accounts(&self) -> &[(B256, &'a TrieAccount)] {
+        &self.accounts
+    }
+
+    /// Borrows a positional subrange of the batch, so storage can be requested in bounded chunks
+    /// without losing the root that authenticated the accounts.
+    ///
+    /// `None` when the range falls outside the batch.
+    pub fn range(&self, range: Range<usize>) -> Option<Self> {
         self.accounts
+            .get(range)
+            .map(|accounts| Self { state_root: self.state_root, accounts: accounts.to_vec() })
     }
 
     // Confirms the batch is the one `request` was built from, so every returned range is checked
@@ -175,7 +199,7 @@ impl<'a> VerifiedAccountBatch<'a> {
             })
         }
         for (index, (requested, (supplied, _))) in
-            request.account_hashes.iter().zip(self.accounts).enumerate()
+            request.account_hashes.iter().zip(&self.accounts).enumerate()
         {
             if requested != supplied {
                 return Err(InvalidStorageRangeRequest::AccountMismatch {
@@ -189,8 +213,11 @@ impl<'a> VerifiedAccountBatch<'a> {
     }
 
     // The accounts from `from` onwards under the same state root, or none if the batch is shorter.
-    pub(super) fn slice(&self, from: usize) -> Option<Self> {
-        self.accounts.get(from..).map(|accounts| Self { state_root: self.state_root, accounts })
+    pub(super) fn slice(mut self, from: usize) -> Option<Self> {
+        (from <= self.accounts.len()).then(|| {
+            self.accounts.drain(..from);
+            self
+        })
     }
 }
 
@@ -430,7 +457,7 @@ mod tests {
     }
 
     #[test]
-    fn batch_range_narrows_the_accounts_and_keeps_their_root() {
+    fn a_subrange_narrows_the_accounts_and_keeps_their_root() {
         let accounts = vec![(key(1), account(7)), (key(2), account(8)), (key(3), account(9))];
         let root_hash = root(&accounts);
         let range = VerifiedAccountRange {
@@ -440,11 +467,42 @@ mod tests {
             next: None,
         };
 
-        let chunk = range.batch_range(1..3).expect("chunk is inside the range");
-        assert_eq!(chunk.accounts(), &accounts[1..3]);
+        let batch = range.batch();
+        let chunk = batch.range(1..3).expect("chunk is inside the batch");
+        let expected =
+            accounts[1..3].iter().map(|(hash, account)| (*hash, account)).collect::<Vec<_>>();
+        assert_eq!(chunk.accounts(), expected);
         assert_eq!(chunk.state_root(), root_hash);
 
-        assert_eq!(range.batch_range(2..4), None);
+        assert_eq!(batch.range(2..4), None);
+    }
+
+    #[test]
+    fn storage_batch_omits_interleaved_accounts_without_storage() {
+        let mut first = account(1);
+        first.storage_root = B256::repeat_byte(0x11);
+        let empty = account(2);
+        let mut third = account(3);
+        third.storage_root = B256::repeat_byte(0x33);
+        let accounts = vec![(key(1), first), (key(2), empty), (key(3), third)];
+        let root_hash = root(&accounts);
+        let range =
+            VerifiedAccountRange { state_root: root_hash, accounts, has_more: false, next: None };
+
+        let batch = range.storage_batch();
+
+        assert_eq!(batch.state_root(), root_hash);
+        assert_eq!(
+            batch.accounts().iter().map(|(hash, _)| *hash).collect::<Vec<_>>(),
+            vec![key(1), key(3)]
+        );
+
+        let chunk = batch.range(1..2).expect("chunk is inside the batch");
+        assert_eq!(
+            chunk.accounts().iter().map(|(hash, _)| *hash).collect::<Vec<_>>(),
+            vec![key(3)]
+        );
+        assert_eq!(chunk.state_root(), root_hash);
     }
 
     #[test]

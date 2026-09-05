@@ -9,10 +9,12 @@ use crossbeam_channel::{Receiver, RecvTimeoutError, TryRecvError};
 use reth_evm::ConfigureEvm;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    BlockNumReader, DatabaseProviderFactory, PruneCheckpointReader, StageCheckpointReader,
-    StorageSettingsCache, TryIntoHistoricalStateProvider,
+    BlockNumReader, ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory,
+    PruneCheckpointReader, StageCheckpointReader, StateProvider, StorageChangeSetReader,
+    StorageSettingsCache,
 };
 use reth_revm::{cached::CachedReads, db::State};
+use reth_storage_overlay::OverlayStateProviderFactory;
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -70,9 +72,11 @@ where
     P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
+        + ChangeSetReader
+        + StorageChangeSetReader
         + StorageSettingsCache
-        + TryIntoHistoricalStateProvider
         + 'static,
+    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: StateProvider> + Send,
     Evm: ConfigureEvm<Primitives = N>,
 {
     pub(super) fn new(
@@ -184,7 +188,7 @@ where
             return BatchEnd::GoAgain
         }
 
-        let state_provider = match job.provider_builder.build() {
+        let state_provider = match job.state_provider_factory.database_provider_ro() {
             Ok(provider) => provider,
             Err(err) => {
                 trace!(
@@ -316,7 +320,6 @@ fn entry_counts(reads: &CachedReads) -> (usize, usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::{super::Transaction as PoolTransaction, *};
-    use crate::tree::StateProviderBuilder;
     use alloy_consensus::{transaction::Recovered, Signed, TxLegacy};
     use alloy_primitives::{Address, Signature, TxKind, U256};
     use crossbeam_channel::{unbounded, Sender};
@@ -376,10 +379,9 @@ mod tests {
             provider.add_stage_checkpoint(StageId::Finish, StageCheckpoint::new(0));
             let job = Job {
                 evm_env: Default::default(),
-                provider_builder: StateProviderBuilder::new(
+                state_provider_factory: OverlayStateProviderFactory::new(
                     provider,
-                    parent_hash,
-                    reth_storage_overlay::OverlayManager::default(),
+                    reth_storage_overlay::OverlayManager::default().overlay_builder(parent_hash),
                 ),
             };
             self.commands.send(Command::Start { parent_hash, job }).unwrap();

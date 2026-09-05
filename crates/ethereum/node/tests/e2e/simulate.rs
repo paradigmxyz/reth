@@ -13,6 +13,66 @@ use reth_node_ethereum::EthereumNode;
 use std::sync::Arc;
 
 #[tokio::test]
+async fn test_simulate_v1_block_access_list_hash_across_amsterdam() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json"))?)
+            .osaka_activated()
+            .with_amsterdam_at(24)
+            .build(),
+    );
+    let (mut nodes, _) = setup_engine::<EthereumNode>(
+        1,
+        chain_spec,
+        false,
+        Default::default(),
+        eth_payload_attributes_amsterdam,
+    )
+    .await?;
+    let node = nodes.pop().unwrap();
+    let provider = ProviderBuilder::new().connect_http(node.rpc_url());
+    let from = Address::with_last_byte(0x41);
+    let contract = Address::with_last_byte(0x42);
+    let state_overrides = StateOverride::from_iter([
+        (from, AccountOverride::default().with_nonce(0)),
+        (contract, AccountOverride::default().with_code(bytes!("0x5f545f5260205ff3"))),
+    ]);
+    let call_block = SimBlock::default()
+        .with_state_overrides(state_overrides)
+        .call(TransactionRequest::default().from(from).to(contract));
+
+    for trace_transfers in [false, true] {
+        let mut payload = SimulatePayload::default()
+            .extend(SimBlock::default())
+            .extend(call_block.clone())
+            .extend(call_block.clone())
+            .extend(SimBlock::default());
+        payload.trace_transfers = trace_transfers;
+        let result: Vec<SimulatedBlock> =
+            provider.raw_request("eth_simulateV1".into(), (&payload, "latest")).await?;
+        assert_eq!(result.len(), 4);
+        assert_eq!(result[0].inner.header.block_access_list_hash, None);
+        let bal_hash = result[1].inner.header.block_access_list_hash.expect("Amsterdam BAL hash");
+        assert!(result[1].calls[0].status);
+        assert!(result[2].calls[0].status);
+        // Identical calls with the same initial state must reset their BAL indices each block.
+        assert_eq!(result[2].inner.header.block_access_list_hash, Some(bal_hash));
+        let empty_hash =
+            result[3].inner.header.block_access_list_hash.expect("empty block BAL hash");
+        assert_ne!(bal_hash, empty_hash);
+        for pair in result.windows(2) {
+            assert_eq!(pair[1].inner.header.parent_hash, pair[0].inner.header.hash);
+        }
+        for block in &result {
+            assert_eq!(block.inner.header.hash, block.inner.header.inner.hash_slow());
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_simulate_v1_explicit_gas_uses_remaining_block_gas() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
