@@ -552,7 +552,8 @@ async fn test_flashbots_validate_v4() -> eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+// Keep blob JSON decoding off the test thread's deeper debug stack.
+#[tokio::test(flavor = "multi_thread")]
 async fn test_flashbots_validate_v5() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
@@ -620,7 +621,8 @@ async fn test_flashbots_validate_v5() -> eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+// Keep blob JSON decoding off the test thread's deeper debug stack.
+#[tokio::test(flavor = "multi_thread")]
 async fn test_flashbots_validate_v6() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
