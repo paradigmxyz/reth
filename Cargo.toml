@@ -694,3 +694,8 @@ vergen-git2 = "10.0.1"
 
 # networking
 ipnet = "2.11"
+
+[patch.crates-io]
+# Temporary integration of alloy-rlp's borrowed `RlpList` cursor, pending its release.
+alloy-rlp = { git = "https://github.com/0xalpharush/rlp", rev = "77ba5b0" }
+alloy-rlp-derive = { git = "https://github.com/0xalpharush/rlp", rev = "77ba5b0" }

@@ -542,8 +542,7 @@ dependencies = [
 [[package]]
 name = "alloy-rlp"
 version = "0.3.16"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24671b1f62edcf0f9b62994c7bf72cd621a04a4b99f5020ece1a647b40e2f103"
+source = "git+https://github.com/0xalpharush/rlp?rev=77ba5b0#77ba5b09a86d36c04a3fb685db3443490f010502"
 dependencies = [
  "alloy-rlp-derive",
  "arrayvec",
@@ -553,8 +552,7 @@ dependencies = [
 [[package]]
 name = "alloy-rlp-derive"
 version = "0.3.16"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d4311c03125e8a18296504560b9de3d75ecbd0dcda7f71e6cf2a196d57e6fba"
+source = "git+https://github.com/0xalpharush/rlp?rev=77ba5b0#77ba5b09a86d36c04a3fb685db3443490f010502"
 dependencies = [
  "proc-macro2",
  "quote",
