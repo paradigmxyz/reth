@@ -974,19 +974,71 @@ where
         Ok(PopCachedBranchOutcome::Popped(cached))
     }
 
-    // Pop any under-construction branches that are now complete. Assumes that all trie data prior
-    // to `next_path`, if any, has been computed. Any branches which were under-construction
-    // previously, and which do not share a prefix with `next_path`, can be assumed to be completed;
-    // they will not have any further keys added to them.
+    /// Pop any under-construction branches that are now complete. Assumes that all trie data prior
+    /// to `next_path`, if any, has been computed. Any branches which were under-construction
+    /// previously, and which do not share a prefix with `next_path`, can be assumed to be
+    /// completed; they will not have any further keys added to them.
+    ///
+    /// Returns a range to calculate if a branch still has dirty keys to process, or popping it
+    /// exposes dirty keys which could split its extension. A missing lower bound disables these
+    /// checks when the caller has already scheduled the remaining range.
     fn commit_branches<'a>(
         &mut self,
         targets: &mut Option<TargetsCursor<'a>>,
         next_path: &Nibbles,
-    ) -> Result<(), StateProofError> {
+        uncalculated_lower_bound: Option<&Nibbles>,
+    ) -> Result<Option<(Nibbles, Option<Nibbles>)>, StateProofError> {
+        let dirty_range = |prefix_set: &mut PrefixSet, upper_bound: Option<Nibbles>| {
+            let uncalculated_lower_bound = uncalculated_lower_bound?;
+
+            if upper_bound.as_ref().is_some_and(|upper| uncalculated_lower_bound >= upper) {
+                return None
+            }
+
+            match upper_bound {
+                Some(upper_bound) => prefix_set
+                    .contains_range(uncalculated_lower_bound..&upper_bound)
+                    .then_some((*uncalculated_lower_bound, Some(upper_bound))),
+                None => prefix_set
+                    .contains_from(uncalculated_lower_bound)
+                    .then_some((*uncalculated_lower_bound, None)),
+            }
+        };
+
+        let mut popped_child_path_upper = None;
         while !next_path.starts_with(&self.branch_path) {
+            // If the lower bound is still within this branch, process any remaining dirty keys
+            // before popping it so they can be added directly to the branch.
+            if uncalculated_lower_bound.is_some_and(|lower| lower.starts_with(&self.branch_path)) &&
+                let Some(range) =
+                    dirty_range(&mut self.prefix_set, self.branch_path.next_without_prefix())
+            {
+                return Ok(Some(range))
+            }
+
+            let branch = self.branch_stack.last().expect("branch_stack cannot be empty");
+            // Once popped, this branch becomes a child at this path. Its upper bound therefore
+            // covers any keys which could split the branch's extension on the right.
+            popped_child_path_upper = Some(
+                self.branch_path
+                    .slice_unchecked(0, self.branch_path.len() - branch.ext_len as usize)
+                    .next_without_prefix(),
+            );
+
             self.pop_branch(targets)?;
         }
-        Ok(())
+
+        // An empty branch_stack is skipped because a popped local root does not need this check:
+        // any gap before `next_path` was already returned by `try_pop_cached_branch`, and forward
+        // traversal will split its extension and process later dirty keys as needed.
+        if !self.branch_stack.is_empty() &&
+            let Some(upper_bound) = popped_child_path_upper &&
+            let Some(range) = dirty_range(&mut self.prefix_set, upper_bound)
+        {
+            return Ok(Some(range))
+        }
+
+        Ok(None)
     }
 
     /// Accepts the current state of both hashed and trie cursors, and determines the next range of
@@ -1040,13 +1092,13 @@ where
                     // used to return that range.
                     trace!(target: TRACE_TARGET, ?uncalculated_lower_bound, "Exhausted cached trie nodes");
                     if let Some(lower) = uncalculated_lower_bound {
-                        self.commit_branches(targets, &lower)?;
+                        self.commit_branches(targets, &lower, None)?;
                         return Ok(Some((lower, traversal_upper_bound.copied())));
                     }
                     return Ok(None)
                 }
                 PopCachedBranchOutcome::CalculateLeaves(range) => {
-                    self.commit_branches(targets, &range.0)?;
+                    self.commit_branches(targets, &range.0, None)?;
                     return Ok(Some(range));
                 }
             };
@@ -1065,7 +1117,12 @@ where
                 "loop",
             );
 
-            self.commit_branches(targets, &cached_path)?;
+            if let Some(range) =
+                self.commit_branches(targets, &cached_path, Some(uncalculated_lower_bound_ref))?
+            {
+                self.cached_branch_stack.push((cached_path, cached_branch));
+                return Ok(Some(range))
+            }
 
             // Since we've popped all branches which don't start with cached_path, branch_path at
             // this point must be equal to or shorter than cached_path.
@@ -1079,6 +1136,16 @@ where
             // top branch is the parent of this cached branch. Either way we push a branch
             // corresponding to the cached one onto the stack, so we can begin constructing it.
             if self.branch_path != cached_path {
+                // If the prefix set contains any entries from the lower bound up until the new
+                // cached path it means that there might be a new node(s) which split the extension
+                // node between cached_path and its parent (self.branch_path).
+                if uncalculated_lower_bound_ref < &cached_path &&
+                    self.prefix_set.contains_range(uncalculated_lower_bound_ref..&cached_path)
+                {
+                    self.cached_branch_stack.push((cached_path, cached_branch));
+                    return Ok(Some((*uncalculated_lower_bound_ref, Some(cached_path))))
+                }
+
                 self.push_cached_branch(targets, cached_path, &cached_branch)?;
             }
 
@@ -1149,24 +1216,22 @@ where
                 );
             }
 
-            // If there are no further children to construct for this branch then pop it off both
-            // stacks and loop using the parent branch.
+            // Defer popping this completed branch to `commit_branches`, which checks for dirty
+            // keys around it before looping with the parent branch.
             if next_child_nibbles.is_empty() {
                 trace!(
                     target: TRACE_TARGET,
                     path=?cached_path,
                     ?curr_branch,
                     ?cached_branch,
-                    "No further children, popping branch",
+                    "No further children",
                 );
-                self.pop_branch(targets)?;
 
                 // no need to pop from `cached_branch_stack`, the current cached branch is already
                 // popped (see note at the top of the loop).
 
-                // The just-popped branch is completely processed; we know there can be no more keys
-                // with that prefix. Set the lower bound which can be returned from this method to
-                // be the next possible prefix, if any.
+                // The completed branch has no more keys with its prefix. Set the lower bound which
+                // can be returned from this method to be the next possible prefix, if any.
                 uncalculated_lower_bound = cached_path.next_without_prefix();
 
                 continue
@@ -1176,18 +1241,6 @@ where
             // determine the child's full path.
             let child_nibble = next_child_nibbles.trailing_zeros() as u8;
             let child_path = self.child_path_at(child_nibble);
-
-            // If the previous child was a cached branch with a short key (extension), then the new
-            // uncalculated_lower_bound will be the increment of that branch's path. If there are
-            // any dirty leaves between that path and this child, it indicates there may be leaves
-            // which would split that extension node. In that case we return the range to process
-            // the leaves.
-            if uncalculated_lower_bound_ref < &child_path &&
-                self.prefix_set.contains_range(uncalculated_lower_bound_ref..&child_path)
-            {
-                self.cached_branch_stack.push((cached_path, cached_branch));
-                return Ok(Some((*uncalculated_lower_bound_ref, Some(child_path))));
-            }
 
             // If the `hash_mask` bit is set for the next child it means the child's hash is cached
             // in the `cached_branch`. We can use that instead of re-calculating the hash of the
@@ -1263,16 +1316,6 @@ where
             {
                 // Push the current cached branch back on before pushing its child and then looping
                 self.cached_branch_stack.push((cached_path, cached_branch));
-
-                // If the next cached branch's path is in the prefix set, it could indicate that
-                // there are dirty leaves which would split the cached branch's extension node (if
-                // there is one). In that case we return the range those leaves would potentially be
-                // in to calculate them.
-                if self.prefix_set.contains(&child_path) {
-                    let gap_upper = Some(*next_cached_path);
-                    self.cached_branch_stack.push(trie_cursor_state.take());
-                    return Ok(Some((*uncalculated_lower_bound_ref, gap_upper)));
-                }
 
                 trace!(
                     target: TRACE_TARGET,
@@ -2090,6 +2133,20 @@ mod tests {
             Self { inner: TrieTestHarness::new(storage) }
         }
 
+        /// Computes the storage root while treating the supplied prefixes as dirty.
+        fn root_with_prefix_set(&self, prefix_set: PrefixSet) -> Option<B256> {
+            let trie_cursor =
+                self.trie_cursor_factory().storage_trie_cursor(self.hashed_address()).unwrap();
+            let hashed_cursor =
+                self.hashed_cursor_factory().hashed_storage_cursor(self.hashed_address()).unwrap();
+            let mut calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor)
+                .with_prefix_set(prefix_set);
+
+            let mut targets = [ProofV2Target::new(B256::ZERO)];
+            let proof = calculator.storage_proof(self.hashed_address(), &mut targets).unwrap();
+            calculator.compute_root_hash(&proof).unwrap()
+        }
+
         /// Asserts that `StorageProofCalculator` and legacy `StorageProof` produce equivalent
         /// results for storage proofs.
         fn assert_proof(
@@ -2792,6 +2849,70 @@ mod tests {
         );
     }
 
+    fn b256(s: &str) -> B256 {
+        B256::from_slice(&alloy_primitives::hex::decode(s).expect("valid hex string"))
+    }
+
+    #[test]
+    fn test_prefix_set_root_proof_processes_sibling_after_cached_descendant() {
+        reth_tracing::init_test_tracing();
+
+        let storage = [
+            ("1022c69e9d900e40775cd387c134899f465f291dbc3c97899ff6bfb8dc972b37", 45u64),
+            ("1111ad8083c8a3a398b2b781217b989ff4d1ed182f46cc765eda49a7b316139d", 60),
+            ("12012d20943649899b2fc0f87b9840b70ef68e93613aac17c269bf8c5a78a712", 17),
+            ("12014b57b9a162c03d072eb6acd4e936f1c4bc23b803a054347c5ee9a9bcfb9a", 49),
+            ("1203f800840af3f898ab4572f2750106a7c4bd2b3e844b6e7fa72704673cc2c6", 76),
+            ("12208f18fbcd6971c92808721392acbf11d5af58e9143a374cc86e70bdd1f097", 10),
+        ]
+        .into_iter()
+        .map(|(key, value)| (b256(key), U256::from(value)))
+        .collect();
+
+        let dirty = b256("12208f18fbcd6971c92808721392acbf11d5af58e9143a374cc86e70bdd1f097");
+        let harness = ProofTestHarness::new(storage);
+        let expected_root = harness.original_root();
+
+        let mut prefix_set = PrefixSetMut::default();
+        prefix_set.insert(Nibbles::unpack(dirty));
+
+        pretty_assertions::assert_eq!(
+            Some(expected_root),
+            harness.root_with_prefix_set(prefix_set.freeze()),
+            "root proof must process a prefix-set sibling after a cached descendant",
+        );
+    }
+
+    #[test]
+    fn test_prefix_set_root_proof_processes_trailing_dirty_sibling() {
+        reth_tracing::init_test_tracing();
+
+        let keys = [
+            "0022001020000000000000000000000000000000000000000000000000000000",
+            "0110212112000000000000000000000000000000000000000000000000000000",
+            "0202210210000000000000000000000000000000000000000000000000000000",
+            "0211020211000000000000000000000000000000000000000000000000000000",
+            "0211211002000000000000000000000000000000000000000000000000000000",
+            "0212221010000000000000000000000000000000000000000000000000000000",
+            "0222011102000000000000000000000000000000000000000000000000000000",
+        ];
+        let storage =
+            keys.iter().enumerate().map(|(i, key)| (b256(key), U256::from(i as u64 + 1))).collect();
+        let harness = ProofTestHarness::new(storage);
+        let expected_root = harness.original_root();
+
+        // The dirty children straddle a clean cached descendant under branch 0x02. Traversal
+        // must resume at the trailing dirty sibling after using the cached descendant.
+        let mut prefix_set = PrefixSetMut::default();
+        prefix_set.insert(Nibbles::unpack(b256(keys[2])));
+        prefix_set.insert(Nibbles::unpack(b256(keys[6])));
+
+        pretty_assertions::assert_eq!(
+            Some(expected_root),
+            harness.root_with_prefix_set(prefix_set.freeze()),
+        );
+    }
+
     /// Helper to compute the keccak256 hash of a storage leaf node. The `short_key` is the
     /// leaf's key after trimming all branch/extension nibbles consumed by ancestor nodes.
     fn storage_leaf_hash(short_key: &Nibbles, value: &U256) -> B256 {
@@ -3109,7 +3230,8 @@ mod tests {
         // Keys whose first bytes directly set the nibble paths we need.
         let key_a0 = B256::right_padding_from(&[0x6a, 0x80]); // nibbles: 6,a,8,0,...
         let key_a1 = B256::right_padding_from(&[0x6a, 0x81]); // nibbles: 6,a,8,1,...
-        let key_c = B256::right_padding_from(&[0x6a, 0x30]); // nibbles: 6,a,3,0,... (BEFORE [6,a,8])
+        let key_c = B256::right_padding_from(&[0x6a, 0x30]); // nibbles: 6,a,3,0,... (BEFORE
+                                                             // [6,a,8])
         let key_d = B256::right_padding_from(&[0x6b, 0x00]); // nibbles: 6,b,0,0,...
         let key_e = B256::right_padding_from(&[0x6c, 0x00]); // nibbles: 6,c,0,0,...
 

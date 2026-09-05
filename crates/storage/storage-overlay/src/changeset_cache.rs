@@ -403,7 +403,7 @@ impl ChangesetCache {
         let overlay = overlay_manager
             .overlay_builder(finish.hash)
             .with_no_reverts()
-            .build_state_trie_overlay_at_frontiers(provider, partial_state_trie, finish)?;
+            .build_state_trie_overlay_at_frontiers(provider, partial_state_trie, finish, true)?;
         let state_trie_provider = OverlayStateProvider::<&P, N>::new_with_state_trie(
             provider,
             overlay,
@@ -644,7 +644,7 @@ mod tests {
     }
 
     fn empty_overlay() -> StateTrieOverlay {
-        StateTrieOverlay::new(Arc::default(), Arc::default())
+        StateTrieOverlay::new(TrieInputSorted::default())
     }
 
     fn insert_test_changesets(
@@ -774,10 +774,10 @@ mod tests {
                 .into_sorted();
 
         let db_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref());
-        let overlay_factory =
+        let state_provider_factory =
             InMemoryTrieCursorFactory::new(db_cursor_factory, &cumulative_trie_updates_prev);
 
-        compute_trie_changesets(&overlay_factory, &trie_updates).unwrap()
+        compute_trie_changesets(&state_provider_factory, &trie_updates).unwrap()
     }
 
     fn seed_tip_trie_tables<Provider, A>(provider: &Provider)
