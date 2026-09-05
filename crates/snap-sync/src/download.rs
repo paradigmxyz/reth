@@ -325,7 +325,7 @@ impl<'a, C, F> StateDownloader<'a, C, F> {
             while !pending.is_empty() {
                 let request = GetByteCodesMessage {
                     request_id: self.next_request_id()?,
-                    hashes: pending,
+                    hashes: pending.clone(),
                     response_bytes: STATE_RESPONSE_BYTES,
                 };
                 let downloader = BytecodeDownloader::new_with_options(
@@ -347,17 +347,8 @@ impl<'a, C, F> StateDownloader<'a, C, F> {
                     Err(RequestError::UnsupportedCapability) => return Ok(None),
                     Err(error) => return Err(error.into()),
                     Ok(BytecodeOutcome::Verified(verified)) => {
-                        pending = verified
-                            .codes
-                            .into_iter()
-                            .filter_map(|(hash, code)| match code {
-                                Some(code) => {
-                                    bytecodes.push((hash, code));
-                                    None
-                                }
-                                None => Some(hash),
-                            })
-                            .collect();
+                        pending = verified.missing(&pending).collect();
+                        bytecodes.extend(verified.into_codes());
                         excluded.clear();
                     }
                 }

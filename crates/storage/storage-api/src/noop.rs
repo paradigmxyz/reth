@@ -9,12 +9,13 @@ use crate::{
     PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader,
     StateProofProvider, StateProvider, StateProviderBox, StateProviderFactory,
     StateRangeProviderFactory, StateRangeView, StateReader, StateRootProvider, StorageRootProvider,
-    TransactionVariant, TransactionsProvider, TryIntoHistoricalStateProvider,
+    TransactionVariant, TransactionsProvider,
 };
 
 #[cfg(feature = "db-api")]
 use crate::{
-    DBProvider, DatabaseProviderFactory, DbTxProvider, StorageChangeSetReader, StorageSettingsCache,
+    DBProvider, DatabaseProviderFactory, DbTxProvider, HistoryInfo, HistoryReader,
+    StorageChangeSetReader, StorageSettingsCache,
 };
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use alloy_consensus::transaction::TransactionMeta;
@@ -427,6 +428,28 @@ impl<C: Send + Sync, N: NodePrimitives> ChangeSetReader for NoopProvider<C, N> {
 }
 
 #[cfg(feature = "db-api")]
+impl<C: Send + Sync, N: NodePrimitives> HistoryReader for NoopProvider<C, N> {
+    fn account_history_info(
+        &self,
+        _address: Address,
+        _block_number: BlockNumber,
+        _lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo> {
+        Ok(HistoryInfo::NotYetWritten)
+    }
+
+    fn storage_history_info(
+        &self,
+        _address: Address,
+        _storage_key: B256,
+        _block_number: BlockNumber,
+        _lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo> {
+        Ok(HistoryInfo::NotYetWritten)
+    }
+}
+
+#[cfg(feature = "db-api")]
 impl<C: Send + Sync, N: NodePrimitives> StorageChangeSetReader for NoopProvider<C, N> {
     fn storage_changeset(
         &self,
@@ -635,17 +658,6 @@ impl<C: Send + Sync + 'static, N: NodePrimitives> StateProviderFactory for NoopP
 
     fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox>> {
         Ok(Some(Box::new(self.clone())))
-    }
-}
-
-impl<C: Send + Sync + 'static, N: NodePrimitives> TryIntoHistoricalStateProvider
-    for NoopProvider<C, N>
-{
-    fn try_into_history_at_block(
-        self,
-        block_number: BlockNumber,
-    ) -> ProviderResult<StateProviderBox> {
-        self.history_by_block_number(block_number)
     }
 }
 

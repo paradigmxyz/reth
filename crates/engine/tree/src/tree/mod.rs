@@ -330,9 +330,6 @@ where
     payload_builds: PayloadBuildTracker,
     /// Notifies the engine when the final active payload job finishes.
     payload_build_finished: Receiver<()>,
-    /// A durable persistence completion whose destructive in-memory handoff is deferred until
-    /// payload jobs finish.
-    pending_persisted_handoff: Option<PersistenceResult>,
     /// Task runtime for spawning blocking work on named, reusable threads.
     runtime: reth_tasks::Runtime,
 }
@@ -361,7 +358,6 @@ where
             .field("evm_config", &self.evm_config)
             .field("execution_timing_stats", &self.execution_timing_stats.len())
             .field("payload_builds_active", &self.payload_builds.is_active())
-            .field("pending_persisted_handoff", &self.pending_persisted_handoff)
             .field("runtime", &self.runtime)
             .finish()
     }
@@ -429,7 +425,6 @@ where
             execution_timing_stats: B256Map::default(),
             payload_builds,
             payload_build_finished,
-            pending_persisted_handoff: None,
             runtime,
         }
     }
@@ -606,12 +601,7 @@ where
                         return
                     }
                 }
-                LoopEvent::PayloadBuildFinished => {
-                    if let Err(err) = self.on_payload_build_finished() {
-                        error!(target: "engine::tree", %err, "Payload build completion handling failed");
-                        return
-                    }
-                }
+                LoopEvent::PayloadBuildFinished => {}
                 LoopEvent::Disconnected => {
                     error!(target: "engine::tree", "Channel disconnected");
                     return
@@ -647,28 +637,11 @@ where
         }
     }
 
-    /// Blocks until the next event that can safely be processed is ready.
+    /// Blocks until the next event is ready.
     ///
-    /// A pending persisted handoff keeps processing engine messages while prioritizing the
-    /// notification that all active payload builds have finished. This keeps the engine responsive
-    /// without reclaiming the in-memory overlay while a payload job may still access it. Otherwise,
-    /// uses biased selection to prioritize persistence completion to update in-memory state and
-    /// unblock further writes.
+    /// Uses biased selection to prioritize persistence completion so in-memory state is updated and
+    /// further writes are unblocked.
     fn wait_for_event(&mut self) -> LoopEvent<T, N> {
-        if self.pending_persisted_handoff.is_some() {
-            self.metrics.engine.backpressure_active.set(0.0);
-            return crossbeam_channel::select_biased! {
-                recv(self.payload_build_finished) -> result => match result {
-                    Ok(()) => LoopEvent::PayloadBuildFinished,
-                    Err(_) => LoopEvent::Disconnected,
-                },
-                recv(self.incoming) -> msg => match msg {
-                    Ok(m) => LoopEvent::EngineMessage(m),
-                    Err(_) => LoopEvent::Disconnected,
-                },
-            }
-        }
-
         // Take ownership of persistence rx if present
         let maybe_persistence = self.persistence_state.rx.take();
 
@@ -1466,12 +1439,6 @@ where
     /// This checks if we need to remove blocks (disk reorg) or save new blocks to disk.
     /// Persistence completion is handled separately via the `wait_for_event` method.
     fn advance_persistence(&mut self) -> Result<(), AdvancePersistenceError> {
-        // A second persistence completion would overwrite the frontier needed by the deferred
-        // handoff. Wait until the payload jobs using the old overlay have finished.
-        if self.pending_persisted_handoff.is_some() {
-            return Ok(())
-        }
-
         if !self.persistence_state.in_progress() {
             if let Some(new_tip_num) = self.find_disk_reorg()? {
                 self.remove_blocks(new_tip_num)
@@ -1504,7 +1471,7 @@ where
             if let Some((rx, start_time, action)) = self.persistence_state.rx.take() {
                 debug!(target: "engine::tree", ?action, "waiting for in-flight persistence");
                 let result = rx.recv().map_err(|_| AdvancePersistenceError::ChannelClosed)?;
-                self.finish_persistence(result, start_time);
+                self.on_persistence_complete(result, start_time)?;
                 continue
             }
 
@@ -1556,31 +1523,9 @@ where
         result: PersistenceResult,
         start_time: Instant,
     ) -> Result<(), AdvancePersistenceError> {
-        let handoff = self.finish_persistence(result, start_time);
-
-        if self.payload_builds.is_active() {
-            debug_assert!(
-                self.pending_persisted_handoff.is_none(),
-                "a new persistence task must not start while its predecessor handoff is pending"
-            );
-            debug!(target: "engine::tree", "Deferring persisted in-memory handoff until payload jobs finish");
-            self.pending_persisted_handoff = Some(handoff);
-            return Ok(())
-        }
-
-        self.on_persisted_handoff(handoff)
-    }
-
-    /// Records a completed persistence operation and returns its deferred in-memory handoff.
-    fn finish_persistence(
-        &mut self,
-        result: PersistenceResult,
-        start_time: Instant,
-    ) -> PersistenceResult {
         self.metrics.engine.persistence_duration.record(start_time.elapsed());
 
-        let last_block = result.last_block;
-        let last_state_trie_block = result.last_state_trie_block;
+        let PersistenceResult { last_block, last_state_trie_block, commit_duration } = result;
         debug_assert!(
             last_state_trie_block.number <= last_block.number,
             "state/trie frontier cannot exceed the last persisted block"
@@ -1589,28 +1534,6 @@ where
         debug!(target: "engine::tree", ?last_block, ?last_state_trie_block, elapsed=?start_time.elapsed(), "Finished persisting, calling finish");
         self.persistence_state.finish(last_block, last_state_trie_block);
 
-        result
-    }
-
-    /// Applies the destructive in-memory portion of a completed persistence operation.
-    fn on_persisted_handoff(
-        &mut self,
-        handoff: PersistenceResult,
-    ) -> Result<(), AdvancePersistenceError> {
-        if handoff.last_block != self.persistence_state.last_persisted_block ||
-            handoff.last_state_trie_block !=
-                self.persistence_state.last_state_trie_persisted_block
-        {
-            debug!(
-                target: "engine::tree",
-                handoff_last_block = ?handoff.last_block,
-                current_last_block = ?self.persistence_state.last_persisted_block,
-                "Discarding stale persisted handoff"
-            );
-            return Ok(())
-        }
-
-        let PersistenceResult { last_block, commit_duration, .. } = handoff;
         let last_block_number = last_block.number;
 
         // Evict cached changesets for blocks below the eviction threshold.
@@ -1637,19 +1560,6 @@ where
         self.on_new_persisted_block()?;
 
         self.purge_timing_stats(last_block_number, commit_duration);
-
-        Ok(())
-    }
-
-    /// Releases work deferred until all payload jobs have finished.
-    fn on_payload_build_finished(&mut self) -> Result<(), AdvancePersistenceError> {
-        if self.payload_builds.is_active() {
-            return Ok(())
-        }
-
-        if let Some(handoff) = self.pending_persisted_handoff.take() {
-            self.on_persisted_handoff(handoff)?;
-        }
 
         Ok(())
     }
@@ -1704,16 +1614,15 @@ where
                             }
                         };
 
-                        // if the parent is the canonical head, we can insert the block as the
-                        // pending block
-                        if self.state.tree_state.canonical_block_hash() ==
-                            block.recovered_block().parent_hash()
-                        {
+                        let is_pending = self.state.tree_state.canonical_block_hash() ==
+                            block.recovered_block().parent_hash();
+                        self.state.tree_state.insert_executed(block.clone());
+
+                        if is_pending {
                             debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
                             self.canonical_in_memory_state.set_pending_block(block.clone());
                         }
 
-                        self.state.tree_state.insert_executed(block.clone());
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
                         self.emit_event(EngineApiEvent::BeaconConsensus(
                             ConsensusEngineEvent::CanonicalBlockAdded(block, now.elapsed()),
@@ -1976,6 +1885,13 @@ where
 
             // update the tracked canonical head
             self.canonical_in_memory_state.set_canonical_head(new_head);
+
+            // If the pipeline reached the head of the syncing FCU, apply its safe and finalized
+            // blocks now that the head is canonical. An unwind must wait for a new FCU because the
+            // supplied sync target may have been invalidated.
+            if !ctrl.is_unwind() {
+                self.on_canonicalized_sync_target(backfill_num_hash.hash);
+            }
         }
 
         // check if we need to run backfill again by comparing the most recent backfill target
@@ -2174,12 +2090,9 @@ where
                 "backfill action should only be emitted when backfill is idle"
             );
 
-            if self.payload_builds.is_active() ||
-                self.persistence_state.in_progress() ||
-                self.pending_persisted_handoff.is_some()
-            {
-                // Backfill can remove the same in-memory blocks as an active payload job or a
-                // persisted handoff, so it must not start until the next sync trigger.
+            if self.payload_builds.is_active() || self.persistence_state.in_progress() {
+                // Backfill can remove the same in-memory blocks as an active payload job or
+                // persistence task, so it must not start until the next sync trigger.
                 debug!(target: "engine::tree", "skipping backfill while in-memory overlay is in use");
                 return
             }
@@ -3227,14 +3140,15 @@ where
             self.execution_timing_stats.insert(executed.recovered_block().hash(), stats);
         }
 
-        // if the parent is the canonical head, we can insert the block as the pending block
-        if self.state.tree_state.canonical_block_hash() == executed.recovered_block().parent_hash()
-        {
+        let is_pending = self.state.tree_state.canonical_block_hash() ==
+            executed.recovered_block().parent_hash();
+        self.state.tree_state.insert_executed(executed.clone());
+
+        if is_pending {
             debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
             self.canonical_in_memory_state.set_pending_block(executed.clone());
         }
 
-        self.state.tree_state.insert_executed(executed.clone());
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
 
         // emit insert event
@@ -3559,7 +3473,7 @@ where
         /// When the persistence operation started.
         start_time: Instant,
     },
-    /// The last active payload job has finished, so deferred in-memory work may proceed.
+    /// The last active payload job has finished, so suppressed persistence may resume.
     PayloadBuildFinished,
     /// A channel was disconnected.
     Disconnected,
