@@ -1,5 +1,6 @@
 use crate::{
     capability::SharedCapabilities,
+    clock::{ProtocolClock, Timestamp},
     disconnect::CanDisconnect,
     errors::{P2PHandshakeError, P2PStreamError},
     pinger::{Pinger, PingerEvent},
@@ -22,7 +23,7 @@ use std::{
     io,
     pin::Pin,
     task::{ready, Context, Poll},
-    time::{Duration, Instant},
+    time::Duration,
 };
 use tokio_stream::Stream;
 use tracing::{debug, trace};
@@ -109,17 +110,44 @@ where
     /// Consumes the `UnauthedP2PStream` and returns a `P2PStream` after the `Hello` handshake is
     /// completed successfully. This also returns the `Hello` message sent by the remote peer.
     pub async fn handshake(
+        self,
+        hello: HelloMessageWithProtocols,
+    ) -> Result<(P2PStream<S>, HelloMessage), P2PStreamError> {
+        self.handshake_with_clock(hello, ProtocolClock::Native).await
+    }
+
+    /// Negotiates the regular `RLPx` capabilities with deadlines and ping timers driven by
+    /// `runtime`.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub async fn handshake_with_runtime(
+        self,
+        hello: HelloMessageWithProtocols,
+        runtime: reth_tasks::TaskRuntime,
+    ) -> Result<(P2PStream<S>, HelloMessage), P2PStreamError> {
+        self.handshake_with_clock(hello, ProtocolClock::Runtime(runtime)).await
+    }
+
+    async fn handshake_with_clock(
         mut self,
         hello: HelloMessageWithProtocols,
+        clock: ProtocolClock,
     ) -> Result<(P2PStream<S>, HelloMessage), P2PStreamError> {
         trace!(?hello, "sending p2p hello to peer");
 
         // send our hello message with the Sink
         self.inner.send(alloy_rlp::encode(P2PMessage::Hello(hello.message())).into()).await?;
 
-        let first_message_bytes = tokio::time::timeout(HANDSHAKE_TIMEOUT, self.inner.next())
-            .await
-            .or(Err(P2PStreamError::HandshakeError(P2PHandshakeError::Timeout)))?
+        let first_message_bytes = match clock {
+            ProtocolClock::Native => tokio::time::timeout(HANDSHAKE_TIMEOUT, self.inner.next())
+                .await
+                .or(Err(P2PStreamError::HandshakeError(P2PHandshakeError::Timeout)))?,
+            #[cfg(any(test, feature = "test-utils"))]
+            ProtocolClock::Runtime(ref runtime) => tokio::select! {
+                biased;
+                message = self.inner.next() => message,
+                _ = runtime.sleep(HANDSHAKE_TIMEOUT) => return Err(P2PStreamError::HandshakeError(P2PHandshakeError::Timeout)),
+            },
+        }
             .ok_or(P2PStreamError::HandshakeError(P2PHandshakeError::NoResponse))??;
 
         // Check that the uncompressed message length does not exceed the max payload size.
@@ -187,7 +215,7 @@ where
             Ok(cap) => Ok(cap),
         }?;
 
-        let stream = P2PStream::new(self.inner, shared_capability);
+        let stream = P2PStream::with_clock(self.inner, shared_capability, clock);
 
         Ok((stream, their_hello))
     }
@@ -312,13 +340,23 @@ impl<S> P2PStream<S> {
     /// New [`P2PStream`]s are assumed to have completed the `p2p` handshake successfully and are
     /// ready to send and receive subprotocol messages.
     pub fn new(inner: S, shared_capabilities: SharedCapabilities) -> Self {
+        Self::with_clock(inner, shared_capabilities, ProtocolClock::Native)
+    }
+
+    fn with_clock(inner: S, shared_capabilities: SharedCapabilities, clock: ProtocolClock) -> Self {
+        let now = clock.now();
+        let pinger = match clock {
+            ProtocolClock::Native => Pinger::new(PING_INTERVAL, PING_TIMEOUT),
+            #[cfg(any(test, feature = "test-utils"))]
+            runtime => Pinger::with_clock(PING_INTERVAL, PING_TIMEOUT, runtime),
+        };
         Self {
             inner,
             encoder: snap::raw::Encoder::new(),
             compress_scratch: Vec::new(),
             decoder: snap::raw::Decoder::new(),
-            pinger: Pinger::new(PING_INTERVAL, PING_TIMEOUT),
-            ping_token_bucket: PingTokenBucket::new(Instant::now()),
+            pinger,
+            ping_token_bucket: PingTokenBucket::new(now),
             shared_capabilities,
             inbound_protocol_limits: Vec::new(),
             outgoing_messages: VecDeque::new(),
@@ -408,15 +446,15 @@ impl<S> P2PStream<S> {
 #[derive(Debug)]
 struct PingTokenBucket {
     tokens: u8,
-    last_refill: Instant,
+    last_refill: Timestamp,
 }
 
 impl PingTokenBucket {
-    const fn new(now: Instant) -> Self {
+    const fn new(now: Timestamp) -> Self {
         Self { tokens: PING_TOKEN_BUCKET_CAPACITY, last_refill: now }
     }
 
-    fn try_take(&mut self, now: Instant) -> bool {
+    fn try_take(&mut self, now: Timestamp) -> bool {
         let refill = now.saturating_duration_since(self.last_refill).as_secs();
         if refill > 0 {
             self.tokens = u64::from(self.tokens)
@@ -597,7 +635,7 @@ where
                     // Use the timestamp of the first ping for every ping in this poll, so buffered
                     // pings form one burst. The tradeoff is that a poll that takes more than one
                     // second can reject a later ping. Considered acceptable.
-                    let now = *ping_batch_time.get_or_insert_with(Instant::now);
+                    let now = *ping_batch_time.get_or_insert_with(|| this.pinger.now());
                     if !this.ping_token_bucket.try_take(now) {
                         return Poll::Ready(Some(Err(P2PStreamError::TooManyPings)))
                     }
@@ -1186,7 +1224,7 @@ mod tests {
 
     #[test]
     fn ping_token_bucket_limits_bursts_and_refills() {
-        let now = Instant::now();
+        let now = ProtocolClock::Native.now();
         let mut bucket = PingTokenBucket::new(now);
 
         for _ in 0..PING_TOKEN_BUCKET_CAPACITY {

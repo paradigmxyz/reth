@@ -9,6 +9,7 @@ use crate::tree::{
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
+use futures::FutureExt;
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
 use reth_evm::{
@@ -23,7 +24,7 @@ use reth_provider::{
 };
 use reth_revm::db::BundleState;
 use reth_storage_overlay::OverlayStateProviderFactory;
-use reth_tasks::Runtime;
+use reth_tasks::{Runtime, TaskHandle, TaskRuntime};
 pub use reth_trie_parallel::{
     error::StateRootTaskError,
     state_root_task::{
@@ -36,7 +37,7 @@ use std::{
     ops::Not,
     sync::{
         atomic::{AtomicBool, AtomicUsize},
-        mpsc, Arc, OnceLock,
+        mpsc, Arc, Mutex, OnceLock,
     },
 };
 use tracing::{debug, instrument, trace, warn, Span};
@@ -111,6 +112,15 @@ where
     /// Dedicated blocking pool for warming the BAL read-set, created lazily on the first BAL block
     /// (see [`Self::bal_prewarm_pool`]). Its threads exit when the processor is dropped.
     bal_prewarm_pool: OnceLock<Arc<bal_prewarm_pool::BalPrewarmPool>>,
+    /// Convert transactions on the caller and omit speculative workers.
+    sequential_execution: bool,
+    /// Runtime controlling speculative workers while transaction conversion stays inline.
+    cooperative_runtime: Option<TaskRuntime>,
+    /// Cache actors own their speculative workers until all providers and caches are released.
+    cooperative_tasks: Mutex<Vec<TaskHandle<()>>>,
+    /// Successful speculative EVM executions observed in the cooperative profile.
+    #[cfg(test)]
+    prewarmed_transactions: Arc<AtomicUsize>,
 }
 
 impl<Evm> PayloadProcessor<Evm>
@@ -140,6 +150,71 @@ where
             disable_bal_parallel_state_root: config.disable_bal_parallel_state_root(),
             disable_bal_batch_io: config.disable_bal_batch_io(),
             bal_prewarm_pool: OnceLock::new(),
+            sequential_execution: false,
+            cooperative_runtime: None,
+            cooperative_tasks: Mutex::new(Vec::new()),
+            #[cfg(test)]
+            prewarmed_transactions: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    /// Uses the caller for transaction conversion without starting cache or prewarm workers.
+    pub(crate) fn with_sequential_execution(mut self) -> Self {
+        self.sequential_execution = true;
+        self.disable_state_cache = true;
+        self.disable_transaction_prewarming = true;
+        self.cooperative_runtime = None;
+        self
+    }
+
+    /// Schedules real speculative execution through an injected runtime. Transaction conversion
+    /// remains inline because the authoritative executor consumes its channel synchronously.
+    pub(crate) fn with_cooperative_prewarming(mut self, runtime: TaskRuntime) -> Self {
+        assert!(
+            self.bal_prewarm_pool.get().is_none(),
+            "configure prewarming before processing blocks"
+        );
+        self.sequential_execution = false;
+        self.disable_state_cache = false;
+        self.disable_transaction_prewarming = false;
+        self.precompile_cache_disabled = true;
+        self.evm_config = self.evm_config.with_jit_support_enabled(false);
+        self.disable_bal_parallel_state_root = false;
+        self.cooperative_runtime = Some(runtime);
+        self
+    }
+
+    /// Waits for speculative workers and cache finalization before releasing database handles.
+    pub(crate) async fn wait_for_tasks(&self) {
+        futures::future::poll_fn(|cx| {
+            let mut tasks = self.cooperative_tasks.lock().expect("prewarm task registry poisoned");
+            tasks.retain_mut(|task| match task.poll_unpin(cx) {
+                std::task::Poll::Ready(result) => {
+                    result.expect("cooperative prewarm task failed");
+                    false
+                }
+                std::task::Poll::Pending => true,
+            });
+            if tasks.is_empty() {
+                std::task::Poll::Ready(())
+            } else {
+                std::task::Poll::Pending
+            }
+        })
+        .await;
+    }
+
+    /// Number of actual speculative transactions completed by cooperative workers.
+    #[cfg(test)]
+    pub(crate) fn prewarming_counter(&self) -> Arc<AtomicUsize> {
+        Arc::clone(&self.prewarmed_transactions)
+    }
+
+    fn new_execution_cache(&self) -> ExecutionCache {
+        if self.cooperative_runtime.is_some() {
+            ExecutionCache::new_deterministic(self.cross_block_cache_size)
+        } else {
+            ExecutionCache::new(self.cross_block_cache_size)
         }
     }
 
@@ -186,6 +261,27 @@ where
             + HistoryReader
             + 'static,
     {
+        if self.sequential_execution {
+            // The iterator is fully converted before its receiver is consumed. An unbounded
+            // channel avoids relying on the advertised transaction count for progress.
+            let (execute_tx, execution_rx) = crossbeam_channel::unbounded();
+            let (transactions, convert) = transactions.into_parts();
+            for (index, transaction) in transactions.into_iter().enumerate() {
+                let tx = convert.convert(transaction).map(WithTxEnv::new);
+                let _ = execute_tx.send((index, tx));
+            }
+            drop(execute_tx);
+            return PayloadHandle {
+                prewarm_handle: CacheTaskHandle {
+                    saved_cache: None,
+                    to_prewarm_task: None,
+                    executed_tx_index: Arc::new(AtomicUsize::new(0)),
+                    cache_metrics: None,
+                },
+                transactions: execution_rx,
+                _span: Span::current(),
+            }
+        }
         let prewarm_transactions =
             self.prewarms_transactions(env.transaction_count, parallel_bal_execution);
         let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(
@@ -260,6 +356,21 @@ where
         parallel_bal_execution: bool,
         prewarm_transactions: bool,
     ) -> (Option<IteratorPrewarmTxReceiver<Evm, I>>, IteratorExecuteTxReceiver<Evm, I>) {
+        if self.cooperative_runtime.is_some() {
+            let (prewarm_tx, prewarm_rx) = prewarm_transactions.then(mpsc::channel).unzip();
+            let (execute_tx, execute_rx) = crossbeam_channel::unbounded();
+            let (transactions, convert) = transactions.into_parts();
+            for (index, transaction) in transactions.into_iter().enumerate() {
+                let tx = convert.convert(transaction).map(WithTxEnv::new);
+                if let Some(prewarm_tx) = &prewarm_tx &&
+                    let Ok(tx) = &tx
+                {
+                    let _ = prewarm_tx.send((index, tx.clone()));
+                }
+                let _ = execute_tx.send((index, tx));
+            }
+            return (prewarm_rx, execute_rx)
+        }
         let (prewarm_tx, prewarm_rx) =
             prewarm_transactions.then(|| mpsc::sync_channel(transaction_count)).unzip();
         let (execute_tx, execute_rx) = crossbeam_channel::bounded(transaction_count);
@@ -401,7 +512,11 @@ where
     {
         // Each mode carries the capability its producers use; the rest is dropped here, so
         // unused capabilities do not keep the state-root task's update channel open.
-        let mode = if parallel_bal_execution {
+        // Serial cooperative execution can warm the BAL read-set while its EVM hook remains
+        // the sole authoritative state producer. In that case the optional update stream is None.
+        let mode = if parallel_bal_execution ||
+            (self.cooperative_runtime.is_some() && env.decoded_bal.is_some())
+        {
             PrewarmMode::BlockAccessList {
                 bal: env.decoded_bal.clone().expect("BAL dispatch implies decoded BAL"),
                 updates: hashed_update_stream,
@@ -420,7 +535,8 @@ where
             evm_config: self.evm_config.clone(),
             saved_cache: saved_cache.clone(),
             provider: state_provider_factory,
-            bal_prewarm_pool: parallel_bal_execution.then(|| self.bal_prewarm_pool()),
+            bal_prewarm_pool: (parallel_bal_execution && self.cooperative_runtime.is_none())
+                .then(|| self.bal_prewarm_pool()),
             metrics: PrewarmMetrics::default(),
             cache_metrics: self.cache_metrics.clone(),
             cache_state_metrics: self.cache_state_metrics.clone(),
@@ -430,15 +546,28 @@ where
             precompile_cache_map: self.precompile_cache_map.clone(),
             disable_bal_parallel_state_root: self.disable_bal_parallel_state_root,
             disable_bal_batch_io: self.disable_bal_batch_io,
+            #[cfg(test)]
+            cooperative_transactions: self
+                .cooperative_runtime
+                .as_ref()
+                .map(|_| Arc::clone(&self.prewarmed_transactions)),
         };
 
         let (prewarm_task, to_prewarm_task) =
             PrewarmCacheTask::new(self.executor.clone(), self.execution_cache.clone(), prewarm_ctx);
         {
             let to_prewarm_task = to_prewarm_task.clone();
-            self.executor.spawn_blocking_named("prewarm", move || {
-                prewarm_task.run(mode, to_prewarm_task);
-            });
+            if let Some(runtime) = &self.cooperative_runtime {
+                let worker_runtime = runtime.clone();
+                let task = runtime.spawn_named_task("prewarm", async move {
+                    prewarm_task.run_cooperative(worker_runtime, mode, to_prewarm_task).await;
+                });
+                self.cooperative_tasks.lock().expect("prewarm task registry poisoned").push(task);
+            } else {
+                self.executor.spawn_blocking_named("prewarm", move || {
+                    prewarm_task.run(mode, to_prewarm_task);
+                });
+            }
         }
 
         CacheTaskHandle {
@@ -461,7 +590,7 @@ where
         } else {
             debug!("creating new execution cache on cache miss");
             let start = Instant::now();
-            let cache = ExecutionCache::new(self.cross_block_cache_size);
+            let cache = self.new_execution_cache();
             if let Some(metrics) = &self.cache_metrics {
                 metrics.record_cache_creation(start.elapsed());
             }
@@ -505,7 +634,7 @@ where
             // Take existing cache (if any) or create fresh caches
             let caches = match cached.take() {
                 Some(existing) => existing.cache().clone(),
-                None => ExecutionCache::new(self.cross_block_cache_size),
+                None => self.new_execution_cache(),
             };
 
             // Insert the block's bundle state into cache
@@ -690,6 +819,65 @@ mod tests {
     fn make_saved_cache(hash: B256) -> SavedCache {
         let execution_cache = ExecutionCache::new(1_000);
         SavedCache::new(hash, execution_cache)
+    }
+
+    #[test]
+    fn cooperative_prewarming_profile_enables_state_cache_without_precompile_workers() {
+        let runtime = reth_tasks::Runtime::test();
+        let processor = PayloadProcessor::new(
+            runtime.clone(),
+            EthEvmConfig::mainnet(),
+            &TreeConfig::default(),
+            PrecompileCacheMap::default(),
+        );
+        assert!(!processor.precompile_cache_disabled);
+        let processor = processor
+            .with_sequential_execution()
+            .with_cooperative_prewarming(reth_tasks::TaskRuntime::from(runtime));
+        assert!(processor.precompile_cache_disabled);
+        assert!(!processor.disable_state_cache);
+        assert!(!processor.disable_transaction_prewarming);
+        assert!(processor.cooperative_runtime.is_some());
+        assert!(processor.bal_prewarm_pool.get().is_none());
+    }
+
+    #[test]
+    fn cooperative_prewarm_drain_can_be_canceled_and_retried() {
+        use commonware_runtime::{deterministic, Runner, Supervisor};
+        use futures::FutureExt;
+        use std::{
+            sync::atomic::{AtomicBool, Ordering},
+            time::Duration,
+        };
+
+        deterministic::Runner::new(
+            deterministic::Config::default()
+                .with_seed(7)
+                .with_timeout(Some(Duration::from_secs(1))),
+        )
+        .start(|context| async move {
+            let tasks = reth_tasks::TaskRuntime::deterministic(context.child("prewarm_drain"));
+            let processor = PayloadProcessor::new(
+                reth_tasks::Runtime::test(),
+                EthEvmConfig::mainnet(),
+                &TreeConfig::default(),
+                PrecompileCacheMap::default(),
+            )
+            .with_cooperative_prewarming(tasks.clone());
+            let finished = Arc::new(AtomicBool::new(false));
+            let worker_finished = finished.clone();
+            let worker_runtime = tasks.clone();
+            let task = tasks.spawn("delayed_prewarm", async move {
+                worker_runtime.sleep(Duration::from_millis(10)).await;
+                worker_finished.store(true, Ordering::Relaxed);
+            });
+            processor.cooperative_tasks.lock().unwrap().push(task);
+            assert!(processor.wait_for_tasks().now_or_never().is_none());
+            assert!(!finished.load(Ordering::Relaxed));
+            processor.wait_for_tasks().await;
+            assert!(finished.load(Ordering::Relaxed));
+            assert!(processor.cooperative_tasks.lock().unwrap().is_empty());
+        });
     }
 
     #[test]

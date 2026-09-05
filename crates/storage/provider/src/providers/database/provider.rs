@@ -3892,17 +3892,23 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
 
             let start = Instant::now();
             self.static_file_provider.finalize()?;
+            #[cfg(test)]
+            tests::crash_cut::after_commit_step("static_files");
             timings.sf = start.elapsed();
 
             let start = Instant::now();
             let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
             for batch in batches {
                 self.rocksdb_provider.commit_batch(batch)?;
+                #[cfg(test)]
+                tests::crash_cut::after_commit_step("rocksdb");
             }
             timings.rocksdb = start.elapsed();
 
             let start = Instant::now();
             self.tx.commit()?;
+            #[cfg(test)]
+            tests::crash_cut::after_commit_step("mdbx");
             timings.mdbx = start.elapsed();
 
             self.metrics.record_commit(&timings);
@@ -3947,6 +3953,8 @@ impl<TX: Send, N: NodeTypes> StoragePath for DatabaseProvider<TX, N> {
 
 #[cfg(test)]
 mod tests {
+    pub(super) mod crash_cut;
+
     use super::*;
     use crate::{
         test_utils::{blocks::BlockchainTestData, create_test_provider_factory},
@@ -4757,6 +4765,11 @@ mod tests {
 
         let genesis = test_block_builder.get_executed_blocks(0..1).next().unwrap();
         let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..5).collect();
+        // The engine retains deferred blocks in the overlay until their trie state is persisted.
+        // Unwind needs this suffix to reconstruct trie reverts from the partial frontier.
+        for block in &blocks[2..] {
+            factory.overlay_manager().insert_block(block.clone());
+        }
 
         let provider_rw = factory.provider_rw().unwrap();
         save_genesis(&provider_rw, &genesis).unwrap();

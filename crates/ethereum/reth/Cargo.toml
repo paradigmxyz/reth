@@ -102,6 +102,7 @@ test-utils = [
     "reth-trie-db?/test-utils",
     "reth-codecs?/test-utils",
     "reth-tasks?/test-utils",
+    "reth-eth-wire?/test-utils",
 ]
 
 full = [

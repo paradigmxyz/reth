@@ -33,12 +33,15 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_storage_overlay::OverlayStateProviderFactory;
-use reth_tasks::{pool::WorkerPool, Runtime};
+use reth_tasks::{pool::WorkerPool, Runtime, TaskRuntime};
 use reth_trie_common::MultiProofTargetsV2;
-use std::sync::{
-    atomic::{AtomicBool, AtomicUsize, Ordering},
-    mpsc::{self, channel, Receiver, Sender},
-    Arc,
+use std::{
+    sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        mpsc::{self, channel, Receiver, Sender},
+        Arc,
+    },
+    time::Duration,
 };
 use tokio::sync::oneshot;
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
@@ -114,7 +117,6 @@ where
 
         trace!(
             target: "engine::tree::payload_processor::prewarm",
-            prewarming_threads = executor.prewarming_pool().current_num_threads(),
             transaction_count = ctx.env.transaction_count,
             "Initialized prewarm task"
         );
@@ -226,48 +228,66 @@ where
                 return;
             };
 
-            if ctx.should_stop() {
-                return;
-            }
-
-            // skip if main execution has already processed this transaction
-            if index < ctx.executed_tx_index.load(Ordering::Relaxed) {
-                return;
-            }
-
-            let start = Instant::now();
-
-            let (tx_env, tx) = tx.into_parts();
-            let res = match evm.transact(tx_env) {
-                Ok(res) => res,
-                Err(err) => {
-                    trace!(
-                        target: "engine::tree::payload_processor::prewarm",
-                        %err,
-                        tx_hash=%tx.tx().tx_hash(),
-                        sender=%tx.signer(),
-                        "Error when executing prewarm transaction",
-                    );
-                    ctx.metrics.transaction_errors.increment(1);
-                    return;
-                }
-            };
-            ctx.metrics.execution_duration.record(start.elapsed());
-
-            if ctx.should_stop() {
-                return;
-            }
-
-            if index > 0 {
-                let (targets, storage_targets) = MultiProofTargetsV2::from_state(res.state);
-                ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
-                if let Some(state_root_hint_stream) = state_root_hint_stream {
-                    state_root_hint_stream.on_access_hint(targets.into());
-                }
-            }
-
-            ctx.metrics.total_runtime.record(start.elapsed());
+            Self::transact(ctx, evm, index, tx, state_root_hint_stream);
         });
+    }
+
+    /// Shared speculative transaction body. Cooperative callers create and drop the EVM in one
+    /// CPU job, so its database reader never crosses a scheduling boundary.
+    fn transact<Tx>(
+        ctx: &PrewarmContext<N, P, Evm>,
+        evm: &mut EvmFor<Evm, StateProviderDatabase<reth_provider::StateProviderBox>>,
+        index: usize,
+        tx: Tx,
+        state_root_hint_stream: Option<&StateRootHintStream>,
+    ) where
+        Tx: ExecutableTxFor<Evm>,
+    {
+        if ctx.should_stop() {
+            return;
+        }
+
+        // skip if main execution has already processed this transaction
+        if index < ctx.executed_tx_index.load(Ordering::Relaxed) {
+            return;
+        }
+
+        let start = Instant::now();
+
+        let (tx_env, tx) = tx.into_parts();
+        let res = match evm.transact(tx_env) {
+            Ok(res) => res,
+            Err(err) => {
+                trace!(
+                    target: "engine::tree::payload_processor::prewarm",
+                    %err,
+                    tx_hash=%tx.tx().tx_hash(),
+                    sender=%tx.signer(),
+                    "Error when executing prewarm transaction",
+                );
+                ctx.metrics.transaction_errors.increment(1);
+                return;
+            }
+        };
+        ctx.metrics.execution_duration.record(start.elapsed());
+        #[cfg(test)]
+        if let Some(transactions) = &ctx.cooperative_transactions {
+            transactions.fetch_add(1, Ordering::Relaxed);
+        }
+
+        if ctx.should_stop() {
+            return;
+        }
+
+        if index > 0 {
+            let (targets, storage_targets) = MultiProofTargetsV2::from_state(res.state);
+            ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
+            if let Some(state_root_hint_stream) = state_root_hint_stream {
+                state_root_hint_stream.on_access_hint(targets.into());
+            }
+        }
+
+        ctx.metrics.total_runtime.record(start.elapsed());
     }
 
     /// This method calls `ExecutionCache::update_with_guard` which requires exclusive access.
@@ -286,6 +306,14 @@ where
         self,
         execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
         valid_block_rx: mpsc::Receiver<()>,
+    ) {
+        self.save_cache_with_validity(execution_outcome, || valid_block_rx.recv().is_ok());
+    }
+
+    fn save_cache_with_validity(
+        self,
+        execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
+        valid: impl FnOnce() -> bool,
     ) {
         let start = Instant::now();
 
@@ -315,7 +343,7 @@ where
 
                 new_cache.update_metrics(cache_state_metrics.as_ref());
 
-                if valid_block_rx.recv().is_ok() {
+                if valid() {
                     // Replace the shared cache with the new one; the previous cache (if any) is
                     // dropped.
                     *cached = Some(new_cache);
@@ -455,6 +483,205 @@ where
         let _ = actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
     }
 
+    /// Runs speculative work and the ordinary cache lifecycle on a cooperative runtime.
+    pub(crate) async fn run_cooperative<Tx>(
+        self,
+        runtime: TaskRuntime,
+        mode: PrewarmMode<Tx>,
+        actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
+    ) where
+        Tx: ExecutableTxFor<Evm> + Send + 'static,
+    {
+        let ctx = self.ctx.clone();
+        let worker_runtime = runtime.clone();
+        let producer = runtime
+            .spawn("prewarm-dispatch", async move {
+                let executed_transactions = match mode {
+                    PrewarmMode::Transactions { pending, hints } => {
+                        Self::prewarm_transactions_cooperative(ctx, &worker_runtime, pending, hints)
+                            .await
+                    }
+                    PrewarmMode::BlockAccessList { bal, updates } => {
+                        Self::prewarm_bal_cooperative(ctx, &worker_runtime, bal, updates).await;
+                        0
+                    }
+                    PrewarmMode::Skipped => 0,
+                };
+                let _ = actions_tx
+                    .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions });
+            })
+            .abort_on_drop();
+
+        let mut state = PrewarmRunState::default();
+        loop {
+            match self.actions_rx.try_recv() {
+                Ok(event) => {
+                    if self.on_event(&mut state, event) {
+                        break;
+                    }
+                    runtime.yield_now().await;
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    runtime.sleep(Duration::from_millis(1)).await;
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.ctx.stop();
+                    break;
+                }
+            }
+        }
+        producer.await.expect("cooperative prewarm producer failed");
+        if let Some(Some((outcome, validity))) = state.final_execution_outcome {
+            // Waiting with the cache mutex held would prevent validation or another actor from
+            // checking out a cache on the simulator's sole execution thread.
+            let valid = loop {
+                match validity.try_recv() {
+                    Ok(()) => break true,
+                    Err(mpsc::TryRecvError::Disconnected) => break false,
+                    Err(mpsc::TryRecvError::Empty) => {
+                        runtime.sleep(Duration::from_millis(1)).await;
+                    }
+                }
+            };
+            self.save_cache_with_validity(outcome, || valid);
+        }
+    }
+
+    async fn prewarm_transactions_cooperative<Tx>(
+        ctx: PrewarmContext<N, P, Evm>,
+        runtime: &TaskRuntime,
+        pending: mpsc::Receiver<(usize, Tx)>,
+        hints: Option<StateRootHintStream>,
+    ) -> usize
+    where
+        Tx: ExecutableTxFor<Evm> + Send + 'static,
+    {
+        let mut workers = std::collections::VecDeque::new();
+        let mut count = 0;
+        while !ctx.should_stop() {
+            let (index, tx) = match pending.try_recv() {
+                Ok(transaction) => transaction,
+                Err(mpsc::TryRecvError::Disconnected) => break,
+                Err(mpsc::TryRecvError::Empty) => {
+                    runtime.sleep(Duration::from_millis(1)).await;
+                    continue;
+                }
+            };
+            if index < ctx.executed_tx_index.load(Ordering::Relaxed) {
+                continue;
+            }
+            let ctx = ctx.clone();
+            let hints = hints.clone();
+            workers.push_back(
+                runtime
+                    .spawn_cpu("prewarm-tx", move || {
+                        if ctx.should_stop() ||
+                            index < ctx.executed_tx_index.load(Ordering::Relaxed)
+                        {
+                            return;
+                        }
+                        if let Some(mut evm) = ctx.evm_for_ctx() {
+                            Self::transact(&ctx, &mut evm, index, tx, hints.as_ref());
+                        }
+                    })
+                    .abort_on_drop(),
+            );
+            count += 1;
+            // Two independently scheduled jobs expose completion reordering without queuing an
+            // unbounded number of speculative EVMs. No EVM survives its individual CPU job.
+            if workers.len() == 2 {
+                workers.pop_front().unwrap().await.expect("cooperative prewarm transaction failed");
+            }
+            runtime.yield_now().await;
+        }
+        if let Some(hints) = &hints &&
+            let Some(withdrawals) = &ctx.env.withdrawals &&
+            !withdrawals.is_empty()
+        {
+            hints.on_access_hint(multiproof_targets_from_withdrawals(withdrawals).into());
+        }
+        for worker in workers {
+            worker.await.expect("cooperative prewarm transaction failed");
+        }
+        count
+    }
+
+    async fn prewarm_bal_cooperative(
+        ctx: PrewarmContext<N, P, Evm>,
+        runtime: &TaskRuntime,
+        bal: Arc<DecodedBal>,
+        updates: Option<StateRootUpdateStream>,
+    ) {
+        let stream_ctx = ctx.clone();
+        let stream_bal = bal.clone();
+        let stream_runtime = runtime.clone();
+        let stream = runtime
+            .spawn("prewarm-bal-stream", async move {
+                if let Some(updates) = updates {
+                    let updates = Arc::new(updates);
+                    for account in stream_bal.as_bal() {
+                        let ctx = stream_ctx.clone();
+                        let updates = updates.clone();
+                        let account = account.clone();
+                        stream_runtime
+                            .spawn_cpu("prewarm-bal-account", move || {
+                                let mut provider = None;
+                                ctx.send_bal_hashed_state(
+                                    &Span::current(),
+                                    &mut provider,
+                                    &account,
+                                    &updates,
+                                );
+                            })
+                            .abort_on_drop()
+                            .await
+                            .expect("cooperative BAL streaming failed");
+                    }
+                    Arc::try_unwrap(updates).expect("BAL workers released update stream").finish();
+                }
+            })
+            .abort_on_drop();
+        if !ctx.disable_bal_batch_io &&
+            let Some(saved_cache) = &ctx.saved_cache
+        {
+            let builder = ctx.provider.clone();
+            BalPrewarmPool::prewarm_cooperative(
+                runtime,
+                Arc::new(move || {
+                    builder.database_provider_ro().map(|provider| Box::new(provider) as _)
+                }),
+                saved_cache.cache().clone(),
+                ctx.env.txpool_snapshot.clone(),
+                bal,
+                ctx.terminate_execution.clone(),
+            )
+            .await;
+        }
+        // Authoritative BAL updates must finish even when speculative prefetch has been stopped.
+        stream.await.expect("cooperative BAL streaming failed");
+    }
+
+    fn on_event(
+        &self,
+        state: &mut PrewarmRunState<N::Receipt>,
+        event: PrewarmTaskEvent<N::Receipt>,
+    ) -> bool {
+        match event {
+            PrewarmTaskEvent::TerminateTransactionExecution => self.ctx.stop(),
+            PrewarmTaskEvent::Terminate { execution_outcome, valid_block_rx } => {
+                self.ctx.stop();
+                state.final_execution_outcome =
+                    Some(execution_outcome.map(|outcome| (outcome, valid_block_rx)));
+            }
+            PrewarmTaskEvent::FinishedTxExecution { executed_transactions } => {
+                self.ctx.metrics.transactions.set(executed_transactions as f64);
+                self.ctx.metrics.transactions_histogram.record(executed_transactions as f64);
+                state.finished_execution = true;
+            }
+        }
+        state.finished_execution && state.final_execution_outcome.is_some()
+    }
+
     /// Executes the task.
     ///
     /// This will execute the transactions until all transactions have been processed or the task
@@ -486,49 +713,32 @@ where
             }
         }
 
-        let mut final_execution_outcome = None;
-        let mut finished_execution = false;
+        let mut state = PrewarmRunState::default();
         while let Ok(event) = self.actions_rx.recv() {
-            match event {
-                PrewarmTaskEvent::TerminateTransactionExecution => {
-                    // stop tx processing
-                    debug!(target: "engine::tree::prewarm", "Terminating prewarm execution");
-                    self.ctx.stop();
-                }
-                PrewarmTaskEvent::Terminate { execution_outcome, valid_block_rx } => {
-                    trace!(target: "engine::tree::payload_processor::prewarm", "Received termination signal");
-                    // `Terminate` can arrive without `TerminateTransactionExecution` when the
-                    // handle is dropped on an execution error, so stop workers before waiting.
-                    self.ctx.stop();
-                    final_execution_outcome =
-                        Some(execution_outcome.map(|outcome| (outcome, valid_block_rx)));
-
-                    if finished_execution {
-                        // all tasks are done, we can exit, which will save caches and exit
-                        break
-                    }
-                }
-                PrewarmTaskEvent::FinishedTxExecution { executed_transactions } => {
-                    trace!(target: "engine::tree::payload_processor::prewarm", "Finished prewarm execution signal");
-                    self.ctx.metrics.transactions.set(executed_transactions as f64);
-                    self.ctx.metrics.transactions_histogram.record(executed_transactions as f64);
-
-                    finished_execution = true;
-
-                    if final_execution_outcome.is_some() {
-                        // all tasks are done, we can exit, which will save caches and exit
-                        break
-                    }
-                }
+            if self.on_event(&mut state, event) {
+                break;
             }
         }
 
         debug!(target: "engine::tree::payload_processor::prewarm", "Completed prewarm execution");
 
         // save caches and finish using the shared ExecutionOutcome
-        if let Some(Some((execution_outcome, valid_block_rx))) = final_execution_outcome {
+        if let Some(Some((execution_outcome, valid_block_rx))) = state.final_execution_outcome {
             self.save_cache(execution_outcome, valid_block_rx);
         }
+    }
+}
+
+type PendingCacheSave<R> = (Arc<BlockExecutionOutput<R>>, mpsc::Receiver<()>);
+
+struct PrewarmRunState<R> {
+    final_execution_outcome: Option<Option<PendingCacheSave<R>>>,
+    finished_execution: bool,
+}
+
+impl<R> Default for PrewarmRunState<R> {
+    fn default() -> Self {
+        Self { final_execution_outcome: None, finished_execution: false }
     }
 }
 
@@ -572,6 +782,9 @@ where
     pub disable_bal_parallel_state_root: bool,
     /// Whether BAL state prefetching during prewarm is disabled.
     pub disable_bal_batch_io: bool,
+    /// Optional observer for successful speculative execution on a cooperative runtime.
+    #[cfg(test)]
+    pub(crate) cooperative_transactions: Option<Arc<AtomicUsize>>,
 }
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
@@ -844,13 +1057,272 @@ mod tests {
         AccountChanges, BalanceChange, BlockAccessIndex, CodeChange, NonceChange, SlotChanges,
         StorageChange,
     };
-    use alloy_primitives::{address, bytes};
+    use alloy_primitives::{address, bytes, Address};
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm::{execute::WithTxEnv, TxEnvFor};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_provider::test_utils::MockEthProvider;
     use reth_storage_overlay::OverlayManager;
+
+    #[derive(Default)]
+    struct ObservedRoot {
+        hints: AtomicUsize,
+        updates: std::sync::Mutex<Vec<reth_trie::HashedPostState>>,
+        finished: AtomicUsize,
+    }
+
+    impl super::super::StateRootSink for ObservedRoot {
+        fn on_access_hint(&self, hint: super::super::StateAccessHint) {
+            let targets: MultiProofTargetsV2 = hint.into();
+            assert!(!targets.account_targets.is_empty());
+            self.hints.fetch_add(1, Ordering::Relaxed);
+        }
+
+        fn on_state_update(&self, _state: revm::state::EvmState) {
+            panic!("prewarm workers never emit authoritative EVM state");
+        }
+
+        fn on_hashed_state_update(&self, state: reth_trie::HashedPostState) {
+            self.updates.lock().unwrap().push(state);
+        }
+
+        fn on_updates_finished(&self) {
+            self.finished.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    type TestPrewarmContext = PrewarmContext<
+        reth_ethereum_primitives::EthPrimitives,
+        reth_provider::ProviderFactory<reth_provider::test_utils::MockNodeTypesWithDB>,
+        EthEvmConfig,
+    >;
+
+    fn cooperative_context() -> TestPrewarmContext {
+        let genesis = serde_json::from_value(serde_json::json!({
+            "config": { "chainId": 1 },
+            "gasLimit": "0x1c9c380",
+            "alloc": {
+                "2222222222222222222222222222222222222222": {
+                    "balance": "0x0", "nonce": "0x1", "code": "0x6009545000",
+                    "storage": {
+                        "0x0000000000000000000000000000000000000000000000000000000000000009":
+                        "0x0000000000000000000000000000000000000000000000000000000000000002"
+                    }
+                },
+                "3333333333333333333333333333333333333333": {
+                    "balance": "0x0", "nonce": "0x1", "code": "0x6009545000",
+                    "storage": {
+                        "0x0000000000000000000000000000000000000000000000000000000000000009":
+                        "0x0000000000000000000000000000000000000000000000000000000000000003"
+                    }
+                }
+            }
+        }))
+        .unwrap();
+        let chain = Arc::new(
+            reth_chainspec::ChainSpecBuilder::default()
+                .chain(reth_chainspec::MAINNET.chain)
+                .genesis(genesis)
+                .cancun_activated()
+                .build(),
+        );
+        let provider =
+            reth_provider::test_utils::create_test_provider_factory_with_chain_spec(chain.clone());
+        let parent_hash = reth_db_common::init::init_genesis(&provider).unwrap();
+        let env = ExecutionEnv {
+            hash: B256::repeat_byte(0xaa),
+            parent_hash,
+            ..ExecutionEnv::test_default()
+        };
+        PrewarmContext {
+            env,
+            evm_config: EthEvmConfig::new(chain),
+            saved_cache: Some(SavedCache::new(
+                parent_hash,
+                crate::tree::ExecutionCache::new_deterministic(1_000_000),
+            )),
+            provider: OverlayStateProviderFactory::new(
+                provider,
+                OverlayManager::default().overlay_builder(parent_hash),
+            ),
+            bal_prewarm_pool: None,
+            metrics: PrewarmMetrics::default(),
+            cache_metrics: None,
+            cache_state_metrics: None,
+            terminate_execution: Arc::new(AtomicBool::new(false)),
+            executed_tx_index: Arc::new(AtomicUsize::new(0)),
+            precompile_cache_disabled: true,
+            precompile_cache_map: PrecompileCacheMap::default(),
+            disable_bal_parallel_state_root: false,
+            disable_bal_batch_io: false,
+            cooperative_transactions: Some(Arc::new(AtomicUsize::new(0))),
+        }
+    }
+
+    fn speculative_transaction() -> WithTxEnv<TxEnvFor<EthEvmConfig>, Recovered<TransactionSigned>>
+    {
+        let caller = Address::repeat_byte(0x11);
+        let tx = TxEnvFor::<EthEvmConfig> {
+            caller,
+            kind: alloy_primitives::TxKind::Call(Address::repeat_byte(0x22)),
+            gas_limit: 100_000,
+            value: U256::from(1),
+            ..Default::default()
+        };
+        let signed = TransactionSigned::new_unhashed(
+            alloy_consensus::TxLegacy {
+                gas_limit: 100_000,
+                to: alloy_primitives::TxKind::Call(Address::repeat_byte(0x22)),
+                value: U256::from(1),
+                ..Default::default()
+            }
+            .into(),
+            alloy_primitives::Signature::new(U256::from(1), U256::from(1), false),
+        );
+        WithTxEnv::new((tx, Recovered::new_unchecked(signed, caller)))
+    }
+
+    #[test]
+    fn deterministic_block_prewarm_cache_lifecycle() {
+        use commonware_runtime::{deterministic, Runner, Supervisor};
+        let seeds: Vec<u64> = match std::env::var("RETH_DST_SEED") {
+            Ok(seed) => vec![seed.parse().expect("RETH_DST_SEED must be a u64")],
+            Err(std::env::VarError::NotPresent) => (0..16).collect(),
+            Err(error) => panic!("invalid RETH_DST_SEED: {error}"),
+        };
+        let simulate = |seed, mode| {
+            let ctx = cooperative_context();
+            let config = deterministic::Config::default()
+                .with_seed(seed)
+                .with_timeout(Some(Duration::from_secs(2)));
+            deterministic::Runner::new(config).start(|context| async move {
+                let runtime = TaskRuntime::deterministic(context.child("block_prewarm"));
+                let root = Arc::new(ObservedRoot::default());
+                let successful = ctx.cooperative_transactions.clone().unwrap();
+                let index = ctx.executed_tx_index.clone();
+                let stopped = ctx.terminate_execution.clone();
+                let warmed = ctx.saved_cache.as_ref().unwrap().cache().clone();
+                let hash = ctx.env.hash;
+                let cache = PayloadExecutionCache::default();
+                let (task, actions) = PrewarmCacheTask::new(Runtime::test(), cache.clone(), ctx);
+                let (pending, transactions) = mpsc::channel();
+                let mode_spec = PrewarmMode::Transactions {
+                    pending: transactions,
+                    hints: Some(StateRootHintStream::new(root.clone())),
+                };
+                let task_runtime = runtime.clone();
+                let task_actions = actions.clone();
+                let task = runtime.spawn("cache", async move {
+                    task.run_cooperative(task_runtime, mode_spec, task_actions).await;
+                });
+                pending.send((1, speculative_transaction())).unwrap();
+                runtime.sleep(Duration::from_millis(5)).await;
+                assert_eq!(successful.load(Ordering::Relaxed), 1);
+                assert!(root.hints.load(Ordering::Relaxed) > 0);
+                assert!(matches!(
+                    warmed
+                        .get_or_try_insert_account_with(Address::repeat_byte(0x22), || {
+                            Err::<Option<Account>, _>("expected a speculative cache hit")
+                        })
+                        .unwrap(),
+                    reth_execution_cache::CachedStatus::Cached(Some(account)) if account.nonce == 1
+                ));
+                assert!(matches!(warmed.get_or_try_insert_storage_with(
+                    Address::repeat_byte(0x22), B256::from(U256::from(9)), || {
+                        Err::<U256, _>("expected speculative SLOAD cache hit")
+                    }).unwrap(), reth_execution_cache::CachedStatus::Cached(value) if value == U256::from(2)));
+                assert!(matches!(warmed.get_or_try_insert_code_with(keccak256(bytes!("6009545000")), || {
+                    Err::<Option<reth_primitives_traits::Bytecode>, _>("expected speculative bytecode cache hit")
+                }).unwrap(), reth_execution_cache::CachedStatus::Cached(Some(_))));
+
+                // The distributor was waiting for more input when authoritative execution passed
+                // transaction 2. Its resumed worker must observe the new index and skip it.
+                index.store(3, Ordering::Relaxed);
+                pending.send((2, speculative_transaction())).unwrap();
+                runtime.sleep(Duration::from_millis(5)).await;
+                assert_eq!(successful.load(Ordering::Relaxed), 1);
+                actions.send(PrewarmTaskEvent::TerminateTransactionExecution).unwrap();
+                runtime.sleep(Duration::from_millis(2)).await;
+                assert!(stopped.load(Ordering::Relaxed));
+                drop(pending);
+                drop(warmed);
+
+                let (valid, validity) = mpsc::channel();
+                actions
+                    .send(PrewarmTaskEvent::Terminate {
+                        execution_outcome: (mode != 2)
+                            .then(|| Arc::new(BlockExecutionOutput::default())),
+                        valid_block_rx: validity,
+                    })
+                    .unwrap();
+                runtime.sleep(Duration::from_millis(2)).await;
+                // A validity wait must leave this mutex available to other runtime actors.
+                cache.update_with_guard(|slot| assert!(slot.is_none()));
+                if mode == 0 {
+                    valid.send(()).unwrap();
+                }
+                drop(valid);
+                task.await.unwrap();
+                assert_eq!(cache.get_cache_for(hash).is_some(), mode == 0);
+                assert_eq!(successful.load(Ordering::Relaxed), 1);
+                (context.auditor().state(), root.hints.load(Ordering::Relaxed))
+            })
+        };
+        // Native debug EVM frames require more stack than the default Rust test thread.
+        std::thread::Builder::new()
+            .stack_size(16 * 1024 * 1024)
+            .spawn(move || {
+                for seed in seeds {
+                    for mode in 0..3 {
+                        assert_eq!(
+                            simulate(seed, mode),
+                            simulate(seed, mode),
+                            "seed={seed}, mode={mode}"
+                        );
+                    }
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn deterministic_bal_prewarm_reads_and_streams_state() {
+        use commonware_runtime::{deterministic, Runner, Supervisor};
+        let simulate = || {
+            let ctx = cooperative_context();
+            deterministic::Runner::new(deterministic::Config::default().with_seed(7)
+                .with_timeout(Some(Duration::from_secs(2))))
+                .start(|context| async move {
+                    let runtime = TaskRuntime::deterministic(context.child("bal_prewarm"));
+                    let address = Address::repeat_byte(0x33);
+                    let slot = U256::from(9);
+                    let changes = AccountChanges::new(address)
+                        .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::from(10)))
+                        .with_storage_change(SlotChanges::new(slot, vec![StorageChange::new(BlockAccessIndex::new(1), U256::from(7))]));
+                    let bal: alloy_eip7928::bal::Bal = vec![changes].into();
+                    let raw = alloy_rlp::encode(&bal).into();
+                    let bal = Arc::new(DecodedBal::new(bal, raw));
+                    let root = Arc::new(ObservedRoot::default());
+                    let warmed = ctx.saved_cache.as_ref().unwrap().cache().clone();
+                    PrewarmCacheTask::prewarm_bal_cooperative(ctx, &runtime, bal,
+                        Some(StateRootUpdateStream::new(root.clone()))).await;
+                    assert_eq!(root.finished.load(Ordering::Relaxed), 1);
+                    assert!(matches!(warmed.get_or_try_insert_storage_with(address, slot.into(), || {
+                        Err::<U256, _>("expected BAL storage cache hit")
+                    }).unwrap(), reth_execution_cache::CachedStatus::Cached(value) if value == U256::from(3)));
+                    let updates = root.updates.lock().unwrap();
+                    assert_eq!(updates.len(), 2);
+                    let hashed_address = keccak256(address);
+                    assert_eq!(updates[0].storages[&hashed_address].storage[&keccak256(slot.to_be_bytes::<32>())], U256::from(7));
+                    assert_eq!(updates[1].accounts[&hashed_address].as_ref().unwrap().balance, U256::from(10));
+                    context.auditor().state()
+                })
+        };
+        assert_eq!(simulate(), simulate());
+    }
 
     #[test]
     fn terminate_event_stops_transaction_execution() {
@@ -873,6 +1345,7 @@ mod tests {
             precompile_cache_map: PrecompileCacheMap::default(),
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
+            cooperative_transactions: None,
         };
         let (task, actions_tx) =
             PrewarmCacheTask::new(Runtime::test(), PayloadExecutionCache::default(), ctx);

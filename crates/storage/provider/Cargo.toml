@@ -73,6 +73,7 @@ rocksdb.workspace = true
 libc.workspace = true
 
 [dev-dependencies]
+commonware-runtime.workspace = true
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-primitives-traits = { workspace = true, features = ["arbitrary", "test-utils"] }
 reth-chain-state = { workspace = true, features = ["test-utils"] }
@@ -107,4 +108,5 @@ test-utils = [
     "reth-stages-types/test-utils",
     "reth-tasks/test-utils",
     "dep:tokio",
+    "commonware-runtime/test-utils",
 ]

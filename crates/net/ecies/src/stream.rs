@@ -78,7 +78,33 @@ where
         remote_id: PeerId,
     ) -> Result<Self, ECIESError> {
         let ecies = ECIESCodec::new_client(secret_key, remote_id)?;
+        Self::connect_with_codec(transport, ecies, remote_id).await
+    }
 
+    /// Connects with reproducible handshake entropy and no runtime-specific timeout.
+    ///
+    /// This is exclusively for simulation. Seeded keys and nonces must never be used for a
+    /// connection carrying private data. The caller must enforce its simulated deadline.
+    #[cfg(feature = "test-utils")]
+    pub async fn connect_seeded(
+        transport: Io,
+        secret_key: SecretKey,
+        remote_id: PeerId,
+        seed: u64,
+    ) -> Result<Self, ECIESError> {
+        Self::connect_with_codec(
+            transport,
+            ECIESCodec::new_seeded(secret_key, Some(remote_id), seed)?,
+            remote_id,
+        )
+        .await
+    }
+
+    async fn connect_with_codec(
+        transport: Io,
+        ecies: ECIESCodec,
+        remote_id: PeerId,
+    ) -> Result<Self, ECIESError> {
         let mut transport = ecies.framed(transport);
         transport.set_backpressure_boundary(DEFAULT_BACKPRESSURE_BOUNDARY);
 
@@ -109,7 +135,22 @@ where
     /// Listen on a just connected ECIES client
     pub async fn incoming(transport: Io, secret_key: SecretKey) -> Result<Self, ECIESError> {
         let ecies = ECIESCodec::new_server(secret_key)?;
+        Self::incoming_with_codec(transport, ecies).await
+    }
 
+    /// Accepts a connection with reproducible handshake entropy for simulation only.
+    ///
+    /// See [`Self::connect_seeded`] for the entropy and timeout requirements.
+    #[cfg(feature = "test-utils")]
+    pub async fn incoming_seeded(
+        transport: Io,
+        secret_key: SecretKey,
+        seed: u64,
+    ) -> Result<Self, ECIESError> {
+        Self::incoming_with_codec(transport, ECIESCodec::new_seeded(secret_key, None, seed)?).await
+    }
+
+    async fn incoming_with_codec(transport: Io, ecies: ECIESCodec) -> Result<Self, ECIESError> {
         trace!("incoming ecies stream");
         let mut transport = ecies.framed(transport);
         transport.set_backpressure_boundary(DEFAULT_BACKPRESSURE_BOUNDARY);

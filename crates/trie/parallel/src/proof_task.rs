@@ -39,14 +39,16 @@ use alloy_primitives::{
 };
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use reth_execution_errors::StateProofError;
-use reth_primitives_traits::{dashmap::DashMap, FastInstant as Instant};
+use reth_primitives_traits::{dashmap::DashMap, Account, FastInstant as Instant};
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult};
 use reth_storage_errors::db::DatabaseError;
-use reth_tasks::Runtime;
+use reth_tasks::{Runtime, TaskRuntime};
 use reth_trie::{
-    hashed_cursor::{HashedCursorFactory, HashedStorageCursor, InstrumentedHashedCursor},
+    hashed_cursor::{
+        HashedCursor, HashedCursorFactory, HashedStorageCursor, InstrumentedHashedCursor,
+    },
     proof_v2,
-    trie_cursor::{InstrumentedTrieCursor, TrieCursorFactory, TrieStorageCursor},
+    trie_cursor::{InstrumentedTrieCursor, TrieCursor, TrieCursorFactory, TrieStorageCursor},
     DecodedMultiProofV2, HashedPostState, MultiProofTargetsV2, ProofTrieNodeV2, ProofV2Target,
 };
 use std::{
@@ -59,6 +61,8 @@ use std::{
     time::Duration,
 };
 use tracing::{debug, debug_span, error, instrument, trace};
+
+mod cooperative;
 
 #[cfg(feature = "metrics")]
 use crate::proof_task_metrics::{
@@ -148,6 +152,8 @@ pub struct ProofWorkerHandle {
     storage_worker_count: usize,
     /// Total number of account workers spawned
     account_worker_count: usize,
+    /// Lifecycle of the optional cooperative worker pools.
+    cooperative: Option<Arc<cooperative::CooperativeProofTasks>>,
 }
 
 impl ProofWorkerHandle {
@@ -303,6 +309,41 @@ impl ProofWorkerHandle {
             account_availability,
             storage_worker_count,
             account_worker_count,
+            cooperative: None,
+        }
+    }
+
+    /// Starts two cooperative account workers and two cooperative storage workers.
+    ///
+    /// Each proof calculation is a bounded job on `runtime`. Storage dependencies complete before
+    /// the synchronous account encoder consumes their results, so no blocking receive waits for
+    /// another simulated task. Providers and cursors are opened and dropped within each job; the
+    /// factory must therefore represent the same stable state view throughout the task.
+    ///
+    /// Use [`Self::shutdown`] to drain workers before releasing the underlying database. Dropping
+    /// the final handle requests cancellation, but does not wait for task cleanup.
+    pub fn new_cooperative<Factory>(
+        runtime: &TaskRuntime,
+        task_ctx: ProofTaskCtx<Factory>,
+        _proof_result_tx: ProofResultSender,
+    ) -> Self
+    where
+        Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
+        cooperative::spawn(runtime, task_ctx)
+    }
+
+    /// Closes cooperative admission and waits for all submitted proof work to finish.
+    ///
+    /// Canceling this wait leaves the workers owned by this handle, so it can be retried.
+    /// Native pools retain their existing lifetime: they stop when all handles are dropped.
+    pub async fn shutdown(&self) {
+        if let Some(tasks) = &self.cooperative {
+            tasks.shutdown().await;
         }
     }
 
@@ -345,19 +386,20 @@ impl ProofWorkerHandle {
         proof_result_sender: CrossbeamSender<StorageProofResultMessage>,
     ) -> Result<(), ProviderError> {
         let hashed_address = input.hashed_address;
-        self.storage_work_tx
-            .send(StorageWorkerJob::StorageProof { input, proof_result_sender })
-            .map_err(|err| {
-                let StorageWorkerJob::StorageProof { proof_result_sender, .. } = err.0;
-                let _ = proof_result_sender.send(StorageProofResultMessage {
-                    hashed_address,
-                    result: Err(
-                        DatabaseError::Other("storage workers unavailable".to_string()).into()
-                    ),
-                });
+        let job = StorageWorkerJob::StorageProof { input, proof_result_sender };
+        let sent = match &self.cooperative {
+            Some(tasks) => tasks.send(&self.storage_work_tx, job),
+            None => self.storage_work_tx.send(job),
+        };
+        sent.map_err(|err| {
+            let StorageWorkerJob::StorageProof { proof_result_sender, .. } = err.0;
+            let _ = proof_result_sender.send(StorageProofResultMessage {
+                hashed_address,
+                result: Err(DatabaseError::Other("storage workers unavailable".to_string()).into()),
+            });
 
-                ProviderError::other(std::io::Error::other("storage workers unavailable"))
-            })
+            ProviderError::other(std::io::Error::other("storage workers unavailable"))
+        })
     }
 
     /// Dispatch an account multiproof computation
@@ -367,24 +409,26 @@ impl ProofWorkerHandle {
         &self,
         input: AccountMultiproofInput,
     ) -> Result<(), ProviderError> {
-        self.account_work_tx
-            .send(AccountWorkerJob::AccountMultiproof { input: Box::new(input) })
-            .map_err(|err| {
-                let error =
-                    ProviderError::other(std::io::Error::other("account workers unavailable"));
+        let job = AccountWorkerJob::AccountMultiproof { input: Box::new(input) };
+        let sent = match &self.cooperative {
+            Some(tasks) => tasks.send(&self.account_work_tx, job),
+            None => self.account_work_tx.send(job),
+        };
+        sent.map_err(|err| {
+            let error = ProviderError::other(std::io::Error::other("account workers unavailable"));
 
-                let AccountWorkerJob::AccountMultiproof { input } = err.0;
-                let ProofResultContext { sender: result_tx, state, start_time: start } =
-                    input.into_proof_result_sender();
+            let AccountWorkerJob::AccountMultiproof { input } = err.0;
+            let ProofResultContext { sender: result_tx, state, start_time: start } =
+                input.into_proof_result_sender();
 
-                let _ = result_tx.send(ProofResultMessage {
-                    result: Err(StateRootTaskError::ProofDispatch(error.clone())),
-                    elapsed: start.elapsed(),
-                    state,
-                });
+            let _ = result_tx.send(ProofResultMessage {
+                result: Err(StateRootTaskError::ProofDispatch(error.clone())),
+                elapsed: if self.cooperative.is_some() { Duration::ZERO } else { start.elapsed() },
+                state,
+            });
 
-                error
-            })
+            error
+        })
     }
 }
 
@@ -995,7 +1039,7 @@ where
     where
         Provider: TrieCursorFactory + HashedCursorFactory + 'a,
     {
-        let MultiProofTargetsV2 { mut account_targets, storage_targets } = targets;
+        let MultiProofTargetsV2 { account_targets, storage_targets } = targets;
 
         let span = debug_span!(
             target: "trie::proof_task",
@@ -1010,20 +1054,13 @@ where
         let storage_proof_receivers =
             dispatch_v2_storage_proofs(&self.storage_work_tx, &account_targets, storage_targets)?;
 
-        let mut value_encoder = AsyncAccountValueEncoder::new(
+        compute_account_proof(
+            v2_account_calculator,
+            v2_storage_calculator,
+            account_targets,
             storage_proof_receivers,
             self.cached_storage_roots.clone(),
-            v2_storage_calculator,
-        );
-
-        let account_proofs =
-            v2_account_calculator.proof(&mut value_encoder, &mut account_targets)?;
-
-        let (storage_proofs, value_encoder_stats) = value_encoder.finalize()?;
-
-        let proof = DecodedMultiProofV2 { account_proofs, storage_proofs };
-
-        Ok((proof, value_encoder_stats))
+        )
     }
 
     /// Processes an account multiproof request.
@@ -1078,6 +1115,30 @@ where
 
         value_encoder_stats
     }
+}
+
+/// Shared account traversal and deferred storage-root encoding for both worker backends.
+fn compute_account_proof<TC, HC, STC, SHC>(
+    calculator: &mut proof_v2::ProofCalculator<TC, HC, AsyncAccountValueEncoder<STC, SHC>>,
+    storage_calculator: Rc<RefCell<proof_v2::StorageProofCalculator<STC, SHC>>>,
+    mut account_targets: Vec<ProofV2Target>,
+    storage_proof_receivers: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
+    cached_storage_roots: Arc<DashMap<B256, B256>>,
+) -> Result<(DecodedMultiProofV2, ValueEncoderStats), StateRootTaskError>
+where
+    TC: TrieCursor,
+    HC: HashedCursor<Value = Account>,
+    STC: TrieStorageCursor,
+    SHC: HashedStorageCursor<Value = U256>,
+{
+    let mut value_encoder = AsyncAccountValueEncoder::new(
+        storage_proof_receivers,
+        cached_storage_roots,
+        storage_calculator,
+    );
+    let account_proofs = calculator.proof(&mut value_encoder, &mut account_targets)?;
+    let (storage_proofs, stats) = value_encoder.finalize()?;
+    Ok((DecodedMultiProofV2 { account_proofs, storage_proofs }, stats))
 }
 
 /// Queues V2 storage proofs for all accounts in the targets and returns receivers.
@@ -1204,9 +1265,15 @@ mod tests {
         let proof_handle = ProofWorkerHandle::new(&runtime, ctx, false, proof_result_tx);
 
         // Verify handle can be cloned
-        let _cloned_handle = proof_handle.clone();
+        let cloned_handle = proof_handle.clone();
 
         // Workers shut down automatically when handle is dropped
         drop(proof_handle);
+        drop(cloned_handle);
+
+        // Keep the test runtime and database alive until both native coordinator jobs have
+        // returned. Named workers execute queued jobs in order, making these completion barriers.
+        runtime.spawn_blocking_named("account-workers", || ()).get();
+        runtime.spawn_blocking_named("storage-workers", || ()).get();
     }
 }

@@ -8,7 +8,10 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use crate::metrics::PayloadBuilderMetrics;
+use crate::{
+    metrics::PayloadBuilderMetrics,
+    timers::{JobDeadline, JobInterval},
+};
 use alloy_eips::merge::SLOT_DURATION;
 use alloy_primitives::{B256, U256};
 use futures_core::ready;
@@ -24,7 +27,7 @@ use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind};
 use reth_primitives_traits::{HeaderTy, NodePrimitives, SealedHeader};
 use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop};
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
-use reth_tasks::Runtime;
+use reth_tasks::{Runtime, TaskRuntime};
 use reth_trie_parallel::state_root_task::PayloadStateRootHandle;
 use std::{
     fmt,
@@ -35,15 +38,16 @@ use std::{
     task::{Context, Poll},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tokio::{
-    sync::{oneshot, Semaphore},
-    time::{Interval, Sleep},
-};
+use tokio::sync::{oneshot, Semaphore};
 use tracing::{debug, trace, warn};
 
 mod better_payload_emitter;
 mod metrics;
 mod stack;
+mod timers;
+
+#[cfg(test)]
+mod deterministic;
 
 pub use better_payload_emitter::BetterPayloadEmitter;
 pub use stack::PayloadBuilderStack;
@@ -60,6 +64,10 @@ pub struct BasicPayloadJobGenerator<Client, Builder> {
     client: Client,
     /// The task executor to spawn payload building tasks on.
     executor: Runtime,
+    /// Execution and clock capabilities used by newly created jobs.
+    task_runtime: TaskRuntime,
+    /// Use the injected runtime's clock for job timers.
+    use_task_clock: bool,
     /// The configuration for the job generator.
     config: BasicPayloadJobGeneratorConfig,
     /// Restricts how many generator tasks can be executed at once.
@@ -87,6 +95,8 @@ impl<Client, Builder> BasicPayloadJobGenerator<Client, Builder> {
     ) -> Self {
         Self {
             client,
+            task_runtime: TaskRuntime::from(executor.clone()),
+            use_task_clock: false,
             executor,
             payload_task_guard: PayloadTaskGuard::new(config.max_payload_tasks),
             config,
@@ -94,6 +104,17 @@ impl<Client, Builder> BasicPayloadJobGenerator<Client, Builder> {
             pre_cached: None,
             pre_cached_parent_block_info: None,
         }
+    }
+
+    /// Uses the supplied executor and clock for all jobs and their detached build attempts.
+    ///
+    /// Each synchronous builder call is one atomic simulation step. The builder's own internal
+    /// tasks must independently obey that boundary. Set this before creating any payload jobs;
+    /// [`Self::tasks`] continues to expose the native runtime supplied to the constructor.
+    pub fn with_task_runtime(mut self, runtime: TaskRuntime) -> Self {
+        self.task_runtime = runtime;
+        self.use_task_clock = true;
+        self
     }
 
     /// Returns the maximum duration a job should be allowed to run.
@@ -106,19 +127,12 @@ impl<Client, Builder> BasicPayloadJobGenerator<Client, Builder> {
     /// See also <https://github.com/ethereum/execution-apis/blob/431cf72fd3403d946ca3e3afc36b973fc87e0e89/src/engine/paris.md?plain=1#L137>
     #[inline]
     fn max_job_duration(&self, unix_timestamp: u64) -> Duration {
-        let duration_until_timestamp = duration_until(unix_timestamp);
+        let duration_until_timestamp = duration_until(self.task_runtime.now(), unix_timestamp);
 
         // safety in case clocks are bad
         let duration_until_timestamp = duration_until_timestamp.min(self.config.deadline * 3);
 
         self.config.deadline + duration_until_timestamp
-    }
-
-    /// Returns the [Instant](tokio::time::Instant) at which the job should be terminated because it
-    /// is considered timed out.
-    #[inline]
-    fn job_deadline(&self, unix_timestamp: u64) -> tokio::time::Instant {
-        tokio::time::Instant::now() + self.max_job_duration(unix_timestamp)
     }
 
     /// Returns a reference to the tasks type
@@ -187,15 +201,22 @@ where
         let config = PayloadConfig::new(Arc::new(parent_header), attributes, id)
             .with_parent_block_info(parent_block_info);
 
-        let until = self.job_deadline(config.attributes.timestamp());
-        let deadline = Box::pin(tokio::time::sleep_until(until));
+        let deadline = JobDeadline::new(
+            self.task_runtime.clone(),
+            self.max_job_duration(config.attributes.timestamp()),
+            self.use_task_clock,
+        );
 
         let mut job = BasicPayloadJob {
             config,
-            executor: self.executor.clone(),
+            executor: self.task_runtime.clone(),
             deadline,
             // ticks immediately
-            interval: tokio::time::interval(self.config.interval),
+            interval: JobInterval::new(
+                self.task_runtime.clone(),
+                self.config.interval,
+                self.use_task_clock,
+            ),
             best_payload: PayloadState::Missing,
             pending_block: None,
             cached_reads,
@@ -372,11 +393,11 @@ where
     /// The configuration for how the payload will be created.
     config: PayloadConfig<Builder::Attributes, HeaderForPayload<Builder::BuiltPayload>>,
     /// How to spawn building tasks
-    executor: Runtime,
+    executor: TaskRuntime,
     /// The deadline when this job should resolve.
-    deadline: Pin<Box<Sleep>>,
+    deadline: JobDeadline,
     /// The interval at which the job should build a new payload after the last.
-    interval: Interval,
+    interval: JobInterval,
     /// The best payload so far and its state.
     best_payload: PayloadState<Builder::BuiltPayload>,
     /// Receiver for the block that is currently being built.
@@ -427,10 +448,10 @@ where
         let leases = self.leases.clone();
         let builder = self.builder.clone();
         let executor = self.executor.clone();
-        self.executor.spawn_task(async move {
+        drop(self.executor.spawn("payload-build-permit", async move {
             // acquire the permit for executing the task
             let permit = guard.acquire_owned().await;
-            executor.spawn_blocking_named_or_tokio(PAYLOAD_BUILDER_THREAD_NAME, move || {
+            drop(executor.spawn_named_or_blocking(PAYLOAD_BUILDER_THREAD_NAME, move || {
                 let _permit = permit;
                 let args = BuildArguments {
                     cached_reads,
@@ -443,8 +464,8 @@ where
                 let result = builder.try_build(args);
                 drop(leases);
                 let _ = tx.send(result);
-            });
-        });
+            }));
+        }));
 
         self.pending_block = Some(PendingPayload { cancel: pending_cancel, payload: rx });
     }
@@ -462,7 +483,7 @@ where
         let this = self.get_mut();
 
         // check if the deadline is reached
-        if this.deadline.as_mut().poll(cx).is_ready() {
+        if Pin::new(&mut this.deadline).poll(cx).is_ready() {
             trace!(target: "payload_builder", "payload building deadline reached");
             return Poll::Ready(Ok(()))
         }
@@ -595,13 +616,15 @@ where
                     let (tx, rx) = oneshot::channel();
                     let config = self.config.clone();
                     let builder = self.builder.clone();
-                    self.executor.spawn_blocking_named_or_tokio(
+                    let leases = self.leases.clone();
+                    drop(self.executor.spawn_named_or_blocking(
                         PAYLOAD_BUILDER_THREAD_NAME,
                         move || {
                             let res = builder.build_empty_payload(config);
+                            drop(leases);
                             let _ = tx.send(res);
                         },
-                    );
+                    ));
 
                     empty_payload = Some(rx);
                 }
@@ -609,12 +632,15 @@ where
                     debug!(target: "payload_builder", id=%self.config.payload_id(), "racing fallback payload");
                     // race the in progress job with this job
                     let (tx, rx) = oneshot::channel();
-                    self.executor.spawn_blocking_named_or_tokio(
+                    let leases = self.leases.clone();
+                    drop(self.executor.spawn_named_or_blocking(
                         PAYLOAD_BUILDER_THREAD_NAME,
                         move || {
-                            let _ = tx.send(job());
+                            let result = job();
+                            drop(leases);
+                            let _ = tx.send(result);
                         },
-                    );
+                    ));
                     empty_payload = Some(rx);
                 }
             };
@@ -1048,8 +1074,8 @@ pub fn is_better_payload<T: BuiltPayload>(best_payload: Option<&T>, new_fees: U2
 /// Returns the duration until the given unix timestamp in seconds.
 ///
 /// Returns `Duration::ZERO` if the given timestamp is in the past.
-fn duration_until(unix_timestamp_secs: u64) -> Duration {
-    let unix_now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+fn duration_until(now: SystemTime, unix_timestamp_secs: u64) -> Duration {
+    let unix_now = now.duration_since(UNIX_EPOCH).unwrap_or_default();
     let timestamp = Duration::from_secs(unix_timestamp_secs);
     timestamp.saturating_sub(unix_now)
 }

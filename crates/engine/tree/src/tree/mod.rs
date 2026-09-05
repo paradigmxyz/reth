@@ -14,6 +14,7 @@ use alloy_rpc_types_engine::{
 use error::{
     InsertBlockError, InsertBlockFatalError, InsertBlockProcessingError, InsertBlockValidationError,
 };
+use payload_build_counter::PayloadBuildCounter;
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, NewCanonicalChain,
 };
@@ -43,15 +44,7 @@ use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie::ComputedTrieData;
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
-use std::{
-    fmt::Debug,
-    ops,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
-    time::Duration,
-};
+use std::{fmt::Debug, ops, sync::Arc, time::Duration};
 
 use crossbeam_channel::{Receiver, Sender};
 use tokio::sync::{
@@ -65,6 +58,7 @@ pub mod error;
 pub mod instrumented_state;
 mod invalid_headers;
 mod metrics;
+mod payload_build_counter;
 pub mod payload_processor;
 pub mod payload_validator;
 mod persistence_state;
@@ -330,6 +324,10 @@ where
     payload_builds: PayloadBuildTracker,
     /// Notifies the engine when the final active payload job finishes.
     payload_build_finished: Receiver<()>,
+    /// Completion signal for shutdown after all persistence frontiers reach the canonical head.
+    pending_termination: Option<TerminationSignal>,
+    /// An explicit persistence-wait request retained while cooperative persistence runs.
+    deferred_engine_message: Option<FromEngine<EngineApiRequest<T, N>, N::Block>>,
     /// Task runtime for spawning blocking work on named, reusable threads.
     runtime: reth_tasks::Runtime,
 }
@@ -425,6 +423,8 @@ where
             execution_timing_stats: B256Map::default(),
             payload_builds,
             payload_build_finished,
+            pending_termination: None,
+            deferred_engine_message: None,
             runtime,
         }
     }
@@ -449,6 +449,45 @@ where
         runtime: reth_tasks::Runtime,
     ) -> (Sender<FromEngine<EngineApiRequest<T, N>, N::Block>>, UnboundedReceiver<EngineApiEvent<N>>)
     {
+        let (task, outgoing) = Self::new_from_provider(
+            provider,
+            consensus,
+            payload_validator,
+            persistence,
+            payload_builder,
+            canonical_in_memory_state,
+            overlay_manager,
+            config,
+            kind,
+            evm_config,
+            runtime,
+        );
+        let incoming = task.incoming_tx.clone();
+        spawn_os_thread("engine", || {
+            increase_thread_priority();
+            task.run()
+        });
+        (incoming, outgoing)
+    }
+
+    /// Creates an engine initialized at the provider's persisted head without starting a thread.
+    ///
+    /// The caller can use [`Self::run`] on a dedicated thread or [`Self::run_cooperative`] when its
+    /// validator and persistence service support cooperative execution.
+    #[expect(clippy::complexity)]
+    pub fn new_from_provider(
+        provider: P,
+        consensus: Arc<dyn FullConsensus<N>>,
+        payload_validator: V,
+        persistence: PersistenceHandle<N>,
+        payload_builder: PayloadBuilderHandle<T>,
+        canonical_in_memory_state: CanonicalInMemoryState<N>,
+        overlay_manager: OverlayManager<N>,
+        config: TreeConfig,
+        kind: EngineApiKind,
+        evm_config: C,
+        runtime: reth_tasks::Runtime,
+    ) -> (Self, UnboundedReceiver<EngineApiEvent<N>>) {
         let best_block_number = provider.best_block_number().unwrap_or(0);
         let header = provider.sealed_header(best_block_number).ok().flatten().unwrap_or_default();
 
@@ -483,12 +522,7 @@ where
             evm_config,
             runtime,
         );
-        let incoming = task.incoming_tx.clone();
-        spawn_os_thread("engine", || {
-            increase_thread_priority();
-            task.run()
-        });
-        (incoming, outgoing)
+        (task, outgoing)
     }
 
     /// Returns a [`TreeOutcome`] indicating the forkchoice head is valid and canonical.
@@ -532,163 +566,188 @@ where
     ///
     /// This will block the current thread and process incoming messages.
     pub fn run(mut self) {
+        while self.step(true) != LoopStep::Shutdown {}
+    }
+
+    /// Runs the production event loop on a cooperative task runtime.
+    ///
+    /// Validation awaits its root computation so proof and sparse-trie tasks can progress on the
+    /// same executor. The engine yields between events and polls its Crossbeam inbox after one
+    /// millisecond of virtual or wall-clock time when idle or awaiting shutdown persistence.
+    pub async fn run_cooperative(mut self, runtime: reth_tasks::TaskRuntime) {
         loop {
-            // Each iteration has three phases:
-            //
-            // 1. Non-blocking poll for persistence completion. If the background flush already
-            //    landed, absorb the result now so the gap calculation below is fresh.
-            // 2. Decide how to wait for the next event. When the canonical-to-persisted gap beyond
-            //    the in-memory buffer reaches the backpressure threshold we only block on the
-            //    persistence receiver, leaving new engine requests sitting in the unbounded
-            //    upstream channel.
-            // 3. Handle the event (engine message or persistence completion) and kick off a new
-            //    persistence cycle if the threshold is met again.
-            //
-            // The net effect: when the unbuffered persistence gap reaches the threshold, we stop
-            // processing incoming messages and let them queue in the channel. This is only a soft
-            // form of backpressure: it delays replies and, more importantly, prevents executing
-            // further blocks that would pile up in the persistence queue - where each block
-            // carries heavier state (eg. trie updates) than the raw payload sitting in the engine
-            // channel.
-            //
-            // Standard Ethereum CLs won't truly back off - the engine API has no
-            // backpressure semantics, and CLs typically timeout after ≈8s and resend - so
-            // this cannot prevent the incoming channel from growing under sustained load.
-            // But it shifts the bottleneck to the lighter-weight incoming queue rather than
-            // the costlier persistence pipeline. Other clients that respect reply latency
-            // can treat the delayed responses as a signal to chill out.
-            match self.try_poll_persistence() {
-                Ok(true) => {
-                    if let Err(err) = self.advance_persistence() {
-                        error!(target: "engine::tree", %err, "Advancing persistence failed");
-                        return
-                    }
-                    continue;
+            match self.step_async(false).await {
+                LoopStep::Shutdown => {
+                    self.payload_validator.wait_for_tasks().await;
+                    return;
                 }
-                Ok(false) => {}
-                Err(err) => {
-                    error!(target: "engine::tree", %err, "Polling persistence failed");
-                    return
+                LoopStep::Idle | LoopStep::Terminating => {
+                    runtime.sleep(Duration::from_millis(1)).await;
                 }
+                _ => runtime.yield_now().await,
             }
+        }
+    }
 
-            let event = if self.should_backpressure() {
-                self.metrics.engine.backpressure_active.set(1.0);
-                let stall_start = Instant::now();
-                let event = self.wait_for_persistence_event();
-                self.metrics.engine.backpressure_stall_duration.record(stall_start.elapsed());
-                event
-            } else {
-                self.metrics.engine.backpressure_active.set(0.0);
-                self.wait_for_event()
-            };
+    fn step(&mut self, blocking: bool) -> LoopStep {
+        futures::executor::block_on(self.step_async(blocking))
+    }
 
-            match event {
-                LoopEvent::EngineMessage(msg) => {
-                    debug!(target: "engine::tree", %msg, "received new engine message");
-                    match self.on_engine_message(msg) {
-                        Ok(ops::ControlFlow::Break(())) => return,
-                        Ok(ops::ControlFlow::Continue(())) => {}
-                        Err(fatal) => {
-                            error!(target: "engine::tree", %fatal, "insert block fatal error");
-                            return
+    /// Processes one event and advances persistence using the same ordering in both execution
+    /// modes. With `blocking` disabled, an empty event queue returns control to the caller.
+    ///
+    /// Validation can suspend within an event while retaining exclusive access to the tree. The
+    /// native wrapper drives this same future on its dedicated engine thread.
+    async fn step_async(&mut self, blocking: bool) -> LoopStep {
+        if self.pending_termination.is_some() {
+            return self.step_termination(blocking)
+        }
+
+        // Absorb an already completed flush before calculating backpressure or reading input.
+        let progress = match self.try_poll_persistence() {
+            Ok(true) => LoopStep::PersistenceComplete,
+            Err(err) => {
+                error!(target: "engine::tree", %err, "Polling persistence failed");
+                return LoopStep::Shutdown
+            }
+            Ok(false) => {
+                let backpressure = self.should_backpressure();
+                self.metrics.engine.backpressure_active.set(if backpressure { 1.0 } else { 0.0 });
+                let stall_start = backpressure.then(Instant::now);
+                let event = self.select_event(blocking, backpressure);
+                if let Some(start) = stall_start {
+                    self.metrics.engine.backpressure_stall_duration.record(start.elapsed());
+                }
+                let Some(event) = event else { return LoopStep::Idle };
+
+                match event {
+                    LoopEvent::EngineMessage(msg) => {
+                        if !blocking &&
+                            self.persistence_state.in_progress() &&
+                            matches!(
+                                &msg,
+                                FromEngine::Request(EngineApiRequest::Beacon(
+                                    BeaconEngineMessage::RethNewPayload {
+                                        wait_for_persistence: true,
+                                        ..
+                                    }
+                                ))
+                            )
+                        {
+                            self.deferred_engine_message = Some(msg);
+                            return LoopStep::EngineMessage
                         }
+                        debug!(target: "engine::tree", %msg, "received new engine message");
+                        match self.on_engine_message_async(msg).await {
+                            Ok(ops::ControlFlow::Break(())) => return LoopStep::Shutdown,
+                            Ok(ops::ControlFlow::Continue(())) => {}
+                            Err(fatal) => {
+                                error!(target: "engine::tree", %fatal, "insert block fatal error");
+                                return LoopStep::Shutdown
+                            }
+                        }
+                        LoopStep::EngineMessage
                     }
-                }
-                LoopEvent::PersistenceComplete { result, start_time } => {
-                    if let Err(err) = self.on_persistence_complete(result, start_time) {
-                        error!(target: "engine::tree", %err, "Persistence complete handling failed");
-                        return
+                    LoopEvent::PersistenceComplete { result, start_time } => {
+                        if let Err(err) = self.on_persistence_complete(result, start_time) {
+                            error!(target: "engine::tree", %err, "Persistence complete handling failed");
+                            return LoopStep::Shutdown
+                        }
+                        LoopStep::PersistenceComplete
                     }
-                }
-                LoopEvent::PayloadBuildFinished => {}
-                LoopEvent::Disconnected => {
-                    error!(target: "engine::tree", "Channel disconnected");
-                    return
+                    LoopEvent::PayloadBuildFinished => LoopStep::PayloadBuildFinished,
+                    LoopEvent::Disconnected => {
+                        error!(target: "engine::tree", "Channel disconnected");
+                        return LoopStep::Shutdown
+                    }
                 }
             }
+        };
 
-            // Always check if we need to trigger new persistence after any event:
-            // - After engine messages: new blocks may have been inserted that exceed the
-            //   persistence threshold
-            // - After persistence completion: we can now persist more blocks if needed
-            if let Err(err) = self.advance_persistence() {
-                error!(target: "engine::tree", %err, "Advancing persistence failed");
-                return
-            }
+        if self.pending_termination.is_some() {
+            return self.step_termination(blocking)
         }
+
+        // The deferred request waited for the write that was active when it arrived. Process it
+        // before starting another write, preserving the synchronous request's ordering.
+        if self.deferred_engine_message.is_some() {
+            return progress
+        }
+        // Every processed event can enable another write. Idle polls must not start writes
+        // that the production loop would not start.
+        if let Err(err) = self.advance_persistence() {
+            error!(target: "engine::tree", %err, "Advancing persistence failed");
+            return LoopStep::Shutdown
+        }
+        progress
     }
 
-    /// Blocks until the in-flight persistence task completes, used when we are under
-    /// backpressure.
-    ///
-    /// Unlike `wait_for_event`, this deliberately does not read from the tree input channel. Any
-    /// requests sent to the tree remain queued upstream until persistence catches up.
-    fn wait_for_persistence_event(&mut self) -> LoopEvent<T, N> {
-        let maybe_persistence = self.persistence_state.rx.take();
-
-        if let Some((persistence_rx, start_time, _action)) = maybe_persistence {
-            match persistence_rx.recv() {
-                Ok(result) => LoopEvent::PersistenceComplete { result, start_time },
-                Err(_) => LoopEvent::Disconnected,
-            }
-        } else {
-            self.wait_for_event()
+    /// Selects from the ready channels in production priority order. Both blocking and
+    /// cooperative callers register exactly the same operations.
+    fn select_event(&mut self, blocking: bool, persistence_only: bool) -> Option<LoopEvent<T, N>> {
+        if self.deferred_engine_message.is_some() && !self.persistence_state.in_progress() {
+            return Some(match self.payload_build_finished.try_recv() {
+                Ok(()) => LoopEvent::PayloadBuildFinished,
+                Err(crossbeam_channel::TryRecvError::Disconnected) => LoopEvent::Disconnected,
+                Err(crossbeam_channel::TryRecvError::Empty) => LoopEvent::EngineMessage(
+                    self.deferred_engine_message.take().expect("deferred request exists"),
+                ),
+            })
         }
-    }
+        let persistence_only = persistence_only || self.deferred_engine_message.is_some();
+        let never_persistence = crossbeam_channel::never();
+        let never_payload = crossbeam_channel::never();
+        let never_input = crossbeam_channel::never();
+        let persistence = self.persistence_state.rx.as_ref();
+        let persistence_rx = persistence.map(|(rx, _, _)| rx).unwrap_or(&never_persistence);
+        // Under backpressure, leave engine input and lease notifications queued until the flush
+        // finishes. This limits executed state growth while preserving the incoming requests.
+        let allow_input = !persistence_only || persistence.is_none();
+        let payload_rx = if allow_input { &self.payload_build_finished } else { &never_payload };
+        let input_rx = if allow_input { &self.incoming } else { &never_input };
 
-    /// Blocks until the next event is ready.
-    ///
-    /// Uses biased selection to prioritize persistence completion so in-memory state is updated and
-    /// further writes are unblocked.
-    fn wait_for_event(&mut self) -> LoopEvent<T, N> {
-        // Take ownership of persistence rx if present
-        let maybe_persistence = self.persistence_state.rx.take();
-
-        if let Some((persistence_rx, start_time, action)) = maybe_persistence {
-            // Biased select prioritizes persistence completion to update in memory state and
-            // unblock further writes
-            crossbeam_channel::select_biased! {
-                recv(persistence_rx) -> result => {
-                    // Don't put it back - consumed (oneshot-like behavior)
-                    match result {
-                        Ok(result) => LoopEvent::PersistenceComplete {
-                            result,
-                            start_time,
-                        },
-                        Err(_) => LoopEvent::Disconnected,
-                    }
-                },
-                recv(self.payload_build_finished) -> result => {
-                    // Put the persistence rx back - we didn't consume it.
-                    self.persistence_state.rx = Some((persistence_rx, start_time, action));
-                    match result {
+        // Keep the operation array on the stack, as in the normal blocking loop. The optional
+        // default arm is the only difference when polling cooperatively.
+        macro_rules! receive {
+            ($($default:tt)*) => {
+                crossbeam_channel::select_biased! {
+                    recv(persistence_rx) -> result => {
+                        let (_, start_time, _) = persistence.expect("ready persistence receiver");
+                        (true, Some(match result {
+                            Ok(result) => LoopEvent::PersistenceComplete {
+                                result, start_time: *start_time,
+                            },
+                            Err(_) => LoopEvent::Disconnected,
+                        }))
+                    },
+                    recv(payload_rx) -> result => (false, Some(match result {
                         Ok(()) => LoopEvent::PayloadBuildFinished,
                         Err(_) => LoopEvent::Disconnected,
-                    }
-                },
-                recv(self.incoming) -> msg => {
-                    // Put the persistence rx back - we didn't consume it
-                    self.persistence_state.rx = Some((persistence_rx, start_time, action));
-                    match msg {
-                        Ok(m) => LoopEvent::EngineMessage(m),
+                    })),
+                    recv(input_rx) -> result => (false, Some(match result {
+                        Ok(message) => LoopEvent::EngineMessage(message),
                         Err(_) => LoopEvent::Disconnected,
-                    }
-                },
-            }
-        } else {
-            // No persistence in progress - wait on an incoming message or payload job completion.
-            crossbeam_channel::select_biased! {
-                recv(self.payload_build_finished) -> result => match result {
-                    Ok(()) => LoopEvent::PayloadBuildFinished,
-                    Err(_) => LoopEvent::Disconnected,
-                },
-                recv(self.incoming) -> msg => match msg {
-                    Ok(m) => LoopEvent::EngineMessage(m),
-                    Err(_) => LoopEvent::Disconnected,
-                },
-            }
+                    })),
+                    $($default)*
+                }
+            };
         }
+        let (completed, event) =
+            if blocking { receive!() } else { receive!(default => (false, None)) };
+        if completed {
+            self.persistence_state.rx = None;
+        }
+        event
+    }
+
+    #[cfg(test)]
+    fn wait_for_persistence_event(&mut self) -> LoopEvent<T, N> {
+        self.select_event(true, true).expect("blocking selection returns an event")
+    }
+
+    #[cfg(test)]
+    fn wait_for_event(&mut self) -> LoopEvent<T, N> {
+        self.select_event(true, false).expect("blocking selection returns an event")
     }
 
     /// Invoked when previously requested blocks were downloaded.
@@ -696,7 +755,7 @@ where
     /// If the block count exceeds the configured batch size we're allowed to execute at once, this
     /// will execute the first batch and send the remaining blocks back through the channel so that
     /// block request processing isn't blocked for a long time.
-    fn on_downloaded(
+    async fn on_downloaded_async(
         &mut self,
         mut blocks: Vec<SealedBlockWithAccessList<N::Block>>,
     ) -> Result<Option<TreeEvent>, InsertBlockFatalError> {
@@ -708,7 +767,7 @@ where
         trace!(target: "engine::tree", block_count = %blocks.len(), "received downloaded blocks");
         let batch = self.config.max_execute_block_batch_size().min(blocks.len());
         for block in blocks.drain(..batch) {
-            if let Some(event) = self.on_downloaded_block(block)? {
+            if let Some(event) = self.on_downloaded_block_async(block).await? {
                 let needs_backfill = event.is_backfill_action();
                 self.on_tree_event(event)?;
                 if needs_backfill {
@@ -741,17 +800,29 @@ where
     /// This returns a [`PayloadStatus`] that represents the outcome of a processed new payload and
     /// returns an error if an internal error occurred.
     #[instrument(
+        name = "on_new_payload",
         level = "debug",
         target = "engine::tree",
         skip_all,
         fields(block_hash = %payload.block_hash(), block_num = %payload.block_number()),
     )]
-    fn on_new_payload(
+    async fn on_new_payload_async(
         &mut self,
         payload: T::ExecutionData,
     ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockProcessingError> {
-        let _thread_resource_usage =
+        let mut thread_resource_usage =
             self.metrics.engine.new_payload.measure_thread_resource_usage();
+        let mut future = std::pin::pin!(self.on_new_payload_inner(payload));
+        futures::future::poll_fn(|cx| {
+            thread_resource_usage.measure_poll(|| std::future::Future::poll(future.as_mut(), cx))
+        })
+        .await
+    }
+
+    async fn on_new_payload_inner(
+        &mut self,
+        payload: T::ExecutionData,
+    ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockProcessingError> {
         trace!(target: "engine::tree", "invoked new payload");
 
         // start timing for the new payload process
@@ -799,7 +870,7 @@ where
         self.metrics.block_validation.record_payload_validation(start.elapsed().as_secs_f64());
 
         let mut outcome = if self.backfill_sync_state.is_idle() {
-            self.try_insert_payload(payload)?.into_outcome()
+            self.try_insert_payload_async(payload).await?.into_outcome()
         } else {
             TreeOutcome::new(self.try_buffer_payload(payload)?)
         };
@@ -821,8 +892,8 @@ where
     }
 
     /// Processes a payload during normal sync operation.
-    #[instrument(level = "debug", target = "engine::tree", skip_all)]
-    fn try_insert_payload(
+    #[instrument(name = "try_insert_payload", level = "debug", target = "engine::tree", skip_all)]
+    async fn try_insert_payload_async(
         &mut self,
         payload: T::ExecutionData,
     ) -> Result<TryInsertPayloadResult, InsertBlockProcessingError> {
@@ -831,12 +902,12 @@ where
         let parent_hash = payload.parent_hash();
         let mut latest_valid_hash = None;
 
-        match self.insert_payload(payload) {
+        match self.insert_payload_async(payload).await {
             Ok(status) => {
                 let (status, already_seen) = match status {
                     InsertPayloadOk::Inserted(BlockStatus::Valid) => {
                         latest_valid_hash = Some(block_hash);
-                        self.try_connect_buffered_blocks(num_hash)?;
+                        self.try_connect_buffered_blocks_async(num_hash).await?;
                         (PayloadStatusEnum::Valid, false)
                     }
                     InsertPayloadOk::AlreadySeen(BlockStatus::Valid) => {
@@ -1437,7 +1508,7 @@ where
     /// Triggers new persistence actions if no persistence task is currently in progress.
     ///
     /// This checks if we need to remove blocks (disk reorg) or save new blocks to disk.
-    /// Persistence completion is handled separately via the `wait_for_event` method.
+    /// Persistence completion is handled separately by the event loop.
     fn advance_persistence(&mut self) -> Result<(), AdvancePersistenceError> {
         if !self.persistence_state.in_progress() {
             if let Some(new_tip_num) = self.find_disk_reorg()? {
@@ -1450,47 +1521,53 @@ where
         Ok(())
     }
 
-    /// Finishes termination by persisting all remaining blocks and signaling completion.
-    ///
-    /// This blocks until all persistence is complete. Always signals completion,
-    /// even if an error occurs.
-    fn finish_termination(
-        &mut self,
-        pending_termination: oneshot::Sender<()>,
-    ) -> Result<(), AdvancePersistenceError> {
-        trace!(target: "engine::tree", "finishing termination, persisting remaining blocks");
-        let result = self.persist_until_complete();
-        let _ = pending_termination.send(());
-        result
+    /// Drives shutdown without reading further engine requests. Completion is signaled even if
+    /// persistence fails, matching the normal termination contract.
+    fn step_termination(&mut self, blocking: bool) -> LoopStep {
+        match self.persist_until_complete_step(blocking) {
+            Ok(false) => return LoopStep::Terminating,
+            Ok(true) => {}
+            Err(err) => error!(target: "engine::tree", %err, "Termination failed"),
+        }
+        drop(self.pending_termination.take());
+        LoopStep::Shutdown
     }
 
-    /// Persists all remaining blocks until none are left.
-    fn persist_until_complete(&mut self) -> Result<(), AdvancePersistenceError> {
-        loop {
-            // Wait for any in-progress persistence to complete (blocking)
-            if let Some((rx, start_time, action)) = self.persistence_state.rx.take() {
-                debug!(target: "engine::tree", ?action, "waiting for in-flight persistence");
-                let result = rx.recv().map_err(|_| AdvancePersistenceError::ChannelClosed)?;
-                self.on_persistence_complete(result, start_time)?;
-                continue
-            }
-
-            // Persistence can finish against a branch that the in-memory canonical chain has
-            // reorged away from. Unwind that stale disk branch before building a head-targeted
-            // save.
-            if let Some(new_tip_num) = self.find_disk_reorg()? {
-                self.remove_blocks(new_tip_num);
-                continue
-            }
-
-            let Some(input) = self.get_save_blocks_input(PersistTarget::Head) else {
-                debug!(target: "engine::tree", "persistence complete, signaling termination");
-                return Ok(())
+    /// Processes at most one persistence completion and starts the next shutdown write if needed.
+    /// Returns `true` when both frontiers have reached the head.
+    fn persist_until_complete_step(
+        &mut self,
+        blocking: bool,
+    ) -> Result<bool, AdvancePersistenceError> {
+        if let Some((rx, start_time, action)) = self.persistence_state.rx.take() {
+            let result = if blocking {
+                rx.recv().map_err(|_| AdvancePersistenceError::ChannelClosed)?
+            } else {
+                match rx.try_recv() {
+                    Ok(result) => result,
+                    Err(crossbeam_channel::TryRecvError::Empty) => {
+                        self.persistence_state.rx = Some((rx, start_time, action));
+                        return Ok(false)
+                    }
+                    Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                        return Err(AdvancePersistenceError::ChannelClosed)
+                    }
+                }
             };
-
-            debug!(target: "engine::tree", count = input.persist_rest_blocks().len(), "persisting remaining blocks before shutdown");
-            self.persist_blocks(input);
+            self.on_persistence_complete(result, start_time)?;
         }
+
+        // A flush can finish on a branch that has since become noncanonical. Unwind that branch
+        // before selecting the remaining canonical blocks, including during shutdown.
+        if let Some(new_tip_num) = self.find_disk_reorg()? {
+            self.remove_blocks(new_tip_num);
+            return Ok(false)
+        }
+        if let Some(input) = self.get_save_blocks_input(PersistTarget::Head) {
+            self.persist_blocks(input);
+            return Ok(false)
+        }
+        Ok(true)
     }
 
     /// Tries to poll for a completed persistence task (non-blocking).
@@ -1566,8 +1643,8 @@ where
 
     /// Handles a message from the engine.
     ///
-    /// Returns `ControlFlow::Break(())` if the engine should terminate.
-    fn on_engine_message(
+    /// A termination message starts shutdown; subsequent loop steps finish persistence.
+    async fn on_engine_message_async(
         &mut self,
         msg: FromEngine<EngineApiRequest<T, N>, N::Block>,
     ) -> Result<ops::ControlFlow<()>, InsertBlockFatalError> {
@@ -1578,14 +1655,11 @@ where
                     self.backfill_sync_state = BackfillSyncState::Active;
                 }
                 FromOrchestrator::BackfillSyncFinished(ctrl) => {
-                    self.on_backfill_sync_finished(ctrl)?;
+                    self.on_backfill_sync_finished_async(ctrl).await?;
                 }
                 FromOrchestrator::Terminate { tx } => {
                     debug!(target: "engine::tree", "received terminate request");
-                    if let Err(err) = self.finish_termination(tx) {
-                        error!(target: "engine::tree", %err, "Termination failed");
-                    }
-                    return Ok(ops::ControlFlow::Break(()))
+                    self.pending_termination = Some(TerminationSignal(Some(tx)));
                 }
             },
             FromEngine::Request(request) => {
@@ -1677,7 +1751,7 @@ where
                                 let start = Instant::now();
                                 let gas_used = payload.gas_used();
                                 let num_hash = payload.num_hash();
-                                let mut output = self.on_new_payload(payload);
+                                let mut output = self.on_new_payload_async(payload).await;
                                 self.metrics.engine.new_payload.update_response_metrics(
                                     start,
                                     &mut self.metrics.engine.forkchoice_updated.latest_finish_at,
@@ -1755,7 +1829,7 @@ where
                                 let start = Instant::now();
                                 let gas_used = payload.gas_used();
                                 let num_hash = payload.num_hash();
-                                let mut output = self.on_new_payload(payload);
+                                let mut output = self.on_new_payload_async(payload).await;
                                 let latency = start.elapsed();
                                 self.metrics.engine.new_payload.update_response_metrics(
                                     start,
@@ -1796,7 +1870,7 @@ where
                 }
             }
             FromEngine::DownloadedBlocks(blocks) => {
-                if let Some(event) = self.on_downloaded(blocks)? {
+                if let Some(event) = self.on_downloaded_async(blocks).await? {
                     self.on_tree_event(event)?;
                 }
             }
@@ -1817,7 +1891,7 @@ where
     ///
     /// In case backfill resulted in an unwind, this will clear the tree state above the unwind
     /// target block.
-    fn on_backfill_sync_finished(
+    async fn on_backfill_sync_finished_async(
         &mut self,
         ctrl: ControlFlow,
     ) -> Result<(), InsertBlockFatalError> {
@@ -1970,7 +2044,7 @@ where
         }
 
         // try to close the gap by executing buffered blocks that are child blocks of the new head
-        self.try_connect_buffered_blocks(self.state.tree_state.current_canonical_head)
+        self.try_connect_buffered_blocks_async(self.state.tree_state.current_canonical_head).await
     }
 
     /// Attempts to make the given target canonical.
@@ -2557,8 +2631,13 @@ where
     }
 
     /// Attempts to connect any buffered blocks that are connected to the given parent hash.
-    #[instrument(level = "debug", target = "engine::tree", skip(self))]
-    fn try_connect_buffered_blocks(
+    #[instrument(
+        name = "try_connect_buffered_blocks",
+        level = "debug",
+        target = "engine::tree",
+        skip(self)
+    )]
+    async fn try_connect_buffered_blocks_async(
         &mut self,
         parent: BlockNumHash,
     ) -> Result<(), InsertBlockFatalError> {
@@ -2573,7 +2652,7 @@ where
         let block_count = blocks.len();
         for child in blocks {
             let child_num_hash = child.num_hash();
-            match self.insert_block(child) {
+            match self.insert_block_async(child).await {
                 Ok(res) => {
                     debug!(target: "engine::tree", child =?child_num_hash, ?res, "connected buffered block");
                     if self.is_any_sync_target(child_num_hash.hash) &&
@@ -2885,7 +2964,7 @@ where
     /// If it matches a non-head sync target (safe or finalized), makes it canonical inline
     /// and triggers a download for the remaining blocks towards the actual head.
     /// Otherwise, tries to connect buffered blocks.
-    fn on_valid_downloaded_block(
+    async fn on_valid_downloaded_block_async(
         &mut self,
         block_num_hash: BlockNumHash,
     ) -> Result<Option<TreeEvent>, InsertBlockFatalError> {
@@ -2907,7 +2986,7 @@ where
             // head. Make it canonical and try to connect any buffered children, then
             // continue downloading towards the actual head if needed.
             self.make_canonical(block_num_hash.hash)?;
-            self.try_connect_buffered_blocks(block_num_hash)?;
+            self.try_connect_buffered_blocks_async(block_num_hash).await?;
 
             // Check if we've reached the sync target head after connecting buffered
             // blocks (e.g. the head block may have already been buffered).
@@ -2923,7 +3002,7 @@ where
             return Ok(None)
         }
         trace!(target: "engine::tree", "appended downloaded block");
-        self.try_connect_buffered_blocks(block_num_hash)?;
+        self.try_connect_buffered_blocks_async(block_num_hash).await?;
         Ok(None)
     }
 
@@ -2932,8 +3011,8 @@ where
     /// Returns an event with the appropriate action to take, such as:
     ///  - download more missing blocks
     ///  - try to canonicalize the target if the `block` is the tracked target (head) block.
-    #[instrument(level = "debug", target = "engine::tree", skip_all, fields(block_hash = %block.hash(), block_num = %block.number()))]
-    fn on_downloaded_block(
+    #[instrument(name = "on_downloaded_block", level = "debug", target = "engine::tree", skip_all, fields(block_hash = %block.hash(), block_num = %block.number()))]
+    async fn on_downloaded_block_async(
         &mut self,
         block: SealedBlockWithAccessList<N::Block>,
     ) -> Result<Option<TreeEvent>, InsertBlockFatalError> {
@@ -2948,9 +3027,9 @@ where
         }
 
         // try to append the block
-        match self.insert_block(block) {
+        match self.insert_block_async(block).await {
             Ok(InsertPayloadOk::Inserted(BlockStatus::Valid)) => {
-                return self.on_valid_downloaded_block(block_num_hash);
+                return self.on_valid_downloaded_block_async(block_num_hash).await;
             }
             Ok(InsertPayloadOk::Inserted(BlockStatus::Disconnected { head, missing_ancestor })) => {
                 // block is not connected to the canonical head, we need to download
@@ -2986,28 +3065,30 @@ where
     ///
     /// Returns `InsertPayloadOk` if the payload was successfully inserted and executed,
     /// or `InsertPayloadError` if validation or execution failed.
-    fn insert_payload(
+    async fn insert_payload_async(
         &mut self,
         payload: T::ExecutionData,
     ) -> Result<InsertPayloadOk, InsertPayloadError<N::Block>> {
-        self.insert_block_or_payload(
+        self.insert_block_or_payload_async(
             payload.block_with_parent(),
             payload,
-            |validator, payload, ctx| validator.validate_payload(payload, ctx),
+            |validator, payload, ctx| validator.validate_payload_async(payload, ctx),
             |this, payload| Ok(this.payload_validator.convert_payload_to_block(payload)?.into()),
         )
+        .await
     }
 
-    fn insert_block(
+    async fn insert_block_async(
         &mut self,
         block: SealedBlockWithAccessList<N::Block>,
     ) -> Result<InsertPayloadOk, InsertPayloadError<N::Block>> {
-        self.insert_block_or_payload(
+        self.insert_block_or_payload_async(
             block.block_with_parent(),
             block,
-            |validator, block, ctx| validator.validate_block(block, ctx),
+            |validator, block, ctx| validator.validate_block_async(block, ctx),
             |_, block| Ok(block),
         )
+        .await
     }
 
     /// Inserts a block or payload into the blockchain tree with full execution.
@@ -3026,12 +3107,17 @@ where
     /// Returns `InsertPayloadOk::Inserted(BlockStatus::Valid)` on successful execution,
     /// `InsertPayloadOk::AlreadySeen` if the block already exists, or
     /// `InsertPayloadOk::Inserted(BlockStatus::Disconnected)` if parent state is missing.
-    #[instrument(level = "debug", target = "engine::tree", skip_all, fields(?block_id))]
-    fn insert_block_or_payload<Input, Err>(
+    #[instrument(name = "insert_block_or_payload", level = "debug", target = "engine::tree", skip_all, fields(?block_id))]
+    async fn insert_block_or_payload_async<Input, Err>(
         &mut self,
         block_id: BlockWithParent,
         input: Input,
-        execute: impl FnOnce(&mut V, Input, TreeCtx<'_, N>) -> Result<ValidationOutput<N>, Err>,
+        execute: impl for<'a> FnOnce(
+            &'a mut V,
+            Input,
+            TreeCtx<'a, N>,
+        )
+            -> futures::future::BoxFuture<'a, Result<ValidationOutput<N>, Err>>,
         convert_to_block: impl FnOnce(
             &mut Self,
             Input,
@@ -3110,7 +3196,7 @@ where
             executed_block: executed,
             execution_timing_stats: timing_stats,
             raw_bal,
-        } = execute(&mut self.payload_validator, input, ctx)?;
+        } = execute(&mut self.payload_validator, input, ctx).await?;
 
         if let Some(raw_bal) = raw_bal {
             let num_hash = executed.recovered_block().num_hash();
@@ -3166,6 +3252,78 @@ where
             .record(block_insert_start.elapsed().as_secs_f64());
         debug!(target: "engine::tree", block=?block_num_hash, "Finished inserting block");
         Ok(InsertPayloadOk::Inserted(BlockStatus::Valid))
+    }
+
+    #[cfg(test)]
+    fn on_engine_message(
+        &mut self,
+        msg: FromEngine<EngineApiRequest<T, N>, N::Block>,
+    ) -> Result<ops::ControlFlow<()>, InsertBlockFatalError> {
+        futures::executor::block_on(self.on_engine_message_async(msg))
+    }
+
+    #[cfg(test)]
+    fn on_backfill_sync_finished(
+        &mut self,
+        ctrl: ControlFlow,
+    ) -> Result<(), InsertBlockFatalError> {
+        futures::executor::block_on(self.on_backfill_sync_finished_async(ctrl))
+    }
+
+    #[cfg(test)]
+    fn on_new_payload(
+        &mut self,
+        payload: T::ExecutionData,
+    ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockProcessingError> {
+        futures::executor::block_on(self.on_new_payload_async(payload))
+    }
+
+    #[cfg(test)]
+    fn try_insert_payload(
+        &mut self,
+        payload: T::ExecutionData,
+    ) -> Result<TryInsertPayloadResult, InsertBlockProcessingError> {
+        futures::executor::block_on(self.try_insert_payload_async(payload))
+    }
+
+    #[cfg(test)]
+    fn on_valid_downloaded_block(
+        &mut self,
+        block: BlockNumHash,
+    ) -> Result<Option<TreeEvent>, InsertBlockFatalError> {
+        futures::executor::block_on(self.on_valid_downloaded_block_async(block))
+    }
+
+    #[cfg(test)]
+    fn insert_block(
+        &mut self,
+        block: impl Into<SealedBlockWithAccessList<N::Block>>,
+    ) -> Result<InsertPayloadOk, InsertPayloadError<N::Block>> {
+        futures::executor::block_on(self.insert_block_async(block.into()))
+    }
+
+    #[cfg(test)]
+    fn insert_block_or_payload<Input, Err>(
+        &mut self,
+        block_id: BlockWithParent,
+        input: Input,
+        execute: impl FnOnce(&mut V, Input, TreeCtx<'_, N>) -> Result<ValidationOutput<N>, Err>,
+        convert_to_block: impl FnOnce(
+            &mut Self,
+            Input,
+        ) -> Result<SealedBlockWithAccessList<N::Block>, Err>,
+    ) -> Result<InsertPayloadOk, Err>
+    where
+        Err: From<InsertBlockError<N::Block>> + Send + 'static,
+    {
+        futures::executor::block_on(self.insert_block_or_payload_async(
+            block_id,
+            input,
+            |validator, input, ctx| {
+                Box::pin(futures::future::ready(execute(validator, input, ctx)))
+            },
+            convert_to_block,
+        ))
     }
 
     /// Handles an error that occurred while inserting a block.
@@ -3479,10 +3637,33 @@ where
     Disconnected,
 }
 
+/// Progress made by one engine iteration, excluding nondeterministic metrics timestamps.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum LoopStep {
+    Idle,
+    EngineMessage,
+    PersistenceComplete,
+    PayloadBuildFinished,
+    Terminating,
+    Shutdown,
+}
+
+/// Signals termination even if the handler is dropped while a shutdown write is pending.
+#[derive(Debug)]
+struct TerminationSignal(Option<oneshot::Sender<()>>);
+
+impl Drop for TerminationSignal {
+    fn drop(&mut self) {
+        if let Some(tx) = self.0.take() {
+            let _ = tx.send(());
+        }
+    }
+}
+
 /// Tracks payload jobs that may access the current in-memory overlay.
 #[derive(Clone, Debug)]
 struct PayloadBuildTracker {
-    active: Arc<AtomicUsize>,
+    active: Arc<PayloadBuildCounter>,
     finished_tx: Sender<()>,
 }
 
@@ -3490,12 +3671,12 @@ impl PayloadBuildTracker {
     /// Creates a tracker and a receiver notified when its active count reaches zero.
     fn new() -> (Self, Receiver<()>) {
         let (finished_tx, finished_rx) = crossbeam_channel::bounded(1);
-        (Self { active: Arc::new(AtomicUsize::new(0)), finished_tx }, finished_rx)
+        (Self { active: Arc::new(PayloadBuildCounter::default()), finished_tx }, finished_rx)
     }
 
     /// Acquires a lease for one payload job.
     fn acquire(&self) -> PayloadBuildLease {
-        self.active.fetch_add(1, Ordering::AcqRel);
+        self.active.acquire();
         PayloadBuildLease {
             active: Arc::clone(&self.active),
             finished_tx: self.finished_tx.clone(),
@@ -3504,23 +3685,20 @@ impl PayloadBuildTracker {
 
     /// Returns whether at least one payload job is active.
     fn is_active(&self) -> bool {
-        self.active.load(Ordering::Acquire) != 0
+        self.active.is_active()
     }
 }
 
 /// A lease held for the lifetime of a payload job.
 #[derive(Debug)]
 struct PayloadBuildLease {
-    active: Arc<AtomicUsize>,
+    active: Arc<PayloadBuildCounter>,
     finished_tx: Sender<()>,
 }
 
 impl Drop for PayloadBuildLease {
     fn drop(&mut self) {
-        let previous = self.active.fetch_sub(1, Ordering::AcqRel);
-        debug_assert!(previous > 0, "payload build lease count underflow");
-
-        if previous == 1 {
+        if self.active.release() {
             // The bounded channel coalesces completion notifications. The engine always checks
             // the counter again before applying a pending handoff.
             let _ = self.finished_tx.try_send(());

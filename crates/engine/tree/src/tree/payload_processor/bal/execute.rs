@@ -50,7 +50,7 @@ pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     ctx: ExecutionCtxFor<'a, Evm>,
     transaction_count: usize,
     txs: Receiver<(usize, Result<Tx, Err>)>,
-    receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
+    receipt_tx: tokio::sync::mpsc::UnboundedSender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
 ) -> Result<
     (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList),
     BalExecutionError,
@@ -92,7 +92,7 @@ fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
     ctx: ExecutionCtxFor<'scope, Evm>,
     transaction_count: usize,
     txs: Receiver<(usize, Result<Tx, Err>)>,
-    receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
+    receipt_tx: tokio::sync::mpsc::UnboundedSender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
     worker_count: usize,
 ) -> Result<
     (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList),
@@ -550,7 +550,7 @@ mod tests {
         MakeDb: Fn() -> Result<DB, BalExecutionError> + Sync,
     {
         let transaction_count = txs.len();
-        let (receipt_tx, _receipt_rx) = crossbeam_channel::unbounded();
+        let (receipt_tx, _receipt_rx) = tokio::sync::mpsc::unbounded_channel();
         let evm_env = evm_config.evm_env(block.header()).unwrap();
         let execution_ctx = evm_config.context_for_block(block).unwrap();
         let make_db = |_: bool| make_db();
@@ -1173,7 +1173,7 @@ mod tests {
         tx_tx.send((0, Err(std::io::Error::other("sig fail")))).unwrap();
         drop(tx_tx);
 
-        let (receipt_tx, _receipt_rx) = crossbeam_channel::unbounded();
+        let (receipt_tx, _receipt_rx) = tokio::sync::mpsc::unbounded_channel();
         let evm_env = evm_config.evm_env(block.header()).unwrap();
         let execution_ctx = evm_config.context_for_block(&block).unwrap();
         let make_db = db_factory(system_contracts_db());

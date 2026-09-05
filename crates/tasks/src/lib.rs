@@ -3,6 +3,7 @@
 //! # Feature Flags
 //!
 //! - `rayon`: Enable rayon thread pool for blocking tasks.
+//! - `deterministic`: Enable cooperative task simulation with Commonware.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -34,6 +35,7 @@ pub mod lazy;
 pub mod metrics;
 pub mod runtime;
 pub mod shutdown;
+pub mod task_runtime;
 pub mod utils;
 pub(crate) mod worker_map;
 
@@ -52,6 +54,7 @@ pub use lazy::LazyHandle;
 #[cfg(feature = "rayon")]
 pub use runtime::RayonConfig;
 pub use runtime::{Runtime, RuntimeBuildError, RuntimeBuilder, RuntimeConfig, TokioConfig};
+pub use task_runtime::{TaskError, TaskHandle, TaskRuntime};
 
 /// A [`TaskExecutor`] is now an alias for [`Runtime`].
 pub type TaskExecutor = Runtime;

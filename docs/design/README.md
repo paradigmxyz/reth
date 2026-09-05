@@ -4,6 +4,7 @@ Docs under this page contain some context on how we've iterated on the Reth desi
 
 - [Reth Goals](./goals.md)
 - [Database](./database.md)
+- [Deterministic simulation testing](./deterministic-testing.md)
 - Networking
     - [P2P](./p2p.md)
     - [Headers Downloader](./headers-downloader.md)
