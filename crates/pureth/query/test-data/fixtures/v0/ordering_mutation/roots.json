@@ -1,0 +1,9 @@
+{
+  "case_id": "ordering_mutation",
+  "expected_result": "roots_differ",
+  "format_version": "pureth_receipt_proof_vectors_v0",
+  "original_fixture_sha256": "0xb712591a4dc7634a2662b07b4ae68fa777540a4ecfe44a119ab71b162763ccf2",
+  "original_root": "0xd4e90213f6f7fa76997b8d2a3e56c1df70c7846a06e8deeead604844b0cfa43a",
+  "swapped_fixture_sha256": "0xe0119b759d0eaa1bb73426721d5d35fa92731a90a7651eb337e0d93e17df0df2",
+  "swapped_root": "0xf3f8ff3ed41cf419a27efe80f9b0ca996af392f6737aa6139e95d02a3a46567e"
+}
