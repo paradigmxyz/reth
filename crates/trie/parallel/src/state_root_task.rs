@@ -497,7 +497,7 @@ pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
             trace!(target: "trie::parallel::sparse", ?address, ?hashed_address, "Adding account to state update");
 
             let destroyed = account.is_selfdestructed();
-            if account.info != account.original_info() {
+            if account.is_created() || destroyed || account.info != account.original_info() {
                 let info = if destroyed { None } else { Some(account.info.into()) };
                 hashed_state.accounts.insert(hashed_address, info);
             }
@@ -549,6 +549,34 @@ mod tests {
 
         assert_eq!(hashed_state.accounts.get(&hashed_address), Some(&None));
         assert!(!hashed_state.storages.contains_key(&hashed_address));
+    }
+
+    #[test]
+    fn created_empty_account_is_included() {
+        let address = Address::repeat_byte(0x03);
+        let mut account = Account::default();
+        account.mark_touch();
+        assert!(account.mark_created_locally());
+
+        let hashed_state =
+            evm_state_to_hashed_post_state(EvmState::from_iter([(address, account)]));
+        let hashed_address = keccak256(address);
+
+        assert!(matches!(hashed_state.accounts.get(&hashed_address), Some(Some(_))));
+    }
+
+    #[test]
+    fn unmodified_selfdestruct_account_is_included_as_none() {
+        let address = Address::repeat_byte(0x04);
+        let mut account = Account::default();
+        account.mark_touch();
+        assert!(account.mark_selfdestructed_locally());
+
+        let hashed_state =
+            evm_state_to_hashed_post_state(EvmState::from_iter([(address, account)]));
+        let hashed_address = keccak256(address);
+
+        assert_eq!(hashed_state.accounts.get(&hashed_address), Some(&None));
     }
 
     #[test]
