@@ -787,7 +787,10 @@ async fn test_engine_ssz_request_validation() -> eyre::Result<()> {
     ] {
         let mut payload = ExecutionPayloadPrague {
             payload_inner: alloy_rpc_types_engine::ExecutionPayloadV2 {
-                payload_inner: alloy_rpc_types_engine::ExecutionPayloadV1::default(),
+                payload_inner: alloy_rpc_types_engine::ExecutionPayloadV1::from_block_unchecked(
+                    B256::ZERO,
+                    &reth_ethereum_primitives::Block::default(),
+                ),
                 withdrawals: vec![],
             },
             blob_gas_used: 0,
@@ -847,12 +850,12 @@ async fn test_engine_ssz_custom_engine_and_middleware() -> eyre::Result<()> {
             .with_components(EthereumNode::components())
             .with_add_ons(
                 EthereumAddOns::default()
-                    .with_engine_api(reth_node_builder::rpc::NoopEngineApiBuilder)
+                    .with_engine_api(reth_node_builder::rpc::NoopEngineApiBuilder::default())
                     .layer_auth_http_middleware(middleware),
             )
             .launch()
             .await?;
-    let auth = &node.add_ons_handle.auth_server_handle;
+    let auth = &node.add_ons_handle.rpc_server_handles.auth;
     let jwt = secret_to_bearer_header(auth.jwt_secret());
     let response = reqwest::Client::new()
         .get(format!("{}{ENGINE_IDENTITY_ROUTE}", auth.http_url()))

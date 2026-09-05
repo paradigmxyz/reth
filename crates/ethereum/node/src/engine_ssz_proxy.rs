@@ -24,6 +24,7 @@ use alloy_rpc_types_engine::{
     ExecutionPayloadFieldV2, ExecutionPayloadSidecar, ForkchoiceState, PayloadAttributes,
     PayloadId, PraguePayloadFields,
 };
+use futures::future::{BoxFuture, Either};
 use http_body_util::{BodyExt, LengthLimitError, Limited};
 use jsonrpsee::server::{HttpBody, HttpRequest, HttpResponse};
 use reth_chainspec::{EthereumHardfork, EthereumHardforks};
@@ -160,10 +161,7 @@ where
 {
     type Response = HttpResponse;
     type Error = BoxError;
-    type Future = futures::future::Either<
-        S::Future,
-        futures::future::BoxFuture<'static, Result<HttpResponse, BoxError>>,
-    >;
+    type Future = Either<S::Future, BoxFuture<'static, Result<HttpResponse, BoxError>>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
@@ -171,13 +169,11 @@ where
 
     fn call(&mut self, request: HttpRequest) -> Self::Future {
         if !request.uri().path().starts_with("/engine/") {
-            return futures::future::Either::Left(self.inner.call(request))
+            return Either::Left(self.inner.call(request))
         }
 
         let handle = self.handle.clone();
-        futures::future::Either::Right(Box::pin(async move {
-            Ok(handle_engine_ssz_request(handle, request).await)
-        }))
+        Either::Right(Box::pin(async move { Ok(handle_engine_ssz_request(handle, request).await) }))
     }
 }
 
@@ -1107,7 +1103,10 @@ mod tests {
         use alloy_rpc_types_engine::{ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3};
         let mut payload = ExecutionPayloadV3 {
             payload_inner: ExecutionPayloadV2 {
-                payload_inner: ExecutionPayloadV1::default(),
+                payload_inner: ExecutionPayloadV1::from_block_unchecked(
+                    B256::ZERO,
+                    &reth_ethereum_primitives::Block::default(),
+                ),
                 withdrawals: vec![],
             },
             blob_gas_used: 0,
@@ -1140,7 +1139,10 @@ mod tests {
         ));
         let shanghai = ExecutionPayloadEnvelopeShanghai {
             payload: ExecutionPayloadV2 {
-                payload_inner: ExecutionPayloadV1::default(),
+                payload_inner: ExecutionPayloadV1::from_block_unchecked(
+                    B256::ZERO,
+                    &reth_ethereum_primitives::Block::default(),
+                ),
                 withdrawals: vec![Default::default(); 17],
             },
         };
@@ -1151,7 +1153,10 @@ mod tests {
         let paris = ExecutionPayloadEnvelopeParis {
             payload: ExecutionPayloadV1 {
                 transactions: vec![Bytes::new(); (1 << 20) + 1],
-                ..Default::default()
+                ..ExecutionPayloadV1::from_block_unchecked(
+                    B256::ZERO,
+                    &reth_ethereum_primitives::Block::default(),
+                )
             },
         };
         assert!(matches!(
