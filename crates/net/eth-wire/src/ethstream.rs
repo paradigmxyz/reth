@@ -7,7 +7,7 @@
 use crate::{
     errors::{EthHandshakeError, EthStreamError},
     handshake::EthereumEthHandshake,
-    message::{EthBroadcastMessage, MAX_MESSAGE_SIZE, TX_MEMORY_BUDGET_MULTIPLIER},
+    message::{EthBroadcastMessage, MAX_MESSAGE_SIZE, MESSAGE_MEMORY_BUDGET_MULTIPLIER},
     p2pstream::HANDSHAKE_TIMEOUT,
     CanDisconnect, DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, ProtocolMessage,
     UnifiedStatus,
@@ -157,10 +157,10 @@ where
             return Err(EthStreamError::UnsupportedMessage { message_id: id });
         }
 
-        let msg = match ProtocolMessage::decode_message_with_tx_memory_budget(
+        let msg = match ProtocolMessage::decode_message_with_memory_budget(
             self.version,
             &mut bytes.as_ref(),
-            self.max_message_size * TX_MEMORY_BUDGET_MULTIPLIER,
+            self.max_message_size.saturating_mul(MESSAGE_MEMORY_BUDGET_MULTIPLIER),
         ) {
             Ok(m) => m,
             Err(err) => {
@@ -355,28 +355,56 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::UnauthedEthStream;
+    use super::{EthStreamInner, UnauthedEthStream};
     use crate::{
+        blocks::BlockBodies,
         broadcast::BlockHashNumber,
         errors::{EthHandshakeError, EthStreamError},
         ethstream::RawCapabilityMessage,
         hello::DEFAULT_TCP_PORT,
+        message::{RequestPair, MESSAGE_MEMORY_BUDGET_MULTIPLIER},
         p2pstream::UnauthedP2PStream,
         EthMessage, EthStream, EthVersion, HelloMessageWithProtocols, PassthroughCodec,
-        ProtocolVersion, Status, StatusMessage,
+        ProtocolMessage, ProtocolVersion, Status, StatusMessage,
     };
     use alloy_chains::NamedChain;
     use alloy_primitives::{bytes::Bytes, B256, U256};
-    use alloy_rlp::Decodable;
+    use alloy_rlp::{Decodable, Encodable};
     use futures::{SinkExt, StreamExt};
     use reth_ecies::stream::ECIESStream;
-    use reth_eth_wire_types::{EthNetworkPrimitives, UnifiedStatus};
+    use reth_eth_wire_types::{EthNetworkPrimitives, NetworkPrimitives, UnifiedStatus};
     use reth_ethereum_forks::{ForkFilter, Head};
     use reth_network_peers::pk2id;
     use secp256k1::{SecretKey, SECP256K1};
     use std::time::Duration;
     use tokio::net::{TcpListener, TcpStream};
     use tokio_util::codec::Decoder;
+
+    #[test]
+    fn block_bodies_decode_respects_memory_budget() {
+        let message = EthMessage::<EthNetworkPrimitives>::BlockBodies(RequestPair {
+            request_id: 0,
+            message: BlockBodies(vec![Default::default(); 3]),
+        });
+        let mut encoded = Vec::new();
+        ProtocolMessage::from(message).encode(&mut encoded);
+
+        type Body = <EthNetworkPrimitives as NetworkPrimitives>::BlockBody;
+        let max_message_size = core::mem::size_of::<Body>() / MESSAGE_MEMORY_BUDGET_MULTIPLIER;
+        assert!(encoded.len() <= max_message_size);
+
+        let decoded = EthStreamInner::<EthNetworkPrimitives>::with_max_message_size(
+            EthVersion::Eth68,
+            max_message_size,
+        )
+        .decode_message(encoded.as_slice().into())
+        .unwrap();
+        let EthMessage::BlockBodies(decoded) = decoded else {
+            panic!("expected block bodies response")
+        };
+
+        assert_eq!(decoded.message.len(), 1);
+    }
 
     #[tokio::test]
     async fn can_handshake() {
