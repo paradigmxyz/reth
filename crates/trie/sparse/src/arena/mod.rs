@@ -3001,14 +3001,27 @@ mod tests {
                 .removed_nodes
                 .retain(|path| self.storage_trie_updates().storage_nodes.contains_key(path));
 
+            let mut expected_updated_nodes =
+                expected_trie_updates.storage_nodes.into_iter().collect::<Vec<_>>();
+            let mut actual_updated_nodes =
+                actual_updates.updated_nodes.into_iter().collect::<Vec<_>>();
+            expected_updated_nodes.sort();
+            actual_updated_nodes.sort();
             pretty_assertions::assert_eq!(
-                expected_trie_updates.storage_nodes.into_iter().collect::<Vec<_>>().sort(),
-                actual_updates.updated_nodes.into_iter().collect::<Vec<_>>().sort(),
+                expected_updated_nodes,
+                actual_updated_nodes,
                 "updated nodes mismatch"
             );
+
+            let mut expected_removed_nodes =
+                expected_trie_updates.removed_nodes.into_iter().collect::<Vec<_>>();
+            let mut actual_removed_nodes =
+                actual_updates.removed_nodes.into_iter().collect::<Vec<_>>();
+            expected_removed_nodes.sort();
+            actual_removed_nodes.sort();
             pretty_assertions::assert_eq!(
-                expected_trie_updates.removed_nodes.into_iter().collect::<Vec<_>>().sort(),
-                actual_updates.removed_nodes.into_iter().collect::<Vec<_>>().sort(),
+                expected_removed_nodes,
+                actual_removed_nodes,
                 "removed nodes mismatch"
             );
             assert_eq!(expected_root, actual_root, "storage root mismatch");
