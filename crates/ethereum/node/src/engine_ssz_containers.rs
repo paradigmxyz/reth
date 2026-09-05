@@ -1402,7 +1402,7 @@ pub type WitnessHeaderV1 = Vec<u8>;
 pub struct ExecutionWitnessV1 {
     /// Hashed trie-node preimages required during execution and state-root recomputation.
     pub state: Vec<WitnessNodeV1>,
-    /// Contract bytecode preimages created or accessed during execution.
+    /// Contract bytecode preimages required from the pre-state.
     pub codes: Vec<WitnessCodeV1>,
     /// RLP-encoded ancestor headers used for pre-state and `BLOCKHASH` correctness proofs.
     pub headers: Vec<WitnessHeaderV1>,
@@ -1414,7 +1414,9 @@ pub type ExecutionWitness = ExecutionWitnessV1;
 /// REST-SSZ response for `POST /payloads/witness`.
 ///
 /// The witness uses the Engine REST-SSZ `Optional[T]` encoding from execution-apis and is present
-/// only when the payload status is `VALID`.
+/// only when the payload status is `VALID`. A `VALID` status without a witness means the parent
+/// state was not yet available through the provider (the parent is only known to the engine
+/// tree); resubmitting the payload once forkchoice has made the parent canonical yields it.
 #[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode)]
 pub struct PayloadStatusWithWitness {
     /// Result of processing the submitted payload.
