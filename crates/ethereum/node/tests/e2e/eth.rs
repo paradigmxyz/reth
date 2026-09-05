@@ -471,6 +471,44 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
 
     node.wait_block(1, block_hash, false).await?;
 
+    for (fork, available) in [("prague", true), ("cancun", false)] {
+        let response = client
+            .post(format!("{auth_url}/engine/v1/bodies/hash"))
+            .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
+            .header(ENGINE_EXECUTION_VERSION_HEADER, fork)
+            .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+            .body(
+                reth_node_ethereum::engine_ssz_containers::BodiesByHashRequest {
+                    block_hashes: vec![block_hash, B256::ZERO],
+                }
+                .as_ssz_bytes(),
+            )
+            .send()
+            .await?;
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let bodies =
+            reth_node_ethereum::engine_ssz_containers::BodiesResponsePrague::from_ssz_bytes(
+                &response.bytes().await?,
+            )
+            .unwrap();
+        assert_eq!(bodies.entries.len(), 2);
+        assert_eq!(bodies.entries[0].available, available);
+        assert!(!bodies.entries[1].available);
+    }
+    let response = client
+        .get(format!("{auth_url}/engine/v1/bodies?from=1&count=32"))
+        .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
+        .header(ENGINE_EXECUTION_VERSION_HEADER, "prague")
+        .send()
+        .await?;
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let bodies = reth_node_ethereum::engine_ssz_containers::BodiesResponsePrague::from_ssz_bytes(
+        &response.bytes().await?,
+    )
+    .unwrap();
+    assert_eq!(bodies.entries.len(), 1);
+    assert!(bodies.entries[0].available);
+
     Ok(())
 }
 
