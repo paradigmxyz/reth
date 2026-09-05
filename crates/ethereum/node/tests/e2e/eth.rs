@@ -662,6 +662,21 @@ async fn test_engine_ssz_proxy_returns_canonical_witness() -> eyre::Result<()> {
     let response = PayloadStatusWithWitness::from_ssz_bytes(&response.bytes().await?).unwrap();
     assert!(matches!(response.payload_status.status, PayloadStatusEnum::Invalid { .. }));
     assert!(response.witness.is_none());
+    invalid.payload.payload_inner.payload_inner.payload_inner.transactions =
+        vec![alloy_primitives::Bytes::from_static(&[2])];
+    let response = client
+        .post(&url)
+        .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
+        .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+        .header(ENGINE_EXECUTION_VERSION_HEADER, "amsterdam")
+        .body(invalid.as_ssz_bytes())
+        .send()
+        .await?;
+    assert_eq!(response.status(), reqwest::StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        response.json::<serde_json::Value>().await?["type"],
+        "/engine-api/errors/invalid-body"
+    );
     Ok(())
 }
 

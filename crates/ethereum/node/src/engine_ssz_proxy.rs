@@ -1246,6 +1246,41 @@ mod tests {
     use ssz::Encode;
 
     #[tokio::test]
+    async fn witness_capabilities_follow_both_wiring_orders() {
+        #[derive(Clone)]
+        struct Api(bool);
+        impl EngineSszApi for Api {
+            fn supports_witness(&self) -> bool {
+                self.0
+            }
+        }
+        struct Witness;
+        impl EngineSszWitness for Witness {
+            fn generate_witness(
+                &self,
+                _: ExecutionData,
+            ) -> BoxFuture<
+                'static,
+                Result<crate::engine_ssz_containers::ExecutionWitnessV1, EngineSszWitnessError>,
+            > {
+                Box::pin(async { Ok(Default::default()) })
+            }
+        }
+        let handle = EngineSszProxyHandle::new();
+        handle.set_witness_handler_sync(Arc::new(Witness));
+        assert!(!handle.witness_enabled().await);
+        handle.set_engine_api_sync(Api(true));
+        assert!(handle.witness_enabled().await);
+        handle.set_engine_api(Api(false)).await;
+        assert!(!handle.witness_enabled().await);
+
+        let handle = EngineSszProxyHandle::with_engine_api(Api(true));
+        assert!(!handle.witness_enabled().await);
+        handle.set_witness_handler(Arc::new(Witness)).await;
+        assert!(handle.witness_enabled().await);
+    }
+
+    #[tokio::test]
     async fn witness_is_only_advertised_when_configured() {
         for enabled in [false, true] {
             let body = handle_capabilities(enabled).into_body().collect().await.unwrap().to_bytes();
