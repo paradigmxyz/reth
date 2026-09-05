@@ -18,7 +18,7 @@ pub mod version;
 pub use version::{EthVersion, ProtocolVersion};
 
 pub mod message;
-pub use message::{EthMessage, EthMessageID, ProtocolMessage};
+pub use message::{EthMessage, EthMessageID, ProtocolMessage, RawResponse};
 
 pub mod header;
 pub use header::*;

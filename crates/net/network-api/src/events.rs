@@ -2,8 +2,8 @@
 
 use reth_eth_wire_types::{
     message::RequestPair, snap::SnapProtocolMessage, BlockAccessLists, BlockBodies, BlockHeaders,
-    Capabilities, Cells, DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion,
-    GetBlockAccessLists, GetBlockBodies, GetBlockHeaders, GetCells, GetNodeData,
+    Capabilities, Cells, DisconnectReason, EthMessage, EthMessageID, EthNetworkPrimitives,
+    EthVersion, GetBlockAccessLists, GetBlockBodies, GetBlockHeaders, GetCells, GetNodeData,
     GetPooledTransactions, GetReceipts, GetReceipts70, NetworkPrimitives, NodeData,
     PooledTransactions, Receipts, Receipts69, Receipts70, UnifiedStatus,
 };
@@ -326,6 +326,23 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
             Self::GetBlockAccessLists { .. } => version >= EthVersion::Eth71,
             Self::GetCells { .. } => version >= EthVersion::Eth72,
             _ => true,
+        }
+    }
+
+    /// Returns the [`EthMessageID`] of the `eth` response this request expects, or `None` for
+    /// [`Self::GetSnap`] which is answered with a `snap/2` message.
+    pub const fn response_message_id(&self) -> Option<EthMessageID> {
+        match self {
+            Self::GetBlockHeaders { .. } => Some(EthMessageID::BlockHeaders),
+            Self::GetBlockBodies { .. } => Some(EthMessageID::BlockBodies),
+            Self::GetPooledTransactions { .. } => Some(EthMessageID::PooledTransactions),
+            Self::GetNodeData { .. } => Some(EthMessageID::NodeData),
+            Self::GetReceipts { .. } | Self::GetReceipts69 { .. } | Self::GetReceipts70 { .. } => {
+                Some(EthMessageID::Receipts)
+            }
+            Self::GetBlockAccessLists { .. } => Some(EthMessageID::BlockAccessLists),
+            Self::GetCells { .. } => Some(EthMessageID::Cells),
+            Self::GetSnap { .. } => None,
         }
     }
 
