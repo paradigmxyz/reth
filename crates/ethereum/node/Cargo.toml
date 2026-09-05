@@ -62,6 +62,7 @@ revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg", "memory_lim
 eyre.workspace = true
 ethereum_ssz.workspace = true
 ethereum_ssz_derive.workspace = true
+futures.workspace = true
 http-body-util.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -85,7 +86,6 @@ alloy-sol-types.workspace = true
 alloy-contract.workspace = true
 alloy-rpc-types-beacon = { workspace = true, features = ["ssz"] }
 
-futures.workspace = true
 tokio.workspace = true
 serde_json.workspace = true
 rand.workspace = true
