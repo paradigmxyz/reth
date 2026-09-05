@@ -8,7 +8,9 @@ use nodes::{
     ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeBranchChild, ArenaSparseNodeState,
 };
 
-use crate::{LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates};
+use crate::{
+    LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates, TrieNodeEpoch,
+};
 use alloc::{borrow::Cow, boxed::Box, collections::VecDeque, vec::Vec};
 use alloy_primitives::{keccak256, map::B256Map, B256};
 use alloy_trie::TrieMask;
@@ -16,14 +18,11 @@ use core::{cmp::Reverse, mem};
 use reth_execution_errors::SparseTrieResult;
 use reth_trie_common::{
     BranchNodeMasks, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, ProofTrieNodeV2,
-    RlpNode, TrieNodeV2, EMPTY_ROOT_HASH,
+    ProofV2TargetParent, RlpNode, TrieNodeV2, EMPTY_ROOT_HASH,
 };
 use slotmap::{DefaultKey, SlotMap};
 use smallvec::SmallVec;
 use tracing::{instrument, trace};
-
-#[cfg(feature = "trie-debug")]
-use crate::debug_recorder::{LeafUpdateRecord, ProofTrieNodeRecord, RecordedOp, TrieDebugRecorder};
 
 /// Alias for the slotmap key type used as node references throughout the arena trie.
 type Index = DefaultKey;
@@ -35,38 +34,6 @@ const TRACE_TARGET: &str = "trie::arena";
 /// The maximum path length (in nibbles) for nodes that live in the upper trie. Nodes at this
 /// depth or deeper belong to lower subtries.
 const UPPER_TRIE_MAX_DEPTH: usize = 2;
-
-/// Finds the sub-range of `sorted_keys[start..]` whose entries start with `prefix`.
-///
-/// Returns the half-open range `start_idx..end_idx` into `sorted_keys`. The returned
-/// `end_idx` can be used as the `start` for the next call when iterating prefixes in
-/// lexicographic order.
-fn prefix_range(
-    sorted_keys: &[Nibbles],
-    start: usize,
-    prefix: &Nibbles,
-) -> core::ops::Range<usize> {
-    // Advance past entries before `prefix`.
-    let begin = start + sorted_keys[start..].partition_point(|p| p < prefix);
-    // Find the end of entries that start with `prefix`.
-    let mut end = begin;
-    while end < sorted_keys.len() && sorted_keys[end].starts_with(prefix) {
-        end += 1;
-    }
-    begin..end
-}
-
-/// Returns the per-slot byte size used by `SlotMap<_, T>`. `SlotMap` wraps each value in a
-/// `Slot<T>` containing the value union + a 4-byte version field, with struct alignment.
-const fn slotmap_slot_size<T>() -> usize {
-    // Slot<T> = { u: SlotUnion<T>, version: u32 }
-    // SlotUnion<T> = union { value: ManuallyDrop<T>, next_free: u32 }
-    // size = max(size_of::<T>(), 4) + 4, rounded up to align_of::<T>() (or 4)
-    let union_size = if core::mem::size_of::<T>() > 4 { core::mem::size_of::<T>() } else { 4 };
-    let raw = union_size + 4;
-    let align = if core::mem::align_of::<T>() > 4 { core::mem::align_of::<T>() } else { 4 };
-    (raw + align - 1) & !(align - 1)
-}
 
 /// Compacts an arena by BFS-copying all reachable nodes into a fresh `SlotMap`, dropping
 /// unreachable (pruned) slots. Parents are stored before children for cache-friendly top-down
@@ -162,9 +129,6 @@ struct ArenaSparseSubtrie {
     num_leaves: u64,
     /// Number of dirty (modified since last hash) leaves in this subtrie.
     num_dirty_leaves: u64,
-    /// Cached total memory footprint of this subtrie in bytes. Computed during prune;
-    /// starts at 0 before the first prune.
-    cached_memory_size: usize,
 }
 
 impl ArenaSparseSubtrie {
@@ -173,7 +137,8 @@ impl ArenaSparseSubtrie {
     /// before use.
     fn new(record_updates: bool) -> Box<Self> {
         let mut arena = SlotMap::new();
-        let root = arena.insert(ArenaSparseNode::EmptyRoot);
+        let root =
+            arena.insert(ArenaSparseNode::EmptyRoot { state: ArenaSparseNodeState::Revealed });
         let buffers = ArenaTrieBuffers {
             updates: record_updates.then(SparseTrieUpdates::default),
             ..Default::default()
@@ -186,14 +151,7 @@ impl ArenaSparseSubtrie {
             required_proofs: Vec::new(),
             num_leaves: 0,
             num_dirty_leaves: 0,
-            cached_memory_size: 0,
         })
-    }
-
-    /// Returns the cached total memory footprint of this subtrie in bytes.
-    /// Accurate after prune; returns 0 before the first prune.
-    const fn memory_size(&self) -> usize {
-        self.cached_memory_size
     }
 
     /// Asserts that `num_leaves` and `num_dirty_leaves` match the actual counts in the arena.
@@ -213,15 +171,11 @@ impl ArenaSparseSubtrie {
         );
     }
 
-    /// Prunes revealed subtrees that are not ancestors of any retained leaf, compacting the arena
-    /// in lexicographic order.
-    ///
-    /// `retained_leaves` must yield leaves in sorted order and be scoped to this subtrie's key
-    /// range. Builds a fresh arena by copying retained nodes from the root, blinding non-retained
-    /// children at the boundary unless their parent branch is retained.
+    /// Collapses nodes last modified before `prune_before` into hash stubs while copying retained
+    /// nodes into a compacted arena.
     ///
     /// Expects that all nodes have computed hashes (i.e. `prune` is called after hashing).
-    fn prune<'a>(&mut self, retained_leaves: impl IntoIterator<Item = &'a Nibbles>) -> usize {
+    fn prune(&mut self, prune_before: TrieNodeEpoch) -> usize {
         // Only branches can have pruneable children.
         if !matches!(&self.arena[self.root], ArenaSparseNode::Branch(_)) {
             return 0;
@@ -229,31 +183,22 @@ impl ArenaSparseSubtrie {
 
         debug_assert_eq!(self.num_dirty_leaves, 0, "prune must run after hashing");
 
-        let retained_leaves = retained_leaves.into_iter();
-        let (retained_lower_bound, retained_upper_bound) = retained_leaves.size_hint();
-        let old_count = self.arena.len();
-        // In a tree where every branch has ≥2 children, #branches ≤ #leaves − 1, so
-        // total nodes ≤ 2N − 1. This is a reasonable upper-bound capacity hint that
-        // avoids most reallocations without over-allocating when pruning is heavy.
-        let mut new_arena =
-            SlotMap::with_capacity(retained_upper_bound.unwrap_or(retained_lower_bound) * 2);
-        let mut retained_leaves = retained_leaves.peekable();
-        let mut new_num_leaves = 0u64;
-        let mut new_nodes_heap_size = 0usize;
+        if prune_before == TrieNodeEpoch::UNMODIFIED {
+            return 0;
+        }
 
-        // Root is always retained.
+        let old_count = self.arena.len();
+        // Do not reserve the old arena's size: discarded nodes should release their capacity.
+        let mut new_arena = SlotMap::new();
+        let mut new_num_leaves = 0u64;
+
+        // The subtrie root is retained by the owning upper trie.
         let root_node = self.arena.remove(self.root).expect("root exists");
         let new_root = new_arena.insert(root_node);
         let mut stack = Vec::new();
-        let root_is_retained = retained_leaves.peek().is_some();
-        if let Some(frame) = prepare_retained_node(
-            &new_arena,
-            new_root,
-            self.path,
-            root_is_retained,
-            &mut new_num_leaves,
-            &mut new_nodes_heap_size,
-        ) {
+        if let Some(frame) =
+            prepare_retained_node(&new_arena, new_root, self.path, &mut new_num_leaves)
+        {
             stack.push(frame);
         }
 
@@ -264,44 +209,22 @@ impl ArenaSparseSubtrie {
                 continue;
             };
 
-            // Child's path in the trie (edges to reach it, excluding its own short_key).
             let parent_new_idx = frame.new_idx;
             let mut child_path = frame.branch_logical_path;
             child_path.push(nibble);
 
-            while retained_leaves.peek().is_some_and(|retained| *retained < &child_path) {
-                retained_leaves.next();
-            }
+            let child_epoch = self.arena[old_child_idx]
+                .state_ref()
+                .and_then(ArenaSparseNodeState::cached_epoch)
+                .expect("prune must run after hashing");
 
-            let child_is_retained =
-                retained_leaves.peek().is_some_and(|retained| retained.starts_with(&child_path));
-            if child_is_retained || frame.branch_is_retained {
-                // Retained or protected by a retained parent branch.
-                let child_node = self.arena.remove(old_child_idx).expect("child exists");
-                let new_child_idx = new_arena.insert(child_node);
-                if let Some(frame) = prepare_retained_node(
-                    &new_arena,
-                    new_child_idx,
-                    child_path,
-                    child_is_retained,
-                    &mut new_num_leaves,
-                    &mut new_nodes_heap_size,
-                ) {
-                    stack.push(frame);
-                }
-                let ArenaSparseNode::Branch(b) = &mut new_arena[parent_new_idx] else {
-                    unreachable!()
-                };
-                b.children[child_pos] = ArenaSparseNodeBranchChild::Revealed(new_child_idx);
-            } else {
-                // Not retained — blind the child slot in the new arena.
+            if child_epoch.should_prune(prune_before) {
                 let node = &self.arena[old_child_idx];
                 let rlp_node = node
                     .state_ref()
-                    .expect("child must have state")
-                    .cached_rlp_node()
+                    .and_then(ArenaSparseNodeState::cached_rlp_node)
                     .cloned()
-                    .expect("pruned child must have cached RLP (prune runs after hashing)");
+                    .expect("prune must run after hashing");
                 trace!(
                     target: TRACE_TARGET,
                     path = ?child_path,
@@ -313,6 +236,21 @@ impl ArenaSparseSubtrie {
                     unreachable!()
                 };
                 b.children[child_pos] = ArenaSparseNodeBranchChild::Blinded(rlp_node);
+            } else {
+                let child_node = self.arena.remove(old_child_idx).expect("child exists");
+                let new_child_idx = new_arena.insert(child_node);
+                if let Some(frame) = prepare_retained_node(
+                    &new_arena,
+                    new_child_idx,
+                    child_path,
+                    &mut new_num_leaves,
+                ) {
+                    stack.push(frame);
+                }
+                let ArenaSparseNode::Branch(b) = &mut new_arena[parent_new_idx] else {
+                    unreachable!()
+                };
+                b.children[child_pos] = ArenaSparseNodeBranchChild::Revealed(new_child_idx);
             }
         }
 
@@ -321,8 +259,6 @@ impl ArenaSparseSubtrie {
         self.num_dirty_leaves = 0;
         self.arena = new_arena;
         self.root = new_root;
-        self.cached_memory_size =
-            self.arena.capacity() * slotmap_slot_size::<ArenaSparseNode>() + new_nodes_heap_size;
 
         #[cfg(debug_assertions)]
         self.debug_assert_counters();
@@ -333,7 +269,6 @@ impl ArenaSparseSubtrie {
             branch_logical_path: Nibbles,
             state_mask: TrieMask,
             remaining_child_mask: TrieMask,
-            branch_is_retained: bool,
         }
 
         impl CopyFrame {
@@ -353,18 +288,14 @@ impl ArenaSparseSubtrie {
             }
         }
 
-        /// Prepares a retained node for lexicographic copying, returning a stack frame when the
-        /// node has children to walk.
+        /// Prepares a retained node for copying, returning a stack frame when the node has children
+        /// to walk.
         fn prepare_retained_node(
             new_arena: &NodeArena,
             new_idx: Index,
             node_path: Nibbles,
-            branch_is_retained: bool,
             new_num_leaves: &mut u64,
-            new_nodes_heap_size: &mut usize,
         ) -> Option<CopyFrame> {
-            *new_nodes_heap_size += new_arena[new_idx].extra_heap_bytes();
-
             let ArenaSparseNode::Branch(b) = &new_arena[new_idx] else {
                 if matches!(&new_arena[new_idx], ArenaSparseNode::Leaf { .. }) {
                     *new_num_leaves += 1;
@@ -372,7 +303,6 @@ impl ArenaSparseSubtrie {
                 return None;
             };
 
-            // Logical path of this branch (path TO node + its extension/short_key).
             let mut branch_logical_path = node_path;
             branch_logical_path.extend(&b.short_key);
 
@@ -381,7 +311,6 @@ impl ArenaSparseSubtrie {
                 branch_logical_path,
                 state_mask: b.state_mask,
                 remaining_child_mask: b.state_mask,
-                branch_is_retained,
             })
         }
     }
@@ -409,7 +338,7 @@ impl ArenaSparseSubtrie {
         trace!(target: TRACE_TARGET, "Subtrie update_leaves");
 
         debug_assert!(
-            !matches!(self.arena[self.root], ArenaSparseNode::EmptyRoot),
+            !matches!(self.arena[self.root], ArenaSparseNode::EmptyRoot { .. }),
             "subtrie root must not be EmptyRoot at start of update_leaves"
         );
 
@@ -423,7 +352,7 @@ impl ArenaSparseSubtrie {
                 let logical_len = self.buffers.cursor.head_logical_branch_path_len(&self.arena);
                 self.required_proofs.push((
                     idx,
-                    ArenaRequiredProof { key, min_len: (logical_len as u8 + 1).min(64) },
+                    ArenaRequiredProof { key, parent: ProofV2TargetParent::new(logical_len) },
                 ));
                 continue;
             }
@@ -457,10 +386,10 @@ impl ArenaSparseSubtrie {
                     self.num_dirty_leaves =
                         (self.num_dirty_leaves as i64 + deltas.num_dirty_leaves_delta) as u64;
 
-                    if let RemoveLeafResult::NeedsProof { key, proof_key, min_len } = result {
+                    if let RemoveLeafResult::NeedsProof { key, proof_key, parent } = result {
                         self.required_proofs
-                            .push((idx, ArenaRequiredProof { key: proof_key, min_len }));
-                        self.required_proofs.push((idx, ArenaRequiredProof { key, min_len }));
+                            .push((idx, ArenaRequiredProof { key: proof_key, parent }));
+                        self.required_proofs.push((idx, ArenaRequiredProof { key, parent }));
                     }
                 }
                 LeafUpdate::Touched => {}
@@ -483,7 +412,7 @@ impl ArenaSparseSubtrie {
         trace!(target: TRACE_TARGET, path = ?self.path, num_nodes = nodes.len(), "Subtrie reveal_nodes");
 
         debug_assert!(
-            !matches!(self.arena[self.root], ArenaSparseNode::EmptyRoot),
+            !matches!(self.arena[self.root], ArenaSparseNode::EmptyRoot { .. }),
             "subtrie root must not be EmptyRoot in reveal_nodes"
         );
 
@@ -516,12 +445,13 @@ impl ArenaSparseSubtrie {
     /// After this call every node reachable from `self.root` will be in `Cached` state.
     ///
     /// Trie updates are written directly to `self.buffers.updates` (if `Some`).
-    fn update_cached_rlp(&mut self) {
+    fn update_cached_rlp(&mut self, new_epoch: TrieNodeEpoch) {
         ArenaParallelSparseTrie::update_cached_rlp(
             &mut self.arena,
             self.root,
             self.path,
             &mut self.buffers,
+            new_epoch,
         );
         self.num_dirty_leaves = 0;
         #[cfg(debug_assertions)]
@@ -560,8 +490,8 @@ enum RemoveLeafResult {
     /// No leaf was found at the given path (no-op).
     NotFound,
     /// The branch collapse requires revealing a blinded sibling. The caller must request a
-    /// proof for the given key at the given minimum depth.
-    NeedsProof { key: B256, proof_key: B256, min_len: u8 },
+    /// proof for the given key below the revealed logical parent branch.
+    NeedsProof { key: B256, proof_key: B256, parent: ProofV2TargetParent },
 }
 
 /// A proof request generated during leaf updates when a blinded node is encountered.
@@ -569,8 +499,8 @@ enum RemoveLeafResult {
 struct ArenaRequiredProof {
     /// The key requiring a proof.
     key: B256,
-    /// Minimum depth at which proof nodes should be returned.
-    min_len: u8,
+    /// The revealed logical parent branch.
+    parent: ProofV2TargetParent,
 }
 
 /// An arena-based parallel sparse trie.
@@ -660,9 +590,9 @@ impl Default for ArenaParallelismThresholds {
 ///
 /// ## Pruning
 ///
-/// [`SparseTrie::prune`] removes revealed nodes that are not ancestors of any retained leaf.
-/// Pruned nodes are replaced with `ArenaSparseNodeBranchChild::Blinded` entries using their
-/// cached RLP. Subtries are pruned in parallel when their leaf count exceeds
+/// [`SparseTrie::prune`] replaces nodes older than its epoch cutoff with
+/// `ArenaSparseNodeBranchChild::Blinded` entries using their cached RLP, then compacts the
+/// arenas. Subtries are pruned in parallel when their leaf count exceeds
 /// [`ArenaParallelismThresholds::min_leaves_for_prune`].
 #[derive(Debug, Clone)]
 pub struct ArenaParallelSparseTrie {
@@ -674,9 +604,6 @@ pub struct ArenaParallelSparseTrie {
     buffers: ArenaTrieBuffers,
     /// Thresholds controlling when parallelism is enabled for different operations.
     parallelism_thresholds: ArenaParallelismThresholds,
-    /// Debug recorder for tracking mutating operations.
-    #[cfg(feature = "trie-debug")]
-    debug_recorder: TrieDebugRecorder,
 }
 
 impl ArenaParallelSparseTrie {
@@ -687,154 +614,6 @@ impl ArenaParallelSparseTrie {
     ) -> Self {
         self.parallelism_thresholds = thresholds;
         self
-    }
-
-    /// Resets the debug recorder and records the current trie state as `SetRoot` + `RevealNodes`
-    /// ops, representing the initial state at the beginning of a block (after pruning).
-    ///
-    /// Walks the upper arena and all subtries depth-first using the cursor, converting each
-    /// node into a [`crate::debug_recorder::ProofTrieNodeRecord`].
-    #[cfg(feature = "trie-debug")]
-    fn record_initial_state(&mut self) {
-        use crate::debug_recorder::{NodeStateRecord, TrieNodeRecord};
-        use alloy_primitives::hex;
-        use alloy_trie::nodes::{BranchNode, TrieNode};
-
-        fn state_to_record(state: &ArenaSparseNodeState) -> NodeStateRecord {
-            match state {
-                ArenaSparseNodeState::Revealed => NodeStateRecord::Revealed,
-                ArenaSparseNodeState::Cached { rlp_node, .. } => {
-                    NodeStateRecord::Cached { rlp_node: hex::encode(rlp_node.as_ref()) }
-                }
-                ArenaSparseNodeState::Dirty => NodeStateRecord::Dirty,
-            }
-        }
-
-        /// Converts an [`ArenaSparseNode`] into a [`ProofTrieNodeRecord`] at the given path.
-        /// For branch children, resolves revealed children's cached RLP from `arena`.
-        /// Returns `None` for subtrie/taken-subtrie nodes (handled separately).
-        fn node_to_record(
-            arena: &NodeArena,
-            idx: Index,
-            path: Nibbles,
-        ) -> Option<ProofTrieNodeRecord> {
-            match &arena[idx] {
-                ArenaSparseNode::EmptyRoot => Some(ProofTrieNodeRecord {
-                    path,
-                    node: TrieNodeRecord(TrieNode::EmptyRoot),
-                    masks: None,
-                    short_key: None,
-                    state: None,
-                }),
-                ArenaSparseNode::Branch(b) => {
-                    let stack = b
-                        .children
-                        .iter()
-                        .map(|child| match child {
-                            ArenaSparseNodeBranchChild::Blinded(rlp) => rlp.clone(),
-                            ArenaSparseNodeBranchChild::Revealed(child_idx) => {
-                                // After pruning / root(), all nodes have cached RLP.
-                                arena[*child_idx]
-                                    .state_ref()
-                                    .and_then(|s| s.cached_rlp_node())
-                                    .cloned()
-                                    .unwrap_or_default()
-                            }
-                        })
-                        .collect();
-                    Some(ProofTrieNodeRecord {
-                        path,
-                        node: TrieNodeRecord(TrieNode::Branch(BranchNode::new(
-                            stack,
-                            b.state_mask,
-                        ))),
-                        masks: Some((
-                            b.branch_masks.hash_mask.get(),
-                            b.branch_masks.tree_mask.get(),
-                        )),
-                        short_key: (!b.short_key.is_empty()).then_some(b.short_key),
-                        state: Some(state_to_record(&b.state)),
-                    })
-                }
-                ArenaSparseNode::Leaf { key, value, state, .. } => Some(ProofTrieNodeRecord {
-                    path,
-                    node: TrieNodeRecord(TrieNode::Leaf(alloy_trie::nodes::LeafNode::new(
-                        *key,
-                        value.clone(),
-                    ))),
-                    masks: None,
-                    short_key: None,
-                    state: Some(state_to_record(state)),
-                }),
-                ArenaSparseNode::Subtrie(_) | ArenaSparseNode::TakenSubtrie => None,
-            }
-        }
-
-        /// Walks an arena depth-first using `cursor` and collects all nodes as records.
-        fn collect_records(
-            arena: &mut NodeArena,
-            root: Index,
-            root_path: Nibbles,
-            cursor: &mut ArenaCursor,
-            result: &mut Vec<ProofTrieNodeRecord>,
-        ) {
-            cursor.reset(arena, root, root_path);
-
-            // The cursor starts with root on the stack but `next` only yields children.
-            if let Some(record) = node_to_record(arena, root, root_path) {
-                result.push(record);
-            }
-
-            loop {
-                match cursor.next(arena, |_, node| {
-                    matches!(node, ArenaSparseNode::Branch(_) | ArenaSparseNode::Leaf { .. })
-                }) {
-                    NextResult::Done => break,
-                    NextResult::Branch | NextResult::NonBranch => {
-                        let head = cursor.head().expect("cursor is non-empty");
-                        if let Some(record) = node_to_record(arena, head.index, head.path) {
-                            result.push(record);
-                        }
-                    }
-                }
-            }
-        }
-
-        let mut nodes = Vec::new();
-
-        // Collect from the upper arena.
-        collect_records(
-            &mut self.upper_arena,
-            self.root,
-            Nibbles::default(),
-            &mut self.buffers.cursor,
-            &mut nodes,
-        );
-
-        // Collect from all subtries.
-        for (_, node) in &mut self.upper_arena {
-            if let ArenaSparseNode::Subtrie(subtrie) = node {
-                collect_records(
-                    &mut subtrie.arena,
-                    subtrie.root,
-                    subtrie.path,
-                    &mut self.buffers.cursor,
-                    &mut nodes,
-                );
-            }
-        }
-
-        // Reset the recorder and record that we pruned, then the initial state.
-        self.debug_recorder.reset();
-        self.debug_recorder.record(RecordedOp::Prune);
-
-        // First node is the root → SetRoot, remaining → RevealNodes.
-        if let Some(root_record) = nodes.first() {
-            self.debug_recorder.record(RecordedOp::SetRoot { node: root_record.clone() });
-        }
-        if nodes.len() > 1 {
-            self.debug_recorder.record(RecordedOp::RevealNodes { nodes: nodes[1..].to_vec() });
-        }
     }
 
     /// Returns `true` if a node at the given path length should be placed in a subtrie rather
@@ -933,7 +712,7 @@ impl ArenaParallelSparseTrie {
             return;
         };
 
-        if !matches!(subtrie.arena[subtrie.root], ArenaSparseNode::EmptyRoot) {
+        if !matches!(subtrie.arena[subtrie.root], ArenaSparseNode::EmptyRoot { .. }) {
             return;
         }
 
@@ -1013,7 +792,8 @@ impl ArenaParallelSparseTrie {
 
             if count == 0 {
                 if branch_idx == self.root {
-                    self.upper_arena[branch_idx] = ArenaSparseNode::EmptyRoot;
+                    self.upper_arena[branch_idx] =
+                        ArenaSparseNode::EmptyRoot { state: ArenaSparseNodeState::Dirty };
                     return;
                 }
                 // Remove the empty branch from its parent.
@@ -1055,7 +835,7 @@ impl ArenaParallelSparseTrie {
             // Check if the remaining child is an empty subtrie that should also be removed.
             let is_empty_subtrie = matches!(
                 &self.upper_arena[child_idx],
-                ArenaSparseNode::Subtrie(s) if matches!(s.arena[s.root], ArenaSparseNode::EmptyRoot)
+                ArenaSparseNode::Subtrie(s) if matches!(s.arena[s.root], ArenaSparseNode::EmptyRoot { .. })
             );
 
             if is_empty_subtrie {
@@ -1118,7 +898,6 @@ impl ArenaParallelSparseTrie {
     ) {
         if let Some(dst_updates) = dst.as_mut() {
             let src_updates = src.as_mut().expect("updates are enabled");
-            debug_assert!(!src_updates.wiped, "subtrie updates should never have wiped=true");
 
             // Source insertions cancel destination removals.
             for path in src_updates.updated_nodes.keys() {
@@ -1181,6 +960,7 @@ impl ArenaParallelSparseTrie {
         root: Index,
         base_path: Nibbles,
         buffers: &mut ArenaTrieBuffers,
+        new_epoch: TrieNodeEpoch,
     ) -> RlpNode {
         let cursor = &mut buffers.cursor;
         let rlp_buf = &mut buffers.rlp_buf;
@@ -1190,12 +970,22 @@ impl ArenaParallelSparseTrie {
         rlp_node_buf.clear();
 
         // Step 1: Handle trivial roots that don't need the stack-based walk.
-        // EmptyRoot has no state to update. Leaves are encoded in place. Already-cached
-        // branches need no work. Only dirty branches enter the main loop below.
+        // Empty roots and leaves are encoded in place. Already-cached branches need no work.
+        // Only dirty branches enter the main loop below.
         match &arena[root] {
-            ArenaSparseNode::EmptyRoot => return RlpNode::word_rlp(&EMPTY_ROOT_HASH),
+            ArenaSparseNode::EmptyRoot { state } => {
+                let node_epoch = match state {
+                    ArenaSparseNodeState::Cached { epoch, .. } => *epoch,
+                    ArenaSparseNodeState::Revealed => TrieNodeEpoch::UNMODIFIED,
+                    ArenaSparseNodeState::Dirty => new_epoch,
+                };
+                let rlp_node = RlpNode::word_rlp(&EMPTY_ROOT_HASH);
+                *arena[root].state_mut() =
+                    ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone(), epoch: node_epoch };
+                return rlp_node
+            }
             ArenaSparseNode::Leaf { .. } => {
-                Self::encode_leaf(arena, root, rlp_buf, rlp_node_buf);
+                Self::encode_leaf(arena, root, rlp_buf, rlp_node_buf, new_epoch);
                 return rlp_node_buf.pop().expect("encode_leaf must push an RlpNode");
             }
             ArenaSparseNode::Branch(b) => {
@@ -1246,6 +1036,7 @@ impl ArenaParallelSparseTrie {
             );
 
             rlp_node_buf.clear();
+            let mut node_epoch = TrieNodeEpoch::UNMODIFIED;
             let state_mask = arena[head_idx].branch_ref().state_mask;
             for (child_idx, _nibble) in BranchChildIter::new(state_mask) {
                 match &arena[head_idx].branch_ref().children[child_idx] {
@@ -1256,7 +1047,13 @@ impl ArenaParallelSparseTrie {
                         let child_idx = *child_idx;
                         match &arena[child_idx] {
                             ArenaSparseNode::Leaf { .. } => {
-                                Self::encode_leaf(arena, child_idx, rlp_buf, rlp_node_buf);
+                                Self::encode_leaf(
+                                    arena,
+                                    child_idx,
+                                    rlp_buf,
+                                    rlp_node_buf,
+                                    new_epoch,
+                                );
                             }
                             ArenaSparseNode::Branch(child_b) => {
                                 let ArenaSparseNodeState::Cached { rlp_node, .. } = &child_b.state
@@ -1282,10 +1079,16 @@ impl ArenaParallelSparseTrie {
                                     _ => panic!("subtrie root must be a cached Branch or Leaf"),
                                 }
                             }
-                            ArenaSparseNode::TakenSubtrie | ArenaSparseNode::EmptyRoot => {
+                            ArenaSparseNode::TakenSubtrie | ArenaSparseNode::EmptyRoot { .. } => {
                                 unreachable!("Unexpected child {:?}", arena[child_idx]);
                             }
                         }
+                        let Some(ArenaSparseNodeState::Cached { epoch: child_epoch, .. }) =
+                            arena[child_idx].state_ref()
+                        else {
+                            panic!("revealed child must be cached after encoding");
+                        };
+                        node_epoch = node_epoch.max(*child_epoch);
                     }
                 }
             }
@@ -1297,6 +1100,9 @@ impl ArenaParallelSparseTrie {
             let prev_branch_masks = b.branch_masks;
             let new_branch_masks = Self::get_branch_masks(arena, b);
             let was_dirty = matches!(b.state, ArenaSparseNodeState::Dirty);
+            if was_dirty {
+                node_epoch = node_epoch.max(new_epoch);
+            }
 
             rlp_buf.clear();
             let rlp_node = BranchNodeRef::new(rlp_node_buf, state_mask).rlp(rlp_buf);
@@ -1318,7 +1124,7 @@ impl ArenaParallelSparseTrie {
             );
 
             let branch = arena[head_idx].branch_mut();
-            branch.state = ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone() };
+            branch.state = ArenaSparseNodeState::Cached { rlp_node, epoch: node_epoch };
             branch.branch_masks = new_branch_masks;
 
             // Record trie updates for dirty branches only.
@@ -1356,7 +1162,7 @@ impl ArenaParallelSparseTrie {
     ) -> Option<&'a Vec<u8>> {
         loop {
             match &arena[current] {
-                ArenaSparseNode::EmptyRoot | ArenaSparseNode::TakenSubtrie => return None,
+                ArenaSparseNode::EmptyRoot { .. } | ArenaSparseNode::TakenSubtrie => return None,
                 ArenaSparseNode::Leaf { key, value, .. } => {
                     let remaining = full_path.slice(path_offset..);
                     return (remaining == *key).then_some(value);
@@ -1404,7 +1210,7 @@ impl ArenaParallelSparseTrie {
     ) -> Result<LeafLookup, LeafLookupError> {
         loop {
             match &arena[current] {
-                ArenaSparseNode::EmptyRoot | ArenaSparseNode::TakenSubtrie => {
+                ArenaSparseNode::EmptyRoot { .. } | ArenaSparseNode::TakenSubtrie => {
                     return Ok(LeafLookup::NonExistent);
                 }
                 ArenaSparseNode::Leaf { key, value, .. } => {
@@ -1476,21 +1282,27 @@ impl ArenaParallelSparseTrie {
         idx: Index,
         rlp_buf: &mut Vec<u8>,
         rlp_node_buf: &mut Vec<RlpNode>,
+        new_epoch: TrieNodeEpoch,
     ) {
         let (key, value, state) = match &arena[idx] {
             ArenaSparseNode::Leaf { key, value, state } => (key, value, state),
             _ => unreachable!("encode_leaf called on non-Leaf node"),
         };
 
-        if let ArenaSparseNodeState::Cached { rlp_node, .. } = state {
-            rlp_node_buf.push(rlp_node.clone());
-            return;
-        }
+        let epoch = match state {
+            ArenaSparseNodeState::Cached { rlp_node, .. } => {
+                rlp_node_buf.push(rlp_node.clone());
+                return;
+            }
+            ArenaSparseNodeState::Revealed => TrieNodeEpoch::UNMODIFIED,
+            ArenaSparseNodeState::Dirty => new_epoch,
+        };
 
         rlp_buf.clear();
         let rlp_node = LeafNodeRef { key, value }.rlp(rlp_buf);
 
-        *arena[idx].state_mut() = ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone() };
+        *arena[idx].state_mut() =
+            ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone(), epoch };
         rlp_node_buf.push(rlp_node);
     }
 
@@ -1761,7 +1573,12 @@ impl ArenaParallelSparseTrie {
                             RemoveLeafResult::NeedsProof {
                                 key,
                                 proof_key: Self::nibbles_to_padded_b256(&sibling_path),
-                                min_len: (sibling_path.len() as u8).min(64),
+                                parent: ProofV2TargetParent::new(
+                                    sibling_path
+                                        .len()
+                                        .checked_sub(1)
+                                        .expect("sibling path has a child nibble"),
+                                ),
                             },
                             SubtrieCounterDeltas::default(),
                         );
@@ -1776,7 +1593,8 @@ impl ArenaParallelSparseTrie {
                     // The leaf is the root — replace with EmptyRoot and reset the cursor
                     // so subsequent iterations can call seek normally.
                     arena.remove(head_idx);
-                    *root = arena.insert(ArenaSparseNode::EmptyRoot);
+                    *root = arena
+                        .insert(ArenaSparseNode::EmptyRoot { state: ArenaSparseNodeState::Dirty });
                     cursor.reset(arena, *root, head_path);
                     return (
                         RemoveLeafResult::Removed,
@@ -1882,7 +1700,9 @@ impl ArenaParallelSparseTrie {
 
         Some(ArenaRequiredProof {
             key: Self::nibbles_to_padded_b256(&sibling_path),
-            min_len: (sibling_path.len() as u8).min(64),
+            parent: ProofV2TargetParent::new(
+                sibling_path.len().checked_sub(1).expect("sibling path has a child nibble"),
+            ),
         })
     }
 
@@ -2099,8 +1919,7 @@ impl ArenaParallelSparseTrie {
     }
 
     /// Removes a pruned node from the arena and blinds the parent's child slot with the node's
-    /// cached RLP. If the node has no cached RLP (e.g. it was never hashed), the parent slot
-    /// is left dangling — this is safe because the parent will also be removed during pruning.
+    /// cached RLP.
     fn remove_pruned_node(
         arena: &mut NodeArena,
         cursor: &ArenaCursor,
@@ -2109,7 +1928,11 @@ impl ArenaParallelSparseTrie {
     ) -> ArenaSparseNode {
         let path = cursor.head().expect("cursor is non-empty").path;
         let node = arena.remove(idx).expect("node must exist to be pruned");
-        let rlp_node = node.state_ref().and_then(|s| s.cached_rlp_node()).cloned();
+        let rlp_node = node
+            .state_ref()
+            .and_then(ArenaSparseNodeState::cached_rlp_node)
+            .cloned()
+            .expect("prune must run after hashing");
         trace!(
             target: TRACE_TARGET,
             ?path,
@@ -2118,14 +1941,12 @@ impl ArenaParallelSparseTrie {
             "pruning node",
         );
 
-        if let Some(rlp_node) = rlp_node {
-            let parent_idx = cursor.parent().expect("pruned child has parent").index;
-            let child_nibble = nibble.expect("non-root child");
-            let parent_branch = arena[parent_idx].branch_mut();
-            let child_idx = BranchChildIdx::new(parent_branch.state_mask, child_nibble)
-                .expect("child nibble not found in parent state_mask");
-            parent_branch.children[child_idx] = ArenaSparseNodeBranchChild::Blinded(rlp_node);
-        }
+        let parent_idx = cursor.parent().expect("pruned child has parent").index;
+        let child_nibble = nibble.expect("non-root child");
+        let parent_branch = arena[parent_idx].branch_mut();
+        let child_idx = BranchChildIdx::new(parent_branch.state_mask, child_nibble)
+            .expect("child nibble not found in parent state_mask");
+        parent_branch.children[child_idx] = ArenaSparseNodeBranchChild::Blinded(rlp_node);
 
         node
     }
@@ -2184,7 +2005,8 @@ impl ArenaParallelSparseTrie {
         let mut arena_node = ArenaSparseNode::from_proof_node(proof_node);
 
         let state = arena_node.state_mut();
-        *state = ArenaSparseNodeState::Cached { rlp_node: cached_rlp };
+        *state =
+            ArenaSparseNodeState::Cached { rlp_node: cached_rlp, epoch: TrieNodeEpoch::UNMODIFIED };
 
         let child_idx = arena.insert(arena_node);
         arena[head_idx].branch_mut().children[dense_child_idx] =
@@ -2246,27 +2068,26 @@ impl Drop for ArenaParallelSparseTrie {
 impl Default for ArenaParallelSparseTrie {
     fn default() -> Self {
         let mut upper_arena = SlotMap::new();
-        let root = upper_arena.insert(ArenaSparseNode::EmptyRoot);
+        let root = upper_arena
+            .insert(ArenaSparseNode::EmptyRoot { state: ArenaSparseNodeState::Revealed });
         Self {
             upper_arena,
             root,
             buffers: ArenaTrieBuffers::default(),
             parallelism_thresholds: ArenaParallelismThresholds::default(),
-            #[cfg(feature = "trie-debug")]
-            debug_recorder: Default::default(),
         }
     }
 }
 
 impl ArenaParallelSparseTrie {
     /// Hashes a subtrie at `head_idx` and collects its update actions.
-    fn update_upper_subtrie(&mut self, head_idx: Index) {
+    fn update_upper_subtrie(&mut self, head_idx: Index, new_epoch: TrieNodeEpoch) {
         let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[head_idx] else {
             unreachable!()
         };
 
         if !subtrie.arena[subtrie.root].is_cached() {
-            subtrie.update_cached_rlp();
+            subtrie.update_cached_rlp(new_epoch);
         }
 
         Self::merge_subtrie_updates(&mut self.buffers.updates, &mut subtrie.buffers.updates);
@@ -2281,17 +2102,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
         masks: Option<BranchNodeMasks>,
         retain_updates: bool,
     ) -> SparseTrieResult<()> {
-        #[cfg(feature = "trie-debug")]
-        self.debug_recorder.record(RecordedOp::SetRoot {
-            node: ProofTrieNodeRecord::from_proof_trie_node_v2(&ProofTrieNodeV2 {
-                path: Nibbles::default(),
-                node: root.clone(),
-                masks,
-            }),
-        });
-
         debug_assert!(
-            matches!(self.upper_arena[self.root], ArenaSparseNode::EmptyRoot),
+            matches!(self.upper_arena[self.root], ArenaSparseNode::EmptyRoot { .. }),
             "set_root called on a trie that already has revealed nodes"
         );
 
@@ -2300,6 +2112,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
         match root {
             TrieNodeV2::EmptyRoot => {
                 trace!(target: TRACE_TARGET, "Setting empty root");
+                self.upper_arena[self.root] =
+                    ArenaSparseNode::EmptyRoot { state: ArenaSparseNodeState::Revealed };
             }
             TrieNodeV2::Leaf(leaf) => {
                 trace!(target: TRACE_TARGET, key = ?leaf.key, "Setting leaf root");
@@ -2347,12 +2161,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
             return Ok(());
         }
 
-        #[cfg(feature = "trie-debug")]
-        self.debug_recorder.record(RecordedOp::RevealNodes {
-            nodes: nodes.iter().map(ProofTrieNodeRecord::from_proof_trie_node_v2).collect(),
-        });
-
-        if matches!(self.upper_arena[self.root], ArenaSparseNode::EmptyRoot) {
+        if matches!(self.upper_arena[self.root], ArenaSparseNode::EmptyRoot { .. }) {
             trace!(target: TRACE_TARGET, "Skipping reveal_nodes on empty root");
             return Ok(());
         }
@@ -2486,17 +2295,15 @@ impl SparseTrie for ArenaParallelSparseTrie {
     }
 
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all, ret)]
-    fn root(&mut self) -> B256 {
-        #[cfg(feature = "trie-debug")]
-        self.debug_recorder.record(RecordedOp::Root);
-
-        self.update_subtrie_hashes();
+    fn root(&mut self, new_epoch: TrieNodeEpoch) -> B256 {
+        self.update_subtrie_hashes(new_epoch);
 
         let rlp_node = Self::update_cached_rlp(
             &mut self.upper_arena,
             self.root,
             Nibbles::default(),
             &mut self.buffers,
+            new_epoch,
         );
 
         rlp_node.as_hash().expect("root RlpNode must be a hash")
@@ -2506,11 +2313,16 @@ impl SparseTrie for ArenaParallelSparseTrie {
         self.upper_arena[self.root].is_cached()
     }
 
-    #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
-    fn update_subtrie_hashes(&mut self) {
-        #[cfg(feature = "trie-debug")]
-        self.debug_recorder.record(RecordedOp::UpdateSubtrieHashes);
+    fn root_epoch(&self) -> Option<TrieNodeEpoch> {
+        match self.upper_arena[self.root].state_ref()? {
+            ArenaSparseNodeState::Revealed => Some(TrieNodeEpoch::UNMODIFIED),
+            ArenaSparseNodeState::Cached { epoch, .. } => Some(*epoch),
+            ArenaSparseNodeState::Dirty => None,
+        }
+    }
 
+    #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
+    fn update_subtrie_hashes(&mut self, new_epoch: TrieNodeEpoch) {
         trace!(target: TRACE_TARGET, "Updating subtrie hashes");
 
         // Only descend if the root is a branch; otherwise there are no subtries.
@@ -2540,7 +2352,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
             if taken.len() == 1 || total_dirty_leaves < self.parallelism_thresholds.min_dirty_leaves
             {
                 for (_, subtrie) in &mut taken {
-                    subtrie.update_cached_rlp();
+                    subtrie.update_cached_rlp(new_epoch);
                 }
             } else {
                 use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -2550,7 +2362,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     .into_par_iter()
                     .map(|(idx, mut subtrie)| {
                         let _guard = parent_span.enter();
-                        subtrie.update_cached_rlp();
+                        subtrie.update_cached_rlp(new_epoch);
                         (idx, subtrie)
                     })
                     .collect();
@@ -2596,7 +2408,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 self.upper_arena[head_idx] = ArenaSparseNode::Subtrie(subtrie);
             }
 
-            self.update_upper_subtrie(head_idx);
+            self.update_upper_subtrie(head_idx, new_epoch);
         }
     }
 
@@ -2633,83 +2445,37 @@ impl SparseTrie for ArenaParallelSparseTrie {
     }
 
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
-    fn wipe(&mut self) {
-        trace!(target: TRACE_TARGET, "Wiping arena trie");
-        self.clear();
-        self.buffers.updates = self.buffers.updates.is_some().then(SparseTrieUpdates::wiped);
-    }
-
-    #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
     fn clear(&mut self) {
-        #[cfg(feature = "trie-debug")]
-        self.debug_recorder.reset();
-
         self.upper_arena = SlotMap::new();
-        self.root = self.upper_arena.insert(ArenaSparseNode::EmptyRoot);
-        self.buffers.clear();
-    }
-
-    fn size_hint(&self) -> usize {
-        self.upper_arena
-            .iter()
-            .map(|(_, node)| match node {
-                ArenaSparseNode::Subtrie(s) => s.num_leaves as usize,
-                ArenaSparseNode::Leaf { .. } => 1,
-                _ => 0,
-            })
-            .sum()
-    }
-
-    fn memory_size(&self) -> usize {
-        let slot_size = slotmap_slot_size::<ArenaSparseNode>();
-
-        // Upper arena: capacity × slot size.
-        let upper = self.upper_arena.capacity() * slot_size;
-
-        // Active subtries: cached total memory from last prune.
-        let subtrie_size: usize = self
+        self.root = self
             .upper_arena
-            .iter()
-            .filter_map(|(_, node)| match node {
-                ArenaSparseNode::Subtrie(s) => Some(s.memory_size()),
-                _ => None,
-            })
-            .sum();
-
-        // RLP buffers.
-        let buffer_size = self.buffers.rlp_buf.capacity() +
-            self.buffers.rlp_node_buf.capacity() * core::mem::size_of::<RlpNode>();
-
-        upper + subtrie_size + buffer_size
+            .insert(ArenaSparseNode::EmptyRoot { state: ArenaSparseNodeState::Revealed });
+        self.buffers.clear();
     }
 
     #[instrument(
         level = "trace",
         target = TRACE_TARGET,
         skip_all,
-        fields(num_retained_leaves = retained_leaves.len()),
+        fields(prune_before = prune_before.get()),
     )]
-    fn prune(&mut self, retained_leaves: &[Nibbles]) -> usize {
+    fn prune(&mut self, prune_before: TrieNodeEpoch) -> usize {
+        assert!(self.root_epoch().is_some(), "prune cannot run on a dirty trie");
+
         // Only descend if the root is a branch; otherwise there are no subtries.
         if !matches!(&self.upper_arena[self.root], ArenaSparseNode::Branch(_)) {
             return 0;
         }
-
-        debug_assert!(
-            retained_leaves.windows(2).all(|w| w[0] <= w[1]),
-            "retained_leaves must be sorted"
-        );
 
         let threshold = self.parallelism_thresholds.min_leaves_for_prune;
 
         let mut cursor = mem::take(&mut self.buffers.cursor);
         cursor.reset(&self.upper_arena, self.root, Nibbles::default());
 
-        // Subtries taken for parallel pruning: (arena_index, subtrie, retained_range).
-        let mut taken: Vec<(Index, Box<ArenaSparseSubtrie>, core::ops::Range<usize>)> = Vec::new();
+        // Subtries taken for parallel pruning.
+        let mut taken: Vec<(Index, Box<ArenaSparseSubtrie>)> = Vec::new();
 
         let mut pruned = 0;
-        let mut retained_idx = 0;
 
         loop {
             let result = cursor.next(&mut self.upper_arena, |_, child| {
@@ -2721,20 +2487,13 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 )
             });
 
-            match result {
-                NextResult::Done => break,
-                NextResult::NonBranch | NextResult::Branch => {}
+            if matches!(result, NextResult::Done) {
+                break
             }
 
             let head = cursor.head().expect("cursor is non-empty");
             let head_idx = head.index;
             let head_path = head.path;
-            let protected_by_retained_parent = if cursor.depth() == 0 {
-                false
-            } else {
-                let parent_path = cursor.parent().expect("cursor must have a parent").path;
-                !prefix_range(retained_leaves, 0, &parent_path).is_empty()
-            };
 
             match &self.upper_arena[head_idx] {
                 ArenaSparseNode::Branch(_) | ArenaSparseNode::Leaf { .. } => {
@@ -2743,12 +2502,11 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         continue;
                     }
 
-                    let range = prefix_range(retained_leaves, 0, &head_path);
-                    if !range.is_empty() {
-                        continue;
-                    }
-
-                    if protected_by_retained_parent {
+                    let node_epoch = self.upper_arena[head_idx]
+                        .state_ref()
+                        .and_then(ArenaSparseNodeState::cached_epoch)
+                        .expect("prune must run after hashing");
+                    if !node_epoch.should_prune(prune_before) {
                         continue;
                     }
 
@@ -2761,19 +2519,11 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     pruned += 1;
                 }
                 ArenaSparseNode::Subtrie(_) => {
-                    let subtrie_range = prefix_range(retained_leaves, retained_idx, &head_path);
-                    retained_idx = subtrie_range.end;
-
-                    if subtrie_range.is_empty() {
-                        if protected_by_retained_parent {
-                            let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[head_idx]
-                            else {
-                                unreachable!()
-                            };
-                            pruned += subtrie.prune(&[]);
-                            continue;
-                        }
-
+                    let root_epoch = self.upper_arena[head_idx]
+                        .state_ref()
+                        .and_then(ArenaSparseNodeState::cached_epoch)
+                        .expect("prune must run after hashing");
+                    if root_epoch.should_prune(prune_before) {
                         let removed = Self::remove_pruned_node(
                             &mut self.upper_arena,
                             &cursor,
@@ -2781,7 +2531,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                             head_path.last(),
                         );
                         let ArenaSparseNode::Subtrie(s) = &removed else { unreachable!() };
-                        pruned += s.num_leaves as usize;
+                        pruned += s.arena.len();
                         self.recycle_subtrie(removed);
                         continue;
                     }
@@ -2796,13 +2546,13 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         ) else {
                             unreachable!()
                         };
-                        taken.push((head_idx, subtrie, subtrie_range));
+                        taken.push((head_idx, subtrie));
                     } else {
                         let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[head_idx]
                         else {
                             unreachable!()
                         };
-                        pruned += subtrie.prune(retained_leaves[subtrie_range].iter());
+                        pruned += subtrie.prune(prune_before);
                     }
                 }
                 _ => unreachable!("NonBranch in prune walk must be Subtrie, Leaf, or Branch"),
@@ -2814,15 +2564,15 @@ impl SparseTrie for ArenaParallelSparseTrie {
         if !taken.is_empty() {
             // Prune taken subtries, in parallel if more than one.
             if taken.len() == 1 {
-                let (_, ref mut subtrie, ref range) = taken[0];
-                pruned += subtrie.prune(retained_leaves[range.clone()].iter());
+                let (_, ref mut subtrie) = taken[0];
+                pruned += subtrie.prune(prune_before);
             } else {
                 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 
                 let parent_span = tracing::Span::current();
                 pruned += taken
                     .par_iter_mut()
-                    .map(|(_, subtrie, range)| {
+                    .map(|(_, subtrie)| {
                         let _guard = parent_span.enter();
                         let _span = tracing::trace_span!(
                             target: TRACE_TARGET,
@@ -2831,13 +2581,13 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         )
                         .entered();
 
-                        subtrie.prune(retained_leaves[range.clone()].iter())
+                        subtrie.prune(prune_before)
                     })
                     .sum::<usize>();
             }
 
             // Restore taken subtries into the upper arena.
-            for (child_idx, subtrie, _) in taken {
+            for (child_idx, subtrie) in taken {
                 self.upper_arena[child_idx] = ArenaSparseNode::Subtrie(subtrie);
             }
         }
@@ -2845,9 +2595,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
         if pruned > 0 {
             compact_arena(&mut self.upper_arena, &mut self.root);
         }
-
-        #[cfg(feature = "trie-debug")]
-        self.record_initial_state();
 
         pruned
     }
@@ -2861,17 +2608,11 @@ impl SparseTrie for ArenaParallelSparseTrie {
     fn update_leaves(
         &mut self,
         updates: &mut B256Map<LeafUpdate>,
-        mut proof_required_fn: impl FnMut(B256, u8),
+        mut proof_required_fn: impl FnMut(B256, ProofV2TargetParent),
     ) -> SparseTrieResult<()> {
         if updates.is_empty() {
             return Ok(());
         }
-
-        #[cfg(feature = "trie-debug")]
-        let recorded_updates: Vec<_> =
-            updates.iter().map(|(k, v)| (*k, LeafUpdateRecord::from(v))).collect();
-        #[cfg(feature = "trie-debug")]
-        let mut recorded_proof_targets: Vec<(B256, u8)> = Vec::new();
 
         // Drain and sort updates lexicographically by nibbles path.
         let mut sorted: Vec<_> =
@@ -2897,11 +2638,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 // Blinded — request a proof regardless of update type.
                 SeekResult::Blinded => {
                     let logical_len = cursor.head_logical_branch_path_len(&self.upper_arena);
-                    let min_len = (logical_len as u8 + 1).min(64);
-                    trace!(target: TRACE_TARGET, ?key, min_len, "Update hit blinded node, requesting proof");
-                    proof_required_fn(key, min_len);
-                    #[cfg(feature = "trie-debug")]
-                    recorded_proof_targets.push((key, min_len));
+                    let parent = ProofV2TargetParent::new(logical_len);
+                    trace!(target: TRACE_TARGET, ?key, ?parent, "Update hit blinded node, requesting proof");
+                    proof_required_fn(key, parent);
                     updates.insert(key, update.clone());
                 }
                 // Subtrie — forward all consecutive updates under this subtrie's prefix.
@@ -2927,10 +2666,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         &cursor,
                         subtrie_updates,
                     ) {
-                        trace!(target: TRACE_TARGET, proof_key = ?proof.key, proof_min_len = proof.min_len, "Subtrie collapse would need blinded sibling, requesting proof");
-                        proof_required_fn(proof.key, proof.min_len);
-                        #[cfg(feature = "trie-debug")]
-                        recorded_proof_targets.push((proof.key, proof.min_len));
+                        trace!(target: TRACE_TARGET, proof_key = ?proof.key, proof_parent = ?proof.parent, "Subtrie collapse would need blinded sibling, requesting proof");
+                        proof_required_fn(proof.key, proof.parent);
                         for &(key, _, ref update) in subtrie_updates {
                             updates.insert(key, update.clone());
                         }
@@ -2980,9 +2717,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         subtrie.update_leaves(subtrie_updates);
 
                         for (target_idx, proof) in subtrie.required_proofs.drain(..) {
-                            proof_required_fn(proof.key, proof.min_len);
-                            #[cfg(feature = "trie-debug")]
-                            recorded_proof_targets.push((proof.key, proof.min_len));
+                            proof_required_fn(proof.key, proof.parent);
                             let (key, _, ref update) = subtrie_updates[target_idx];
                             updates.insert(key, update.clone());
                         }
@@ -3041,10 +2776,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
                             &mut self.buffers.updates,
                         );
                         match result {
-                            RemoveLeafResult::NeedsProof { key, proof_key, min_len } => {
-                                proof_required_fn(proof_key, min_len);
-                                #[cfg(feature = "trie-debug")]
-                                recorded_proof_targets.push((proof_key, min_len));
+                            RemoveLeafResult::NeedsProof { key, proof_key, parent } => {
+                                proof_required_fn(proof_key, parent);
                                 let update =
                                     mem::replace(&mut sorted[update_idx].2, LeafUpdate::Touched);
                                 updates.insert(key, update);
@@ -3081,12 +2814,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
             #[cfg(debug_assertions)]
             self.debug_assert_subtrie_structure();
 
-            #[cfg(feature = "trie-debug")]
-            self.debug_recorder.record(RecordedOp::UpdateLeaves {
-                updates: recorded_updates,
-                proof_targets: recorded_proof_targets,
-            });
-
             return Ok(());
         }
 
@@ -3110,9 +2837,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         for (child_idx, mut subtrie, range) in taken {
             let subtrie_updates = &sorted[range];
             for (target_idx, proof) in subtrie.required_proofs.drain(..) {
-                proof_required_fn(proof.key, proof.min_len);
-                #[cfg(feature = "trie-debug")]
-                recorded_proof_targets.push((proof.key, proof.min_len));
+                proof_required_fn(proof.key, proof.parent);
                 let (key, _, ref update) = subtrie_updates[target_idx];
                 updates.insert(key, update.clone());
             }
@@ -3139,7 +2864,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                                 let head_idx = cursor.head().expect("cursor is non-empty").index;
                                 !matches!(
                                     &self.upper_arena[head_idx],
-                                    ArenaSparseNode::Subtrie(s) if matches!(s.arena[s.root], ArenaSparseNode::EmptyRoot)
+                                    ArenaSparseNode::Subtrie(s) if matches!(s.arena[s.root], ArenaSparseNode::EmptyRoot { .. })
                                 )
                             },
                             "taken subtrie became EmptyRoot — should have been forced inline"
@@ -3166,31 +2891,26 @@ impl SparseTrie for ArenaParallelSparseTrie {
         #[cfg(debug_assertions)]
         self.debug_assert_subtrie_structure();
 
-        #[cfg(feature = "trie-debug")]
-        self.debug_recorder.record(RecordedOp::UpdateLeaves {
-            updates: recorded_updates,
-            proof_targets: recorded_proof_targets,
-        });
-
         Ok(())
-    }
-
-    #[cfg(feature = "trie-debug")]
-    fn take_debug_recorder(&mut self) -> TrieDebugRecorder {
-        core::mem::take(&mut self.debug_recorder)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::TRACE_TARGET;
-    use crate::{ArenaParallelSparseTrie, ArenaParallelismThresholds, LeafUpdate, SparseTrie};
+    use crate::{
+        ArenaParallelSparseTrie, ArenaParallelismThresholds, LeafUpdate, SparseTrie, TrieNodeEpoch,
+    };
     use alloy_primitives::{map::B256Map, B256, U256};
     use rand::{seq::SliceRandom, Rng, SeedableRng};
     use reth_trie::test_utils::TrieTestHarness;
-    use reth_trie_common::{Nibbles, ProofV2Target};
+    use reth_trie_common::ProofV2Target;
     use std::collections::BTreeMap;
     use tracing::{info, trace};
+
+    const fn epoch(value: u64) -> TrieNodeEpoch {
+        TrieNodeEpoch::new(value)
+    }
 
     /// Test harness for proptest-based arena sparse trie testing.
     ///
@@ -3255,8 +2975,8 @@ mod tests {
             // reveal, and repeat until no more proofs are needed.
             loop {
                 let mut targets: Vec<ProofV2Target> = Vec::new();
-                apst.update_leaves(&mut leaf_updates, |key, min_len| {
-                    targets.push(ProofV2Target::new(key).with_min_len(min_len));
+                apst.update_leaves(&mut leaf_updates, |key, parent| {
+                    targets.push(ProofV2Target::new(key).with_parent(parent));
                 })
                 .expect("update_leaves should succeed");
 
@@ -3269,7 +2989,7 @@ mod tests {
             }
 
             // Compute root and take updates from the APST.
-            let actual_root = apst.root();
+            let actual_root = apst.root(epoch(0));
             let mut actual_updates = apst.take_updates();
 
             // Minimize sparse updates inline (can't use TrieTestHarness::minimize_sparse_updates
@@ -3281,14 +3001,27 @@ mod tests {
                 .removed_nodes
                 .retain(|path| self.storage_trie_updates().storage_nodes.contains_key(path));
 
+            let mut expected_updated_nodes =
+                expected_trie_updates.storage_nodes.into_iter().collect::<Vec<_>>();
+            let mut actual_updated_nodes =
+                actual_updates.updated_nodes.into_iter().collect::<Vec<_>>();
+            expected_updated_nodes.sort();
+            actual_updated_nodes.sort();
             pretty_assertions::assert_eq!(
-                expected_trie_updates.storage_nodes.into_iter().collect::<Vec<_>>().sort(),
-                actual_updates.updated_nodes.into_iter().collect::<Vec<_>>().sort(),
+                expected_updated_nodes,
+                actual_updated_nodes,
                 "updated nodes mismatch"
             );
+
+            let mut expected_removed_nodes =
+                expected_trie_updates.removed_nodes.into_iter().collect::<Vec<_>>();
+            let mut actual_removed_nodes =
+                actual_updates.removed_nodes.into_iter().collect::<Vec<_>>();
+            expected_removed_nodes.sort();
+            actual_removed_nodes.sort();
             pretty_assertions::assert_eq!(
-                expected_trie_updates.removed_nodes.into_iter().collect::<Vec<_>>().sort(),
-                actual_updates.removed_nodes.into_iter().collect::<Vec<_>>().sort(),
+                expected_removed_nodes,
+                actual_removed_nodes,
                 "removed nodes mismatch"
             );
             assert_eq!(expected_root, actual_root, "storage root mismatch");
@@ -3372,17 +3105,9 @@ mod tests {
             // Update the harness base dataset to reflect the first changeset.
             harness.apply_changeset(changeset1);
 
-            // Pick N random keys from the current storage as retained leaves for pruning.
-            let mut all_storage_keys: Vec<Nibbles> = harness.storage().keys()
-                .map(|k| Nibbles::unpack(*k))
-                .collect();
-            all_storage_keys.shuffle(&mut rng);
-            let num_retain = if all_storage_keys.is_empty() { 0 } else {
-                rng.random_range(0..=all_storage_keys.len())
-            };
-            let mut retained: Vec<Nibbles> = all_storage_keys[..num_retain].to_vec();
-            retained.sort_unstable();
-            apst.prune(&retained);
+            // All nodes were cached at epoch 0, so this maximally prunes the trie before the
+            // second update round.
+            apst.prune(epoch(1));
 
             let changeset2 = build_changeset(harness.storage(), changeset2_new_keys, overlap_pct, delete_pct, &mut rng);
             for (i, (k, v)) in changeset2.iter().enumerate() {

@@ -244,6 +244,14 @@ impl<S: StateProofProvider> StateProofProvider for InstrumentedStateProvider<S> 
         self.state_provider.multiproof(input, targets)
     }
 
+    fn multiproof_v2(
+        &self,
+        input: TrieInput,
+        targets: reth_trie::MultiProofTargetsV2,
+    ) -> ProviderResult<reth_trie::DecodedMultiProofV2> {
+        self.state_provider.multiproof_v2(input, targets)
+    }
+
     fn witness(
         &self,
         input: TrieInput,
@@ -297,7 +305,10 @@ impl<S: BlockHashReader> BlockHashReader for InstrumentedStateProvider<S> {
 }
 
 impl<S: HashedPostStateProvider> HashedPostStateProvider for InstrumentedStateProvider<S> {
-    fn hashed_post_state(&self, bundle_state: &reth_revm::db::BundleState) -> HashedPostState {
+    fn hashed_post_state(
+        &self,
+        bundle_state: &reth_revm::db::BundleState,
+    ) -> ProviderResult<HashedPostState> {
         self.state_provider.hashed_post_state(bundle_state)
     }
 }

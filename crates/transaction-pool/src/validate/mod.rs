@@ -1,13 +1,14 @@
 //! Transaction validation abstractions.
 
 use crate::{
+    blobstore::PooledBlobSidecar,
     error::InvalidPoolTransactionError,
     identifier::{SenderId, TransactionId},
     traits::{PoolTransaction, TransactionOrigin},
     PriceBumpConfig,
 };
-use alloy_eips::{eip7594::BlobTransactionSidecarVariant, eip7702::SignedAuthorization};
-use alloy_primitives::{Address, TxHash, B256, U256};
+use alloy_eips::eip7702::SignedAuthorization;
+use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
 use futures_util::future::Either;
 use reth_primitives_traits::{Block, Recovered, SealedBlock};
 use std::{fmt, fmt::Debug, future::Future, time::Instant};
@@ -116,13 +117,13 @@ pub enum ValidTransaction<T> {
         /// The valid EIP-4844 transaction.
         transaction: T,
         /// The extracted sidecar of that transaction
-        sidecar: BlobTransactionSidecarVariant,
+        sidecar: PooledBlobSidecar,
     },
 }
 
 impl<T> ValidTransaction<T> {
     /// Creates a new valid transaction with an optional sidecar.
-    pub fn new(transaction: T, sidecar: Option<BlobTransactionSidecarVariant>) -> Self {
+    pub fn new(transaction: T, sidecar: Option<PooledBlobSidecar>) -> Self {
         if let Some(sidecar) = sidecar {
             Self::ValidWithSidecar { transaction, sidecar }
         } else {
@@ -452,6 +453,11 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     /// Note: this takes `&self` since indented usage is via `Arc<Self>`.
     pub fn to_consensus(&self) -> Recovered<T::Consensus> {
         self.transaction.clone_into_consensus()
+    }
+
+    /// Returns the EIP-2718 encoded consensus transaction.
+    pub fn encoded_2718_consensus(&self) -> Bytes {
+        self.transaction.encoded_2718_consensus()
     }
 
     /// Determines whether a candidate transaction (`maybe_replacement`) is underpriced compared to

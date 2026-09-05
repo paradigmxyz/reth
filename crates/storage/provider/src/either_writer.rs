@@ -33,32 +33,37 @@ use reth_errors::ProviderError;
 use reth_node_types::NodePrimitives;
 use reth_primitives_traits::{ReceiptTy, StorageEntry};
 use reth_static_file_types::StaticFileSegment;
-use reth_storage_api::{ChangeSetReader, DBProvider, NodePrimitivesProvider, StorageSettingsCache};
+use reth_storage_api::{
+    ChangeSetReader, DBProvider, DbTxProvider, NodePrimitivesProvider, StorageSettingsCache,
+};
 use reth_storage_errors::provider::ProviderResult;
 use strum::{Display, EnumIs};
 
 /// Type alias for [`EitherReader`] constructors.
-type EitherReaderTy<'a, P, T> =
-    EitherReader<'a, CursorTy<<P as DBProvider>::Tx, T>, <P as NodePrimitivesProvider>::Primitives>;
+type EitherReaderTy<'a, P, T> = EitherReader<
+    'a,
+    CursorTy<<P as DbTxProvider>::Tx, T>,
+    <P as NodePrimitivesProvider>::Primitives,
+>;
 
 /// Type alias for [`EitherReader`] constructors.
 type DupEitherReaderTy<'a, P, T> = EitherReader<
     'a,
-    DupCursorTy<<P as DBProvider>::Tx, T>,
+    DupCursorTy<<P as DbTxProvider>::Tx, T>,
     <P as NodePrimitivesProvider>::Primitives,
 >;
 
 /// Type alias for dup [`EitherWriter`] constructors.
 type DupEitherWriterTy<'a, P, T> = EitherWriter<
     'a,
-    DupCursorMutTy<<P as DBProvider>::Tx, T>,
+    DupCursorMutTy<<P as DbTxProvider>::Tx, T>,
     <P as NodePrimitivesProvider>::Primitives,
 >;
 
 /// Type alias for [`EitherWriter`] constructors.
 type EitherWriterTy<'a, P, T> = EitherWriter<
     'a,
-    CursorMutTy<<P as DBProvider>::Tx, T>,
+    CursorMutTy<<P as DbTxProvider>::Tx, T>,
     <P as NodePrimitivesProvider>::Primitives,
 >;
 
@@ -1679,9 +1684,9 @@ mod rocksdb_tests {
         );
 
         // Scenario 4: Query at pruning boundary
-        // Note: We test block >= lowest_available because HistoricalStateProviderRef
-        // errors on blocks below the pruning boundary before doing the lookup.
-        // The RocksDB implementation doesn't have this check at the same level.
+        // We test block >= lowest_available because state queries reject blocks below the
+        // pruning boundary before doing the lookup. The RocksDB implementation doesn't have
+        // this check at the same level.
         // This tests that when pruning IS available, both backends agree.
         run_account_history_scenario(
             "with_pruning_boundary",

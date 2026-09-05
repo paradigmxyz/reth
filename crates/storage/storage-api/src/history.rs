@@ -6,6 +6,40 @@ use reth_db_models::AccountBeforeTx;
 use reth_primitives_traits::StorageEntry;
 use reth_storage_errors::provider::ProviderResult;
 
+/// Location of a historical account or storage value.
+#[derive(Debug, Eq, PartialEq)]
+pub enum HistoryInfo {
+    /// The key had not been written at the requested block.
+    NotYetWritten,
+    /// The value is in this block's changeset.
+    InChangeset(BlockNumber),
+    /// The value is in plain state.
+    InPlainState,
+    /// Pruning requires a plain-state fallback.
+    MaybeInPlainState,
+}
+
+/// Reads account and storage history indices.
+#[auto_impl(&, Arc, Box)]
+pub trait HistoryReader: Send {
+    /// Looks up an account's historical storage location.
+    fn account_history_info(
+        &self,
+        address: Address,
+        block_number: BlockNumber,
+        lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo>;
+
+    /// Looks up a storage slot's historical storage location.
+    fn storage_history_info(
+        &self,
+        address: Address,
+        storage_key: B256,
+        block_number: BlockNumber,
+        lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo>;
+}
+
 /// History Writer
 #[auto_impl(&, Arc, Box)]
 pub trait HistoryWriter: Send {

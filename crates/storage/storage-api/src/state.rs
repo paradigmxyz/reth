@@ -97,8 +97,12 @@ impl<T: AccountReader + BytecodeReader> AccountInfoReader for T {}
 /// Trait that provides the hashed state from various sources.
 #[auto_impl(&, Arc, Box)]
 pub trait HashedPostStateProvider {
-    /// Returns the `HashedPostState` of the provided [`BundleState`].
-    fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState;
+    /// Returns the [`HashedPostState`] of the provided [`BundleState`], materializing zero-valued
+    /// updates for parent storage of accounts that were destroyed but remain in the post-state.
+    ///
+    /// Providers backed by an exact parent-state view also materialize terminally destroyed
+    /// accounts with explicit zero-valued storage updates.
+    fn hashed_post_state(&self, bundle_state: &BundleState) -> ProviderResult<HashedPostState>;
 }
 
 /// Trait for reading bytecode associated with a given code hash.
@@ -106,15 +110,6 @@ pub trait HashedPostStateProvider {
 pub trait BytecodeReader {
     /// Get account code by its hash
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>>;
-}
-
-/// Trait implemented for database providers that can be converted into a historical state provider.
-pub trait TryIntoHistoricalStateProvider {
-    /// Returns a historical [`StateProvider`] indexed by the given historic block number.
-    fn try_into_history_at_block(
-        self,
-        block_number: BlockNumber,
-    ) -> ProviderResult<StateProviderBox>;
 }
 
 /// Light wrapper that returns `StateProvider` implementations that correspond to the given
