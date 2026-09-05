@@ -1,0 +1,52 @@
+[package]
+name = "reth-snap-sync"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "snap/2 state synchronization"
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-db-api.workspace = true
+reth-downloaders.workspace = true
+reth-eth-wire-types.workspace = true
+reth-network-p2p.workspace = true
+reth-network-peers.workspace = true
+reth-primitives-traits.workspace = true
+reth-prune-types.workspace = true
+reth-provider.workspace = true
+reth-stages.workspace = true
+reth-stages-types.workspace = true
+reth-storage-api.workspace = true
+reth-tasks.workspace = true
+reth-trie-common = { workspace = true, features = ["eip7928"] }
+
+# alloy
+alloy-eip7928.workspace = true
+alloy-primitives.workspace = true
+alloy-rlp.workspace = true
+
+# revm
+revm.workspace = true
+
+# misc
+thiserror.workspace = true
+tokio = { workspace = true, features = ["time"] }
+tracing.workspace = true
+
+[dev-dependencies]
+alloy-consensus.workspace = true
+reth-db-api = { workspace = true, features = ["test-utils"] }
+reth-downloaders = { workspace = true, features = ["test-utils"] }
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-static-file-types.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[features]
+default = []

@@ -9382,6 +9382,7 @@ dependencies = [
  "reth-engine-primitives",
  "reth-engine-tree",
  "reth-engine-util",
+ "reth-errors",
  "reth-ethereum-engine-primitives",
  "reth-evm",
  "reth-evm-ethereum",
@@ -9407,7 +9408,9 @@ dependencies = [
  "reth-rpc-engine-api",
  "reth-rpc-eth-types",
  "reth-rpc-layer",
+ "reth-snap-sync",
  "reth-stages",
+ "reth-stages-api",
  "reth-static-file",
  "reth-storage-overlay",
  "reth-tasks",
@@ -10259,6 +10262,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-snap-sync"
+version = "2.5.2"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eip7928",
+ "alloy-primitives",
+ "alloy-rlp",
+ "reth-db-api",
+ "reth-downloaders",
+ "reth-eth-wire-types",
+ "reth-network-p2p",
+ "reth-network-peers",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-prune-types",
+ "reth-stages",
+ "reth-stages-types",
+ "reth-static-file-types",
+ "reth-storage-api",
+ "reth-tasks",
+ "reth-trie-common",
+ "revm",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "reth-stages"
 version = "2.5.2"
 dependencies = [
@@ -10684,6 +10715,7 @@ name = "reth-trie-common"
 version = "2.5.2"
 dependencies = [
  "alloy-consensus",
+ "alloy-eip7928",
  "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",

@@ -10,7 +10,7 @@ use reth_eth_wire_types::snap::{
 };
 use reth_network_p2p::{
     error::RequestError,
-    snap::client::{SnapClient, SnapResponse},
+    snap::client::{SnapClient, SnapRequestOptions, SnapResponse},
 };
 use reth_network_peers::PeerId;
 use reth_tasks::Runtime;
@@ -26,8 +26,8 @@ mod block_access_list;
 mod bytecode;
 mod request;
 mod storage;
-#[cfg(test)]
-mod test_utils;
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils;
 
 pub use block_access_list::*;
 pub use bytecode::*;
@@ -49,6 +49,16 @@ impl<C: SnapClient> AccountRangeDownloader<C> {
         request: GetAccountRangeMessage,
         runtime: Runtime,
     ) -> Result<Self, InvalidAccountRange> {
+        Self::new_with_options(client, request, runtime, SnapRequestOptions::default())
+    }
+
+    /// Creates a downloader with custom request options.
+    pub fn new_with_options(
+        client: C,
+        request: GetAccountRangeMessage,
+        runtime: Runtime,
+        options: SnapRequestOptions,
+    ) -> Result<Self, InvalidAccountRange> {
         if request.starting_hash > request.limit_hash {
             return Err(InvalidAccountRange {
                 origin: request.starting_hash,
@@ -56,7 +66,7 @@ impl<C: SnapClient> AccountRangeDownloader<C> {
             })
         }
         let verifier = request.clone();
-        Ok(Self(VerifyingRequest::new(client, request, verifier, runtime)))
+        Ok(Self(VerifyingRequest::new_with_options(client, request, verifier, runtime, options)))
     }
 }
 

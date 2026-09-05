@@ -2057,6 +2057,59 @@ mod tests {
         ));
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn served_snap_responses_throttle_the_peer() {
+        let mut builder = snap_session_builder();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+        let fut = builder.with_client_stream(local_addr, async move |client_stream| {
+            let _client_stream = client_stream;
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        });
+        tokio::task::spawn(fut);
+        let (incoming, _) = listener.accept().await.unwrap();
+        let mut session = builder.connect_incoming(incoming).await;
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        for request_id in 0..=MAX_QUEUED_OUTGOING_RESPONSES as u64 {
+            let outcome = session.on_incoming_snap_message(SnapProtocolMessage::GetAccountRange(
+                GetAccountRangeMessage {
+                    request_id,
+                    root_hash: B256::ZERO,
+                    starting_hash: B256::ZERO,
+                    limit_hash: B256::ZERO,
+                    response_bytes: 1024,
+                },
+            ));
+            assert!(matches!(outcome, OnIncomingMessageOutcome::Ok));
+
+            let Some(ActiveSessionMessage::ValidMessage {
+                message: PeerMessage::EthRequest(PeerRequest::GetSnap { response, .. }),
+                ..
+            }) = builder.active_session_rx.next().await
+            else {
+                panic!("expected an outbound GetSnap request")
+            };
+            let _ = response.send(Ok(SnapResponse::AccountRange(AccountRangeMessage {
+                request_id,
+                accounts: Vec::new(),
+                proof: Vec::new(),
+            })));
+
+            let mut req = session.received_requests_from_remote.pop().unwrap();
+            let Poll::Ready(resp) = req.rx.poll(&mut cx) else {
+                panic!("response should be ready")
+            };
+            session.handle_outgoing_response(req.request_id, resp);
+        }
+
+        // Serving snap fills the same response budget as eth requests, so the session stops
+        // reading further requests from this peer until these flush. That is the rate limiting
+        // EIP-8189 asks a snap server to apply.
+        assert!(session.queued_outgoing.response_count() > MAX_QUEUED_OUTGOING_RESPONSES);
+    }
+
     #[test]
     fn eth72_pooled_hashes_count_broadcast_items() {
         let hashes =
