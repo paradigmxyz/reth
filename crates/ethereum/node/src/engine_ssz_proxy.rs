@@ -163,93 +163,6 @@ impl<ChainSpec, Provider, Pool, Validator>
     }
 }
 
-/// Generates an execution witness for a valid payload.
-pub trait EngineSszWitness: Send + Sync + 'static {
-    /// Generates a REST-SSZ execution witness for the block hash.
-    fn generate_witness(
-        &self,
-        block_hash: B256,
-    ) -> Pin<Box<dyn Future<Output = Result<ExecutionWitnessV1, String>> + Send + '_>>;
-}
-
-/// Re-executes imported blocks to produce `/payloads/witness` responses.
-#[derive(Clone, Debug)]
-pub struct EngineSszWitnessGenerator<Provider, Evm> {
-    provider: Provider,
-    evm_config: Evm,
-    task_spawner: Runtime,
-}
-
-impl<Provider, Evm> EngineSszWitnessGenerator<Provider, Evm> {
-    /// Creates a new witness generator.
-    pub const fn new(provider: Provider, evm_config: Evm, task_spawner: Runtime) -> Self {
-        Self { provider, evm_config, task_spawner }
-    }
-}
-
-impl<Provider, Evm> EngineSszWitness for EngineSszWitnessGenerator<Provider, Evm>
-where
-    Provider: BlockReader + HeaderProvider + StateProviderFactory + Clone + Send + Sync + 'static,
-    Provider::Block: Block<Header: alloy_rlp::Encodable>,
-    Evm: ConfigureEvm<Primitives: NodePrimitives<Block = Provider::Block>> + 'static,
-{
-    fn generate_witness(
-        &self,
-        block_hash: B256,
-    ) -> Pin<Box<dyn Future<Output = Result<ExecutionWitnessV1, String>> + Send + '_>> {
-        let provider = self.provider.clone();
-        let evm_config = self.evm_config.clone();
-        let task_spawner = self.task_spawner.clone();
-
-        Box::pin(async move {
-            task_spawner
-                .spawn_blocking(move || {
-                    let block = provider
-                        .recovered_block(block_hash.into(), TransactionVariant::WithHash)
-                        .map_err(|err| err.to_string())?
-                        .ok_or_else(|| format!("block {block_hash} not found for witness"))?;
-
-                    let block_number = block.header().number();
-                    let parent_hash = block.header().parent_hash();
-                    let state_provider =
-                        provider.state_by_block_hash(parent_hash).map_err(|err| err.to_string())?;
-                    let state = StateProviderDatabase::new(state_provider);
-                    let mut db = reth_revm::State::builder()
-                        .with_database(state)
-                        .with_bundle_update()
-                        .build();
-
-                    let block_executor = evm_config.executor(&mut db);
-                    let mode = ExecutionWitnessMode::Legacy;
-                    let mut witness_record = ExecutionWitnessRecord::default();
-                    block_executor
-                        .execute_with_state_closure(&block, |statedb: &reth_revm::State<_>| {
-                            witness_record.record_executed_state(statedb, mode);
-                        })
-                        .map_err(|err| err.to_string())?;
-
-                    let witness = witness_record
-                        .into_execution_witness(&*db.database, &provider, block_number, mode)
-                        .map_err(|err| err.to_string())?;
-
-                    Ok(ExecutionWitnessV1 {
-                        state: witness.state.into_iter().map(|bytes| bytes.to_vec()).collect(),
-                        codes: witness.codes.into_iter().map(|bytes| bytes.to_vec()).collect(),
-                        headers: witness.headers.into_iter().map(|bytes| bytes.to_vec()).collect(),
-                    })
-                })
-                .await
-                .map_err(|err| {
-                    io::Error::new(
-                        io::ErrorKind::BrokenPipe,
-                        format!("witness generation task failed: {err}"),
-                    )
-                    .to_string()
-                })?
-        })
-    }
-}
-
 /// A tower layer that intercepts SSZ Engine API routes under `/engine/v1`.
 #[derive(Clone, Debug)]
 pub struct EngineSszProxyLayer<ChainSpec, Provider = (), Pool = (), Validator = ()> {
@@ -320,6 +233,99 @@ where
     }
 }
 
+/// Generates an execution witness for a valid payload.
+pub trait EngineSszWitness: Send + Sync + 'static {
+    /// Generates a REST-SSZ execution witness for the block hash.
+    fn generate_witness(
+        &self,
+        block_hash: B256,
+    ) -> Pin<Box<dyn Future<Output = Result<ExecutionWitnessV1, String>> + Send + '_>>;
+}
+
+/// Re-executes imported blocks to produce `/payloads/witness` responses.
+#[derive(Clone, Debug)]
+pub struct EngineSszWitnessGenerator<Provider, Evm> {
+    provider: Provider,
+    evm_config: Evm,
+    task_spawner: Runtime,
+}
+
+impl<Provider, Evm> EngineSszWitnessGenerator<Provider, Evm> {
+    /// Creates a new witness generator.
+    pub const fn new(provider: Provider, evm_config: Evm, task_spawner: Runtime) -> Self {
+        Self { provider, evm_config, task_spawner }
+    }
+}
+
+impl<Provider, Evm> EngineSszWitness for EngineSszWitnessGenerator<Provider, Evm>
+where
+    Provider: BlockReader + HeaderProvider + StateProviderFactory + Clone + Send + Sync + 'static,
+    Provider::Block: Block<Header: alloy_rlp::Encodable>,
+    Evm: ConfigureEvm<Primitives: NodePrimitives<Block = Provider::Block>> + 'static,
+{
+    fn generate_witness(
+        &self,
+        block_hash: B256,
+    ) -> Pin<Box<dyn Future<Output = Result<ExecutionWitnessV1, String>> + Send + '_>> {
+        let provider = self.provider.clone();
+        let evm_config = self.evm_config.clone();
+        let task_spawner = self.task_spawner.clone();
+
+        Box::pin(async move {
+            task_spawner
+                .spawn_blocking(move || {
+                    let block = provider
+                        .recovered_block(block_hash.into(), TransactionVariant::WithHash)
+                        .map_err(|err| err.to_string())?
+                        .ok_or_else(|| format!("block {block_hash} not found for witness"))?;
+
+                    let block_number = block.header().number();
+                    let parent_hash = block.header().parent_hash();
+                    let state_provider =
+                        provider.state_by_block_hash(parent_hash).map_err(|err| err.to_string())?;
+                    let state = StateProviderDatabase::new(state_provider);
+                    let mut db = reth_revm::State::builder()
+                        .with_database(state)
+                        .with_bundle_update()
+                        .build();
+
+                    let block_executor = evm_config.executor(&mut db);
+                    let mode = ExecutionWitnessMode::Legacy;
+                    let mut witness = None;
+                    block_executor
+                        .execute_with_state_closure(&block, |statedb: &reth_revm::State<_>| {
+                            witness =
+                                Some(ExecutionWitnessRecord::new(statedb).into_execution_witness(
+                                    &statedb.database.database.0,
+                                    &provider,
+                                    block_number,
+                                    mode,
+                                ));
+                        })
+                        .map_err(|err| err.to_string())?;
+
+                    let witness = witness
+                        .expect("state closure is called after successful execution")
+                        .map_err(|err| err.to_string())?;
+
+                    Ok(ExecutionWitnessV1 {
+                        state: witness.state.into_iter().map(|bytes| bytes.to_vec()).collect(),
+                        codes: witness.codes.into_iter().map(|bytes| bytes.to_vec()).collect(),
+                        headers: witness.headers.into_iter().map(|bytes| bytes.to_vec()).collect(),
+                    })
+                })
+                .await
+                .map_err(|err| {
+                    io::Error::new(
+                        io::ErrorKind::BrokenPipe,
+                        format!("witness generation task failed: {err}"),
+                    )
+                    .to_string()
+                })?
+        })
+    }
+}
+
 async fn handle_engine_ssz_request<ChainSpec, Provider, Pool, Validator>(
     handle: EngineSszProxyHandle<ChainSpec, Provider, Pool, Validator>,
     request: HttpRequest,
@@ -341,7 +347,7 @@ where
             if method != "GET" {
                 return text_response(STATUS_METHOD_NOT_ALLOWED, "method not allowed")
             }
-            handle_capabilities()
+            handle_capabilities(handle.witness_handler().await.is_some())
         }
         EngineSszEndpoint::Identity => {
             if method != "GET" {
@@ -528,10 +534,14 @@ fn parse_method_version(version: &str) -> Option<u8> {
     version.strip_prefix('v')?.parse().ok().filter(|version| (1..=4).contains(version))
 }
 
-fn handle_capabilities() -> HttpResponse {
+fn handle_capabilities(witness_enabled: bool) -> HttpResponse {
+    let mut fork_scoped_endpoints = vec!["payloads", "forkchoice", "bodies"];
+    if witness_enabled {
+        fork_scoped_endpoints.push("payloads/witness");
+    }
     json_response(serde_json::json!({
         "supported_forks": ["paris", "shanghai", "cancun", "prague", "osaka", "amsterdam"],
-        "fork_scoped_endpoints": ["payloads", "payloads/witness", "forkchoice", "bodies"],
+        "fork_scoped_endpoints": fork_scoped_endpoints,
         "independently_versioned": {
             "blobs": ["v1", "v2", "v3", "v4"],
         },
@@ -669,6 +679,14 @@ where
         return problem_response(STATUS_BAD_REQUEST, ERROR_UNSUPPORTED_FORK, None)
     }
 
+    let Some(witness_handler) = witness_handler else {
+        return problem_response(
+            STATUS_SERVICE_UNAVAILABLE,
+            ERROR_INTERNAL,
+            Some("witness generator unavailable".to_string()),
+        )
+    };
+
     let payload = match decode_new_payload_request(fork, body) {
         Ok(payload) => payload,
         Err(err) => return problem_response(STATUS_BAD_REQUEST, ERROR_SSZ_DECODE, Some(err.into())),
@@ -706,9 +724,6 @@ where
                 ERROR_INTERNAL,
                 Some("valid payload status missing latest_valid_hash".to_string()),
             )
-        };
-        let Some(witness_handler) = witness_handler else {
-            return problem_response(STATUS_INTERNAL_SERVER_ERROR, ERROR_INTERNAL, None)
         };
         match witness_handler.generate_witness(block_hash).await {
             Ok(witness) => Some(witness),
@@ -1064,6 +1079,42 @@ mod tests {
     use super::*;
     use alloy_rpc_types_engine::PayloadStatus as LegacyPayloadStatus;
     use ssz::Encode;
+
+    #[tokio::test]
+    async fn witness_is_only_advertised_when_configured() {
+        for enabled in [false, true] {
+            let body = handle_capabilities(enabled).into_body().collect().await.unwrap().to_bytes();
+            let capabilities: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            let endpoints = capabilities["fork_scoped_endpoints"].as_array().unwrap();
+            assert_eq!(endpoints.iter().any(|endpoint| endpoint == "payloads/witness"), enabled);
+        }
+        assert_eq!(
+            parse_engine_path("/engine/v1/payloads/witness"),
+            Some(EngineSszEndpoint::PayloadsWithWitness)
+        );
+    }
+
+    #[tokio::test]
+    async fn witness_requests_enforce_streamed_body_limit() {
+        for advertised in [false, true] {
+            for size in [16, 17] {
+                let mut request = HttpRequest::builder().header(CONTENT_TYPE, OCTET_STREAM);
+                if advertised {
+                    request = request.header(CONTENT_LENGTH, size);
+                }
+                let response =
+                    read_witness_body(request.body(HttpBody::from(vec![0; size])).unwrap(), 16)
+                        .await;
+                if size == 16 {
+                    assert_eq!(response.unwrap().len(), 16);
+                } else {
+                    let response = response.unwrap_err();
+                    assert_eq!(response.status(), STATUS_PAYLOAD_TOO_LARGE);
+                    assert_eq!(response.headers()[CONTENT_TYPE], PROBLEM_JSON);
+                }
+            }
+        }
+    }
 
     #[test]
     fn parses_capabilities_endpoint() {

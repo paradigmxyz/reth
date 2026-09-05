@@ -21,7 +21,7 @@ use reth_node_ethereum::{
     engine_ssz_containers::{
         ForkchoiceUpdateResponse as SszForkchoiceUpdateResponse, PayloadStatus as SszPayloadStatus,
     },
-    engine_ssz_proxy::EngineSszProxyLayer,
+    engine_ssz_proxy::{EngineSszProxyLayer, EngineSszWitness, EngineSszWitnessGenerator},
     EthereumAddOns, EthereumEngineValidatorBuilder, EthereumNode,
 };
 use reth_provider::BlockNumReader;
@@ -372,7 +372,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
         capabilities,
         serde_json::json!({
             "supported_forks": ["paris", "shanghai", "cancun", "prague", "osaka", "amsterdam"],
-            "fork_scoped_endpoints": ["payloads", "payloads/witness", "forkchoice", "bodies"],
+            "fork_scoped_endpoints": ["payloads", "forkchoice", "bodies"],
             "independently_versioned": {
                 "blobs": ["v1", "v2", "v3", "v4"],
             },
@@ -470,6 +470,16 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
     assert_eq!(fcu.payload_status.status, PayloadStatusEnum::Valid);
 
     node.wait_block(1, block_hash, false).await?;
+
+    let generator = EngineSszWitnessGenerator::new(
+        node.inner.provider.clone(),
+        node.inner.evm_config.clone(),
+        Runtime::test(),
+    );
+    let witness = generator.generate_witness(block_hash).await.map_err(eyre::Error::msg)?;
+    assert!(!witness.state.is_empty());
+    let parent: alloy_consensus::Header = alloy_rlp::decode_exact(&witness.headers[0])?;
+    assert_eq!(parent.hash_slow(), genesis_hash);
 
     Ok(())
 }
