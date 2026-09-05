@@ -15,7 +15,9 @@ use std::{future::Future, pin::Pin};
 /// Re-executes validated payloads against their parent state for `/payloads/witness`.
 ///
 /// The parent state must be available through the provider (persisted, canonical in-memory,
-/// or pending). Parents present only in the engine tree are temporarily unavailable.
+/// or pending). Parents present only in the engine tree are reported as
+/// [`EngineSszWitnessError::ParentStateUnavailable`]; the route then answers with the payload
+/// status alone.
 #[derive(Clone, Debug)]
 pub struct EngineSszWitnessGenerator<Provider, Evm> {
     provider: Provider,

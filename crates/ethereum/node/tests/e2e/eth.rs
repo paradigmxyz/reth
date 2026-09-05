@@ -968,7 +968,7 @@ async fn test_engine_ssz_custom_engine_and_middleware() -> eyre::Result<()> {
 }
 
 #[tokio::test]
-async fn test_engine_ssz_witness_requires_provider_parent_state() -> eyre::Result<()> {
+async fn test_engine_ssz_witness_omitted_without_provider_parent_state() -> eyre::Result<()> {
     let chain = Arc::new(
         ChainSpecBuilder::default()
             .chain(MAINNET.chain)
@@ -1001,9 +1001,9 @@ async fn test_engine_ssz_witness_requires_provider_parent_state() -> eyre::Resul
         .body(request.as_ssz_bytes())
         .send()
         .await?;
-    assert_eq!(response.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
-    let problem = response.json::<serde_json::Value>().await?;
-    assert_eq!(problem["type"], "/engine-api/errors/service-unavailable");
-    assert!(problem["detail"].as_str().unwrap().contains(&parent_hash.to_string()));
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let response = PayloadStatusWithWitness::from_ssz_bytes(&response.bytes().await?).unwrap();
+    assert_eq!(response.payload_status.status, PayloadStatusEnum::Valid);
+    assert!(response.witness.is_none());
     Ok(())
 }

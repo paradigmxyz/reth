@@ -26,7 +26,7 @@ use alloy_primitives::{Bytes, B128, B256};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadBodyV1,
     ExecutionPayloadFieldV2, ExecutionPayloadSidecar, ForkchoiceState, PayloadAttributes,
-    PayloadId, PraguePayloadFields,
+    PayloadId, PayloadStatusEnum, PraguePayloadFields,
 };
 use futures::future::{BoxFuture, Either};
 use http_body_util::{BodyExt, LengthLimitError, Limited};
@@ -37,6 +37,7 @@ use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_provider::{BalProvider, BlockReader, HeaderProvider, StateProviderFactory};
 use reth_rpc::EngineApi;
 use reth_rpc_engine_api::EngineApiError;
+use reth_tracing::tracing::debug;
 use reth_transaction_pool::TransactionPool;
 use ssz::Decode;
 use std::{
@@ -405,13 +406,30 @@ where
             Ok(status) => status,
             Err(response) => return response,
         };
-        let witness = if matches!(status.status, alloy_rpc_types_engine::PayloadStatusEnum::Valid) {
-            match witness_handler.generate_witness(payload).await {
+        let witness = match status.status {
+            PayloadStatusEnum::Valid => match witness_handler.generate_witness(payload).await {
                 Ok(witness) => Some(witness),
-                Err(err) => return witness_error_response(err),
-            }
-        } else {
-            None
+                // The block is valid but its parent is only known to the engine tree. The
+                // status stays authoritative; resubmitting once forkchoice has made the parent
+                // canonical yields the witness.
+                Err(EngineSszWitnessError::ParentStateUnavailable { parent, source }) => {
+                    debug!(
+                        target: "engine::ssz",
+                        %parent,
+                        %source,
+                        "witness omitted for valid payload"
+                    );
+                    None
+                }
+                Err(err) => {
+                    return problem_response(
+                        STATUS_INTERNAL_SERVER_ERROR,
+                        "internal",
+                        Some(err.to_string()),
+                    )
+                }
+            },
+            _ => None,
         };
         ssz_response(PayloadStatusWithWitness::new(status, witness))
     }
@@ -814,16 +832,6 @@ where
     EngineSszPayloadStatus::try_from(status).map_err(|error| {
         problem_response(STATUS_INTERNAL_SERVER_ERROR, "internal", Some(error.to_string()))
     })
-}
-
-fn witness_error_response(error: EngineSszWitnessError) -> HttpResponse {
-    let (status, kind) = match &error {
-        EngineSszWitnessError::ParentStateUnavailable { .. } => {
-            (STATUS_SERVICE_UNAVAILABLE, "service-unavailable")
-        }
-        EngineSszWitnessError::Internal(_) => (STATUS_INTERNAL_SERVER_ERROR, "internal"),
-    };
-    problem_response(status, kind, Some(error.to_string()))
 }
 
 fn engine_error_response(err: EngineApiError) -> HttpResponse {
