@@ -900,7 +900,6 @@ fn parse_bodies_range_query(query: &str) -> Result<(u64, u64), HttpResponse> {
 }
 
 /// Amsterdam bodies with a missing or pruned BAL are unavailable, just like pruned blocks.
-
 fn payload_bodies_response<LegacyBody, ForkBody>(
     response: Result<Vec<Option<(u64, LegacyBody)>>, EngineApiError>,
     convert: impl Fn(LegacyBody) -> Option<ForkBody>,
@@ -985,8 +984,6 @@ async fn read_ssz_body(request: HttpRequest, max_bytes: usize) -> Result<Bytes, 
         Err(_) => Err(problem_response(STATUS_BAD_REQUEST, "invalid-request", None)),
     }
 }
-
-/// Handles SSZ `engine_getBlobsV*` requests with the node's blob store.
 
 fn blob_response<Ssz, Legacy>(response: Result<Option<Legacy>, EngineApiError>) -> HttpResponse
 where
