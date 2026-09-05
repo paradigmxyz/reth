@@ -12,7 +12,7 @@ use crate::{
         best::BestTransactions,
         blob::BlobTransactions,
         parked::{BasefeeOrd, ParkedPool, QueuedOrd},
-        pending::PendingPool,
+        pending::{PendingPool, PendingRemovalKind},
         state::{SubPool, TxState},
         update::{Destination, PoolUpdate, UpdateOutcome},
         AddedPendingTransaction, AddedTransaction, OnNewCanonicalStateOutcome,
@@ -237,17 +237,27 @@ impl<T: TransactionOrdering> TxPool<T> {
             }
             (Ordering::Greater, Ordering::Equal | Ordering::Greater) => {
                 // increased blob fee: recheck pending pool and remove all that are no longer valid
-                let removed =
-                    self.pending_pool.update_blob_fee(self.all_transactions.pending_fees.blob_fee);
-                for tx in removed {
+                let blob_fee = self.all_transactions.pending_fees.blob_fee;
+                let removed = self.pending_pool.update_blob_fee(blob_fee);
+                for (tx, kind) in removed {
                     let to = {
-                        let tx =
+                        let meta =
                             self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
 
-                        // the blob fee is too high now, unset the blob fee cap block flag
-                        tx.state.remove(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
-                        tx.subpool = tx.state.into();
-                        tx.subpool
+                        match kind {
+                            PendingRemovalKind::Trigger => {
+                                meta.state.remove(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
+                            }
+                            PendingRemovalKind::Descendant => {
+                                meta.state.set(
+                                    TxState::ENOUGH_BLOB_FEE_CAP_BLOCK,
+                                    tx.max_fee_per_blob_gas().is_none_or(|fee| fee >= blob_fee),
+                                );
+                                meta.state.remove(TxState::NO_PARKED_ANCESTORS);
+                            }
+                        }
+                        meta.subpool = meta.state.into();
+                        meta.subpool
                     };
                     self.add_transaction_to_subpool(to, tx);
                 }
@@ -292,15 +302,26 @@ impl<T: TransactionOrdering> TxPool<T> {
             }
             Ordering::Greater => {
                 // increased base fee: recheck pending pool and remove all that are no longer valid
-                let removed =
-                    self.pending_pool.update_base_fee(self.all_transactions.pending_fees.base_fee);
-                for tx in removed {
+                let base_fee = self.all_transactions.pending_fees.base_fee;
+                let removed = self.pending_pool.update_base_fee(base_fee);
+                for (tx, kind) in removed {
                     let to = {
-                        let tx =
+                        let meta =
                             self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
-                        tx.state.remove(TxState::ENOUGH_FEE_CAP_BLOCK);
-                        tx.subpool = tx.state.into();
-                        tx.subpool
+                        match kind {
+                            PendingRemovalKind::Trigger => {
+                                meta.state.remove(TxState::ENOUGH_FEE_CAP_BLOCK);
+                            }
+                            PendingRemovalKind::Descendant => {
+                                meta.state.set(
+                                    TxState::ENOUGH_FEE_CAP_BLOCK,
+                                    tx.max_fee_per_gas() >= base_fee as u128,
+                                );
+                                meta.state.remove(TxState::NO_PARKED_ANCESTORS);
+                            }
+                        }
+                        meta.subpool = meta.state.into();
+                        meta.subpool
                     };
                     self.add_transaction_to_subpool(to, tx);
                 }
@@ -2176,6 +2197,93 @@ impl<T: PoolTransaction> AllTransactions<T> {
         assert_eq!(self.by_hash.len(), self.txs.len(), "by_hash.len() != txs.len()");
         assert!(self.auths.len() <= self.txs.len(), "auths.len() > txs.len()");
     }
+
+    /// Asserts that every tracked state is what recomputing it from scratch would produce.
+    ///
+    /// The `state` bits are maintained incrementally, by `insert_tx`, by [`Self::update`] and by
+    /// the fee update paths in [`TxPool`], each of which touches a different subset. This
+    /// recomputes them from the sender info, the tracked fees and the transactions themselves, so
+    /// a path that updates one bit and forgets another is caught here instead of surfacing later
+    /// as a transaction sitting in the wrong sub-pool.
+    ///
+    /// Only the gapless prefix of each sender is checked. Transactions behind a nonce gap are
+    /// deliberately left alone by the update paths, so there is nothing to compare them against.
+    ///
+    /// Not currently wired into [`Self::assert_invariants`]: a transaction already parked in the
+    /// blob sub-pool keeps a stale `ENOUGH_BLOB_FEE_CAP_BLOCK` when the blob fee rises, because
+    /// the rise only consults the pending pool and nothing else recomputes that flag. Call this
+    /// explicitly from tests until that is fixed, then it can guard every invariant check.
+    #[cfg(test)]
+    pub(crate) fn assert_states_match_full_scan(&self) {
+        let mut current_sender = None;
+        let mut next_nonce = 0;
+        let mut cumulative_cost = U256::ZERO;
+        let mut has_parked_ancestor = false;
+        let mut balance = U256::ZERO;
+        let mut gapped = false;
+
+        for (id, tx) in &self.txs {
+            if current_sender != Some(id.sender) {
+                let info = self.sender_info.get(&id.sender).unwrap_or_else(|| {
+                    panic!("no sender info for {id:?}, which has transactions in the pool")
+                });
+                current_sender = Some(id.sender);
+                next_nonce = info.state_nonce;
+                balance = info.balance;
+                cumulative_cost = U256::ZERO;
+                has_parked_ancestor = false;
+                gapped = false;
+            }
+
+            if gapped || id.nonce != next_nonce {
+                // behind a nonce gap, the update paths do not maintain these
+                gapped = true;
+                continue
+            }
+
+            let mut expected = TxState::default();
+
+            // `ensure_valid` rejects anything above the limit, so everything tracked has this and
+            // the bit is not recomputed from the current limit, which may have moved since
+            expected.insert(TxState::NOT_TOO_MUCH_GAS);
+            expected.insert(TxState::NO_NONCE_GAPS);
+
+            if tx.transaction.is_eip4844() {
+                expected.insert(TxState::BLOB_TRANSACTION);
+                if tx.transaction.max_fee_per_blob_gas() >= Some(self.pending_fees.blob_fee) {
+                    expected.insert(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
+                }
+            } else {
+                expected.insert(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
+            }
+
+            if tx.transaction.max_fee_per_gas() >= self.pending_fees.base_fee as u128 {
+                expected.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
+            }
+
+            cumulative_cost += *tx.transaction.cost();
+            if cumulative_cost <= balance {
+                expected.insert(TxState::ENOUGH_BALANCE);
+            }
+
+            if !has_parked_ancestor {
+                expected.insert(TxState::NO_PARKED_ANCESTORS);
+            }
+            has_parked_ancestor = !expected.is_pending();
+            next_nonce = id.next_nonce();
+
+            assert_eq!(
+                tx.state, expected,
+                "state of {id:?} does not match a full recomputation, stored {:?} recomputed {:?}",
+                tx.state, expected
+            );
+            assert_eq!(
+                tx.subpool,
+                SubPool::from(expected),
+                "sub-pool of {id:?} does not match its recomputed state"
+            );
+        }
+    }
 }
 
 #[cfg(test)]
@@ -3407,6 +3515,225 @@ mod tests {
         let InsertOk { state, .. } =
             pool.insert_tx(f.validated(tx), on_chain_balance, on_chain_nonce).unwrap();
         assert!(state.contains(TxState::NOT_TOO_MUCH_GAS));
+    }
+
+    #[test]
+    fn basefee_rise_parks_dependents_on_their_ancestor_not_their_fee() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        // same sender: the first only just covers the base fee, the second covers far more
+        let first = MockTransaction::eip1559().with_max_fee(110).with_priority_fee(1);
+        let first_v = f.validated(first.clone());
+        let first_id = *first_v.id();
+        pool.add_transaction(first_v, U256::from(u128::MAX), 0, None).unwrap();
+
+        let second_tx = MockTransaction::eip1559()
+            .with_sender(first.sender())
+            .with_nonce(first.nonce() + 1)
+            .with_max_fee(10_000)
+            .with_priority_fee(1);
+        let second_v = f.validated(second_tx);
+        let second_id = *second_v.id();
+        pool.add_transaction(second_v, U256::from(u128::MAX), 0, None).unwrap();
+
+        assert_eq!(pool.pending_pool.len(), 2);
+
+        // raise the base fee past the first transaction only
+        let mut block_info = pool.block_info();
+        block_info.pending_basefee = 200;
+        pool.set_block_info(block_info);
+
+        let first_meta = pool.all_transactions.txs.get(&first_id).unwrap();
+        assert!(
+            !first_meta.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK),
+            "the transaction that failed the fee check should lose the fee flag"
+        );
+
+        let second_meta = pool.all_transactions.txs.get(&second_id).unwrap();
+        assert!(
+            second_meta.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK),
+            "the dependent covers the base fee, its fee flag must stay set"
+        );
+        assert!(
+            !second_meta.state.contains(TxState::NO_PARKED_ANCESTORS),
+            "the dependent is blocked by its parked ancestor, that is what should be recorded"
+        );
+        assert_eq!(second_meta.subpool, SubPool::Queued);
+        pool.all_transactions.assert_states_match_full_scan();
+    }
+
+    #[test]
+    fn basefee_rise_recomputes_fee_cap_for_parked_descendants() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let first = MockTransaction::eip1559().with_max_fee(110).with_priority_fee(1);
+        let first_v = f.validated(first.clone());
+        let first_id = *first_v.id();
+        pool.add_transaction(first_v, U256::MAX, 0, None).unwrap();
+
+        let second = MockTransaction::eip1559()
+            .with_sender(first.sender())
+            .with_nonce(1)
+            .with_max_fee(120)
+            .with_priority_fee(1);
+        let second_v = f.validated(second);
+        let second_id = *second_v.id();
+        pool.add_transaction(second_v, U256::MAX, 0, None).unwrap();
+
+        let mut block_info = pool.block_info();
+        block_info.pending_basefee = 200;
+        pool.set_block_info(block_info);
+
+        let first_meta = pool.all_transactions.txs.get(&first_id).unwrap();
+        assert!(!first_meta.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK));
+        assert!(first_meta.state.contains(TxState::NO_PARKED_ANCESTORS));
+        assert_eq!(first_meta.subpool, SubPool::BaseFee);
+
+        let second_meta = pool.all_transactions.txs.get(&second_id).unwrap();
+        assert!(!second_meta.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK));
+        assert!(!second_meta.state.contains(TxState::NO_PARKED_ANCESTORS));
+        assert_eq!(second_meta.subpool, SubPool::Queued);
+        pool.all_transactions.assert_states_match_full_scan();
+    }
+
+    #[test]
+    fn replacing_parked_ancestor_does_not_promote_underpriced_descendant() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let first = MockTransaction::eip1559().with_max_fee(110).with_priority_fee(1);
+        let first_v = f.validated(first.clone());
+        let first_hash = *first_v.hash();
+        pool.add_transaction(first_v, U256::MAX, 0, None).unwrap();
+
+        let second = MockTransaction::eip1559()
+            .with_sender(first.sender())
+            .with_nonce(1)
+            .with_max_fee(120)
+            .with_priority_fee(1);
+        let second_v = f.validated(second);
+        let second_id = *second_v.id();
+        pool.add_transaction(second_v, U256::MAX, 0, None).unwrap();
+
+        let mut block_info = pool.block_info();
+        block_info.pending_basefee = 200;
+        pool.set_block_info(block_info);
+
+        let replacement = first.rng_hash().with_max_fee(300).with_priority_fee(2);
+        let replacement_v = f.validated(replacement);
+        let replacement_id = *replacement_v.id();
+        let added = pool.add_transaction(replacement_v, U256::MAX, 0, None).unwrap();
+
+        assert_eq!(added.subpool(), SubPool::Pending);
+        assert!(!pool.contains(&first_hash));
+        assert_eq!(
+            pool.all_transactions.txs.get(&replacement_id).unwrap().subpool,
+            SubPool::Pending
+        );
+
+        let second_meta = pool.all_transactions.txs.get(&second_id).unwrap();
+        assert!(!second_meta.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK));
+        assert!(second_meta.state.contains(TxState::NO_PARKED_ANCESTORS));
+        assert_eq!(second_meta.subpool, SubPool::BaseFee);
+        pool.all_transactions.assert_states_match_full_scan();
+    }
+
+    #[test]
+    fn blob_fee_rise_recomputes_fee_cap_for_all_parked_descendants() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let initial_blob_fee = pool.all_transactions.pending_fees.blob_fee;
+        let increased_blob_fee = initial_blob_fee + 100;
+        let base_fee = pool.all_transactions.pending_fees.base_fee as u128;
+
+        let first = MockTransaction::eip4844()
+            .with_max_fee(base_fee + 1_000)
+            .with_blob_fee(initial_blob_fee + 10);
+        let sender = first.sender();
+        let first_v = f.validated(first);
+        let first_id = *first_v.id();
+        pool.add_transaction(first_v, U256::MAX, 0, None).unwrap();
+
+        let second = MockTransaction::eip4844()
+            .with_sender(sender)
+            .with_nonce(1)
+            .with_max_fee(base_fee + 1_000)
+            .with_blob_fee(initial_blob_fee + 1_000);
+        let second_v = f.validated(second);
+        let second_id = *second_v.id();
+        pool.add_transaction(second_v, U256::MAX, 0, None).unwrap();
+
+        let third = MockTransaction::eip4844()
+            .with_sender(sender)
+            .with_nonce(2)
+            .with_max_fee(base_fee + 1_000)
+            .with_blob_fee(initial_blob_fee + 20);
+        let third_v = f.validated(third);
+        let third_id = *third_v.id();
+        pool.add_transaction(third_v, U256::MAX, 0, None).unwrap();
+
+        let mut block_info = pool.block_info();
+        block_info.pending_blob_fee = Some(increased_blob_fee);
+        pool.set_block_info(block_info);
+
+        let first_meta = pool.all_transactions.txs.get(&first_id).unwrap();
+        assert!(!first_meta.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
+        assert!(first_meta.state.contains(TxState::NO_PARKED_ANCESTORS));
+
+        let second_meta = pool.all_transactions.txs.get(&second_id).unwrap();
+        assert!(second_meta.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
+        assert!(!second_meta.state.contains(TxState::NO_PARKED_ANCESTORS));
+
+        let third_meta = pool.all_transactions.txs.get(&third_id).unwrap();
+        assert!(!third_meta.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
+        assert!(!third_meta.state.contains(TxState::NO_PARKED_ANCESTORS));
+
+        for id in [first_id, second_id, third_id] {
+            assert_eq!(pool.all_transactions.txs.get(&id).unwrap().subpool, SubPool::Blob);
+        }
+        pool.all_transactions.assert_states_match_full_scan();
+    }
+
+    #[test]
+    fn states_match_full_scan_through_inserts_and_fee_moves() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let base_fee = pool.all_transactions.pending_fees.base_fee;
+
+        // a sender with a chain of transactions, one of which will not survive a fee rise
+        let first = MockTransaction::eip1559().with_max_fee(base_fee as u128 + 10);
+        let sender = first.sender();
+        for (nonce, max_fee) in [(0u64, base_fee as u128 + 10), (1, base_fee as u128 + 1_000)] {
+            let tx = MockTransaction::eip1559()
+                .with_sender(sender)
+                .with_nonce(nonce)
+                .with_max_fee(max_fee)
+                .with_priority_fee(1);
+            pool.add_transaction(f.validated(tx), U256::from(u128::MAX), 0, None).unwrap();
+        }
+        // and an unrelated sender that should be untouched throughout
+        pool.add_transaction(
+            f.validated(MockTransaction::eip1559().with_max_fee(base_fee as u128 + 5_000)),
+            U256::from(u128::MAX),
+            0,
+            None,
+        )
+        .unwrap();
+        pool.all_transactions.assert_states_match_full_scan();
+
+        // a rise past the first transaction drags its descendant out with it
+        pool.update_basefee(base_fee + 100, |_| {});
+        pool.all_transactions.assert_states_match_full_scan();
+
+        // The fall promotes the ancestor, but nothing on the fee path recomputes the descendant's
+        // NO_PARKED_ANCESTORS, so the states are only consistent again after a full update. That
+        // is the contract this check documents: the fee paths leave a descendant lagging by one
+        // update, and `update` is what settles it.
+        pool.update_basefee(base_fee, |_| {});
+        pool.all_transactions.update(&Default::default());
+        pool.all_transactions.assert_states_match_full_scan();
     }
 
     #[test]
