@@ -276,8 +276,17 @@ impl std::str::FromStr for EngineSszFork {
 
 /// API surface required by the SSZ Engine API proxy.
 ///
-/// Custom APIs can opt in with a marker implementation; unsupported routes return 404.
+/// Custom APIs can opt in with a marker implementation; every route, including
+/// `/capabilities`, then answers 404 so clients fall back to the JSON-RPC Engine API.
 pub trait EngineSszApi: Clone + Send + Sync + 'static {
+    /// Returns the capabilities advertisement.
+    ///
+    /// `witness_enabled` is true when a witness generator is configured and
+    /// [`Self::supports_witness`] holds, so the advertisement can include the extension.
+    fn capabilities(&self, _witness_enabled: bool) -> HttpResponse {
+        problem_response(STATUS_NOT_FOUND, "method-not-found", None)
+    }
+
     /// Whether the implementation supports the witness extension.
     fn supports_witness(&self) -> bool {
         false
@@ -359,6 +368,10 @@ where
     Validator: EngineApiValidator<EthEngineTypes>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
+    fn capabilities(&self, witness_enabled: bool) -> HttpResponse {
+        handle_capabilities(witness_enabled)
+    }
+
     fn identity(&self) -> HttpResponse {
         json_response(vec![self.client_version().clone()])
     }
@@ -561,7 +574,10 @@ where
             if method != "GET" {
                 return problem_response(STATUS_METHOD_NOT_ALLOWED, "method-not-allowed", None)
             }
-            handle_capabilities(handle.witness_enabled().await)
+            let Some(engine_api) = handle.engine_api().await else {
+                return problem_response(STATUS_SERVICE_UNAVAILABLE, "service-unavailable", None)
+            };
+            engine_api.capabilities(handle.witness_enabled().await)
         }
         EngineSszEndpoint::Identity => {
             if method != "GET" {

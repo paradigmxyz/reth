@@ -950,17 +950,20 @@ async fn test_engine_ssz_custom_engine_and_middleware() -> eyre::Result<()> {
             .await?;
     let auth = &node.add_ons_handle.rpc_server_handles.auth;
     let jwt = secret_to_bearer_header(auth.jwt_secret());
-    let response = reqwest::Client::new()
-        .get(format!("{}{ENGINE_IDENTITY_ROUTE}", auth.http_url()))
-        .header("Authorization", jwt.to_str()?)
-        .send()
-        .await?;
-    assert_eq!(response.status(), reqwest::StatusCode::NOT_FOUND);
-    assert_eq!(
-        response.json::<serde_json::Value>().await?["type"],
-        "/engine-api/errors/method-not-found"
-    );
-    assert_eq!(requests.load(Ordering::Relaxed), 1);
+    let client = reqwest::Client::new();
+    for route in [ENGINE_CAPABILITIES_ROUTE, ENGINE_IDENTITY_ROUTE] {
+        let response = client
+            .get(format!("{}{route}", auth.http_url()))
+            .header("Authorization", jwt.to_str()?)
+            .send()
+            .await?;
+        assert_eq!(response.status(), reqwest::StatusCode::NOT_FOUND);
+        assert_eq!(
+            response.json::<serde_json::Value>().await?["type"],
+            "/engine-api/errors/method-not-found"
+        );
+    }
+    assert_eq!(requests.load(Ordering::Relaxed), 2);
     Ok(())
 }
 
