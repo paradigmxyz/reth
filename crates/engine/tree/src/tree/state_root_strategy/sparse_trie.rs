@@ -637,16 +637,19 @@ where
             let mut targets = Vec::new();
 
             let updates_len_before = updates.len();
-            trie.update_leaves(updates, |path, parent| match fetched.entry(path) {
-                Entry::Occupied(mut entry) => {
-                    if parent < *entry.get() {
-                        entry.insert(parent);
-                        targets.push(ProofV2Target::new(path).with_parent(parent));
+            trie.update_leaves(updates, |target| {
+                let parent = target.parent;
+                match fetched.entry(target.key()) {
+                    Entry::Occupied(mut entry) => {
+                        if parent < *entry.get() {
+                            entry.insert(parent);
+                            targets.push(target);
+                        }
                     }
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(parent);
-                    targets.push(ProofV2Target::new(path).with_parent(parent));
+                    Entry::Vacant(entry) => {
+                        entry.insert(parent);
+                        targets.push(target);
+                    }
                 }
             })?;
             let updates_len_after = updates.len();
@@ -680,19 +683,18 @@ where
 
         let updates_len_before = account_updates.len();
 
-        self.trie.trie_mut().update_leaves(account_updates, |target, parent| {
-            match self.fetched_account_targets.entry(target) {
+        self.trie.trie_mut().update_leaves(account_updates, |target| {
+            let parent = target.parent;
+            match self.fetched_account_targets.entry(target.key()) {
                 Entry::Occupied(mut entry) => {
                     if parent < *entry.get() {
                         entry.insert(parent);
-                        self.pending_targets
-                            .push_account_target(ProofV2Target::new(target).with_parent(parent));
+                        self.pending_targets.push_account_target(target);
                     }
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(parent);
-                    self.pending_targets
-                        .push_account_target(ProofV2Target::new(target).with_parent(parent));
+                    self.pending_targets.push_account_target(target);
                 }
             }
         })?;

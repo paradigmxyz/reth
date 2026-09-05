@@ -19,7 +19,7 @@ pub(super) fn test_get_leaf_value_after_update<T: SparseTrie>(new_trie: fn() -> 
     let new_value_rlp = encode_fixed_size(&new_value).to_vec();
     let mut leaf_updates: B256Map<LeafUpdate> =
         once((key4, LeafUpdate::Changed(new_value_rlp.clone()))).collect();
-    trie.update_leaves(&mut leaf_updates, |_, _| {}).expect("update_leaves should succeed");
+    trie.update_leaves(&mut leaf_updates, |_| {}).expect("update_leaves should succeed");
 
     assert_eq!(
         trie.get_leaf_value(&Nibbles::unpack(key4)),
@@ -32,7 +32,7 @@ pub(super) fn test_get_leaf_value_after_update<T: SparseTrie>(new_trie: fn() -> 
     let updated_value_rlp = encode_fixed_size(&updated_value).to_vec();
     let mut leaf_updates: B256Map<LeafUpdate> =
         once((key2, LeafUpdate::Changed(updated_value_rlp.clone()))).collect();
-    trie.update_leaves(&mut leaf_updates, |_, _| {}).expect("update_leaves should succeed");
+    trie.update_leaves(&mut leaf_updates, |_| {}).expect("update_leaves should succeed");
 
     assert_eq!(
         trie.get_leaf_value(&Nibbles::unpack(key2)),

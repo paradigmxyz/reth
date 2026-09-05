@@ -144,10 +144,8 @@ pub(super) fn test_incremental_reveal_and_update_with_retry<T: SparseTrie>(new_t
 
     // First update_leaves: covered keys are drained, blinded keys remain, callback fires.
     let mut targets: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, parent| {
-        targets.push(ProofV2Target::new(key).with_parent(parent));
-    })
-    .expect("update_leaves should succeed");
+    trie.update_leaves(&mut leaf_updates, |target| targets.push(target))
+        .expect("update_leaves should succeed");
 
     assert!(!targets.is_empty(), "callback should fire for blinded keys");
     assert!(!leaf_updates.is_empty(), "blinded keys should remain in updates map");
@@ -158,10 +156,8 @@ pub(super) fn test_incremental_reveal_and_update_with_retry<T: SparseTrie>(new_t
 
     // Second update_leaves: now all paths are revealed, remaining keys should be drained.
     let mut targets2: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, parent| {
-        targets2.push(ProofV2Target::new(key).with_parent(parent));
-    })
-    .expect("update_leaves should succeed on retry");
+    trie.update_leaves(&mut leaf_updates, |target| targets2.push(target))
+        .expect("update_leaves should succeed on retry");
 
     assert!(targets2.is_empty(), "no callback should fire after reveal");
     assert!(leaf_updates.is_empty(), "all keys should be drained after retry");
@@ -334,10 +330,8 @@ pub(super) fn test_touched_prewarm_then_changed_update<T: SparseTrie>(new_trie: 
             .collect();
 
     let mut targets: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, parent| {
-        targets.push(ProofV2Target::new(key).with_parent(parent));
-    })
-    .expect("update_leaves with Touched should succeed");
+    trie.update_leaves(&mut leaf_updates, |target| targets.push(target))
+        .expect("update_leaves with Touched should succeed");
 
     assert!(targets.is_empty(), "no callback should fire for Touched on fully revealed paths");
     assert!(leaf_updates.is_empty(), "all Touched keys should be drained");
@@ -401,10 +395,8 @@ pub(super) fn test_touched_on_blinded_triggers_proof_then_changed_succeeds<T: Sp
     let mut leaf_updates: B256Map<LeafUpdate> = once((target_key, LeafUpdate::Touched)).collect();
 
     let mut targets: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, parent| {
-        targets.push(ProofV2Target::new(key).with_parent(parent));
-    })
-    .expect("update_leaves with Touched should succeed");
+    trie.update_leaves(&mut leaf_updates, |target| targets.push(target))
+        .expect("update_leaves with Touched should succeed");
 
     assert!(!targets.is_empty(), "callback should fire for Touched on blinded path");
     assert!(!leaf_updates.is_empty(), "Touched key should remain in map when blinded");
@@ -418,7 +410,7 @@ pub(super) fn test_touched_on_blinded_triggers_proof_then_changed_succeeds<T: Sp
     leaf_updates.insert(target_key, LeafUpdate::Changed(encode_fixed_size(&new_value).to_vec()));
 
     // Step 4: update_leaves again — key should now be drained.
-    trie.update_leaves(&mut leaf_updates, |_, _| {})
+    trie.update_leaves(&mut leaf_updates, |_| {})
         .expect("update_leaves with Changed should succeed");
 
     assert!(leaf_updates.is_empty(), "Changed key should be drained after reveal");
@@ -473,7 +465,7 @@ pub(super) fn test_get_leaf_value_for_storage_root_lookup<T: SparseTrie>(new_tri
     // Step 4: Update the leaf with the re-encoded value.
     let mut leaf_updates: B256Map<LeafUpdate> =
         once((key1, LeafUpdate::Changed(new_value_rlp))).collect();
-    trie.update_leaves(&mut leaf_updates, |_, _| {}).expect("update_leaves should succeed");
+    trie.update_leaves(&mut leaf_updates, |_| {}).expect("update_leaves should succeed");
 
     // Step 5: Compute root and verify against reference.
     let root = trie.root(epoch(0));
@@ -528,7 +520,7 @@ pub(super) fn test_find_leaf_before_update_to_check_existence<T: SparseTrie>(new
     ]
     .into_iter()
     .collect();
-    trie.update_leaves(&mut leaf_updates, |_, _| {}).expect("update_leaves should succeed");
+    trie.update_leaves(&mut leaf_updates, |_| {}).expect("update_leaves should succeed");
 
     // Step 4: Compute root and verify against reference.
     let root = trie.root(epoch(0));
@@ -588,7 +580,7 @@ pub(super) fn test_prune_then_reuse_for_next_block<T: SparseTrie>(new_trie: fn()
     let mut changeset_hot: BTreeMap<B256, U256> = BTreeMap::new();
     changeset_hot.insert(keys[0], U256::from(999));
     let mut leaf_updates_hot = SuiteTestHarness::leaf_updates(&changeset_hot);
-    trie.update_leaves(&mut leaf_updates_hot, |_, _| {
+    trie.update_leaves(&mut leaf_updates_hot, |_| {
         panic!("leaf changed at the cutoff epoch must remain revealed")
     })
     .expect("update_leaves should succeed");
@@ -607,7 +599,7 @@ pub(super) fn test_prune_then_reuse_for_next_block<T: SparseTrie>(new_trie: fn()
     changeset_cold.insert(keys[4], U256::from(555));
     let mut leaf_updates_cold = SuiteTestHarness::leaf_updates(&changeset_cold);
     let mut proof_requested = false;
-    trie.update_leaves(&mut leaf_updates_cold, |_, _| proof_requested = true)
+    trie.update_leaves(&mut leaf_updates_cold, |_| proof_requested = true)
         .expect("update_leaves should succeed");
     assert!(proof_requested, "leaf older than the cutoff should require a proof");
     harness.reveal_and_update(&mut trie, &mut leaf_updates_cold);

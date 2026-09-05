@@ -28,6 +28,8 @@ pub(crate) struct SubTrieTargets<'a> {
     /// The targets belonging to this sub-trie. These will be sorted by their `key` field,
     /// lexicographically.
     pub(crate) targets: &'a [ProofV2Target],
+    /// Every target in this range can be read without the stored branch table.
+    pub(crate) leaves_only: bool,
 }
 
 /// Finds the deepest target prefix shared by each path in an ordered input stream.
@@ -78,7 +80,8 @@ pub(crate) fn iter_sub_trie_targets(
         .map(|targets| {
             let lower_bound = target_child_prefix(&targets[0]);
             let upper_bound = lower_bound.next_without_prefix();
-            SubTrieTargets { lower_bound, upper_bound, targets }
+            let leaves_only = targets.iter().all(|target| target.leaves_only);
+            SubTrieTargets { lower_bound, upper_bound, targets, leaves_only }
         })
 }
 

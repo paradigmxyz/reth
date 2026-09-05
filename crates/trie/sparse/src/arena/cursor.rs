@@ -3,7 +3,8 @@ use super::{
     ArenaSparseNode, ArenaSparseNodeBranchChild, ArenaSparseNodeState, Index, NodeArena,
 };
 use alloc::vec::Vec;
-use reth_trie_common::Nibbles;
+use alloy_primitives::B256;
+use reth_trie_common::{Nibbles, ProofV2Target};
 use tracing::{instrument, trace};
 
 const TRACE_TARGET: &str = "trie::arena::cursor";
@@ -164,10 +165,10 @@ impl ArenaCursor {
         logical_branch_path(arena, self.stack.last().expect("cursor is non-empty"))
     }
 
-    /// Returns the length of the logical path of the branch at the top of the stack.
-    /// Equivalent to `head_logical_branch_path(arena).len()` but avoids constructing the path.
-    pub(super) fn head_logical_branch_path_len(&self, arena: &NodeArena) -> usize {
-        logical_branch_path_len(arena, self.stack.last().expect("cursor is non-empty"))
+    /// Returns a proof target below the current branch, with its cache metadata.
+    pub(super) fn proof_target(&self, arena: &NodeArena, key: B256) -> ProofV2Target {
+        let entry = self.stack.last().expect("cursor is non-empty");
+        arena[entry.index].branch_ref().proof_target(key, logical_branch_path_len(arena, entry))
     }
 
     /// Returns the absolute path of a child at `child_nibble` under the branch at the top of

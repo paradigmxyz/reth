@@ -91,7 +91,7 @@ pub(super) fn test_insert_single_leaf_into_empty_trie<T: SparseTrie>(new_trie: f
     let mut leaf_updates = SuiteTestHarness::leaf_updates(&BTreeMap::from([(key, value)]));
 
     // Empty trie has no blinded nodes, so update_leaves should succeed in one call.
-    trie.update_leaves(&mut leaf_updates, |_, _| {
+    trie.update_leaves(&mut leaf_updates, |_| {
         panic!("no proof callback expected on empty trie");
     })
     .expect("update_leaves should succeed");
@@ -129,7 +129,7 @@ pub(super) fn test_insert_multiple_leaves_into_empty_trie<T: SparseTrie>(new_tri
     let mut leaf_updates = SuiteTestHarness::leaf_updates(&storage);
 
     // Empty trie has no blinded nodes, so one call should drain all updates.
-    trie.update_leaves(&mut leaf_updates, |_, _| {
+    trie.update_leaves(&mut leaf_updates, |_| {
         panic!("no proof callback expected on empty trie");
     })
     .expect("update_leaves should succeed");
@@ -169,7 +169,7 @@ pub(super) fn test_update_all_leaves_with_new_values<T: SparseTrie>(new_trie: fn
 
     // Insert all 256 keys with old values.
     let mut leaf_updates = SuiteTestHarness::leaf_updates(&old_storage);
-    trie.update_leaves(&mut leaf_updates, |_, _| {
+    trie.update_leaves(&mut leaf_updates, |_| {
         panic!("no proof callback expected on empty trie");
     })
     .expect("update_leaves should succeed");
@@ -179,7 +179,7 @@ pub(super) fn test_update_all_leaves_with_new_values<T: SparseTrie>(new_trie: fn
 
     // Update all 256 keys with new values.
     let mut leaf_updates = SuiteTestHarness::leaf_updates(&new_storage);
-    trie.update_leaves(&mut leaf_updates, |_, _| {
+    trie.update_leaves(&mut leaf_updates, |_| {
         panic!("no proof callback expected — all paths already revealed");
     })
     .expect("update_leaves should succeed");
@@ -208,7 +208,7 @@ pub(super) fn test_two_leaves_at_adjacent_keys_root_correctness<T: SparseTrie>(
 
     // Insert first leaf and compute root.
     let mut leaf_updates = SuiteTestHarness::leaf_updates(&BTreeMap::from([(key_50, value)]));
-    trie.update_leaves(&mut leaf_updates, |_, _| {
+    trie.update_leaves(&mut leaf_updates, |_| {
         panic!("no proof callback expected on empty trie");
     })
     .expect("update_leaves should succeed");
@@ -216,7 +216,7 @@ pub(super) fn test_two_leaves_at_adjacent_keys_root_correctness<T: SparseTrie>(
 
     // Insert second leaf and compute root.
     let mut leaf_updates = SuiteTestHarness::leaf_updates(&BTreeMap::from([(key_51, value)]));
-    trie.update_leaves(&mut leaf_updates, |_, _| {
+    trie.update_leaves(&mut leaf_updates, |_| {
         panic!("no proof callback expected — all paths already revealed");
     })
     .expect("update_leaves should succeed");
@@ -504,10 +504,8 @@ pub(super) fn test_update_leaves_blinded_node_requests_proof<T: SparseTrie>(new_
 
     // First update_leaves call: should invoke callback for the blinded node.
     let mut targets: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, parent| {
-        targets.push(ProofV2Target::new(key).with_parent(parent));
-    })
-    .expect("update_leaves should succeed");
+    trie.update_leaves(&mut leaf_updates, |target| targets.push(target))
+        .expect("update_leaves should succeed");
 
     // The callback should have been invoked.
     assert!(!targets.is_empty(), "callback should be invoked for a blinded node");
@@ -553,10 +551,8 @@ pub(super) fn test_update_leaves_retry_after_reveal<T: SparseTrie>(new_trie: fn(
 
     // First update_leaves: callback fires, key stays in map.
     let mut targets: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, parent| {
-        targets.push(ProofV2Target::new(key).with_parent(parent));
-    })
-    .expect("update_leaves should succeed");
+    trie.update_leaves(&mut leaf_updates, |target| targets.push(target))
+        .expect("update_leaves should succeed");
     assert!(!targets.is_empty(), "callback should fire for blinded node");
     assert!(!leaf_updates.is_empty(), "key should remain in map after blinded hit");
 
@@ -566,10 +562,8 @@ pub(super) fn test_update_leaves_retry_after_reveal<T: SparseTrie>(new_trie: fn(
 
     // Second update_leaves: now the path is revealed, key should be drained.
     let mut targets2: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, parent| {
-        targets2.push(ProofV2Target::new(key).with_parent(parent));
-    })
-    .expect("update_leaves should succeed on retry");
+    trie.update_leaves(&mut leaf_updates, |target| targets2.push(target))
+        .expect("update_leaves should succeed on retry");
     assert!(targets2.is_empty(), "no callback should fire after reveal");
     assert!(leaf_updates.is_empty(), "key should be drained after successful retry");
 
@@ -616,10 +610,8 @@ pub(super) fn test_remove_leaf_blinded_sibling_requires_reveal<T: SparseTrie>(ne
         SuiteTestHarness::leaf_updates(&BTreeMap::from([(revealed_key, U256::ZERO)]));
 
     let mut targets: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, parent| {
-        targets.push(ProofV2Target::new(key).with_parent(parent));
-    })
-    .expect("update_leaves should succeed");
+    trie.update_leaves(&mut leaf_updates, |target| targets.push(target))
+        .expect("update_leaves should succeed");
     assert!(!targets.is_empty(), "callback should fire for blinded sibling");
     assert!(!leaf_updates.is_empty(), "key should remain in map after blinded hit");
 
@@ -628,8 +620,7 @@ pub(super) fn test_remove_leaf_blinded_sibling_requires_reveal<T: SparseTrie>(ne
     trie.reveal_nodes(&mut proof_nodes).expect("reveal_nodes should succeed");
 
     // Retry removal — now the sibling is revealed, branch can collapse.
-    trie.update_leaves(&mut leaf_updates, |_, _| {})
-        .expect("update_leaves should succeed on retry");
+    trie.update_leaves(&mut leaf_updates, |_| {}).expect("update_leaves should succeed on retry");
     assert!(leaf_updates.is_empty(), "key should be drained after successful removal");
 
     // Root should match reference trie with only group_b keys.
@@ -682,10 +673,8 @@ pub(super) fn test_update_leaves_removal_branch_collapse_blinded_sibling<T: Spar
         SuiteTestHarness::leaf_updates(&BTreeMap::from([(revealed_key, U256::ZERO)]));
 
     let mut targets: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, parent| {
-        targets.push(ProofV2Target::new(key).with_parent(parent));
-    })
-    .expect("update_leaves should succeed");
+    trie.update_leaves(&mut leaf_updates, |target| targets.push(target))
+        .expect("update_leaves should succeed");
 
     // Callback should have fired for the blinded sibling path.
     assert!(!targets.is_empty(), "callback should fire for blinded sibling");
@@ -750,10 +739,8 @@ pub(super) fn test_update_leaves_subtrie_collapse_requests_proof<T: SparseTrie>(
     ]));
 
     let mut targets: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, parent| {
-        targets.push(ProofV2Target::new(key).with_parent(parent));
-    })
-    .expect("update_leaves should succeed");
+    trie.update_leaves(&mut leaf_updates, |target| targets.push(target))
+        .expect("update_leaves should succeed");
 
     // Callback should have fired for the blinded sibling.
     assert!(
@@ -804,10 +791,8 @@ pub(super) fn test_update_leaves_multiple_keys_same_blinded_node<T: SparseTrie>(
     let mut leaf_updates = SuiteTestHarness::leaf_updates(&blinded_keys);
 
     let mut targets: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, parent| {
-        targets.push(ProofV2Target::new(key).with_parent(parent));
-    })
-    .expect("update_leaves should succeed");
+    trie.update_leaves(&mut leaf_updates, |target| targets.push(target))
+        .expect("update_leaves should succeed");
 
     // Callback should fire for each key (3 invocations).
     assert_eq!(targets.len(), 3, "callback should fire once per key hitting the blinded node");
@@ -833,10 +818,8 @@ pub(super) fn test_update_leaves_touched_fully_revealed<T: SparseTrie>(new_trie:
     let mut leaf_updates: B256Map<LeafUpdate> = once((key2, LeafUpdate::Touched)).collect();
 
     let mut targets: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, parent| {
-        targets.push(ProofV2Target::new(key).with_parent(parent));
-    })
-    .expect("update_leaves should succeed");
+    trie.update_leaves(&mut leaf_updates, |target| targets.push(target))
+        .expect("update_leaves should succeed");
 
     // No callback should fire.
     assert!(targets.is_empty(), "no callback should fire for Touched on fully revealed path");
@@ -885,10 +868,8 @@ pub(super) fn test_update_leaves_touched_blinded_requests_proof<T: SparseTrie>(
     let mut leaf_updates: B256Map<LeafUpdate> = once((target_key, LeafUpdate::Touched)).collect();
 
     let mut targets: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, parent| {
-        targets.push(ProofV2Target::new(key).with_parent(parent));
-    })
-    .expect("update_leaves should succeed");
+    trie.update_leaves(&mut leaf_updates, |target| targets.push(target))
+        .expect("update_leaves should succeed");
 
     // Callback should have been invoked for the blinded node.
     assert!(!targets.is_empty(), "callback should fire for Touched on blinded path");
@@ -914,7 +895,7 @@ pub(super) fn test_update_leaves_touched_nonexistent_key<T: SparseTrie>(new_trie
     let mut leaf_updates: B256Map<LeafUpdate> = once((target_key, LeafUpdate::Touched)).collect();
 
     let mut callback_count = 0usize;
-    trie.update_leaves(&mut leaf_updates, |_key, _parent| {
+    trie.update_leaves(&mut leaf_updates, |_| {
         callback_count += 1;
     })
     .expect("update_leaves should succeed");
@@ -951,7 +932,7 @@ pub(super) fn test_update_leaves_touched_nonexistent_in_populated_trie<T: Sparse
         once((nonexistent_key, LeafUpdate::Touched)).collect();
 
     let mut callback_count = 0usize;
-    trie.update_leaves(&mut leaf_updates, |_key, _parent| {
+    trie.update_leaves(&mut leaf_updates, |_| {
         callback_count += 1;
     })
     .expect("update_leaves should succeed");
@@ -1061,15 +1042,13 @@ pub(super) fn test_remove_leaf_marks_ancestors_dirty_unconditionally<T: SparseTr
 
     // Insert all leaves via update_leaves — do NOT call root() so no hashes are cached.
     let mut insert_updates = SuiteTestHarness::leaf_updates(&storage);
-    trie.update_leaves(&mut insert_updates, |_, _| {})
-        .expect("insert update_leaves should succeed");
+    trie.update_leaves(&mut insert_updates, |_| {}).expect("insert update_leaves should succeed");
 
     // Now remove one leaf WITHOUT having called root() first.
     let mut removal: BTreeMap<B256, U256> = BTreeMap::new();
     removal.insert(keys[2], U256::ZERO); // remove key 0x30
     let mut removal_updates = SuiteTestHarness::leaf_updates(&removal);
-    trie.update_leaves(&mut removal_updates, |_, _| {})
-        .expect("removal update_leaves should succeed");
+    trie.update_leaves(&mut removal_updates, |_| {}).expect("removal update_leaves should succeed");
 
     // Call root() — all ancestors of the removed leaf must be marked dirty
     // even though no hashes were previously cached.
@@ -1362,10 +1341,8 @@ pub(super) fn test_branch_collapse_multi_empty_subtries_blinded_remaining<T: Spa
     ]));
 
     let mut targets: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, parent| {
-        targets.push(ProofV2Target::new(key).with_parent(parent));
-    })
-    .expect("update_leaves should succeed");
+    trie.update_leaves(&mut leaf_updates, |target| targets.push(target))
+        .expect("update_leaves should succeed");
 
     // Callback should fire for the blinded child at 0xd8.
     assert!(!targets.is_empty(), "callback should fire for blinded child during branch collapse");
@@ -1377,8 +1354,7 @@ pub(super) fn test_branch_collapse_multi_empty_subtries_blinded_remaining<T: Spa
     trie.reveal_nodes(&mut proof_nodes).expect("reveal_nodes should succeed");
 
     // Retry — now the sibling is revealed, branch can collapse.
-    trie.update_leaves(&mut leaf_updates, |_, _| {})
-        .expect("update_leaves should succeed on retry");
+    trie.update_leaves(&mut leaf_updates, |_| {}).expect("update_leaves should succeed on retry");
     assert!(leaf_updates.is_empty(), "keys should be drained after successful retry");
 
     // Root should match reference trie with only key_d8.

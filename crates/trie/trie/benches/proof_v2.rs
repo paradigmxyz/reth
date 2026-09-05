@@ -283,10 +283,8 @@ fn bench_sparse_reveal(c: &mut Criterion) {
                         |(mut trie, mut updates)| {
                             while !updates.is_empty() {
                                 let mut targets = Vec::new();
-                                trie.update_leaves(&mut updates, |key, parent| {
-                                    targets.push(ProofV2Target::new(key).with_parent(parent))
-                                })
-                                .unwrap();
+                                trie.update_leaves(&mut updates, |target| targets.push(target))
+                                    .unwrap();
                                 if targets.is_empty() {
                                     assert!(updates.is_empty());
                                     break

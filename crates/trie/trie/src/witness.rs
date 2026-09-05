@@ -189,12 +189,8 @@ where
                         .storage_trie_mut(&hashed_address)
                         .expect("storage trie was revealed from multiproof");
                     storage_trie
-                        .update_leaves(slot_updates, |key, parent| {
-                            targets
-                                .storage_targets
-                                .entry(hashed_address)
-                                .or_default()
-                                .push(ProofV2Target::new(key).with_parent(parent));
+                        .update_leaves(slot_updates, |target| {
+                            targets.storage_targets.entry(hashed_address).or_default().push(target);
                         })
                         .map_err(|err| {
                             SparseStateTrieErrorKind::SparseStorageTrie(
@@ -272,8 +268,8 @@ where
 
                 sparse_trie
                     .trie_mut()
-                    .update_leaves(account_updates, |key, parent| {
-                        targets.account_targets.push(ProofV2Target::new(key).with_parent(parent));
+                    .update_leaves(account_updates, |target| {
+                        targets.account_targets.push(target);
                     })
                     .map_err(SparseStateTrieErrorKind::from)?;
 

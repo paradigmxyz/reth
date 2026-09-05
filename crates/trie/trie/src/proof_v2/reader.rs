@@ -105,6 +105,10 @@ where
                     self.lower_bound = None;
                     break
                 }
+                if self.targets.leaves_only {
+                    self.read_leaves(lower, self.targets.upper_bound)?;
+                    continue
+                }
                 self.seek_trie(lower)?;
                 let Some((path, _)) = self.cursor_state.trie_entry.get() else {
                     self.read_leaves(lower, self.targets.upper_bound)?;
@@ -343,7 +347,7 @@ mod tests {
     use super::*;
     use crate::{
         hashed_cursor::HashedCursorFactory,
-        proof_v2::{iter_sub_trie_targets, StorageValueEncoder},
+        proof_v2::{iter_sub_trie_targets, StorageProofCalculator, StorageValueEncoder},
         test_utils::TrieTestHarness,
         trie_cursor::TrieCursorFactory,
     };
@@ -439,5 +443,42 @@ mod tests {
             [key(0x20, 0x00), key(0x20, 0x10), key(0x28, 0x00), key(0x28, 0x10)]
                 .map(Nibbles::unpack),
         );
+    }
+
+    #[test]
+    fn leaf_targets_preserve_proofs_and_skip_trie_seeks() {
+        let key = |prefix, child| B256::right_padding_from(&[prefix, child]);
+        let harness = TrieTestHarness::new(
+            [0x20, 0x24, 0x28]
+                .into_iter()
+                .flat_map(|prefix| [0x00, 0x10].map(|child| (key(prefix, child), U256::from(1))))
+                .collect(),
+        );
+        let address = harness.hashed_address();
+        let factory = harness.trie_cursor_factory();
+        let mut calculator = StorageProofCalculator::new_storage(
+            factory.storage_trie_cursor(address).unwrap(),
+            harness.hashed_cursor_factory().hashed_storage_cursor(address).unwrap(),
+        );
+        let targets =
+            [(0x20, 0x00), (0x20, 0x10), (0x28, 0x00), (0x28, 0x10)].map(|(prefix, child)| {
+                ProofV2Target::new(key(prefix, child)).with_parent(ProofV2TargetParent::new(1))
+            });
+        let expected = harness.proof_v2(&mut targets.clone()).0;
+
+        // Conflicting hints within one child must still share a traversal. Repeated calls also
+        // exercise cursor resets after a call that read leaves without seeking the trie table.
+        for hints in (0..16).rev() {
+            let mut targets = targets;
+            for (index, target) in targets.iter_mut().enumerate() {
+                target.leaves_only = hints & (1 << index) != 0;
+            }
+            factory.visited_storage_keys(address).clear();
+            let proof = calculator.storage_proof(address, &mut targets).unwrap();
+            assert_eq!(proof, expected, "hints={hints:04b}");
+            if hints == 15 {
+                assert!(factory.visited_storage_keys(address).is_empty());
+            }
+        }
     }
 }

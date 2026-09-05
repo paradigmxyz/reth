@@ -131,7 +131,12 @@ where
     ) -> Result<ProofTrieNodeV2, StateProofError> {
         self.proof_subtrie(
             value_encoder,
-            SubTrieTargets { lower_bound: Nibbles::new(), upper_bound: None, targets: &[] },
+            SubTrieTargets {
+                lower_bound: Nibbles::new(),
+                upper_bound: None,
+                targets: &[],
+                leaves_only: false,
+            },
             &mut ProofCursorState::default(),
         )?;
         let mut proofs = self.builder.take_proofs();

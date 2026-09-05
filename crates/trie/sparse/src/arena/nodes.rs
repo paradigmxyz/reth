@@ -5,7 +5,10 @@ use super::{
 use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::{keccak256, B256};
 use alloy_trie::{BranchNodeCompact, TrieMask};
-use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, RlpNode, TrieNodeV2};
+use reth_trie_common::{
+    BranchNodeMasks, Nibbles, ProofTrieNodeV2, ProofV2Target, ProofV2TargetParent, RlpNode,
+    TrieNodeV2,
+};
 use smallvec::SmallVec;
 use strum::AsRefStr;
 
@@ -85,6 +88,17 @@ pub(super) struct ArenaSparseNodeBranch {
 }
 
 impl ArenaSparseNodeBranch {
+    pub(super) fn proof_target(&self, key: B256, parent_len: usize) -> ProofV2Target {
+        let target = ProofV2Target::new(key).with_parent(ProofV2TargetParent::new(parent_len));
+        let nibble = target.key_nibbles.get_unchecked(parent_len);
+        // A missing mask can mean unknown root metadata. A set hash bit identifies a direct
+        // branch; without a tree bit, that branch has only leaves and no stored descendants.
+        target.with_leaves_only(
+            self.branch_masks.hash_mask.is_bit_set(nibble) &&
+                !self.branch_masks.tree_mask.is_bit_set(nibble),
+        )
+    }
+
     /// Unsets the bit for `nibble` in `state_mask`, `hash_mask`, and `tree_mask`.
     pub(super) const fn unset_child_bit(&mut self, nibble: u8) {
         self.state_mask.unset_bit(nibble);

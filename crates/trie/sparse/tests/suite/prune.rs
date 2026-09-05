@@ -31,7 +31,7 @@ pub(super) fn test_prune_retains_recent_leaves<T: SparseTrie>(new_trie: fn() -> 
         (key_a, U256::from(10)),
         (key_b, U256::from(20)),
     ]));
-    trie.update_leaves(&mut updates, |_, _| panic!("fully revealed trie must not request proofs"))
+    trie.update_leaves(&mut updates, |_| panic!("fully revealed trie must not request proofs"))
         .expect("update_leaves should succeed");
     assert!(updates.is_empty());
 
@@ -71,13 +71,13 @@ pub(super) fn test_prune_retains_structurally_modified_branch<T: SparseTrie>(new
 
     let mut trie = (new_trie)();
     let mut initial_updates = SuiteTestHarness::leaf_updates(&storage);
-    trie.update_leaves(&mut initial_updates, |_, _| panic!("empty trie must not request proofs"))
+    trie.update_leaves(&mut initial_updates, |_| panic!("empty trie must not request proofs"))
         .expect("update_leaves should succeed");
     assert!(initial_updates.is_empty());
     trie.root(epoch(10));
 
     let mut deletion = SuiteTestHarness::leaf_updates(&BTreeMap::from([(old_keys[2], U256::ZERO)]));
-    trie.update_leaves(&mut deletion, |_, _| panic!("fully revealed trie must not request proofs"))
+    trie.update_leaves(&mut deletion, |_| panic!("fully revealed trie must not request proofs"))
         .expect("update_leaves should succeed");
     assert!(deletion.is_empty());
     storage.remove(&old_keys[2]);
@@ -90,7 +90,7 @@ pub(super) fn test_prune_retains_structurally_modified_branch<T: SparseTrie>(new
     let inserted = key(0x00, 0x30);
     let mut insertion =
         SuiteTestHarness::leaf_updates(&BTreeMap::from([(inserted, U256::from(5))]));
-    trie.update_leaves(&mut insertion, |_, _| {
+    trie.update_leaves(&mut insertion, |_| {
         panic!("structurally modified branch at the cutoff epoch must remain revealed")
     })
     .expect("update_leaves should succeed");
@@ -152,7 +152,7 @@ pub(super) fn test_prune_then_update_and_recompute_root<T: SparseTrie>(new_trie:
         keys[0],
         LeafUpdate::Changed(encode_fixed_size(&U256::from(100)).to_vec()),
     )]);
-    trie.update_leaves(&mut first_update, |_, _| {
+    trie.update_leaves(&mut first_update, |_| {
         panic!("fully revealed trie must not request proofs")
     })
     .expect("update_leaves should succeed");
@@ -165,7 +165,7 @@ pub(super) fn test_prune_then_update_and_recompute_root<T: SparseTrie>(new_trie:
         keys[0],
         LeafUpdate::Changed(encode_fixed_size(&new_value).to_vec()),
     )]);
-    trie.update_leaves(&mut leaf_updates, |_, _| {
+    trie.update_leaves(&mut leaf_updates, |_| {
         panic!("leaf at the cutoff epoch should remain revealed")
     })
     .expect("update_leaves should succeed");
@@ -237,7 +237,7 @@ pub(super) fn test_prune_mixed_embedded_and_hashed_nodes<T: SparseTrie>(new_trie
 
     let mut trie = (new_trie)();
     let mut leaf_updates = SuiteTestHarness::leaf_updates(&storage);
-    trie.update_leaves(&mut leaf_updates, |_, _| {
+    trie.update_leaves(&mut leaf_updates, |_| {
         panic!("no proof callback expected on empty trie");
     })
     .expect("update_leaves should succeed");
@@ -337,7 +337,7 @@ pub(super) fn test_prune_handles_small_subtrie_root_nodes<T: SparseTrie>(new_tri
         small_key,
         LeafUpdate::Changed(encode_fixed_size(&U256::from(2)).to_vec()),
     )]);
-    trie.update_leaves(&mut update, |_, _| panic!("fully revealed trie must not request proofs"))
+    trie.update_leaves(&mut update, |_| panic!("fully revealed trie must not request proofs"))
         .expect("update_leaves should succeed");
     assert!(update.is_empty());
 

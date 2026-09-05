@@ -13,6 +13,9 @@ pub struct ProofV2Target {
     pub key_nibbles: Nibbles,
     /// The known-parent context for this target.
     pub parent: ProofV2TargetParent,
+    /// Read the target's subtree directly from leaves. The caller can enable this when the
+    /// known parent shows that the child has no stored branch nodes.
+    pub leaves_only: bool,
 }
 
 impl ProofV2Target {
@@ -21,7 +24,7 @@ impl ProofV2Target {
     pub fn new(key: B256) -> Self {
         // SAFETY: key is a B256 and so is exactly 32-bytes.
         let key_nibbles = unsafe { Nibbles::unpack_unchecked(key.as_slice()) };
-        Self { key_nibbles, parent: ProofV2TargetParent::NONE }
+        Self { key_nibbles, parent: ProofV2TargetParent::NONE, leaves_only: false }
     }
 
     /// Returns the key the target was initialized with.
@@ -32,6 +35,12 @@ impl ProofV2Target {
     /// Sets the already-revealed parent branch of this target.
     pub const fn with_parent(mut self, parent: ProofV2TargetParent) -> Self {
         self.parent = parent;
+        self
+    }
+
+    /// Sets whether the target's subtree should be read directly from leaves.
+    pub const fn with_leaves_only(mut self, leaves_only: bool) -> Self {
+        self.leaves_only = leaves_only;
         self
     }
 }

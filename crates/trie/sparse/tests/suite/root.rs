@@ -103,7 +103,7 @@ pub(super) fn test_root_deterministic_across_update_orders<T: SparseTrie>(new_tr
         for (key, value) in &order_a {
             let mut leaf_updates =
                 SuiteTestHarness::leaf_updates(&BTreeMap::from([(*key, *value)]));
-            trie.update_leaves(&mut leaf_updates, |_, _| {}).expect("update_leaves should succeed");
+            trie.update_leaves(&mut leaf_updates, |_| {}).expect("update_leaves should succeed");
         }
         trie.root(epoch(0))
     };
@@ -115,7 +115,7 @@ pub(super) fn test_root_deterministic_across_update_orders<T: SparseTrie>(new_tr
         for (key, value) in &order_b {
             let mut leaf_updates =
                 SuiteTestHarness::leaf_updates(&BTreeMap::from([(*key, *value)]));
-            trie.update_leaves(&mut leaf_updates, |_, _| {}).expect("update_leaves should succeed");
+            trie.update_leaves(&mut leaf_updates, |_| {}).expect("update_leaves should succeed");
         }
         trie.root(epoch(0))
     };

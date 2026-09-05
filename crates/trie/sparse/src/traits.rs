@@ -9,9 +9,7 @@ use alloy_primitives::{
 };
 use alloy_trie::BranchNodeCompact;
 use reth_execution_errors::SparseTrieResult;
-use reth_trie_common::{
-    BranchNodeMasks, Nibbles, ProofTrieNodeV2, ProofV2TargetParent, TrieNodeV2,
-};
+use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, ProofV2Target, TrieNodeV2};
 
 /// Modification epoch assigned to cached sparse trie nodes.
 ///
@@ -230,10 +228,9 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// Once that proof is calculated and revealed via [`SparseTrie::reveal_nodes`], the same
     /// `updates` map can be reused to retry the update.
     ///
-    /// The callback receives `(key, parent)` where `key` is the full 32-byte hashed key
-    /// (right-padded with zeros from the blinded path) and `parent` identifies the revealed logical
-    /// parent branch. No known parent indicates that the trie is entirely blind and the proof
-    /// must include the root.
+    /// The callback receives a target with the full hashed key, its known parent, and any cache
+    /// metadata available from that parent. A blinded path is right-padded with zeros to form the
+    /// key. No known parent indicates that the proof must include the root.
     ///
     /// The callback may be invoked multiple times for the same target across retry loops.
     /// Callers should deduplicate if needed.
@@ -242,7 +239,7 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     fn update_leaves(
         &mut self,
         updates: &mut B256Map<LeafUpdate>,
-        proof_required_fn: impl FnMut(B256, ProofV2TargetParent),
+        proof_required_fn: impl FnMut(ProofV2Target),
     ) -> SparseTrieResult<()>;
 }
 

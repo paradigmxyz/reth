@@ -98,10 +98,8 @@ impl SuiteTestHarness {
     ) {
         loop {
             let mut targets: Vec<ProofV2Target> = Vec::new();
-            trie.update_leaves(leaf_updates, |key, parent| {
-                targets.push(ProofV2Target::new(key).with_parent(parent));
-            })
-            .expect("update_leaves should succeed");
+            trie.update_leaves(leaf_updates, |target| targets.push(target))
+                .expect("update_leaves should succeed");
 
             if targets.is_empty() {
                 break;

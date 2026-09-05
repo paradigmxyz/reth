@@ -591,7 +591,7 @@ mod tests {
 
     fn apply_account_update(sparse: &mut SparseStateTrie, address: B256, update: LeafUpdate) {
         let mut updates = B256Map::from_iter([(address, update)]);
-        sparse.trie_mut().update_leaves(&mut updates, |_, _| {}).unwrap();
+        sparse.trie_mut().update_leaves(&mut updates, |_| {}).unwrap();
         assert!(updates.is_empty());
     }
 
@@ -709,11 +709,7 @@ mod tests {
         // Remove the leaf node and check that the storage trie does not contain the leaf node and
         // value
         let mut updates = B256Map::from_iter([(B256::ZERO, LeafUpdate::Changed(Vec::new()))]);
-        sparse
-            .storage_trie_mut(&B256::ZERO)
-            .unwrap()
-            .update_leaves(&mut updates, |_, _| {})
-            .unwrap();
+        sparse.storage_trie_mut(&B256::ZERO).unwrap().update_leaves(&mut updates, |_| {}).unwrap();
         assert!(updates.is_empty());
         assert!(matches!(
             sparse.storage_trie_ref(&B256::ZERO).unwrap().find_leaf(&full_path_0, None),
@@ -810,7 +806,7 @@ mod tests {
         sparse
             .storage_trie_mut(&account)
             .unwrap()
-            .update_leaves(&mut storage_updates, |_, _| {
+            .update_leaves(&mut storage_updates, |_| {
                 panic!("fully revealed storage trie must not request proofs")
             })
             .unwrap();
@@ -956,11 +952,7 @@ mod tests {
 
         // Remove the leaf node
         let mut updates = B256Map::from_iter([(B256::ZERO, LeafUpdate::Changed(Vec::new()))]);
-        sparse
-            .storage_trie_mut(&B256::ZERO)
-            .unwrap()
-            .update_leaves(&mut updates, |_, _| {})
-            .unwrap();
+        sparse.storage_trie_mut(&B256::ZERO).unwrap().update_leaves(&mut updates, |_| {}).unwrap();
         assert!(updates.is_empty());
         assert!(sparse
             .storage_trie_ref(&B256::ZERO)
@@ -1081,11 +1073,7 @@ mod tests {
 
         let mut updates =
             B256Map::from_iter([(slot_3, LeafUpdate::Changed(alloy_rlp::encode(value_3)))]);
-        sparse
-            .storage_trie_mut(&address_1)
-            .unwrap()
-            .update_leaves(&mut updates, |_, _| {})
-            .unwrap();
+        sparse.storage_trie_mut(&address_1).unwrap().update_leaves(&mut updates, |_| {}).unwrap();
         assert!(updates.is_empty());
         trie_account_1.storage_root = sparse.storage_root(&address_1, epoch(0)).unwrap();
         apply_account_update(
