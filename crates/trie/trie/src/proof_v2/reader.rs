@@ -399,4 +399,45 @@ mod tests {
         );
         assert!(reader.next().unwrap().is_none());
     }
+
+    #[test]
+    fn reader_skips_untargeted_children_of_known_parent() {
+        let key = |prefix, child| B256::right_padding_from(&[prefix, child]);
+        let storage = [0x20, 0x24, 0x28]
+            .into_iter()
+            .flat_map(|prefix| [0x00, 0x10].map(|child| (key(prefix, child), U256::from(1))))
+            .collect();
+        let harness = TrieTestHarness::new(storage);
+        let address = harness.hashed_address();
+        let mut trie_cursor = harness.trie_cursor_factory().storage_trie_cursor(address).unwrap();
+        let mut hashed_cursor =
+            harness.hashed_cursor_factory().hashed_storage_cursor(address).unwrap();
+        let mut encoder = StorageValueEncoder;
+        let mut prefix_set = PrefixSet::default();
+        let mut frames = Vec::new();
+        let mut cursor_state = ProofCursorState::default();
+        let mut targets = [0x20, 0x28].map(|prefix| {
+            ProofV2Target::new(key(prefix, 0x10)).with_parent(ProofV2TargetParent::new(1))
+        });
+        let mut paths = Vec::new();
+        for group in iter_sub_trie_targets(&mut targets) {
+            let mut reader = ProofReader::new(
+                &mut trie_cursor,
+                &mut hashed_cursor,
+                &mut encoder,
+                &mut prefix_set,
+                &group,
+                &mut frames,
+                &mut cursor_state,
+            );
+            while let Some(item) = reader.next().unwrap() {
+                paths.push(item.path);
+            }
+        }
+        assert_eq!(
+            paths,
+            [key(0x20, 0x00), key(0x20, 0x10), key(0x28, 0x00), key(0x28, 0x10)]
+                .map(Nibbles::unpack),
+        );
+    }
 }

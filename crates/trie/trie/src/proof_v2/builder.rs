@@ -158,47 +158,23 @@ impl<D: DeferredValueEncoder> ProofBuilder<D> {
         targets: &SubTrieTargets<'_>,
         root: Option<ProofNode<D>>,
     ) -> Result<(), StateProofError> {
-        let Some(parent) = targets.parent_prefix else {
-            let mut proof = if let Some(root) = root {
-                self.rlp_encode_buf.clear();
-                root.into_proof(Nibbles::new(), &mut self.rlp_encode_buf)?
-            } else {
-                ProofTrieNodeV2::empty()
-            };
-            // A direct root branch has no record in the branch table. An extension still carries
-            // the masks of the branch below it.
-            if matches!(&proof.node, TrieNodeV2::Branch(branch) if branch.key.is_empty()) {
-                proof.masks = None;
-            }
-            self.retained_proofs.push(proof);
+        let mut proof = if let Some(root) = root {
+            self.rlp_encode_buf.clear();
+            root.into_proof(targets.lower_bound, &mut self.rlp_encode_buf)?
+        } else if targets.lower_bound.is_empty() {
+            ProofTrieNodeV2::empty()
+        } else {
             return Ok(())
         };
-        let Some(root) = root else { return Ok(()) };
-        let path = root.path;
-        if path == parent {
-            self.recycle(root);
-            return Ok(())
+        // A direct root branch has no record in the branch table. An extension still carries
+        // the masks of the branch below it.
+        if targets.lower_bound.is_empty() &&
+            matches!(&proof.node, TrieNodeV2::Branch(branch) if branch.key.is_empty())
+        {
+            proof.masks = None;
         }
-        if !path.starts_with(&parent) {
-            return Err(StateProofError::TrieInconsistency(format!(
-                "local root path {path:?} does not start with parent prefix {parent:?}",
-            )))
-        }
-        let child_path = path.slice_unchecked(0, parent.len() + 1);
-        if root.retain_depth < child_path.len() {
-            self.recycle(root);
-            return Ok(())
-        }
-        self.rlp_encode_buf.clear();
-        let proof = root.into_proof(child_path, &mut self.rlp_encode_buf)?;
         self.retained_proofs.push(proof);
         Ok(())
-    }
-
-    fn recycle(&mut self, child: ProofNode<D>) {
-        if let ProofNodeKind::Branch { children, .. } = child.kind {
-            self.rlp_nodes_bufs.push(children);
-        }
     }
 
     pub(super) fn take_proofs(&mut self) -> Vec<ProofTrieNodeV2> {

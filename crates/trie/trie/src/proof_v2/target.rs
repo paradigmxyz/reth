@@ -18,17 +18,13 @@ fn target_child_prefix(target: &ProofV2Target) -> Nibbles {
         .map_or_else(Nibbles::new, |parent_len| target.key_nibbles.slice(0..parent_len + 1))
 }
 
-/// Describes targets with the same already-revealed parent and the bounded range traversed to
-/// calculate their direct children.
+/// Targets within one child of an already-revealed parent, or within the full trie.
 pub(crate) struct SubTrieTargets<'a> {
-    /// The first path traversed for these targets.
+    /// The root path of the requested subtree.
     pub(crate) lower_bound: Nibbles,
     /// The first path after the traversal range, or `None` if it extends through the end of the
     /// trie.
     pub(crate) upper_bound: Option<Nibbles>,
-    /// The path of the already-revealed parent branch. `None` means the actual trie root is
-    /// requested, while `Some(Nibbles::new())` means the root branch is already revealed.
-    pub(crate) parent_prefix: Option<Nibbles>,
     /// The targets belonging to this sub-trie. These will be sorted by their `key` field,
     /// lexicographically.
     pub(crate) targets: &'a [ProofV2Target],
@@ -64,14 +60,13 @@ impl<'a> TargetDepths<'a> {
 }
 
 /// Given a set of [`ProofV2Target`]s, returns an iterator over those same [`ProofV2Target`]s
-/// grouped by their already-revealed parent. Each group traverses the bounded span from its first
-/// targeted direct child through its last targeted direct child.
+/// grouped by the child of their already-revealed parent that needs a proof.
+/// Targets without a known parent share one group covering the full trie.
 pub(crate) fn iter_sub_trie_targets(
     targets: &mut [ProofV2Target],
 ) -> impl Iterator<Item = SubTrieTargets<'_>> {
-    // Sort by parent context first so equal parents are contiguous, then by target key so the
-    // first and last targets determine the traversal bounds for the group. `None` and a known root
-    // parent remain distinct.
+    // The known parent and its untargeted children need no proof. Requests for each child stay
+    // together so they share one traversal.
     targets.sort_unstable_by(|a, b| {
         known_parent_prefix(a)
             .cmp(&known_parent_prefix(b))
@@ -79,13 +74,11 @@ pub(crate) fn iter_sub_trie_targets(
     });
 
     targets
-        .chunk_by_mut(|current, next| known_parent_prefix(current) == known_parent_prefix(next))
+        .chunk_by_mut(|current, next| target_child_prefix(current) == target_child_prefix(next))
         .map(|targets| {
-            let parent_prefix = known_parent_prefix(&targets[0]);
             let lower_bound = target_child_prefix(&targets[0]);
-            let upper_bound = target_child_prefix(targets.last().expect("chunk is non-empty"))
-                .next_without_prefix();
-            SubTrieTargets { lower_bound, upper_bound, parent_prefix, targets }
+            let upper_bound = lower_bound.next_without_prefix();
+            SubTrieTargets { lower_bound, upper_bound, targets }
         })
 }
 
@@ -165,7 +158,7 @@ mod tests {
                     ],
                 )],
             ),
-            // Targets below children 0 and f of parent 2 span [20, 3).
+            // Children 0 and f of parent 2 have separate ranges, with a gap between them.
             (
                 vec![
                     ProofV2Target::new(B256::repeat_byte(0x20))
@@ -179,11 +172,14 @@ mod tests {
                     (
                         Some("2"),
                         "20",
+                        Some("21"),
+                        vec!["2020202020202020202020202020202020202020202020202020202020202020"],
+                    ),
+                    (
+                        Some("2"),
+                        "2f",
                         Some("3"),
-                        vec![
-                            "2020202020202020202020202020202020202020202020202020202020202020",
-                            "2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f",
-                        ],
+                        vec!["2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f"],
                     ),
                     (
                         Some("4"),
@@ -216,7 +212,7 @@ mod tests {
                     ),
                 ],
             ),
-            // A known-root span ending in child f is unbounded.
+            // Child f of a known root has an unbounded end.
             (
                 vec![
                     ProofV2Target::new(B256::repeat_byte(0x20))
@@ -224,15 +220,20 @@ mod tests {
                     ProofV2Target::new(B256::repeat_byte(0xf0))
                         .with_parent(ProofV2TargetParent::new(0)),
                 ],
-                vec![(
-                    Some(""),
-                    "2",
-                    None,
-                    vec![
-                        "2020202020202020202020202020202020202020202020202020202020202020",
-                        "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0",
-                    ],
-                )],
+                vec![
+                    (
+                        Some(""),
+                        "2",
+                        Some("3"),
+                        vec!["2020202020202020202020202020202020202020202020202020202020202020"],
+                    ),
+                    (
+                        Some(""),
+                        "f",
+                        None,
+                        vec!["f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0"],
+                    ),
+                ],
             ),
             // Parent ordering can make traversal ranges move backwards (4 then 20).
             (
@@ -285,7 +286,7 @@ mod tests {
             let actual = iter_sub_trie_targets(&mut input_targets)
                 .map(|sub_trie| {
                     (
-                        sub_trie.parent_prefix,
+                        known_parent_prefix(&sub_trie.targets[0]),
                         sub_trie.lower_bound,
                         sub_trie.upper_bound,
                         sub_trie
