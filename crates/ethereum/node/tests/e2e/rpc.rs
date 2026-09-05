@@ -588,7 +588,7 @@ async fn test_flashbots_validate_v5() -> eyre::Result<()> {
     let envelope = payload.clone().try_into_v5()?;
     assert!(!envelope.blobs_bundle.blobs.is_empty());
 
-    let mut request = BuilderBlockValidationRequestV5 {
+    let request = BuilderBlockValidationRequestV5 {
         request: SignedBidSubmissionV5 {
             message: BidTrace {
                 parent_hash: payload.block().parent_hash,
@@ -611,12 +611,27 @@ async fn test_flashbots_validate_v5() -> eyre::Result<()> {
         .await
         .expect("request should validate");
 
-    request.request.blobs_bundle.proofs[0] = request.request.blobs_bundle.proofs[1];
+    let mut invalid_proof_request = request.clone();
+    invalid_proof_request.request.blobs_bundle.proofs[0] =
+        invalid_proof_request.request.blobs_bundle.proofs[1];
     let err = provider
-        .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV5".into(), (&request,))
+        .raw_request::<_, ()>(
+            "flashbots_validateBuilderSubmissionV5".into(),
+            (&invalid_proof_request,),
+        )
         .await
         .unwrap_err();
     assert!(err.to_string().contains("invalid KZG proof"), "{err}");
+
+    invalid_proof_request.request.message.block_hash = B256::ZERO;
+    let err = provider
+        .raw_request::<_, ()>(
+            "flashbots_validateBuilderSubmissionV5".into(),
+            (&invalid_proof_request,),
+        )
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("block hash mismatch"), "{err}");
 
     Ok(())
 }
