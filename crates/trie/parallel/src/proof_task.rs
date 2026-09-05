@@ -628,23 +628,24 @@ where
 
     /// Runs the worker loop, processing jobs until the channel closes.
     ///
-    /// # Lifecycle
-    ///
-    /// 1. Initializes database provider and transaction
-    /// 2. Advertises availability
-    /// 3. Processes jobs in a loop:
-    ///    - Receives job from channel
-    ///    - Marks worker as busy
-    ///    - Processes the job
-    ///    - Marks worker as available
-    /// 4. Shuts down when channel closes
+    /// The first job opens the database snapshot. The worker keeps that snapshot and its cursors
+    /// for subsequent jobs. Workers without jobs do not hold readers that delay page reuse.
     ///
     /// # Panic Safety
     ///
     /// If this function panics, the worker thread terminates but other workers
     /// continue operating and the system degrades gracefully.
     fn run(mut self) -> ProviderResult<()> {
-        // Create provider from factory
+        let idle_start = Instant::now();
+        self.availability.mark_idle(self.worker_id);
+        let Ok(first_job) = self.work_rx.recv() else {
+            #[cfg(feature = "metrics")]
+            self.metrics.record_storage_worker_idle_time(idle_start.elapsed());
+            return Ok(())
+        };
+        let first_idle_time = idle_start.elapsed();
+        self.availability.mark_busy(self.worker_id);
+
         let provider = self.task_ctx.factory.database_provider_ro()?;
         let proof_tx = ProofTaskTx::new(provider, self.worker_id);
 
@@ -669,13 +670,10 @@ where
             instrumented_hashed_cursor,
         );
 
-        // Initially mark this worker as available.
-        self.availability.mark_idle(self.worker_id);
-
-        let mut total_idle_time = Duration::ZERO;
+        let mut total_idle_time = first_idle_time;
         let mut idle_start = Instant::now();
 
-        while let Ok(job) = self.work_rx.recv() {
+        for job in core::iter::once(first_job).chain(self.work_rx.iter()) {
             total_idle_time += idle_start.elapsed();
 
             // Mark worker as busy.
@@ -846,22 +844,24 @@ where
 
     /// Runs the worker loop, processing jobs until the channel closes.
     ///
-    /// # Lifecycle
-    ///
-    /// 1. Initializes database provider and transaction
-    /// 2. Advertises availability
-    /// 3. Processes jobs in a loop:
-    ///    - Receives job from channel
-    ///    - Marks worker as busy
-    ///    - Processes the job
-    ///    - Marks worker as available
-    /// 4. Shuts down when channel closes
+    /// The first job opens the database snapshot. The worker keeps that snapshot and its cursors
+    /// for subsequent jobs. Workers without jobs do not hold readers that delay page reuse.
     ///
     /// # Panic Safety
     ///
     /// If this function panics, the worker thread terminates but other workers
     /// continue operating and the system degrades gracefully.
     fn run(mut self) -> ProviderResult<()> {
+        let idle_start = Instant::now();
+        self.availability.mark_idle(self.worker_id);
+        let Ok(first_job) = self.work_rx.recv() else {
+            #[cfg(feature = "metrics")]
+            self.metrics.record_account_worker_idle_time(idle_start.elapsed());
+            return Ok(())
+        };
+        let first_idle_time = idle_start.elapsed();
+        self.availability.mark_busy(self.worker_id);
+
         let provider = self.task_ctx.factory.database_provider_ro()?;
 
         trace!(
@@ -919,14 +919,11 @@ where
                 instrumented_storage_hashed_cursor,
             )));
 
-        // Count this worker as available only after successful initialization.
-        self.availability.mark_idle(self.worker_id);
-
-        let mut total_idle_time = Duration::ZERO;
+        let mut total_idle_time = first_idle_time;
         let mut idle_start = Instant::now();
         let mut value_encoder_stats_cache = ValueEncoderStats::default();
 
-        while let Ok(job) = self.work_rx.recv() {
+        for job in core::iter::once(first_job).chain(self.work_rx.iter()) {
             total_idle_time += idle_start.elapsed();
 
             // Mark worker as busy.
@@ -1178,6 +1175,10 @@ mod tests {
     use super::*;
     use reth_chainspec::ChainSpec;
     use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
+    use reth_trie::{
+        hashed_cursor::noop::NoopHashedCursor,
+        trie_cursor::noop::{NoopAccountTrieCursor, NoopStorageTrieCursor},
+    };
     use std::sync::Arc;
 
     fn test_ctx<Factory>(factory: Factory) -> ProofTaskCtx<Factory> {
@@ -1208,5 +1209,134 @@ mod tests {
 
         // Workers shut down automatically when handle is dropped
         drop(proof_handle);
+    }
+
+    #[test]
+    fn workers_open_one_snapshot_only_when_they_receive_jobs() {
+        for job_count in [0, 2] {
+            let opens = Arc::new(AtomicUsize::new(0));
+            let factory = CountingFactory { opens: opens.clone() };
+            let roots = Arc::new(DashMap::default());
+            let (work_tx, work_rx) = unbounded();
+            let (result_tx, result_rx) = unbounded();
+            for _ in 0..job_count {
+                work_tx
+                    .send(StorageWorkerJob::StorageProof {
+                        input: StorageProofInput::new(B256::ZERO, Vec::new(), true),
+                        proof_result_sender: result_tx.clone(),
+                    })
+                    .unwrap();
+            }
+            drop(work_tx);
+            drop(result_tx);
+            StorageProofWorker::new(
+                test_ctx(factory.clone()),
+                work_rx,
+                0,
+                Arc::new(AvailabilitySheet::new(1)),
+                roots.clone(),
+                #[cfg(feature = "metrics")]
+                ProofTaskTrieMetrics::default(),
+                #[cfg(feature = "metrics")]
+                ProofTaskCursorMetrics::new(),
+            )
+            .run()
+            .unwrap();
+            let results: Vec<_> = result_rx.try_iter().collect();
+            assert_eq!(results.len(), job_count);
+            for message in results {
+                assert_eq!(message.result.unwrap().root, Some(reth_trie::EMPTY_ROOT_HASH));
+            }
+            let active = usize::from(job_count > 0);
+            assert_eq!(opens.load(Ordering::Relaxed), active);
+
+            let (work_tx, work_rx) = unbounded();
+            let (result_tx, result_rx) = unbounded();
+            let (storage_tx, _storage_rx) = unbounded();
+            for _ in 0..job_count {
+                work_tx
+                    .send(AccountWorkerJob::AccountMultiproof {
+                        input: Box::new(AccountMultiproofInput {
+                            targets: MultiProofTargetsV2::default(),
+                            proof_result_sender: ProofResultContext::new(
+                                result_tx.clone(),
+                                HashedPostState::default(),
+                                Instant::now(),
+                            ),
+                        }),
+                    })
+                    .unwrap();
+            }
+            drop(work_tx);
+            drop(result_tx);
+            AccountProofWorker::new(
+                test_ctx(factory),
+                work_rx,
+                0,
+                storage_tx,
+                Arc::new(AvailabilitySheet::new(1)),
+                roots,
+                #[cfg(feature = "metrics")]
+                ProofTaskTrieMetrics::default(),
+                #[cfg(feature = "metrics")]
+                ProofTaskCursorMetrics::new(),
+            )
+            .run()
+            .unwrap();
+            let results: Vec<_> = result_rx.try_iter().collect();
+            assert_eq!(results.len(), job_count);
+            for message in results {
+                let proof = message.result.unwrap();
+                assert!(proof.account_proofs.is_empty());
+                assert!(proof.storage_proofs.is_empty());
+            }
+            assert_eq!(opens.load(Ordering::Relaxed), 2 * active);
+        }
+    }
+
+    #[derive(Clone)]
+    struct CountingFactory {
+        opens: Arc<AtomicUsize>,
+    }
+
+    impl DatabaseProviderROFactory for CountingFactory {
+        type Provider = Self;
+
+        fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
+            self.opens.fetch_add(1, Ordering::Relaxed);
+            Ok(self.clone())
+        }
+    }
+
+    impl TrieCursorFactory for CountingFactory {
+        type AccountTrieCursor<'a> = NoopAccountTrieCursor;
+        type StorageTrieCursor<'a> = NoopStorageTrieCursor;
+
+        fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
+            Ok(NoopAccountTrieCursor::default())
+        }
+
+        fn storage_trie_cursor(
+            &self,
+            _hashed_address: B256,
+        ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
+            Ok(NoopStorageTrieCursor::default())
+        }
+    }
+
+    impl HashedCursorFactory for CountingFactory {
+        type AccountCursor<'a> = NoopHashedCursor<reth_primitives_traits::Account>;
+        type StorageCursor<'a> = NoopHashedCursor<U256>;
+
+        fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
+            Ok(NoopHashedCursor::default())
+        }
+
+        fn hashed_storage_cursor(
+            &self,
+            _hashed_address: B256,
+        ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
+            Ok(NoopHashedCursor::default())
+        }
     }
 }
