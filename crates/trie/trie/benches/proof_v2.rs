@@ -3,15 +3,24 @@ use alloy_primitives::{
     map::{B256Map, B256Set},
     B256, U256,
 };
-use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
+use criterion::{
+    criterion_group, criterion_main, measurement::WallTime, BatchSize, BenchmarkGroup, BenchmarkId,
+    Criterion,
+};
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use reth_trie::{
-    hashed_cursor::{mock::MockHashedCursorFactory, HashedCursorFactory},
+    hashed_cursor::{
+        mock::MockHashedCursorFactory, noop::NoopHashedCursorFactory, HashedCursorFactory,
+        HashedPostStateCursorFactory,
+    },
     proof::StorageProof,
     proof_v2::StorageProofCalculator,
-    trie_cursor::{mock::MockTrieCursorFactory, TrieCursorFactory},
+    trie_cursor::{
+        mock::MockTrieCursorFactory, noop::NoopTrieCursorFactory, InMemoryTrieCursorFactory,
+        TrieCursorFactory,
+    },
 };
-use reth_trie_common::{HashedPostState, HashedStorage};
+use reth_trie_common::{HashedPostState, HashedStorage, ProofV2Target, ProofV2TargetParent};
 
 /// Generate test data for benchmarking.
 ///
@@ -50,7 +59,9 @@ fn generate_test_data(
     let hashed_post_state = HashedPostState { accounts: B256Map::default(), storages };
 
     // Generate proof targets: 80% from existing slots, 20% random
-    let slot_keys: Vec<B256> = storage_map.keys().copied().collect();
+    let mut slot_keys: Vec<B256> = storage_map.keys().copied().collect();
+    // Keep target selection identical across runs with different hash map seeds.
+    slot_keys.sort_unstable();
 
     let targets_strategy = proptest::collection::vec(
         prop::bool::weighted(0.8).prop_flat_map(move |from_slots| {
@@ -77,44 +88,45 @@ fn generate_test_data(
 
 /// Create cursor factories from a `HashedPostState` for storage trie testing.
 ///
-/// This mimics the test harness pattern from the `proof_v2` tests by using `StateRoot`
-/// to generate `TrieUpdates` from the `HashedPostState`.
+/// Cached cases use the branches produced by `StorageRoot` for each storage trie.
 fn create_cursor_factories(
     post_state: &HashedPostState,
-) -> (MockTrieCursorFactory, MockHashedCursorFactory) {
-    use reth_trie::{updates::StorageTrieUpdates, StateRoot};
+    cache_branches: bool,
+) -> (MockTrieCursorFactory, MockHashedCursorFactory, reth_trie_common::updates::TrieUpdatesSorted)
+{
+    use reth_trie::{updates::StorageTrieUpdates, StorageRoot};
 
-    // Create empty trie cursor factory to serve as the initial state for StateRoot
-    // Ensure that there's a storage trie dataset for every storage account
-    let storage_tries: B256Map<_> = post_state
-        .storages
-        .keys()
-        .copied()
-        .map(|addr| (addr, StorageTrieUpdates::default()))
-        .collect();
-
-    let empty_trie_cursor_factory =
-        MockTrieCursorFactory::from_trie_updates(reth_trie_common::updates::TrieUpdates {
-            storage_tries: storage_tries.clone(),
-            ..Default::default()
-        });
-
-    // Create mock hashed cursor factory from the post state
+    let mut trie_updates = reth_trie_common::updates::TrieUpdates {
+        storage_tries: post_state
+            .storages
+            .keys()
+            .copied()
+            .map(|addr| (addr, StorageTrieUpdates::default()))
+            .collect(),
+        ..Default::default()
+    };
     let hashed_cursor_factory = MockHashedCursorFactory::from_hashed_post_state(post_state.clone());
-
-    // Generate TrieUpdates using StateRoot
-    let (_root, mut trie_updates) =
-        StateRoot::new(empty_trie_cursor_factory, hashed_cursor_factory.clone())
+    if cache_branches {
+        let empty_trie_cursor_factory =
+            MockTrieCursorFactory::from_trie_updates(trie_updates.clone());
+        for (&hashed_address, storage_updates) in &mut trie_updates.storage_tries {
+            let (_, _, updates) = StorageRoot::new_hashed(
+                empty_trie_cursor_factory.clone(),
+                hashed_cursor_factory.clone(),
+                hashed_address,
+                Default::default(),
+                #[cfg(feature = "metrics")]
+                reth_trie::metrics::TrieRootMetrics::new(reth_trie::TrieType::Storage),
+            )
             .root_with_updates()
-            .expect("StateRoot should succeed");
+            .expect("StorageRoot should succeed");
+            *storage_updates = updates;
+        }
+    }
 
-    // Continue using empty storage tries for each account
-    trie_updates.storage_tries = storage_tries;
+    let trie_cursor_factory = MockTrieCursorFactory::from_trie_updates(trie_updates.clone());
 
-    // Initialize trie cursor factory from the generated TrieUpdates
-    let trie_cursor_factory = MockTrieCursorFactory::from_trie_updates(trie_updates);
-
-    (trie_cursor_factory, hashed_cursor_factory)
+    (trie_cursor_factory, hashed_cursor_factory, trie_updates.into_sorted())
 }
 
 // Benchmark comparing legacy and V2 implementations
@@ -124,51 +136,107 @@ fn bench_proof_algos(c: &mut Criterion) {
         for num_targets in [1, 16, 64, 128, 512, 2048] {
             let (hashed_address, hashed_post_state, targets, legacy_targets) =
                 generate_test_data(dataset_size, num_targets);
+            let sorted_state = hashed_post_state.clone().into_sorted();
 
-            // Create mock cursor factories from the hashed post state
-            let (trie_cursor_factory, hashed_cursor_factory) =
-                create_cursor_factories(&hashed_post_state);
+            for (cache_name, cache_branches) in [("cached", true), ("leaves", false)] {
+                let (trie_cursor_factory, hashed_cursor_factory, sorted_updates) =
+                    create_cursor_factories(&hashed_post_state, cache_branches);
 
-            let bench_name = format!("dataset_{dataset_size}/targets_{num_targets}");
+                let bench_name =
+                    format!("{cache_name}/dataset_{dataset_size}/targets_{num_targets}");
 
-            group.bench_function(BenchmarkId::new("Legacy", &bench_name), |b| {
-                b.iter_batched(
-                    || legacy_targets.clone(),
-                    |targets| {
-                        StorageProof::new_hashed(
-                            trie_cursor_factory.clone(),
-                            hashed_cursor_factory.clone(),
-                            hashed_address,
-                        )
-                        .storage_multiproof(targets)
-                        .expect("Legacy proof generation failed");
-                    },
-                    BatchSize::SmallInput,
+                bench_proof_case(
+                    &mut group,
+                    "Mock",
+                    &bench_name,
+                    trie_cursor_factory,
+                    hashed_cursor_factory,
+                    (&targets, &legacy_targets),
+                    hashed_address,
                 );
-            });
-
-            group.bench_function(BenchmarkId::new("V2", &bench_name), |b| {
-                let trie_cursor = trie_cursor_factory
-                    .storage_trie_cursor(hashed_address)
-                    .expect("Failed to create trie cursor");
-                let hashed_cursor = hashed_cursor_factory
-                    .hashed_storage_cursor(hashed_address)
-                    .expect("Failed to create hashed cursor");
-
-                let mut proof_calculator =
-                    StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
-
-                b.iter_batched(
-                    || targets.iter().copied().map(Into::into).collect::<Vec<_>>(),
-                    |mut targets| {
-                        proof_calculator
-                            .storage_proof(hashed_address, &mut targets)
-                            .expect("Proof generation failed");
-                    },
-                    BatchSize::SmallInput,
+                bench_proof_case(
+                    &mut group,
+                    "Overlay",
+                    &bench_name,
+                    InMemoryTrieCursorFactory::new(
+                        NoopTrieCursorFactory::default(),
+                        &sorted_updates,
+                    ),
+                    HashedPostStateCursorFactory::new(
+                        NoopHashedCursorFactory::default(),
+                        &sorted_state,
+                    ),
+                    (&targets, &legacy_targets),
+                    hashed_address,
                 );
-            });
+            }
         }
+    }
+}
+
+fn bench_proof_case<TC: TrieCursorFactory + Clone, HC: HashedCursorFactory + Clone>(
+    group: &mut BenchmarkGroup<'_, WallTime>,
+    source: &str,
+    bench_name: &str,
+    trie_cursor_factory: TC,
+    hashed_cursor_factory: HC,
+    targets: (&[B256], &B256Set),
+    hashed_address: B256,
+) {
+    let (targets, legacy_targets) = targets;
+    group.bench_function(BenchmarkId::new(format!("{source}/Legacy"), bench_name), |b| {
+        b.iter_batched(
+            || legacy_targets.clone(),
+            |targets| {
+                StorageProof::new_hashed(
+                    trie_cursor_factory.clone(),
+                    hashed_cursor_factory.clone(),
+                    hashed_address,
+                )
+                .storage_multiproof(targets)
+                .expect("Legacy proof generation failed");
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    for name in ["V2", "V2Partial", "V2Mixed"] {
+        group.bench_function(BenchmarkId::new(format!("{source}/{name}"), bench_name), |b| {
+            let mut calculator = StorageProofCalculator::new_storage(
+                trie_cursor_factory.storage_trie_cursor(hashed_address).unwrap(),
+                hashed_cursor_factory.hashed_storage_cursor(hashed_address).unwrap(),
+            );
+            b.iter_batched(
+                || {
+                    targets
+                        .iter()
+                        .copied()
+                        .enumerate()
+                        .map(|(i, key)| {
+                            let parent = match name {
+                                "V2Partial" => ProofV2TargetParent::new(2),
+                                "V2Mixed" => ProofV2TargetParent::new([0, 2, 8][i % 3]),
+                                _ => ProofV2TargetParent::NONE,
+                            };
+                            ProofV2Target::new(key).with_parent(parent)
+                        })
+                        .collect::<Vec<_>>()
+                },
+                |mut targets| {
+                    calculator.storage_proof(hashed_address, &mut targets).unwrap();
+                },
+                BatchSize::SmallInput,
+            );
+        });
+    }
+    if targets.len() == 1 {
+        group.bench_function(BenchmarkId::new(format!("{source}/V2Root"), bench_name), |b| {
+            let mut calculator = StorageProofCalculator::new_storage(
+                trie_cursor_factory.storage_trie_cursor(hashed_address).unwrap(),
+                hashed_cursor_factory.hashed_storage_cursor(hashed_address).unwrap(),
+            );
+            b.iter(|| calculator.storage_root_node(hashed_address).unwrap());
+        });
     }
 }
 

@@ -45,10 +45,15 @@ revm.workspace = true
 triehash.workspace = true
 
 # misc
+criterion.workspace = true
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 serde_json.workspace = true
 similar-asserts.workspace = true
+
+[[bench]]
+name = "proof_v2"
+harness = false
 
 [features]
 metrics = ["reth-trie/metrics"]
