@@ -427,8 +427,11 @@ where
         &self,
         request: BuilderBlockValidationRequestV5,
     ) -> Result<(), ValidationApiError> {
+        let payload = ExecutionPayload::V3(request.request.execution_payload);
+        validate_message_against_payload(&request.request.message, &payload)?;
+
         let block = self.payload_validator.ensure_well_formed_payload(ExecutionData {
-            payload: ExecutionPayload::V3(request.request.execution_payload),
+            payload,
             sidecar: ExecutionPayloadSidecar::v4(
                 CancunPayloadFields {
                     parent_beacon_block_root: request.parent_beacon_block_root,
@@ -468,12 +471,15 @@ where
         &self,
         request: BuilderBlockValidationRequestV6,
     ) -> Result<(), ValidationApiError> {
+        let payload = ExecutionPayload::V4(request.request.execution_payload);
+        validate_message_against_payload(&request.request.message, &payload)?;
+
         let decoded_bal =
-            DecodedBal::from_rlp_bytes(request.request.execution_payload.block_access_list.clone())
+            DecodedBal::from_rlp_bytes(payload.as_v4().unwrap().block_access_list.clone())
                 .map_err(ValidationApiError::InvalidBlockAccessList)?;
 
         let block = self.payload_validator.ensure_well_formed_payload(ExecutionData {
-            payload: ExecutionPayload::V4(request.request.execution_payload),
+            payload,
             sidecar: ExecutionPayloadSidecar::v4(
                 CancunPayloadFields {
                     parent_beacon_block_root: request.parent_beacon_block_root,
@@ -633,6 +639,38 @@ pub struct ValidationApiInner<Provider, E: ConfigureEvm, T: PayloadTypes> {
     metrics: ValidationMetrics,
 }
 
+/// Ensures that the raw execution payload fields match the corresponding [`BidTrace`] fields.
+fn validate_message_against_payload(
+    message: &BidTrace,
+    payload: &ExecutionPayload,
+) -> Result<(), ValidationApiError> {
+    let payload = payload.as_v1();
+
+    if payload.block_hash != message.block_hash {
+        Err(ValidationApiError::BlockHashMismatch(GotExpected {
+            got: message.block_hash,
+            expected: payload.block_hash,
+        }))
+    } else if payload.parent_hash != message.parent_hash {
+        Err(ValidationApiError::ParentHashMismatch(GotExpected {
+            got: message.parent_hash,
+            expected: payload.parent_hash,
+        }))
+    } else if payload.gas_limit != message.gas_limit {
+        Err(ValidationApiError::GasLimitMismatch(GotExpected {
+            got: message.gas_limit,
+            expected: payload.gas_limit,
+        }))
+    } else if payload.gas_used != message.gas_used {
+        Err(ValidationApiError::GasUsedMismatch(GotExpected {
+            got: message.gas_used,
+            expected: payload.gas_used,
+        }))
+    } else {
+        Ok(())
+    }
+}
+
 /// Calculates a deterministic hash of the blocklist for change detection.
 ///
 /// This function sorts addresses to ensure deterministic output regardless of
@@ -758,8 +796,98 @@ pub(crate) struct ValidationMetrics {
 
 #[cfg(test)]
 mod tests {
-    use super::{hash_disallow_list, AddressSet};
-    use alloy_primitives::Address;
+    use super::{
+        hash_disallow_list, validate_message_against_payload, AddressSet, ValidationApiError,
+    };
+    use alloy_primitives::{Address, B256};
+    use alloy_rpc_types_beacon::relay::BidTrace;
+    use alloy_rpc_types_engine::{ExecutionPayload, ExecutionPayloadV1};
+
+    fn test_execution_payload() -> ExecutionPayload {
+        ExecutionPayload::V1(ExecutionPayloadV1 {
+            parent_hash: B256::repeat_byte(0x11),
+            fee_recipient: Address::ZERO,
+            state_root: B256::ZERO,
+            receipts_root: B256::ZERO,
+            logs_bloom: Default::default(),
+            prev_randao: B256::ZERO,
+            block_number: 1,
+            gas_limit: 30_000_000,
+            gas_used: 15_000_000,
+            timestamp: 1,
+            extra_data: Default::default(),
+            base_fee_per_gas: Default::default(),
+            block_hash: B256::repeat_byte(0x22),
+            transactions: Default::default(),
+        })
+    }
+
+    fn matching_bid_trace(payload: &ExecutionPayload) -> BidTrace {
+        let payload = payload.as_v1();
+        BidTrace {
+            parent_hash: payload.parent_hash,
+            block_hash: payload.block_hash,
+            gas_limit: payload.gas_limit,
+            gas_used: payload.gas_used,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_validate_message_against_payload_block_hash_mismatch() {
+        let payload = test_execution_payload();
+        let mut message = matching_bid_trace(&payload);
+        message.block_hash = B256::repeat_byte(0x33);
+
+        let err = validate_message_against_payload(&message, &payload).unwrap_err();
+        let ValidationApiError::BlockHashMismatch(mismatch) = err else {
+            panic!("unexpected error: {err}")
+        };
+        assert_eq!(mismatch.got, message.block_hash);
+        assert_eq!(mismatch.expected, payload.block_hash());
+    }
+
+    #[test]
+    fn test_validate_message_against_payload_parent_hash_mismatch() {
+        let payload = test_execution_payload();
+        let mut message = matching_bid_trace(&payload);
+        message.parent_hash = B256::repeat_byte(0x33);
+
+        let err = validate_message_against_payload(&message, &payload).unwrap_err();
+        let ValidationApiError::ParentHashMismatch(mismatch) = err else {
+            panic!("unexpected error: {err}")
+        };
+        assert_eq!(mismatch.got, message.parent_hash);
+        assert_eq!(mismatch.expected, payload.parent_hash());
+    }
+
+    #[test]
+    fn test_validate_message_against_payload_gas_limit_mismatch() {
+        let payload = test_execution_payload();
+        let mut message = matching_bid_trace(&payload);
+        message.gas_limit += 1;
+
+        let err = validate_message_against_payload(&message, &payload).unwrap_err();
+        let ValidationApiError::GasLimitMismatch(mismatch) = err else {
+            panic!("unexpected error: {err}")
+        };
+        assert_eq!(mismatch.got, message.gas_limit);
+        assert_eq!(mismatch.expected, payload.gas_limit());
+    }
+
+    #[test]
+    fn test_validate_message_against_payload_gas_used_mismatch() {
+        let payload = test_execution_payload();
+        let mut message = matching_bid_trace(&payload);
+        message.gas_used += 1;
+
+        let err = validate_message_against_payload(&message, &payload).unwrap_err();
+        let ValidationApiError::GasUsedMismatch(mismatch) = err else {
+            panic!("unexpected error: {err}")
+        };
+        assert_eq!(mismatch.got, message.gas_used);
+        assert_eq!(mismatch.expected, payload.as_v1().gas_used);
+    }
 
     #[test]
     fn test_hash_disallow_list_deterministic() {
