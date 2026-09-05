@@ -480,7 +480,8 @@ mod tests {
         tree_state.insert_executed(fork_block_5.clone());
 
         assert_eq!(tree_state.blocks_by_hash.len(), 8);
-        assert_eq!(tree_state.blocks_by_number[&3].len(), 2); // two blocks at height 3 (original and fork)
+        assert_eq!(tree_state.blocks_by_number[&3].len(), 2); // two blocks at height 3 (original
+                                                              // and fork)
         assert_eq!(tree_state.parent_to_child[&blocks[1].recovered_block().hash()].len(), 2); // block 2 should have two children
 
         // verify that we can insert the same block again without issues
