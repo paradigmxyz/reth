@@ -11,8 +11,13 @@ const CRITICAL_METHOD_PREFIXES: &[&str] =
     &["engine_forkchoiceUpdated", "engine_getPayload", "engine_newPayload"];
 
 /// Engine API methods for upcoming hardforks that should not warn while they are still unstable.
-const UNSTABLE_METHODS: &[&str] =
-    &["engine_forkchoiceUpdatedV4", "engine_getPayloadV6", "engine_newPayloadV5"];
+const UNSTABLE_METHODS: &[&str] = &[
+    "engine_forkchoiceUpdatedV4",
+    "engine_forkchoiceUpdatedV5",
+    "engine_getPayloadV6",
+    "engine_newPayloadV5",
+    "engine_newPayloadV6",
+];
 
 /// All Engine API capabilities supported by Reth (Ethereum mainnet).
 ///
@@ -22,6 +27,7 @@ pub const CAPABILITIES: &[&str] = &[
     "engine_forkchoiceUpdatedV2",
     "engine_forkchoiceUpdatedV3",
     "engine_forkchoiceUpdatedV4",
+    "engine_forkchoiceUpdatedV5",
     "engine_getClientVersionV1",
     "engine_getPayloadV1",
     "engine_getPayloadV2",
@@ -29,11 +35,13 @@ pub const CAPABILITIES: &[&str] = &[
     "engine_getPayloadV4",
     "engine_getPayloadV5",
     "engine_getPayloadV6",
+    "engine_getInclusionListV1",
     "engine_newPayloadV1",
     "engine_newPayloadV2",
     "engine_newPayloadV3",
     "engine_newPayloadV4",
     "engine_newPayloadV5",
+    "engine_newPayloadV6",
     "engine_getPayloadBodiesByHashV1",
     "engine_getPayloadBodiesByHashV2",
     "engine_getPayloadBodiesByRangeV1",
@@ -250,6 +258,7 @@ mod tests {
         assert!(!is_critical_method("engine_getPayloadBodiesByHashV1"));
         assert!(!is_critical_method("engine_getPayloadBodiesByRangeV1"));
         assert!(!is_critical_method("engine_getClientVersionV1"));
+        assert!(!is_critical_method("engine_getInclusionListV1"));
     }
 
     #[test]

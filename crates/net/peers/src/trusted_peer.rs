@@ -116,6 +116,18 @@ impl FromStr for TrustedPeer {
     type Err = NodeRecordParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        #[cfg(feature = "secp256k1")]
+        if s.starts_with("enr:") {
+            let enr = enr::Enr::<secp256k1::SecretKey>::from_str(s)
+                .map_err(NodeRecordParseError::InvalidUrl)?;
+            let mut record = NodeRecord::try_from(&enr)?;
+            if !record.has_rlpx_endpoint() {
+                // Discovery-only ENRs commonly share their UDP port with the RLPx listener.
+                record.tcp_port = record.udp_port;
+            }
+            return Ok(record.into())
+        }
+
         use url::Url;
 
         // Parse the URL with enode prefix replaced with http.
@@ -177,6 +189,23 @@ mod tests {
             udp_port: 30301,
             id: "6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0".parse().unwrap(),
         })
+    }
+
+    #[cfg(feature = "secp256k1")]
+    #[test]
+    fn test_enr_parse() {
+        let enr = "enr:-IS4QHCYrYZbAKWCBRlAy5zzaDZXJBGkcnh4MHcBFZntXNFrdvJjX04jRzjzCBOonrkTfj499SZuOh8R33Ls8RRcy5wBgmlkgnY0gmlwhH8AAAGJc2VjcDI1NmsxoQPKY0yuDUmstAHYpMa2_oxVtw0RW_QAdpzBQA8yWM0xOIN1ZHCCdl8";
+        let node: TrustedPeer = enr.parse().unwrap();
+
+        assert_eq!(node, TrustedPeer {
+            host: Host::Ipv4([127, 0, 0, 1].into()),
+            tcp_port: 30303,
+            udp_port: 30303,
+            id: "ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd31387574077f301b421bc84df7266c44e9e6d569fc56be00812904767bf5ccd1fc7f"
+                .parse()
+                .unwrap(),
+        });
+        assert!("enr:garbage".parse::<TrustedPeer>().is_err());
     }
 
     #[test]

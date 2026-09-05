@@ -1,6 +1,6 @@
 //! Transactions management for the p2p network.
 
-use alloy_consensus::transaction::TxHashRef;
+use alloy_consensus::{constants::EIP4844_TX_TYPE_ID, transaction::TxHashRef};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use smallvec::SmallVec;
 
@@ -48,13 +48,14 @@ use alloy_rlp::Encodable;
 use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
-    BroadcastPoolTransactions, DedupPayload, EthNetworkPrimitives, EthVersion,
+    BroadcastPoolTransactions, Cells, DedupPayload, EthNetworkPrimitives, EthVersion, GetCells,
     GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData, LazyEncoded,
     LazyEncodedTransaction, NetworkPrimitives, NewPooledTransactionHashes,
     NewPooledTransactionHashes66, NewPooledTransactionHashes68, NewPooledTransactionHashes72,
     PooledTransactions, RequestTxHashes, Transactions, ValidAnnouncementData,
 };
 use reth_ethereum_primitives::TxType;
+use reth_evm::SenderRecoveryCache;
 use reth_metrics::common::mpsc::MemoryBoundedReceiver;
 use reth_network_api::{
     events::{PeerEvent, SessionInfo},
@@ -224,6 +225,33 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
 
         rx.await?.map(|res| Some(res.0))
     }
+
+    /// Requests cells from a specific eth/72 peer.
+    ///
+    /// This is the transport-level client primitive for EIP-8070. The caller supplies the
+    /// transaction hashes and the common cell mask for the request. Announcement-driven batching,
+    /// retries, cell verification, and blob reconstruction are layered above this method.
+    ///
+    /// Returns `None` if the peer is no longer connected.
+    pub async fn get_cells_from(
+        &self,
+        peer_id: PeerId,
+        hashes: Vec<B256>,
+        cell_mask: alloy_primitives::B128,
+    ) -> Result<Option<Cells>, RequestError> {
+        if hashes.is_empty() {
+            return Ok(Some(Cells { cell_mask, ..Default::default() }))
+        }
+
+        let Some(peer) = self.peer_handle(peer_id).await? else { return Ok(None) };
+
+        let (tx, rx) = oneshot::channel();
+        let request =
+            PeerRequest::GetCells { request: GetCells { hashes, cell_mask }, response: tx };
+        peer.try_send(request).map_err(|_| RequestError::ChannelClosed)?;
+
+        rx.await?.map(Some)
+    }
 }
 
 /// Manages transactions on top of the p2p network.
@@ -285,6 +313,8 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
 pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Access to the transaction pool.
     pool: Pool,
+    /// Cache of recovered transaction senders shared with payload execution, if enabled.
+    sender_recovery_cache: Option<SenderRecoveryCache>,
     /// Network access.
     network: NetworkHandle<N>,
     /// Subscriptions to all network related events.
@@ -400,6 +430,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
 
         Self {
             pool,
+            sender_recovery_cache: None,
             network,
             network_events,
             transaction_fetcher,
@@ -422,6 +453,12 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
     /// Returns a new handle that can send commands to this type.
     pub fn handle(&self) -> TransactionsHandle<N> {
         TransactionsHandle { manager_tx: self.command_tx.clone() }
+    }
+
+    /// Uses the provided sender recovery cache.
+    pub fn with_sender_recovery_cache(mut self, cache: SenderRecoveryCache) -> Self {
+        self.sender_recovery_cache = Some(cache);
+        self
     }
 
     /// Returns `true` if [`TransactionsManager`] has capacity to request pending hashes. Returns
@@ -507,6 +544,10 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             // Blob sidecar errors: penalize but do NOT cache the hash as bad.
             // The transaction may be valid — only the sidecar from this peer was wrong.
             // Using regular penalties means repeated offenders still get disconnected.
+            //
+            // Eth/72 peers cannot reach this path with an elided sidecar: their blob
+            // transactions are dropped before import in `import_transactions`, so any sidecar
+            // failure here means actual blob data failed validation.
             if let Some(peers) = peers {
                 for peer_id in peers {
                     self.report_peer_bad_transactions(peer_id);
@@ -1416,6 +1457,23 @@ where
             }
         }
 
+        // Eth/72 `PooledTransactions` responses elide blob payloads from type 3 transactions per
+        // EIP-8070, so their sidecars can never validate. Drop them before touching the pool;
+        // geth equivalently diverts these bodies into a buffer that is completed with cells
+        // fetched via `GetCells`, which is not implemented yet.
+        if peer.version() == EthVersion::Eth72 {
+            let len_before = transactions.len();
+            transactions.retain(|tx| !tx.is_eip4844());
+            let dropped = len_before - transactions.len();
+            if dropped > 0 {
+                trace!(target: "net::tx",
+                    peer_id=format!("{peer_id:#}"),
+                    dropped,
+                    "dropped blob transactions from eth72 response, cell fetching not implemented"
+                );
+            }
+        }
+
         // tracks the quality of the given transactions
         let mut has_bad_transactions = false;
 
@@ -1454,16 +1512,23 @@ where
 
         let txs_len = transactions.len();
 
-        let recover = |tx| match Pool::Transaction::try_recover(tx) {
-            Ok(tx) => Some(tx),
-            Err(badtx) => {
-                trace!(target: "net::tx",
-                    peer_id=format!("{peer_id:#}"),
-                    hash=%badtx.tx_hash(),
-                    client_version=%client_version,
-                    "failed ecrecovery for transaction"
-                );
-                None
+        let recover = |tx| {
+            let recovered = if let Some(cache) = &self.sender_recovery_cache {
+                Pool::Transaction::try_recover_with_cache(tx, cache)
+            } else {
+                Pool::Transaction::try_recover(tx)
+            };
+            match recovered {
+                Ok(tx) => Some(tx),
+                Err(badtx) => {
+                    trace!(target: "net::tx",
+                        peer_id=format!("{peer_id:#}"),
+                        hash=%badtx.tx_hash(),
+                        client_version=%client_version,
+                        "failed ecrecovery for transaction"
+                    );
+                    None
+                }
             }
         };
 
@@ -2041,7 +2106,12 @@ impl PooledTransactionsHashesBuilder {
             Self::Eth72(msg) => {
                 msg.hashes.push(*pooled_tx.hash());
                 msg.sizes.push(pooled_tx.encoded_length());
-                msg.types.push(pooled_tx.transaction.ty());
+                let ty = pooled_tx.transaction.ty();
+                msg.types.push(ty);
+                if ty == EIP4844_TX_TYPE_ID {
+                    // The pool holds the full sidecar, so every cell can be served.
+                    msg.cell_mask = Some(NewPooledTransactionHashes72::ALL_CELLS_MASK);
+                }
             }
         }
     }
@@ -2082,7 +2152,12 @@ impl PooledTransactionsHashesBuilder {
             Self::Eth72(msg) => {
                 msg.hashes.push(*tx.tx_hash());
                 msg.sizes.push(tx.propagation_size());
-                msg.types.push(tx.tx_type());
+                let ty = tx.tx_type();
+                msg.types.push(ty);
+                if ty == EIP4844_TX_TYPE_ID {
+                    // The pool holds the full sidecar, so every cell can be served.
+                    msg.cell_mask = Some(NewPooledTransactionHashes72::ALL_CELLS_MASK);
+                }
             }
         }
     }
@@ -3314,6 +3389,31 @@ mod tests {
             PropagationMode::Basic,
         );
         assert!(propagated.is_empty());
+    }
+
+    #[test]
+    fn test_eth72_hashes_builder_sets_cell_mask_for_blob_txs() {
+        let mut tx_gen = TransactionGenerator::new(rand::rng());
+
+        // no blob transactions: the mask stays unset and encodes as a zero mask
+        let mut builder = PooledTransactionsHashesBuilder::new(EthVersion::Eth72);
+        builder.push(&PropagateTransaction::pool_tx(valid_eth_pool_transaction(
+            tx_gen.gen_eip1559_pooled(),
+        )));
+        let msg = builder.build();
+        assert_eq!(msg.as_eth72().unwrap().cell_mask, None);
+
+        // announcing a blob transaction advertises every cell as available
+        let mut builder = PooledTransactionsHashesBuilder::new(EthVersion::Eth72);
+        builder.push(&PropagateTransaction::pool_tx(valid_eth_pool_transaction(
+            tx_gen.gen_eip1559_pooled(),
+        )));
+        builder.push_pooled(valid_eth_pool_transaction(tx_gen.gen_eip4844_pooled()));
+        let msg = builder.build();
+        assert_eq!(
+            msg.as_eth72().unwrap().cell_mask,
+            Some(NewPooledTransactionHashes72::ALL_CELLS_MASK)
+        );
     }
 
     #[tokio::test]

@@ -243,7 +243,7 @@ async fn test_testing_build_block_v1_osaka() -> eyre::Result<()> {
         withdrawals: Some(vec![]),
         parent_beacon_block_root: Some(B256::ZERO),
         slot_number: None,
-        target_gas_limit: None,
+        ..Default::default()
     };
 
     let request = TestingBuildBlockRequestV1 {
@@ -320,7 +320,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
         withdrawals: Some(vec![]),
         parent_beacon_block_root: Some(B256::ZERO),
         slot_number: None,
-        target_gas_limit: None,
+        ..Default::default()
     };
 
     let envelope = node
@@ -521,8 +521,7 @@ async fn test_sparse_trie_reuse_across_blocks() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     // Use the state-root task with pruning enabled.
-    let tree_config =
-        TreeConfig::default().with_sparse_trie_prune_depth(2).with_sparse_trie_max_hot_slots(100);
+    let tree_config = TreeConfig::default().with_sparse_trie_prune_depth(2);
 
     let (mut nodes, _wallet) = setup_engine::<EthereumNode>(
         1,

@@ -40,7 +40,7 @@ pub trait SpawnBlocking: EthApiTypes + Clone + Send + Sync + 'static {
     /// Returns handle to semaphore for blocking IO tasks.
     ///
     /// This semaphore is used to limit concurrent blocking IO operations like `eth_call`,
-    /// `eth_estimateGas`, and similar methods that require EVM execution.
+    /// `eth_estimateGas` and the `eth_getLogs` range scans.
     fn blocking_io_task_guard(&self) -> &Arc<Semaphore>;
 
     /// Acquires a permit from the tracing task semaphore.
@@ -80,8 +80,8 @@ pub trait SpawnBlocking: EthApiTypes + Clone + Send + Sync + 'static {
 
     /// Acquires a permit from the blocking IO request semaphore.
     ///
-    /// This should be used for operations like `eth_call`, `eth_estimateGas`, and similar methods
-    /// that require EVM execution and are spawned as blocking tasks.
+    /// This should be used for operations like `eth_call`, `eth_estimateGas` and the `eth_getLogs`
+    /// range scans, which are spawned as blocking tasks.
     ///
     /// See also [`Semaphore::acquire_owned`](`tokio::sync::Semaphore::acquire_owned`).
     fn acquire_owned_blocking_io(
@@ -164,6 +164,9 @@ pub trait SpawnBlocking: EthApiTypes + Clone + Send + Sync + 'static {
         let (tx, rx) = oneshot::channel();
         let this = self.clone();
         self.io_task_spawner().spawn_blocking_task(async move {
+            if tx.is_closed() {
+                return
+            }
             let res = f(this);
             let _ = tx.send(res);
         });
@@ -184,11 +187,20 @@ pub trait SpawnBlocking: EthApiTypes + Clone + Send + Sync + 'static {
         F: FnOnce(Self) -> Fut + Send + 'static,
         R: Send + 'static,
     {
-        let (tx, rx) = oneshot::channel();
+        let (mut tx, rx) = oneshot::channel();
         let this = self.clone();
         self.io_task_spawner().spawn_blocking_task(async move {
-            let res = f(this).await;
-            let _ = tx.send(res);
+            let fut = f(this);
+            tokio::pin!(fut);
+            let res = tokio::select! {
+                // Futures executed here may perform blocking work before their first yield.
+                biased;
+                _ = tx.closed() => None,
+                res = &mut fut => Some(res),
+            };
+            if let Some(res) = res {
+                let _ = tx.send(res);
+            }
         });
 
         async move { rx.await.map_err(|_| EthApiError::InternalEthError)? }

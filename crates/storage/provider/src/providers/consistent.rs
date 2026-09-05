@@ -1,11 +1,10 @@
 use super::{DatabaseProviderRO, ProviderFactory, ProviderNodeTypes};
 use crate::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut},
-    to_range, AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
-    BlockReaderIdExt, BlockSource, ChainSpecProvider, ChangeSetReader, HeaderProvider,
-    ProviderError, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
-    StageCheckpointReader, StateReader, StaticFileProviderFactory, TransactionVariant,
-    TransactionsProvider,
+    to_range, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
+    BlockSource, ChainSpecProvider, ChangeSetReader, HeaderProvider, ProviderError,
+    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader,
+    StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::{
     transaction::{TransactionMeta, TxHashRef},
@@ -13,20 +12,19 @@ use alloy_consensus::{
 };
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
-use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStateProviderRef};
+use reth_chain_state::{BlockState, CanonicalInMemoryState};
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
-use reth_execution_types::ExecutionOutcome;
 use reth_node_types::{BlockTy, HeaderTy, ReceiptTy, TxTy};
 use reth_primitives_traits::{
-    Account, BlockBody, RecoveredBlock, SealedHeader, SealedOrRecoveredBlock, StorageEntry,
+    BlockBody, RecoveredBlock, SealedHeader, SealedOrRecoveredBlock, StorageEntry,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, DatabaseProviderFactory, NodePrimitivesProvider, StateProvider,
-    StateProviderBox, StorageChangeSetReader, TryIntoHistoricalStateProvider,
+    BlockBodyIndicesProvider, DatabaseProviderFactory, NodePrimitivesProvider,
+    StorageChangeSetReader,
 };
 use reth_storage_errors::provider::ProviderResult;
 use revm::database::states::PlainStorageRevert;
@@ -34,7 +32,6 @@ use std::{
     ops::{Add, Bound, RangeBounds, RangeInclusive, Sub},
     sync::Arc,
 };
-use tracing::trace;
 
 /// Type that interacts with a snapshot view of the blockchain (storage and in-memory) at time of
 /// instantiation, EXCEPT for pending, safe and finalized block which might change while holding
@@ -75,6 +72,13 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         Ok(Self { storage_provider, head_block, canonical_in_memory_state: state })
     }
 
+    /// Consumes this consistent view and returns its database provider snapshot.
+    pub(crate) fn into_database_provider(
+        self,
+    ) -> <ProviderFactory<N> as DatabaseProviderFactory>::Provider {
+        self.storage_provider
+    }
+
     // Helper function to convert range bounds
     fn convert_range_bounds<T>(
         &self,
@@ -97,36 +101,6 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         };
 
         (start, end)
-    }
-
-    /// Storage provider for latest block
-    fn latest_ref<'a>(&'a self) -> ProviderResult<Box<dyn StateProvider + 'a>> {
-        trace!(target: "providers::blockchain", "Getting latest block state provider");
-
-        // use latest state provider if the head state exists
-        if let Some(state) = &self.head_block {
-            trace!(target: "providers::blockchain", "Using head state for latest state provider");
-            Ok(self.block_state_provider_ref(state)?.boxed())
-        } else {
-            trace!(target: "providers::blockchain", "Using database state for latest state provider");
-            Ok(self.storage_provider.latest())
-        }
-    }
-
-    fn history_by_block_hash_ref<'a>(
-        &'a self,
-        block_hash: BlockHash,
-    ) -> ProviderResult<Box<dyn StateProvider + 'a>> {
-        trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
-
-        self.get_in_memory_or_storage_by_block(
-            block_hash.into(),
-            |_| self.storage_provider.history_by_block_hash(block_hash),
-            |block_state| {
-                let state_provider = self.block_state_provider_ref(block_state)?;
-                Ok(Box::new(state_provider))
-            },
-        )
     }
 
     /// Fetches a range of data from both in-memory state and persistent storage while a predicate
@@ -240,17 +214,6 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         }
 
         Ok(items)
-    }
-
-    /// This uses a given [`BlockState`] to initialize a state provider for that block.
-    fn block_state_provider_ref(
-        &self,
-        state: &BlockState<N::Primitives>,
-    ) -> ProviderResult<MemoryOverlayStateProviderRef<'_, N::Primitives>> {
-        let anchor_hash = state.anchor().hash;
-        let latest_historical = self.history_by_block_hash_ref(anchor_hash)?;
-        let in_memory = state.chain().map(|block_state| block_state.block()).collect();
-        Ok(MemoryOverlayStateProviderRef::new(latest_historical, in_memory))
     }
 
     /// Fetches data from either in-memory state or persistent storage for a range of transactions.
@@ -439,50 +402,6 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             return fetch_from_block_state(block_state)
         }
         fetch_from_db(&self.storage_provider)
-    }
-
-    /// Consumes the provider and returns a state provider for the specific block hash.
-    pub(crate) fn into_state_provider_at_block_hash(
-        self,
-        block_hash: BlockHash,
-    ) -> ProviderResult<StateProviderBox> {
-        // Resolve block number and verify it's canonical before destructuring self
-        let block_number =
-            self.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-        self.ensure_canonical_block(block_number)?;
-
-        let Self { storage_provider, head_block, .. } = self;
-        if let Some(Some(block_state)) =
-            head_block.as_ref().map(|b| b.block_on_chain(block_hash.into()))
-        {
-            let anchor_hash = block_state.anchor().hash;
-            let block_number = storage_provider
-                .block_number(anchor_hash)?
-                .ok_or(ProviderError::BlockHashNotFound(anchor_hash))?;
-            let latest_historical = storage_provider.try_into_history_at_block(block_number)?;
-            return Ok(Box::new(block_state.state_provider(latest_historical)));
-        }
-        storage_provider.try_into_history_at_block(block_number)
-    }
-}
-
-impl<N: ProviderNodeTypes> ConsistentProvider<N> {
-    /// Ensures that the given block number is canonical (synced)
-    ///
-    /// This is a helper for guarding the `HistoricalStateProvider` against block numbers that are
-    /// out of range and would lead to invalid results, mainly during initial sync.
-    ///
-    /// Verifying the `block_number` would be expensive since we need to lookup sync table
-    /// Instead, we ensure that the `block_number` is within the range of the
-    /// [`Self::best_block_number`] which is updated when a block is synced.
-    #[inline]
-    pub(crate) fn ensure_canonical_block(&self, block_number: BlockNumber) -> ProviderResult<()> {
-        let latest = self.best_block_number()?;
-        if block_number > latest {
-            Err(ProviderError::HeaderNotFound(block_number.into()))
-        } else {
-            Ok(())
-        }
     }
 }
 
@@ -1491,40 +1410,6 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> AccountReader for ConsistentProvider<N> {
-    /// Get basic account information.
-    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        // use latest state provider
-        let state_provider = self.latest_ref()?;
-        state_provider.basic_account(address)
-    }
-}
-
-impl<N: ProviderNodeTypes> StateReader for ConsistentProvider<N> {
-    type Receipt = ReceiptTy<N>;
-
-    /// Re-constructs the [`ExecutionOutcome`] from in-memory and database state, if necessary.
-    ///
-    /// If data for the block does not exist, this will return [`None`].
-    ///
-    /// NOTE: This cannot be called safely in a loop outside of the blockchain tree thread. This is
-    /// because the [`CanonicalInMemoryState`] could change during a reorg, causing results to be
-    /// inconsistent. Currently this can safely be called within the blockchain tree thread,
-    /// because the tree thread is responsible for modifying the [`CanonicalInMemoryState`] in the
-    /// first place.
-    fn get_state(
-        &self,
-        block: BlockNumber,
-    ) -> ProviderResult<Option<ExecutionOutcome<Self::Receipt>>> {
-        if let Some(state) = self.head_block.as_ref().and_then(|b| b.block_on_chain(block.into())) {
-            let state = state.block_ref().execution_outcome().clone();
-            Ok(Some(ExecutionOutcome::from((state, block))))
-        } else {
-            self.storage_provider.get_state(block)
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::{
@@ -1989,9 +1874,7 @@ mod tests {
         provider_rw.commit()?;
 
         let provider = BlockchainProvider::new(factory)?;
-        let consistent_provider = provider.consistent_provider()?;
-
-        let outcome = consistent_provider.get_state(1)?.expect("should return execution outcome");
+        let outcome = provider.get_state(1)?.expect("should return execution outcome");
 
         let state = &outcome.bundle.state;
         let account_state = state.get(&address).expect("should have account in bundle state");

@@ -66,7 +66,7 @@
 //!    category (2.) and become pending.
 
 use crate::{
-    blobstore::BlobStore,
+    blobstore::{BlobStore, PooledBlobSidecar},
     error::{PoolError, PoolErrorKind, PoolResult},
     identifier::{SenderId, SenderIdentifiers, TransactionId},
     metrics::BlobStoreMetrics,
@@ -1055,6 +1055,20 @@ where
         }
     }
 
+    /// Returns all transactions of the given sender, collected under a single read guard so that
+    /// both sides reflect the same pool state.
+    pub fn all_transactions_by_sender(
+        &self,
+        sender: Address,
+    ) -> AllPoolTransactions<T::Transaction> {
+        let Some(sender_id) = self.sender_id(&sender) else { return Default::default() };
+        let pool = self.get_pool_data();
+        AllPoolTransactions {
+            pending: pool.pending_txs_by_sender(sender_id),
+            queued: pool.queued_txs_by_sender(sender_id),
+        }
+    }
+
     /// Returns _all_ transactions in the pool
     pub fn all_transaction_hashes(&self) -> Vec<TxHash> {
         self.get_pool_data().all().transactions_iter().map(|tx| *tx.hash()).collect()
@@ -1300,7 +1314,7 @@ where
     }
 
     /// Inserts a blob transaction into the blob store
-    fn insert_blob(&self, hash: TxHash, blob: BlobTransactionSidecarVariant) {
+    fn insert_blob(&self, hash: TxHash, blob: PooledBlobSidecar) {
         debug!(target: "txpool", "[{:?}] storing blob sidecar", hash);
         if let Err(err) = self.blob_store.insert(hash, blob) {
             warn!(target: "txpool", %err, "[{:?}] failed to insert blob", hash);
@@ -1362,7 +1376,7 @@ struct AddedTransactionMeta<T: PoolTransaction> {
     /// The transaction that was added to the pool
     added: AddedTransaction<T>,
     /// Optional blob sidecar for EIP-4844 transactions
-    blob_sidecar: Option<BlobTransactionSidecarVariant>,
+    blob_sidecar: Option<PooledBlobSidecar>,
 }
 
 /// Tracks an added transaction and all graph changes caused by adding it.
@@ -1666,15 +1680,50 @@ impl<T: PoolTransaction> OnNewCanonicalStateOutcome<T> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        blobstore::{BlobStore, InMemoryBlobStore},
+        blobstore::{BlobStore, InMemoryBlobStore, PooledBlobSidecar},
         identifier::SenderId,
-        test_utils::{MockTransaction, TestPoolBuilder},
+        test_utils::{testing_pool, MockTransaction, TestPoolBuilder},
         validate::ValidTransaction,
-        BlockInfo, PoolConfig, SubPoolLimit, TransactionOrigin, TransactionValidationOutcome, U256,
+        BlockInfo, PoolConfig, SubPoolLimit, TransactionOrigin, TransactionPool,
+        TransactionPoolExt, TransactionValidationOutcome, ValidPoolTransaction, U256,
     };
+    use alloy_consensus::Transaction;
     use alloy_eips::{eip4844::BlobTransactionSidecar, eip7594::BlobTransactionSidecarVariant};
     use alloy_primitives::Address;
-    use std::{fs, path::PathBuf};
+    use std::{fs, path::PathBuf, sync::Arc};
+
+    #[tokio::test]
+    async fn all_transactions_by_sender_across_reclassification() {
+        let pool = testing_pool();
+        let sender = Address::with_last_byte(1);
+        // nonces 0 and 1 are pending, the gapped nonce 9 is queued
+        for nonce in [0, 1, 9] {
+            let tx =
+                MockTransaction::legacy().with_sender(sender).with_nonce(nonce).with_gas_price(100);
+            pool.add_transaction(TransactionOrigin::External, tx).await.unwrap();
+        }
+        let nonces = |txs: &[Arc<ValidPoolTransaction<MockTransaction>>]| {
+            let mut nonces: Vec<_> = txs.iter().map(|tx| tx.transaction.nonce()).collect();
+            nonces.sort_unstable();
+            nonces
+        };
+
+        let txs = pool.all_transactions_by_sender(sender);
+        assert_eq!(nonces(&txs.pending), [0, 1]);
+        assert_eq!(nonces(&txs.queued), [9]);
+
+        // a higher base fee reclassifies the pending transactions as queued; the snapshot must
+        // report each of them on exactly one side
+        pool.set_block_info(BlockInfo {
+            pending_basefee: 200,
+            block_gas_limit: 30_000_000,
+            ..Default::default()
+        });
+        let txs = pool.all_transactions_by_sender(sender);
+        assert!(txs.pending.is_empty());
+        assert_eq!(nonces(&txs.queued), [0, 1, 9]);
+        assert_eq!(nonces(&pool.get_transactions_by_sender(sender)), [0, 1, 9]);
+    }
 
     #[test]
     fn test_discard_blobs_on_blob_tx_eviction() {
@@ -1731,7 +1780,7 @@ mod tests {
 
             // Insert the sidecar into the blob store if the current index is within the blob limit.
             if n < blob_limit.max_txs {
-                blob_store.insert(*tx.get_hash(), sidecar.clone()).unwrap();
+                blob_store.insert(*tx.get_hash(), sidecar.clone().into()).unwrap();
             }
 
             // Add the transaction to the pool with external origin and valid outcome.
@@ -1743,7 +1792,7 @@ mod tests {
                     bytecode_hash: None,
                     transaction: ValidTransaction::ValidWithSidecar {
                         transaction: tx,
-                        sidecar: sidecar.clone(),
+                        sidecar: PooledBlobSidecar::from(sidecar.clone()),
                     },
                     propagate: true,
                     authorities: None,

@@ -83,7 +83,7 @@ fn test_chain_spec() -> Arc<ChainSpec> {
 }
 
 /// Returns test payload attributes for the given timestamp.
-const fn test_attributes_generator(timestamp: u64) -> PayloadAttributes {
+fn test_attributes_generator(timestamp: u64) -> PayloadAttributes {
     PayloadAttributes {
         timestamp,
         prev_randao: B256::ZERO,
@@ -91,7 +91,7 @@ const fn test_attributes_generator(timestamp: u64) -> PayloadAttributes {
         withdrawals: Some(vec![]),
         parent_beacon_block_root: Some(B256::ZERO),
         slot_number: None,
-        target_gas_limit: None,
+        ..Default::default()
     }
 }
 
@@ -190,7 +190,9 @@ async fn test_rocksdb_transaction_queries() -> Result<()> {
         test_attributes_generator,
     )
     .with_storage_v2()
-    .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
+    .with_tree_config_modifier(|config| {
+        config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
+    })
     .build()
     .await?;
 
@@ -257,7 +259,9 @@ async fn test_rocksdb_multi_tx_same_block() -> Result<()> {
         test_attributes_generator,
     )
     .with_storage_v2()
-    .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
+    .with_tree_config_modifier(|config| {
+        config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
+    })
     .build()
     .await?;
 
@@ -325,7 +329,9 @@ async fn test_rocksdb_txs_across_blocks() -> Result<()> {
         test_attributes_generator,
     )
     .with_storage_v2()
-    .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
+    .with_tree_config_modifier(|config| {
+        config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
+    })
     .build()
     .await?;
 
@@ -410,7 +416,9 @@ async fn test_rocksdb_pending_tx_not_in_storage() -> Result<()> {
         test_attributes_generator,
     )
     .with_storage_v2()
-    .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
+    .with_tree_config_modifier(|config| {
+        config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
+    })
     .build()
     .await?;
 
@@ -474,7 +482,9 @@ async fn test_rocksdb_reorg_unwind() -> Result<()> {
         test_attributes_generator,
     )
     .with_storage_v2()
-    .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
+    .with_tree_config_modifier(|config| {
+        config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
+    })
     .build()
     .await?;
 
@@ -597,7 +607,9 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
         test_attributes_generator,
     )
     .with_storage_v2()
-    .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
+    .with_tree_config_modifier(|config| {
+        config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
+    })
     .build()
     .await?;
 
@@ -744,7 +756,9 @@ async fn test_rocksdb_account_history_pruning() -> Result<()> {
         test_attributes_generator,
     )
     .with_storage_v2()
-    .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
+    .with_tree_config_modifier(|config| {
+        config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
+    })
     .with_node_config_modifier(|mut config| {
         config.pruning.account_history_distance = Some(PRUNE_DISTANCE);
         config.pruning.minimum_distance = Some(PRUNE_DISTANCE);
@@ -841,7 +855,9 @@ async fn test_rocksdb_storage_history_pruning() -> Result<()> {
         test_attributes_generator,
     )
     .with_storage_v2()
-    .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
+    .with_tree_config_modifier(|config| {
+        config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
+    })
     .with_node_config_modifier(|mut config| {
         config.pruning.storage_history_distance = Some(PRUNE_DISTANCE);
         config.pruning.minimum_distance = Some(PRUNE_DISTANCE);

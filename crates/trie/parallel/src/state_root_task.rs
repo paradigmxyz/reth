@@ -11,8 +11,7 @@ use crate::error::StateRootTaskError;
 use alloy_evm::block::OnStateHook;
 use alloy_primitives::{keccak256, map::B256Map, B256};
 use reth_trie::{
-    prefix_set::TriePrefixSetsMut, updates::TrieUpdates, HashedPostState, HashedStorage,
-    MultiProofTargetsV2, ProofV2Target,
+    updates::TrieUpdates, HashedPostState, HashedStorage, MultiProofTargetsV2, ProofV2Target,
 };
 use revm::state::EvmState;
 use std::{fmt, sync::Arc};
@@ -44,12 +43,6 @@ pub struct StateRootComputeOutcome {
     pub trie_updates: Arc<TrieUpdates>,
     /// Hashed post state produced while computing the state root.
     pub hashed_state: Arc<HashedPostState>,
-    /// Changed trie node base paths retained while computing the root.
-    pub changed_paths: Option<Arc<TriePrefixSetsMut>>,
-    /// Debug recorders taken from the sparse tries, keyed by `None` for account trie
-    /// and `Some(address)` for storage tries.
-    #[cfg(feature = "trie-debug")]
-    pub debug_recorders: Vec<(Option<B256>, reth_trie_sparse::debug_recorder::TrieDebugRecorder)>,
 }
 
 /// Handle to a background sparse trie state root computation.
@@ -274,6 +267,19 @@ impl PayloadStateRootHandle {
             .expect("state_root already taken")
             .recv()
             .map_err(|_| StateRootTaskError::Other("state root task dropped".to_string()))?
+    }
+
+    /// Takes the state root receiver for use with custom waiting logic (e.g., timeouts).
+    ///
+    /// Dropping the handle continues to cancel the backing task if it owns a cancellation guard.
+    ///
+    /// # Panics
+    ///
+    /// If called more than once.
+    pub const fn take_state_root_rx(
+        &mut self,
+    ) -> std::sync::mpsc::Receiver<Result<StateRootComputeOutcome, StateRootTaskError>> {
+        self.state_root_rx.take().expect("state_root already taken")
     }
 
     /// Takes the hashed state receiver, if the handle was built with one and it was not taken
@@ -503,12 +509,10 @@ pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
                 .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
                 .peekable();
 
-            if destroyed {
-                hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
-            } else if changed_storage_iter.peek().is_some() {
+            if !destroyed && changed_storage_iter.peek().is_some() {
                 hashed_state
                     .storages
-                    .insert(hashed_address, HashedStorage::from_iter(false, changed_storage_iter));
+                    .insert(hashed_address, HashedStorage::from_iter(changed_storage_iter));
             }
         }
     }
@@ -519,7 +523,55 @@ pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use alloy_primitives::{Address, U256};
+    use revm::state::{Account, EvmStorageSlot, TransactionId};
+    use std::{
+        sync::atomic::{AtomicUsize, Ordering},
+        time::Duration,
+    };
+
+    #[test]
+    fn created_selfdestruct_does_not_emit_storage() {
+        let address = Address::repeat_byte(0x01);
+        let mut account = Account::default();
+        account.mark_touch();
+        assert!(account.mark_created_locally());
+        assert!(account.mark_selfdestructed_locally());
+        account.info.nonce = 1;
+        account.storage.insert(
+            U256::from(1),
+            EvmStorageSlot::new_changed(U256::ZERO, U256::from(2), TransactionId::ZERO),
+        );
+
+        let hashed_state =
+            evm_state_to_hashed_post_state(EvmState::from_iter([(address, account)]));
+        let hashed_address = keccak256(address);
+
+        assert_eq!(hashed_state.accounts.get(&hashed_address), Some(&None));
+        assert!(!hashed_state.storages.contains_key(&hashed_address));
+    }
+
+    #[test]
+    fn existing_selfdestruct_does_not_emit_storage() {
+        let address = Address::repeat_byte(0x02);
+        let mut account = Account::default();
+        account.info.nonce = 1;
+        account.set_current_info_as_original();
+        account.mark_touch();
+        assert!(account.mark_selfdestructed_locally());
+        account.selfdestruct();
+        account.storage.insert(
+            U256::from(1),
+            EvmStorageSlot::new_changed(U256::ZERO, U256::from(2), TransactionId::ZERO),
+        );
+
+        let hashed_state =
+            evm_state_to_hashed_post_state(EvmState::from_iter([(address, account)]));
+        let hashed_address = keccak256(address);
+
+        assert_eq!(hashed_state.accounts.get(&hashed_address), Some(&None));
+        assert!(!hashed_state.storages.contains_key(&hashed_address));
+    }
 
     #[derive(Default)]
     struct CountingSink {
@@ -674,12 +726,48 @@ mod tests {
                 state_root: B256::repeat_byte(0x42),
                 trie_updates: Arc::new(TrieUpdates::default()),
                 hashed_state: Arc::new(HashedPostState::default()),
-                changed_paths: None,
-                #[cfg(feature = "trie-debug")]
-                debug_recorders: Vec::new(),
             }))
             .unwrap();
         let outcome = handle.state_root().expect("outcome is delivered");
         assert_eq!(outcome.state_root, B256::repeat_byte(0x42));
+    }
+
+    #[test]
+    #[should_panic(expected = "state_root already taken")]
+    fn payload_state_root_receiver_can_only_be_taken_once() {
+        let (_state_root_tx, state_root_rx) = std::sync::mpsc::channel();
+        let mut handle = PayloadStateRootHandle::new("test", None, state_root_rx, None);
+
+        let _state_root_rx = handle.take_state_root_rx();
+        let _ = handle.take_state_root_rx();
+    }
+
+    #[test]
+    fn payload_state_root_receiver_retains_cancellation() {
+        let (updates_tx, _updates_rx) = crossbeam_channel::unbounded();
+        let (cancel_guard, cancel_rx) = StateRootTaskCancelGuard::channel();
+        let (_state_root_tx, state_root_rx) = std::sync::mpsc::channel();
+        let (_hashed_state_tx, hashed_state_rx) = std::sync::mpsc::channel();
+        let mut handle = StateRootHandle::new(
+            B256::ZERO,
+            updates_tx,
+            cancel_guard,
+            state_root_rx,
+            hashed_state_rx,
+        )
+        .into_payload_state_root_handle();
+
+        let state_root_rx = handle.take_state_root_rx();
+        assert!(matches!(
+            state_root_rx.recv_timeout(Duration::ZERO),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+        ));
+        assert!(matches!(cancel_rx.try_recv(), Err(crossbeam_channel::TryRecvError::Empty)));
+
+        drop(handle);
+        assert!(matches!(
+            cancel_rx.recv_timeout(Duration::from_secs(1)),
+            Err(crossbeam_channel::RecvTimeoutError::Disconnected)
+        ));
     }
 }

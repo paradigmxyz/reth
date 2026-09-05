@@ -10,7 +10,7 @@ use core::fmt;
 use either::Either;
 use reth_execution_types::BlockExecutionOutput;
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
-use reth_trie_common::{prefix_set::TriePrefixSetsMut, updates::TrieUpdates, HashedPostState};
+use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 
 /// Represents an executed block for payload building purposes.
 ///
@@ -26,8 +26,6 @@ pub struct BuiltPayloadExecutedBlock<N: NodePrimitives> {
     pub hashed_state: Arc<HashedPostState>,
     /// Trie updates that result from calculating the state root for the block (unsorted).
     pub trie_updates: Arc<TrieUpdates>,
-    /// Changed trie node base paths, if known.
-    pub changed_paths: Option<Arc<TriePrefixSetsMut>>,
 }
 
 /// Represents a successfully built execution payload (block).
@@ -99,6 +97,11 @@ pub trait PayloadAttributes:
     /// `Some` for payload attributes that specify the desired gas limit, `None` if the builder
     /// should use its configured target.
     fn target_gas_limit(&self) -> Option<u64> {
+        None
+    }
+
+    /// Returns the EIP-7805 inclusion-list transactions supplied by the consensus layer.
+    fn inclusion_list_transactions(&self) -> Option<&[Bytes]> {
         None
     }
 }
@@ -255,7 +258,7 @@ mod tests {
             withdrawals: None,
             parent_beacon_block_root: None,
             slot_number: None,
-            target_gas_limit: None,
+            ..Default::default()
         };
 
         // Verify that the generated payload ID matches the expected value
@@ -294,7 +297,7 @@ mod tests {
             ]),
             parent_beacon_block_root: None,
             slot_number: None,
-            target_gas_limit: None,
+            ..Default::default()
         };
 
         // Verify that the generated payload ID matches the expected value
@@ -328,7 +331,7 @@ mod tests {
                 .unwrap(),
             ),
             slot_number: None,
-            target_gas_limit: None,
+            ..Default::default()
         };
 
         // Verify that the generated payload ID matches the expected value
@@ -353,7 +356,7 @@ mod tests {
             withdrawals: Some(vec![]),
             parent_beacon_block_root: Some(B256::from_slice(&[2; 32])),
             slot_number: Some(1),
-            target_gas_limit: None,
+            ..Default::default()
         };
 
         let first = payload_id(&parent, &attributes);
@@ -367,6 +370,7 @@ mod tests {
         let parent =
             B256::from_str("0x9876543210abcdef9876543210abcdef9876543210abcdef9876543210abcdef")
                 .unwrap();
+        #[allow(clippy::needless_update)]
         let mut attributes = EthPayloadAttributes {
             timestamp: 1622553200,
             prev_randao: B256::from_slice(&[1; 32]),
@@ -378,6 +382,7 @@ mod tests {
             parent_beacon_block_root: Some(B256::from_slice(&[2; 32])),
             slot_number: Some(1),
             target_gas_limit: Some(30_000_000),
+            ..Default::default()
         };
 
         let first = payload_id(&parent, &attributes);

@@ -1,13 +1,11 @@
 use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use alloy_primitives::{keccak256, map::B256Map, BlockNumber, B256};
+use alloy_primitives::{keccak256, map::B256Map, Address, BlockNumber, B256};
 use reth_db_api::{
     models::{AccountBeforeTx, BlockNumberAddress},
     transaction::DbTx,
 };
 use reth_execution_errors::StateRootError;
-use reth_storage_api::{
-    BlockNumReader, ChangeSetReader, DBProvider, StorageChangeSetReader, StorageSettingsCache,
-};
+use reth_storage_api::{ChangeSetReader, DBProvider, StorageChangeSetReader, StorageSettingsCache};
 use reth_storage_errors::provider::ProviderError;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
@@ -146,7 +144,7 @@ pub trait DatabaseHashedPostState: Sized {
     /// Initializes [`HashedPostStateSorted`] from reverts. Iterates over state reverts in the
     /// specified range and aggregates them into sorted hashed state.
     fn from_reverts(
-        provider: &(impl ChangeSetReader + StorageChangeSetReader + BlockNumReader + DBProvider),
+        provider: &(impl ChangeSetReader + StorageChangeSetReader),
         range: impl RangeBounds<BlockNumber>,
     ) -> Result<HashedPostStateSorted, ProviderError>;
 }
@@ -263,18 +261,6 @@ impl<'a, TX: DbTx, A: crate::TrieTableAdapter> DatabaseStateRoot<'a, TX>
     }
 }
 
-/// Calls [`HashedPostStateSorted::from_reverts`].
-pub fn from_reverts_auto(
-    provider: &(impl ChangeSetReader
-          + StorageChangeSetReader
-          + BlockNumReader
-          + DBProvider
-          + StorageSettingsCache),
-    range: impl RangeBounds<BlockNumber>,
-) -> Result<HashedPostStateSorted, ProviderError> {
-    HashedPostStateSorted::from_reverts(provider, range)
-}
-
 impl DatabaseHashedPostState for HashedPostStateSorted {
     /// Builds a sorted hashed post-state from reverts.
     ///
@@ -287,7 +273,7 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
     /// - Returns keys already ordered for trie iteration.
     #[instrument(target = "trie::db", skip(provider), fields(range))]
     fn from_reverts(
-        provider: &(impl ChangeSetReader + StorageChangeSetReader + BlockNumReader + DBProvider),
+        provider: &(impl ChangeSetReader + StorageChangeSetReader),
         range: impl RangeBounds<BlockNumber>,
     ) -> Result<Self, ProviderError> {
         // Extract concrete start/end values to use for both account and storage changesets.
@@ -321,11 +307,21 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
 
         if start < end {
             let end_inclusive = end.saturating_sub(1);
+            // Rows are ordered by `BlockNumberAddress`, so all slots of one account arrive
+            // consecutively and the address hash can be reused across them.
+            let mut last_address: Option<(Address, B256)> = None;
             for (BlockNumberAddress((_, address)), storage) in
                 provider.storage_changesets_range(start..=end_inclusive)?
             {
                 if seen_storage_keys.insert((address, storage.key)) {
-                    let hashed_address = keccak256(address);
+                    let hashed_address = match last_address {
+                        Some((last, hashed)) if last == address => hashed,
+                        _ => {
+                            let hashed = keccak256(address);
+                            last_address = Some((address, hashed));
+                            hashed
+                        }
+                    };
                     storages
                         .entry(hashed_address)
                         .or_default()
@@ -339,7 +335,7 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
             .into_iter()
             .map(|(address, mut slots)| {
                 slots.sort_unstable_by_key(|(slot, _)| *slot);
-                (address, HashedStorageSorted { storage_slots: slots, wiped: false })
+                (address, HashedStorageSorted { storage_slots: slots })
             })
             .collect();
 
@@ -393,7 +389,7 @@ mod tests {
         hashed_state.accounts.insert(B256::from(U256::from(2)), None);
         hashed_state.storages.insert(
             B256::from(U256::from(1)),
-            HashedStorage::from_iter(false, [(B256::from(U256::from(3)), U256::from(30))]),
+            HashedStorage::from_iter([(B256::from(U256::from(3)), U256::from(30))]),
         );
 
         let sorted = hashed_state.into_sorted();

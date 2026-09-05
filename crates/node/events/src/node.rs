@@ -252,8 +252,8 @@ impl NodeState {
                     gas_used=%format_gas(block.gas_used()),
                     gas_throughput=%format_gas_throughput(block.gas_used(), elapsed),
                     gas_limit=%format_gas(block.gas_limit()),
-                    full=%format!("{:.1}%", full),
-                    base_fee=%format!("{:.2}Gwei", block.base_fee_per_gas().unwrap_or(0) as f64 / GWEI_TO_WEI as f64),
+                    full=%format_args!("{:.1}%", full),
+                    base_fee=%format_args!("{:.2}Gwei", block.base_fee_per_gas().unwrap_or(0) as f64 / GWEI_TO_WEI as f64),
                     blobs=block.blob_gas_used().unwrap_or(0) / alloy_eips::eip4844::DATA_GAS_PER_BLOB,
                     excess_blobs=block.excess_blob_gas().unwrap_or(0) / alloy_eips::eip4844::DATA_GAS_PER_BLOB,
                     ?elapsed,
@@ -337,6 +337,15 @@ impl NodeState {
                     cache.code.hits = stats.code_cache_hits,
                     cache.code.misses = stats.code_cache_misses,
                     cache.code.hit_rate = format!("{:.2}", hit_rate(stats.code_cache_hits, stats.code_cache_misses)),
+                    cache.txpool_snapshot.account.hits = stats.txpool_snapshot_account_hits,
+                    cache.txpool_snapshot.account.misses = stats.txpool_snapshot_account_misses,
+                    cache.txpool_snapshot.account.hit_rate = format!("{:.2}", hit_rate(stats.txpool_snapshot_account_hits, stats.txpool_snapshot_account_misses)),
+                    cache.txpool_snapshot.storage.hits = stats.txpool_snapshot_storage_hits,
+                    cache.txpool_snapshot.storage.misses = stats.txpool_snapshot_storage_misses,
+                    cache.txpool_snapshot.storage.hit_rate = format!("{:.2}", hit_rate(stats.txpool_snapshot_storage_hits, stats.txpool_snapshot_storage_misses)),
+                    cache.txpool_snapshot.code.hits = stats.txpool_snapshot_code_hits,
+                    cache.txpool_snapshot.code.misses = stats.txpool_snapshot_code_misses,
+                    cache.txpool_snapshot.code.hit_rate = format!("{:.2}", hit_rate(stats.txpool_snapshot_code_hits, stats.txpool_snapshot_code_misses)),
                 );
             }
         }

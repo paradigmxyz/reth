@@ -1,10 +1,10 @@
-//! clap [Args](clap::Args) for revmc JIT configuration.
+//! clap [Args](clap::Args) for JIT configuration.
 
 use clap::Args;
 use humantime::parse_duration;
 use std::time::Duration;
 
-/// Parameters for JIT compilation of EVM bytecode via revmc.
+/// Parameters for JIT compilation of EVM bytecode.
 #[derive(Debug, Clone, Args, PartialEq, Eq)]
 #[command(next_help_heading = "JIT")]
 pub struct JitArgs {
