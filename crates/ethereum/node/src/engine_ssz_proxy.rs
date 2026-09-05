@@ -753,7 +753,6 @@ fn parse_bodies_range_query(query: &str) -> Result<(u64, u64), HttpResponse> {
 }
 
 /// Amsterdam bodies with a missing or pruned BAL are unavailable, just like pruned blocks.
-
 fn payload_bodies_response<LegacyBody, ForkBody>(
     response: Result<Vec<Option<(u64, LegacyBody)>>, EngineApiError>,
     convert: impl Fn(LegacyBody) -> Option<ForkBody>,
