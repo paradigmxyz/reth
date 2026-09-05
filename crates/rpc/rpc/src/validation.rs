@@ -427,8 +427,11 @@ where
         &self,
         request: BuilderBlockValidationRequestV5,
     ) -> Result<(), ValidationApiError> {
+        let payload = ExecutionPayload::V3(request.request.execution_payload);
+        validate_message_against_payload(&request.request.message, &payload)?;
+
         let block = self.payload_validator.ensure_well_formed_payload(ExecutionData {
-            payload: ExecutionPayload::V3(request.request.execution_payload),
+            payload,
             sidecar: ExecutionPayloadSidecar::v4(
                 CancunPayloadFields {
                     parent_beacon_block_root: request.parent_beacon_block_root,
@@ -468,12 +471,15 @@ where
         &self,
         request: BuilderBlockValidationRequestV6,
     ) -> Result<(), ValidationApiError> {
+        let payload = ExecutionPayload::V4(request.request.execution_payload);
+        validate_message_against_payload(&request.request.message, &payload)?;
+
         let decoded_bal =
-            DecodedBal::from_rlp_bytes(request.request.execution_payload.block_access_list.clone())
+            DecodedBal::from_rlp_bytes(payload.as_v4().unwrap().block_access_list.clone())
                 .map_err(ValidationApiError::InvalidBlockAccessList)?;
 
         let block = self.payload_validator.ensure_well_formed_payload(ExecutionData {
-            payload: ExecutionPayload::V4(request.request.execution_payload),
+            payload,
             sidecar: ExecutionPayloadSidecar::v4(
                 CancunPayloadFields {
                     parent_beacon_block_root: request.parent_beacon_block_root,
@@ -631,6 +637,38 @@ pub struct ValidationApiInner<Provider, E: ConfigureEvm, T: PayloadTypes> {
     task_spawner: Runtime,
     /// Validation metrics
     metrics: ValidationMetrics,
+}
+
+/// Ensures that the raw execution payload fields match the corresponding [`BidTrace`] fields.
+fn validate_message_against_payload(
+    message: &BidTrace,
+    payload: &ExecutionPayload,
+) -> Result<(), ValidationApiError> {
+    let payload = payload.as_v1();
+
+    if payload.block_hash != message.block_hash {
+        Err(ValidationApiError::BlockHashMismatch(GotExpected {
+            got: message.block_hash,
+            expected: payload.block_hash,
+        }))
+    } else if payload.parent_hash != message.parent_hash {
+        Err(ValidationApiError::ParentHashMismatch(GotExpected {
+            got: message.parent_hash,
+            expected: payload.parent_hash,
+        }))
+    } else if payload.gas_limit != message.gas_limit {
+        Err(ValidationApiError::GasLimitMismatch(GotExpected {
+            got: message.gas_limit,
+            expected: payload.gas_limit,
+        }))
+    } else if payload.gas_used != message.gas_used {
+        Err(ValidationApiError::GasUsedMismatch(GotExpected {
+            got: message.gas_used,
+            expected: payload.gas_used,
+        }))
+    } else {
+        Ok(())
+    }
 }
 
 /// Calculates a deterministic hash of the blocklist for change detection.
