@@ -13,7 +13,13 @@ env:
 permissions: {}
 
 jobs:
+  cargo-cooldown:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/cargo-cooldown.yml
+
   clippy-binaries:
+    needs: cargo-cooldown
     name: clippy binaries / ${{ matrix.type }}
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
     permissions:
@@ -48,6 +54,7 @@ jobs:
           RUSTFLAGS: -D warnings
 
   clippy:
+    needs: cargo-cooldown
     name: clippy
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
     permissions:
@@ -66,11 +73,12 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-on-failure: true
-      - run: cargo clippy --workspace --lib --examples --tests --benches --all-features --locked
+      - run: cargo clippy --locked --workspace --lib --examples --tests --benches --all-features
         env:
           RUSTFLAGS: -D warnings
 
   wasm:
+    needs: cargo-cooldown
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
     permissions:
       contents: read
@@ -97,6 +105,7 @@ jobs:
           .github/scripts/check_wasm.sh
 
   riscv:
+    needs: cargo-cooldown
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
     permissions:
       contents: read
@@ -121,6 +130,7 @@ jobs:
         run: .github/scripts/check_rv32imac.sh
 
   crate-checks:
+    needs: cargo-cooldown
     name: crate-checks (${{ matrix.partition }}/${{ matrix.total_partitions }})
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
     permissions:
@@ -144,9 +154,10 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-on-failure: true
-      - run: cargo hack check --workspace --partition ${{ matrix.partition }}/${{ matrix.total_partitions }}
+      - run: cargo hack check --locked --workspace --partition ${{ matrix.partition }}/${{ matrix.total_partitions }}
 
   msrv:
+    needs: cargo-cooldown
     name: MSRV
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-8' || 'ubuntu-latest' }}
     permissions:
@@ -165,11 +176,12 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-on-failure: true
-      - run: cargo build --bin reth --workspace
+      - run: cargo build --locked --bin reth --workspace
         env:
           RUSTFLAGS: -D warnings
 
   docs:
+    needs: cargo-cooldown
     name: docs
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
     permissions:
@@ -186,7 +198,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-on-failure: true
-      - run: cargo docs --document-private-items
+      - run: cargo docs --locked --document-private-items
         env:
           # Keep in sync with ./book.yml:jobs.build
           # This should only add `-D warnings`
@@ -211,6 +223,7 @@ jobs:
         run: cargo fmt --all --check
 
   udeps:
+    needs: cargo-cooldown
     name: udeps
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
     permissions:
@@ -233,6 +246,7 @@ jobs:
       - run: cargo udeps --workspace --lib --examples --tests --benches --all-features --locked
 
   book:
+    needs: cargo-cooldown
     name: book
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
     permissions:
@@ -249,7 +263,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-on-failure: true
-      - run: cargo build --bin reth --workspace
+      - run: cargo build --locked --bin reth --workspace
         env:
           RUSTFLAGS: -D warnings
       - run: ./docs/cli/update.sh target/debug/reth
@@ -297,6 +311,7 @@ jobs:
           cmd: jq empty etc/grafana/dashboards/overview.json
 
   no-test-deps:
+    needs: cargo-cooldown
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -308,10 +323,11 @@ jobs:
       - uses: rui314/setup-mold@7e4f20ad28a2e8ca6fd0892ccf72e2abb706b9c3 # v1
       - uses: dtolnay/rust-toolchain@stable
       - name: Ensure no arbitrary or proptest dependency on default build
-        run: cargo tree --package reth -e=features,no-dev | grep -Eq "arbitrary|proptest" && exit 1 || exit 0
+        run: cargo tree --locked --package reth -e=features,no-dev | grep -Eq "arbitrary|proptest" && exit 1 || exit 0
 
   # Check crates correctly propagate features
   feature-propagation:
+    needs: cargo-cooldown
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
     permissions:
       contents: read
@@ -332,9 +348,12 @@ jobs:
       - run: zepter run check
 
   deny:
+    needs: cargo-cooldown
     permissions:
       contents: read
     uses: tempoxyz/ci/.github/workflows/deny.yml@main
+    with:
+      deny-flags: --all-features --locked
 
   lint-success:
     name: lint success

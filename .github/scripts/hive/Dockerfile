@@ -32,7 +32,7 @@ ARG MANIFEST_PATH=""
 
 COPY --from=planner /app/recipe.json recipe.json
 
-RUN cargo chef cook \
+RUN cargo chef cook --locked \
     --profile $BUILD_PROFILE \
     --bin $CARGO_BIN \
     ${FEATURES:+--features "$FEATURES"}  \
@@ -40,12 +40,11 @@ RUN cargo chef cook \
     --recipe-path recipe.json
 
 COPY --exclude=.git --exclude=dist . .
-RUN cargo build \
+RUN cargo build --locked \
     --profile $BUILD_PROFILE \
     --bin $CARGO_BIN \
     ${FEATURES:+--features "$FEATURES"}  \
-    ${MANIFEST_PATH:+--manifest-path $MANIFEST_PATH}  \
-    --locked
+    ${MANIFEST_PATH:+--manifest-path $MANIFEST_PATH}
 
 # 
 # The runtime will then just use the build artifact without building anything

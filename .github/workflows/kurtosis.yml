@@ -21,7 +21,13 @@ concurrency:
 permissions: {}
 
 jobs:
+  cargo-cooldown:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/cargo-cooldown.yml
+
   build-reth:
+    needs: cargo-cooldown
     if: github.repository == 'paradigmxyz/reth'
     permissions:
       contents: read

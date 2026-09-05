@@ -1,0 +1,42 @@
+name: Cargo dependency cooldown
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref containing the Cargo.lock to verify
+        required: false
+        type: string
+    outputs:
+      sha:
+        description: Commit SHA whose Cargo.lock passed cooldown
+        value: ${{ jobs.check.outputs.sha }}
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Reject newly published crates
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.revision.outputs.sha }}
+    env:
+      RUSTC_WRAPPER: ""
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref || github.sha }}
+      - name: Resolve checked revision
+        id: revision
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Install Rust toolchain
+        uses: tempoxyz/gh-actions/vendor/dtolnay/rust-toolchain@0aa93238d85fd085d7901320b670cc6adb7a02f3 # gh-actions#101
+        with:
+          toolchain: stable
+      - name: Enforce Cargo dependency cooldown
+        uses: tempoxyz/gh-actions/actions/cargo-cooldown@0aa93238d85fd085d7901320b670cc6adb7a02f3 # gh-actions#101
+        with:
+          strict-project-config: true

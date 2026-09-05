@@ -25,7 +25,13 @@ env:
 permissions: {}
 
 jobs:
+  cargo-cooldown:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/cargo-cooldown.yml
+
   check:
+    needs: cargo-cooldown
     name: Check compilation with patched alloy
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-16' || 'ubuntu-latest' }}
     permissions:
@@ -44,6 +50,12 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-on-failure: true
+
+      - name: Prepare Cargo dependency cooldown verifier
+        id: cargo-cooldown
+        uses: tempoxyz/gh-actions/actions/cargo-cooldown@0aa93238d85fd085d7901320b670cc6adb7a02f3 # gh-actions#101
+        with:
+          strict-project-config: true
 
       - name: Apply alloy patches
         env:
@@ -71,6 +83,14 @@ jobs:
           
           echo "=== Final patch section ==="
           tail -50 Cargo.toml
+
+      - name: Enforce Cargo dependency cooldown for patched Alloy graph
+        env:
+          CARGO_COOLDOWN_BIN: ${{ steps.cargo-cooldown.outputs.verifier-path }}
+          CARGO_COOLDOWN_SHA256: ${{ steps.cargo-cooldown.outputs.verifier-sha256 }}
+        run: |
+          cargo metadata --format-version 1 >/dev/null
+          .github/scripts/verify-cargo-lock-cooldown.sh --allow-modified-lockfile .
 
       - name: Check workspace
         run: cargo clippy --workspace --lib --examples --tests --benches --all-features --locked
