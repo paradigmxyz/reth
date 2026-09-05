@@ -10,13 +10,15 @@ use alloy_primitives::{
 };
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion, Throughput};
 use futures::{task::noop_waker_ref, StreamExt};
-use reth_eth_wire::{Eth68TxMetadata, EthVersion, PooledTransactions};
+use reth_eth_wire::{EthVersion, PooledTransactions};
 use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
 use reth_network::{
     test_utils::transactions::new_mock_session_with_capacity,
     transactions::{
+        announcement::{AnnouncedTransaction, TransactionMetadata},
         constants::tx_fetcher::MAX_COUNT_EAGER_CANDIDATE_PEERS_PER_HASH,
-        fetcher::TransactionFetcher, PeerMetadata,
+        fetcher::TransactionFetcher,
+        PeerMetadata,
     },
 };
 use reth_network_api::PeerRequest;
@@ -55,14 +57,14 @@ impl Rig {
     }
 
     /// Every peer announces the same hashes, like a gossiped batch of transactions.
-    fn announce_gossip(&mut self, announcement: &[(TxHash, Eth68TxMetadata)]) {
+    fn announce_gossip(&mut self, announcement: &[AnnouncedTransaction]) {
         for (peer_id, _) in &self.sessions {
             self.fetcher.on_announcement(*peer_id, announcement.iter().copied());
         }
     }
 
     /// Every peer announces its own slice of the hashes.
-    fn announce_disjoint(&mut self, announcement: &[(TxHash, Eth68TxMetadata)]) {
+    fn announce_disjoint(&mut self, announcement: &[AnnouncedTransaction]) {
         let per_peer = announcement.len() / self.sessions.len();
         for (i, (peer_id, _)) in self.sessions.iter().enumerate() {
             let slice = &announcement[i * per_peer..(i + 1) * per_peer];
@@ -125,13 +127,18 @@ fn pooled_txs(count: usize) -> Vec<PooledTransactionVariant> {
         .collect()
 }
 
-fn announcement_of(txs: &[PooledTransactionVariant]) -> Vec<(TxHash, Eth68TxMetadata)> {
-    txs.iter().map(|tx| (*tx.tx_hash(), Some((TX_TYPE, TX_SIZE)))).collect()
+fn announcement_of(txs: &[PooledTransactionVariant]) -> Vec<AnnouncedTransaction> {
+    txs.iter()
+        .map(|tx| AnnouncedTransaction {
+            hash: *tx.tx_hash(),
+            metadata: Some(TransactionMetadata { tx_type: TX_TYPE, size: TX_SIZE }),
+        })
+        .collect()
 }
 
 /// Shared fixtures.
 struct Fixtures {
-    announcement: Vec<(TxHash, Eth68TxMetadata)>,
+    announcement: Vec<AnnouncedTransaction>,
     by_hash: B256Map<PooledTransactionVariant>,
 }
 

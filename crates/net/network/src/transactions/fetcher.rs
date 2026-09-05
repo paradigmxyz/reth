@@ -44,6 +44,7 @@
 //! - a fixed number of candidates per hash, which also bounds the number of fetch attempts
 
 use super::{
+    announcement::{AnnouncedTransaction, TransactionMetadata},
     config::TransactionFetcherConfig,
     constants::{
         tx_fetcher::{
@@ -63,7 +64,7 @@ use alloy_primitives::{
     TxHash,
 };
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
-use reth_eth_wire::{Eth68TxMetadata, GetPooledTransactions, PooledTransactions};
+use reth_eth_wire::{GetPooledTransactions, PooledTransactions};
 use reth_eth_wire_types::{EthNetworkPrimitives, NetworkPrimitives};
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::{RequestError, RequestResult};
@@ -110,8 +111,8 @@ pub struct TransactionFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
     num_fetching: usize,
     /// Reused when verifying responses, so no sets are allocated per response.
     scratch_requested: B256Set,
-    /// Reused when verifying responses, so no sets are allocated per response.
-    scratch_delivered: B256Set,
+    /// Counts rejected hashes to distinguish duplicates from unsolicited transactions.
+    scratch_rejected: B256Map<usize>,
     /// Reused when processing announcements, so no vector is allocated per announcement.
     scratch_queue: Vec<TxHash>,
     /// Configured limits.
@@ -135,7 +136,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             inflight: Default::default(),
             num_fetching: 0,
             scratch_requested: Default::default(),
-            scratch_delivered: Default::default(),
+            scratch_rejected: Default::default(),
             scratch_queue: Default::default(),
             config,
             metrics,
@@ -184,7 +185,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     pub fn on_announcement(
         &mut self,
         peer_id: PeerId,
-        announcement: impl IntoIterator<Item = (TxHash, Eth68TxMetadata)>,
+        announcement: impl IntoIterator<Item = AnnouncedTransaction>,
     ) {
         let key = self.peer_key(peer_id);
         let max_per_peer = self.config.max_announced_hashes_per_peer as usize;
@@ -203,7 +204,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         // hashes at the front of `queue` that were evicted again before being pushed
         let mut queue_start = 0;
 
-        for (hash, metadata) in announcement {
+        for AnnouncedTransaction { hash, metadata } in announcement {
             let size = announced_size(metadata);
             let at_capacity = self.hashes.len() >= max_total;
 
@@ -703,17 +704,14 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             peer.inflight = peer.inflight.saturating_sub(1);
         }
 
-        let mut delivered = std::mem::take(&mut self.scratch_delivered);
-        delivered.clear();
+        let mut remaining = std::mem::take(&mut self.scratch_requested);
 
         let outcome = match result {
             Ok(Ok(mut transactions)) => {
-                let mut requested_set = std::mem::take(&mut self.scratch_requested);
-                requested_set.clear();
-                requested_set.extend(requested.iter().copied());
+                remaining.clear();
+                remaining.extend(requested.iter().copied());
                 let unsolicited =
-                    verify_response(&mut transactions, &requested_set, &mut delivered);
-                self.scratch_requested = requested_set;
+                    verify_response(&mut transactions, &mut remaining, &mut self.scratch_rejected);
                 Ok((transactions, unsolicited))
             }
             Ok(Err(error)) => Err(error),
@@ -721,8 +719,8 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             Err(_) => Err(RequestError::ChannelClosed),
         };
 
-        self.on_delivery(key, &requested, &delivered);
-        self.scratch_delivered = delivered;
+        self.on_delivery(key, &requested, outcome.is_ok().then_some(&remaining));
+        self.scratch_requested = remaining;
         self.mark_ready(key, false);
 
         match outcome {
@@ -760,18 +758,20 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
 
     /// Settles the requested hashes of a resolved request: delivered hashes are dropped and
     /// undelivered hashes are rescheduled for their remaining candidates.
-    fn on_delivery(&mut self, key: PeerKey, requested: &[TxHash], delivered: &B256Set) {
+    /// `remaining` contains undelivered hashes after a successful response, or is absent if the
+    /// request failed and none were delivered.
+    fn on_delivery(&mut self, key: PeerKey, requested: &[TxHash], remaining: Option<&B256Set>) {
+        let delivered_count = remaining.map_or(0, |remaining| requested.len() - remaining.len());
+        let was_delivered =
+            |hash: &TxHash| remaining.is_some_and(|remaining| !remaining.contains(hash));
         // Position right after the last delivered hash. Undelivered hashes before it were skipped
         // by the peer on purpose, so the peer is dropped as a candidate for them. Undelivered
         // hashes after it were most likely truncated because the response hit the size limit, so
         // the peer stays a candidate, but only if it delivered at least half of the request. A
         // smaller response did not hit any limit, so the peer is dropped for all of them, which
         // stops a peer from serving the same tail one transaction at a time.
-        let cutoff = if 2 * delivered.len() >= requested.len() {
-            requested
-                .iter()
-                .rposition(|hash| delivered.contains(hash))
-                .map_or(requested.len(), |idx| idx + 1)
+        let cutoff = if 2 * delivered_count >= requested.len() {
+            requested.iter().rposition(was_delivered).map_or(requested.len(), |idx| idx + 1)
         } else {
             requested.len()
         };
@@ -781,7 +781,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
 
         // iterate in reverse so that queueing at the front of a queue preserves the request order
         for (idx, hash) in requested.iter().enumerate().rev() {
-            if delivered.contains(hash) {
+            if was_delivered(hash) {
                 self.remove_hash(hash);
                 continue
             }
@@ -1192,30 +1192,43 @@ struct ResolvedRequest<T> {
 
 /// Returns the announced size of a transaction, capped at the response soft limit since a peer
 /// can't serve anything bigger, or 0 if the announcement carried no size.
-fn announced_size(metadata: Eth68TxMetadata) -> u32 {
-    metadata
-        .map_or(0, |(_, size)| size.min(SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE) as u32)
+fn announced_size(metadata: Option<TransactionMetadata>) -> u32 {
+    metadata.map_or(0, |metadata| {
+        metadata.size.min(SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE) as u32
+    })
 }
 
-/// Filters a response down to the transactions that were requested, dropping duplicates.
-///
-/// Records the delivered hashes in `delivered` and returns the number of unsolicited transactions
-/// that were dropped.
+/// Retains the first requested transaction for each hash and removes received hashes from
+/// `remaining`. Returns the number of unsolicited entries, counting repeats of unsolicited hashes.
 fn verify_response<T: SignedTransaction>(
     transactions: &mut PooledTransactions<T>,
-    requested: &B256Set,
-    delivered: &mut B256Set,
+    remaining: &mut B256Set,
+    rejected: &mut B256Map<usize>,
 ) -> usize {
-    let mut unsolicited = 0;
+    rejected.clear();
+    // A successful removal verifies the hash and deduplicates it in one lookup.
     transactions.0.retain(|tx| {
         let hash = *tx.tx_hash();
-        if !requested.contains(&hash) {
-            unsolicited += 1;
-            return false
+        if remaining.remove(&hash) {
+            true
+        } else {
+            *rejected.entry(hash).or_default() += 1;
+            false
         }
-        delivered.insert(hash)
     });
-    unsolicited
+    if rejected.is_empty() {
+        return 0
+    }
+
+    // Rejected hashes that were also received successfully are duplicates, not unsolicited.
+    // Only malformed responses populate this scratch map or need this additional pass.
+    for tx in transactions.iter() {
+        rejected.remove(tx.tx_hash());
+        if rejected.is_empty() {
+            return 0
+        }
+    }
+    rejected.values().sum()
 }
 
 #[cfg(test)]
@@ -1345,13 +1358,19 @@ mod tests {
         ) {
             self.fetcher.on_announcement(
                 peer_id,
-                entries.into_iter().map(|(h, size)| (h, Some((2, size)))),
+                entries.into_iter().map(|(hash, size)| AnnouncedTransaction {
+                    hash,
+                    metadata: Some(TransactionMetadata { tx_type: 2, size }),
+                }),
             );
             self.verify();
         }
 
         fn announce_unsized(&mut self, peer_id: PeerId, hashes: &[TxHash]) {
-            self.fetcher.on_announcement(peer_id, hashes.iter().map(|hash| (*hash, None)));
+            self.fetcher.on_announcement(
+                peer_id,
+                hashes.iter().map(|&hash| AnnouncedTransaction { hash, metadata: None }),
+            );
             self.verify();
         }
 
@@ -2398,13 +2417,88 @@ mod tests {
         let requested = [hash(1), *txs[0].tx_hash(), hash(2)];
 
         let mut response = PooledTransactions(vec![txs[0].clone(), txs[1].clone(), txs[0].clone()]);
-        let mut delivered = B256Set::default();
-        let unsolicited =
-            verify_response(&mut response, &requested.into_iter().collect(), &mut delivered);
+        let mut remaining = requested.into_iter().collect();
+        let unsolicited = verify_response(&mut response, &mut remaining, &mut B256Map::default());
 
         assert_eq!(response.0, txs[..1]);
-        assert_eq!(delivered.into_iter().collect::<Vec<_>>(), vec![*txs[0].tx_hash()]);
+        assert_eq!(remaining, B256Set::from_iter([hash(1), hash(2)]));
         assert_eq!(unsolicited, 1);
+    }
+
+    #[test]
+    fn verify_response_preserves_first_values_order_and_missing_hashes() {
+        use alloy_consensus::{EthereumTypedTransaction, TxLegacy};
+        use alloy_primitives::{Signature, U256};
+
+        let mut rejected = B256Map::default();
+        for hashes in [
+            &[][..],
+            &[0],
+            &[0, 1, 2, 3],
+            &[0, 0, 0, 0],
+            &[0, 0, 1, 2, 3],
+            &[0, 1, 2, 3, 0],
+            &[0, 1, 0, 2, 1, 3, 0],
+        ] {
+            for requested_mask in 0..16 {
+                let mut remaining: B256Set = (0..4)
+                    .filter(|hash| requested_mask & (1 << hash) != 0)
+                    .map(B256::repeat_byte)
+                    .collect();
+                let original: Vec<_> = hashes
+                    .iter()
+                    .enumerate()
+                    .map(|(nonce, &hash)| {
+                        PooledTransactionVariant::new_unchecked(
+                            EthereumTypedTransaction::Legacy(TxLegacy {
+                                nonce: nonce as u64,
+                                ..Default::default()
+                            }),
+                            Signature::new(U256::from(1), U256::from(1), false),
+                            B256::repeat_byte(hash),
+                        )
+                    })
+                    .collect();
+                let mut expected = Vec::new();
+                for tx in &original {
+                    if remaining.contains(tx.tx_hash()) &&
+                        !expected.iter().any(|previous: &&PooledTransactionVariant| {
+                            previous.tx_hash() == tx.tx_hash()
+                        })
+                    {
+                        expected.push(tx);
+                    }
+                }
+                let expected_unsolicited =
+                    original.iter().filter(|tx| !remaining.contains(tx.tx_hash())).count();
+                let expected_remaining = remaining
+                    .iter()
+                    .filter(|hash| !expected.iter().any(|tx| tx.tx_hash() == *hash))
+                    .copied()
+                    .collect::<B256Set>();
+                let mut response = PooledTransactions(original.clone());
+                let allocation = response.0.as_ptr();
+                assert_eq!(
+                    verify_response(&mut response, &mut remaining, &mut rejected),
+                    expected_unsolicited
+                );
+                assert_eq!(response.iter().collect::<Vec<_>>(), expected);
+                assert_eq!(response.0.as_ptr(), allocation);
+                assert_eq!(remaining, expected_remaining);
+            }
+        }
+
+        let mut response = PooledTransactions(pooled_txs(3));
+        let mut remaining = response.iter().map(|tx| *tx.tx_hash()).collect();
+        let capacity = rejected.capacity();
+        assert_eq!(verify_response(&mut response, &mut remaining, &mut rejected), 0);
+        assert_eq!(rejected.capacity(), capacity);
+        assert!(remaining.is_empty());
+
+        let mut remaining = response.iter().map(|tx| *tx.tx_hash()).collect();
+        let mut cold_scratch = B256Map::default();
+        assert_eq!(verify_response(&mut response, &mut remaining, &mut cold_scratch), 0);
+        assert_eq!(cold_scratch.capacity(), 0);
     }
 
     #[test]
