@@ -222,4 +222,17 @@ impl Encodable for BranchNodeV2 {
 
         ExtensionNodeRef::new(&self.key, branch_rlp_node.as_slice()).encode(out);
     }
+
+    fn length(&self) -> usize {
+        if self.key.is_empty() {
+            return BranchNodeRef::new(&self.stack, self.state_mask).length()
+        }
+
+        let branch_rlp_node = self
+            .branch_rlp_node
+            .as_ref()
+            .expect("branch_rlp_node must always be present for extension nodes");
+
+        ExtensionNodeRef::new(&self.key, branch_rlp_node.as_slice()).length()
+    }
 }
