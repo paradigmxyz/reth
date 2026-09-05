@@ -73,19 +73,6 @@ const PROBLEM_JSON: &str = "application/problem+json";
 
 type EthEngineApi<Provider, Pool, Validator, ChainSpec> =
     EngineApi<Provider, EthEngineTypes, Pool, Validator, ChainSpec>;
-struct EngineSszState<Api> {
-    engine_api: Option<Api>,
-    witness_handler: Option<Arc<dyn EngineSszWitness>>,
-    witness_enabled: bool,
-}
-
-impl<Api: EngineSszApi> EngineSszState<Api> {
-    fn update_witness_support(&mut self) {
-        self.witness_enabled = self.witness_handler.is_some() &&
-            self.engine_api.as_ref().is_some_and(EngineSszApi::supports_witness);
-    }
-}
-
 /// Shared handle used by [`EngineSszProxyLayer`].
 pub struct EngineSszProxyHandle<Api = ()> {
     state: Arc<RwLock<EngineSszState<Api>>>,
@@ -540,6 +527,19 @@ where
             3 => blob_response::<BlobsV3Response, _>(self.get_blobs_v3_metered(hashes)),
             _ => problem_response(STATUS_NOT_FOUND, "method-not-found", None),
         }
+    }
+}
+
+struct EngineSszState<Api> {
+    engine_api: Option<Api>,
+    witness_handler: Option<Arc<dyn EngineSszWitness>>,
+    witness_enabled: bool,
+}
+
+impl<Api: EngineSszApi> EngineSszState<Api> {
+    fn update_witness_support(&mut self) {
+        self.witness_enabled = self.witness_handler.is_some() &&
+            self.engine_api.as_ref().is_some_and(EngineSszApi::supports_witness);
     }
 }
 
