@@ -30,6 +30,7 @@ use reth_revm::{
     cancelled::CancelOnDrop,
     database::StateProviderDatabase,
     db::{bal::EvmDatabaseError, State},
+    state::bal::Bal,
 };
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
@@ -129,6 +130,16 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                 for block in block_state_calls {
                     let SimBlock { block_overrides, state_overrides, calls } = block;
+                    // A validation-off simulation with zero fee caps must not create a synthetic
+                    // zero-reward coinbase entry in the Amsterdam BAL. Keep this block-wide so a
+                    // fee-bearing call still settles fees normally.
+                    let has_only_zero_fee_calls = !calls.is_empty() &&
+                        calls.iter().all(|call| {
+                            let call = call.as_ref();
+                            call.gas_price().unwrap_or_default() == 0 &&
+                                call.max_fee_per_gas().unwrap_or_default() == 0 &&
+                                call.max_priority_fee_per_gas().unwrap_or_default() == 0
+                        });
 
                     let attributes = this
                         .pending_env_builder()
@@ -140,6 +151,14 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         .next_evm_env(&parent, &attributes)
                         .map_err(RethError::other)
                         .map_err(Self::Error::from_eth_err)?;
+
+                    // State overrides are synthetic initial state and must not be emitted as BAL
+                    // writes. Enable the builder only after applying them below.
+                    let is_amsterdam =
+                        this.provider().chain_spec().is_amsterdam_active_at_timestamp(
+                            evm_env.block_env.timestamp().saturating_to(),
+                        );
+                    db.bal_state.bal_builder = None;
 
                     // Always disable EIP-3607
                     evm_env.cfg_env.disable_eip3607 = true;
@@ -154,6 +173,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         // If not explicitly required, we disable nonce check <https://github.com/paradigmxyz/reth/issues/16108>
                         evm_env.cfg_env.disable_nonce_check = true;
                         evm_env.cfg_env.disable_base_fee = true;
+                        evm_env.cfg_env.disable_fee_charge = has_only_zero_fee_calls;
                         evm_env.block_env.inner_mut().basefee = 0;
                     }
 
@@ -187,6 +207,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         apply_state_overrides(state_overrides.clone(), &mut db)
                             .map_err(Self::Error::from_eth_err)?;
                     }
+
+                    // `finish` consumes the BAL builder, so recreate it for every simulated
+                    // Amsterdam block after state-override setup has been excluded.
+                    db.bal_state.bal_builder = is_amsterdam.then(Bal::new);
 
                     let chain_id = evm_env.cfg_env.chain_id;
 
