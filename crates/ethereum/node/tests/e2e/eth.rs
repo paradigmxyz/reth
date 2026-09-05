@@ -19,6 +19,7 @@ use reth_node_core::{
 };
 use reth_node_ethereum::{
     engine_ssz_containers::{
+        BodiesByHashRequest, BodiesResponsePrague,
         ForkchoiceUpdateResponse as SszForkchoiceUpdateResponse, PayloadStatus as SszPayloadStatus,
     },
     engine_ssz_proxy::EngineSszProxyLayer,
@@ -477,20 +478,11 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
             .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
             .header(ENGINE_EXECUTION_VERSION_HEADER, fork)
             .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
-            .body(
-                reth_node_ethereum::engine_ssz_containers::BodiesByHashRequest {
-                    block_hashes: vec![block_hash, B256::ZERO],
-                }
-                .as_ssz_bytes(),
-            )
+            .body(BodiesByHashRequest { block_hashes: vec![block_hash, B256::ZERO] }.as_ssz_bytes())
             .send()
             .await?;
         assert_eq!(response.status(), reqwest::StatusCode::OK);
-        let bodies =
-            reth_node_ethereum::engine_ssz_containers::BodiesResponsePrague::from_ssz_bytes(
-                &response.bytes().await?,
-            )
-            .unwrap();
+        let bodies = BodiesResponsePrague::from_ssz_bytes(&response.bytes().await?).unwrap();
         assert_eq!(bodies.entries.len(), 2);
         assert_eq!(bodies.entries[0].available, available);
         assert!(!bodies.entries[1].available);
@@ -502,10 +494,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
         .send()
         .await?;
     assert_eq!(response.status(), reqwest::StatusCode::OK);
-    let bodies = reth_node_ethereum::engine_ssz_containers::BodiesResponsePrague::from_ssz_bytes(
-        &response.bytes().await?,
-    )
-    .unwrap();
+    let bodies = BodiesResponsePrague::from_ssz_bytes(&response.bytes().await?).unwrap();
     assert_eq!(bodies.entries.len(), 1);
     assert!(bodies.entries[0].available);
 

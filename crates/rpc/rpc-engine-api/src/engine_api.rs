@@ -778,14 +778,22 @@ where
         count: u64,
         include_bal: bool,
     ) -> EngineApiResult<Vec<Option<(u64, ExecutionPayloadBodyV2)>>> {
+        let bodies = self
+            .get_payload_bodies_by_range_with(start, count, Self::payload_body_with_timestamp)
+            .await?;
+        self.attach_payload_body_bals(bodies, include_bal).await
+    }
+
+    /// Records SSZ body requests in the corresponding JSON-RPC V1/V2 latency histogram.
+    pub async fn get_payload_bodies_by_range_with_timestamps_metered(
+        &self,
+        start: BlockNumber,
+        count: u64,
+        include_bal: bool,
+    ) -> EngineApiResult<Vec<Option<(u64, ExecutionPayloadBodyV2)>>> {
         let start_time = Instant::now();
-        let result = async {
-            let bodies = self
-                .get_payload_bodies_by_range_with(start, count, Self::payload_body_with_timestamp)
-                .await?;
-            self.attach_payload_body_bals(bodies, include_bal).await
-        }
-        .await;
+        let result =
+            self.get_payload_bodies_by_range_with_timestamps(start, count, include_bal).await;
         let latency = &self.inner.metrics.latency;
         if include_bal {
             latency.get_payload_bodies_by_range_v2.record(start_time.elapsed());
@@ -837,39 +845,11 @@ where
         start: BlockNumber,
         count: u64,
     ) -> EngineApiResult<ExecutionPayloadBodiesV2> {
-        let mut payload_bodies = self
-            .get_payload_bodies_by_range_with(start, count, |block| {
-                let block_hash = block.header().hash_slow();
-                (
-                    block_hash,
-                    ExecutionPayloadBodyV2 {
-                        transactions: block.body().encoded_2718_transactions(),
-                        withdrawals: block
-                            .body()
-                            .withdrawals()
-                            .cloned()
-                            .map(Withdrawals::into_inner),
-                        block_access_list: None,
-                    },
-                )
-            })
-            .await?;
-
-        let block_hashes = payload_bodies
-            .iter()
-            .filter_map(|payload_body| payload_body.as_ref().map(|(block_hash, _)| *block_hash))
-            .collect::<Vec<_>>();
-        let block_access_lists = self.get_block_access_lists_by_hashes(block_hashes).await?;
-
-        for (payload_body, block_access_list) in
-            payload_bodies.iter_mut().filter_map(Option::as_mut).zip(block_access_lists)
-        {
-            payload_body.1.block_access_list = block_access_list;
-        }
-
-        Ok(payload_bodies
+        Ok(self
+            .get_payload_bodies_by_range_with_timestamps(start, count, true)
+            .await?
             .into_iter()
-            .map(|payload_body| payload_body.map(|(_, payload_body)| payload_body))
+            .map(|body| body.map(|(_, body)| body))
             .collect())
     }
 
@@ -933,14 +913,19 @@ where
         hashes: Vec<BlockHash>,
         include_bal: bool,
     ) -> EngineApiResult<Vec<Option<(u64, ExecutionPayloadBodyV2)>>> {
+        let bodies =
+            self.get_payload_bodies_by_hash_with(hashes, Self::payload_body_with_timestamp).await?;
+        self.attach_payload_body_bals(bodies, include_bal).await
+    }
+
+    /// Records SSZ body requests in the corresponding JSON-RPC V1/V2 latency histogram.
+    pub async fn get_payload_bodies_by_hash_with_timestamps_metered(
+        &self,
+        hashes: Vec<BlockHash>,
+        include_bal: bool,
+    ) -> EngineApiResult<Vec<Option<(u64, ExecutionPayloadBodyV2)>>> {
         let start = Instant::now();
-        let result = async {
-            let bodies = self
-                .get_payload_bodies_by_hash_with(hashes, Self::payload_body_with_timestamp)
-                .await?;
-            self.attach_payload_body_bals(bodies, include_bal).await
-        }
-        .await;
+        let result = self.get_payload_bodies_by_hash_with_timestamps(hashes, include_bal).await;
         let latency = &self.inner.metrics.latency;
         if include_bal {
             latency.get_payload_bodies_by_hash_v2.record(start.elapsed());
