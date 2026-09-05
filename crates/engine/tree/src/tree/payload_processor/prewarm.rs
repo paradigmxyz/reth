@@ -814,6 +814,7 @@ impl BalAccountStateFields {
                     .and_then(|account| account.bytecode_hash)
                     .or(Some(alloy_consensus::constants::KECCAK_EMPTY))
             }),
+            extension: existing_account.map(|account| account.extension).unwrap_or_default(),
         }
     }
 }

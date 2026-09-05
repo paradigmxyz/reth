@@ -44,6 +44,7 @@ pub type BlockBody = alloy_consensus::BlockBody<TransactionSigned>;
 pub struct EthPrimitives;
 
 impl reth_primitives_traits::NodePrimitives for EthPrimitives {
+    type AccountExtension = reth_primitives_traits::EmptyAccountExtension;
     type Block = crate::Block;
     type BlockHeader = alloy_consensus::Header;
     type BlockBody = crate::BlockBody;

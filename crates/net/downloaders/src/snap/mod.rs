@@ -334,6 +334,7 @@ mod tests {
             balance: U256::from(1),
             storage_root: EMPTY_ROOT_HASH,
             code_hash: KECCAK256_EMPTY,
+            extension: (),
         }
     }
 

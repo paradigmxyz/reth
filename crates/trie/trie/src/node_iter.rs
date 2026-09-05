@@ -80,7 +80,7 @@ pub struct TrieNodeIter<C, H: HashedCursor, K> {
 
 impl<C, H: HashedCursor, K> TrieNodeIter<C, H, K>
 where
-    H::Value: Copy,
+    H::Value: Clone,
     K: AsRef<AddedRemovedKeys>,
 {
     /// Creates a new [`TrieNodeIter`] for the state trie.
@@ -123,14 +123,15 @@ where
     ///
     /// If `metrics` feature is enabled, it also updates the metrics.
     fn seek_hashed_entry(&mut self, key: B256) -> Result<Option<(B256, H::Value)>, DatabaseError> {
-        if let Some((last_key, last_value)) = self.last_next_result &&
+        if let Some((last_key, last_value)) = self.last_next_result.clone() &&
             last_key == key
         {
             trace!(target: "trie::node_iter", seek_key = ?key, "reusing result from last next() call instead of seeking");
             self.last_next_result = None; // Consume the cached value
 
             let result = Some((last_key, last_value));
-            self.last_seeked_hashed_entry = Some(SeekedHashedEntry { seeked_key: key, result });
+            self.last_seeked_hashed_entry =
+                Some(SeekedHashedEntry { seeked_key: key, result: result.clone() });
 
             return Ok(result);
         }
@@ -139,16 +140,17 @@ where
             .last_seeked_hashed_entry
             .as_ref()
             .filter(|entry| entry.seeked_key == key)
-            .map(|entry| entry.result)
+            .and_then(|entry| entry.result.clone())
         {
             #[cfg(feature = "metrics")]
             self.metrics.inc_leaf_nodes_same_seeked();
-            return Ok(entry);
+            return Ok(Some(entry));
         }
 
         trace!(target: "trie::node_iter", ?key, "performing hashed cursor seek");
         let result = self.hashed_cursor.seek(key)?;
-        self.last_seeked_hashed_entry = Some(SeekedHashedEntry { seeked_key: key, result });
+        self.last_seeked_hashed_entry =
+            Some(SeekedHashedEntry { seeked_key: key, result: result.clone() });
 
         #[cfg(feature = "metrics")]
         {
@@ -163,7 +165,7 @@ where
     fn next_hashed_entry(&mut self) -> Result<Option<(B256, H::Value)>, DatabaseError> {
         let next = self.hashed_cursor.next()?;
 
-        self.last_next_result = next;
+        self.last_next_result = next.clone();
 
         #[cfg(feature = "metrics")]
         {
@@ -177,7 +179,7 @@ impl<C, H, K> TrieNodeIter<C, H, K>
 where
     C: TrieCursor,
     H: HashedCursor,
-    H::Value: Copy,
+    H::Value: Clone,
     K: AsRef<AddedRemovedKeys>,
 {
     /// Return the next trie node to be added to the hash builder.
@@ -385,7 +387,7 @@ mod tests {
         fn empty_leaf_rlp_for_key(key: Nibbles) -> RlpNode {
             RlpNode::from_rlp(&alloy_rlp::encode(LeafNode::new(
                 key,
-                alloy_rlp::encode(TrieAccount::default()),
+                alloy_rlp::encode(TrieAccount::<()>::default()),
             )))
         }
 

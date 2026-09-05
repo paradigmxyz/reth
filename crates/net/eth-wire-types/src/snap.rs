@@ -138,6 +138,7 @@ impl AccountData {
             balance: slim.balance,
             storage_root: SlimAccountBody::restore(&slim.storage_root, EMPTY_ROOT_HASH)?,
             code_hash: SlimAccountBody::restore(&slim.code_hash, KECCAK256_EMPTY)?,
+            extension: (),
         })
     }
 
@@ -885,7 +886,7 @@ mod tests {
     }
 
     fn trie_account(storage_root: B256, code_hash: B256) -> TrieAccount {
-        TrieAccount { nonce: 7, balance: U256::from(42), storage_root, code_hash }
+        TrieAccount { nonce: 7, balance: U256::from(42), storage_root, code_hash, extension: () }
     }
 
     #[test]

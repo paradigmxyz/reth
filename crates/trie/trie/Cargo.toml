@@ -62,6 +62,7 @@ pretty_assertions.workspace = true
 proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
 rand.workspace = true
+serde.workspace = true
 
 [features]
 metrics = ["reth-metrics", "dep:metrics"]

@@ -72,6 +72,7 @@ type V2AccountProofCalculator<'a, Provider> = proof_v2::ProofCalculator<
     AsyncAccountValueEncoder<
         InstrumentedTrieCursor<'a, <Provider as TrieCursorFactory>::StorageTrieCursor<'a>>,
         InstrumentedHashedCursor<'a, <Provider as HashedCursorFactory>::StorageCursor<'a>>,
+        <Provider as HashedCursorFactory>::AccountExtension,
     >,
 >;
 
@@ -911,6 +912,7 @@ where
                         '_,
                         <Factory::Provider as HashedCursorFactory>::StorageCursor<'_>,
                     >,
+                    <Factory::Provider as HashedCursorFactory>::AccountExtension,
                 >,
             >::new(instrumented_account_trie_cursor, instrumented_account_hashed_cursor);
         let v2_storage_calculator =
@@ -1010,11 +1012,12 @@ where
         let storage_proof_receivers =
             dispatch_v2_storage_proofs(&self.storage_work_tx, &account_targets, storage_targets)?;
 
-        let mut value_encoder = AsyncAccountValueEncoder::new(
-            storage_proof_receivers,
-            self.cached_storage_roots.clone(),
-            v2_storage_calculator,
-        );
+        let mut value_encoder: AsyncAccountValueEncoder<_, _, Provider::AccountExtension> =
+            AsyncAccountValueEncoder::new(
+                storage_proof_receivers,
+                self.cached_storage_roots.clone(),
+                v2_storage_calculator,
+            );
 
         let account_proofs =
             v2_account_calculator.proof(&mut value_encoder, &mut account_targets)?;

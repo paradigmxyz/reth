@@ -1,7 +1,7 @@
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 use crate::forward_cursor::ForwardInMemoryCursor;
 use alloy_primitives::{B256, U256};
-use reth_primitives_traits::Account;
+use reth_primitives_traits::{Account, AccountExtension};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::HashedPostStateSorted;
 
@@ -19,17 +19,19 @@ impl<CF, T> HashedPostStateCursorFactory<CF, T> {
     }
 }
 
-impl<'overlay, CF, T> HashedCursorFactory for HashedPostStateCursorFactory<CF, &'overlay T>
+impl<'overlay, CF, T, E> HashedCursorFactory for HashedPostStateCursorFactory<CF, &'overlay T>
 where
-    CF: HashedCursorFactory,
-    T: AsRef<HashedPostStateSorted>,
+    CF: HashedCursorFactory<AccountExtension = E>,
+    T: AsRef<HashedPostStateSorted<E>>,
+    E: AccountExtension,
 {
+    type AccountExtension = E;
     type AccountCursor<'cursor>
-        = HashedPostStateCursor<'overlay, CF::AccountCursor<'cursor>, Option<Account>>
+        = HashedPostStateCursor<'overlay, CF::AccountCursor<'cursor>, Option<Account<E>>, E>
     where
         Self: 'cursor;
     type StorageCursor<'cursor>
-        = HashedPostStateCursor<'overlay, CF::StorageCursor<'cursor>, U256>
+        = HashedPostStateCursor<'overlay, CF::StorageCursor<'cursor>, U256, E>
     where
         Self: 'cursor;
 
@@ -57,36 +59,36 @@ where
 /// This design allows us to use `U256::ZERO`, rather than an Option, to indicate deletion for
 /// storage (which maps cleanly to how changesets are stored in the DB) while not requiring two
 /// different cursor implementations.
-pub trait HashedPostStateCursorValue: Copy {
-    /// The non-zero type returned by `into_option`.
+pub trait HashedPostStateCursorValue: Clone {
+    /// The non-zero type returned by `as_option`.
     /// For `Option<Account>`, this is `Account`.
     /// For `U256`, this is `U256`.
-    type NonZero: Copy + std::fmt::Debug;
+    type NonZero: Clone + std::fmt::Debug;
 
     /// Returns `Some(&NonZero)` if the value is present, `None` if deleted.
-    fn into_option(self) -> Option<Self::NonZero>;
+    fn as_option(&self) -> Option<Self::NonZero>;
 }
 
-impl HashedPostStateCursorValue for Option<Account> {
-    type NonZero = Account;
+impl<E: AccountExtension> HashedPostStateCursorValue for Option<Account<E>> {
+    type NonZero = Account<E>;
 
-    fn into_option(self) -> Option<Self::NonZero> {
-        self
+    fn as_option(&self) -> Option<Self::NonZero> {
+        self.clone()
     }
 }
 
 impl HashedPostStateCursorValue for U256 {
     type NonZero = Self;
 
-    fn into_option(self) -> Option<Self::NonZero> {
-        (!self.is_zero()).then_some(self)
+    fn as_option(&self) -> Option<Self::NonZero> {
+        (!self.is_zero()).then_some(*self)
     }
 }
 
 /// A cursor to iterate over state updates and corresponding database entries.
 /// It will always give precedence to the data from the post state updates.
 #[derive(Debug)]
-pub struct HashedPostStateCursor<'a, C, V>
+pub struct HashedPostStateCursor<'a, C, V, E = reth_primitives_traits::EmptyAccountExtension>
 where
     V: HashedPostStateCursorValue,
 {
@@ -103,7 +105,7 @@ where
     /// Tracks whether `seek` has been called.
     seeked: bool,
     /// Reference to the full post state.
-    post_state: &'a HashedPostStateSorted,
+    post_state: &'a HashedPostStateSorted<E>,
 }
 
 #[derive(Debug)]
@@ -129,12 +131,13 @@ impl<V> DbCursorState<V> {
     }
 }
 
-impl<'a, C> HashedPostStateCursor<'a, C, Option<Account>>
+impl<'a, C, E> HashedPostStateCursor<'a, C, Option<Account<E>>, E>
 where
-    C: HashedCursor<Value = Account>,
+    C: HashedCursor<Value = Account<E>>,
+    E: AccountExtension,
 {
     /// Create new account cursor which combines a DB cursor and the post state.
-    pub fn new_account(cursor: C, post_state: &'a HashedPostStateSorted) -> Self {
+    pub fn new_account(cursor: C, post_state: &'a HashedPostStateSorted<E>) -> Self {
         let post_state_cursor = ForwardInMemoryCursor::new(&post_state.accounts);
         Self {
             cursor,
@@ -148,15 +151,16 @@ where
     }
 }
 
-impl<'a, C> HashedPostStateCursor<'a, C, U256>
+impl<'a, C, E> HashedPostStateCursor<'a, C, U256, E>
 where
     C: HashedStorageCursor<Value = U256>,
+    E: AccountExtension,
 {
     /// Create new storage cursor with full post state reference.
     /// This allows the cursor to switch between storage tries when `set_hashed_address` is called.
     pub fn new_storage(
         cursor: C,
-        post_state: &'a HashedPostStateSorted,
+        post_state: &'a HashedPostStateSorted<E>,
         hashed_address: B256,
     ) -> Self {
         let post_state_cursor = Self::get_storage_overlay(post_state, hashed_address);
@@ -173,7 +177,7 @@ where
 
     /// Returns the storage overlay for `hashed_address`.
     fn get_storage_overlay(
-        post_state: &'a HashedPostStateSorted,
+        post_state: &'a HashedPostStateSorted<E>,
         hashed_address: B256,
     ) -> ForwardInMemoryCursor<'a, B256, U256> {
         let post_state_storage = post_state.storages.get(&hashed_address);
@@ -183,10 +187,11 @@ where
     }
 }
 
-impl<'a, C, V> HashedPostStateCursor<'a, C, V>
+impl<'a, C, V, E> HashedPostStateCursor<'a, C, V, E>
 where
     C: HashedCursor<Value = V::NonZero>,
     V: HashedPostStateCursorValue,
+    E: AccountExtension,
 {
     const fn get_cursor_mut(&mut self) -> &mut C {
         &mut self.cursor
@@ -248,7 +253,7 @@ where
     fn choose_next_entry(&mut self) -> Result<Option<(B256, V::NonZero)>, DatabaseError> {
         loop {
             let post_state_current =
-                self.post_state_cursor.current().copied().map(|(k, v)| (k, v.into_option()));
+                self.post_state_cursor.current().map(|(k, v)| (*k, v.as_option()));
             let db_entry = self.db_cursor_state.entry();
 
             match (post_state_current, db_entry) {
@@ -277,16 +282,17 @@ where
                 // - mem_key > db_key
                 // - overlay is exhausted
                 // Return the db_entry. If DB is also exhausted then this returns None.
-                _ => return Ok(db_entry.copied()),
+                _ => return Ok(db_entry.cloned()),
             }
         }
     }
 }
 
-impl<C, V> HashedCursor for HashedPostStateCursor<'_, C, V>
+impl<C, V, E> HashedCursor for HashedPostStateCursor<'_, C, V, E>
 where
     C: HashedCursor<Value = V::NonZero>,
     V: HashedPostStateCursorValue,
+    E: AccountExtension,
 {
     type Value = V::NonZero;
 
@@ -299,8 +305,7 @@ where
     /// The returned account key is memoized and the cursor remains positioned at that key until
     /// [`HashedCursor::seek`] or [`HashedCursor::next`] are called.
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
-        let post_state_entry =
-            self.post_state_cursor.seek(&key).copied().map(|(k, v)| (k, v.into_option()));
+        let post_state_entry = self.post_state_cursor.seek(&key).map(|(k, v)| (*k, v.as_option()));
 
         if let Some((mem_key, Some(value))) = post_state_entry &&
             mem_key == key
@@ -391,9 +396,10 @@ where
 
 /// The cursor to iterate over post state hashed values and corresponding database entries.
 /// It will always give precedence to the data from the post state.
-impl<C> HashedStorageCursor for HashedPostStateCursor<'_, C, U256>
+impl<C, E> HashedStorageCursor for HashedPostStateCursor<'_, C, U256, E>
 where
     C: HashedStorageCursor<Value = U256>,
+    E: AccountExtension,
 {
     /// Returns `true` if the account has no storage entries.
     ///
@@ -408,8 +414,10 @@ where
     fn set_hashed_address(&mut self, hashed_address: B256) {
         self.reset();
         self.cursor.set_hashed_address(hashed_address);
-        let post_state_cursor =
-            HashedPostStateCursor::<C, U256>::get_storage_overlay(self.post_state, hashed_address);
+        let post_state_cursor = HashedPostStateCursor::<C, U256, E>::get_storage_overlay(
+            self.post_state,
+            hashed_address,
+        );
         self.post_state_cursor = post_state_cursor;
         self.db_cursor_state = DbCursorState::NeedsPosition;
     }
@@ -521,11 +529,11 @@ mod tests {
                     itertools::EitherOrBoth::Left((key, node)) => Some((key, node)),
                     // Only in post state: keep if not a deletion
                     itertools::EitherOrBoth::Right((key, wrapped)) => {
-                        wrapped.into_option().map(|val| (key, val))
+                        wrapped.as_option().map(|val| (key, val))
                     }
                     // In both: post state takes precedence (keep if not a deletion)
                     itertools::EitherOrBoth::Both(_, (key, wrapped)) => {
-                        wrapped.into_option().map(|val| (key, val))
+                        wrapped.as_option().map(|val| (key, val))
                     }
                 })
                 .collect()
@@ -616,7 +624,9 @@ mod tests {
                 };
                 let mut storages = alloy_primitives::map::B256Map::default();
                 storages.insert(hashed_address, storage_sorted);
-                let post_state = HashedPostStateSorted::new(Vec::new(), storages);
+                let post_state = HashedPostStateSorted::<
+                    reth_primitives_traits::EmptyAccountExtension,
+                >::new(Vec::new(), storages);
 
                 let mut test_cursor = HashedPostStateCursor::new_storage(mock_cursor, &post_state, hashed_address);
 

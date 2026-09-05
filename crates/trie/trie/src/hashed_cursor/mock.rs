@@ -5,15 +5,15 @@ use crate::mock::{KeyVisit, KeyVisitType};
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 use alloy_primitives::{map::B256Map, B256, U256};
 use parking_lot::{Mutex, MutexGuard};
-use reth_primitives_traits::Account;
+use reth_primitives_traits::{Account, AccountExtension, EmptyAccountExtension};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::HashedPostState;
 use tracing::instrument;
 
 /// Mock hashed cursor factory.
 #[derive(Clone, Default, Debug)]
-pub struct MockHashedCursorFactory {
-    hashed_accounts: Arc<BTreeMap<B256, Account>>,
+pub struct MockHashedCursorFactory<E = EmptyAccountExtension> {
+    hashed_accounts: Arc<BTreeMap<B256, Account<E>>>,
     hashed_storage_tries: Arc<B256Map<BTreeMap<B256, U256>>>,
 
     /// List of keys that the hashed accounts cursor has visited.
@@ -22,10 +22,10 @@ pub struct MockHashedCursorFactory {
     visited_storage_keys: Arc<B256Map<Mutex<Vec<KeyVisit<B256>>>>>,
 }
 
-impl MockHashedCursorFactory {
-    /// Creates a new mock hashed cursor factory.
-    pub fn new(
-        hashed_accounts: BTreeMap<B256, Account>,
+impl<E: AccountExtension> MockHashedCursorFactory<E> {
+    /// Creates a new mock hashed cursor factory with chain-specific accounts.
+    pub fn new_with_extension(
+        hashed_accounts: BTreeMap<B256, Account<E>>,
         hashed_storage_tries: B256Map<BTreeMap<B256, U256>>,
     ) -> Self {
         let visited_storage_keys =
@@ -39,9 +39,9 @@ impl MockHashedCursorFactory {
     }
 
     /// Creates a new mock hashed cursor factory from a `HashedPostState`.
-    pub fn from_hashed_post_state(post_state: HashedPostState) -> Self {
+    pub fn from_hashed_post_state(post_state: HashedPostState<E>) -> Self {
         // Extract accounts from post state, filtering out None (deleted accounts)
-        let hashed_accounts: BTreeMap<B256, Account> = post_state
+        let hashed_accounts: BTreeMap<B256, Account<E>> = post_state
             .accounts
             .into_iter()
             .filter_map(|(addr, account)| account.map(|acc| (addr, acc)))
@@ -67,7 +67,7 @@ impl MockHashedCursorFactory {
             hashed_storages.entry(*account).or_default();
         }
 
-        Self::new(hashed_accounts, hashed_storages)
+        Self::new_with_extension(hashed_accounts, hashed_storages)
     }
 
     /// Returns a reference to the list of visited hashed account keys.
@@ -84,9 +84,20 @@ impl MockHashedCursorFactory {
     }
 }
 
-impl HashedCursorFactory for MockHashedCursorFactory {
+impl MockHashedCursorFactory {
+    /// Creates a new mock hashed cursor factory for Ethereum accounts.
+    pub fn new(
+        hashed_accounts: BTreeMap<B256, Account>,
+        hashed_storage_tries: B256Map<BTreeMap<B256, U256>>,
+    ) -> Self {
+        Self::new_with_extension(hashed_accounts, hashed_storage_tries)
+    }
+}
+
+impl<E: AccountExtension> HashedCursorFactory for MockHashedCursorFactory<E> {
+    type AccountExtension = E;
     type AccountCursor<'a>
-        = MockHashedCursor<Account>
+        = MockHashedCursor<Account<E>>
     where
         Self: 'a;
     type StorageCursor<'a>
