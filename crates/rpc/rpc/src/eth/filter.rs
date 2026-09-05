@@ -232,7 +232,8 @@ where
         FilterChanges<RpcTransaction<Eth::NetworkTypes>, RpcLog<Eth::NetworkTypes>>,
         EthFilterError,
     > {
-        let best_number = self.provider().best_block_number()?;
+        let info = self.provider().chain_info()?;
+        let best_number = info.best_number;
 
         // start_block is the block from which we should start fetching changes, the next block from
         // the last time changes were polled, in other words the best block at last poll + 1
