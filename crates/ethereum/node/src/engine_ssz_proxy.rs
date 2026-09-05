@@ -838,8 +838,6 @@ async fn read_ssz_body(request: HttpRequest, max_bytes: usize) -> Result<Bytes, 
     }
 }
 
-/// Handles SSZ `engine_getBlobsV*` requests with the node's blob store.
-
 fn blob_response<Ssz, Legacy>(response: Result<Option<Legacy>, EngineApiError>) -> HttpResponse
 where
     Ssz: TryFrom<Legacy> + ssz::Encode,
