@@ -413,6 +413,7 @@ where
             .await
             .map_err(|err| match err.as_err() {
                 Some(EthApiError::HeaderNotFound(id)) if *id == at => {
+                    // Unknown blocks use -32000: https://github.com/ethereum/execution-apis/pull/855
                     EthApiError::TracingBlockNotFound(at).into()
                 }
                 _ => err,
