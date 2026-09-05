@@ -35,6 +35,7 @@ use alloy_primitives::{
     map::{AddressSet, B256Map, B256Set},
     TxHash, B256,
 };
+use reth_primitives_traits::transaction::error::InvalidTransactionError;
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 #[cfg(test)]
@@ -646,11 +647,10 @@ impl<T: TransactionOrdering> TxPool<T> {
         // Apply the state changes to the total set of transactions which triggers sub-pool updates.
         let updates = self.all_transactions.update(&changed_senders);
 
-        // track changed accounts
-        self.all_transactions.sender_info.extend(changed_senders);
-
         // Process the sub-pool updates
         let update = self.process_updates(updates);
+        // Track changed accounts after discards, which can remove sender info.
+        self.all_transactions.sender_info.extend(changed_senders);
         // update the metrics after the update
         self.update_size_metrics();
         update
@@ -738,12 +738,32 @@ impl<T: TransactionOrdering> TxPool<T> {
     pub(crate) fn add_transaction(
         &mut self,
         tx: ValidPoolTransaction<T::Transaction>,
-        on_chain_balance: U256,
-        on_chain_nonce: u64,
+        mut on_chain_balance: U256,
+        mut on_chain_nonce: u64,
         on_chain_code_hash: Option<B256>,
     ) -> PoolResult<AddedTransaction<T::Transaction>> {
         if self.contains(tx.hash()) {
             return Err(PoolError::new(*tx.hash(), PoolErrorKind::AlreadyImported))
+        }
+
+        // Prefer newer tracked sender state.
+        if let Some(info) = self.all_transactions.sender_info.get(&tx.sender_id()) &&
+            info.state_nonce > on_chain_nonce
+        {
+            on_chain_nonce = info.state_nonce;
+            on_chain_balance = info.balance;
+        }
+
+        if tx.nonce() < on_chain_nonce {
+            return Err(PoolError::new(
+                *tx.hash(),
+                InvalidPoolTransactionError::Consensus(
+                    InvalidTransactionError::NonceNotConsistent {
+                        tx: tx.nonce(),
+                        state: on_chain_nonce,
+                    },
+                ),
+            ))
         }
 
         self.validate_auth(&tx, on_chain_nonce, on_chain_code_hash)?;
@@ -3833,6 +3853,42 @@ mod tests {
         let outcome = pool.update_accounts(changed_senders);
         assert_eq!(outcome.discarded.len(), 1);
         assert_eq!(pool.pending_pool.len(), 1);
+    }
+
+    #[test]
+    fn stale_validation_does_not_regress_sender_state() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let template = MockTransaction::eip1559();
+        let first = f.validated(template.clone().with_nonce(0).rng_hash());
+        let sender = first.sender_id();
+        pool.add_transaction(first, U256::from(1_000), 0, None).unwrap();
+
+        let mut changed_senders = HashMap::default();
+        changed_senders.insert(sender, SenderInfo { state_nonce: 1, balance: U256::from(1_000) });
+        let outcome = pool.update_accounts(changed_senders);
+        assert_eq!(outcome.discarded.len(), 1);
+        assert_eq!(pool.all_transactions.sender_info[&sender].state_nonce, 1);
+
+        // Stale validation for the next nonce remains pending.
+        let current = f.validated(template.clone().with_nonce(1).rng_hash());
+        pool.add_transaction(current, U256::from(1_000), 0, None).unwrap();
+        assert_eq!(pool.pending_pool.len(), 1);
+        assert_eq!(pool.queued_pool.len(), 0);
+        assert_eq!(pool.all_transactions.sender_info[&sender].state_nonce, 1);
+
+        let stale = f.validated(template.with_nonce(0).rng_hash());
+        let stale_hash = *stale.hash();
+        let err = pool.add_transaction(stale, U256::from(1_000), 0, None).unwrap_err();
+        assert!(matches!(
+            err.kind,
+            PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::Consensus(
+                InvalidTransactionError::NonceNotConsistent { tx: 0, state: 1 }
+            ))
+        ));
+        assert!(!pool.contains(&stale_hash));
+        assert_eq!(pool.all_transactions.sender_info[&sender].state_nonce, 1);
     }
 
     #[test]
