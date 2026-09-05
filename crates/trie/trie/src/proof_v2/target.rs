@@ -34,6 +34,35 @@ pub(crate) struct SubTrieTargets<'a> {
     pub(crate) targets: &'a [ProofV2Target],
 }
 
+/// Finds the deepest target prefix shared by each path in an ordered input stream.
+/// Only the targets on either side of a path can give its longest shared prefix.
+pub(super) struct TargetDepths<'a> {
+    remaining: &'a [ProofV2Target],
+    previous: Option<&'a Nibbles>,
+}
+
+impl<'a> TargetDepths<'a> {
+    pub(super) const fn new(targets: &'a [ProofV2Target]) -> Self {
+        Self { remaining: targets, previous: None }
+    }
+
+    #[inline]
+    pub(super) fn next(&mut self, path: &Nibbles) -> usize {
+        let mut next_depth = 0;
+        while let Some((target, rest)) = self.remaining.split_first() {
+            let key = &target.key_nibbles;
+            let common = key.common_prefix_length(path);
+            if key.get(common) >= path.get(common) {
+                next_depth = common;
+                break
+            }
+            self.previous = Some(key);
+            self.remaining = rest;
+        }
+        self.previous.map_or(next_depth, |key| next_depth.max(key.common_prefix_length(path)))
+    }
+}
+
 /// Given a set of [`ProofV2Target`]s, returns an iterator over those same [`ProofV2Target`]s
 /// grouped by their already-revealed parent. Each group traverses the bounded span from its first
 /// targeted direct child through its last targeted direct child.
@@ -64,7 +93,45 @@ pub(crate) fn iter_sub_trie_targets(
 mod tests {
     use super::*;
     use alloy_primitives::B256;
+    use proptest::prelude::*;
     use reth_trie_common::ProofV2TargetParent;
+
+    proptest! {
+        #[test]
+        fn target_depths_match_linear_search(
+            entries in prop::collection::vec((any::<[u8; 32]>(), 0usize..65), 0..40),
+            query in any::<[u8; 32]>(),
+        ) {
+            let mut targets = entries.into_iter().map(|(key, parent)| {
+                ProofV2Target::new(B256::from(key)).with_parent(
+                    parent.checked_sub(1).map_or(ProofV2TargetParent::NONE, ProofV2TargetParent::new),
+                )
+            }).collect::<Vec<_>>();
+            let query = Nibbles::unpack(query);
+            for group in iter_sub_trie_targets(&mut targets) {
+                let paths = group.targets.iter().map(|target| target.key_nibbles)
+                    .chain(core::iter::once(query))
+                    .flat_map(|key| (0..=key.len()).rev().map(move |len| key.slice(..len)))
+                    .collect::<Vec<_>>();
+                let mut paths = paths;
+                paths.sort_unstable();
+                let mut depths = TargetDepths::new(group.targets);
+                for path in paths {
+                    let expected = group.targets.iter()
+                        .map(|target| target.key_nibbles.common_prefix_length(&path))
+                        .max().unwrap_or(0);
+                    prop_assert_eq!(depths.next(&path), expected);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn empty_target_depths() {
+        let mut depths = TargetDepths::new(&[]);
+        assert_eq!(depths.next(&Nibbles::new()), 0);
+        assert_eq!(depths.next(&Nibbles::unpack(B256::repeat_byte(0xff))), 0);
+    }
 
     #[test]
     fn test_iter_sub_trie_targets() {
