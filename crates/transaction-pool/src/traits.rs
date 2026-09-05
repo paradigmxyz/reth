@@ -419,8 +419,8 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
 
     /// Builds an EIP-7805 (FOCIL) inclusion list from the pool's local view.
     ///
-    /// The returned transactions are EIP-2718 encoded and their RLP list encoding is at most
-    /// `max_size` bytes. Blob transactions are excluded, as EIP-7805 requires.
+    /// The returned transactions are EIP-2718 encoded and the sum of their byte lengths is at
+    /// most `max_size` bytes. Blob transactions are excluded, as EIP-7805 requires.
     ///
     /// At most [`MAX_INCLUSION_LIST_TXS_PER_SENDER`] transactions come from any one sender: only a
     /// sender's next nonce is appendable, so a longer run would spend the byte budget without

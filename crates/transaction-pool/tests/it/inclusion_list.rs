@@ -60,5 +60,5 @@ async fn inclusion_list_respects_the_size_limit() {
 
     let il = pool.build_inclusion_list(8192);
     assert!(!il.is_empty());
-    assert!(alloy_rlp::list_length::<alloy_primitives::Bytes, [u8]>(&il) <= 8192);
+    assert!(il.iter().map(|tx| tx.len()).sum::<usize>() <= 8192);
 }
