@@ -8,15 +8,15 @@ use crate::{
     engine_ssz_containers::{
         BlobsV1Request, BlobsV1Response, BlobsV2Response, BlobsV3Response, BlobsV4Request,
         BlobsV4Response, BodiesByHashRequest, BodiesResponse, BuiltPayloadAmsterdam,
-        BuiltPayloadCancun, BuiltPayloadOsaka, BuiltPayloadParis, BuiltPayloadPrague,
-        BuiltPayloadShanghai, ExecutionPayloadBodyAmsterdam, ExecutionPayloadBodyParis,
-        ExecutionPayloadBodyShanghai, ExecutionPayloadEnvelopeAmsterdam,
-        ExecutionPayloadEnvelopeCancun, ExecutionPayloadEnvelopeOsaka,
-        ExecutionPayloadEnvelopeParis, ExecutionPayloadEnvelopePrague,
-        ExecutionPayloadEnvelopeShanghai, ForkchoiceUpdateAmsterdam, ForkchoiceUpdateCancun,
-        ForkchoiceUpdateOsaka, ForkchoiceUpdateParis, ForkchoiceUpdatePrague,
-        ForkchoiceUpdateResponse, ForkchoiceUpdateShanghai, Optional,
-        PayloadStatus as EngineSszPayloadStatus, PayloadStatusWithWitness,
+        BuiltPayloadOsaka, BuiltPayloadParis, BuiltPayloadPrague, BuiltPayloadShanghai,
+        ExecutionPayloadBodyAmsterdam, ExecutionPayloadBodyParis, ExecutionPayloadBodyShanghai,
+        ExecutionPayloadEnvelopeAmsterdam, ExecutionPayloadEnvelopeCancun,
+        ExecutionPayloadEnvelopeOsaka, ExecutionPayloadEnvelopeParis,
+        ExecutionPayloadEnvelopePrague, ExecutionPayloadEnvelopeShanghai,
+        ForkchoiceUpdateAmsterdam, ForkchoiceUpdateCancun, ForkchoiceUpdateOsaka,
+        ForkchoiceUpdateParis, ForkchoiceUpdatePrague, ForkchoiceUpdateResponse,
+        ForkchoiceUpdateShanghai, Optional, PayloadStatus as EngineSszPayloadStatus,
+        PayloadStatusWithWitness,
     },
     engine_ssz_witness::{EngineSszWitness, EngineSszWitnessError},
 };
@@ -461,22 +461,25 @@ where
                 },
                 Err(err) => engine_error_response(err),
             },
-            EngineSszFork::Cancun => match self.get_payload_v3_metered(payload_id).await {
-                Ok(payload) => get_payload_response(BuiltPayloadCancun::from(payload)),
-                Err(err) => engine_error_response(err),
-            },
-            EngineSszFork::Prague => match self.get_payload_v4_metered(payload_id).await {
-                Ok(payload) => get_payload_response(BuiltPayloadPrague::from(payload)),
-                Err(err) => engine_error_response(err),
-            },
-            EngineSszFork::Osaka => match self.get_payload_v5_metered(payload_id).await {
-                Ok(payload) => get_payload_response(BuiltPayloadOsaka::from(payload)),
-                Err(err) => engine_error_response(err),
-            },
-            EngineSszFork::Amsterdam => match self.get_payload_v6_metered(payload_id).await {
-                Ok(payload) => get_payload_response(BuiltPayloadAmsterdam::from(payload)),
-                Err(err) => engine_error_response(err),
-            },
+            EngineSszFork::Cancun => self
+                .get_payload_v3_metered(payload_id)
+                .await
+                .map_or_else(engine_error_response, get_payload_response),
+            EngineSszFork::Prague => self
+                .get_payload_v4_metered(payload_id)
+                .await
+                .map(BuiltPayloadPrague::from)
+                .map_or_else(engine_error_response, get_payload_response),
+            EngineSszFork::Osaka => self
+                .get_payload_v5_metered(payload_id)
+                .await
+                .map(BuiltPayloadOsaka::from)
+                .map_or_else(engine_error_response, get_payload_response),
+            EngineSszFork::Amsterdam => self
+                .get_payload_v6_metered(payload_id)
+                .await
+                .map(BuiltPayloadAmsterdam::from)
+                .map_or_else(engine_error_response, get_payload_response),
         }
     }
 
@@ -581,35 +584,28 @@ async fn handle_engine_ssz_request<Api>(
 where
     Api: EngineSszApi,
 {
-    let method = request.method().as_str().to_owned();
-    let path = request.uri().path().to_owned();
-    let Some(endpoint) = parse_engine_path(&path) else {
+    let Some(endpoint) = parse_engine_path(request.uri().path()) else {
         return problem_response(STATUS_NOT_FOUND, "method-not-found", None)
     };
 
+    if request.method() != endpoint.method() {
+        return problem_response(STATUS_METHOD_NOT_ALLOWED, "method-not-allowed", None)
+    }
+
     match endpoint {
         EngineSszEndpoint::Capabilities => {
-            if method != "GET" {
-                return problem_response(STATUS_METHOD_NOT_ALLOWED, "method-not-allowed", None)
-            }
             let Some(engine_api) = handle.engine_api().await else {
                 return problem_response(STATUS_SERVICE_UNAVAILABLE, "service-unavailable", None)
             };
             engine_api.capabilities(handle.witness_enabled().await)
         }
         EngineSszEndpoint::Identity => {
-            if method != "GET" {
-                return problem_response(STATUS_METHOD_NOT_ALLOWED, "method-not-allowed", None)
-            }
             let Some(engine_api) = handle.engine_api().await else {
                 return problem_response(STATUS_SERVICE_UNAVAILABLE, "service-unavailable", None)
             };
             engine_api.identity()
         }
         EngineSszEndpoint::NewPayload => {
-            if method != "POST" {
-                return problem_response(STATUS_METHOD_NOT_ALLOWED, "method-not-allowed", None)
-            }
             let Some(fork) = request_fork(&request) else {
                 return problem_response(STATUS_BAD_REQUEST, "unsupported-fork", None)
             };
@@ -623,9 +619,6 @@ where
             engine_api.new_payload(fork, body).await
         }
         EngineSszEndpoint::PayloadsWithWitness => {
-            if method != "POST" {
-                return problem_response(STATUS_METHOD_NOT_ALLOWED, "method-not-allowed", None)
-            }
             let Some(fork) = request_fork(&request) else {
                 return problem_response(STATUS_BAD_REQUEST, "unsupported-fork", None)
             };
@@ -645,9 +638,6 @@ where
             engine_api.new_payload_with_witness(body, witness_handler).await
         }
         EngineSszEndpoint::GetPayload(payload_id) => {
-            if method != "GET" {
-                return problem_response(STATUS_METHOD_NOT_ALLOWED, "method-not-allowed", None)
-            }
             let Ok(payload_id) = payload_id else {
                 return problem_response(STATUS_BAD_REQUEST, "invalid-request", None)
             };
@@ -660,9 +650,6 @@ where
             engine_api.get_payload(fork, payload_id).await
         }
         EngineSszEndpoint::Forkchoice => {
-            if method != "POST" {
-                return problem_response(STATUS_METHOD_NOT_ALLOWED, "method-not-allowed", None)
-            }
             let Some(fork) = request_fork(&request) else {
                 return problem_response(STATUS_BAD_REQUEST, "unsupported-fork", None)
             };
@@ -676,9 +663,6 @@ where
             engine_api.forkchoice_updated(fork, body).await
         }
         EngineSszEndpoint::PayloadBodiesByHash => {
-            if method != "POST" {
-                return problem_response(STATUS_METHOD_NOT_ALLOWED, "method-not-allowed", None)
-            }
             let Some(fork) = request_fork(&request) else {
                 return problem_response(STATUS_BAD_REQUEST, "unsupported-fork", None)
             };
@@ -701,9 +685,6 @@ where
             engine_api.get_payload_bodies_by_hash(fork, request).await
         }
         EngineSszEndpoint::PayloadBodiesByRange => {
-            if method != "GET" {
-                return problem_response(STATUS_METHOD_NOT_ALLOWED, "method-not-allowed", None)
-            }
             let Some(fork) = request_fork(&request) else {
                 return problem_response(STATUS_BAD_REQUEST, "unsupported-fork", None)
             };
@@ -718,9 +699,6 @@ where
             engine_api.get_payload_bodies_by_range(fork, start, count).await
         }
         EngineSszEndpoint::Blobs(version) => {
-            if method != "POST" {
-                return problem_response(STATUS_METHOD_NOT_ALLOWED, "method-not-allowed", None)
-            }
             let body = match read_ssz_body(request, MAX_BLOB_REQUEST_BYTES).await {
                 Ok(body) => body,
                 Err(response) => return response,
@@ -787,6 +765,22 @@ enum EngineSszEndpoint {
     PayloadBodiesByHash,
     PayloadBodiesByRange,
     Blobs(u8),
+}
+
+impl EngineSszEndpoint {
+    const fn method(&self) -> &'static str {
+        match self {
+            Self::Capabilities |
+            Self::Identity |
+            Self::GetPayload(_) |
+            Self::PayloadBodiesByRange => "GET",
+            Self::NewPayload |
+            Self::PayloadsWithWitness |
+            Self::Forkchoice |
+            Self::PayloadBodiesByHash |
+            Self::Blobs(_) => "POST",
+        }
+    }
 }
 
 fn handle_capabilities(witness_enabled: bool) -> HttpResponse {
@@ -1215,12 +1209,9 @@ fn ssz_response<T: ssz::Encode>(value: T) -> HttpResponse {
 }
 
 fn get_payload_response<T: ssz::Encode>(value: T) -> HttpResponse {
-    HttpResponse::builder()
-        .status(STATUS_OK)
-        .header(CONTENT_TYPE, OCTET_STREAM)
-        .header(CACHE_CONTROL, "no-store")
-        .body(HttpBody::from(value.as_ssz_bytes()))
-        .expect("valid response")
+    let mut response = ssz_response(value);
+    response.headers_mut().insert(CACHE_CONTROL, "no-store".parse().expect("valid cache control"));
+    response
 }
 
 fn json_response<T: serde::Serialize>(value: T) -> HttpResponse {
