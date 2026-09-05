@@ -8,8 +8,8 @@ use super::{
 };
 use crate::transactions::constants::{
     tx_fetcher::{
-        DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH, DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
-        DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
+        DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH, DEFAULT_MAX_COUNT_ANNOUNCED_HASHES_PER_PEER,
+        DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS, DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
     },
     tx_manager::{
         DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS, DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
@@ -17,7 +17,7 @@ use crate::transactions::constants::{
 };
 use alloy_eips::eip2718::IsTyped2718;
 use alloy_primitives::B256;
-use derive_more::{Constructor, Display};
+use derive_more::Display;
 use reth_eth_wire::NetworkPrimitives;
 use reth_network_types::peers::kind::PeerKind;
 
@@ -124,7 +124,7 @@ impl FromStr for TransactionPropagationMode {
 }
 
 /// Configuration for fetching transactions.
-#[derive(Debug, Constructor, Clone)]
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TransactionFetcherConfig {
     /// Max inflight [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) requests.
@@ -141,24 +141,50 @@ pub struct TransactionFetcherConfig {
     /// [`PooledTransactions`](reth_eth_wire::PooledTransactions) response on packing a
     /// [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) request with hashes.
     pub soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
-    /// Max capacity of the cache of transaction hashes, for transactions that weren't yet fetched.
-    /// A transaction is pending fetch if its hash didn't fit into a
-    /// [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) yet, or it wasn't returned
-    /// upon request to peers.
+    /// Max number of announced transaction hashes to keep track of, i.e. hashes that were
+    /// announced but not fetched yet, both pending and inflight. Once reached, the peer tracking
+    /// the most hashes gives up its oldest pending hash for a newly announced one.
     pub max_capacity_cache_txns_pending_fetch: u32,
+    /// Max number of tracked hashes a single peer can be a candidate for. Announcements from a
+    /// peer that exceed this limit are dropped.
+    #[cfg_attr(feature = "serde", serde(default = "default_max_announced_hashes_per_peer"))]
+    pub max_announced_hashes_per_peer: u32,
+}
+
+#[cfg(feature = "serde")]
+const fn default_max_announced_hashes_per_peer() -> u32 {
+    DEFAULT_MAX_COUNT_ANNOUNCED_HASHES_PER_PEER
+}
+
+impl TransactionFetcherConfig {
+    /// Creates a new config with the default limit on announced hashes per peer.
+    pub const fn new(
+        max_inflight_requests: u32,
+        max_inflight_requests_per_peer: u8,
+        soft_limit_byte_size_pooled_transactions_response: usize,
+        soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
+        max_capacity_cache_txns_pending_fetch: u32,
+    ) -> Self {
+        Self {
+            max_inflight_requests,
+            max_inflight_requests_per_peer,
+            soft_limit_byte_size_pooled_transactions_response,
+            soft_limit_byte_size_pooled_transactions_response_on_pack_request,
+            max_capacity_cache_txns_pending_fetch,
+            max_announced_hashes_per_peer: DEFAULT_MAX_COUNT_ANNOUNCED_HASHES_PER_PEER,
+        }
+    }
 }
 
 impl Default for TransactionFetcherConfig {
     fn default() -> Self {
-        Self {
-            max_inflight_requests: DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
-            max_inflight_requests_per_peer: DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
-            soft_limit_byte_size_pooled_transactions_response:
-                SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
-            soft_limit_byte_size_pooled_transactions_response_on_pack_request:
-                DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
-                max_capacity_cache_txns_pending_fetch: DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
-        }
+        Self::new(
+            DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
+            DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
+            SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
+            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
+            DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
+        )
     }
 }
 

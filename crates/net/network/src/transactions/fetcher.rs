@@ -1,1051 +1,994 @@
-//! `TransactionFetcher` is responsible for rate limiting and retry logic for fetching
-//! transactions. Upon receiving an announcement, functionality of the `TransactionFetcher` is
-//! used for filtering out hashes 1) for which the tx is already known and 2) unknown but the hash
-//! is already seen in a previous announcement. The hashes that remain from an announcement are
-//! then packed into a request with respect to the [`EthVersion`] of the announcement. Any hashes
-//! that don't fit into the request, are buffered in the `TransactionFetcher`. If on the other
-//! hand, space remains, hashes that the peer has previously announced are taken out of buffered
-//! hashes to fill the request up. The [`GetPooledTransactions`] request is then sent to the
-//! peer's session, this marks the peer as active with respect to
-//! `MAX_CONCURRENT_TX_REQUESTS_PER_PEER`.
+//! Fetches transactions that peers announced with `NewPooledTransactionHashes`.
 //!
-//! When a peer buffers hashes in the `TransactionsManager::on_new_pooled_transaction_hashes`
-//! pipeline, it is stored as fallback peer for those hashes. When [`TransactionsManager`] is
-//! polled, it checks if any of fallback peer is idle. If so, it packs a request for that peer,
-//! filling it from the buffered hashes. It does so until there are no more idle peers or until
-//! the hashes buffer is empty.
+//! The [`TransactionFetcher`] tracks every announced hash that is not known yet, together with the
+//! peers that announced it, and turns those announcements into `GetPooledTransactions` requests.
 //!
-//! If a [`GetPooledTransactions`] request resolves with an error, the hashes in the request are
-//! buffered with respect to `MAX_REQUEST_RETRIES_PER_TX_HASH`. So is the case if the request
-//! resolves with partial success, that is some of the requested hashes are not in the response,
-//! these are then buffered.
+//! # Model
 //!
-//! Most healthy peers will send the same hashes in their announcements, as RLPx is a gossip
-//! protocol. This means it's unlikely, that a valid hash, will be buffered for very long
-//! before it's re-tried. Nonetheless, the capacity of the buffered hashes cache must be large
-//! enough to buffer many hashes during network failure, to allow for recovery.
+//! Every tracked hash is in exactly one of two states:
+//!
+//! - _pending_: waiting for one of the peers that announced it, its _candidates_, to become idle
+//! - _fetching_: part of exactly one inflight request
+//!
+//! A hash remembers the peers that announced it as candidates. Each peer keeps a FIFO queue of
+//! hashes to request, and the first peers to announce a hash get it queued right away. Later
+//! announcers are only remembered, so that a hash is not given up on when the first announcers
+//! fail to deliver it, without costing a queue entry per announcement. A request for an idle peer
+//! is built by draining its queue in the order the announcements were processed, skipping hashes
+//! that are being fetched from another peer or are not tracked anymore, until the request is
+//! full. Packing a request is therefore proportional to the request size and independent of the
+//! total number of pending hashes.
+//!
+//! When a request resolves, delivered hashes are dropped from tracking. Undelivered hashes go back
+//! to pending and are queued for their remaining candidates, most recent announcers first, or are
+//! dropped if none remain. The responding peer is dropped as a candidate for every undelivered
+//! hash that precedes the last delivered hash of the request, since the peer skipped it on
+//! purpose, and for all requested hashes if the response was empty or the request failed.
+//! Undelivered hashes after the last delivered hash keep the peer as a candidate, since the
+//! response was most likely truncated because it hit the response size limit, provided the peer
+//! delivered at least half of the request. A smaller response did not hit any limit, so the peer
+//! is dropped for all of its undelivered hashes.
+//!
+//! Request timeouts are enforced by the peer's session, which resolves the request with
+//! [`RequestError::Timeout`], so the fetcher does not run any timers.
+//!
+//! # Bounds
+//!
+//! - a configurable number of inflight requests per peer, one by default, and a global inflight
+//!   request limit
+//! - a per peer limit on the number of tracked hashes it is a candidate for, so a single peer
+//!   cannot flood the fetcher with announcements
+//! - a global limit on the number of tracked hashes, at which the peer tracking the most hashes
+//!   gives up its oldest pending hash, so a group of peers flooding the fetcher evicts its own
+//!   hashes rather than everyone else's
+//! - a fixed number of candidates per hash, which also bounds the number of fetch attempts
 
 use super::{
     config::TransactionFetcherConfig,
-    constants::{tx_fetcher::*, SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST},
-    PeerMetadata, PooledTransactions, SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
+    constants::{
+        tx_fetcher::{
+            AVERAGE_BYTE_SIZE_TX_ENCODED, MAX_COUNT_CANDIDATE_PEERS_PER_HASH,
+            MAX_COUNT_EAGER_CANDIDATE_PEERS_PER_HASH,
+            MIN_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST,
+        },
+        SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
+        SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST,
+    },
+    PeerMetadata,
 };
-use crate::{
-    cache::{LruCache, LruMap},
-    duration_metered_exec,
-    metrics::TransactionFetcherMetrics,
-};
+use crate::metrics::TransactionFetcherMetrics;
 use alloy_consensus::transaction::PooledTransaction;
 use alloy_primitives::{
-    map::{FbBuildHasher, HashMap},
+    map::{B256Map, B256Set, Entry, FbBuildHasher, HashMap},
     TxHash,
 };
-use derive_more::{Constructor, Deref};
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
-use pin_project::pin_project;
-use reth_eth_wire::{
-    DedupPayload, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
-    PartiallyValidData, RequestTxHashes, ValidAnnouncementData,
-};
+use reth_eth_wire::{Eth68TxMetadata, GetPooledTransactions, PooledTransactions};
 use reth_eth_wire_types::{EthNetworkPrimitives, NetworkPrimitives};
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::{RequestError, RequestResult};
 use reth_network_peers::PeerId;
 use reth_primitives_traits::SignedTransaction;
-use schnellru::ByLength;
+use smallvec::SmallVec;
 use std::{
+    collections::VecDeque,
     pin::Pin,
     task::{ready, Context, Poll},
-    time::Duration,
 };
 use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError};
 use tracing::trace;
 
-/// The type responsible for fetching missing transactions from peers.
+/// How many hashes that are currently being fetched are skipped over when looking for the oldest
+/// pending hash to evict at capacity.
+const MAX_EVICTION_ATTEMPTS: usize = 8;
+
+/// Fetches transactions that peers announced but that are not in the pool yet.
 ///
-/// This will keep track of unique transaction hashes that are currently being fetched and submits
-/// new requests on announced hashes.
+/// Announcements are recorded with [`Self::on_announcement`], requests are sent with
+/// [`Self::dispatch`] and resolved requests are yielded as [`FetchEvent`]s by the [`Stream`]
+/// implementation. See the [module docs](self) for how requests are scheduled.
 #[derive(Debug)]
-#[pin_project]
 pub struct TransactionFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
-    /// All peers with to which a [`GetPooledTransactions`] request is inflight.
-    pub active_peers: LruMap<PeerId, u8, ByLength, FbBuildHasher<64>>,
-    /// All currently active [`GetPooledTransactions`] requests.
-    ///
-    /// The set of hashes encompassed by these requests are a subset of all hashes in the fetcher.
-    /// It's disjoint from the set of hashes which are awaiting an idle fallback peer in order to
-    /// be fetched.
-    #[pin]
-    pub inflight_requests: FuturesUnordered<GetPooledTxRequestFut<N::PooledTransaction>>,
-    /// Hashes that are awaiting an idle fallback peer so they can be fetched.
-    ///
-    /// This is a subset of all hashes in the fetcher, and is disjoint from the set of hashes for
-    /// which a [`GetPooledTransactions`] request is inflight.
-    pub hashes_pending_fetch: LruCache<TxHash, FbBuildHasher<32>>,
-    /// Tracks all hashes in the transaction fetcher.
-    pub hashes_fetch_inflight_and_pending_fetch:
-        LruMap<TxHash, TxFetchMetadata, ByLength, FbBuildHasher<32>>,
-    /// Info on capacity of the transaction fetcher.
-    pub info: TransactionFetcherInfo,
-    #[doc(hidden)]
+    /// All tracked hashes with their candidate peers and fetch state.
+    hashes: B256Map<TxEntry>,
+    /// Tracked hashes in the order they were added, used to evict the oldest pending hash once
+    /// the fetcher is at capacity and the peer tracking the most hashes has none pending. Entries
+    /// are removed lazily, so it may contain hashes that are not tracked anymore.
+    order: VecDeque<TxHash>,
+    /// Fetch state of all peers that announced tracked hashes.
+    peers: HashMap<PeerKey, PeerState>,
+    /// Maps peer ids to their compact key.
+    peer_keys: HashMap<PeerId, PeerKey, FbBuildHasher<64>>,
+    /// Key assigned to the next new peer. Keys are never reused, so the candidates of a hash can
+    /// safely refer to peers that disconnected in the meantime.
+    next_peer_key: u32,
+    /// Idle peers with queued hashes, in the order they became ready.
+    ready: VecDeque<PeerKey>,
+    /// All inflight `GetPooledTransactions` requests.
+    inflight: FuturesUnordered<InflightRequest<N::PooledTransaction>>,
+    /// Number of tracked hashes that are part of an inflight request.
+    num_fetching: usize,
+    /// Reused when verifying responses, so no sets are allocated per response.
+    scratch_requested: B256Set,
+    /// Reused when verifying responses, so no sets are allocated per response.
+    scratch_delivered: B256Set,
+    /// Reused when processing announcements, so no vector is allocated per announcement.
+    scratch_queue: Vec<TxHash>,
+    /// Configured limits.
+    config: TransactionFetcherConfig,
     metrics: TransactionFetcherMetrics,
 }
 
 impl<N: NetworkPrimitives> TransactionFetcher<N> {
-    /// Removes the peer from the active set.
-    pub(crate) fn remove_peer(&mut self, peer_id: &PeerId) {
-        self.active_peers.remove(peer_id);
-    }
-
-    /// Updates metrics.
-    #[inline]
-    pub fn update_metrics(&self) {
-        let metrics = &self.metrics;
-
-        metrics.inflight_transaction_requests.set(self.inflight_requests.len() as f64);
-
-        let hashes_pending_fetch = self.hashes_pending_fetch.len() as f64;
-        let total_hashes = self.hashes_fetch_inflight_and_pending_fetch.len() as f64;
-
-        metrics.hashes_pending_fetch.set(hashes_pending_fetch);
-        metrics.hashes_inflight_transaction_requests.set(total_hashes - hashes_pending_fetch);
-    }
-
-    #[inline]
-    fn update_pending_fetch_cache_search_metrics(&self, durations: TxFetcherSearchDurations) {
-        let metrics = &self.metrics;
-
-        let TxFetcherSearchDurations { find_idle_peer, fill_request } = durations;
-        metrics
-            .duration_find_idle_fallback_peer_for_any_pending_hash
-            .set(find_idle_peer.as_secs_f64());
-        metrics.duration_fill_request_from_hashes_pending_fetch.set(fill_request.as_secs_f64());
-    }
-
-    /// Sets up transaction fetcher with config
-    pub fn with_transaction_fetcher_config(config: &TransactionFetcherConfig) -> Self {
-        let TransactionFetcherConfig {
-            max_inflight_requests,
-            max_capacity_cache_txns_pending_fetch,
-            ..
-        } = *config;
-
-        let info = config.clone().into();
-
+    /// Creates a new fetcher with the given config.
+    pub fn new(config: TransactionFetcherConfig) -> Self {
         let metrics = TransactionFetcherMetrics::default();
-        metrics.capacity_inflight_requests.increment(max_inflight_requests as u64);
+        metrics.capacity_inflight_requests.increment(config.max_inflight_requests as u64);
 
         Self {
-            active_peers: LruMap::with_hasher(max_inflight_requests, Default::default()),
-            hashes_pending_fetch: LruCache::with_hasher(
-                max_capacity_cache_txns_pending_fetch,
-                Default::default(),
-            ),
-            hashes_fetch_inflight_and_pending_fetch: LruMap::with_hasher(
-                max_inflight_requests + max_capacity_cache_txns_pending_fetch,
-                Default::default(),
-            ),
-            info,
+            hashes: Default::default(),
+            order: Default::default(),
+            peers: Default::default(),
+            peer_keys: Default::default(),
+            next_peer_key: 0,
+            ready: Default::default(),
+            inflight: Default::default(),
+            num_fetching: 0,
+            scratch_requested: Default::default(),
+            scratch_delivered: Default::default(),
+            scratch_queue: Default::default(),
+            config,
             metrics,
-            ..Default::default()
         }
     }
 
-    /// Removes the specified hashes from inflight tracking.
-    #[inline]
-    pub fn remove_hashes_from_transaction_fetcher<'a, I>(&mut self, hashes: I)
-    where
-        I: IntoIterator<Item = &'a TxHash>,
-    {
-        for hash in hashes {
-            self.hashes_fetch_inflight_and_pending_fetch.remove(hash);
-            self.hashes_pending_fetch.remove(hash);
-        }
+    /// Returns the fetcher's config.
+    pub const fn config(&self) -> &TransactionFetcherConfig {
+        &self.config
     }
 
-    /// Updates peer's activity status upon a resolved [`GetPooledTxRequest`].
-    fn decrement_inflight_request_count_for(&mut self, peer_id: &PeerId) {
-        let remove = || -> bool {
-            if let Some(inflight_count) = self.active_peers.get(peer_id) {
-                *inflight_count = inflight_count.saturating_sub(1);
-                if *inflight_count == 0 {
-                    return true
-                }
-            }
-            false
-        }();
-
-        if remove {
-            self.active_peers.remove(peer_id);
-        }
+    /// Returns the number of tracked hashes, pending and fetching.
+    pub fn num_hashes(&self) -> usize {
+        self.hashes.len()
     }
 
-    /// Returns `true` if peer is idle with respect to `self.inflight_requests`.
-    #[inline]
-    pub fn is_idle(&self, peer_id: &PeerId) -> bool {
-        let Some(inflight_count) = self.active_peers.peek(peer_id) else { return true };
-        *inflight_count < self.info.max_inflight_requests_per_peer
-    }
-
-    /// Returns any idle peer for the given hash.
-    pub fn get_idle_peer_for(&self, hash: TxHash) -> Option<&PeerId> {
-        let TxFetchMetadata { fallback_peers, .. } =
-            self.hashes_fetch_inflight_and_pending_fetch.peek(&hash)?;
-
-        fallback_peers.iter().find(|peer_id| self.is_idle(peer_id))
-    }
-
-    /// Returns any idle peer for any hash pending fetch. If one is found, the corresponding
-    /// hash is written to the request buffer that is passed as parameter.
-    ///
-    /// Loops through the hashes pending fetch in lru order until one is found with an idle
-    /// fallback peer, or the budget passed as parameter is depleted, whatever happens first.
-    pub fn find_any_idle_fallback_peer_for_any_pending_hash(
-        &mut self,
-        hashes_to_request: &mut RequestTxHashes,
-        mut budget: Option<usize>, // search fallback peers for max `budget` lru pending hashes
-    ) -> Option<PeerId> {
-        let mut hashes_pending_fetch_iter = self.hashes_pending_fetch.iter();
-
-        let idle_peer = loop {
-            let &hash = hashes_pending_fetch_iter.next()?;
-
-            let idle_peer = self.get_idle_peer_for(hash);
-
-            if idle_peer.is_some() {
-                hashes_to_request.insert(hash);
-                break idle_peer.copied()
-            }
-
-            if let Some(ref mut bud) = budget {
-                *bud = bud.saturating_sub(1);
-                if *bud == 0 {
-                    return None
-                }
-            }
-        };
-        let hash = hashes_to_request.iter().next()?;
-
-        // pop hash that is loaded in request buffer from cache of hashes pending fetch
-        drop(hashes_pending_fetch_iter);
-        _ = self.hashes_pending_fetch.remove(hash);
-
-        idle_peer
-    }
-
-    /// Packages hashes for a [`GetPooledTxRequest`] up to limit. Returns left over hashes. Takes
-    /// a [`RequestTxHashes`] buffer as parameter for filling with hashes to request.
-    ///
-    /// Returns left over hashes.
-    pub fn pack_request(
-        &self,
-        hashes_to_request: &mut RequestTxHashes,
-        hashes_from_announcement: ValidAnnouncementData,
-    ) -> RequestTxHashes {
-        if hashes_from_announcement.msg_version().has_eth68_metadata() {
-            return self.pack_request_eth68(hashes_to_request, hashes_from_announcement)
-        }
-        self.pack_request_eth66(hashes_to_request, hashes_from_announcement)
-    }
-
-    /// Packages hashes for a [`GetPooledTxRequest`] from an
-    /// [`Eth68`](reth_eth_wire::EthVersion::Eth68) announcement up to limit as defined by protocol
-    /// version 68. Takes a [`RequestTxHashes`] buffer as parameter for filling with hashes to
-    /// request.
-    ///
-    /// Returns left over hashes.
-    ///
-    /// Loops through hashes passed as parameter and checks if a hash fits in the expected
-    /// response. If no, it's added to surplus hashes. If yes, it's added to hashes to the request
-    /// and expected response size is accumulated.
-    pub fn pack_request_eth68(
-        &self,
-        hashes_to_request: &mut RequestTxHashes,
-        hashes_from_announcement: impl HandleMempoolData
-            + IntoIterator<Item = (TxHash, Option<(u8, usize)>)>,
-    ) -> RequestTxHashes {
-        let mut acc_size_response = 0;
-
-        let mut hashes_from_announcement_iter = hashes_from_announcement.into_iter();
-
-        if let Some((hash, Some((_ty, size)))) = hashes_from_announcement_iter.next() {
-            hashes_to_request.insert(hash);
-
-            // tx is really big, pack request with single tx
-            if size >= self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request {
-                return hashes_from_announcement_iter.collect()
-            }
-            acc_size_response = size;
-        }
-
-        let mut surplus_hashes = RequestTxHashes::default();
-
-        // folds size based on expected response size  and adds selected hashes to the request
-        // list and the other hashes to the surplus list
-        for (hash, metadata) in hashes_from_announcement_iter.by_ref() {
-            let Some((_ty, size)) = metadata else {
-                unreachable!("this method is called upon reception of an eth68 announcement")
-            };
-
-            let next_acc_size = acc_size_response.checked_add(size).filter(|next_acc_size| {
-                *next_acc_size <=
-                    self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request
-            });
-
-            if let Some(next_acc_size) = next_acc_size {
-                // only update accumulated size of tx response if tx will fit in without exceeding
-                // soft limit
-                acc_size_response = next_acc_size;
-                _ = hashes_to_request.insert(hash)
-            } else {
-                _ = surplus_hashes.insert(hash)
-            }
-
-            let free_space =
-                self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request -
-                    acc_size_response;
-
-            if free_space < MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED {
-                break
-            }
-        }
-
-        surplus_hashes.extend(hashes_from_announcement_iter.map(|(hash, _metadata)| hash));
-
-        surplus_hashes
-    }
-
-    /// Packages hashes for a [`GetPooledTxRequest`] from an
-    /// [`Eth66`](reth_eth_wire::EthVersion::Eth66) announcement up to limit as defined by
-    /// protocol version 66. Takes a [`RequestTxHashes`] buffer as parameter for filling with
-    /// hashes to request.
-    ///
-    /// Returns left over hashes.
-    pub fn pack_request_eth66(
-        &self,
-        hashes_to_request: &mut RequestTxHashes,
-        hashes_from_announcement: ValidAnnouncementData,
-    ) -> RequestTxHashes {
-        let (mut hashes, _version) = hashes_from_announcement.into_request_hashes();
-        if hashes.len() <= SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST {
-            *hashes_to_request = hashes;
-            hashes_to_request.shrink_to_fit();
-
-            RequestTxHashes::default()
-        } else {
-            let surplus_hashes =
-                hashes.retain_count(SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST);
-            *hashes_to_request = hashes;
-            hashes_to_request.shrink_to_fit();
-
-            surplus_hashes
-        }
-    }
-
-    /// Tries to buffer hashes for retry.
-    pub fn try_buffer_hashes_for_retry(
-        &mut self,
-        mut hashes: RequestTxHashes,
-        peer_failed_to_serve: &PeerId,
-    ) {
-        // It could be that the txns have been received over broadcast in the time being. Remove
-        // the peer as fallback peer so it isn't request again for these hashes.
-        hashes.retain(|hash| {
-            if let Some(entry) = self.hashes_fetch_inflight_and_pending_fetch.get(hash) {
-                entry.fallback_peers_mut().remove(peer_failed_to_serve);
-                return true
-            }
-            // tx has been seen over broadcast in the time it took for the request to resolve
-            false
-        });
-
-        self.buffer_hashes(hashes, None)
-    }
-
-    /// Number of hashes pending fetch.
+    /// Returns the number of hashes that are waiting for an idle candidate peer.
     pub fn num_pending_hashes(&self) -> usize {
-        self.hashes_pending_fetch.len()
+        self.hashes.len().saturating_sub(self.num_fetching)
     }
 
-    /// Number of all transaction hashes in the fetcher.
-    pub fn num_all_hashes(&self) -> usize {
-        self.hashes_fetch_inflight_and_pending_fetch.len()
+    /// Returns the number of hashes that are part of an inflight request.
+    pub const fn num_fetching_hashes(&self) -> usize {
+        self.num_fetching
     }
 
-    /// Buffers hashes. Note: Only peers that haven't yet tried to request the hashes should be
-    /// passed as `fallback_peer` parameter! For re-buffering hashes on failed request, use
-    /// [`TransactionFetcher::try_buffer_hashes_for_retry`]. Hashes that have been re-requested
-    /// [`DEFAULT_MAX_RETRIES`], are dropped.
-    pub fn buffer_hashes(&mut self, hashes: RequestTxHashes, fallback_peer: Option<PeerId>) {
-        for hash in hashes {
-            // hash could have been evicted from bounded lru map
-            let Some(TxFetchMetadata { retries, fallback_peers, .. }) =
-                self.hashes_fetch_inflight_and_pending_fetch.get(&hash)
-            else {
-                continue
+    /// Returns the number of inflight requests.
+    pub fn num_inflight_requests(&self) -> usize {
+        self.inflight.len()
+    }
+
+    /// Returns `true` if there is no inflight request to the peer.
+    pub fn is_idle(&self, peer_id: &PeerId) -> bool {
+        self.peer_keys
+            .get(peer_id)
+            .and_then(|key| self.peers.get(key))
+            .is_none_or(|peer| peer.inflight == 0)
+    }
+
+    /// Records hashes announced by the peer and queues them for fetching.
+    ///
+    /// The metadata of a hash is the announced transaction type and size, if the announcement
+    /// carried it. The caller is expected to have filtered out hashes that are already known.
+    ///
+    /// Requests are only sent by [`Self::dispatch`].
+    pub fn on_announcement(
+        &mut self,
+        peer_id: PeerId,
+        announcement: impl IntoIterator<Item = (TxHash, Eth68TxMetadata)>,
+    ) {
+        let key = self.peer_key(peer_id);
+        let max_per_peer = self.config.max_announced_hashes_per_peer as usize;
+        let max_total = self.config.max_capacity_cache_txns_pending_fetch as usize;
+
+        let mut dropped_peer_limit = 0u64;
+        let mut evicted_at_capacity = 0u64;
+        let mut dropped_at_capacity = 0u64;
+
+        // The peer's count of tracked hashes and the hashes to queue for it are kept locally and
+        // applied once at the end, so every announced hash costs a single map lookup.
+        let Some(peer) = self.peers.get(&key) else { return };
+        let mut tracked = peer.tracked;
+        let mut queue = std::mem::take(&mut self.scratch_queue);
+        queue.clear();
+        // hashes at the front of `queue` that were evicted again before being pushed
+        let mut queue_start = 0;
+
+        for (hash, metadata) in announcement {
+            let size = announced_size(metadata);
+            let at_capacity = self.hashes.len() >= max_total;
+
+            // whether the hash is queued for the peer right away
+            let eager = match self.hashes.entry(hash) {
+                Entry::Occupied(mut occupied) => {
+                    let entry = occupied.get_mut();
+                    if let Some(candidate) = entry.candidate_mut(key) {
+                        // announced before by this peer, keep the latest size
+                        candidate.set_size(size);
+                        continue
+                    }
+                    if entry.candidates.len() >= MAX_COUNT_CANDIDATE_PEERS_PER_HASH {
+                        continue
+                    }
+                    if tracked >= max_per_peer {
+                        dropped_peer_limit += 1;
+                        continue
+                    }
+                    // The first announcers get the hash queued right away, later ones are only
+                    // remembered and asked once the earlier ones failed to deliver.
+                    let eager = entry.candidates.len() < MAX_COUNT_EAGER_CANDIDATE_PEERS_PER_HASH;
+                    let candidate = if eager {
+                        Candidate::queued(key, size)
+                    } else {
+                        Candidate::unqueued(key, size)
+                    };
+                    entry.candidates.push(candidate);
+                    eager
+                }
+                Entry::Vacant(vacant) => {
+                    if tracked >= max_per_peer {
+                        dropped_peer_limit += 1;
+                        continue
+                    }
+                    if at_capacity {
+                        // the evicted hash may be one of this peer's, so its count is synced
+                        if let Some(peer) = self.peers.get_mut(&key) {
+                            peer.tracked = tracked;
+                        }
+                        if self.evict_pending(key, &queue, &mut queue_start) {
+                            evicted_at_capacity += 1;
+                            tracked = self.peers.get(&key).map_or(tracked, |peer| peer.tracked);
+                        } else {
+                            dropped_at_capacity += 1;
+                            continue
+                        }
+                        self.hashes.insert(hash, TxEntry::new(key, size));
+                    } else {
+                        vacant.insert(TxEntry::new(key, size));
+                    }
+                    self.record_order(hash);
+                    true
+                }
             };
 
-            if let Some(peer_id) = fallback_peer {
-                // peer has not yet requested hash
-                fallback_peers.insert(peer_id);
-            } else {
-                if *retries >= DEFAULT_MAX_RETRIES {
-                    trace!(target: "net::tx",
-                        %hash,
-                        retries,
-                        "retry limit for `GetPooledTransactions` requests reached for hash, dropping hash"
-                    );
-
-                    self.hashes_fetch_inflight_and_pending_fetch.remove(&hash);
-                    self.hashes_pending_fetch.remove(&hash);
-                    continue
-                }
-                *retries += 1;
-            }
-
-            if let (_, Some(evicted_hash)) = self.hashes_pending_fetch.insert_and_get_evicted(hash)
-            {
-                self.hashes_fetch_inflight_and_pending_fetch.remove(&evicted_hash);
+            tracked += 1;
+            if eager {
+                queue.push(hash);
             }
         }
-    }
 
-    /// Tries to request hashes pending fetch.
-    ///
-    /// Finds the first buffered hash with a fallback peer that is idle, if any. Fills the rest of
-    /// the request by checking the transactions seen by the peer against the buffer.
-    pub fn on_fetch_pending_hashes(
-        &mut self,
-        peers: &HashMap<PeerId, PeerMetadata<N>, FbBuildHasher<64>>,
-        has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
-    ) -> bool {
-        let mut hashes_to_request = RequestTxHashes::with_capacity(
-            DEFAULT_MARGINAL_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST,
-        );
-        let mut search_durations = TxFetcherSearchDurations::default();
+        let queued = queue.len() - queue_start;
+        if let Some(peer) = self.peers.get_mut(&key) {
+            peer.tracked = tracked;
+            for hash in &queue[queue_start..] {
+                peer.push_queue(&self.hashes, key, *hash, false, max_per_peer);
+            }
+        }
+        queue.clear();
+        self.scratch_queue = queue;
 
-        // budget to look for an idle peer before giving up
-        let budget_find_idle_fallback_peer = self
-            .search_breadth_budget_find_idle_fallback_peer(&has_capacity_wrt_pending_pool_imports);
+        if dropped_peer_limit > 0 {
+            self.metrics.announced_hashes_dropped_peer_limit.increment(dropped_peer_limit);
+        }
+        if evicted_at_capacity > 0 {
+            self.metrics.hashes_evicted_at_capacity.increment(evicted_at_capacity);
+        }
+        if dropped_at_capacity > 0 {
+            self.metrics.announced_hashes_dropped_at_capacity.increment(dropped_at_capacity);
+        }
 
-        let peer_id = duration_metered_exec!(
-            {
-                let Some(peer_id) = self.find_any_idle_fallback_peer_for_any_pending_hash(
-                    &mut hashes_to_request,
-                    budget_find_idle_fallback_peer,
-                ) else {
-                    // no peers are idle or budget is depleted
-                    return false
-                };
-
-                peer_id
-            },
-            search_durations.find_idle_peer
-        );
-
-        // peer may have disconnected between idle check and here, re-buffer hashes so they
-        // aren't lost from the pending fetch cache
-        let Some(peer) = peers.get(&peer_id) else {
-            self.buffer_hashes(hashes_to_request, None);
-            return false
-        };
-        let conn_eth_version = peer.version;
-
-        // fill the request with more hashes pending fetch that have been announced by the peer.
-        // the search for more hashes is done with respect to the given budget, which determines
-        // how many hashes to loop through before giving up. if no more hashes are found wrt to
-        // the budget, the single hash that was taken out of the cache above is sent in a request.
-        let budget_fill_request = self
-            .search_breadth_budget_find_intersection_pending_hashes_and_hashes_seen_by_peer(
-                &has_capacity_wrt_pending_pool_imports,
-            );
-
-        duration_metered_exec!(
-            {
-                self.fill_request_from_hashes_pending_fetch(
-                    &mut hashes_to_request,
-                    &peer.seen_transactions,
-                    budget_fill_request,
-                )
-            },
-            search_durations.fill_request
-        );
-
-        self.update_pending_fetch_cache_search_metrics(search_durations);
-
-        trace!(target: "net::tx",
-            peer_id=format!("{peer_id:#}"),
-            hashes=?*hashes_to_request,
-            %conn_eth_version,
-            "requesting hashes that were stored pending fetch from peer"
-        );
-
-        // request the buffered missing transactions
-        if let Some(failed_to_request_hashes) =
-            self.request_transactions_from_peer(hashes_to_request, peer)
-        {
+        if queued > 0 {
             trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
-                ?failed_to_request_hashes,
-                %conn_eth_version,
-                "failed sending request to peer's session, buffering hashes"
+                queued,
+                dropped_peer_limit,
+                evicted_at_capacity,
+                dropped_at_capacity,
+                "queued announced hashes"
             );
-
-            self.buffer_hashes(failed_to_request_hashes, Some(peer_id));
-            return false
+            self.mark_ready(key, false);
         }
-
-        true
     }
 
-    /// Filters out hashes that have been seen before. For hashes that have already been seen, the
-    /// peer is added as fallback peer.
-    pub fn filter_unseen_and_pending_hashes(
+    /// Sends `GetPooledTransactions` requests to idle peers that have queued hashes.
+    ///
+    /// Stops when the global inflight request limit is reached. `max_fetching_hashes` is the
+    /// number of hashes the caller can handle being inflight at once: requests are cut down to
+    /// what that budget leaves, but never below
+    /// [`MIN_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST`], so that peers that don't respond
+    /// to their requests can't stop fetching from the others. A budget of zero sends nothing.
+    ///
+    /// Returns the number of requests sent. New requests are only polled by the next call to
+    /// [`Stream::poll_next`], so the caller must poll the fetcher again if any were sent.
+    pub fn dispatch(
         &mut self,
-        new_announced_hashes: &mut ValidAnnouncementData,
-        is_tx_bad_import: impl Fn(&TxHash) -> bool,
-        peer_id: &PeerId,
-        client_version: &str,
-    ) {
-        let mut previously_unseen_hashes_count = 0;
+        peers: &HashMap<PeerId, PeerMetadata<N>, FbBuildHasher<64>>,
+        max_fetching_hashes: usize,
+    ) -> usize {
+        if max_fetching_hashes == 0 {
+            return 0
+        }
+        let max_inflight = self.config.max_inflight_requests as usize;
+        let mut sent = 0;
+        // peers whose session channel is full, they get another chance on the next dispatch
+        let mut retry = SmallVec::<[PeerKey; 4]>::new();
 
-        let msg_version = new_announced_hashes.msg_version();
+        while self.inflight.len() < max_inflight {
+            let Some(key) = self.ready.pop_front() else { break };
+            let Some(peer) = self.peers.get_mut(&key) else { continue };
+            peer.ready = false;
+            if peer.inflight >= self.config.max_inflight_requests_per_peer {
+                continue
+            }
+            let peer_id = peer.peer_id;
+            // the session is gone if the manager doesn't know the peer anymore
+            let Some(session) = peers.get(&peer_id) else { continue };
 
-        // filter out inflight hashes, and register the peer as fallback for all inflight hashes
-        new_announced_hashes.retain(|hash, metadata| {
+            let limit = max_fetching_hashes
+                .saturating_sub(self.num_fetching)
+                .max(MIN_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST)
+                .min(max_fetching_hashes)
+                .min(SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST);
+            let hashes = self.pack_request(key, limit);
+            if hashes.is_empty() {
+                continue
+            }
 
-            // occupied entry
-            if let Some(TxFetchMetadata{ tx_encoded_length: previously_seen_size, ..}) = self.hashes_fetch_inflight_and_pending_fetch.peek_mut(hash) {
-                // update size metadata if available
-                if let Some((_ty, size)) = metadata {
-                    if let Some(prev_size) = previously_seen_size {
-                        // check if this peer is announcing a different size than a previous peer
-                        if size != prev_size {
-                            trace!(target: "net::tx",
-                                peer_id=format!("{peer_id:#}"),
-                                %hash,
-                                size,
-                                previously_seen_size,
-                                %client_version,
-                                "peer announced a different size for tx, this is especially worrying if one size is much bigger..."
-                            );
-                        }
+            let (response, rx) = oneshot::channel();
+            let request = PeerRequest::GetPooledTransactions {
+                request: GetPooledTransactions(hashes.clone()),
+                response,
+            };
+
+            match session.request_tx().try_send(request) {
+                Ok(()) => {
+                    trace!(target: "net::tx",
+                        peer_id=format!("{peer_id:#}"),
+                        hashes=hashes.len(),
+                        "sending `GetPooledTransactions` request to peer's session"
+                    );
+                    if let Some(peer) = self.peers.get_mut(&key) {
+                        peer.inflight += 1;
                     }
-                    // believe the most recent peer to announce tx
-                    *previously_seen_size = Some(*size);
+                    self.inflight.push(InflightRequest {
+                        peer: key,
+                        peer_id,
+                        hashes,
+                        response: rx,
+                    });
+                    sent += 1;
+                    // the peer may be allowed more than one inflight request
+                    self.mark_ready(key, false);
                 }
-
-                // hash has been seen but is not inflight
-                if self.hashes_pending_fetch.remove(hash) {
-                    return true
+                Err(err) => {
+                    self.metrics.egress_peer_channel_full.increment(1);
+                    self.unpack_request(key, hashes);
+                    match err {
+                        TrySendError::Full(_) => retry.push(key),
+                        TrySendError::Closed(_) => self.on_peer_disconnected(&peer_id),
+                    }
                 }
+            }
+        }
 
+        for key in retry {
+            self.mark_ready(key, false);
+        }
+
+        sent
+    }
+
+    /// Stops tracking the given hashes because the transactions were received, e.g. over
+    /// broadcast.
+    ///
+    /// Hashes that are part of an inflight request are simply not rescheduled when that request
+    /// resolves.
+    pub fn on_transactions_received<'a>(&mut self, hashes: impl IntoIterator<Item = &'a TxHash>) {
+        for hash in hashes {
+            self.remove_hash(hash);
+        }
+    }
+
+    /// Removes the peer as a candidate for all hashes it announced and drops pending hashes that
+    /// have no candidate left.
+    ///
+    /// An inflight request to the peer resolves with an error once its session is gone, which
+    /// reschedules the requested hashes.
+    pub fn on_peer_disconnected(&mut self, peer_id: &PeerId) {
+        let Some(key) = self.peer_keys.remove(peer_id) else { return };
+        if self.peers.remove(&key).is_none() {
+            return
+        }
+
+        // Every tracked hash is visited, since the peer is a candidate of hashes that are not in
+        // its queue as well. Disconnects are rare compared to announcements, so this is cheaper
+        // overall than checking for gone peers whenever candidates are counted.
+        let mut dropped = 0u64;
+        let mut requeue = Vec::new();
+        self.hashes.retain(|hash, entry| {
+            let before = entry.candidates.len();
+            entry.candidates.retain(|candidate| candidate.peer != key);
+            if entry.candidates.len() == before || entry.fetching_by.is_some() {
+                return true
+            }
+            if entry.candidates.is_empty() {
+                dropped += 1;
                 return false
             }
-
-            // vacant entry
-
-            if is_tx_bad_import(hash) {
-                return false
-            }
-
-            previously_unseen_hashes_count += 1;
-
-            if self
-                .hashes_fetch_inflight_and_pending_fetch
-                .get_or_insert(*hash, || TxFetchMetadata {
-                    retries: 0,
-                    fallback_peers: LruCache::with_hasher(
-                        DEFAULT_MAX_COUNT_FALLBACK_PEERS as u32,
-                        Default::default(),
-                    ),
-                    tx_encoded_length: None,
-                })
-                .is_none()
-            {
-
-                trace!(target: "net::tx",
-                    peer_id=format!("{peer_id:#}"),
-                    %hash,
-                    ?msg_version,
-                    %client_version,
-                    "failed to cache new announced hash from peer in schnellru::LruMap, dropping hash"
-                );
-
-                return false
+            // the hash must stay queued for at least one candidate
+            if !entry.candidates.iter().any(|candidate| candidate.is_queued()) {
+                requeue.push((*hash, entry.unqueued_candidates()));
             }
             true
         });
 
-        trace!(target: "net::tx",
-            peer_id=format!("{peer_id:#}"),
-            previously_unseen_hashes_count=previously_unseen_hashes_count,
-            msg_version=?msg_version,
-            client_version=%client_version,
-            "received previously unseen hashes in announcement from peer"
-        );
+        let mut requeued = SmallVec::<[PeerKey; MAX_COUNT_CANDIDATE_PEERS_PER_HASH]>::new();
+        for (hash, targets) in requeue {
+            self.requeue(hash, targets, &mut requeued);
+        }
+
+        if dropped > 0 {
+            self.metrics.hashes_dropped_no_candidate_peers.increment(dropped);
+        }
+        // retried hashes go to the most recent announcers first
+        for key in requeued {
+            self.mark_ready(key, true);
+        }
     }
 
-    /// Requests the missing transactions from the previously unseen announced hashes of the peer.
-    /// Returns the requested hashes if the request concurrency limit is reached or if the request
-    /// fails to send over the channel to the peer's session task.
-    ///
-    /// This filters all announced hashes that are already in flight, and requests the missing,
-    /// while marking the given peer as an alternative peer for the hashes that are already in
-    /// flight.
-    pub fn request_transactions_from_peer(
-        &mut self,
-        new_announced_hashes: RequestTxHashes,
-        peer: &PeerMetadata<N>,
-    ) -> Option<RequestTxHashes> {
-        let peer_id: PeerId = peer.request_tx.peer_id;
-        let conn_eth_version = peer.version;
-
-        if self.active_peers.len() >= self.info.max_inflight_requests {
-            trace!(target: "net::tx",
-                peer_id=format!("{peer_id:#}"),
-                hashes=?*new_announced_hashes,
-                %conn_eth_version,
-                max_inflight_transaction_requests=self.info.max_inflight_requests,
-                "limit for concurrent `GetPooledTransactions` requests reached, dropping request for hashes to peer"
-            );
-            return Some(new_announced_hashes)
-        }
-
-        let Some(inflight_count) = self.active_peers.get_or_insert(peer_id, || 0) else {
-            trace!(target: "net::tx",
-                peer_id=format!("{peer_id:#}"),
-                hashes=?*new_announced_hashes,
-                conn_eth_version=%conn_eth_version,
-                "failed to cache active peer in schnellru::LruMap, dropping request to peer"
-            );
-            return Some(new_announced_hashes)
-        };
-
-        if *inflight_count >= self.info.max_inflight_requests_per_peer {
-            trace!(target: "net::tx",
-                peer_id=format!("{peer_id:#}"),
-                hashes=?*new_announced_hashes,
-                %conn_eth_version,
-                max_concurrent_tx_reqs_per_peer=self.info.max_inflight_requests_per_peer,
-                "limit for concurrent `GetPooledTransactions` requests per peer reached"
-            );
-            return Some(new_announced_hashes)
-        }
-
-        #[cfg(debug_assertions)]
-        {
-            for hash in &new_announced_hashes {
-                if self.hashes_pending_fetch.contains(hash) {
-                    tracing::debug!(target: "net::tx", "`{}` should have been taken out of buffer before packing in a request, breaks invariant `@hashes_pending_fetch` and `@inflight_requests`, `@hashes_fetch_inflight_and_pending_fetch` for `{}`: {:?}",
-                        format!("{:?}", new_announced_hashes), // Assuming new_announced_hashes can be debug-printed directly
-                        format!("{:?}", new_announced_hashes),
-                        new_announced_hashes.iter().map(|hash| {
-                            let metadata = self.hashes_fetch_inflight_and_pending_fetch.get(hash);
-                            // Assuming you only need `retries` and `tx_encoded_length` for debugging
-                            (*hash, metadata.map(|m| (m.retries, m.tx_encoded_length)))
-                        }).collect::<Vec<(TxHash, Option<(u8, Option<usize>)>)>>())
-                }
-            }
-        }
-
-        let (response, rx) = oneshot::channel();
-        let req = PeerRequest::GetPooledTransactions {
-            request: GetPooledTransactions(new_announced_hashes.iter().copied().collect()),
-            response,
-        };
-
-        // try to send the request to the peer
-        if let Err(err) = peer.request_tx.try_send(req) {
-            // peer channel is full
-            return match err {
-                TrySendError::Full(_) | TrySendError::Closed(_) => {
-                    self.metrics.egress_peer_channel_full.increment(1);
-                    Some(new_announced_hashes)
-                }
-            }
-        }
-
-        *inflight_count += 1;
-        // stores a new request future for the request
-        self.inflight_requests.push(GetPooledTxRequestFut::new(peer_id, new_announced_hashes, rx));
-
-        None
+    /// Updates the fetcher's gauges.
+    pub fn update_metrics(&self) {
+        self.metrics.inflight_transaction_requests.set(self.inflight.len() as f64);
+        self.metrics.hashes_inflight_transaction_requests.set(self.num_fetching as f64);
+        self.metrics.hashes_pending_fetch.set(self.num_pending_hashes() as f64);
     }
 
-    /// Tries to fill request with hashes pending fetch so that the expected [`PooledTransactions`]
-    /// response is full enough. A mutable reference to a list of hashes to request is passed as
-    /// parameter. A budget is passed as parameter, this ensures that the node stops searching
-    /// for more hashes after the budget is depleted. Under bad network conditions, the cache of
-    /// hashes pending fetch may become very full for a while. As the node recovers, the hashes
-    /// pending fetch cache should get smaller. The budget should aim to be big enough to loop
-    /// through all buffered hashes in good network conditions.
-    ///
-    /// The request hashes buffer is filled as if it's an eth68 request, i.e. smartly assemble
-    /// the request based on expected response size. For any hash missing size metadata, it is
-    /// guessed at [`AVERAGE_BYTE_SIZE_TX_ENCODED`].
-    ///
-    /// Loops through hashes pending fetch and does:
-    ///
-    /// 1. Check if a hash pending fetch is seen by peer.
-    /// 2. Optimistically include the hash in the request.
-    /// 3. Accumulate expected total response size.
-    /// 4. Check if acc size and hashes count is at limit, if so stop looping.
-    /// 5. Remove hashes to request from cache of hashes pending fetch.
-    pub fn fill_request_from_hashes_pending_fetch(
-        &mut self,
-        hashes_to_request: &mut RequestTxHashes,
-        seen_hashes: &LruCache<TxHash, FbBuildHasher<32>>,
-        mut budget_fill_request: Option<usize>, // check max `budget` lru pending hashes
-    ) {
-        let Some(hash) = hashes_to_request.iter().next() else { return };
+    /// Returns the key of the peer, registering the peer if it isn't known yet.
+    fn peer_key(&mut self, peer_id: PeerId) -> PeerKey {
+        *self.peer_keys.entry(peer_id).or_insert_with(|| {
+            let key = PeerKey(self.next_peer_key);
+            self.next_peer_key += 1;
+            self.peers.insert(key, PeerState::new(peer_id));
+            key
+        })
+    }
 
-        let mut acc_size_response = self
-            .hashes_fetch_inflight_and_pending_fetch
-            .get(hash)
-            .and_then(|entry| entry.tx_encoded_len())
-            .unwrap_or(AVERAGE_BYTE_SIZE_TX_ENCODED);
-
-        // if request full enough already, we're satisfied, send request for single tx
-        if acc_size_response >=
-            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_FETCH_PENDING_HASHES
+    /// Marks the peer as ready for a request if it is idle and has hashes queued, either behind
+    /// the other ready peers or ahead of them.
+    fn mark_ready(&mut self, key: PeerKey, first: bool) {
+        if let Some(peer) = self.peers.get_mut(&key) &&
+            !peer.ready &&
+            !peer.queue.is_empty() &&
+            peer.inflight < self.config.max_inflight_requests_per_peer
         {
-            return
+            peer.ready = true;
+            if first {
+                self.ready.push_front(key);
+            } else {
+                self.ready.push_back(key);
+            }
         }
+    }
 
-        // try to fill request by checking if any other hashes pending fetch (in lru order) are
-        // also seen by peer
-        for hash in self.hashes_pending_fetch.iter() {
-            // 1. Check if a hash pending fetch is seen by peer.
-            if !seen_hashes.contains(hash) {
+    /// Queues the hash for the peer, at the back or the front of its queue, and marks it as
+    /// queued in the hash's candidate entry.
+    fn enqueue(&mut self, key: PeerKey, hash: TxHash, front: bool) {
+        let max_per_peer = self.config.max_announced_hashes_per_peer as usize;
+        let Some(peer) = self.peers.get_mut(&key) else { return };
+        if let Some(candidate) =
+            self.hashes.get_mut(&hash).and_then(|entry| entry.candidate_mut(key))
+        {
+            candidate.set_queued(true);
+        }
+        peer.push_queue(&self.hashes, key, hash, front, max_per_peer);
+    }
+
+    /// Records a newly tracked hash in the eviction order.
+    ///
+    /// Entries of hashes that are not tracked anymore are removed lazily: once the order holds
+    /// twice the capacity, it is compacted to the newest entry of every tracked hash. A hash that
+    /// is tracked again while its old entry lingers has two entries until then, so the compaction
+    /// always shrinks the order to at most the number of tracked hashes.
+    fn record_order(&mut self, hash: TxHash) {
+        let max_len = 2 * self.config.max_capacity_cache_txns_pending_fetch as usize;
+        if self.order.len() >= max_len {
+            let hashes = &self.hashes;
+            let mut seen = B256Set::with_capacity_and_hasher(hashes.len(), Default::default());
+            let mut kept = VecDeque::with_capacity(hashes.len());
+            for hash in self.order.drain(..).rev() {
+                if hashes.contains_key(&hash) && seen.insert(hash) {
+                    kept.push_front(hash);
+                }
+            }
+            self.order = kept;
+        }
+        self.order.push_back(hash);
+    }
+
+    /// Evicts a pending hash to make room for one announced by `announcer` and returns whether
+    /// one was found.
+    ///
+    /// The peer tracking the most hashes gives up its oldest pending hash, so a group of peers
+    /// flooding the fetcher with announcements evicts its own hashes rather than those of other
+    /// peers. The announcer gives way when it tracks as many hashes as the busiest peer. If the
+    /// chosen peer has no pending hash, the oldest pending hash overall is evicted.
+    ///
+    /// `queued` are the hashes of the current announcement that are not in the announcer's queue
+    /// yet, `queued_start` marks how many of them were evicted again already.
+    fn evict_pending(
+        &mut self,
+        announcer: PeerKey,
+        queued: &[TxHash],
+        queued_start: &mut usize,
+    ) -> bool {
+        let busiest = self
+            .peers
+            .iter()
+            .filter(|(_, peer)| peer.tracked > 0)
+            .max_by_key(|(_, peer)| peer.tracked)
+            .map(|(key, peer)| (*key, peer.tracked));
+        let Some((mut key, tracked)) = busiest else { return self.evict_oldest_pending() };
+        if self.peers.get(&announcer).is_some_and(|peer| peer.tracked >= tracked) {
+            key = announcer;
+        }
+        if self.evict_oldest_pending_of(key) {
+            return true
+        }
+        if key == announcer && *queued_start < queued.len() {
+            let hash = queued[*queued_start];
+            *queued_start += 1;
+            self.remove_hash(&hash);
+            return true
+        }
+        self.evict_oldest_pending()
+    }
+
+    /// Evicts the oldest pending hash queued for the peer and returns whether one was found.
+    ///
+    /// Queue entries that are drained on the way are handled like when packing a request.
+    fn evict_oldest_pending_of(&mut self, key: PeerKey) -> bool {
+        let Some(peer) = self.peers.get_mut(&key) else { return false };
+        let mut evict = None;
+        while let Some(hash) = peer.queue.pop_front() {
+            let Some(entry) = self.hashes.get_mut(&hash) else { continue };
+            let Some(candidate) = entry.candidate_mut(key) else { continue };
+            candidate.set_queued(false);
+            if entry.fetching_by.is_some() {
+                // queued again for this peer should that fetch fail
                 continue
-            };
+            }
+            evict = Some(hash);
+            break
+        }
+        // a drained queue leaves the peer with nothing to be ready for
+        let unready = peer.ready && peer.queue.is_empty();
+        if unready {
+            peer.ready = false;
+            self.ready.retain(|ready| *ready != key);
+        }
+        let Some(hash) = evict else { return false };
+        self.remove_hash(&hash);
+        true
+    }
 
-            // 2. Optimistically include the hash in the request.
-            hashes_to_request.insert(*hash);
+    /// Evicts the oldest pending hash overall to make room for a new one.
+    ///
+    /// Returns `false` if only hashes that are being fetched were found among the oldest tracked
+    /// hashes.
+    fn evict_oldest_pending(&mut self) -> bool {
+        let mut attempts = 0;
+        while let Some(hash) = self.order.pop_front() {
+            let Some(entry) = self.hashes.get(&hash) else { continue };
+            if entry.fetching_by.is_some() {
+                self.order.push_back(hash);
+                attempts += 1;
+                if attempts >= MAX_EVICTION_ATTEMPTS {
+                    return false
+                }
+                continue
+            }
+            self.remove_hash(&hash);
+            return true
+        }
+        false
+    }
 
-            // 3. Accumulate expected total response size.
-            let size = self
-                .hashes_fetch_inflight_and_pending_fetch
-                .get(hash)
-                .and_then(|entry| entry.tx_encoded_len())
-                .unwrap_or(AVERAGE_BYTE_SIZE_TX_ENCODED);
+    /// Drains the peer's queue into a request, in announcement order, until the request holds
+    /// `max_hashes` hashes or the expected response size reaches the configured soft limit. A
+    /// transaction that on its own exceeds the size limit is requested alone.
+    ///
+    /// The returned hashes are marked as being fetched by the peer.
+    fn pack_request(&mut self, key: PeerKey, max_hashes: usize) -> Vec<TxHash> {
+        let max_bytes =
+            self.config.soft_limit_byte_size_pooled_transactions_response_on_pack_request;
+        let Some(peer) = self.peers.get_mut(&key) else { return Vec::new() };
 
-            acc_size_response = acc_size_response.saturating_add(size);
+        let mut hashes = Vec::with_capacity(peer.queue.len().min(max_hashes));
+        let mut bytes = 0usize;
 
-            // 4. Check if acc size or hashes count is at limit, if so stop looping.
-            // if expected response is full enough or the number of hashes in the request is
-            // enough, we're satisfied
-            if acc_size_response >=
-                DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_FETCH_PENDING_HASHES ||
-                hashes_to_request.len() >
-                    DEFAULT_SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST_ON_FETCH_PENDING_HASHES
-            {
+        while let Some(hash) = peer.queue.pop_front() {
+            // skip hashes that were delivered in the meantime, or that this peer is no longer a
+            // candidate for
+            let Some(entry) = self.hashes.get_mut(&hash) else { continue };
+            let Some(candidate) = entry.candidate_mut(key) else { continue };
+            candidate.set_queued(false);
+            let size = candidate.request_size();
+
+            // hashes that are being fetched elsewhere are queued again if that fetch fails
+            if entry.fetching_by.is_some() {
+                continue
+            }
+
+            if !hashes.is_empty() && bytes.saturating_add(size) > max_bytes {
+                if let Some(candidate) = entry.candidate_mut(key) {
+                    candidate.set_queued(true);
+                }
+                peer.queue.push_front(hash);
                 break
             }
 
-            if let Some(ref mut bud) = budget_fill_request {
-                *bud -= 1;
-                if *bud == 0 {
-                    break
-                }
+            entry.fetching_by = Some(key);
+            self.num_fetching += 1;
+            bytes = bytes.saturating_add(size);
+            hashes.push(hash);
+
+            if hashes.len() >= max_hashes {
+                break
             }
         }
 
-        // 5. Remove hashes to request from cache of hashes pending fetch.
-        for hash in hashes_to_request.iter() {
-            self.hashes_pending_fetch.remove(hash);
+        hashes
+    }
+
+    /// Reverts [`Self::pack_request`] for a request that could not be sent: the hashes are pending
+    /// again and are queued at the front of the peer's queue in their original order.
+    fn unpack_request(&mut self, key: PeerKey, hashes: Vec<TxHash>) {
+        for hash in hashes.into_iter().rev() {
+            if let Some(entry) = self.hashes.get_mut(&hash) &&
+                entry.fetching_by == Some(key)
+            {
+                entry.fetching_by = None;
+                self.num_fetching -= 1;
+                self.enqueue(key, hash, true);
+            }
         }
     }
 
-    /// Returns `true` if [`TransactionFetcher`] has capacity to request pending hashes. Returns
-    /// `false` if [`TransactionFetcher`] is operating close to full capacity.
-    pub fn has_capacity_for_fetching_pending_hashes(&self) -> bool {
-        let info = &self.info;
-
-        self.has_capacity(info.max_inflight_requests)
-    }
-
-    /// Returns `true` if the number of inflight requests are under a given tolerated max.
-    fn has_capacity(&self, max_inflight_requests: usize) -> bool {
-        self.inflight_requests.len() <= max_inflight_requests
-    }
-
-    /// Returns the limit to enforce when looking for any pending hash with an idle fallback peer.
-    ///
-    /// Returns `Some(limit)` if [`TransactionFetcher`] and the
-    /// [`TransactionPool`](reth_transaction_pool::TransactionPool) are operating close to full
-    /// capacity. Returns `None`, unlimited, if they are not that busy.
-    pub fn search_breadth_budget_find_idle_fallback_peer(
-        &self,
-        has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
-    ) -> Option<usize> {
-        let info = &self.info;
-
-        let tx_fetcher_has_capacity = self.has_capacity(
-            info.max_inflight_requests /
-                DEFAULT_DIVISOR_MAX_COUNT_INFLIGHT_REQUESTS_ON_FIND_IDLE_PEER,
-        );
-        let tx_pool_has_capacity = has_capacity_wrt_pending_pool_imports(
-            DEFAULT_DIVISOR_MAX_COUNT_PENDING_POOL_IMPORTS_ON_FIND_IDLE_PEER,
-        );
-
-        if tx_fetcher_has_capacity && tx_pool_has_capacity {
-            // unlimited search breadth
-            None
-        } else {
-            // limited breadth of search for idle peer
-            let limit = DEFAULT_BUDGET_FIND_IDLE_FALLBACK_PEER;
-
-            trace!(target: "net::tx",
-                inflight_requests=self.inflight_requests.len(),
-                max_inflight_transaction_requests=info.max_inflight_requests,
-                hashes_pending_fetch=self.hashes_pending_fetch.len(),
-                limit,
-                "search breadth limited in search for idle fallback peer for some hash pending fetch"
-            );
-
-            Some(limit)
-        }
-    }
-
-    /// Returns the limit to enforce when looking for the intersection between hashes announced by
-    /// peer and hashes pending fetch.
-    ///
-    /// Returns `Some(limit)` if [`TransactionFetcher`] and the
-    /// [`TransactionPool`](reth_transaction_pool::TransactionPool) are operating close to full
-    /// capacity. Returns `None`, unlimited, if they are not that busy.
-    pub fn search_breadth_budget_find_intersection_pending_hashes_and_hashes_seen_by_peer(
-        &self,
-        has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
-    ) -> Option<usize> {
-        let info = &self.info;
-
-        let tx_fetcher_has_capacity = self.has_capacity(
-            info.max_inflight_requests /
-                DEFAULT_DIVISOR_MAX_COUNT_INFLIGHT_REQUESTS_ON_FIND_INTERSECTION,
-        );
-        let tx_pool_has_capacity = has_capacity_wrt_pending_pool_imports(
-            DEFAULT_DIVISOR_MAX_COUNT_PENDING_POOL_IMPORTS_ON_FIND_INTERSECTION,
-        );
-
-        if tx_fetcher_has_capacity && tx_pool_has_capacity {
-            // unlimited search breadth
-            None
-        } else {
-            // limited breadth of search for idle peer
-            let limit = DEFAULT_BUDGET_FIND_INTERSECTION_ANNOUNCED_BY_PEER_AND_PENDING_FETCH;
-
-            trace!(target: "net::tx",
-                inflight_requests=self.inflight_requests.len(),
-                max_inflight_transaction_requests=self.info.max_inflight_requests,
-                hashes_pending_fetch=self.hashes_pending_fetch.len(),
-                limit=limit,
-                "search breadth limited in search for intersection of hashes announced by peer and hashes pending fetch"
-            );
-
-            Some(limit)
-        }
-    }
-
-    /// Processes a resolved [`GetPooledTransactions`] request. Queues the outcome as a
-    /// [`FetchEvent`], which will then be streamed by
-    /// [`TransactionsManager`](super::TransactionsManager).
-    pub fn on_resolved_get_pooled_transactions_request_fut(
+    /// Queues a pending hash for the given candidates, the ones that don't have it queued, and
+    /// records those peers in `requeued`.
+    fn requeue(
         &mut self,
-        response: GetPooledTxResponse<N::PooledTransaction>,
+        hash: TxHash,
+        targets: SmallVec<[PeerKey; MAX_COUNT_CANDIDATE_PEERS_PER_HASH]>,
+        requeued: &mut SmallVec<[PeerKey; MAX_COUNT_CANDIDATE_PEERS_PER_HASH]>,
+    ) {
+        for key in targets {
+            self.enqueue(key, hash, true);
+            if !requeued.contains(&key) {
+                requeued.push(key);
+            }
+        }
+    }
+
+    /// Stops tracking the hash.
+    fn remove_hash(&mut self, hash: &TxHash) {
+        let Some(entry) = self.hashes.remove(hash) else { return };
+        if entry.fetching_by.is_some() {
+            self.num_fetching -= 1;
+        }
+        for candidate in &entry.candidates {
+            if let Some(peer) = self.peers.get_mut(&candidate.peer) {
+                peer.tracked = peer.tracked.saturating_sub(1);
+            }
+        }
+    }
+
+    /// Processes a resolved request and returns the corresponding event.
+    fn on_resolved(
+        &mut self,
+        resolved: ResolvedRequest<N::PooledTransaction>,
     ) -> FetchEvent<N::PooledTransaction> {
-        // update peer activity, requests for buffered hashes can only be made to idle
-        // fallback peers
-        let GetPooledTxResponse { peer_id, mut requested_hashes, result } = response;
+        let ResolvedRequest { peer: key, peer_id, hashes: requested, result } = resolved;
 
-        self.decrement_inflight_request_count_for(&peer_id);
+        if let Some(peer) = self.peers.get_mut(&key) {
+            peer.inflight = peer.inflight.saturating_sub(1);
+        }
 
-        match result {
-            Ok(Ok(transactions)) => {
-                //
-                // 1. peer has failed to serve any of the hashes it has announced to us that we,
-                // as a follow, have requested
-                //
-                if transactions.is_empty() {
-                    trace!(target: "net::tx",
-                        peer_id=format!("{peer_id:#}"),
-                        requested_hashes_len=requested_hashes.len(),
-                        "received empty `PooledTransactions` response from peer, peer failed to serve hashes it announced"
-                    );
+        let mut delivered = std::mem::take(&mut self.scratch_delivered);
+        delivered.clear();
 
-                    return FetchEvent::EmptyResponse { peer_id }
-                }
+        let outcome = match result {
+            Ok(Ok(mut transactions)) => {
+                let mut requested_set = std::mem::take(&mut self.scratch_requested);
+                requested_set.clear();
+                requested_set.extend(requested.iter().copied());
+                let unsolicited =
+                    verify_response(&mut transactions, &requested_set, &mut delivered);
+                self.scratch_requested = requested_set;
+                Ok((transactions, unsolicited))
+            }
+            Ok(Err(error)) => Err(error),
+            // the session dropped the request
+            Err(_) => Err(RequestError::ChannelClosed),
+        };
 
-                //
-                // 2. filter out hashes that we didn't request
-                //
-                let payload = UnverifiedPooledTransactions::new(transactions);
+        self.on_delivery(key, &requested, &delivered);
+        self.scratch_delivered = delivered;
+        self.mark_ready(key, false);
 
-                let unverified_len = payload.len();
-                let (verification_outcome, verified_payload) =
-                    payload.verify(&requested_hashes, &peer_id);
-
-                let unsolicited = unverified_len - verified_payload.len();
+        match outcome {
+            Ok((transactions, unsolicited)) => {
                 if unsolicited > 0 {
                     self.metrics.unsolicited_transactions.increment(unsolicited as u64);
-                }
-
-                let report_peer = if verification_outcome == VerificationOutcome::ReportPeer {
                     trace!(target: "net::tx",
                         peer_id=format!("{peer_id:#}"),
-                        unverified_len,
-                        verified_payload_len=verified_payload.len(),
-                        "received `PooledTransactions` response from peer with entries that didn't verify against request, filtered out transactions"
-                    );
-                    true
-                } else {
-                    false
-                };
-
-                // peer has only sent hashes that we didn't request
-                if verified_payload.is_empty() {
-                    return FetchEvent::FetchError { peer_id, error: RequestError::BadResponse }
-                }
-
-                //
-                // 3. stateless validation of payload, e.g. dedup
-                //
-                let unvalidated_payload_len = verified_payload.len();
-
-                let valid_payload = verified_payload.dedup();
-
-                // todo: validate based on announced tx size/type and report peer for sending
-                // invalid response <https://github.com/paradigmxyz/reth/issues/6529>. requires
-                // passing the rlp encoded length down from active session along with the decoded
-                // tx.
-
-                if valid_payload.len() != unvalidated_payload_len {
-                    trace!(target: "net::tx",
-                    peer_id=format!("{peer_id:#}"),
-                    unvalidated_payload_len,
-                    valid_payload_len=valid_payload.len(),
-                    "received `PooledTransactions` response from peer with duplicate entries, filtered them out"
+                        unsolicited,
+                        "received transactions in `PooledTransactions` response that weren't requested"
                     );
                 }
-                // valid payload will have at least one transaction at this point. even if the tx
-                // size/type announced by the peer is different to the actual tx size/type, pass on
-                // to pending pool imports pipeline for validation.
-
-                //
-                // 4. clear received hashes
-                //
-                let requested_hashes_len = requested_hashes.len();
-                let mut fetched = Vec::with_capacity(valid_payload.len());
-                requested_hashes.retain(|requested_hash| {
-                    if valid_payload.contains_key(requested_hash) {
-                        // hash is now known, stop tracking
-                        fetched.push(*requested_hash);
-                        return false
+                if !transactions.is_empty() {
+                    self.metrics.fetched_transactions.increment(transactions.len() as u64);
+                    FetchEvent::TransactionsFetched {
+                        peer_id,
+                        transactions,
+                        report_peer: unsolicited > 0,
                     }
-                    true
-                });
-                fetched.shrink_to_fit();
-                self.metrics.fetched_transactions.increment(fetched.len() as u64);
-
-                if fetched.len() < requested_hashes_len {
+                } else if unsolicited > 0 {
+                    // the peer only sent transactions we didn't ask for
+                    FetchEvent::FetchError { peer_id, error: RequestError::BadResponse }
+                } else {
                     trace!(target: "net::tx",
                         peer_id=format!("{peer_id:#}"),
-                        requested_hashes_len=requested_hashes_len,
-                        fetched_len=fetched.len(),
-                        "peer failed to serve hashes it announced"
+                        requested=requested.len(),
+                        "received empty `PooledTransactions` response, peer failed to serve hashes it announced"
                     );
+                    FetchEvent::EmptyResponse { peer_id }
                 }
-
-                //
-                // 5. buffer left over hashes
-                //
-                self.try_buffer_hashes_for_retry(requested_hashes, &peer_id);
-
-                let transactions = valid_payload.into_data().into_values().collect();
-
-                FetchEvent::TransactionsFetched { peer_id, transactions, report_peer }
             }
-            Ok(Err(req_err)) => {
-                self.try_buffer_hashes_for_retry(requested_hashes, &peer_id);
-                FetchEvent::FetchError { peer_id, error: req_err }
-            }
-            Err(_) => {
-                self.try_buffer_hashes_for_retry(requested_hashes, &peer_id);
-                // request channel closed/dropped
-                FetchEvent::FetchError { peer_id, error: RequestError::ChannelClosed }
-            }
+            Err(error) => FetchEvent::FetchError { peer_id, error },
         }
+    }
+
+    /// Settles the requested hashes of a resolved request: delivered hashes are dropped and
+    /// undelivered hashes are rescheduled for their remaining candidates.
+    fn on_delivery(&mut self, key: PeerKey, requested: &[TxHash], delivered: &B256Set) {
+        // Position right after the last delivered hash. Undelivered hashes before it were skipped
+        // by the peer on purpose, so the peer is dropped as a candidate for them. Undelivered
+        // hashes after it were most likely truncated because the response hit the size limit, so
+        // the peer stays a candidate, but only if it delivered at least half of the request. A
+        // smaller response did not hit any limit, so the peer is dropped for all of them, which
+        // stops a peer from serving the same tail one transaction at a time.
+        let cutoff = if 2 * delivered.len() >= requested.len() {
+            requested
+                .iter()
+                .rposition(|hash| delivered.contains(hash))
+                .map_or(requested.len(), |idx| idx + 1)
+        } else {
+            requested.len()
+        };
+
+        let mut dropped = 0u64;
+        let mut requeued = SmallVec::<[PeerKey; MAX_COUNT_CANDIDATE_PEERS_PER_HASH]>::new();
+
+        // iterate in reverse so that queueing at the front of a queue preserves the request order
+        for (idx, hash) in requested.iter().enumerate().rev() {
+            if delivered.contains(hash) {
+                self.remove_hash(hash);
+                continue
+            }
+
+            // the hash was received elsewhere in the meantime, or was even announced and assigned
+            // to another peer again
+            let Some(entry) = self.hashes.get_mut(hash) else { continue };
+            if entry.fetching_by != Some(key) {
+                continue
+            }
+            entry.fetching_by = None;
+            self.num_fetching -= 1;
+
+            let peers = &mut self.peers;
+            entry.candidates.retain(|candidate| {
+                // disconnected peers are pruned as well
+                let Some(peer) = peers.get_mut(&candidate.peer) else { return false };
+                if idx < cutoff && candidate.peer == key {
+                    peer.tracked = peer.tracked.saturating_sub(1);
+                    return false
+                }
+                true
+            });
+
+            if entry.candidates.is_empty() {
+                self.hashes.remove(hash);
+                dropped += 1;
+                continue
+            }
+
+            let targets = entry.unqueued_candidates();
+            self.requeue(*hash, targets, &mut requeued);
+        }
+
+        if dropped > 0 {
+            self.metrics.hashes_dropped_no_candidate_peers.increment(dropped);
+            trace!(target: "net::tx", dropped, "dropped hashes that no peer is left to fetch from");
+        }
+
+        // retried hashes go to the most recent announcers first
+        for key in requeued {
+            self.mark_ready(key, true);
+        }
+    }
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl<N: NetworkPrimitives> TransactionFetcher<N> {
+    /// Returns the connected peers that are candidates for the hash, in announcement order.
+    pub fn candidate_peers(&self, hash: &TxHash) -> Vec<PeerId> {
+        self.hashes
+            .get(hash)
+            .map(|entry| {
+                entry
+                    .candidates
+                    .iter()
+                    .filter_map(|candidate| self.peers.get(&candidate.peer))
+                    .map(|peer| peer.peer_id)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Returns the peer the hash is currently fetched from, if any.
+    pub fn fetching_peer(&self, hash: &TxHash) -> Option<PeerId> {
+        let key = self.hashes.get(hash)?.fetching_by?;
+        self.peers.get(&key).map(|peer| peer.peer_id)
+    }
+
+    /// Returns the hashes queued for the peer, oldest first. May include hashes that are not
+    /// tracked anymore or are being fetched elsewhere.
+    pub fn queued_hashes(&self, peer_id: &PeerId) -> Vec<TxHash> {
+        self.peer_keys
+            .get(peer_id)
+            .and_then(|key| self.peers.get(key))
+            .map(|peer| peer.queue.iter().copied().collect())
+            .unwrap_or_default()
+    }
+
+    /// Returns the number of peers the fetcher tracks.
+    pub fn num_peers(&self) -> usize {
+        self.peers.len()
+    }
+
+    /// Panics if the internal bookkeeping is inconsistent.
+    pub fn assert_invariants(&self) {
+        let fetching = self.hashes.values().filter(|entry| entry.fetching_by.is_some()).count();
+        assert_eq!(fetching, self.num_fetching, "fetching counter out of sync");
+
+        let ordered = self.order.iter().copied().collect::<B256Set>();
+        assert!(
+            self.order.len() <= 2 * self.config.max_capacity_cache_txns_pending_fetch as usize,
+            "eviction order grew beyond its bound"
+        );
+
+        for (hash, entry) in &self.hashes {
+            assert!(
+                !entry.candidates.is_empty() || entry.fetching_by.is_some(),
+                "{hash} is pending without candidates"
+            );
+            assert!(
+                entry.candidates.len() <= MAX_COUNT_CANDIDATE_PEERS_PER_HASH,
+                "{hash} has too many candidates"
+            );
+            let mut unique = entry.candidates.iter().map(|c| c.peer).collect::<Vec<_>>();
+            unique.sort_unstable();
+            unique.dedup();
+            assert_eq!(unique.len(), entry.candidates.len(), "{hash} has duplicate candidates");
+            assert!(ordered.contains(hash), "{hash} is missing from the eviction order");
+        }
+
+        assert!(
+            self.order.len() <= 2 * self.config.max_capacity_cache_txns_pending_fetch as usize,
+            "eviction order grew beyond its bound"
+        );
+
+        // a hash flagged as queued is in the peer's queue, and a pending hash is queued for at
+        // least one connected candidate, otherwise it could starve
+        let queued = self
+            .peers
+            .iter()
+            .map(|(key, peer)| {
+                assert!(
+                    peer.queue.len() <= 2 * self.config.max_announced_hashes_per_peer as usize,
+                    "queue of {:#} grew beyond its bound",
+                    peer.peer_id
+                );
+                (*key, peer.queue.iter().copied().collect::<B256Set>())
+            })
+            .collect::<HashMap<_, _>>();
+        for (hash, entry) in &self.hashes {
+            let mut fetchable = entry.fetching_by.is_some();
+            for candidate in &entry.candidates {
+                let Some(queue) = queued.get(&candidate.peer) else { continue };
+                if candidate.is_queued() {
+                    assert!(
+                        queue.contains(hash),
+                        "{hash} is flagged but not queued for {:?}",
+                        candidate.peer
+                    );
+                    fetchable = true;
+                }
+            }
+            assert!(fetchable, "pending {hash} is not queued for any connected candidate");
+        }
+
+        for (key, peer) in &self.peers {
+            let tracked = self.hashes.values().filter(|entry| entry.has_candidate(*key)).count();
+            assert_eq!(tracked, peer.tracked, "tracked counter of {:#} out of sync", peer.peer_id);
+            assert!(
+                peer.tracked <= self.config.max_announced_hashes_per_peer as usize,
+                "{:#} exceeds the per peer limit",
+                peer.peer_id
+            );
+            assert_eq!(
+                peer.ready,
+                self.ready.contains(key),
+                "ready flag of {:#} out of sync",
+                peer.peer_id
+            );
+            if peer.ready {
+                assert!(
+                    !peer.queue.is_empty(),
+                    "{:#} is ready without queued hashes",
+                    peer.peer_id
+                );
+                assert!(
+                    peer.inflight < self.config.max_inflight_requests_per_peer,
+                    "{:#} is ready but busy",
+                    peer.peer_id
+                );
+            }
+            assert_eq!(
+                self.peer_keys.get(&peer.peer_id),
+                Some(key),
+                "peer key mapping out of sync"
+            );
+        }
+
+        for (peer_id, key) in &self.peer_keys {
+            assert!(self.peers.contains_key(key), "{peer_id:#} maps to an unknown key");
+        }
+
+        let inflight = self.peers.values().map(|peer| peer.inflight as usize).sum::<usize>();
+        assert!(inflight <= self.inflight.len(), "peers claim more inflight requests than exist");
+    }
+}
+
+impl<N: NetworkPrimitives> Default for TransactionFetcher<N> {
+    fn default() -> Self {
+        Self::new(TransactionFetcherConfig::default())
     }
 }
 
 impl<N: NetworkPrimitives> Stream for TransactionFetcher<N> {
     type Item = FetchEvent<N::PooledTransaction>;
 
-    /// Advances all inflight requests and returns the next event.
+    /// Advances all inflight requests and yields the next resolved request as an event.
+    ///
+    /// Never terminates, returns [`Poll::Pending`] while no request is inflight.
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        // `FuturesUnordered` doesn't close when `None` is returned. so just return pending.
-        // <https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&gist=815be2b6c8003303757c3ced135f363e>
-        if self.inflight_requests.is_empty() {
-            return Poll::Pending
+        // `FuturesUnordered` yields `None` while empty but keeps working once new requests are
+        // pushed, so this is mapped to pending
+        match self.inflight.poll_next_unpin(cx) {
+            Poll::Ready(Some(resolved)) => Poll::Ready(Some(self.on_resolved(resolved))),
+            Poll::Ready(None) | Poll::Pending => Poll::Pending,
         }
-
-        if let Some(resp) = ready!(self.inflight_requests.poll_next_unpin(cx)) {
-            return Poll::Ready(Some(self.on_resolved_get_pooled_transactions_request_fut(resp)))
-        }
-
-        Poll::Pending
-    }
-}
-
-impl<T: NetworkPrimitives> Default for TransactionFetcher<T> {
-    fn default() -> Self {
-        Self {
-            active_peers: LruMap::with_hasher(
-                DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
-                Default::default(),
-            ),
-            inflight_requests: Default::default(),
-            hashes_pending_fetch: LruCache::with_hasher(
-                DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
-                Default::default(),
-            ),
-            hashes_fetch_inflight_and_pending_fetch: LruMap::with_hasher(
-                DEFAULT_MAX_CAPACITY_CACHE_INFLIGHT_AND_PENDING_FETCH,
-                Default::default(),
-            ),
-            info: TransactionFetcherInfo::default(),
-            metrics: Default::default(),
-        }
-    }
-}
-
-/// Metadata of a transaction hash that is yet to be fetched.
-#[derive(Debug, Constructor)]
-pub struct TxFetchMetadata {
-    /// The number of times a request attempt has been made for the hash.
-    retries: u8,
-    /// Peers that have announced the hash, but to which a request attempt has not yet been made.
-    fallback_peers: LruCache<PeerId, FbBuildHasher<64>>,
-    /// Size metadata of the transaction if it has been seen in an eth68 announcement.
-    // todo: store all seen sizes as a `(size, peer_id)` tuple to catch peers that respond with
-    // another size tx than they announced. alt enter in request (won't catch peers announcing
-    // wrong size for requests assembled from hashes pending fetch if stored in request fut)
-    tx_encoded_length: Option<usize>,
-}
-
-impl TxFetchMetadata {
-    /// Returns a mutable reference to the fallback peers cache for this transaction hash.
-    pub const fn fallback_peers_mut(&mut self) -> &mut LruCache<PeerId, FbBuildHasher<64>> {
-        &mut self.fallback_peers
-    }
-
-    /// Returns the size of the transaction, if its hash has been received in any
-    /// [`Eth68`](reth_eth_wire::EthVersion::Eth68) announcement. If the transaction hash has only
-    /// been seen in [`Eth66`](reth_eth_wire::EthVersion::Eth66) announcements so far, this will
-    /// return `None`.
-    pub const fn tx_encoded_len(&self) -> Option<usize> {
-        self.tx_encoded_length
     }
 }
 
@@ -1076,525 +1019,1922 @@ pub enum FetchEvent<T = PooledTransaction> {
     },
 }
 
-/// An inflight request for [`PooledTransactions`] from a peer.
+/// Compact identifier of a peer within the fetcher.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct PeerKey(u32);
+
+/// State of a tracked hash.
 #[derive(Debug)]
-pub struct GetPooledTxRequest<T = PooledTransaction> {
+struct TxEntry {
+    /// Peers that announced the hash and may be asked for it, oldest first.
+    candidates: SmallVec<[Candidate; MAX_COUNT_CANDIDATE_PEERS_PER_HASH]>,
+    /// The peer currently fetching the transaction, if any.
+    fetching_by: Option<PeerKey>,
+}
+
+impl TxEntry {
+    /// A new entry for a hash that is queued for the announcing peer.
+    fn new(peer: PeerKey, size: u32) -> Self {
+        let mut candidates = SmallVec::new();
+        candidates.push(Candidate::queued(peer, size));
+        Self { candidates, fetching_by: None }
+    }
+
+    fn has_candidate(&self, key: PeerKey) -> bool {
+        self.candidates.iter().any(|candidate| candidate.peer == key)
+    }
+
+    /// Returns the candidates that don't have the hash queued, in the order they announced it.
+    fn unqueued_candidates(&self) -> SmallVec<[PeerKey; MAX_COUNT_CANDIDATE_PEERS_PER_HASH]> {
+        self.candidates
+            .iter()
+            .filter(|candidate| !candidate.is_queued())
+            .map(|candidate| candidate.peer)
+            .collect()
+    }
+
+    fn candidate_mut(&mut self, key: PeerKey) -> Option<&mut Candidate> {
+        self.candidates.iter_mut().find(|candidate| candidate.peer == key)
+    }
+}
+
+/// A peer that announced a hash.
+#[derive(Debug, Clone, Copy)]
+struct Candidate {
+    peer: PeerKey,
+    /// The size the peer announced for the transaction, 0 if unknown, with
+    /// [`Self::QUEUED`] set while the hash is in the peer's queue.
+    size_and_queued: u32,
+}
+
+impl Candidate {
+    /// Marks the hash as queued for the peer. Announced sizes are capped well below this bit.
+    const QUEUED: u32 = 1 << 31;
+
+    /// A candidate that has the hash queued.
+    const fn queued(peer: PeerKey, size: u32) -> Self {
+        Self { peer, size_and_queued: size | Self::QUEUED }
+    }
+
+    /// A candidate that doesn't have the hash queued.
+    const fn unqueued(peer: PeerKey, size: u32) -> Self {
+        Self { peer, size_and_queued: size }
+    }
+
+    const fn is_queued(&self) -> bool {
+        self.size_and_queued & Self::QUEUED != 0
+    }
+
+    const fn set_queued(&mut self, queued: bool) {
+        if queued {
+            self.size_and_queued |= Self::QUEUED;
+        } else {
+            self.size_and_queued &= !Self::QUEUED;
+        }
+    }
+
+    const fn set_size(&mut self, size: u32) {
+        self.size_and_queued = (self.size_and_queued & Self::QUEUED) | size;
+    }
+
+    /// Returns the size to account for when packing the hash into a request to this peer.
+    const fn request_size(&self) -> usize {
+        let size = self.size_and_queued & !Self::QUEUED;
+        if size == 0 {
+            AVERAGE_BYTE_SIZE_TX_ENCODED
+        } else {
+            size as usize
+        }
+    }
+}
+
+/// Fetch state of a peer.
+#[derive(Debug)]
+struct PeerState {
     peer_id: PeerId,
-    /// Transaction hashes that were requested, for cleanup purposes
-    requested_hashes: RequestTxHashes,
+    /// Hashes the peer announced, oldest first. Entries are removed lazily, so the queue may
+    /// contain hashes that are not tracked anymore or that the peer is no longer a candidate for.
+    queue: VecDeque<TxHash>,
+    /// Number of tracked hashes that list this peer as a candidate.
+    tracked: usize,
+    /// Number of inflight requests to this peer.
+    inflight: u8,
+    /// Whether the peer is queued in the ready list.
+    ready: bool,
+}
+
+impl PeerState {
+    const fn new(peer_id: PeerId) -> Self {
+        Self { peer_id, queue: VecDeque::new(), tracked: 0, inflight: 0, ready: false }
+    }
+
+    /// Queues the hash at the back or the front of the queue.
+    ///
+    /// Queues are bounded: once a queue holds twice `max_tracked` hashes, entries the peer is no
+    /// longer a candidate for and duplicates are removed. A duplicate can occur when a hash is
+    /// tracked again after it was delivered or evicted, while its old entry still lingers in the
+    /// queue. Duplicates are skipped when the queue is drained, so they only cost memory.
+    fn push_queue(
+        &mut self,
+        hashes: &B256Map<TxEntry>,
+        key: PeerKey,
+        hash: TxHash,
+        front: bool,
+        max_tracked: usize,
+    ) {
+        if self.queue.len() >= 2 * max_tracked {
+            let mut seen = B256Set::with_capacity_and_hasher(self.tracked, Default::default());
+            self.queue.retain(|hash| {
+                hashes.get(hash).is_some_and(|entry| entry.has_candidate(key)) && seen.insert(*hash)
+            });
+        }
+        if front {
+            self.queue.push_front(hash);
+        } else {
+            self.queue.push_back(hash);
+        }
+    }
+}
+
+/// An inflight `GetPooledTransactions` request.
+#[derive(Debug)]
+struct InflightRequest<T> {
+    peer: PeerKey,
+    peer_id: PeerId,
+    /// The requested hashes, in request order.
+    hashes: Vec<TxHash>,
     response: oneshot::Receiver<RequestResult<PooledTransactions<T>>>,
 }
 
-/// Upon reception of a response, a [`GetPooledTxRequest`] is deconstructed to form a
-/// [`GetPooledTxResponse`].
+impl<T> Future for InflightRequest<T> {
+    type Output = ResolvedRequest<T>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        let result = ready!(this.response.poll_unpin(cx));
+        Poll::Ready(ResolvedRequest {
+            peer: this.peer,
+            peer_id: this.peer_id,
+            hashes: std::mem::take(&mut this.hashes),
+            result,
+        })
+    }
+}
+
+/// A resolved `GetPooledTransactions` request.
 #[derive(Debug)]
-pub struct GetPooledTxResponse<T = PooledTransaction> {
+struct ResolvedRequest<T> {
+    peer: PeerKey,
     peer_id: PeerId,
-    /// Transaction hashes that were requested, for cleanup purposes, since peer may only return a
-    /// subset of requested hashes.
-    requested_hashes: RequestTxHashes,
+    hashes: Vec<TxHash>,
     result: Result<RequestResult<PooledTransactions<T>>, RecvError>,
 }
 
-/// Stores the response receiver made by sending a [`GetPooledTransactions`] request to a peer's
-/// session.
-#[must_use = "futures do nothing unless polled"]
-#[pin_project::pin_project]
-#[derive(Debug)]
-pub struct GetPooledTxRequestFut<T = PooledTransaction> {
-    #[pin]
-    inner: Option<GetPooledTxRequest<T>>,
+/// Returns the announced size of a transaction, capped at the response soft limit since a peer
+/// can't serve anything bigger, or 0 if the announcement carried no size.
+fn announced_size(metadata: Eth68TxMetadata) -> u32 {
+    metadata
+        .map_or(0, |(_, size)| size.min(SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE) as u32)
 }
 
-impl<T> GetPooledTxRequestFut<T> {
-    #[inline]
-    const fn new(
-        peer_id: PeerId,
-        requested_hashes: RequestTxHashes,
-        response: oneshot::Receiver<RequestResult<PooledTransactions<T>>>,
-    ) -> Self {
-        Self { inner: Some(GetPooledTxRequest { peer_id, requested_hashes, response }) }
-    }
-}
-
-impl<T> Future for GetPooledTxRequestFut<T> {
-    type Output = GetPooledTxResponse<T>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut req = self.as_mut().project().inner.take().expect("polled after completion");
-        match req.response.poll_unpin(cx) {
-            Poll::Ready(result) => Poll::Ready(GetPooledTxResponse {
-                peer_id: req.peer_id,
-                requested_hashes: req.requested_hashes,
-                result,
-            }),
-            Poll::Pending => {
-                self.project().inner.set(Some(req));
-                Poll::Pending
-            }
+/// Filters a response down to the transactions that were requested, dropping duplicates.
+///
+/// Records the delivered hashes in `delivered` and returns the number of unsolicited transactions
+/// that were dropped.
+fn verify_response<T: SignedTransaction>(
+    transactions: &mut PooledTransactions<T>,
+    requested: &B256Set,
+    delivered: &mut B256Set,
+) -> usize {
+    let mut unsolicited = 0;
+    transactions.0.retain(|tx| {
+        let hash = *tx.tx_hash();
+        if !requested.contains(&hash) {
+            unsolicited += 1;
+            return false
         }
-    }
-}
-
-/// Wrapper of unverified [`PooledTransactions`].
-#[derive(Debug, Constructor, Deref)]
-pub struct UnverifiedPooledTransactions<T> {
-    txns: PooledTransactions<T>,
-}
-
-/// [`PooledTransactions`] that have been successfully verified.
-#[derive(Debug, Constructor, Deref)]
-pub struct VerifiedPooledTransactions<T> {
-    txns: PooledTransactions<T>,
-}
-
-impl<T: SignedTransaction> DedupPayload for VerifiedPooledTransactions<T> {
-    type Value = T;
-
-    fn is_empty(&self) -> bool {
-        self.txns.is_empty()
-    }
-
-    fn len(&self) -> usize {
-        self.txns.len()
-    }
-
-    fn dedup(self) -> PartiallyValidData<Self::Value> {
-        PartiallyValidData::from_raw_data(
-            self.txns.into_iter().map(|tx| (*tx.tx_hash(), tx)).collect(),
-            None,
-        )
-    }
-}
-
-trait VerifyPooledTransactionsResponse {
-    type Transaction: SignedTransaction;
-
-    fn verify(
-        self,
-        requested_hashes: &RequestTxHashes,
-        peer_id: &PeerId,
-    ) -> (VerificationOutcome, VerifiedPooledTransactions<Self::Transaction>);
-}
-
-impl<T: SignedTransaction> VerifyPooledTransactionsResponse for UnverifiedPooledTransactions<T> {
-    type Transaction = T;
-
-    fn verify(
-        self,
-        requested_hashes: &RequestTxHashes,
-        _peer_id: &PeerId,
-    ) -> (VerificationOutcome, VerifiedPooledTransactions<T>) {
-        let mut verification_outcome = VerificationOutcome::Ok;
-
-        let Self { mut txns } = self;
-
-        #[cfg(debug_assertions)]
-        let mut tx_hashes_not_requested: smallvec::SmallVec<[TxHash; 16]> = smallvec::smallvec!();
-        #[cfg(not(debug_assertions))]
-        let mut tx_hashes_not_requested_count = 0;
-
-        txns.0.retain(|tx| {
-            if !requested_hashes.contains(tx.tx_hash()) {
-                verification_outcome = VerificationOutcome::ReportPeer;
-
-                #[cfg(debug_assertions)]
-                tx_hashes_not_requested.push(*tx.tx_hash());
-                #[cfg(not(debug_assertions))]
-                {
-                    tx_hashes_not_requested_count += 1;
-                }
-
-                return false
-            }
-            true
-        });
-
-        #[cfg(debug_assertions)]
-        if !tx_hashes_not_requested.is_empty() {
-            trace!(target: "net::tx",
-                peer_id=format!("{_peer_id:#}"),
-                ?tx_hashes_not_requested,
-                "transactions in `PooledTransactions` response from peer were not requested"
-            );
-        }
-        #[cfg(not(debug_assertions))]
-        if tx_hashes_not_requested_count != 0 {
-            trace!(target: "net::tx",
-                peer_id=format!("{_peer_id:#}"),
-                tx_hashes_not_requested_count,
-                "transactions in `PooledTransactions` response from peer were not requested"
-            );
-        }
-
-        (verification_outcome, VerifiedPooledTransactions::new(txns))
-    }
-}
-
-/// Outcome from verifying a [`PooledTransactions`] response. Signals to caller whether to penalize
-/// the sender of the response or not.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum VerificationOutcome {
-    /// Peer behaves appropriately.
-    Ok,
-    /// A penalty should be flagged for the peer. Peer sent a response with unacceptably
-    /// invalid entries.
-    ReportPeer,
-}
-
-/// Tracks stats about the [`TransactionFetcher`].
-#[derive(Debug, Constructor)]
-pub struct TransactionFetcherInfo {
-    /// Max inflight [`GetPooledTransactions`] requests.
-    pub max_inflight_requests: usize,
-    /// Max inflight [`GetPooledTransactions`] requests per peer.
-    pub max_inflight_requests_per_peer: u8,
-    /// Soft limit for the byte size of the expected [`PooledTransactions`] response, upon packing
-    /// a [`GetPooledTransactions`] request with hashes (by default less than 2 MiB worth of
-    /// transactions is requested).
-    pub soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
-    /// Soft limit for the byte size of a [`PooledTransactions`] response, upon assembling the
-    /// response. Spec'd at 2 MiB, but can be adjusted for research purpose.
-    pub soft_limit_byte_size_pooled_transactions_response: usize,
-    /// Max capacity of the cache of transaction hashes, for transactions that weren't yet fetched.
-    /// A transaction is pending fetch if its hash didn't fit into a [`GetPooledTransactions`] yet,
-    /// or it wasn't returned upon request to peers.
-    pub max_capacity_cache_txns_pending_fetch: u32,
-}
-
-impl Default for TransactionFetcherInfo {
-    fn default() -> Self {
-        Self::new(
-            DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS as usize,
-            DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
-            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
-            SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
-            DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
-        )
-    }
-}
-
-impl From<TransactionFetcherConfig> for TransactionFetcherInfo {
-    fn from(config: TransactionFetcherConfig) -> Self {
-        let TransactionFetcherConfig {
-            max_inflight_requests,
-            max_inflight_requests_per_peer,
-            soft_limit_byte_size_pooled_transactions_response,
-            soft_limit_byte_size_pooled_transactions_response_on_pack_request,
-            max_capacity_cache_txns_pending_fetch,
-        } = config;
-
-        Self::new(
-            max_inflight_requests as usize,
-            max_inflight_requests_per_peer,
-            soft_limit_byte_size_pooled_transactions_response_on_pack_request,
-            soft_limit_byte_size_pooled_transactions_response,
-            max_capacity_cache_txns_pending_fetch,
-        )
-    }
-}
-
-#[derive(Debug, Default)]
-struct TxFetcherSearchDurations {
-    find_idle_peer: Duration,
-    fill_request: Duration,
+        delivered.insert(hash)
+    });
+    unsolicited
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
-    use crate::test_utils::transactions::{buffer_hash_to_tx_fetcher, new_mock_session};
-    use alloy_primitives::{
-        hex,
-        map::{B256Map, B256Set, HashMap},
-        B256,
+    use crate::test_utils::transactions::new_mock_session_with_capacity;
+    use alloy_consensus::transaction::Recovered;
+    use alloy_primitives::B256;
+    use futures::task::{noop_waker_ref, waker, ArcWake};
+    use rand::{rngs::StdRng, seq::IndexedRandom, Rng, SeedableRng};
+    use reth_eth_wire::EthVersion;
+    use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
+    use reth_transaction_pool::test_utils::MockTransactionFactory;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
     };
-    use alloy_rlp::Decodable;
-    use derive_more::IntoIterator;
-    use reth_eth_wire_types::EthVersion;
-    use reth_ethereum_primitives::TransactionSigned;
-    use std::str::FromStr;
+    use tokio::sync::mpsc;
 
-    #[derive(IntoIterator)]
-    struct TestValidAnnouncementData(Vec<(TxHash, Option<(u8, usize)>)>);
+    type Fetcher = TransactionFetcher<EthNetworkPrimitives>;
+    type ResponseSender =
+        oneshot::Sender<RequestResult<PooledTransactions<PooledTransactionVariant>>>;
 
-    impl HandleMempoolData for TestValidAnnouncementData {
-        fn is_empty(&self) -> bool {
-            self.0.is_empty()
-        }
+    const KIB: usize = 1024;
 
-        fn len(&self) -> usize {
-            self.0.len()
-        }
+    fn peer(n: u8) -> PeerId {
+        PeerId::new([n; 64])
+    }
 
-        fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) {
-            self.0.retain(|(hash, _)| f(hash))
+    fn hash(n: u64) -> TxHash {
+        let mut bytes = [0u8; 32];
+        bytes[24..].copy_from_slice(&n.to_be_bytes());
+        B256::from(bytes)
+    }
+
+    fn hashes(range: std::ops::Range<u64>) -> Vec<TxHash> {
+        range.map(hash).collect()
+    }
+
+    /// A peer id for tests that need more than 255 peers.
+    fn peer_n(n: u64) -> PeerId {
+        let mut bytes = [0u8; 64];
+        bytes[..8].copy_from_slice(&n.to_be_bytes());
+        PeerId::new(bytes)
+    }
+
+    /// Counts how often a task is woken.
+    #[derive(Default)]
+    struct WakeCounter(AtomicUsize);
+
+    impl ArcWake for WakeCounter {
+        fn wake_by_ref(arc_self: &Arc<Self>) {
+            arc_self.0.fetch_add(1, Ordering::SeqCst);
         }
     }
 
-    impl HandleVersionedMempoolData for TestValidAnnouncementData {
-        fn msg_version(&self) -> EthVersion {
-            EthVersion::Eth68
+    impl WakeCounter {
+        fn wakes(&self) -> usize {
+            self.0.load(Ordering::SeqCst)
         }
     }
 
-    #[test]
-    fn pack_eth68_request() {
-        reth_tracing::init_test_tracing();
-
-        // RIG TEST
-
-        let tx_fetcher = &mut TransactionFetcher::<EthNetworkPrimitives>::default();
-
-        let eth68_hashes = [
-            B256::from_slice(&[1; 32]),
-            B256::from_slice(&[2; 32]),
-            B256::from_slice(&[3; 32]),
-            B256::from_slice(&[4; 32]),
-            B256::from_slice(&[5; 32]),
-        ];
-        let eth68_sizes = [
-            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ - MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED - 1, // first will fit
-            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ, // second won't
-            2, // free space > `MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED`, third will fit, no more after this
-            9,
-            0,
-        ];
-
-        let expected_request_hashes =
-            [eth68_hashes[0], eth68_hashes[2]].into_iter().collect::<B256Set>();
-
-        let expected_surplus_hashes =
-            [eth68_hashes[1], eth68_hashes[3], eth68_hashes[4]].into_iter().collect::<B256Set>();
-
-        let mut eth68_hashes_to_request = RequestTxHashes::with_capacity(3);
-
-        let valid_announcement_data = TestValidAnnouncementData(
-            eth68_hashes
-                .into_iter()
-                .zip(eth68_sizes)
-                .map(|(hash, size)| (hash, Some((0u8, size))))
-                .collect::<Vec<_>>(),
-        );
-
-        // TEST
-
-        let surplus_eth68_hashes =
-            tx_fetcher.pack_request_eth68(&mut eth68_hashes_to_request, valid_announcement_data);
-
-        let eth68_hashes_to_request = eth68_hashes_to_request.into_iter().collect::<B256Set>();
-        let surplus_eth68_hashes = surplus_eth68_hashes.into_iter().collect::<B256Set>();
-
-        assert_eq!(expected_request_hashes, eth68_hashes_to_request);
-        assert_eq!(expected_surplus_hashes, surplus_eth68_hashes);
+    fn pooled_txs(count: usize) -> Vec<PooledTransactionVariant> {
+        let mut factory = MockTransactionFactory::default();
+        (0..count)
+            .map(|_| {
+                let recovered: Recovered<TransactionSigned> =
+                    factory.create_eip1559().transaction.into();
+                PooledTransactionVariant::try_from(recovered.into_inner())
+                    .expect("eip1559 transaction converts to pooled transaction")
+            })
+            .collect()
     }
 
-    #[test]
-    fn pack_eth68_request_does_not_overflow_announced_size() {
-        reth_tracing::init_test_tracing();
-
-        let tx_fetcher = &mut TransactionFetcher::<EthNetworkPrimitives>::default();
-
-        let eth68_hashes =
-            [B256::from_slice(&[1; 32]), B256::from_slice(&[2; 32]), B256::from_slice(&[3; 32])];
-        let eth68_sizes = [
-            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ - MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED - 1,
-            usize::MAX,
-            2,
-        ];
-
-        let expected_request_hashes =
-            [eth68_hashes[0], eth68_hashes[2]].into_iter().collect::<B256Set>();
-        let expected_surplus_hashes = std::iter::once(eth68_hashes[1]).collect::<B256Set>();
-
-        let mut eth68_hashes_to_request = RequestTxHashes::with_capacity(3);
-        let valid_announcement_data = TestValidAnnouncementData(
-            eth68_hashes
-                .into_iter()
-                .zip(eth68_sizes)
-                .map(|(hash, size)| (hash, Some((0u8, size))))
-                .collect::<Vec<_>>(),
-        );
-
-        let surplus_eth68_hashes =
-            tx_fetcher.pack_request_eth68(&mut eth68_hashes_to_request, valid_announcement_data);
-
-        let eth68_hashes_to_request = eth68_hashes_to_request.into_iter().collect::<B256Set>();
-        let surplus_eth68_hashes = surplus_eth68_hashes.into_iter().collect::<B256Set>();
-
-        assert_eq!(expected_request_hashes, eth68_hashes_to_request);
-        assert_eq!(expected_surplus_hashes, surplus_eth68_hashes);
+    fn hashes_of(txs: &[PooledTransactionVariant]) -> Vec<TxHash> {
+        txs.iter().map(|tx| *tx.tx_hash()).collect()
     }
 
-    #[test]
-    fn pack_eth72_request_uses_metadata_size_limit() {
-        reth_tracing::init_test_tracing();
-
-        let tx_fetcher = &mut TransactionFetcher::<EthNetworkPrimitives>::default();
-
-        let hashes =
-            [B256::from_slice(&[1; 32]), B256::from_slice(&[2; 32]), B256::from_slice(&[3; 32])];
-        let announced_size =
-            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ;
-        let announcement_data = hashes
-            .into_iter()
-            .map(|hash| (hash, Some((0u8, announced_size))))
-            .collect::<B256Map<_>>();
-        let valid_announcement_data = ValidAnnouncementData::from_partially_valid_data(
-            PartiallyValidData::from_raw_data_eth72(announcement_data),
-        );
-
-        let mut hashes_to_request = RequestTxHashes::with_capacity(3);
-        let surplus_hashes =
-            tx_fetcher.pack_request(&mut hashes_to_request, valid_announcement_data);
-
-        assert_eq!(1, hashes_to_request.len());
-        assert_eq!(2, surplus_hashes.len());
+    /// A fetcher with mock peer sessions.
+    struct Rig {
+        fetcher: Fetcher,
+        peers: HashMap<PeerId, PeerMetadata<EthNetworkPrimitives>, FbBuildHasher<64>>,
+        sessions: HashMap<PeerId, mpsc::Receiver<PeerRequest>, FbBuildHasher<64>>,
+        /// Whether every operation checks the fetcher's invariants, which is too slow for large
+        /// workloads.
+        check_invariants: bool,
     }
 
-    #[tokio::test]
-    async fn test_on_fetch_pending_hashes() {
-        reth_tracing::init_test_tracing();
-
-        let tx_fetcher = &mut TransactionFetcher::default();
-
-        // RIG TEST
-
-        // hashes that will be fetched because they are stored as pending fetch
-        let seen_hashes = [
-            B256::from_slice(&[1; 32]),
-            B256::from_slice(&[2; 32]),
-            B256::from_slice(&[3; 32]),
-            B256::from_slice(&[4; 32]),
-        ];
-        //
-        // txns 1-3 are small, all will fit in request. no metadata has been made available for
-        // hash 4, it has only been seen over eth66 conn, so average tx size will be assumed in
-        // filling request.
-        let seen_eth68_hashes_sizes = [120, 158, 116];
-
-        // peer that will fetch seen hashes because they are pending fetch
-        let peer_1 = PeerId::new([1; 64]);
-        // second peer, won't do anything in this test
-        let peer_2 = PeerId::new([2; 64]);
-
-        // add seen hashes to peers seen transactions
-        //
-        // get handle for peer_1's session to receive request for pending hashes
-        let (mut peer_1_data, mut peer_1_mock_session_rx) =
-            new_mock_session(peer_1, EthVersion::Eth66);
-        for hash in &seen_hashes {
-            peer_1_data.seen_transactions.insert(*hash);
+    impl Rig {
+        fn new() -> Self {
+            Self::with_config(TransactionFetcherConfig::default())
         }
-        let (mut peer_2_data, _) = new_mock_session(peer_2, EthVersion::Eth66);
-        for hash in &seen_hashes {
-            peer_2_data.seen_transactions.insert(*hash);
-        }
-        let mut peers: HashMap<PeerId, _, FbBuildHasher<64>> = HashMap::default();
-        peers.insert(peer_1, peer_1_data);
-        peers.insert(peer_2, peer_2_data);
 
-        // insert seen_hashes into tx fetcher
-        for i in 0..3 {
-            // insert peer_2 as fallback peer for seen_hashes
-            buffer_hash_to_tx_fetcher(
-                tx_fetcher,
-                seen_hashes[i],
-                peer_2,
-                0,
-                Some(seen_eth68_hashes_sizes[i]),
+        fn with_config(config: TransactionFetcherConfig) -> Self {
+            Self {
+                fetcher: Fetcher::new(config),
+                peers: Default::default(),
+                sessions: Default::default(),
+                check_invariants: true,
+            }
+        }
+
+        fn verify(&self) {
+            if self.check_invariants {
+                self.fetcher.assert_invariants();
+            }
+        }
+
+        fn add_peer(&mut self, peer_id: PeerId) {
+            self.add_peer_with_capacity(peer_id, 8);
+        }
+
+        fn add_peer_with_capacity(&mut self, peer_id: PeerId, capacity: usize) {
+            let (peer, rx) = new_mock_session_with_capacity(peer_id, EthVersion::Eth68, capacity);
+            self.peers.insert(peer_id, peer);
+            self.sessions.insert(peer_id, rx);
+        }
+
+        fn announce(&mut self, peer_id: PeerId, hashes: &[TxHash]) {
+            self.announce_with_sizes(peer_id, hashes.iter().map(|hash| (*hash, 512)));
+        }
+
+        fn announce_with_sizes(
+            &mut self,
+            peer_id: PeerId,
+            entries: impl IntoIterator<Item = (TxHash, usize)>,
+        ) {
+            self.fetcher.on_announcement(
+                peer_id,
+                entries.into_iter().map(|(h, size)| (h, Some((2, size)))),
             );
-        }
-        buffer_hash_to_tx_fetcher(tx_fetcher, seen_hashes[3], peer_2, 0, None);
-
-        // insert pending hash without peer_1 as fallback peer, only with peer_2 as fallback peer
-        let hash_other = B256::from_slice(&[5; 32]);
-        buffer_hash_to_tx_fetcher(tx_fetcher, hash_other, peer_2, 0, None);
-
-        // add peer_1 as lru fallback peer for seen hashes
-        for hash in &seen_hashes {
-            buffer_hash_to_tx_fetcher(tx_fetcher, *hash, peer_1, 0, None);
+            self.verify();
         }
 
-        // seen hashes and the random hash from peer_2 are pending fetch
-        assert_eq!(tx_fetcher.num_pending_hashes(), 5);
+        fn announce_unsized(&mut self, peer_id: PeerId, hashes: &[TxHash]) {
+            self.fetcher.on_announcement(peer_id, hashes.iter().map(|hash| (*hash, None)));
+            self.verify();
+        }
 
-        // TEST
+        fn dispatch(&mut self) -> usize {
+            self.dispatch_with_budget(usize::MAX)
+        }
 
-        tx_fetcher.on_fetch_pending_hashes(&peers, |_| true);
+        fn dispatch_with_budget(&mut self, max_fetching_hashes: usize) -> usize {
+            let sent = self.fetcher.dispatch(&self.peers, max_fetching_hashes);
+            self.verify();
+            sent
+        }
 
-        // mock session of peer_1 receives request
-        let req = peer_1_mock_session_rx
-            .recv()
-            .await
-            .expect("peer session should receive request with buffered hashes");
-        let PeerRequest::GetPooledTransactions { request, .. } = req else { unreachable!() };
-        let GetPooledTransactions(requested_hashes) = request;
+        /// Takes the next request the peer's session received.
+        fn take_request(&mut self, peer_id: PeerId) -> Option<(Vec<TxHash>, ResponseSender)> {
+            match self.sessions.get_mut(&peer_id)?.try_recv().ok()? {
+                PeerRequest::GetPooledTransactions { request, response } => {
+                    Some((request.0, response))
+                }
+                _ => unreachable!("the fetcher only sends `GetPooledTransactions` requests"),
+            }
+        }
 
+        fn next_event(&mut self) -> Option<FetchEvent<PooledTransactionVariant>> {
+            let mut cx = Context::from_waker(noop_waker_ref());
+            let event = match self.fetcher.poll_next_unpin(&mut cx) {
+                Poll::Ready(event) => event,
+                Poll::Pending => None,
+            };
+            self.verify();
+            event
+        }
+
+        fn drain_events(&mut self) -> Vec<FetchEvent<PooledTransactionVariant>> {
+            std::iter::from_fn(|| self.next_event()).collect()
+        }
+
+        fn respond(
+            &mut self,
+            peer_id: PeerId,
+            txs: Vec<PooledTransactionVariant>,
+        ) -> FetchEvent<PooledTransactionVariant> {
+            let (_, response) = self.take_request(peer_id).expect("request inflight");
+            response.send(Ok(PooledTransactions(txs))).unwrap();
+            self.next_event().expect("response yields an event")
+        }
+
+        fn fail(
+            &mut self,
+            peer_id: PeerId,
+            error: RequestError,
+        ) -> FetchEvent<PooledTransactionVariant> {
+            let (_, response) = self.take_request(peer_id).expect("request inflight");
+            response.send(Err(error)).unwrap();
+            self.next_event().expect("error yields an event")
+        }
+
+        fn disconnect(&mut self, peer_id: PeerId) {
+            self.peers.remove(&peer_id);
+            self.sessions.remove(&peer_id);
+            self.fetcher.on_peer_disconnected(&peer_id);
+            self.verify();
+        }
+    }
+
+    #[test]
+    fn announced_hashes_are_requested_from_announcing_peer() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        rig.add_peer(peer_a);
+        let txs = pooled_txs(2);
+        let hashes = hashes_of(&txs);
+
+        rig.announce(peer_a, &hashes);
+        assert_eq!(rig.fetcher.num_pending_hashes(), 2);
+        assert!(rig.fetcher.is_idle(&peer_a));
+
+        assert_eq!(rig.dispatch(), 1);
+        assert!(!rig.fetcher.is_idle(&peer_a));
+        assert_eq!(rig.fetcher.num_inflight_requests(), 1);
+        assert_eq!(rig.fetcher.num_fetching_hashes(), 2);
+        assert_eq!(rig.fetcher.num_pending_hashes(), 0);
+        assert_eq!(rig.fetcher.fetching_peer(&hashes[0]), Some(peer_a));
+
+        let (requested, response) = rig.take_request(peer_a).unwrap();
+        assert_eq!(requested, hashes);
+        response.send(Ok(PooledTransactions(txs))).unwrap();
+
+        let FetchEvent::TransactionsFetched { peer_id, transactions, report_peer } =
+            rig.next_event().unwrap()
+        else {
+            panic!("expected fetched transactions")
+        };
+        assert_eq!(peer_id, peer_a);
+        assert_eq!(transactions.len(), 2);
+        assert!(!report_peer);
+
+        assert_eq!(rig.fetcher.num_hashes(), 0);
+        assert_eq!(rig.fetcher.num_inflight_requests(), 0);
+        assert!(rig.fetcher.is_idle(&peer_a));
+        assert!(rig.next_event().is_none());
+    }
+
+    #[test]
+    fn duplicate_announcements_from_same_peer_are_ignored() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        rig.add_peer(peer_a);
+        let hashes = hashes(0..3);
+
+        rig.announce(peer_a, &hashes);
+        rig.announce(peer_a, &hashes);
+
+        assert_eq!(rig.fetcher.num_hashes(), 3);
+        assert_eq!(rig.fetcher.queued_hashes(&peer_a), hashes);
+        assert_eq!(rig.fetcher.candidate_peers(&hashes[0]), vec![peer_a]);
+    }
+
+    #[test]
+    fn requests_preserve_announcement_order() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        rig.add_peer(peer_a);
+
+        rig.announce(peer_a, &hashes(10..13));
+        rig.announce(peer_a, &hashes(0..3));
+
+        rig.dispatch();
+        let (requested, _) = rig.take_request(peer_a).unwrap();
+        assert_eq!(requested, [hashes(10..13), hashes(0..3)].concat());
+    }
+
+    #[test]
+    fn request_is_capped_by_hash_count() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        rig.add_peer(peer_a);
+        let hashes = hashes(0..300);
+
+        // no size metadata, so the count limit is what bounds the request
+        rig.announce_unsized(peer_a, &hashes);
+        assert_eq!(rig.dispatch(), 1);
+
+        let (requested, response) = rig.take_request(peer_a).unwrap();
+        assert_eq!(requested.len(), SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST);
+        assert_eq!(requested, hashes[..256]);
+        assert_eq!(rig.fetcher.num_pending_hashes(), 44);
+
+        // the peer is busy until the request resolves
+        assert_eq!(rig.dispatch(), 0);
+        response.send(Err(RequestError::Timeout)).unwrap();
+        rig.next_event().unwrap();
+        assert_eq!(rig.fetcher.num_pending_hashes(), 44);
+
+        assert_eq!(rig.dispatch(), 1);
+        let (requested, _) = rig.take_request(peer_a).unwrap();
+        assert_eq!(requested, hashes[256..]);
+    }
+
+    #[test]
+    fn request_is_capped_by_expected_response_size() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        rig.add_peer(peer_a);
+        let hashes = hashes(0..3);
+
+        rig.announce_with_sizes(
+            peer_a,
+            [(hashes[0], 100 * KIB), (hashes[1], 100 * KIB), (hashes[2], 100)],
+        );
+
+        rig.dispatch();
+        let (requested, response) = rig.take_request(peer_a).unwrap();
+        assert_eq!(requested, hashes[..1], "second transaction doesn't fit in 128 KiB");
+
+        response.send(Ok(PooledTransactions(vec![]))).unwrap();
+        rig.next_event().unwrap();
+        // the empty response dropped the peer as candidate for the first hash
+        assert_eq!(rig.fetcher.num_hashes(), 2);
+
+        rig.dispatch();
+        let (requested, _) = rig.take_request(peer_a).unwrap();
+        assert_eq!(requested, hashes[1..]);
+    }
+
+    #[test]
+    fn oversized_transaction_is_requested_alone() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        rig.add_peer(peer_a);
+        let hashes = hashes(0..3);
+
+        rig.announce_with_sizes(
+            peer_a,
+            [(hashes[0], 100), (hashes[1], 1024 * KIB), (hashes[2], 100)],
+        );
+
+        let mut requests = Vec::new();
+        for _ in 0..3 {
+            assert_eq!(rig.dispatch(), 1);
+            let (requested, response) = rig.take_request(peer_a).unwrap();
+            requests.push(requested);
+            // a timeout keeps other hashes pending but drops the peer for the requested ones
+            response.send(Err(RequestError::Timeout)).unwrap();
+            rig.next_event().unwrap();
+        }
         assert_eq!(
-            requested_hashes.into_iter().collect::<B256Set>(),
-            seen_hashes.into_iter().collect::<B256Set>()
-        )
+            requests,
+            vec![hashes[..1].to_vec(), hashes[1..2].to_vec(), hashes[2..].to_vec()]
+        );
+        assert_eq!(rig.fetcher.num_hashes(), 0);
     }
 
     #[test]
-    fn on_fetch_pending_hashes_rebuffers_on_disconnected_peer() {
-        let tx_fetcher = &mut TransactionFetcher::default();
-        let peer_1 = PeerId::new([1; 64]);
-        let peer_2 = PeerId::new([2; 64]);
-        let hash_1 = B256::from_slice(&[1; 32]);
+    fn announced_size_is_per_peer() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        let peer_b = peer(2);
+        rig.add_peer(peer_a);
+        rig.add_peer(peer_b);
+        let hashes = hashes(0..2);
 
-        buffer_hash_to_tx_fetcher(tx_fetcher, hash_1, peer_1, 0, Some(128));
-        buffer_hash_to_tx_fetcher(tx_fetcher, hash_1, peer_2, 0, Some(128));
+        // peer_a doesn't know the sizes, peer_b announces a huge first transaction
+        rig.announce_unsized(peer_a, &hashes);
+        rig.announce_with_sizes(peer_b, [(hashes[0], 1024 * KIB), (hashes[1], 100)]);
 
-        assert_eq!(tx_fetcher.num_pending_hashes(), 1);
+        // peer_a's request is packed with the size estimate
+        rig.dispatch();
+        let (requested, response) = rig.take_request(peer_a).unwrap();
+        assert_eq!(requested, hashes);
+        response.send(Ok(PooledTransactions(vec![]))).unwrap();
+        rig.next_event().unwrap();
 
-        // pass empty peers map — both peers are "disconnected"
-        let peers: HashMap<PeerId, PeerMetadata, FbBuildHasher<64>> = HashMap::default();
-        tx_fetcher.on_fetch_pending_hashes(&peers, |_| true);
-
-        // hash should be re-buffered, not lost
-        assert_eq!(tx_fetcher.num_pending_hashes(), 1);
+        // peer_b's request honors the size it announced
+        rig.dispatch();
+        let (requested, _) = rig.take_request(peer_b).unwrap();
+        assert_eq!(requested, hashes[..1]);
     }
 
     #[test]
-    fn verify_response_hashes() {
-        let input = hex!(
-            "02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598daa"
-        );
-        let signed_tx_1: PooledTransaction =
-            TransactionSigned::decode(&mut &input[..]).unwrap().try_into().unwrap();
-        let input = hex!(
-            "02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598d76"
-        );
-        let signed_tx_2: PooledTransaction =
-            TransactionSigned::decode(&mut &input[..]).unwrap().try_into().unwrap();
+    fn announced_sizes_are_capped() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        rig.add_peer(peer_a);
+        let hashes = hashes(0..3);
 
-        // only tx 1 is requested
-        let request_hashes = [
-            B256::from_str("0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e67890")
-                .unwrap(),
-            *signed_tx_1.hash(),
-            B256::from_str("0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e12345")
-                .unwrap(),
-            B256::from_str("0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4edabe3")
-                .unwrap(),
-        ];
+        // absurd sizes must not break the size accounting
+        rig.announce_with_sizes(
+            peer_a,
+            [(hashes[0], usize::MAX - 1), (hashes[1], usize::MAX), (hashes[2], 100)],
+        );
 
-        for hash in &request_hashes {
-            assert_ne!(hash, signed_tx_2.hash())
+        rig.dispatch();
+        let (requested, response) = rig.take_request(peer_a).unwrap();
+        assert_eq!(requested, hashes[..1], "an oversized transaction is requested alone");
+        response.send(Err(RequestError::Timeout)).unwrap();
+        rig.next_event().unwrap();
+
+        rig.dispatch();
+        let (requested, _) = rig.take_request(peer_a).unwrap();
+        assert_eq!(requested, hashes[1..2]);
+    }
+
+    #[test]
+    fn hash_is_fetched_from_one_peer_at_a_time() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        let peer_b = peer(2);
+        rig.add_peer(peer_a);
+        rig.add_peer(peer_b);
+        let txs = pooled_txs(1);
+        let hashes = hashes_of(&txs);
+
+        rig.announce(peer_a, &hashes);
+        rig.announce(peer_b, &hashes);
+        assert_eq!(rig.fetcher.candidate_peers(&hashes[0]), vec![peer_a, peer_b]);
+
+        assert_eq!(rig.dispatch(), 1);
+        assert_eq!(rig.fetcher.fetching_peer(&hashes[0]), Some(peer_a));
+        assert!(rig.take_request(peer_b).is_none());
+        // peer_b's queue entry was consumed without a request
+        assert!(rig.fetcher.queued_hashes(&peer_b).is_empty());
+        assert_eq!(rig.fetcher.candidate_peers(&hashes[0]), vec![peer_a, peer_b]);
+
+        rig.respond(peer_a, txs);
+        assert_eq!(rig.fetcher.num_hashes(), 0);
+        assert_eq!(rig.dispatch(), 0);
+    }
+
+    #[test]
+    fn failed_request_is_retried_with_alternate_peer() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        let peer_b = peer(2);
+        rig.add_peer(peer_a);
+        rig.add_peer(peer_b);
+        let txs = pooled_txs(2);
+        let hashes = hashes_of(&txs);
+
+        rig.announce(peer_a, &hashes);
+        rig.announce(peer_b, &hashes);
+        rig.dispatch();
+        // peer_b skipped the hashes while they were inflight to peer_a
+        assert!(rig.fetcher.queued_hashes(&peer_b).is_empty());
+
+        let FetchEvent::FetchError { peer_id, error } = rig.fail(peer_a, RequestError::Timeout)
+        else {
+            panic!("expected fetch error")
+        };
+        assert_eq!(peer_id, peer_a);
+        assert!(matches!(error, RequestError::Timeout));
+
+        // the hashes are pending again for peer_b only and queued in request order
+        assert_eq!(rig.fetcher.num_pending_hashes(), 2);
+        assert_eq!(rig.fetcher.candidate_peers(&hashes[0]), vec![peer_b]);
+        assert_eq!(rig.fetcher.queued_hashes(&peer_b), hashes);
+
+        assert_eq!(rig.dispatch(), 1);
+        assert!(rig.take_request(peer_a).is_none());
+        let event = rig.respond(peer_b, txs);
+        assert!(
+            matches!(event, FetchEvent::TransactionsFetched { peer_id, .. } if peer_id == peer_b)
+        );
+        assert_eq!(rig.fetcher.num_hashes(), 0);
+    }
+
+    #[test]
+    fn empty_response_drops_peer_as_candidate() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        rig.add_peer(peer_a);
+        let hashes = hashes(0..2);
+
+        rig.announce(peer_a, &hashes);
+        rig.dispatch();
+        let event = rig.respond(peer_a, vec![]);
+        assert!(matches!(event, FetchEvent::EmptyResponse { peer_id } if peer_id == peer_a));
+
+        // no other peer announced the hashes, so they are dropped
+        assert_eq!(rig.fetcher.num_hashes(), 0);
+        assert_eq!(rig.dispatch(), 0);
+    }
+
+    #[test]
+    fn partial_response_keeps_peer_for_truncated_tail() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        rig.add_peer(peer_a);
+        let txs = pooled_txs(4);
+        let hashes = hashes_of(&txs);
+
+        rig.announce(peer_a, &hashes);
+        rig.dispatch();
+
+        // the first half is delivered, the rest looks like truncation
+        rig.respond(peer_a, txs[..2].to_vec());
+        assert_eq!(rig.fetcher.num_pending_hashes(), 2);
+        assert_eq!(rig.fetcher.candidate_peers(&hashes[2]), vec![peer_a]);
+        assert_eq!(rig.fetcher.queued_hashes(&peer_a), hashes[2..]);
+
+        rig.dispatch();
+        let (requested, _) = rig.take_request(peer_a).unwrap();
+        assert_eq!(requested, hashes[2..]);
+    }
+
+    #[test]
+    fn small_partial_response_drops_peer_for_all_undelivered_hashes() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        let peer_b = peer(2);
+        rig.add_peer(peer_a);
+        rig.add_peer(peer_b);
+        let txs = pooled_txs(10);
+        let hashes = hashes_of(&txs);
+
+        rig.announce(peer_a, &hashes);
+        rig.announce(peer_b, &hashes[..5]);
+        rig.dispatch();
+        assert_eq!(rig.fetcher.fetching_peer(&hashes[0]), Some(peer_a));
+
+        // one transaction out of ten did not hit any response limit, so peer_a is dropped for
+        // the rest instead of serving it one transaction at a time
+        rig.respond(peer_a, txs[..1].to_vec());
+        assert_eq!(rig.fetcher.num_hashes(), 4, "hashes without another candidate are dropped");
+        for hash in &hashes[1..5] {
+            assert_eq!(rig.fetcher.candidate_peers(hash), vec![peer_b]);
+        }
+        assert!(rig.fetcher.queued_hashes(&peer_a).is_empty());
+    }
+
+    #[test]
+    fn partial_response_drops_peer_for_skipped_hashes() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        let peer_b = peer(2);
+        rig.add_peer(peer_a);
+        rig.add_peer(peer_b);
+        let txs = pooled_txs(3);
+        let hashes = hashes_of(&txs);
+
+        rig.announce(peer_a, &hashes);
+        rig.announce(peer_b, &hashes);
+        rig.dispatch();
+
+        // peer_a delivers the last hash only, so it deliberately skipped the first two
+        rig.respond(peer_a, txs[2..].to_vec());
+        assert_eq!(rig.fetcher.num_pending_hashes(), 2);
+        assert_eq!(rig.fetcher.candidate_peers(&hashes[0]), vec![peer_b]);
+        assert_eq!(rig.fetcher.candidate_peers(&hashes[1]), vec![peer_b]);
+
+        rig.dispatch();
+        assert!(rig.take_request(peer_a).is_none());
+        let (requested, _) = rig.take_request(peer_b).unwrap();
+        assert_eq!(requested, hashes[..2]);
+    }
+
+    #[test]
+    fn skipped_hashes_without_alternates_are_dropped() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        rig.add_peer(peer_a);
+        let txs = pooled_txs(4);
+        let hashes = hashes_of(&txs);
+
+        rig.announce(peer_a, &hashes);
+        rig.dispatch();
+        rig.respond(peer_a, txs[1..3].to_vec());
+
+        // the first hash was skipped and has no other candidate, the last one is retried
+        assert_eq!(rig.fetcher.num_hashes(), 1);
+        assert_eq!(rig.fetcher.candidate_peers(&hashes[3]), vec![peer_a]);
+        assert!(rig.fetcher.candidate_peers(&hashes[0]).is_empty());
+    }
+
+    #[test]
+    fn unsolicited_transactions_are_filtered_and_reported() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        rig.add_peer(peer_a);
+        let txs = pooled_txs(2);
+        let hashes = hashes_of(&txs);
+
+        rig.announce(peer_a, &hashes[..1]);
+        rig.dispatch();
+
+        let FetchEvent::TransactionsFetched { transactions, report_peer, .. } =
+            rig.respond(peer_a, txs.clone())
+        else {
+            panic!("expected fetched transactions")
+        };
+        assert!(report_peer);
+        assert_eq!(transactions.0, txs[..1]);
+        assert_eq!(rig.fetcher.num_hashes(), 0);
+    }
+
+    #[test]
+    fn response_with_only_unsolicited_transactions_is_a_bad_response() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        let peer_b = peer(2);
+        rig.add_peer(peer_a);
+        rig.add_peer(peer_b);
+        let txs = pooled_txs(2);
+        let hashes = hashes_of(&txs);
+
+        rig.announce(peer_a, &hashes[..1]);
+        rig.announce(peer_b, &hashes[..1]);
+        rig.dispatch();
+
+        let event = rig.respond(peer_a, txs[1..].to_vec());
+        assert!(matches!(
+            event,
+            FetchEvent::FetchError { peer_id, error: RequestError::BadResponse } if peer_id == peer_a
+        ));
+        // treated like a failed request, peer_b gets to try
+        assert_eq!(rig.fetcher.candidate_peers(&hashes[0]), vec![peer_b]);
+        rig.dispatch();
+        assert!(rig.take_request(peer_b).is_some());
+    }
+
+    #[test]
+    fn duplicate_transactions_in_response_are_deduplicated() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        rig.add_peer(peer_a);
+        let txs = pooled_txs(1);
+
+        rig.announce(peer_a, &hashes_of(&txs));
+        rig.dispatch();
+
+        let FetchEvent::TransactionsFetched { transactions, report_peer, .. } =
+            rig.respond(peer_a, vec![txs[0].clone(), txs[0].clone()])
+        else {
+            panic!("expected fetched transactions")
+        };
+        assert_eq!(transactions.len(), 1);
+        assert!(!report_peer);
+    }
+
+    #[test]
+    fn received_transactions_stop_tracking() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        rig.add_peer(peer_a);
+        let txs = pooled_txs(3);
+        let hashes = hashes_of(&txs);
+
+        rig.announce(peer_a, &hashes[..2]);
+        rig.dispatch();
+        rig.announce(peer_a, &hashes[2..]);
+        assert_eq!(rig.fetcher.num_fetching_hashes(), 2);
+        assert_eq!(rig.fetcher.num_pending_hashes(), 1);
+
+        // one inflight and the pending hash arrive over broadcast
+        rig.fetcher.on_transactions_received([&hashes[0], &hashes[2]]);
+        rig.fetcher.assert_invariants();
+        assert_eq!(rig.fetcher.num_hashes(), 1);
+        assert_eq!(rig.fetcher.num_fetching_hashes(), 1);
+
+        // the response doesn't include the hash received over broadcast, which must not be
+        // rescheduled, but includes the other one
+        let FetchEvent::TransactionsFetched { transactions, .. } =
+            rig.respond(peer_a, txs[1..2].to_vec())
+        else {
+            panic!("expected fetched transactions")
+        };
+        assert_eq!(transactions.len(), 1);
+        assert_eq!(rig.fetcher.num_hashes(), 0);
+        assert_eq!(rig.dispatch(), 0);
+    }
+
+    #[test]
+    fn response_delivering_hash_received_over_broadcast_is_still_returned() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        rig.add_peer(peer_a);
+        let txs = pooled_txs(1);
+        let hashes = hashes_of(&txs);
+
+        rig.announce(peer_a, &hashes);
+        rig.dispatch();
+        rig.fetcher.on_transactions_received(&hashes);
+
+        let FetchEvent::TransactionsFetched { transactions, report_peer, .. } =
+            rig.respond(peer_a, txs)
+        else {
+            panic!("expected fetched transactions")
+        };
+        assert_eq!(transactions.len(), 1);
+        assert!(!report_peer, "the transaction was requested, even if it arrived elsewhere first");
+        assert_eq!(rig.fetcher.num_hashes(), 0);
+    }
+
+    #[test]
+    fn peer_disconnect_drops_hashes_without_alternates() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        let peer_b = peer(2);
+        rig.add_peer(peer_a);
+        rig.add_peer(peer_b);
+        let hashes = hashes(0..2);
+
+        rig.announce(peer_a, &hashes);
+        rig.announce(peer_b, &hashes[1..]);
+
+        rig.disconnect(peer_a);
+        assert_eq!(rig.fetcher.num_hashes(), 1);
+        assert_eq!(rig.fetcher.candidate_peers(&hashes[1]), vec![peer_b]);
+        assert!(rig.fetcher.is_idle(&peer_a));
+
+        rig.dispatch();
+        let (requested, _) = rig.take_request(peer_b).unwrap();
+        assert_eq!(requested, hashes[1..]);
+    }
+
+    #[test]
+    fn inflight_request_of_disconnected_peer_is_rescheduled() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        let peer_b = peer(2);
+        rig.add_peer(peer_a);
+        rig.add_peer(peer_b);
+        let txs = pooled_txs(2);
+        let hashes = hashes_of(&txs);
+
+        rig.announce(peer_a, &hashes);
+        rig.announce(peer_b, &hashes);
+        rig.dispatch();
+        assert_eq!(rig.fetcher.fetching_peer(&hashes[0]), Some(peer_a));
+
+        // dropping the session drops the pending request, which resolves it with an error
+        rig.disconnect(peer_a);
+        assert_eq!(
+            rig.fetcher.num_fetching_hashes(),
+            2,
+            "hashes stay inflight until the request resolves"
+        );
+
+        let event = rig.next_event().unwrap();
+        assert!(matches!(
+            event,
+            FetchEvent::FetchError { peer_id, error: RequestError::ChannelClosed } if peer_id == peer_a
+        ));
+        assert_eq!(rig.fetcher.num_pending_hashes(), 2);
+        assert_eq!(rig.fetcher.candidate_peers(&hashes[0]), vec![peer_b]);
+
+        rig.dispatch();
+        let event = rig.respond(peer_b, txs);
+        assert!(matches!(event, FetchEvent::TransactionsFetched { .. }));
+        assert_eq!(rig.fetcher.num_hashes(), 0);
+    }
+
+    #[test]
+    fn reconnected_peer_starts_fresh() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        rig.add_peer(peer_a);
+        let hashes = hashes(0..2);
+
+        rig.announce(peer_a, &hashes);
+        rig.dispatch();
+        rig.disconnect(peer_a);
+        rig.add_peer(peer_a);
+
+        // the pending request of the old session resolves after the peer reconnected
+        rig.next_event().unwrap();
+        assert_eq!(rig.fetcher.num_hashes(), 0);
+
+        rig.announce(peer_a, &hashes);
+        assert_eq!(rig.dispatch(), 1);
+        let (requested, _) = rig.take_request(peer_a).unwrap();
+        assert_eq!(requested, hashes);
+    }
+
+    #[test]
+    fn per_peer_announcement_limit_is_enforced() {
+        let config =
+            TransactionFetcherConfig { max_announced_hashes_per_peer: 3, ..Default::default() };
+        let mut rig = Rig::with_config(config);
+        let peer_a = peer(1);
+        let peer_b = peer(2);
+        rig.add_peer(peer_a);
+        rig.add_peer(peer_b);
+        let txs = pooled_txs(5);
+        let hashes = hashes_of(&txs);
+
+        rig.announce(peer_a, &hashes);
+        assert_eq!(rig.fetcher.num_hashes(), 3);
+        assert_eq!(rig.fetcher.queued_hashes(&peer_a), hashes[..3]);
+
+        // the limit is per peer, another peer can still announce the dropped hashes
+        rig.announce(peer_b, &hashes[3..]);
+        assert_eq!(rig.fetcher.num_hashes(), 5);
+        assert_eq!(rig.fetcher.candidate_peers(&hashes[4]), vec![peer_b]);
+
+        // delivering frees up the budget of the peer
+        rig.dispatch();
+        rig.respond(peer_a, txs[..3].to_vec());
+        rig.announce(peer_a, &hashes[3..]);
+        assert_eq!(rig.fetcher.candidate_peers(&hashes[3]), vec![peer_b, peer_a]);
+    }
+
+    #[test]
+    fn global_capacity_evicts_oldest_pending_hash() {
+        let config = TransactionFetcherConfig {
+            max_capacity_cache_txns_pending_fetch: 2,
+            ..Default::default()
+        };
+        let mut rig = Rig::with_config(config);
+        let peer_a = peer(1);
+        let peer_b = peer(2);
+        rig.add_peer(peer_a);
+        rig.add_peer(peer_b);
+        let txs = pooled_txs(5);
+        let hashes = hashes_of(&txs);
+
+        // the oldest pending hash makes room for a new one
+        rig.announce(peer_a, &hashes[..3]);
+        assert_eq!(rig.fetcher.num_hashes(), 2);
+        assert!(rig.fetcher.candidate_peers(&hashes[0]).is_empty());
+        assert_eq!(rig.fetcher.candidate_peers(&hashes[2]), vec![peer_a]);
+
+        // hashes that are being fetched are not evicted, the announcement is dropped instead
+        rig.dispatch();
+        let (requested, response) = rig.take_request(peer_a).unwrap();
+        assert_eq!(requested, hashes[1..3]);
+        rig.announce(peer_b, &hashes[3..4]);
+        assert_eq!(rig.fetcher.num_hashes(), 2);
+        assert!(rig.fetcher.candidate_peers(&hashes[3]).is_empty());
+
+        // the second hash is delivered, the third is pending again. Both peers then track one
+        // hash and the announcing peer gives way, so its own older hash makes room.
+        response.send(Ok(PooledTransactions(txs[1..2].to_vec()))).unwrap();
+        rig.next_event().unwrap();
+        assert_eq!(rig.fetcher.num_hashes(), 1);
+        rig.announce(peer_b, &hashes[3..4]);
+        assert_eq!(rig.fetcher.num_hashes(), 2);
+        rig.announce(peer_b, &hashes[4..5]);
+        assert_eq!(rig.fetcher.num_hashes(), 2);
+        assert_eq!(rig.fetcher.candidate_peers(&hashes[2]), vec![peer_a]);
+        assert!(rig.fetcher.candidate_peers(&hashes[3]).is_empty());
+        assert_eq!(rig.fetcher.candidate_peers(&hashes[4]), vec![peer_b]);
+    }
+
+    #[test]
+    fn later_announcers_are_asked_after_the_first_ones_failed() {
+        let mut rig = Rig::new();
+        let hash = hash(1);
+        let peers =
+            (1..=MAX_COUNT_CANDIDATE_PEERS_PER_HASH as u8 + 2).map(peer).collect::<Vec<_>>();
+        for peer_id in &peers {
+            rig.add_peer(*peer_id);
+            rig.announce(*peer_id, &[hash]);
         }
 
-        let request_hashes = RequestTxHashes::new(request_hashes.into_iter().collect());
+        // the first announcers get the hash queued, the following ones are only remembered and
+        // announcements beyond the candidate limit are ignored
+        let candidates = &peers[..MAX_COUNT_CANDIDATE_PEERS_PER_HASH];
+        assert_eq!(rig.fetcher.candidate_peers(&hash), candidates);
+        for (i, peer_id) in candidates.iter().enumerate() {
+            let eager = i < MAX_COUNT_EAGER_CANDIDATE_PEERS_PER_HASH;
+            assert_eq!(rig.fetcher.queued_hashes(peer_id).contains(&hash), eager, "peer {i}");
+        }
+        assert!(rig.fetcher.queued_hashes(&peers[MAX_COUNT_CANDIDATE_PEERS_PER_HASH]).is_empty());
 
-        // but response contains tx 1 + another tx
-        let response_txns = PooledTransactions(vec![signed_tx_1.clone(), signed_tx_2]);
-        let payload = UnverifiedPooledTransactions::new(response_txns);
+        // the first announcer fetches the hash, retries go to the most recent announcers first
+        assert_eq!(rig.dispatch(), 1);
+        assert_eq!(rig.fetcher.fetching_peer(&hash), Some(peers[0]));
+        rig.fail(peers[0], RequestError::Timeout);
+        assert_eq!(rig.dispatch(), 1);
+        assert_eq!(rig.fetcher.fetching_peer(&hash), Some(*candidates.last().unwrap()));
 
-        let (outcome, verified_payload) = payload.verify(&request_hashes, &PeerId::ZERO);
+        // the hash is given up on once all candidates failed
+        let mut attempts = 1;
+        while let Some(fetching) = rig.fetcher.fetching_peer(&hash) {
+            rig.fail(fetching, RequestError::Timeout);
+            attempts += 1;
+            rig.dispatch();
+        }
+        assert_eq!(attempts, MAX_COUNT_CANDIDATE_PEERS_PER_HASH);
+        assert_eq!(rig.fetcher.num_hashes(), 0);
+    }
 
-        assert_eq!(VerificationOutcome::ReportPeer, outcome);
-        assert_eq!(1, verified_payload.len());
-        assert!(verified_payload.contains(&signed_tx_1));
+    #[test]
+    fn capacity_eviction_targets_the_peer_with_the_most_hashes() {
+        let config = TransactionFetcherConfig {
+            max_capacity_cache_txns_pending_fetch: 100,
+            max_announced_hashes_per_peer: 60,
+            ..Default::default()
+        };
+        let mut rig = Rig::with_config(config);
+        let honest = peer(1);
+        let flooders = [peer(2), peer(3)];
+        rig.add_peer(honest);
+        for peer_id in flooders {
+            rig.add_peer(peer_id);
+        }
+
+        // the honest peer's hashes are the oldest when the flood fills the fetcher
+        let honest_hashes = hashes(0..10);
+        rig.announce(honest, &honest_hashes);
+        rig.announce(flooders[0], &hashes(100..160));
+        rig.announce(flooders[1], &hashes(200..260));
+
+        assert_eq!(rig.fetcher.num_hashes(), 100);
+        for hash in &honest_hashes {
+            assert_eq!(rig.fetcher.candidate_peers(hash), vec![honest], "{hash} was evicted");
+        }
+        assert_eq!(rig.fetcher.queued_hashes(&honest), honest_hashes);
+
+        // the flooders gave up their oldest hashes
+        assert!(rig.fetcher.candidate_peers(&hashes(100..101)[0]).is_empty());
+        assert_eq!(rig.fetcher.candidate_peers(&hashes(259..260)[0]), vec![flooders[1]]);
+    }
+
+    #[test]
+    fn eviction_order_stays_bounded_when_hashes_are_tracked_again() {
+        let config = TransactionFetcherConfig {
+            max_capacity_cache_txns_pending_fetch: 8,
+            ..Default::default()
+        };
+        let mut rig = Rig::with_config(config);
+        let peer_a = peer(1);
+        rig.add_peer(peer_a);
+        let batch = hashes(0..8);
+
+        // the same hashes are given up on and announced again over and over, every round leaves
+        // stale entries in the eviction order behind
+        for _ in 0..10 {
+            rig.announce(peer_a, &batch);
+            assert_eq!(rig.fetcher.num_hashes(), 8);
+            rig.dispatch();
+            rig.fail(peer_a, RequestError::Timeout);
+            assert_eq!(rig.fetcher.num_hashes(), 0);
+        }
+        rig.announce(peer_a, &batch);
+        assert_eq!(rig.fetcher.num_hashes(), 8);
+
+        // a new hash still evicts the oldest one rather than getting dropped
+        rig.announce(peer_a, &hashes(8..9));
+        assert_eq!(rig.fetcher.num_hashes(), 8);
+        assert!(rig.fetcher.candidate_peers(&batch[0]).is_empty());
+    }
+
+    #[test]
+    fn disconnected_remembered_candidates_are_forgotten() {
+        let mut rig = Rig::new();
+        let hash = hash(1);
+        let peers = (1..=MAX_COUNT_CANDIDATE_PEERS_PER_HASH as u8).map(peer).collect::<Vec<_>>();
+        for peer_id in &peers {
+            rig.add_peer(*peer_id);
+            rig.announce(*peer_id, &[hash]);
+        }
+        let (queued, remembered) = peers.split_at(MAX_COUNT_EAGER_CANDIDATE_PEERS_PER_HASH);
+
+        // remembered candidates have no queue entry, they are forgotten nonetheless
+        for peer_id in remembered {
+            rig.disconnect(*peer_id);
+        }
+        assert_eq!(rig.fetcher.candidate_peers(&hash), queued);
+
+        // which frees their slots for later announcers
+        let newcomer = peer(42);
+        rig.add_peer(newcomer);
+        rig.announce(newcomer, &[hash]);
+        assert!(rig.fetcher.candidate_peers(&hash).contains(&newcomer));
+
+        // and a hash whose last connected candidate leaves is dropped
+        for peer_id in queued {
+            rig.disconnect(*peer_id);
+        }
+        rig.disconnect(newcomer);
+        assert_eq!(rig.fetcher.num_hashes(), 0);
+    }
+
+    #[test]
+    fn remembered_candidates_take_over_when_queued_ones_disconnect() {
+        let mut rig = Rig::new();
+        let hash = hash(1);
+        let peers =
+            (1..=MAX_COUNT_EAGER_CANDIDATE_PEERS_PER_HASH as u8 + 1).map(peer).collect::<Vec<_>>();
+        for peer_id in &peers {
+            rig.add_peer(*peer_id);
+            rig.announce(*peer_id, &[hash]);
+        }
+        let last = *peers.last().unwrap();
+        assert!(rig.fetcher.queued_hashes(&last).is_empty());
+
+        // all peers that had the hash queued disconnect before fetching it
+        for peer_id in &peers[..peers.len() - 1] {
+            rig.disconnect(*peer_id);
+        }
+        assert_eq!(rig.fetcher.candidate_peers(&hash), vec![last]);
+        assert_eq!(rig.fetcher.queued_hashes(&last), vec![hash]);
+        assert_eq!(rig.dispatch(), 1);
+        assert_eq!(rig.fetcher.fetching_peer(&hash), Some(last));
+    }
+
+    #[test]
+    fn global_inflight_limit_defers_ready_peers() {
+        let config = TransactionFetcherConfig { max_inflight_requests: 1, ..Default::default() };
+        let mut rig = Rig::with_config(config);
+        let peer_a = peer(1);
+        let peer_b = peer(2);
+        rig.add_peer(peer_a);
+        rig.add_peer(peer_b);
+
+        rig.announce(peer_a, &hashes(0..2));
+        rig.announce(peer_b, &hashes(2..4));
+
+        assert_eq!(rig.dispatch(), 1);
+        let (_, response) = rig.take_request(peer_a).unwrap();
+        assert!(rig.take_request(peer_b).is_none());
+        assert_eq!(rig.dispatch(), 0);
+
+        // the deferred peer is served once a request slot frees up
+        rig.announce(peer_a, &hashes(4..5));
+        drop(response);
+        rig.next_event().unwrap();
+        assert_eq!(rig.dispatch(), 1);
+        assert!(rig.take_request(peer_b).is_some());
+        assert!(rig.take_request(peer_a).is_none(), "peer_b was ready first");
+    }
+
+    #[test]
+    fn per_peer_inflight_limit_allows_concurrent_requests() {
+        let config =
+            TransactionFetcherConfig { max_inflight_requests_per_peer: 2, ..Default::default() };
+        let mut rig = Rig::with_config(config);
+        let peer_a = peer(1);
+        rig.add_peer(peer_a);
+        let hashes = hashes(0..300);
+
+        rig.announce_unsized(peer_a, &hashes);
+        assert_eq!(rig.dispatch(), 2);
+
+        let (first, _) = rig.take_request(peer_a).unwrap();
+        let (second, _) = rig.take_request(peer_a).unwrap();
+        assert_eq!(first, hashes[..256]);
+        assert_eq!(second, hashes[256..]);
+        assert!(!rig.fetcher.is_idle(&peer_a));
+    }
+
+    #[test]
+    fn dispatch_respects_hash_budget() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        let peer_b = peer(2);
+        rig.add_peer(peer_a);
+        rig.add_peer(peer_b);
+
+        rig.announce(peer_a, &hashes(0..100));
+        rig.announce(peer_b, &hashes(100..200));
+
+        assert_eq!(rig.dispatch_with_budget(0), 0);
+
+        // requests are cut down to what the budget leaves, and a used up budget doesn't stop
+        // other peers, they get the minimum request instead
+        assert_eq!(rig.dispatch_with_budget(40), 2);
+        let (requested, response_a) = rig.take_request(peer_a).unwrap();
+        assert_eq!(requested, hashes(0..40));
+        let (requested, _) = rig.take_request(peer_b).unwrap();
+        assert_eq!(requested.len(), MIN_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST);
+        assert_eq!(
+            rig.fetcher.num_fetching_hashes(),
+            40 + MIN_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST
+        );
+
+        // a budget below the minimum caps the request
+        response_a.send(Err(RequestError::Timeout)).unwrap();
+        rig.next_event().unwrap();
+        assert_eq!(rig.dispatch_with_budget(10), 1);
+        let (requested, _) = rig.take_request(peer_a).unwrap();
+        assert_eq!(requested, hashes(40..50));
+    }
+
+    #[test]
+    fn full_session_channel_rolls_back_request() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        rig.add_peer_with_capacity(peer_a, 1);
+        let hashes = hashes(0..3);
+
+        // occupy the only slot of the session channel
+        let (blocker, _rx) = oneshot::channel();
+        rig.peers[&peer_a]
+            .request_tx()
+            .try_send(PeerRequest::GetPooledTransactions {
+                request: GetPooledTransactions(vec![]),
+                response: blocker,
+            })
+            .unwrap();
+
+        rig.announce(peer_a, &hashes);
+        assert_eq!(rig.dispatch(), 0);
+        assert_eq!(rig.fetcher.num_pending_hashes(), 3);
+        assert_eq!(rig.fetcher.num_inflight_requests(), 0);
+        assert!(rig.fetcher.is_idle(&peer_a));
+        assert_eq!(rig.fetcher.queued_hashes(&peer_a), hashes);
+
+        // drain the blocker, the peer is retried on the next dispatch
+        let (blocked, _) = rig.take_request(peer_a).unwrap();
+        assert!(blocked.is_empty());
+        assert_eq!(rig.dispatch(), 1);
+        let (requested, _) = rig.take_request(peer_a).unwrap();
+        assert_eq!(requested, hashes);
+    }
+
+    #[test]
+    fn closed_session_channel_disconnects_peer() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        let peer_b = peer(2);
+        rig.add_peer(peer_a);
+        rig.add_peer(peer_b);
+        let hashes = hashes(0..2);
+
+        rig.announce(peer_a, &hashes);
+        rig.announce(peer_b, &hashes[..1]);
+        // the session task is gone, but the manager didn't process the disconnect yet
+        rig.sessions.remove(&peer_a);
+
+        assert_eq!(rig.dispatch(), 1);
+        assert!(rig.fetcher.candidate_peers(&hashes[0]).contains(&peer_b));
+        assert_eq!(rig.fetcher.candidate_peers(&hashes[0]), vec![peer_b]);
+        assert_eq!(rig.fetcher.num_hashes(), 1, "hash only announced by the gone peer is dropped");
+        assert_eq!(rig.fetcher.fetching_peer(&hashes[0]), Some(peer_b));
+    }
+
+    #[test]
+    fn busy_peer_queue_is_compacted() {
+        let config =
+            TransactionFetcherConfig { max_announced_hashes_per_peer: 4, ..Default::default() };
+        let mut rig = Rig::with_config(config);
+        let peer_a = peer(1);
+        let peer_b = peer(2);
+        rig.add_peer(peer_a);
+        rig.add_peer(peer_b);
+
+        // keep peer_a busy
+        rig.announce(peer_a, &hashes(0..1));
+        rig.dispatch();
+
+        // hashes announced by the busy peer are delivered by others over and over
+        for round in 1..20u64 {
+            let hashes = hashes(round * 10..round * 10 + 4);
+            rig.announce(peer_a, &hashes);
+            rig.fetcher.on_transactions_received(&hashes);
+            rig.fetcher.assert_invariants();
+        }
+        assert!(rig.fetcher.queued_hashes(&peer_a).len() <= 8);
+    }
+
+    #[test]
+    fn late_response_for_reassigned_hash_is_ignored() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        let peer_b = peer(2);
+        rig.add_peer(peer_a);
+        rig.add_peer(peer_b);
+        let txs = pooled_txs(1);
+        let hashes = hashes_of(&txs);
+
+        rig.announce(peer_a, &hashes);
+        rig.dispatch();
+        // arrives over broadcast, gets announced again and is assigned to another peer
+        rig.fetcher.on_transactions_received(&hashes);
+        rig.announce(peer_b, &hashes);
+        rig.dispatch();
+        assert_eq!(rig.fetcher.fetching_peer(&hashes[0]), Some(peer_b));
+
+        // the original request resolves without the hash, which must not touch the new fetch
+        rig.respond(peer_a, vec![]);
+        assert_eq!(rig.fetcher.fetching_peer(&hashes[0]), Some(peer_b));
+        assert_eq!(rig.fetcher.candidate_peers(&hashes[0]), vec![peer_b]);
+
+        rig.respond(peer_b, txs);
+        assert_eq!(rig.fetcher.num_hashes(), 0);
+    }
+
+    #[test]
+    fn verify_response_filters_unsolicited_and_duplicates() {
+        let txs = pooled_txs(2);
+        let requested = [hash(1), *txs[0].tx_hash(), hash(2)];
+
+        let mut response = PooledTransactions(vec![txs[0].clone(), txs[1].clone(), txs[0].clone()]);
+        let mut delivered = B256Set::default();
+        let unsolicited =
+            verify_response(&mut response, &requested.into_iter().collect(), &mut delivered);
+
+        assert_eq!(response.0, txs[..1]);
+        assert_eq!(delivered.into_iter().collect::<Vec<_>>(), vec![*txs[0].tx_hash()]);
+        assert_eq!(unsolicited, 1);
+    }
+
+    #[test]
+    fn random_operations_keep_invariants() {
+        let mut rng = StdRng::seed_from_u64(0x5eed);
+        let txs = pooled_txs(150);
+        let all_hashes = hashes_of(&txs);
+        let by_hash = txs.iter().map(|tx| (*tx.tx_hash(), tx.clone())).collect::<B256Map<_>>();
+        // more peers than a hash has candidate slots, so announcers get remembered and rejected
+        let peer_ids = (1..=24).map(peer).collect::<Vec<_>>();
+
+        let config = TransactionFetcherConfig {
+            max_inflight_requests: 8,
+            max_inflight_requests_per_peer: 2,
+            max_capacity_cache_txns_pending_fetch: 120,
+            max_announced_hashes_per_peer: 40,
+            ..Default::default()
+        };
+        let mut rig = Rig::with_config(config);
+        for peer_id in &peer_ids {
+            rig.add_peer_with_capacity(*peer_id, 4);
+        }
+        let mut connected = peer_ids.clone();
+        // requests taken from the sessions that weren't answered yet
+        let mut outstanding: Vec<(PeerId, Vec<TxHash>, ResponseSender)> = Vec::new();
+
+        for _ in 0..5000 {
+            match rng.random_range(0..100u32) {
+                0..=39 => {
+                    let Some(&peer_id) = connected.choose(&mut rng) else { continue };
+                    let count = rng.random_range(1..=30);
+                    let entries = all_hashes
+                        .choose_multiple(&mut rng, count)
+                        .map(|hash| {
+                            let size = match rng.random_range(0..10) {
+                                0 => 0,
+                                1 => 200 * KIB,
+                                _ => rng.random_range(100..1500),
+                            };
+                            (*hash, size)
+                        })
+                        .collect::<Vec<_>>();
+                    rig.announce_with_sizes(peer_id, entries);
+                }
+                40..=59 => {
+                    let budget =
+                        if rng.random_bool(0.2) { rng.random_range(0..60) } else { usize::MAX };
+                    rig.dispatch_with_budget(budget);
+                    for peer_id in &connected {
+                        while let Some((requested, response)) = rig.take_request(*peer_id) {
+                            assert!(!requested.is_empty());
+                            assert!(
+                                requested.len() <=
+                                    SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST
+                            );
+                            let unique = requested.iter().copied().collect::<B256Set>();
+                            assert_eq!(unique.len(), requested.len(), "request has duplicates");
+                            outstanding.push((*peer_id, requested, response));
+                        }
+                    }
+                }
+                60..=84 => {
+                    if outstanding.is_empty() {
+                        continue
+                    }
+                    let (_, requested, response) =
+                        outstanding.swap_remove(rng.random_range(0..outstanding.len()));
+                    match rng.random_range(0..10) {
+                        0..=5 => {
+                            let mut delivered = requested
+                                .iter()
+                                .filter(|_| rng.random_bool(0.7))
+                                .map(|hash| by_hash[hash].clone())
+                                .collect::<Vec<_>>();
+                            if rng.random_bool(0.1) &&
+                                let Some(duplicate) = delivered.first().cloned()
+                            {
+                                delivered.push(duplicate);
+                            }
+                            if rng.random_bool(0.1) {
+                                delivered.push(txs.choose(&mut rng).unwrap().clone());
+                            }
+                            let _ = response.send(Ok(PooledTransactions(delivered)));
+                        }
+                        6..=7 => {
+                            let _ = response.send(Ok(PooledTransactions(vec![])));
+                        }
+                        8 => {
+                            let _ = response.send(Err(RequestError::Timeout));
+                        }
+                        _ => drop(response),
+                    }
+                    rig.drain_events();
+                }
+                85..=89 => {
+                    let count = rng.random_range(1..=10);
+                    let received =
+                        all_hashes.choose_multiple(&mut rng, count).copied().collect::<Vec<_>>();
+                    rig.fetcher.on_transactions_received(&received);
+                    rig.fetcher.assert_invariants();
+                }
+                90..=94 => {
+                    if connected.len() > 1 {
+                        let peer_id = connected.swap_remove(rng.random_range(0..connected.len()));
+                        rig.disconnect(peer_id);
+                        // drops the response senders of the peer's outstanding requests
+                        outstanding.retain(|(id, ..)| *id != peer_id);
+                        rig.drain_events();
+                    }
+                }
+                _ => {
+                    if let Some(&peer_id) = peer_ids.iter().find(|id| !connected.contains(id)) {
+                        rig.add_peer_with_capacity(peer_id, 4);
+                        connected.push(peer_id);
+                    }
+                }
+            }
+        }
+
+        // settle everything that is still inflight
+        drop(outstanding);
+        for peer_id in &connected {
+            rig.sessions.remove(peer_id);
+        }
+        rig.drain_events();
+        assert_eq!(rig.fetcher.num_inflight_requests(), 0);
+        assert_eq!(rig.fetcher.num_fetching_hashes(), 0);
+    }
+    #[test]
+    fn stream_is_pending_without_requests_and_never_terminates() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        rig.add_peer(peer_a);
+        let txs = pooled_txs(1);
+        let mut cx = Context::from_waker(noop_waker_ref());
+
+        assert!(rig.fetcher.poll_next_unpin(&mut cx).is_pending());
+
+        rig.announce(peer_a, &hashes_of(&txs));
+        rig.dispatch();
+        rig.respond(peer_a, txs);
+
+        // the stream stays open once all requests resolved
+        assert!(rig.fetcher.poll_next_unpin(&mut cx).is_pending());
+        assert_eq!(rig.fetcher.num_inflight_requests(), 0);
+    }
+
+    #[test]
+    fn resolved_requests_are_yielded_one_per_poll() {
+        let mut rig = Rig::new();
+        let peers = (1..=3).map(peer).collect::<Vec<_>>();
+        for (i, peer_id) in peers.iter().enumerate() {
+            rig.add_peer(*peer_id);
+            rig.announce(*peer_id, &hashes(i as u64..i as u64 + 1));
+        }
+        assert_eq!(rig.dispatch(), 3);
+        for peer_id in &peers {
+            let (_, response) = rig.take_request(*peer_id).unwrap();
+            response.send(Err(RequestError::Timeout)).unwrap();
+        }
+
+        let events = rig.drain_events();
+        assert_eq!(events.len(), 3);
+        assert!(events.iter().all(|event| matches!(event, FetchEvent::FetchError { .. })));
+        assert!(rig.next_event().is_none());
+        assert_eq!(rig.fetcher.num_inflight_requests(), 0);
+    }
+
+    #[test]
+    fn response_wakes_the_polling_task() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        rig.add_peer(peer_a);
+        rig.announce(peer_a, &hashes(0..1));
+        rig.dispatch();
+
+        let counter = Arc::new(WakeCounter::default());
+        let waker = waker(counter.clone());
+        let mut cx = Context::from_waker(&waker);
+        assert!(rig.fetcher.poll_next_unpin(&mut cx).is_pending());
+        // `FuturesUnordered` wakes the task once itself after polling newly added requests, so
+        // only the change matters
+        let wakes = counter.wakes();
+
+        let (_, response) = rig.take_request(peer_a).unwrap();
+        response.send(Err(RequestError::Timeout)).unwrap();
+        assert_eq!(
+            counter.wakes(),
+            wakes + 1,
+            "the response wakes the task that polled the fetcher"
+        );
+        assert!(matches!(
+            rig.fetcher.poll_next_unpin(&mut cx),
+            Poll::Ready(Some(FetchEvent::FetchError { .. }))
+        ));
+        rig.fetcher.assert_invariants();
+    }
+
+    #[test]
+    fn requests_sent_after_a_poll_register_wakers_on_the_next_poll() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        rig.add_peer(peer_a);
+        let counter = Arc::new(WakeCounter::default());
+        let waker = waker(counter.clone());
+        let mut cx = Context::from_waker(&waker);
+
+        assert!(rig.fetcher.poll_next_unpin(&mut cx).is_pending());
+        rig.announce(peer_a, &hashes(0..1));
+        assert_eq!(rig.dispatch(), 1);
+
+        // the caller has to poll again after dispatching, only then the request is polled and
+        // registers the waker that its response wakes
+        assert!(rig.fetcher.poll_next_unpin(&mut cx).is_pending());
+        let wakes = counter.wakes();
+        let (_, response) = rig.take_request(peer_a).unwrap();
+        response.send(Err(RequestError::Timeout)).unwrap();
+        assert_eq!(counter.wakes(), wakes + 1);
+        assert!(matches!(
+            rig.fetcher.poll_next_unpin(&mut cx),
+            Poll::Ready(Some(FetchEvent::FetchError { .. }))
+        ));
+    }
+
+    #[test]
+    fn announcement_flood_from_one_peer_is_bounded() {
+        let mut rig = Rig::new();
+        rig.check_invariants = false;
+        let peer_a = peer(1);
+        rig.add_peer(peer_a);
+        let limit = rig.fetcher.config().max_announced_hashes_per_peer as usize;
+
+        // 50 full announcements of unique hashes
+        for batch in 0..50u64 {
+            rig.announce_unsized(peer_a, &hashes(batch * 4096..(batch + 1) * 4096));
+        }
+        assert_eq!(rig.fetcher.num_hashes(), limit);
+        assert!(rig.fetcher.queued_hashes(&peer_a).len() <= 2 * limit);
+        rig.fetcher.assert_invariants();
+
+        // settled hashes free the peer's budget again
+        assert_eq!(rig.dispatch(), 1);
+        let (requested, response) = rig.take_request(peer_a).unwrap();
+        assert_eq!(requested.len(), 256);
+        response.send(Err(RequestError::Timeout)).unwrap();
+        rig.next_event().unwrap();
+        assert_eq!(rig.fetcher.num_hashes(), limit - 256);
+
+        rig.announce_unsized(peer_a, &hashes(1_000_000..1_000_300));
+        assert_eq!(rig.fetcher.num_hashes(), limit);
+        rig.fetcher.assert_invariants();
+    }
+
+    #[test]
+    fn global_capacity_bounds_tracked_hashes_across_peers() {
+        let config = TransactionFetcherConfig {
+            max_capacity_cache_txns_pending_fetch: 1000,
+            ..Default::default()
+        };
+        let mut rig = Rig::with_config(config);
+        rig.check_invariants = false;
+        let peers = (1..=4).map(peer).collect::<Vec<_>>();
+        for (i, peer_id) in peers.iter().enumerate() {
+            rig.add_peer(*peer_id);
+            rig.announce_unsized(*peer_id, &hashes(i as u64 * 400..(i as u64 + 1) * 400));
+        }
+
+        // 600 of the 1600 announced hashes were evicted, spread over the peers so that every
+        // peer lost its oldest hashes and kept its newest
+        assert_eq!(rig.fetcher.num_hashes(), 1000);
+        for (i, peer_id) in peers.iter().enumerate() {
+            let first = i as u64 * 400;
+            assert!(rig.fetcher.candidate_peers(&hash(first)).is_empty());
+            assert!(rig.fetcher.candidate_peers(&hash(first + 99)).is_empty());
+            assert_eq!(rig.fetcher.candidate_peers(&hash(first + 200)), vec![*peer_id]);
+            assert_eq!(rig.fetcher.candidate_peers(&hash(first + 399)), vec![*peer_id]);
+        }
+        rig.fetcher.assert_invariants();
+
+        // every peer still has hashes to request, the evicted ones are skipped
+        assert_eq!(rig.dispatch(), 4);
+        let mut requested_total = 0;
+        for peer_id in &peers {
+            let (requested, _) = rig.take_request(*peer_id).unwrap();
+            assert!(requested.len() <= 256);
+            requested_total += requested.len();
+        }
+        assert_eq!(requested_total, 1000, "every remaining hash is requested");
+        rig.fetcher.assert_invariants();
+    }
+
+    #[test]
+    fn many_peers_announcing_the_same_hashes() {
+        let mut rig = Rig::new();
+        rig.check_invariants = false;
+        let hashes = hashes(0..100);
+        let peers = (0..200).map(peer_n).collect::<Vec<_>>();
+        for peer_id in &peers {
+            rig.add_peer_with_capacity(*peer_id, 1);
+            rig.announce(*peer_id, &hashes);
+        }
+
+        // only the first announcers of a hash are its candidates
+        let candidates = &peers[..MAX_COUNT_CANDIDATE_PEERS_PER_HASH];
+        assert_eq!(rig.fetcher.num_hashes(), 100);
+        assert_eq!(rig.fetcher.candidate_peers(&hashes[0]), candidates);
+        rig.fetcher.assert_invariants();
+
+        // one request at a time, retried with the next candidate until all are exhausted
+        let mut order = Vec::new();
+        for _ in candidates {
+            assert_eq!(rig.dispatch(), 1);
+            let fetching = rig.fetcher.fetching_peer(&hashes[0]).unwrap();
+            let (requested, response) = rig.take_request(fetching).unwrap();
+            assert_eq!(requested.len(), 100);
+            response.send(Err(RequestError::Timeout)).unwrap();
+            rig.next_event().unwrap();
+            order.push(fetching);
+        }
+        let expected =
+            [&candidates[..1], &candidates[1..].iter().rev().copied().collect::<Vec<_>>()].concat();
+        assert_eq!(order, expected, "the first announcer is asked first, then the most recent");
+        assert_eq!(rig.fetcher.num_hashes(), 0);
+        assert_eq!(rig.dispatch(), 0);
+        rig.fetcher.assert_invariants();
+    }
+
+    #[test]
+    fn global_inflight_limit_serves_peers_in_announcement_order() {
+        let mut rig = Rig::new();
+        rig.check_invariants = false;
+        let max_inflight = rig.fetcher.config().max_inflight_requests as usize;
+        let peers = (0..max_inflight as u64 + 20).map(peer_n).collect::<Vec<_>>();
+        for (i, peer_id) in peers.iter().enumerate() {
+            rig.add_peer(*peer_id);
+            rig.announce(*peer_id, &hashes(i as u64 * 10..(i as u64 + 1) * 10));
+        }
+
+        assert_eq!(rig.dispatch(), max_inflight);
+        assert!(peers[..max_inflight].iter().all(|peer_id| !rig.fetcher.is_idle(peer_id)));
+        assert!(peers[max_inflight..].iter().all(|peer_id| rig.fetcher.is_idle(peer_id)));
+        assert_eq!(rig.fetcher.num_fetching_hashes(), max_inflight * 10);
+        rig.fetcher.assert_invariants();
+
+        // the remaining peers are served once requests resolve
+        for peer_id in &peers[..max_inflight] {
+            rig.fail(*peer_id, RequestError::Timeout);
+        }
+        assert_eq!(rig.dispatch(), 20);
+        assert_eq!(rig.fetcher.num_inflight_requests(), 20);
+        rig.fetcher.assert_invariants();
+    }
+
+    #[test]
+    fn huge_unsolicited_response_is_filtered() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        rig.add_peer(peer_a);
+        let txs = pooled_txs(4097);
+
+        rig.announce(peer_a, &hashes_of(&txs[..1]));
+        rig.dispatch();
+
+        let FetchEvent::TransactionsFetched { transactions, report_peer, .. } =
+            rig.respond(peer_a, txs.clone())
+        else {
+            panic!("expected fetched transactions")
+        };
+        assert_eq!(transactions.0, txs[..1]);
+        assert!(report_peer);
+        assert_eq!(rig.fetcher.num_hashes(), 0);
+    }
+
+    #[test]
+    fn peer_churn_leaves_no_state_behind() {
+        let mut rig = Rig::new();
+        let txs = pooled_txs(40);
+        let all = hashes_of(&txs);
+        let by_hash = txs.iter().map(|tx| (*tx.tx_hash(), tx.clone())).collect::<B256Map<_>>();
+        let peers = (1..=6).map(peer).collect::<Vec<_>>();
+        for peer_id in &peers {
+            rig.add_peer_with_capacity(*peer_id, 4);
+        }
+
+        for round in 0..30usize {
+            // every peer announces a window of the hashes
+            for (i, peer_id) in peers.iter().enumerate() {
+                let start = (round + i) % 20;
+                rig.announce(*peer_id, &all[start..start + 20]);
+            }
+            rig.dispatch();
+
+            // a rotating peer disconnects with its request inflight and comes back
+            let churned = peers[round % peers.len()];
+            rig.disconnect(churned);
+            rig.add_peer_with_capacity(churned, 4);
+            rig.drain_events();
+
+            // the others deliver or fail
+            for (i, peer_id) in peers.iter().enumerate() {
+                if *peer_id == churned {
+                    continue
+                }
+                if let Some((requested, response)) = rig.take_request(*peer_id) {
+                    let delivered = if i % 2 == 0 {
+                        requested.iter().map(|hash| by_hash[hash].clone()).collect()
+                    } else {
+                        vec![]
+                    };
+                    response.send(Ok(PooledTransactions(delivered))).unwrap();
+                }
+            }
+            rig.drain_events();
+        }
+
+        for peer_id in &peers {
+            rig.disconnect(*peer_id);
+        }
+        rig.drain_events();
+        assert_eq!(rig.fetcher.num_hashes(), 0);
+        assert_eq!(rig.fetcher.num_inflight_requests(), 0);
+        assert_eq!(rig.fetcher.num_peers(), 0);
+    }
+
+    #[test]
+    fn delivery_order_does_not_matter() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        let peer_b = peer(2);
+        rig.add_peer(peer_a);
+        rig.add_peer(peer_b);
+        let txs = pooled_txs(4);
+        let hashes = hashes_of(&txs);
+
+        rig.announce(peer_a, &hashes);
+        rig.announce(peer_b, &hashes);
+        rig.dispatch();
+
+        // the last and the first hash are delivered in reverse order, the two in between were
+        // skipped by peer_a
+        let event = rig.respond(peer_a, vec![txs[3].clone(), txs[0].clone()]);
+        let FetchEvent::TransactionsFetched { transactions, .. } = event else { panic!() };
+        assert_eq!(transactions.len(), 2);
+        assert_eq!(rig.fetcher.num_hashes(), 2);
+        assert_eq!(rig.fetcher.candidate_peers(&hashes[1]), vec![peer_b]);
+        assert_eq!(rig.fetcher.candidate_peers(&hashes[2]), vec![peer_b]);
+        assert_eq!(rig.fetcher.queued_hashes(&peer_b), hashes[1..3]);
+    }
+
+    #[test]
+    fn partial_delivery_with_concurrent_requests_per_peer() {
+        let config =
+            TransactionFetcherConfig { max_inflight_requests_per_peer: 2, ..Default::default() };
+        let mut rig = Rig::with_config(config);
+        let peer_a = peer(1);
+        rig.add_peer(peer_a);
+        let txs = pooled_txs(300);
+        let hashes = hashes_of(&txs);
+
+        rig.announce(peer_a, &hashes);
+        assert_eq!(rig.dispatch(), 2);
+        let (first, response_first) = rig.take_request(peer_a).unwrap();
+        let (second, response_second) = rig.take_request(peer_a).unwrap();
+        assert_eq!(first.len(), 256);
+        assert_eq!(second.len(), 44);
+
+        // only the last hash of the first request is delivered, the rest was skipped and has no
+        // other candidate
+        response_first.send(Ok(PooledTransactions(txs[255..256].to_vec()))).unwrap();
+        rig.next_event().unwrap();
+        assert_eq!(rig.fetcher.num_hashes(), 44);
+        assert_eq!(rig.fetcher.num_fetching_hashes(), 44);
+        assert!(!rig.fetcher.is_idle(&peer_a));
+
+        response_second.send(Ok(PooledTransactions(txs[256..].to_vec()))).unwrap();
+        rig.next_event().unwrap();
+        assert_eq!(rig.fetcher.num_hashes(), 0);
+        assert!(rig.fetcher.is_idle(&peer_a));
+    }
+
+    #[test]
+    fn old_request_resolves_after_peer_reconnected_and_reannounced() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        rig.add_peer(peer_a);
+        let txs = pooled_txs(2);
+        let hashes = hashes_of(&txs);
+
+        rig.announce(peer_a, &hashes);
+        rig.dispatch();
+        let (_, response) = rig.take_request(peer_a).unwrap();
+
+        // the peer reconnects and announces the hashes again while the old request is pending
+        rig.disconnect(peer_a);
+        rig.add_peer(peer_a);
+        rig.announce(peer_a, &hashes);
+        assert_eq!(rig.fetcher.candidate_peers(&hashes[0]), vec![peer_a]);
+        assert_eq!(rig.fetcher.num_fetching_hashes(), 2);
+        assert_eq!(rig.dispatch(), 0, "the hashes are still being fetched");
+
+        // the old request delivers one hash and skips the other, which is retried with the new
+        // session
+        response.send(Ok(PooledTransactions(txs[1..].to_vec()))).unwrap();
+        rig.next_event().unwrap();
+        assert_eq!(rig.fetcher.num_hashes(), 1);
+        assert_eq!(rig.fetcher.candidate_peers(&hashes[0]), vec![peer_a]);
+        assert_eq!(rig.dispatch(), 1);
+        let (requested, _) = rig.take_request(peer_a).unwrap();
+        assert_eq!(requested, hashes[..1]);
+    }
+
+    #[test]
+    fn requeued_hashes_are_not_queued_twice() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        let peer_b = peer(2);
+        rig.add_peer(peer_a);
+        rig.add_peer(peer_b);
+        let hashes = hashes(0..3);
+
+        // peer_b is busy while both announce the hashes, so they stay in its queue
+        rig.announce(peer_b, &hashes[..1]);
+        rig.dispatch();
+        rig.announce(peer_a, &hashes[1..]);
+        rig.announce(peer_b, &hashes[1..]);
+        rig.dispatch();
+        assert_eq!(rig.fetcher.fetching_peer(&hashes[1]), Some(peer_a));
+        assert_eq!(rig.fetcher.queued_hashes(&peer_b), hashes[1..]);
+
+        rig.fail(peer_a, RequestError::Timeout);
+        assert_eq!(rig.fetcher.queued_hashes(&peer_b), hashes[1..], "no duplicates");
     }
 }

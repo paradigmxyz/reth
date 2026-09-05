@@ -277,18 +277,18 @@ pub struct TransactionFetcherMetrics {
     /// [`PooledTransactions`](reth_eth_wire::PooledTransactions) responses, that weren't
     /// requested.
     pub(crate) unsolicited_transactions: Counter,
-    /* ================ SEARCH DURATION ================ */
-    /// Time spent searching for an idle peer in call to
-    /// [`TransactionFetcher::find_any_idle_fallback_peer_for_any_pending_hash`](crate::transactions::TransactionFetcher::find_any_idle_fallback_peer_for_any_pending_hash).
-    ///
-    /// Duration in seconds.
-    pub(crate) duration_find_idle_fallback_peer_for_any_pending_hash: Gauge,
-
-    /// Time spent searching for hashes pending fetch, announced by a given peer in
-    /// [`TransactionFetcher::fill_request_from_hashes_pending_fetch`](crate::transactions::TransactionFetcher::fill_request_from_hashes_pending_fetch).
-    ///
-    /// Duration in seconds.
-    pub(crate) duration_fill_request_from_hashes_pending_fetch: Gauge,
+    /// Total number of pending hashes that were evicted for newly announced hashes because the
+    /// fetcher already tracks the maximum number of hashes.
+    pub(crate) hashes_evicted_at_capacity: Counter,
+    /// Total number of announced hashes that were dropped because the fetcher already tracks the
+    /// maximum number of hashes and none of the oldest ones is pending.
+    pub(crate) announced_hashes_dropped_at_capacity: Counter,
+    /// Total number of announced hashes that were dropped because the announcing peer is already
+    /// a candidate for the maximum number of hashes.
+    pub(crate) announced_hashes_dropped_peer_limit: Counter,
+    /// Total number of tracked hashes that were dropped because no peer is left to fetch them
+    /// from, e.g. because all peers that announced them failed to deliver them.
+    pub(crate) hashes_dropped_no_candidate_peers: Counter,
 }
 
 /// Measures the duration of executing the given code block. The duration is added to the given
