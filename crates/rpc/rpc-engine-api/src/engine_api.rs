@@ -485,10 +485,8 @@ where
 
         for pool_tx in self.inner.tx_pool.best_transactions().without_blobs().without_updates() {
             let encoded = pool_tx.encoded_2718_consensus();
-            let new_size = total_size + alloy_rlp::Encodable::length(&encoded);
-            if new_size + alloy_rlp::length_of_length(new_size) >
-                MAX_BYTES_PER_INCLUSION_LIST as usize
-            {
+            let new_size = total_size + encoded.len();
+            if new_size > MAX_BYTES_PER_INCLUSION_LIST as usize {
                 break
             }
 
@@ -1911,8 +1909,67 @@ mod tests {
         let res = EngineApiServer::get_inclusion_list_v1(&api).await.unwrap();
         assert_eq!(res, vec![expected]);
         assert!(
-            alloy_rlp::list_length::<Bytes, [u8]>(&res) <= MAX_BYTES_PER_INCLUSION_LIST as usize
+            res.iter().map(|tx| tx.len()).sum::<usize>() <= MAX_BYTES_PER_INCLUSION_LIST as usize
         );
+    }
+
+    /// Signs candidate transactions because signature lengths affect the final encoded size.
+    fn inclusion_list_transaction(size: usize, typed: bool, fee: u128) -> EthPooledTransaction {
+        for input_size in size.saturating_sub(256)..size {
+            let builder = TransactionBuilder::default()
+                .signer(B256::with_last_byte(if typed { 2 } else { 1 }))
+                .max_fee_per_gas(fee)
+                .max_priority_fee_per_gas(fee)
+                .input(vec![0; input_size]);
+            let transaction = if typed { builder.into_eip1559() } else { builder.into_legacy() };
+            if transaction.encode_2718_len() == size {
+                return pooled_transaction(transaction)
+            }
+        }
+        panic!("could not construct a transaction of {size} bytes")
+    }
+
+    #[tokio::test]
+    async fn get_inclusion_list_v1_transaction_byte_boundaries() {
+        let limit = MAX_BYTES_PER_INCLUSION_LIST as usize;
+        for typed in [false, true] {
+            for size in [limit - 3, limit, limit + 1] {
+                let pool = eth_test_pool();
+                let transaction = inclusion_list_transaction(size, typed, 3_000_000_000);
+                let encoded = transaction.encoded_2718_consensus();
+                assert_eq!(encoded.len(), size);
+                pool.add_transaction(TransactionOrigin::External, transaction).await.unwrap();
+                let (_, api) = setup_engine_api_with_pool(pool);
+
+                let res = EngineApiServer::get_inclusion_list_v1(&api).await.unwrap();
+                let expected = if size <= limit { vec![encoded] } else { vec![] };
+                assert_eq!(res, expected, "typed={typed}, size={size}");
+                assert!(res.iter().all(|tx| !tx.is_empty()));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn get_inclusion_list_v1_cumulative_transaction_byte_boundaries() {
+        let limit = MAX_BYTES_PER_INCLUSION_LIST as usize;
+        for extra in [0, 1] {
+            let pool = eth_test_pool();
+            let first = inclusion_list_transaction(limit / 2, false, 3_000_000_000);
+            let second = inclusion_list_transaction(limit / 2 + extra, true, 2_000_000_000);
+            let mut expected =
+                vec![first.encoded_2718_consensus(), second.encoded_2718_consensus()];
+            assert_eq!(expected.iter().map(|tx| tx.len()).sum::<usize>(), limit + extra);
+            if extra != 0 {
+                expected.pop();
+            }
+            pool.add_transaction(TransactionOrigin::External, first).await.unwrap();
+            pool.add_transaction(TransactionOrigin::External, second).await.unwrap();
+            let (_, api) = setup_engine_api_with_pool(pool);
+
+            let res = EngineApiServer::get_inclusion_list_v1(&api).await.unwrap();
+            assert_eq!(res, expected);
+            assert!(res.iter().all(|tx| !tx.is_empty()));
+        }
     }
 
     #[tokio::test]
