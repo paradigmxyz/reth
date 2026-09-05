@@ -502,6 +502,11 @@ where
         let start = Instant::now();
         let result = Self::get_inclusion_list_v1(self);
         self.inner.metrics.latency.get_inclusion_list_v1.record(start.elapsed());
+        if let Ok(inclusion_list) = &result {
+            let encoded_size = inclusion_list.iter().map(|tx| tx.len()).sum::<usize>();
+            self.inner.metrics.inclusion_list.transaction_count.record(inclusion_list.len() as f64);
+            self.inner.metrics.inclusion_list.encoded_size_bytes.record(encoded_size as f64);
+        }
         result
     }
 
