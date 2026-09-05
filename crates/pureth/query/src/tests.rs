@@ -1,4 +1,6 @@
 use super::*;
+use crate::schema::validate_runtime_lengths;
+use alloy_primitives::B256;
 
 #[test]
 fn parser_accepts_valid_syntax() {
@@ -161,8 +163,8 @@ fn address_target_is_right_padded_to_one_chunk() {
     assert_eq!(address_target_node(&too_long), Err(InvalidAddressLength { actual: 21 }));
 }
 
-fn synthetic_branch() -> Vec<[u8; 32]> {
-    (1_u8..=9).map(|byte| [byte; 32]).collect()
+fn synthetic_branch() -> Vec<B256> {
+    (1_u8..=9).map(B256::repeat_byte).collect()
 }
 
 const SYNTHETIC_ROOT: [u8; 32] = [
@@ -174,7 +176,7 @@ const SYNTHETIC_ROOT: [u8; 32] = [
 fn verifier_accepts_the_independently_computed_synthetic_branch() {
     let target = address_target_node(&[0x11; 20]).unwrap();
 
-    assert_eq!(verify_branch(target, 576, &synthetic_branch(), SYNTHETIC_ROOT), Ok(true));
+    assert_eq!(verify_branch(target, 576, &synthetic_branch(), B256::from(SYNTHETIC_ROOT)), Ok(()));
 }
 
 #[test]
@@ -184,90 +186,88 @@ fn verifier_rejects_single_input_mutations() {
 
     let mut wrong_target = target;
     wrong_target[0] ^= 1;
-    assert_eq!(verify_branch(wrong_target, 576, &branch, SYNTHETIC_ROOT), Ok(false));
+    assert_eq!(
+        verify_branch(wrong_target, 576, &branch, B256::from(SYNTHETIC_ROOT)),
+        Err(ProofError::RootMismatch)
+    );
 
     let mut wrong_sibling = branch.clone();
     wrong_sibling[3][0] ^= 1;
-    assert_eq!(verify_branch(target, 576, &wrong_sibling, SYNTHETIC_ROOT), Ok(false));
+    assert_eq!(
+        verify_branch(target, 576, &wrong_sibling, B256::from(SYNTHETIC_ROOT)),
+        Err(ProofError::RootMismatch)
+    );
 
     let mut wrong_order = branch.clone();
     wrong_order.swap(0, 1);
-    assert_eq!(verify_branch(target, 576, &wrong_order, SYNTHETIC_ROOT), Ok(false));
+    assert_eq!(
+        verify_branch(target, 576, &wrong_order, B256::from(SYNTHETIC_ROOT)),
+        Err(ProofError::RootMismatch)
+    );
 
     assert_eq!(
-        verify_branch(target, 576, &branch[..8], SYNTHETIC_ROOT),
+        verify_branch(target, 576, &branch[..8], B256::from(SYNTHETIC_ROOT)),
         Err(ProofError::WrongBranchLength { expected: 9, actual: 8 })
     );
 
     let mut too_long = branch.clone();
-    too_long.push([10; 32]);
+    too_long.push(B256::repeat_byte(10));
     assert_eq!(
-        verify_branch(target, 576, &too_long, SYNTHETIC_ROOT),
+        verify_branch(target, 576, &too_long, B256::from(SYNTHETIC_ROOT)),
         Err(ProofError::WrongBranchLength { expected: 9, actual: 10 })
     );
 
-    assert_eq!(verify_branch(target, 577, &branch, SYNTHETIC_ROOT), Ok(false));
+    assert_eq!(
+        verify_branch(target, 577, &branch, B256::from(SYNTHETIC_ROOT)),
+        Err(ProofError::RootMismatch)
+    );
 
-    let mut wrong_root = SYNTHETIC_ROOT;
+    let mut wrong_root = B256::from(SYNTHETIC_ROOT);
     wrong_root[0] ^= 1;
-    assert_eq!(verify_branch(target, 576, &branch, wrong_root), Ok(false));
-    assert_eq!(verify_branch(target, 0, &[], SYNTHETIC_ROOT), Err(ProofError::ZeroGindex));
+    assert_eq!(verify_branch(target, 576, &branch, wrong_root), Err(ProofError::RootMismatch));
+    assert_eq!(
+        verify_branch(target, 0, &[], B256::from(SYNTHETIC_ROOT)),
+        Err(ProofError::ZeroGindex)
+    );
 }
 
 #[test]
 fn envelope_binds_schema_path_value_and_proof() {
-    let branch = synthetic_branch();
+    let case = crate::vector_records::load_proof_case(
+        include_bytes!("../test-data/fixtures/v0/singleton_baseline/fixture.json"),
+        include_bytes!("../test-data/fixtures/v0/singleton_baseline/proof.json"),
+    )
+    .unwrap();
 
     assert_eq!(
         verify_receipt_log_address(
-            SCHEMA_ID,
-            SCHEMA_DIGEST,
-            "[0].logs[0].address",
-            &[1],
-            &[0x11; 20],
-            &branch,
-            SYNTHETIC_ROOT,
+            &case.proof.schema_id,
+            &case.proof.path,
+            &case.selected_address,
+            &case.branch,
+            case.root,
         ),
-        Ok(true)
+        Ok(())
     );
 
     assert_eq!(
         verify_receipt_log_address(
             "other-schema",
-            SCHEMA_DIGEST,
-            "[0].logs[0].address",
-            &[1],
-            &[0x11; 20],
-            &branch,
-            SYNTHETIC_ROOT,
+            &case.proof.path,
+            &case.selected_address,
+            &case.branch,
+            case.root,
         ),
         Err(EnvelopeError::WrongSchema)
     );
 
-    let mut wrong_digest = SCHEMA_DIGEST;
-    wrong_digest[0] ^= 1;
     assert_eq!(
         verify_receipt_log_address(
             SCHEMA_ID,
-            wrong_digest,
-            "[0].logs[0].address",
-            &[1],
-            &[0x11; 20],
-            &branch,
-            SYNTHETIC_ROOT,
-        ),
-        Err(EnvelopeError::WrongSchemaDigest)
-    );
-
-    assert_eq!(
-        verify_receipt_log_address(
-            SCHEMA_ID,
-            SCHEMA_DIGEST,
             "[0].logs[0].topics[0]",
-            &[1],
-            &[0x11; 20],
-            &branch,
-            SYNTHETIC_ROOT,
+            &case.selected_address,
+            &case.branch,
+            case.root,
         ),
         Err(EnvelopeError::UnsupportedPath)
     );
@@ -275,39 +275,28 @@ fn envelope_binds_schema_path_value_and_proof() {
     assert_eq!(
         verify_receipt_log_address(
             SCHEMA_ID,
-            SCHEMA_DIGEST,
             "[0].logs[0].address",
-            &[1],
             &[0x11; 19],
-            &branch,
-            SYNTHETIC_ROOT,
+            &case.branch,
+            case.root,
         ),
         Err(EnvelopeError::InvalidValue(InvalidAddressLength { actual: 19 }))
     );
 
     assert_eq!(
-        verify_receipt_log_address(
-            SCHEMA_ID,
-            SCHEMA_DIGEST,
-            "[0].logs[1].address",
-            &[1],
-            &[0x11; 20],
-            &branch,
-            SYNTHETIC_ROOT,
+        validate_runtime_lengths(
+            ResolvedPath::ReceiptLogAddress { receipt_index: 0, log_index: 1 },
+            1,
+            1,
         ),
-        Err(EnvelopeError::InvalidBounds(BoundsError::LogOutOfBounds))
+        Err(BoundsError::LogOutOfBounds)
     );
-
     assert_eq!(
-        verify_receipt_log_address(
-            SCHEMA_ID,
-            SCHEMA_DIGEST,
-            "[1].logs[0].address",
-            &[1, 1],
-            &[0x11; 20],
-            &branch,
-            SYNTHETIC_ROOT,
+        validate_runtime_lengths(
+            ResolvedPath::ReceiptLogAddress { receipt_index: 1, log_index: 0 },
+            1,
+            1,
         ),
-        Err(EnvelopeError::InvalidProof(ProofError::WrongBranchLength { expected: 12, actual: 9 }))
+        Err(BoundsError::ReceiptOutOfBounds)
     );
 }

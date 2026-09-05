@@ -1,11 +1,11 @@
+use alloy_primitives::B256;
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
 
 use crate::{
     address_target_node, branch_positions, parse_path, receipt_log_address_gindex, resolve_v0,
     validate_runtime_bounds,
     vector::{decode_fixed, validate_receipt_fixture, ReceiptFixture, VectorError},
-    SCHEMA_DIGEST, SCHEMA_ID,
+    SCHEMA_ID,
 };
 
 const FORMAT_VERSION: &str = "pureth_receipt_proof_vectors_v0";
@@ -17,67 +17,23 @@ const TARGET_TYPE: &str = "ExecutionAddress";
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct Manifest {
-    pub branch_order: String,
-    pub cases: Vec<ManifestCase>,
-    pub dependency_revisions: DependencyRevisions,
-    pub format_version: String,
-    pub object_kind: String,
-    pub producer: Producer,
-    pub proof_format: String,
-    pub root_context: String,
-    pub root_type: String,
-    pub schema_digest: String,
-    pub schema_id: String,
-    pub ssz_semantics: String,
-    pub status: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct ManifestCase {
-    pub case_id: String,
-    pub fixtures: Vec<ManifestFixture>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct ManifestFixture {
-    pub path: String,
-    pub sha256: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct DependencyRevisions {
-    pub ethereum_ssz: String,
-    pub remerkleable_reference: String,
-    pub tree_hash: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct Producer {
-    #[serde(rename = "crate")]
-    pub crate_name: String,
-    pub version: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ProofRecord {
+pub(crate) struct ProofRecord {
     pub format_version: String,
     pub case_id: String,
     pub schema_id: String,
-    pub schema_digest: String,
-    pub fixture_sha256: String,
+    #[serde(rename = "schema_digest")]
+    _schema_digest: String,
+    #[serde(rename = "fixture_sha256")]
+    _fixture_sha256: String,
     pub object_kind: String,
     pub root_type: String,
     pub path: String,
     pub target_type: String,
     pub value_ssz: String,
-    pub receipt_count: usize,
-    pub log_counts: Vec<usize>,
+    #[serde(rename = "receipt_count")]
+    _receipt_count: usize,
+    #[serde(rename = "log_counts")]
+    _log_counts: Vec<usize>,
     pub gindex: String,
     pub target_node: String,
     pub branch_gindices: Vec<u64>,
@@ -90,106 +46,66 @@ pub struct ProofRecord {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct RootRecord {
+pub(crate) struct RootRecord {
     pub format_version: String,
     pub case_id: String,
     pub schema_id: String,
-    pub schema_digest: String,
-    pub fixture_sha256: String,
+    #[serde(rename = "schema_digest")]
+    _schema_digest: String,
+    #[serde(rename = "fixture_sha256")]
+    _fixture_sha256: String,
     pub object_kind: String,
     pub root_type: String,
-    pub receipt_count: usize,
-    pub log_counts: Vec<usize>,
+    #[serde(rename = "receipt_count")]
+    _receipt_count: usize,
+    #[serde(rename = "log_counts")]
+    _log_counts: Vec<usize>,
     pub root: String,
     pub root_context: String,
 }
 
 #[derive(Debug)]
-pub struct LoadedFixture {
+pub(crate) struct LoadedFixture {
     pub fixture: ReceiptFixture,
-    pub schema_digest: [u8; 32],
-    pub fixture_digest: [u8; 32],
     pub log_counts: Vec<usize>,
 }
 
 #[derive(Debug)]
-pub struct LoadedProofCase {
+pub(crate) struct LoadedProofCase {
     pub fixture: LoadedFixture,
     pub proof: ProofRecord,
     pub selected_address: [u8; 20],
-    pub target_node: [u8; 32],
     pub gindex: u64,
-    pub branch: Vec<[u8; 32]>,
-    pub root: [u8; 32],
+    pub branch: Vec<B256>,
+    pub root: B256,
 }
 
 #[derive(Debug)]
-pub struct LoadedRootCase {
+pub(crate) struct LoadedRootCase {
     pub fixture: LoadedFixture,
     pub record: RootRecord,
-    pub root: [u8; 32],
+    pub root: B256,
 }
 
-pub(crate) fn load_manifest(schema_bytes: &[u8], bytes: &[u8]) -> Result<Manifest, VectorError> {
-    let manifest: Manifest = serde_json::from_slice(bytes)?;
-    let schema_digest: [u8; 32] = Sha256::digest(schema_bytes).into();
-    require(schema_digest == SCHEMA_DIGEST, "schema digest does not match V0")?;
-    require(manifest.format_version == FORMAT_VERSION, "unknown manifest format")?;
-    require(manifest.schema_id == SCHEMA_ID, "unknown manifest schema")?;
-    require(manifest.object_kind == OBJECT_KIND, "unknown object kind")?;
-    require(manifest.root_type == ROOT_TYPE, "unknown root type")?;
-    require(manifest.proof_format == PROOF_FORMAT, "unknown proof format")?;
-    require(manifest.root_context == ROOT_CONTEXT, "unknown root context")?;
-    require(manifest.branch_order == "immediate_sibling_first", "unknown branch order")?;
-    require(
-        decode_fixed::<32>(&manifest.schema_digest)? == schema_digest,
-        "manifest schema digest mismatch",
-    )?;
-    require(!manifest.cases.is_empty(), "manifest has no cases")?;
-    require(!manifest.producer.crate_name.is_empty(), "manifest producer is empty")?;
-    require(!manifest.producer.version.is_empty(), "manifest producer version is empty")?;
-    require(!manifest.ssz_semantics.trim().is_empty(), "SSZ semantics are empty")?;
-    require(!manifest.status.trim().is_empty(), "manifest status is empty")?;
-    require(
-        !manifest.dependency_revisions.ethereum_ssz.is_empty() &&
-            !manifest.dependency_revisions.remerkleable_reference.is_empty() &&
-            !manifest.dependency_revisions.tree_hash.is_empty(),
-        "manifest dependency revision is empty",
-    )?;
-    Ok(manifest)
-}
-
-pub(crate) fn load_fixture(
-    schema_bytes: &[u8],
-    fixture_bytes: &[u8],
-) -> Result<LoadedFixture, VectorError> {
-    let schema_digest: [u8; 32] = Sha256::digest(schema_bytes).into();
-    require(schema_digest == SCHEMA_DIGEST, "schema digest does not match V0")?;
+pub(crate) fn load_fixture(fixture_bytes: &[u8]) -> Result<LoadedFixture, VectorError> {
     let fixture: ReceiptFixture = serde_json::from_slice(fixture_bytes)?;
     validate_receipt_fixture(&fixture)?;
-    let fixture_digest: [u8; 32] = Sha256::digest(fixture_bytes).into();
     let log_counts = fixture.receipts.iter().map(|receipt| receipt.logs.len()).collect();
-    Ok(LoadedFixture { fixture, schema_digest, fixture_digest, log_counts })
+    Ok(LoadedFixture { fixture, log_counts })
 }
 
 pub(crate) fn load_proof_case(
-    schema_bytes: &[u8],
     fixture_bytes: &[u8],
     proof_bytes: &[u8],
 ) -> Result<LoadedProofCase, VectorError> {
-    let fixture = load_fixture(schema_bytes, fixture_bytes)?;
+    let fixture = load_fixture(fixture_bytes)?;
     let proof: ProofRecord = serde_json::from_slice(proof_bytes)?;
     validate_common(
         &proof.format_version,
         &proof.schema_id,
-        &proof.schema_digest,
-        &proof.fixture_sha256,
         &proof.object_kind,
         &proof.root_type,
-        proof.receipt_count,
-        &proof.log_counts,
         &proof.root_context,
-        &fixture,
     )?;
     require(!proof.case_id.trim().is_empty(), "proof case ID is empty")?;
     require(proof.target_type == TARGET_TYPE, "unknown proof target type")?;
@@ -225,7 +141,7 @@ pub(crate) fn load_proof_case(
     let target_node = address_target_node(&selected_address)
         .map_err(|_| VectorError::Invalid("selected address has the wrong length".into()))?;
     require(
-        decode_fixed::<32>(&proof.target_node)? == target_node,
+        B256::from(decode_fixed::<32>(&proof.target_node)?) == target_node,
         "recorded target node mismatch",
     )?;
 
@@ -239,66 +155,47 @@ pub(crate) fn load_proof_case(
     let expected_positions = branch_positions(gindex)
         .map_err(|error| VectorError::Invalid(format!("invalid branch positions: {error:?}")))?;
     require(proof.branch_gindices == expected_positions, "recorded branch gindices mismatch")?;
-    let branch =
-        proof.proof.iter().map(|node| decode_fixed::<32>(node)).collect::<Result<Vec<_>, _>>()?;
+    let branch = proof
+        .proof
+        .iter()
+        .map(|node| decode_fixed::<32>(node).map(B256::from))
+        .collect::<Result<Vec<_>, _>>()?;
     require(branch.len() == expected_positions.len(), "proof length mismatch")?;
-    let root = decode_fixed::<32>(&proof.root)?;
+    let root = B256::from(decode_fixed::<32>(&proof.root)?);
 
-    Ok(LoadedProofCase { fixture, proof, selected_address, target_node, gindex, branch, root })
+    Ok(LoadedProofCase { fixture, proof, selected_address, gindex, branch, root })
 }
 
 pub(crate) fn load_root_case(
-    schema_bytes: &[u8],
     fixture_bytes: &[u8],
     record_bytes: &[u8],
 ) -> Result<LoadedRootCase, VectorError> {
-    let fixture = load_fixture(schema_bytes, fixture_bytes)?;
+    let fixture = load_fixture(fixture_bytes)?;
     let record: RootRecord = serde_json::from_slice(record_bytes)?;
     validate_common(
         &record.format_version,
         &record.schema_id,
-        &record.schema_digest,
-        &record.fixture_sha256,
         &record.object_kind,
         &record.root_type,
-        record.receipt_count,
-        &record.log_counts,
         &record.root_context,
-        &fixture,
     )?;
     require(!record.case_id.trim().is_empty(), "root case ID is empty")?;
-    let root = decode_fixed::<32>(&record.root)?;
+    let root = B256::from(decode_fixed::<32>(&record.root)?);
     Ok(LoadedRootCase { fixture, record, root })
 }
 
-#[allow(clippy::too_many_arguments)]
 fn validate_common(
     format_version: &str,
     schema_id: &str,
-    schema_digest: &str,
-    fixture_sha256: &str,
     object_kind: &str,
     root_type: &str,
-    receipt_count: usize,
-    log_counts: &[usize],
     root_context: &str,
-    fixture: &LoadedFixture,
 ) -> Result<(), VectorError> {
     require(format_version == FORMAT_VERSION, "unknown vector format")?;
     require(schema_id == SCHEMA_ID, "unknown vector schema")?;
     require(object_kind == OBJECT_KIND, "unknown object kind")?;
     require(root_type == ROOT_TYPE, "unknown root type")?;
     require(root_context == ROOT_CONTEXT, "unknown root context")?;
-    require(
-        decode_fixed::<32>(schema_digest)? == fixture.schema_digest,
-        "recorded schema digest mismatch",
-    )?;
-    require(
-        decode_fixed::<32>(fixture_sha256)? == fixture.fixture_digest,
-        "recorded fixture digest mismatch",
-    )?;
-    require(receipt_count == fixture.fixture.receipts.len(), "recorded receipt count mismatch")?;
-    require(log_counts == fixture.log_counts, "recorded log counts mismatch")?;
     Ok(())
 }
 
