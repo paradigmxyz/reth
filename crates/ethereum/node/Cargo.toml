@@ -39,7 +39,6 @@ reth-rpc-eth-types.workspace = true
 reth-engine-local.workspace = true
 reth-engine-primitives = { workspace = true, features = ["std"] }
 reth-payload-primitives.workspace = true
-reth-storage-api.workspace = true
 reth-tasks.workspace = true
 reth-trie-common.workspace = true
 # ethereum

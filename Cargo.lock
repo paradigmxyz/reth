@@ -9535,7 +9535,6 @@ dependencies = [
  "reth-rpc-layer",
  "reth-rpc-server-types",
  "reth-stages-types",
- "reth-storage-api",
  "reth-tasks",
  "reth-testing-utils",
  "reth-tracing",

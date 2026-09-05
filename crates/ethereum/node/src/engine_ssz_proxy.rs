@@ -4,43 +4,40 @@
 //!
 //! [EIP-8178]: https://eips.ethereum.org/EIPS/eip-8178
 
+pub use crate::engine_ssz_witness::{EngineSszWitness, EngineSszWitnessGenerator};
+
 use crate::engine_ssz_containers::{
-    BuiltPayloadAmsterdam, BuiltPayloadCancun, BuiltPayloadOsaka, BuiltPayloadParis,
-    BuiltPayloadPrague, BuiltPayloadShanghai, ExecutionPayloadEnvelopeAmsterdam,
+    BlobsV1Request, BlobsV1Response, BlobsV2Response, BlobsV3Response, BlobsV4Request,
+    BlobsV4Response, BodiesByHashRequest, BodiesResponse, BuiltPayloadAmsterdam,
+    BuiltPayloadCancun, BuiltPayloadOsaka, BuiltPayloadParis, BuiltPayloadPrague,
+    BuiltPayloadShanghai, ExecutionPayloadBodyAmsterdam, ExecutionPayloadBodyParis,
+    ExecutionPayloadBodyShanghai, ExecutionPayloadEnvelopeAmsterdam,
     ExecutionPayloadEnvelopeCancun, ExecutionPayloadEnvelopeOsaka, ExecutionPayloadEnvelopeParis,
-    ExecutionPayloadEnvelopePrague, ExecutionPayloadEnvelopeShanghai, ExecutionWitnessV1,
-    ForkchoiceUpdateAmsterdam, ForkchoiceUpdateCancun, ForkchoiceUpdateOsaka,
-    ForkchoiceUpdateParis, ForkchoiceUpdatePrague, ForkchoiceUpdateResponse,
-    ForkchoiceUpdateShanghai, Optional, PayloadStatus as EngineSszPayloadStatus,
-    PayloadStatusWithWitness,
+    ExecutionPayloadEnvelopePrague, ExecutionPayloadEnvelopeShanghai, ForkchoiceUpdateAmsterdam,
+    ForkchoiceUpdateCancun, ForkchoiceUpdateOsaka, ForkchoiceUpdateParis, ForkchoiceUpdatePrague,
+    ForkchoiceUpdateResponse, ForkchoiceUpdateShanghai, Optional,
+    PayloadStatus as EngineSszPayloadStatus, PayloadStatusWithWitness,
 };
 use alloy_consensus::{Transaction, TxEnvelope};
 use alloy_eips::{eip2718::Decodable2718, eip7685::RequestsOrHash};
 use alloy_primitives::{Bytes, B128, B256};
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadFieldV2,
-    ExecutionPayloadSidecar, ForkchoiceState, PayloadAttributes, PayloadId, PayloadStatusEnum,
-    PraguePayloadFields,
+    CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadBodyV1,
+    ExecutionPayloadFieldV2, ExecutionPayloadSidecar, ForkchoiceState, PayloadAttributes,
+    PayloadId, PraguePayloadFields,
 };
 use http_body_util::{BodyExt, LengthLimitError, Limited};
 use jsonrpsee::server::{HttpBody, HttpRequest, HttpResponse};
-use reth_chainspec::EthereumHardforks;
+use reth_chainspec::{EthereumHardfork, EthereumHardforks};
 use reth_engine_primitives::EngineApiValidator;
 use reth_ethereum_engine_primitives::EthEngineTypes;
-use reth_evm::{execute::Executor, ConfigureEvm};
-use reth_primitives_traits::{AlloyBlockHeader, Block, NodePrimitives};
 use reth_provider::{BalProvider, BlockReader, HeaderProvider, StateProviderFactory};
-use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord};
 use reth_rpc::EngineApi;
 use reth_rpc_engine_api::EngineApiError;
-use reth_storage_api::TransactionVariant;
-use reth_tasks::Runtime;
 use reth_transaction_pool::TransactionPool;
-use reth_trie_common::ExecutionWitnessMode;
 use ssz::Decode;
 use std::{
     future::Future,
-    io,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -50,66 +47,55 @@ use tower::{BoxError, Layer, Service};
 
 const OCTET_STREAM: &str = "application/octet-stream";
 const APPLICATION_JSON: &str = "application/json";
-const TEXT_PLAIN: &str = "text/plain";
 const CONTENT_TYPE: &str = "content-type";
-const CONTENT_LENGTH: &str = "content-length";
 const CACHE_CONTROL: &str = "cache-control";
 const ETH_EXECUTION_VERSION: &str = "eth-execution-version";
 
 const STATUS_OK: u16 = 200;
 const STATUS_BAD_REQUEST: u16 = 400;
-const STATUS_UNSUPPORTED_MEDIA_TYPE: u16 = 415;
 const STATUS_NOT_FOUND: u16 = 404;
-const STATUS_PAYLOAD_TOO_LARGE: u16 = 413;
 const STATUS_METHOD_NOT_ALLOWED: u16 = 405;
+const STATUS_PAYLOAD_TOO_LARGE: u16 = 413;
 const STATUS_INTERNAL_SERVER_ERROR: u16 = 500;
 const STATUS_SERVICE_UNAVAILABLE: u16 = 503;
-
-const PROBLEM_JSON: &str = "application/problem+json";
-const ERROR_INVALID_REQUEST: &str = "/engine-api/errors/invalid-request";
-const ERROR_UNSUPPORTED_MEDIA_TYPE: &str = "/engine-api/errors/unsupported-media-type";
-const ERROR_SSZ_DECODE: &str = "/engine-api/errors/ssz-decode-error";
-const ERROR_UNSUPPORTED_FORK: &str = "/engine-api/errors/unsupported-fork";
-const ERROR_INTERNAL: &str = "/engine-api/errors/internal";
-const ERROR_REQUEST_TOO_LARGE: &str = "/engine-api/errors/request-too-large";
+const STATUS_UNSUPPORTED_MEDIA_TYPE: u16 = 415;
 
 const MAX_BLOB_LIMIT: usize = 128;
+const MAX_BLOB_REQUEST_BYTES: u64 = 4 + 16 + MAX_BLOB_LIMIT as u64 * 32;
+const MAX_BODIES_REQUEST: usize = crate::engine_ssz_containers::MAX_BODIES_REQUEST;
+const MAX_BODIES_REQUEST_BYTES: u64 = 4 + (MAX_BODIES_REQUEST as u64 * 32);
 const MAX_PAYLOAD_BYTES: u64 = 64 * 1024 * 1024;
+const PROBLEM_JSON: &str = "application/problem+json";
 
 type EthEngineApi<Provider, Pool, Validator, ChainSpec> =
     EngineApi<Provider, EthEngineTypes, Pool, Validator, ChainSpec>;
-type SharedEthEngineApi<Provider, Pool, Validator, ChainSpec> =
-    Arc<RwLock<Option<EthEngineApi<Provider, Pool, Validator, ChainSpec>>>>;
+type SharedEngineApi<Api> = Arc<RwLock<Option<Api>>>;
 type SharedWitnessHandler = Arc<RwLock<Option<Arc<dyn EngineSszWitness>>>>;
 
 /// Shared handle used by [`EngineSszProxyLayer`].
-pub struct EngineSszProxyHandle<ChainSpec, Provider = (), Pool = (), Validator = ()> {
-    engine_api: SharedEthEngineApi<Provider, Pool, Validator, ChainSpec>,
+pub struct EngineSszProxyHandle<Api = ()> {
+    engine_api: SharedEngineApi<Api>,
     witness_handler: SharedWitnessHandler,
 }
 
-impl<C, Provider, Pool, Validator> Clone for EngineSszProxyHandle<C, Provider, Pool, Validator> {
+impl<Api> Clone for EngineSszProxyHandle<Api> {
     fn clone(&self) -> Self {
         Self { engine_api: self.engine_api.clone(), witness_handler: self.witness_handler.clone() }
     }
 }
 
-impl<C, Provider, Pool, Validator> std::fmt::Debug
-    for EngineSszProxyHandle<C, Provider, Pool, Validator>
-{
+impl<Api> std::fmt::Debug for EngineSszProxyHandle<Api> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineSszProxyHandle").finish_non_exhaustive()
     }
 }
 
-impl<ChainSpec, Provider, Pool, Validator>
-    EngineSszProxyHandle<ChainSpec, Provider, Pool, Validator>
-{
+impl<Api> EngineSszProxyHandle<Api> {
     fn new() -> Self {
         Self { engine_api: Default::default(), witness_handler: Default::default() }
     }
 
-    fn with_engine_api(engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>) -> Self {
+    fn with_engine_api(engine_api: Api) -> Self {
         Self {
             engine_api: Arc::new(RwLock::new(Some(engine_api))),
             witness_handler: Default::default(),
@@ -117,18 +103,12 @@ impl<ChainSpec, Provider, Pool, Validator>
     }
 
     /// Sets the Engine API implementation used by the proxy.
-    pub async fn set_engine_api(
-        &self,
-        engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>,
-    ) {
+    pub async fn set_engine_api(&self, engine_api: Api) {
         *self.engine_api.write().await = Some(engine_api);
     }
 
     /// Sets the Engine API implementation during synchronous launch wiring.
-    pub fn set_engine_api_sync(
-        &self,
-        engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>,
-    ) {
+    pub fn set_engine_api_sync(&self, engine_api: Api) {
         *self
             .engine_api
             .try_write()
@@ -149,48 +129,40 @@ impl<ChainSpec, Provider, Pool, Validator>
     }
 }
 
-impl<ChainSpec, Provider, Pool, Validator>
-    EngineSszProxyHandle<ChainSpec, Provider, Pool, Validator>
-{
-    /// Returns the Engine API implementation used by the proxy.
-    pub async fn engine_api(&self) -> Option<EthEngineApi<Provider, Pool, Validator, ChainSpec>> {
-        self.engine_api.read().await.clone()
-    }
-
+impl<Api: Clone> EngineSszProxyHandle<Api> {
     /// Returns the witness generator used by `/payloads/witness`.
     pub async fn witness_handler(&self) -> Option<Arc<dyn EngineSszWitness>> {
         self.witness_handler.read().await.clone()
+    }
+
+    /// Returns the Engine API implementation used by the proxy.
+    pub async fn engine_api(&self) -> Option<Api> {
+        self.engine_api.read().await.clone()
     }
 }
 
 /// A tower layer that intercepts SSZ Engine API routes under `/engine/v1`.
 #[derive(Clone, Debug)]
-pub struct EngineSszProxyLayer<ChainSpec, Provider = (), Pool = (), Validator = ()> {
-    handle: EngineSszProxyHandle<ChainSpec, Provider, Pool, Validator>,
+pub struct EngineSszProxyLayer<Api = ()> {
+    handle: EngineSszProxyHandle<Api>,
 }
 
-impl<ChainSpec, Provider, Pool, Validator>
-    EngineSszProxyLayer<ChainSpec, Provider, Pool, Validator>
-{
+impl<Api> EngineSszProxyLayer<Api> {
     /// Creates a new proxy layer and a handle for setting the engine after node launch.
-    pub fn new() -> (Self, EngineSszProxyHandle<ChainSpec, Provider, Pool, Validator>) {
+    pub fn new() -> (Self, EngineSszProxyHandle<Api>) {
         let handle = EngineSszProxyHandle::new();
         (Self { handle: handle.clone() }, handle)
     }
 
     /// Creates a new proxy layer with an Engine API implementation.
-    pub fn with_engine_api(
-        engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>,
-    ) -> (Self, EngineSszProxyHandle<ChainSpec, Provider, Pool, Validator>) {
+    pub fn with_engine_api(engine_api: Api) -> (Self, EngineSszProxyHandle<Api>) {
         let handle = EngineSszProxyHandle::with_engine_api(engine_api);
         (Self { handle: handle.clone() }, handle)
     }
 }
 
-impl<S, ChainSpec, Provider, Pool, Validator> Layer<S>
-    for EngineSszProxyLayer<ChainSpec, Provider, Pool, Validator>
-{
-    type Service = EngineSszProxyService<S, ChainSpec, Provider, Pool, Validator>;
+impl<S, Api> Layer<S> for EngineSszProxyLayer<Api> {
+    type Service = EngineSszProxyService<S, Api>;
 
     fn layer(&self, inner: S) -> Self::Service {
         EngineSszProxyService { inner, handle: self.handle.clone() }
@@ -199,20 +171,16 @@ impl<S, ChainSpec, Provider, Pool, Validator> Layer<S>
 
 /// The service produced by [`EngineSszProxyLayer`].
 #[derive(Clone, Debug)]
-pub struct EngineSszProxyService<S, ChainSpec, Provider = (), Pool = (), Validator = ()> {
+pub struct EngineSszProxyService<S, Api = ()> {
     inner: S,
-    handle: EngineSszProxyHandle<ChainSpec, Provider, Pool, Validator>,
+    handle: EngineSszProxyHandle<Api>,
 }
 
-impl<S, ChainSpec, Provider, Pool, Validator> Service<HttpRequest>
-    for EngineSszProxyService<S, ChainSpec, Provider, Pool, Validator>
+impl<S, Api> Service<HttpRequest> for EngineSszProxyService<S, Api>
 where
     S: Service<HttpRequest, Response = HttpResponse, Error = BoxError> + Send + Clone,
     S::Future: Send + 'static,
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalProvider + 'static,
-    Pool: TransactionPool + 'static,
-    Validator: EngineApiValidator<EthEngineTypes>,
-    ChainSpec: EthereumHardforks + Send + Sync + 'static,
+    Api: EngineSszApi,
 {
     type Response = HttpResponse;
     type Error = BoxError;
@@ -233,204 +201,191 @@ where
     }
 }
 
-/// Generates an execution witness for a valid payload.
-pub trait EngineSszWitness: Send + Sync + 'static {
-    /// Generates a REST-SSZ execution witness for the block hash.
-    fn generate_witness(
-        &self,
-        block_hash: B256,
-    ) -> Pin<Box<dyn Future<Output = Result<ExecutionWitnessV1, String>> + Send + '_>>;
-}
-
-/// Re-executes imported blocks to produce `/payloads/witness` responses.
-#[derive(Clone, Debug)]
-pub struct EngineSszWitnessGenerator<Provider, Evm> {
-    provider: Provider,
-    evm_config: Evm,
-    task_spawner: Runtime,
-}
-
-impl<Provider, Evm> EngineSszWitnessGenerator<Provider, Evm> {
-    /// Creates a new witness generator.
-    pub const fn new(provider: Provider, evm_config: Evm, task_spawner: Runtime) -> Self {
-        Self { provider, evm_config, task_spawner }
-    }
-}
-
-impl<Provider, Evm> EngineSszWitness for EngineSszWitnessGenerator<Provider, Evm>
-where
-    Provider: BlockReader + HeaderProvider + StateProviderFactory + Clone + Send + Sync + 'static,
-    Provider::Block: Block<Header: alloy_rlp::Encodable>,
-    Evm: ConfigureEvm<Primitives: NodePrimitives<Block = Provider::Block>> + 'static,
-{
-    fn generate_witness(
-        &self,
-        block_hash: B256,
-    ) -> Pin<Box<dyn Future<Output = Result<ExecutionWitnessV1, String>> + Send + '_>> {
-        let provider = self.provider.clone();
-        let evm_config = self.evm_config.clone();
-        let task_spawner = self.task_spawner.clone();
-
-        Box::pin(async move {
-            task_spawner
-                .spawn_blocking(move || {
-                    let block = provider
-                        .recovered_block(block_hash.into(), TransactionVariant::WithHash)
-                        .map_err(|err| err.to_string())?
-                        .ok_or_else(|| format!("block {block_hash} not found for witness"))?;
-
-                    let block_number = block.header().number();
-                    let parent_hash = block.header().parent_hash();
-                    let state_provider =
-                        provider.state_by_block_hash(parent_hash).map_err(|err| err.to_string())?;
-                    let state = StateProviderDatabase::new(state_provider);
-                    let mut db = reth_revm::State::builder()
-                        .with_database(state)
-                        .with_bundle_update()
-                        .build();
-
-                    let block_executor = evm_config.executor(&mut db);
-                    let mode = ExecutionWitnessMode::Legacy;
-                    let mut witness = None;
-                    block_executor
-                        .execute_with_state_closure(&block, |statedb: &reth_revm::State<_>| {
-                            witness =
-                                Some(ExecutionWitnessRecord::new(statedb).into_execution_witness(
-                                    &statedb.database.database.0,
-                                    &provider,
-                                    block_number,
-                                    mode,
-                                ));
-                        })
-                        .map_err(|err| err.to_string())?;
-
-                    let witness = witness
-                        .expect("state closure is called after successful execution")
-                        .map_err(|err| err.to_string())?;
-
-                    Ok(ExecutionWitnessV1 {
-                        state: witness.state.into_iter().map(|bytes| bytes.to_vec()).collect(),
-                        codes: witness.codes.into_iter().map(|bytes| bytes.to_vec()).collect(),
-                        headers: witness.headers.into_iter().map(|bytes| bytes.to_vec()).collect(),
-                    })
-                })
-                .await
-                .map_err(|err| {
-                    io::Error::new(
-                        io::ErrorKind::BrokenPipe,
-                        format!("witness generation task failed: {err}"),
-                    )
-                    .to_string()
-                })?
-        })
-    }
-}
-
-async fn handle_engine_ssz_request<ChainSpec, Provider, Pool, Validator>(
-    handle: EngineSszProxyHandle<ChainSpec, Provider, Pool, Validator>,
+async fn handle_engine_ssz_request<Api>(
+    handle: EngineSszProxyHandle<Api>,
     request: HttpRequest,
 ) -> HttpResponse
 where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalProvider + 'static,
-    Pool: TransactionPool + 'static,
-    Validator: EngineApiValidator<EthEngineTypes>,
-    ChainSpec: EthereumHardforks + Send + Sync + 'static,
+    Api: EngineSszApi,
 {
     let method = request.method().as_str().to_owned();
     let path = request.uri().path().to_owned();
     let Some(endpoint) = parse_engine_path(&path) else {
-        return text_response(STATUS_NOT_FOUND, "unknown engine ssz endpoint")
+        return problem_response(STATUS_NOT_FOUND, "method-not-found", None)
     };
 
     match endpoint {
         EngineSszEndpoint::Capabilities => {
             if method != "GET" {
-                return text_response(STATUS_METHOD_NOT_ALLOWED, "method not allowed")
+                return problem_response(STATUS_METHOD_NOT_ALLOWED, "method-not-allowed", None)
             }
-            handle_capabilities(handle.witness_handler().await.is_some())
+            handle_capabilities(
+                handle.witness_handler().await.is_some() &&
+                    handle.engine_api().await.is_some_and(|api| api.supports_witness()),
+            )
         }
         EngineSszEndpoint::Identity => {
             if method != "GET" {
-                return text_response(STATUS_METHOD_NOT_ALLOWED, "method not allowed")
+                return problem_response(STATUS_METHOD_NOT_ALLOWED, "method-not-allowed", None)
             }
             let Some(engine_api) = handle.engine_api().await else {
-                return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
+                return problem_response(STATUS_SERVICE_UNAVAILABLE, "service-unavailable", None)
             };
-            handle_identity(engine_api)
+            engine_api.identity()
         }
         EngineSszEndpoint::NewPayload => {
             if method != "POST" {
-                return text_response(STATUS_METHOD_NOT_ALLOWED, "method not allowed")
+                return problem_response(STATUS_METHOD_NOT_ALLOWED, "method-not-allowed", None)
             }
             let Some(fork) = request_fork(&request) else {
-                return text_response(STATUS_BAD_REQUEST, "unsupported fork")
+                return problem_response(STATUS_BAD_REQUEST, "unsupported-fork", None)
             };
-            let Ok(body) = request.into_body().collect().await.map(|body| body.to_bytes()) else {
-                return text_response(STATUS_BAD_REQUEST, "failed to read request body")
-            };
-            let Some(engine_api) = handle.engine_api().await else {
-                return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
-            };
-            handle_new_payload(engine_api, fork, &body).await
-        }
-        EngineSszEndpoint::PayloadsWithWitness => {
-            if method != "POST" {
-                return problem_response(STATUS_METHOD_NOT_ALLOWED, ERROR_INVALID_REQUEST, None)
-            }
-            let Some(fork) = request_fork(&request) else {
-                return problem_response(STATUS_BAD_REQUEST, ERROR_UNSUPPORTED_FORK, None)
-            };
-            let body = match read_witness_body(request, MAX_PAYLOAD_BYTES).await {
+            let body = match read_ssz_body(request, MAX_PAYLOAD_BYTES).await {
                 Ok(body) => body,
                 Err(response) => return response,
             };
             let Some(engine_api) = handle.engine_api().await else {
-                return problem_response(STATUS_INTERNAL_SERVER_ERROR, ERROR_INTERNAL, None)
+                return problem_response(STATUS_SERVICE_UNAVAILABLE, "service-unavailable", None)
             };
-            handle_new_payload_with_witness(engine_api, handle.witness_handler().await, fork, &body)
-                .await
+            engine_api.new_payload(fork, body).await
+        }
+        EngineSszEndpoint::PayloadsWithWitness => {
+            if method != "POST" {
+                return problem_response(STATUS_METHOD_NOT_ALLOWED, "method-not-allowed", None)
+            }
+            let Some(fork) = request_fork(&request) else {
+                return problem_response(STATUS_BAD_REQUEST, "unsupported-fork", None)
+            };
+            if fork != EngineSszFork::Amsterdam {
+                return problem_response(STATUS_BAD_REQUEST, "unsupported-fork", None)
+            }
+            let body = match read_ssz_body(request, MAX_PAYLOAD_BYTES).await {
+                Ok(body) => body,
+                Err(response) => return response,
+            };
+            let Some(engine_api) = handle.engine_api().await else {
+                return problem_response(STATUS_SERVICE_UNAVAILABLE, "service-unavailable", None)
+            };
+            let Some(witness_handler) = handle.witness_handler().await else {
+                return problem_response(STATUS_SERVICE_UNAVAILABLE, "service-unavailable", None)
+            };
+            engine_api.new_payload_with_witness(body, witness_handler).await
         }
         EngineSszEndpoint::GetPayload(payload_id) => {
             if method != "GET" {
-                return text_response(STATUS_METHOD_NOT_ALLOWED, "method not allowed")
+                return problem_response(STATUS_METHOD_NOT_ALLOWED, "method-not-allowed", None)
             }
             let Ok(payload_id) = payload_id else {
-                return text_response(STATUS_BAD_REQUEST, "invalid payload id")
+                return problem_response(STATUS_BAD_REQUEST, "invalid-request", None)
             };
             let Some(fork) = request_fork(&request) else {
-                return text_response(STATUS_BAD_REQUEST, "unsupported fork")
+                return problem_response(STATUS_BAD_REQUEST, "unsupported-fork", None)
             };
             let Some(engine_api) = handle.engine_api().await else {
-                return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
+                return problem_response(STATUS_SERVICE_UNAVAILABLE, "service-unavailable", None)
             };
-            handle_get_payload(engine_api, fork, payload_id).await
+            engine_api.get_payload(fork, payload_id).await
         }
         EngineSszEndpoint::Forkchoice => {
             if method != "POST" {
-                return text_response(STATUS_METHOD_NOT_ALLOWED, "method not allowed")
+                return problem_response(STATUS_METHOD_NOT_ALLOWED, "method-not-allowed", None)
             }
             let Some(fork) = request_fork(&request) else {
-                return text_response(STATUS_BAD_REQUEST, "unsupported fork")
+                return problem_response(STATUS_BAD_REQUEST, "unsupported-fork", None)
             };
-            let Ok(body) = request.into_body().collect().await.map(|body| body.to_bytes()) else {
-                return text_response(STATUS_BAD_REQUEST, "failed to read request body")
+            let body = match read_ssz_body(request, MAX_PAYLOAD_BYTES).await {
+                Ok(body) => body,
+                Err(response) => return response,
             };
             let Some(engine_api) = handle.engine_api().await else {
-                return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
+                return problem_response(STATUS_SERVICE_UNAVAILABLE, "service-unavailable", None)
             };
-            handle_forkchoice_updated(engine_api, fork, &body).await
+            engine_api.forkchoice_updated(fork, body).await
+        }
+        EngineSszEndpoint::PayloadBodiesByHash => {
+            if method != "POST" {
+                return problem_response(STATUS_METHOD_NOT_ALLOWED, "method-not-allowed", None)
+            }
+            let Some(fork) = request_fork(&request) else {
+                return problem_response(STATUS_BAD_REQUEST, "unsupported-fork", None)
+            };
+            let body = match read_ssz_body(request, MAX_BODIES_REQUEST_BYTES).await {
+                Ok(body) => body,
+                Err(response) => return response,
+            };
+            let request = match BodiesByHashRequest::from_ssz_bytes(&body) {
+                Ok(request) if request.block_hashes.len() <= MAX_BODIES_REQUEST => {
+                    request.block_hashes
+                }
+                Ok(_) => {
+                    return problem_response(STATUS_PAYLOAD_TOO_LARGE, "request-too-large", None)
+                }
+                Err(_) => return problem_response(STATUS_BAD_REQUEST, "ssz-decode-error", None),
+            };
+            let Some(engine_api) = handle.engine_api().await else {
+                return problem_response(STATUS_SERVICE_UNAVAILABLE, "service-unavailable", None)
+            };
+            engine_api.get_payload_bodies_by_hash(fork, request).await
+        }
+        EngineSszEndpoint::PayloadBodiesByRange => {
+            if method != "GET" {
+                return problem_response(STATUS_METHOD_NOT_ALLOWED, "method-not-allowed", None)
+            }
+            let Some(fork) = request_fork(&request) else {
+                return problem_response(STATUS_BAD_REQUEST, "unsupported-fork", None)
+            };
+            let Some(query) = request.uri().query() else {
+                return problem_response(
+                    STATUS_BAD_REQUEST,
+                    "invalid-request",
+                    Some("missing payload bodies query".to_string()),
+                )
+            };
+            let mut start = None;
+            let mut count = None;
+            for pair in query.split('&') {
+                let Some((key, value)) = pair.split_once('=') else {
+                    return problem_response(STATUS_BAD_REQUEST, "invalid-request", None)
+                };
+                match key {
+                    "from" => match value.parse() {
+                        Ok(value) => start = Some(value),
+                        Err(_) => {
+                            return problem_response(STATUS_BAD_REQUEST, "invalid-request", None)
+                        }
+                    },
+                    "count" => match value.parse() {
+                        Ok(value) => count = Some(value),
+                        Err(_) => {
+                            return problem_response(STATUS_BAD_REQUEST, "invalid-request", None)
+                        }
+                    },
+                    _ => return problem_response(STATUS_BAD_REQUEST, "invalid-request", None),
+                }
+            }
+            let (Some(start), Some(count)) = (start, count) else {
+                return problem_response(STATUS_BAD_REQUEST, "invalid-request", None)
+            };
+            if count > MAX_BODIES_REQUEST as u64 {
+                return problem_response(STATUS_PAYLOAD_TOO_LARGE, "request-too-large", None)
+            };
+            let Some(engine_api) = handle.engine_api().await else {
+                return problem_response(STATUS_SERVICE_UNAVAILABLE, "service-unavailable", None)
+            };
+            engine_api.get_payload_bodies_by_range(fork, start, count).await
         }
         EngineSszEndpoint::Blobs(version) => {
             if method != "POST" {
-                return text_response(STATUS_METHOD_NOT_ALLOWED, "method not allowed")
+                return problem_response(STATUS_METHOD_NOT_ALLOWED, "method-not-allowed", None)
             }
-            let Ok(body) = request.into_body().collect().await.map(|body| body.to_bytes()) else {
-                return text_response(STATUS_BAD_REQUEST, "failed to read request body")
+            let body = match read_ssz_body(request, MAX_BLOB_REQUEST_BYTES).await {
+                Ok(body) => body,
+                Err(response) => return response,
             };
             let Some(engine_api) = handle.engine_api().await else {
-                return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
+                return problem_response(STATUS_SERVICE_UNAVAILABLE, "service-unavailable", None)
             };
-            handle_get_blobs(engine_api, version, &body).await
+            engine_api.get_blobs(version, body).await
         }
     }
 }
@@ -464,6 +419,12 @@ fn parse_engine_path(path: &str) -> Option<EngineSszEndpoint> {
         (Some("engine"), Some("v1"), Some("blobs"), version, None) => {
             Some(EngineSszEndpoint::Blobs(parse_method_version(version?)?))
         }
+        (Some("engine"), Some("v1"), Some("bodies"), Some("hash"), None) => {
+            Some(EngineSszEndpoint::PayloadBodiesByHash)
+        }
+        (Some("engine"), Some("v1"), Some("bodies"), None, None) => {
+            Some(EngineSszEndpoint::PayloadBodiesByRange)
+        }
         _ => None,
     }
 }
@@ -476,16 +437,25 @@ enum EngineSszEndpoint {
     PayloadsWithWitness,
     GetPayload(Result<PayloadId, <PayloadId as std::str::FromStr>::Err>),
     Forkchoice,
+    PayloadBodiesByHash,
+    PayloadBodiesByRange,
     Blobs(u8),
 }
 
+/// Fork selector used by SSZ Engine API request handling.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum EngineSszFork {
+pub enum EngineSszFork {
+    /// Paris fork.
     Paris,
+    /// Shanghai fork.
     Shanghai,
+    /// Cancun fork.
     Cancun,
+    /// Prague fork.
     Prague,
+    /// Osaka fork.
     Osaka,
+    /// Amsterdam fork.
     Amsterdam,
 }
 
@@ -507,10 +477,6 @@ impl EngineSszFork {
             Self::Cancun | Self::Prague | Self::Osaka => 3,
             Self::Amsterdam => 4,
         }
-    }
-
-    const fn supports_witness(self) -> bool {
-        matches!(self, Self::Amsterdam)
     }
 }
 
@@ -547,7 +513,7 @@ fn handle_capabilities(witness_enabled: bool) -> HttpResponse {
         },
         "unscoped_endpoints": ["capabilities", "identity"],
         "limits": {
-            "bodies.max_count": 128,
+            "bodies.max_count": MAX_BODIES_REQUEST,
             "blobs.max_versioned_hashes": MAX_BLOB_LIMIT,
             "payload.max_bytes": MAX_PAYLOAD_BYTES,
         },
@@ -586,47 +552,55 @@ where
                         get_payload_response(BuiltPayloadParis { payload, block_value })
                     }
                     ExecutionPayloadFieldV2::V2(_) => {
-                        text_response(STATUS_BAD_REQUEST, "unsupported fork")
+                        problem_response(STATUS_BAD_REQUEST, "unsupported-fork", None)
                     }
                 }
             }
-            Err(err) => get_payload_error_response(err),
+            Err(err) => engine_error_response(err),
         },
         EngineSszFork::Shanghai => match engine_api.get_payload_v2_metered(payload_id).await {
             Ok(payload) => match BuiltPayloadShanghai::try_from(payload) {
                 Ok(payload) => get_payload_response(payload),
-                Err(err) => text_response(STATUS_BAD_REQUEST, err.to_string()),
+                Err(err) => problem_response(422, "invalid-body", Some(err.to_string())),
             },
-            Err(err) => get_payload_error_response(err),
+            Err(err) => engine_error_response(err),
         },
         EngineSszFork::Cancun => match engine_api.get_payload_v3_metered(payload_id).await {
             Ok(payload) => get_payload_response(BuiltPayloadCancun::from(payload)),
-            Err(err) => get_payload_error_response(err),
+            Err(err) => engine_error_response(err),
         },
         EngineSszFork::Prague => match engine_api.get_payload_v4_metered(payload_id).await {
             Ok(payload) => get_payload_response(BuiltPayloadPrague::from(payload)),
-            Err(err) => get_payload_error_response(err),
+            Err(err) => engine_error_response(err),
         },
         EngineSszFork::Osaka => match engine_api.get_payload_v5_metered(payload_id).await {
             Ok(payload) => get_payload_response(BuiltPayloadOsaka::from(payload)),
-            Err(err) => get_payload_error_response(err),
+            Err(err) => engine_error_response(err),
         },
         EngineSszFork::Amsterdam => match engine_api.get_payload_v6_metered(payload_id).await {
             Ok(payload) => get_payload_response(BuiltPayloadAmsterdam::from(payload)),
-            Err(err) => get_payload_error_response(err),
+            Err(err) => engine_error_response(err),
         },
     }
 }
 
-fn get_payload_error_response(err: EngineApiError) -> HttpResponse {
-    let status = match &err {
-        EngineApiError::UnknownPayload => STATUS_NOT_FOUND,
-        EngineApiError::EngineObjectValidationError(
-            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
-        ) => STATUS_BAD_REQUEST,
-        _ => STATUS_INTERNAL_SERVER_ERROR,
+fn engine_error_response(err: EngineApiError) -> HttpResponse {
+    let detail = err.to_string();
+    let error: jsonrpsee::types::ErrorObjectOwned = err.into();
+    let (status, problem_type) = match error.code() {
+        -32700 => (400, "parse-error"),
+        -32600 => (400, "invalid-request"),
+        -32601 => (404, "method-not-found"),
+        -32602 => (422, "invalid-body"),
+        -38001 => (404, "unknown-payload"),
+        -38002 => (409, "invalid-forkchoice"),
+        -38003 => (422, "invalid-attributes"),
+        -38004 => (413, "request-too-large"),
+        -38005 => (400, "unsupported-fork"),
+        -38006 => (409, "reorg-too-deep"),
+        _ => (500, "internal"),
     };
-    text_response(status, err.to_string())
+    problem_response(status, problem_type, Some(detail))
 }
 
 async fn handle_new_payload<Provider, Pool, Validator, ChainSpec>(
@@ -642,7 +616,7 @@ where
 {
     let payload = match decode_new_payload_request(fork, body) {
         Ok(payload) => payload,
-        Err(err) => return text_response(STATUS_BAD_REQUEST, err),
+        Err(_) => return problem_response(STATUS_BAD_REQUEST, "ssz-decode-error", None),
     };
 
     let response = match fork.payloads_version() {
@@ -651,22 +625,23 @@ where
         3 => engine_api.new_payload_v3(payload).await,
         4 => engine_api.new_payload_v4(payload).await,
         5 => engine_api.new_payload_v5(payload).await,
-        _ => return text_response(STATUS_BAD_REQUEST, "unsupported payload endpoint version"),
+        _ => return problem_response(STATUS_BAD_REQUEST, "unsupported-fork", None),
     };
 
     match response {
         Ok(status) => match EngineSszPayloadStatus::try_from(status) {
             Ok(status) => ssz_response(status),
-            Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+            Err(err) => {
+                problem_response(STATUS_INTERNAL_SERVER_ERROR, "internal", Some(err.to_string()))
+            }
         },
-        Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+        Err(err) => engine_error_response(err),
     }
 }
 
 async fn handle_new_payload_with_witness<Provider, Pool, Validator, ChainSpec>(
     engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>,
-    witness_handler: Option<Arc<dyn EngineSszWitness>>,
-    fork: EngineSszFork,
+    witness_handler: Arc<dyn EngineSszWitness>,
     body: &[u8],
 ) -> HttpResponse
 where
@@ -675,27 +650,12 @@ where
     Validator: EngineApiValidator<EthEngineTypes>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
-    if !fork.supports_witness() {
-        return problem_response(STATUS_BAD_REQUEST, ERROR_UNSUPPORTED_FORK, None)
-    }
-
-    let Some(witness_handler) = witness_handler else {
-        return problem_response(
-            STATUS_SERVICE_UNAVAILABLE,
-            ERROR_INTERNAL,
-            Some("witness generator unavailable".to_string()),
-        )
-    };
-
-    let payload = match decode_new_payload_request(fork, body) {
+    let payload = match decode_new_payload_request(EngineSszFork::Amsterdam, body) {
         Ok(payload) => payload,
-        Err(err) => return problem_response(STATUS_BAD_REQUEST, ERROR_SSZ_DECODE, Some(err.into())),
+        Err(_) => return problem_response(STATUS_BAD_REQUEST, "ssz-decode-error", None),
     };
 
-    let response = match fork.payloads_version() {
-        5 => engine_api.new_payload_v5(payload).await,
-        _ => return problem_response(STATUS_BAD_REQUEST, ERROR_UNSUPPORTED_FORK, None),
-    };
+    let response = engine_api.new_payload_v5(payload.clone()).await;
 
     let status = match response {
         Ok(status) => match EngineSszPayloadStatus::try_from(status) {
@@ -703,32 +663,19 @@ where
             Err(err) => {
                 return problem_response(
                     STATUS_INTERNAL_SERVER_ERROR,
-                    ERROR_INTERNAL,
+                    "internal",
                     Some(err.to_string()),
                 )
             }
         },
-        Err(err) => {
-            return problem_response(
-                STATUS_INTERNAL_SERVER_ERROR,
-                ERROR_INTERNAL,
-                Some(err.to_string()),
-            )
-        }
+        Err(err) => return engine_error_response(err),
     };
 
-    let witness = if matches!(&status.status, PayloadStatusEnum::Valid) {
-        let Some(block_hash) = status.latest_valid_hash.as_ref().copied() else {
-            return problem_response(
-                STATUS_INTERNAL_SERVER_ERROR,
-                ERROR_INTERNAL,
-                Some("valid payload status missing latest_valid_hash".to_string()),
-            )
-        };
-        match witness_handler.generate_witness(block_hash).await {
+    let witness = if matches!(&status.status, alloy_rpc_types_engine::PayloadStatusEnum::Valid) {
+        match witness_handler.generate_witness(payload).await {
             Ok(witness) => Some(witness),
             Err(err) => {
-                return problem_response(STATUS_INTERNAL_SERVER_ERROR, ERROR_INTERNAL, Some(err))
+                return problem_response(STATUS_INTERNAL_SERVER_ERROR, "internal", Some(err))
             }
         }
     } else {
@@ -736,41 +683,6 @@ where
     };
 
     ssz_response(PayloadStatusWithWitness::new(status, witness))
-}
-
-async fn read_witness_body(request: HttpRequest, max_bytes: u64) -> Result<Bytes, HttpResponse> {
-    let content_type = request.headers().get(CONTENT_TYPE).and_then(|value| value.to_str().ok());
-    if content_type != Some(OCTET_STREAM) {
-        return Err(problem_response(
-            STATUS_UNSUPPORTED_MEDIA_TYPE,
-            ERROR_UNSUPPORTED_MEDIA_TYPE,
-            None,
-        ))
-    }
-
-    if let Some(content_length) = request.headers().get(CONTENT_LENGTH) {
-        let Some(content_length) =
-            content_length.to_str().ok().and_then(|value| value.parse::<u64>().ok())
-        else {
-            return Err(problem_response(STATUS_BAD_REQUEST, ERROR_INVALID_REQUEST, None))
-        };
-        if content_length > max_bytes {
-            return Err(problem_response(STATUS_PAYLOAD_TOO_LARGE, ERROR_REQUEST_TOO_LARGE, None))
-        }
-    }
-
-    let Ok(limit) = usize::try_from(max_bytes) else {
-        return Err(problem_response(STATUS_INTERNAL_SERVER_ERROR, ERROR_INTERNAL, None))
-    };
-    match Limited::new(request.into_body(), limit).collect().await {
-        Ok(body) => Ok(body.to_bytes().into()),
-        Err(err) if err.downcast_ref::<LengthLimitError>().is_some() => {
-            Err(problem_response(STATUS_PAYLOAD_TOO_LARGE, ERROR_REQUEST_TOO_LARGE, None))
-        }
-        Err(err) => {
-            Err(problem_response(STATUS_BAD_REQUEST, ERROR_INVALID_REQUEST, Some(err.to_string())))
-        }
-    }
 }
 
 async fn handle_forkchoice_updated<Provider, Pool, Validator, ChainSpec>(
@@ -786,7 +698,7 @@ where
 {
     let (state, attrs, custody_columns) = match decode_forkchoice_request(fork, body) {
         Ok(request) => request,
-        Err(err) => return text_response(STATUS_BAD_REQUEST, err),
+        Err(_) => return problem_response(STATUS_BAD_REQUEST, "ssz-decode-error", None),
     };
 
     let response = match fork.forkchoice_version() {
@@ -794,15 +706,172 @@ where
         2 => engine_api.fork_choice_updated_v2_metered(state, attrs).await,
         3 => engine_api.fork_choice_updated_v3_metered(state, attrs).await,
         4 => engine_api.fork_choice_updated_v4_metered(state, attrs, custody_columns).await,
-        _ => return text_response(STATUS_BAD_REQUEST, "unsupported forkchoice endpoint version"),
+        _ => return problem_response(STATUS_BAD_REQUEST, "unsupported-fork", None),
     };
 
     match response {
         Ok(updated) => match ForkchoiceUpdateResponse::try_from(updated) {
             Ok(updated) => ssz_response(updated),
-            Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+            Err(err) => {
+                problem_response(STATUS_INTERNAL_SERVER_ERROR, "internal", Some(err.to_string()))
+            }
         },
-        Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+        Err(err) => engine_error_response(err),
+    }
+}
+
+enum PayloadBodiesRequest {
+    Hash(Vec<B256>),
+    Range { start: u64, count: u64 },
+}
+
+async fn handle_get_payload_bodies<Provider, Pool, Validator, ChainSpec>(
+    engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>,
+    fork: EngineSszFork,
+    request: PayloadBodiesRequest,
+) -> HttpResponse
+where
+    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalProvider + 'static,
+    Pool: TransactionPool + 'static,
+    Validator: EngineApiValidator<EthEngineTypes>,
+    ChainSpec: EthereumHardforks + Send + Sync + 'static,
+{
+    let include_bal = fork == EngineSszFork::Amsterdam;
+    let response = match request {
+        PayloadBodiesRequest::Hash(hashes) => {
+            engine_api.get_payload_bodies_by_hash_with_timestamps(hashes, include_bal).await
+        }
+        PayloadBodiesRequest::Range { start, count } => {
+            engine_api.get_payload_bodies_by_range_with_timestamps(start, count, include_bal).await
+        }
+    };
+    let chain_spec = engine_api.chain_spec();
+    if include_bal {
+        return payload_bodies_http_response(
+            response,
+            |body| ExecutionPayloadBodyAmsterdam::try_from(body).ok(),
+            fork,
+            chain_spec.as_ref(),
+        )
+    }
+    let response = response.map(|bodies| {
+        bodies
+            .into_iter()
+            .map(|body| {
+                body.map(|(timestamp, body)| {
+                    (
+                        timestamp,
+                        ExecutionPayloadBodyV1 {
+                            transactions: body.transactions,
+                            withdrawals: body.withdrawals,
+                        },
+                    )
+                })
+            })
+            .collect()
+    });
+    if fork == EngineSszFork::Paris {
+        payload_bodies_http_response(
+            response,
+            |body| ExecutionPayloadBodyParis::try_from(body).ok(),
+            fork,
+            chain_spec.as_ref(),
+        )
+    } else {
+        payload_bodies_http_response(
+            response,
+            |body| ExecutionPayloadBodyShanghai::try_from(body).ok(),
+            fork,
+            chain_spec.as_ref(),
+        )
+    }
+}
+
+fn payload_bodies_response<LegacyBody, ForkBody>(
+    response: Result<Vec<Option<(u64, LegacyBody)>>, EngineApiError>,
+    convert: impl Fn(LegacyBody) -> Option<ForkBody>,
+    fork: EngineSszFork,
+    chain_spec: &impl EthereumHardforks,
+) -> Result<BodiesResponse<ForkBody>, EngineApiError>
+where
+    ForkBody: Default + ssz::Encode + ssz::Decode,
+{
+    let bodies = response?;
+    let bodies = bodies
+        .into_iter()
+        .map(|body| {
+            body.filter(|(timestamp, _)| body_matches_fork(chain_spec, fork, *timestamp))
+                .map(|(_, body)| body)
+        })
+        .collect();
+    Ok(BodiesResponse::from_optional_bodies(bodies, convert))
+}
+
+fn payload_bodies_http_response<LegacyBody, ForkBody>(
+    response: Result<Vec<Option<(u64, LegacyBody)>>, EngineApiError>,
+    convert: impl Fn(LegacyBody) -> Option<ForkBody>,
+    fork: EngineSszFork,
+    chain_spec: &impl EthereumHardforks,
+) -> HttpResponse
+where
+    ForkBody: Default + ssz::Encode + ssz::Decode,
+{
+    match payload_bodies_response(response, convert, fork, chain_spec) {
+        Ok(response) => ssz_response(response),
+        Err(err) => engine_error_response(err),
+    }
+}
+
+fn body_matches_fork<ChainSpec: EthereumHardforks>(
+    chain_spec: &ChainSpec,
+    fork: EngineSszFork,
+    timestamp: u64,
+) -> bool {
+    let active = |fork| chain_spec.is_ethereum_fork_active_at_timestamp(fork, timestamp);
+    match fork {
+        EngineSszFork::Paris => !active(EthereumHardfork::Shanghai),
+        EngineSszFork::Shanghai => {
+            active(EthereumHardfork::Shanghai) && !active(EthereumHardfork::Cancun)
+        }
+        EngineSszFork::Cancun => {
+            active(EthereumHardfork::Cancun) && !active(EthereumHardfork::Prague)
+        }
+        EngineSszFork::Prague => {
+            active(EthereumHardfork::Prague) && !active(EthereumHardfork::Osaka)
+        }
+        EngineSszFork::Osaka => {
+            active(EthereumHardfork::Osaka) && !active(EthereumHardfork::Amsterdam)
+        }
+        EngineSszFork::Amsterdam => active(EthereumHardfork::Amsterdam),
+    }
+}
+
+async fn read_ssz_body(request: HttpRequest, max_bytes: u64) -> Result<Bytes, HttpResponse> {
+    let content_type = request.headers().get(CONTENT_TYPE).and_then(|value| value.to_str().ok());
+    if content_type != Some(OCTET_STREAM) {
+        return Err(problem_response(STATUS_UNSUPPORTED_MEDIA_TYPE, "unsupported-media-type", None))
+    }
+
+    if let Some(content_length) = request.headers().get("content-length") {
+        let Some(content_length) =
+            content_length.to_str().ok().and_then(|value| value.parse::<u64>().ok())
+        else {
+            return Err(problem_response(STATUS_BAD_REQUEST, "invalid-request", None))
+        };
+        if content_length > max_bytes {
+            return Err(problem_response(STATUS_PAYLOAD_TOO_LARGE, "request-too-large", None))
+        }
+    }
+
+    let Ok(limit) = usize::try_from(max_bytes) else {
+        return Err(problem_response(STATUS_INTERNAL_SERVER_ERROR, "internal", None))
+    };
+    match Limited::new(request.into_body(), limit).collect().await {
+        Ok(body) => Ok(body.to_bytes().into()),
+        Err(err) if err.downcast_ref::<LengthLimitError>().is_some() => {
+            Err(problem_response(STATUS_PAYLOAD_TOO_LARGE, "request-too-large", None))
+        }
+        Err(_) => Err(problem_response(STATUS_BAD_REQUEST, "invalid-request", None)),
     }
 }
 
@@ -818,62 +887,182 @@ where
     Validator: EngineApiValidator<EthEngineTypes>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
+    let request = if version == 4 {
+        BlobsV4Request::from_ssz_bytes(body)
+    } else {
+        BlobsV1Request::from_ssz_bytes(body).map(|request| BlobsV4Request {
+            versioned_hashes: request.versioned_hashes,
+            indices_bitarray: B128::ZERO,
+        })
+    };
+    let request = match request {
+        Ok(request) => request,
+        Err(_) => return problem_response(STATUS_BAD_REQUEST, "ssz-decode-error", None),
+    };
+    if request.versioned_hashes.len() > MAX_BLOB_LIMIT {
+        return problem_response(STATUS_PAYLOAD_TOO_LARGE, "request-too-large", None)
+    }
+    let hashes = request.versioned_hashes;
     match version {
-        1 => {
-            let hashes = match decode_blob_hashes_request(body) {
-                Ok(hashes) => hashes,
-                Err(err) => return text_response(STATUS_BAD_REQUEST, err),
-            };
-            match engine_api.get_blobs_v1_metered(hashes) {
-                Ok(response) => ssz_response(response),
-                Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
-            }
-        }
-        2 => {
-            let hashes = match decode_blob_hashes_request(body) {
-                Ok(hashes) => hashes,
-                Err(err) => return text_response(STATUS_BAD_REQUEST, err),
-            };
-            match engine_api.get_blobs_v2_metered(hashes) {
-                Ok(Some(response)) => ssz_response(response),
-                Ok(None) => no_content_response(),
-                Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
-            }
-        }
-        3 => {
-            let hashes = match decode_blob_hashes_request(body) {
-                Ok(hashes) => hashes,
-                Err(err) => return text_response(STATUS_BAD_REQUEST, err),
-            };
-            match engine_api.get_blobs_v3_metered(hashes) {
-                Ok(Some(response)) => ssz_response(response),
-                Ok(None) => no_content_response(),
-                Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
-            }
-        }
-        4 => {
-            let (hashes, indices_bitarray) = match decode_blob_cells_request(body) {
-                Ok(request) => request,
-                Err(err) => return text_response(STATUS_BAD_REQUEST, err),
-            };
-            match engine_api.get_blobs_v4_metered(hashes, indices_bitarray) {
-                Ok(Some(response)) => ssz_response(response),
-                Ok(None) => no_content_response(),
-                Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
-            }
-        }
-        _ => text_response(STATUS_NOT_FOUND, "unsupported blobs endpoint version"),
+        1 => blob_response::<BlobsV1Response, _>(engine_api.get_blobs_v1_metered(hashes).map(Some)),
+        2 => blob_response::<BlobsV2Response, _>(engine_api.get_blobs_v2_metered(hashes)),
+        3 => blob_response::<BlobsV3Response, _>(engine_api.get_blobs_v3_metered(hashes)),
+        4 => blob_response::<BlobsV4Response, _>(
+            engine_api.get_blobs_v4_metered(hashes, request.indices_bitarray),
+        ),
+        _ => problem_response(STATUS_NOT_FOUND, "method-not-found", None),
     }
 }
 
-/// Decodes the common getBlobs request container with only versioned hashes.
-fn decode_blob_hashes_request(body: &[u8]) -> Result<Vec<B256>, &'static str> {
-    Vec::<B256>::from_ssz_bytes(body).map_err(|_| "invalid ssz")
+fn blob_response<Ssz, Legacy>(response: Result<Option<Legacy>, EngineApiError>) -> HttpResponse
+where
+    Ssz: TryFrom<Legacy> + ssz::Encode,
+    Ssz::Error: std::fmt::Display,
+{
+    match response {
+        Ok(Some(response)) => match Ssz::try_from(response) {
+            Ok(response) => ssz_response(response),
+            Err(err) => {
+                problem_response(STATUS_INTERNAL_SERVER_ERROR, "internal", Some(err.to_string()))
+            }
+        },
+        Ok(None) => no_content_response(),
+        Err(err) => engine_error_response(err),
+    }
 }
 
-/// Decodes the Amsterdam getBlobs request container with hashes and a cell index mask.
-fn decode_blob_cells_request(body: &[u8]) -> Result<(Vec<B256>, B128), &'static str> {
-    <(Vec<B256>, B128) as ssz::Decode>::from_ssz_bytes(body).map_err(|_| "invalid ssz")
+/// API surface required by the SSZ Engine API proxy.
+pub trait EngineSszApi: Clone + Send + Sync + 'static {
+    /// Whether the implementation supports the witness extension.
+    fn supports_witness(&self) -> bool {
+        false
+    }
+
+    /// Returns the Engine API identity response.
+    fn identity(&self) -> HttpResponse;
+
+    /// Handles a new payload request.
+    fn new_payload(
+        &self,
+        fork: EngineSszFork,
+        body: Bytes,
+    ) -> impl Future<Output = HttpResponse> + Send;
+
+    /// Handles the experimental Amsterdam payload submission with a witness.
+    fn new_payload_with_witness(
+        &self,
+        _body: Bytes,
+        _witness_handler: Arc<dyn EngineSszWitness>,
+    ) -> impl Future<Output = HttpResponse> + Send {
+        async { problem_response(STATUS_NOT_FOUND, "method-not-found", None) }
+    }
+
+    /// Handles a getPayload request.
+    fn get_payload(
+        &self,
+        fork: EngineSszFork,
+        payload_id: PayloadId,
+    ) -> impl Future<Output = HttpResponse> + Send;
+
+    /// Handles a forkchoice update request.
+    fn forkchoice_updated(
+        &self,
+        fork: EngineSszFork,
+        body: Bytes,
+    ) -> impl Future<Output = HttpResponse> + Send;
+
+    /// Handles a getPayloadBodiesByHash request.
+    fn get_payload_bodies_by_hash(
+        &self,
+        fork: EngineSszFork,
+        hashes: Vec<B256>,
+    ) -> impl Future<Output = HttpResponse> + Send;
+
+    /// Handles a getPayloadBodiesByRange request.
+    fn get_payload_bodies_by_range(
+        &self,
+        fork: EngineSszFork,
+        start: u64,
+        count: u64,
+    ) -> impl Future<Output = HttpResponse> + Send;
+
+    /// Handles a getBlobs request.
+    fn get_blobs(&self, version: u8, body: Bytes) -> impl Future<Output = HttpResponse> + Send;
+}
+
+impl<Provider, Pool, Validator, ChainSpec> EngineSszApi
+    for EthEngineApi<Provider, Pool, Validator, ChainSpec>
+where
+    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalProvider + 'static,
+    Pool: TransactionPool + 'static,
+    Validator: EngineApiValidator<EthEngineTypes>,
+    ChainSpec: EthereumHardforks + Send + Sync + 'static,
+{
+    fn supports_witness(&self) -> bool {
+        true
+    }
+
+    async fn new_payload_with_witness(
+        &self,
+        body: Bytes,
+        witness_handler: Arc<dyn EngineSszWitness>,
+    ) -> HttpResponse {
+        handle_new_payload_with_witness(self.clone(), witness_handler, &body).await
+    }
+
+    fn identity(&self) -> HttpResponse {
+        handle_identity(self.clone())
+    }
+
+    fn new_payload(
+        &self,
+        fork: EngineSszFork,
+        body: Bytes,
+    ) -> impl Future<Output = HttpResponse> + Send {
+        let engine_api = self.clone();
+        async move { handle_new_payload(engine_api, fork, body.as_ref()).await }
+    }
+
+    fn get_payload(
+        &self,
+        fork: EngineSszFork,
+        payload_id: PayloadId,
+    ) -> impl Future<Output = HttpResponse> + Send {
+        let engine_api = self.clone();
+        async move { handle_get_payload(engine_api, fork, payload_id).await }
+    }
+
+    fn forkchoice_updated(
+        &self,
+        fork: EngineSszFork,
+        body: Bytes,
+    ) -> impl Future<Output = HttpResponse> + Send {
+        let engine_api = self.clone();
+        async move { handle_forkchoice_updated(engine_api, fork, body.as_ref()).await }
+    }
+
+    async fn get_payload_bodies_by_hash(
+        &self,
+        fork: EngineSszFork,
+        hashes: Vec<B256>,
+    ) -> HttpResponse {
+        handle_get_payload_bodies(self.clone(), fork, PayloadBodiesRequest::Hash(hashes)).await
+    }
+
+    async fn get_payload_bodies_by_range(
+        &self,
+        fork: EngineSszFork,
+        start: u64,
+        count: u64,
+    ) -> HttpResponse {
+        handle_get_payload_bodies(self.clone(), fork, PayloadBodiesRequest::Range { start, count })
+            .await
+    }
+
+    fn get_blobs(&self, version: u8, body: Bytes) -> impl Future<Output = HttpResponse> + Send {
+        let engine_api = self.clone();
+        async move { handle_get_blobs(engine_api, version, body.as_ref()).await }
+    }
 }
 
 fn decode_new_payload_request(
@@ -1036,7 +1225,11 @@ fn get_payload_response<T: ssz::Encode>(value: T) -> HttpResponse {
 
 fn json_response<T: serde::Serialize>(value: T) -> HttpResponse {
     let Ok(body) = serde_json::to_string(&value) else {
-        return text_response(STATUS_INTERNAL_SERVER_ERROR, "failed to encode json")
+        return problem_response(
+            STATUS_INTERNAL_SERVER_ERROR,
+            "internal",
+            Some("failed to encode json".to_string()),
+        )
     };
 
     HttpResponse::builder()
@@ -1050,23 +1243,17 @@ fn no_content_response() -> HttpResponse {
     HttpResponse::builder().status(204).body(HttpBody::empty()).expect("valid response")
 }
 
-fn text_response(status: u16, body: impl Into<String>) -> HttpResponse {
-    HttpResponse::builder()
-        .status(status)
-        .header(CONTENT_TYPE, TEXT_PLAIN)
-        .body(HttpBody::from(body.into()))
-        .expect("valid response")
-}
-
 fn problem_response(
     status: u16,
     problem_type: &'static str,
     detail: Option<String>,
 ) -> HttpResponse {
+    let problem_type = format!("/engine-api/errors/{problem_type}");
     let body = match detail {
         Some(detail) => serde_json::json!({ "type": problem_type, "detail": detail }),
         None => serde_json::json!({ "type": problem_type }),
     };
+
     HttpResponse::builder()
         .status(status)
         .header(CONTENT_TYPE, PROBLEM_JSON)
@@ -1077,7 +1264,6 @@ fn problem_response(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_rpc_types_engine::PayloadStatus as LegacyPayloadStatus;
     use ssz::Encode;
 
     #[tokio::test]
@@ -1095,25 +1281,153 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn witness_requests_enforce_streamed_body_limit() {
-        for advertised in [false, true] {
-            for size in [16, 17] {
+    async fn post_body_limits_apply_without_content_length() {
+        for size in [16, 17] {
+            let request = HttpRequest::builder()
+                .header(CONTENT_TYPE, OCTET_STREAM)
+                .body(HttpBody::from(vec![0; size]))
+                .unwrap();
+            let response = read_ssz_body(request, 16).await;
+            if size == 16 {
+                assert_eq!(response.unwrap().len(), size);
+            } else {
+                assert_eq!(response.unwrap_err().status(), STATUS_PAYLOAD_TOO_LARGE);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn engine_errors_preserve_validation_semantics() {
+        use alloy_rpc_types_engine::ForkchoiceUpdateError;
+        use reth_engine_primitives::BeaconForkChoiceUpdateError;
+        for (error, status, kind) in [
+            (EngineApiError::UnknownPayload, 404, "unknown-payload"),
+            (EngineApiError::BlobRequestTooLarge { len: 129 }, 413, "request-too-large"),
+            (
+                EngineApiError::ForkChoiceUpdate(
+                    BeaconForkChoiceUpdateError::ForkchoiceUpdateError(
+                        ForkchoiceUpdateError::InvalidState,
+                    ),
+                ),
+                409,
+                "invalid-forkchoice",
+            ),
+            (
+                EngineApiError::ForkChoiceUpdate(
+                    BeaconForkChoiceUpdateError::ForkchoiceUpdateError(
+                        ForkchoiceUpdateError::UpdatedInvalidPayloadAttributes,
+                    ),
+                ),
+                422,
+                "invalid-attributes",
+            ),
+        ] {
+            let response = engine_error_response(error);
+            assert_eq!(response.status(), status);
+            assert_eq!(response.headers()[CONTENT_TYPE], PROBLEM_JSON);
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+            let problem: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(problem["type"], format!("/engine-api/errors/{kind}"));
+        }
+    }
+
+    #[test]
+    fn payload_bodies_are_filtered_at_fork_boundaries() {
+        use reth_chainspec::{ChainSpecBuilder, ForkCondition};
+        let chain_spec = ChainSpecBuilder::default()
+            .chain(1.into())
+            .genesis(Default::default())
+            .with_fork(EthereumHardfork::Shanghai, ForkCondition::Timestamp(10))
+            .with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(20))
+            .with_fork(EthereumHardfork::Prague, ForkCondition::Timestamp(30))
+            .with_fork(EthereumHardfork::Osaka, ForkCondition::Timestamp(40))
+            .with_fork(EthereumHardfork::Amsterdam, ForkCondition::Timestamp(50))
+            .build();
+        for (fork, start, end) in [
+            (EngineSszFork::Shanghai, 10, 20),
+            (EngineSszFork::Cancun, 20, 30),
+            (EngineSszFork::Prague, 30, 40),
+            (EngineSszFork::Osaka, 40, 50),
+        ] {
+            let body = ExecutionPayloadBodyV1 {
+                transactions: vec![Bytes::from_static(&[1, 2, 3])],
+                withdrawals: Some(vec![]),
+            };
+            let response = payload_bodies_response(
+                Ok(vec![
+                    Some((start - 1, body.clone())),
+                    Some((start, body.clone())),
+                    Some((end - 1, body.clone())),
+                    Some((end, body)),
+                    None,
+                ]),
+                |body| ExecutionPayloadBodyShanghai::try_from(body).ok(),
+                fork,
+                &chain_spec,
+            )
+            .unwrap();
+            assert_eq!(
+                response.entries.iter().map(|entry| entry.available).collect::<Vec<_>>(),
+                [false, true, true, false, false]
+            );
+            for index in [0, 3, 4] {
+                assert_eq!(response.entries[index].body, ExecutionPayloadBodyShanghai::default());
+            }
+        }
+        assert!(body_matches_fork(&chain_spec, EngineSszFork::Paris, 9));
+        assert!(!body_matches_fork(&chain_spec, EngineSszFork::Paris, 10));
+        assert!(!body_matches_fork(&chain_spec, EngineSszFork::Amsterdam, 49));
+        assert!(body_matches_fork(&chain_spec, EngineSszFork::Amsterdam, 50));
+    }
+
+    #[tokio::test]
+    async fn payload_bodies_hash_request_limits_and_media_type() {
+        for content_length in [false, true] {
+            for count in [32, 33] {
+                let bytes =
+                    BodiesByHashRequest { block_hashes: vec![B256::ZERO; count] }.as_ssz_bytes();
                 let mut request = HttpRequest::builder().header(CONTENT_TYPE, OCTET_STREAM);
-                if advertised {
-                    request = request.header(CONTENT_LENGTH, size);
+                if content_length {
+                    request = request.header("content-length", bytes.len());
                 }
-                let response =
-                    read_witness_body(request.body(HttpBody::from(vec![0; size])).unwrap(), 16)
-                        .await;
-                if size == 16 {
-                    assert_eq!(response.unwrap().len(), 16);
+                let result = read_ssz_body(
+                    request.body(HttpBody::from(bytes)).unwrap(),
+                    MAX_BODIES_REQUEST_BYTES,
+                )
+                .await;
+                if count == 32 {
+                    assert_eq!(
+                        BodiesByHashRequest::from_ssz_bytes(&result.unwrap())
+                            .unwrap()
+                            .block_hashes
+                            .len(),
+                        32
+                    );
                 } else {
-                    let response = response.unwrap_err();
+                    let response = result.unwrap_err();
                     assert_eq!(response.status(), STATUS_PAYLOAD_TOO_LARGE);
                     assert_eq!(response.headers()[CONTENT_TYPE], PROBLEM_JSON);
                 }
             }
         }
+        let response = read_ssz_body(HttpRequest::new(HttpBody::empty()), MAX_BODIES_REQUEST_BYTES)
+            .await
+            .unwrap_err();
+        assert_eq!(response.status(), STATUS_UNSUPPORTED_MEDIA_TYPE);
+    }
+
+    #[tokio::test]
+    async fn payload_bodies_errors_and_capabilities_match_rest_spec() {
+        let response =
+            engine_error_response(EngineApiError::InvalidBodiesRange { start: 0, count: 1 });
+        assert_eq!(response.status(), 422);
+        assert_eq!(response.headers()[CONTENT_TYPE], PROBLEM_JSON);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let problem: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(problem["type"], "/engine-api/errors/invalid-body");
+        let body = handle_capabilities(false).into_body().collect().await.unwrap().to_bytes();
+        let capabilities: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(capabilities["limits"]["bodies.max_count"], 32);
     }
 
     #[test]
@@ -1158,30 +1472,31 @@ mod tests {
     }
 
     #[test]
+    fn parses_payload_bodies_endpoints() {
+        assert_eq!(
+            parse_engine_path("/engine/v1/bodies/hash").unwrap(),
+            EngineSszEndpoint::PayloadBodiesByHash
+        );
+        assert_eq!(
+            parse_engine_path("/engine/v1/bodies").unwrap(),
+            EngineSszEndpoint::PayloadBodiesByRange
+        );
+    }
+
+    #[test]
     fn rejects_legacy_version_scoped_endpoint() {
         assert!(parse_engine_path("/engine/v4/payloads").is_none());
     }
 
     #[test]
-    fn decodes_top_level_blob_hashes_request() {
+    fn decodes_blob_request_container() {
         let hashes = vec![B256::ZERO, B256::with_last_byte(1)];
-        let decoded = decode_blob_hashes_request(&hashes.as_ssz_bytes()).unwrap();
+        let decoded = BlobsV1Request::from_ssz_bytes(
+            &BlobsV1Request { versioned_hashes: hashes.clone() }.as_ssz_bytes(),
+        )
+        .unwrap()
+        .versioned_hashes;
         assert_eq!(decoded, hashes);
-    }
-
-    #[test]
-    fn payload_status_with_witness_encodes_execution_witness() {
-        let payload_status = EngineSszPayloadStatus::try_from(LegacyPayloadStatus {
-            status: PayloadStatusEnum::Valid,
-            latest_valid_hash: Some(B256::with_last_byte(1)),
-        })
-        .unwrap();
-        let response =
-            PayloadStatusWithWitness::new(payload_status, Some(ExecutionWitnessV1::default()));
-
-        let decoded = PayloadStatusWithWitness::from_ssz_bytes(&response.as_ssz_bytes()).unwrap();
-        assert!(decoded.witness.is_some());
-        assert_eq!(decoded.witness.as_ref(), Some(&ExecutionWitnessV1::default()));
     }
 
     #[test]

@@ -1402,7 +1402,7 @@ pub type WitnessHeaderV1 = Vec<u8>;
 pub struct ExecutionWitnessV1 {
     /// Hashed trie-node preimages required during execution and state-root recomputation.
     pub state: Vec<WitnessNodeV1>,
-    /// Contract bytecode preimages created or accessed during execution.
+    /// Contract bytecode preimages required from the pre-state.
     pub codes: Vec<WitnessCodeV1>,
     /// RLP-encoded ancestor headers used for pre-state and `BLOCKHASH` correctness proofs.
     pub headers: Vec<WitnessHeaderV1>,
