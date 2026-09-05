@@ -130,6 +130,10 @@ impl PayloadAttributes for EthPayloadAttributes {
     fn target_gas_limit(&self) -> Option<u64> {
         self.target_gas_limit
     }
+
+    fn inclusion_list_transactions(&self) -> Option<&[Bytes]> {
+        self.inclusion_list_transactions.as_deref()
+    }
 }
 
 /// Factory trait for creating payload attributes.
@@ -218,6 +222,14 @@ pub fn payload_id(
 
     if let Some(target_gas_limit) = attributes.target_gas_limit {
         hasher.update(target_gas_limit.to_be_bytes());
+    }
+
+    // Two forkchoice updates differing only in their inclusion list must start distinct build
+    // processes, otherwise the second builds against a stale list.
+    if let Some(inclusion_list) = &attributes.inclusion_list_transactions {
+        let mut buf = Vec::new();
+        inclusion_list.encode(&mut buf);
+        hasher.update(buf);
     }
 
     let out = hasher.finalize();
@@ -389,5 +401,34 @@ mod tests {
         attributes.target_gas_limit = Some(60_000_000);
 
         assert_ne!(first, payload_id(&parent, &attributes));
+    }
+
+    #[test]
+    fn test_payload_id_differs_by_inclusion_list() {
+        let parent =
+            B256::from_str("0x3b8fb240d288781d4aac94d3fd16809ee413bc99294a085798a589dae51ddd4a")
+                .unwrap();
+        let mut attributes = EthPayloadAttributes {
+            timestamp: 0x5,
+            prev_randao: B256::ZERO,
+            suggested_fee_recipient: Address::from_str(
+                "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            )
+            .unwrap(),
+            withdrawals: None,
+            parent_beacon_block_root: None,
+            inclusion_list_transactions: Some(vec![Bytes::from_static(&[0x01, 0x02])]),
+            ..Default::default()
+        };
+
+        let first = payload_id(&parent, &attributes);
+        attributes.inclusion_list_transactions = Some(vec![Bytes::from_static(&[0x03, 0x04])]);
+        assert_ne!(first, payload_id(&parent, &attributes));
+
+        // An empty list is a different build input than no list at all.
+        attributes.inclusion_list_transactions = Some(vec![]);
+        let empty = payload_id(&parent, &attributes);
+        attributes.inclusion_list_transactions = None;
+        assert_ne!(empty, payload_id(&parent, &attributes));
     }
 }

@@ -65,6 +65,11 @@ pub trait ExecutionPayload:
     ///
     /// Returns `None` for pre-Amsterdam blocks.
     fn slot_number(&self) -> Option<u64>;
+
+    /// Returns the EIP-7805 inclusion-list transactions supplied with this payload.
+    fn inclusion_list_transactions(&self) -> Option<&[Bytes]> {
+        None
+    }
 }
 
 impl ExecutionPayload for ExecutionData {
@@ -110,6 +115,10 @@ impl ExecutionPayload for ExecutionData {
 
     fn slot_number(&self) -> Option<u64> {
         self.payload.slot_number()
+    }
+
+    fn inclusion_list_transactions(&self) -> Option<&[Bytes]> {
+        self.sidecar.inclusion_list_transactions().map(Vec::as_slice)
     }
 }
 
@@ -187,6 +196,14 @@ where
         match self {
             Self::ExecutionPayload(payload) => payload.slot_number(),
             Self::PayloadAttributes(attributes) => attributes.slot_number(),
+        }
+    }
+
+    /// Returns the EIP-7805 inclusion-list transactions from either the payload or attributes.
+    pub fn inclusion_list_transactions(&self) -> Option<&[Bytes]> {
+        match self {
+            Self::ExecutionPayload(payload) => payload.inclusion_list_transactions(),
+            Self::PayloadAttributes(attributes) => attributes.inclusion_list_transactions(),
         }
     }
 

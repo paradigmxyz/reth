@@ -82,6 +82,9 @@ impl EngineMessageStore {
                     })?,
                 )?;
             }
+            // This is an internal follow-up to a newPayload message, not an Engine API request
+            // that can be replayed on its own.
+            BeaconEngineMessage::InclusionListStatus { .. } => {}
         };
         Ok(())
     }

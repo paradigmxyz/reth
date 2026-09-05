@@ -148,6 +148,14 @@ pub enum VersionSpecificValidationError {
     /// before Amsterdam
     #[error("slot number pre-Amsterdam")]
     HasSlotNumberPreAmsterdam,
+    /// Thrown if the current engine method version does not support EIP-7805 inclusion list
+    /// transactions
+    #[error("inclusion list transactions not supported in this engine API version")]
+    InclusionListNotSupported,
+    /// Thrown if `engine_forkchoiceUpdatedV5` payload attributes or an `engine_newPayloadV6`
+    /// payload carry no EIP-7805 inclusion list
+    #[error("no inclusion list transactions post-Bogota")]
+    NoInclusionListPostBogota,
 }
 
 /// Error validating payload received over `newPayload` API.

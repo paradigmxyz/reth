@@ -127,7 +127,9 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                     VersionSpecificValidationError::NoBlockAccessListPostAmsterdam |
                     VersionSpecificValidationError::HasSlotNumberPreAmsterdam |
                     VersionSpecificValidationError::NoSlotNumberPostAmsterdam |
-                    VersionSpecificValidationError::SlotNumberNotSupported,
+                    VersionSpecificValidationError::SlotNumberNotSupported |
+                    VersionSpecificValidationError::InclusionListNotSupported |
+                    VersionSpecificValidationError::NoInclusionListPostBogota,
                 ),
             ) |
             EngineApiError::UnexpectedRequestsHash => {
