@@ -9,6 +9,7 @@ use reth_network_api::NetworkInfo;
 use reth_prune_types::{PruneMode, PruneSegment};
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_types::{EthCapabilities, EthCapabilitiesHead, EthCapabilitiesResource};
+use reth_stages_types::StageId;
 use reth_storage_api::{
     BlockNumReader, PruneCheckpointReader, StageCheckpointReader, TransactionsProvider,
 };
@@ -98,9 +99,13 @@ pub trait EthApiSpec: RpcNodeCore + EthApiTypes {
     /// Returns the [`SyncStatus`] of the network
     fn sync_status(&self) -> RethResult<SyncStatus> {
         let status = if self.is_syncing() {
-            let current_block = U256::from(
-                self.provider().chain_info().map(|info| info.best_number).unwrap_or_default(),
-            );
+            let current_block =
+                self.provider().chain_info().map(|info| info.best_number).unwrap_or_default();
+
+            let highest_block = self
+                .provider()
+                .get_stage_checkpoint(StageId::Headers)?
+                .map_or(current_block, |checkpoint| checkpoint.block_number.max(current_block));
 
             let stages = self
                 .provider()
@@ -112,8 +117,8 @@ pub trait EthApiSpec: RpcNodeCore + EthApiTypes {
 
             SyncStatus::Info(Box::new(SyncInfo {
                 starting_block: self.starting_block(),
-                current_block,
-                highest_block: current_block,
+                current_block: U256::from(current_block),
+                highest_block: U256::from(highest_block),
                 warp_chunks_amount: None,
                 warp_chunks_processed: None,
                 stages: Some(stages),
