@@ -102,15 +102,11 @@ where
                             .map_err(eyre::Report::new)?
                             .ok_or_else(|| eyre::eyre!("ancestor {hash} not found for witness"))?;
                         hash = header.parent_hash();
-                        headers.push(alloy_rlp::encode(&header));
+                        headers.push(alloy_rlp::encode(&header).into());
                     }
                     headers.reverse();
 
-                    Ok(ExecutionWitnessV1 {
-                        state: witness.state.into_iter().map(|bytes| bytes.to_vec()).collect(),
-                        codes: witness.codes.into_iter().map(|bytes| bytes.to_vec()).collect(),
-                        headers,
-                    })
+                    Ok(ExecutionWitnessV1 { state: witness.state, codes: witness.codes, headers })
                 })
                 .await
                 .map_err(eyre::Report::new)?
