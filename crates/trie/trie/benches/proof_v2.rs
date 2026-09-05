@@ -21,6 +21,7 @@ use reth_trie::{
     },
 };
 use reth_trie_common::{HashedPostState, HashedStorage, ProofV2Target, ProofV2TargetParent};
+use reth_trie_sparse::{ArenaParallelSparseTrie, LeafUpdate, SparseTrie, TrieNodeEpoch};
 
 /// Generate test data for benchmarking.
 ///
@@ -240,5 +241,69 @@ fn bench_proof_case<TC: TrieCursorFactory + Clone, HC: HashedCursorFactory + Clo
     }
 }
 
-criterion_group!(proof_comparison, bench_proof_algos);
+fn bench_sparse_reveal(c: &mut Criterion) {
+    let mut group = c.benchmark_group("SparseReveal");
+    for size in [1024, 10240] {
+        for count in [16, 128, 512] {
+            let (address, state, keys, _) = generate_test_data(size, count);
+            let (_, _, trie_updates) = create_cursor_factories(&state, true);
+            let sorted_state = state.into_sorted();
+            let trie_factory =
+                InMemoryTrieCursorFactory::new(NoopTrieCursorFactory::default(), &trie_updates);
+            let hashed_factory = HashedPostStateCursorFactory::new(
+                NoopHashedCursorFactory::default(),
+                &sorted_state,
+            );
+            let mut calculator = StorageProofCalculator::new_storage(
+                trie_factory.storage_trie_cursor(address).unwrap(),
+                hashed_factory.hashed_storage_cursor(address).unwrap(),
+            );
+            let root = calculator.storage_root_node(address).unwrap();
+            let expected_root =
+                calculator.compute_root_hash(std::slice::from_ref(&root)).unwrap().unwrap();
+            let mut cached = ArenaParallelSparseTrie::default();
+            cached.set_root(root.node, root.masks, false).unwrap();
+            let mut warm_targets = sorted_state.storages[&address]
+                .storage_slots_ref()
+                .iter()
+                .step_by(16)
+                .map(|(key, _)| ProofV2Target::new(*key))
+                .collect::<Vec<_>>();
+            let mut nodes = calculator.storage_proof(address, &mut warm_targets).unwrap();
+            cached.reveal_nodes(&mut nodes).unwrap();
+            assert_eq!(cached.root(TrieNodeEpoch::UNMODIFIED), expected_root);
+            let updates =
+                keys.into_iter().map(|key| (key, LeafUpdate::Touched)).collect::<B256Map<_>>();
+
+            group.bench_function(
+                BenchmarkId::new(format!("dataset_{size}"), format!("targets_{count}")),
+                |b| {
+                    b.iter_batched(
+                        || (cached.clone(), updates.clone()),
+                        |(mut trie, mut updates)| {
+                            while !updates.is_empty() {
+                                let mut targets = Vec::new();
+                                trie.update_leaves(&mut updates, |key, parent| {
+                                    targets.push(ProofV2Target::new(key).with_parent(parent))
+                                })
+                                .unwrap();
+                                if targets.is_empty() {
+                                    assert!(updates.is_empty());
+                                    break
+                                }
+                                let mut nodes =
+                                    calculator.storage_proof(address, &mut targets).unwrap();
+                                trie.reveal_nodes(&mut nodes).unwrap();
+                            }
+                            assert_eq!(trie.root(TrieNodeEpoch::UNMODIFIED), expected_root);
+                        },
+                        BatchSize::SmallInput,
+                    );
+                },
+            );
+        }
+    }
+}
+
+criterion_group!(proof_comparison, bench_proof_algos, bench_sparse_reveal);
 criterion_main!(proof_comparison);
