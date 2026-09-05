@@ -1,5 +1,5 @@
 use crate::utils::{advance_with_random_transactions, eth_payload_attributes};
-use alloy_eips::{eip4844::BlobAndProofV1, eip7685::RequestsOrHash};
+use alloy_eips::eip7685::RequestsOrHash;
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, B256};
 use alloy_rpc_types_engine::{
@@ -19,7 +19,9 @@ use reth_node_core::{
 };
 use reth_node_ethereum::{
     engine_ssz_containers::{
-        ForkchoiceUpdateResponse as SszForkchoiceUpdateResponse, PayloadStatus as SszPayloadStatus,
+        BlobsV1Request, BlobsV1Response, BlobsV2Response, BlobsV3Response, BlobsV4Request,
+        BlobsV4Response, ForkchoiceUpdateResponse as SszForkchoiceUpdateResponse,
+        PayloadStatus as SszPayloadStatus,
     },
     EthereumAddOns, EthereumNode,
 };
@@ -370,7 +372,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
             },
             "unscoped_endpoints": ["capabilities", "identity"],
             "limits": {
-                "bodies.max_count": 128,
+                "bodies.max_count": 32,
                 "blobs.max_versioned_hashes": 128,
                 "payload.max_bytes": 67108864,
             },
@@ -448,20 +450,154 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
         .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
         .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
         .header(reqwest::header::ACCEPT, "application/octet-stream")
-        .body(versioned_hashes.as_ssz_bytes())
+        .body(BlobsV1Request { versioned_hashes: versioned_hashes.clone() }.as_ssz_bytes())
         .send()
         .await?;
     assert_eq!(blobs_response.status(), reqwest::StatusCode::OK);
 
-    let blobs =
-        Vec::<Option<BlobAndProofV1>>::from_ssz_bytes(&blobs_response.bytes().await?).unwrap();
-    assert_eq!(blobs.len(), versioned_hashes.len());
-    assert!(blobs.iter().all(Option::is_some));
+    let blobs = BlobsV1Response::from_ssz_bytes(&blobs_response.bytes().await?).unwrap();
+    assert_eq!(blobs.entries.len(), versioned_hashes.len());
+    assert!(blobs.entries.iter().all(|entry| entry.available));
 
     let fcu = SszForkchoiceUpdateResponse::from_ssz_bytes(&fcu_response.bytes().await?).unwrap();
     assert_eq!(fcu.payload_status.status, PayloadStatusEnum::Valid);
 
     node.wait_block(1, block_hash, false).await?;
+
+    for (fork, available) in [("prague", true), ("cancun", false)] {
+        let response = client
+            .post(format!("{auth_url}/engine/v1/bodies/hash"))
+            .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
+            .header(ENGINE_EXECUTION_VERSION_HEADER, fork)
+            .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+            .body(
+                reth_node_ethereum::engine_ssz_containers::BodiesByHashRequest {
+                    block_hashes: vec![block_hash, B256::ZERO],
+                }
+                .as_ssz_bytes(),
+            )
+            .send()
+            .await?;
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let bodies =
+            reth_node_ethereum::engine_ssz_containers::BodiesResponsePrague::from_ssz_bytes(
+                &response.bytes().await?,
+            )
+            .unwrap();
+        assert_eq!(bodies.entries.len(), 2);
+        assert_eq!(bodies.entries[0].available, available);
+        assert!(!bodies.entries[1].available);
+    }
+    let response = client
+        .get(format!("{auth_url}/engine/v1/bodies?from=1&count=32"))
+        .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
+        .header(ENGINE_EXECUTION_VERSION_HEADER, "prague")
+        .send()
+        .await?;
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let bodies = reth_node_ethereum::engine_ssz_containers::BodiesResponsePrague::from_ssz_bytes(
+        &response.bytes().await?,
+    )
+    .unwrap();
+    assert_eq!(bodies.entries.len(), 1);
+    assert!(bodies.entries[0].available);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_engine_ssz_proxy_blob_revisions() -> eyre::Result<()> {
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json"))?)
+            .osaka_activated()
+            .build(),
+    );
+    let (mut nodes, _) =
+        setup::<EthereumNode>(1, chain_spec, false, eth_payload_attributes).await?;
+    let mut node = nodes.pop().unwrap();
+    node.advance_block().await?;
+    let client = reqwest::Client::new();
+    let auth_server = node.auth_server_handle();
+    let auth_url = auth_server.http_url();
+    let auth_header = secret_to_bearer_header(auth_server.jwt_secret());
+    // Missing blobs retain one unavailable entry, except V2's all-or-nothing response.
+    for version in 2..=4 {
+        let body = if version == 4 {
+            BlobsV4Request {
+                versioned_hashes: vec![B256::ZERO],
+                indices_bitarray: alloy_primitives::B128::ZERO,
+            }
+            .as_ssz_bytes()
+        } else {
+            BlobsV1Request { versioned_hashes: vec![B256::ZERO] }.as_ssz_bytes()
+        };
+        let response = client
+            .post(format!("{auth_url}/engine/v1/blobs/v{version}"))
+            .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
+            .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+            .body(body)
+            .send()
+            .await?;
+        if version == 2 {
+            assert_eq!(response.status(), reqwest::StatusCode::NO_CONTENT);
+            assert!(response.bytes().await?.is_empty());
+            continue
+        }
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let bytes = response.bytes().await?;
+        let availability = match version {
+            1 => BlobsV1Response::from_ssz_bytes(&bytes)
+                .unwrap()
+                .entries
+                .into_iter()
+                .map(|entry| entry.available)
+                .collect::<Vec<_>>(),
+            3 => BlobsV3Response::from_ssz_bytes(&bytes)
+                .unwrap()
+                .entries
+                .into_iter()
+                .map(|entry| entry.available)
+                .collect(),
+            4 => BlobsV4Response::from_ssz_bytes(&bytes)
+                .unwrap()
+                .entries
+                .into_iter()
+                .map(|entry| entry.available)
+                .collect(),
+            _ => unreachable!(),
+        };
+        assert_eq!(availability, [false]);
+    }
+    // A container with no requested hashes is a successful empty V2 response.
+    let response = client
+        .post(format!("{auth_url}/engine/v1/blobs/v2"))
+        .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
+        .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+        .body(BlobsV1Request { versioned_hashes: vec![] }.as_ssz_bytes())
+        .send()
+        .await?;
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    assert!(BlobsV2Response::from_ssz_bytes(&response.bytes().await?).unwrap().entries.is_empty());
+
+    for (body, status) in [
+        (vec![0; 32], reqwest::StatusCode::BAD_REQUEST),
+        (
+            BlobsV1Request { versioned_hashes: vec![B256::ZERO; 129] }.as_ssz_bytes(),
+            reqwest::StatusCode::PAYLOAD_TOO_LARGE,
+        ),
+    ] {
+        let response = client
+            .post(format!("{auth_url}/engine/v1/blobs/v1"))
+            .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
+            .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+            .body(body)
+            .send()
+            .await?;
+        assert_eq!(response.status(), status);
+        assert_eq!(response.headers()[reqwest::header::CONTENT_TYPE], "application/problem+json");
+    }
 
     Ok(())
 }
