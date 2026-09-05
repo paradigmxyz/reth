@@ -148,6 +148,17 @@ const DEFAULT_WRITE_BUFFER_SIZE: usize = 128 << 20;
 /// memtable arena usage exceeds the budget.
 const DEFAULT_WRITE_BUFFER_MANAGER_SIZE: usize = 4 * 1024 * 1024 * 1024;
 
+/// Bytes of flushed memtables kept in memory as write history for `OptimisticTransactionDB`
+/// conflict checks.
+///
+/// Left unset, `OptimisticTransactionDB` defaults this to `max_write_buffer_number *
+/// write_buffer_size`, pinning two flushed memtables per column family for conflict checks that
+/// only [`RocksTx`] commits perform; the production write path writes batches directly and reads
+/// go through snapshots. Zero is not usable because `OptimisticTransactionDB::Open` maps it back
+/// to that default, so 1 byte is the smallest value that lets `RocksDB` free a flushed memtable on
+/// the next writes to the column family.
+const DEFAULT_MAX_WRITE_BUFFER_SIZE_TO_MAINTAIN: i64 = 1;
+
 /// Default buffer capacity for compression in batches.
 /// 4 KiB matches common block/page sizes and comfortably holds typical history values,
 /// reducing the first few reallocations without over-allocating.
@@ -271,6 +282,7 @@ impl RocksDBBuilder {
         // Only use Zstd compression, disable dictionary training
         cf_options.set_bottommost_zstd_max_train_bytes(0, true);
         cf_options.set_write_buffer_size(DEFAULT_WRITE_BUFFER_SIZE);
+        cf_options.set_max_write_buffer_size_to_maintain(DEFAULT_MAX_WRITE_BUFFER_SIZE_TO_MAINTAIN);
 
         cf_options
     }
@@ -307,6 +319,7 @@ impl RocksDBBuilder {
         // varint-encoded u64 (a few bytes). Compression wastes CPU cycles for zero space savings.
         cf_options.set_compression_type(DBCompressionType::None);
         cf_options.set_bottommost_compression_type(DBCompressionType::None);
+        cf_options.set_max_write_buffer_size_to_maintain(DEFAULT_MAX_WRITE_BUFFER_SIZE_TO_MAINTAIN);
 
         cf_options
     }
@@ -835,8 +848,10 @@ impl RocksDBProvider {
 
     /// Creates a new transaction with MDBX-like semantics (read-your-writes, rollback).
     ///
-    /// Note: With `OptimisticTransactionDB`, commits may fail if there are conflicts.
-    /// Conflict detection happens at commit time, not at write time.
+    /// Note: With `OptimisticTransactionDB`, commits may fail if there are conflicts, or if the
+    /// column family was flushed since the transaction's first write: flushed memtables are not
+    /// kept as write history (see `DEFAULT_MAX_WRITE_BUFFER_SIZE_TO_MAINTAIN`). Conflict
+    /// detection happens at commit time, not at write time.
     ///
     /// # Panics
     /// Panics if the provider is in read-only mode.
@@ -3017,6 +3032,28 @@ mod tests {
         tables,
     };
     use tempfile::TempDir;
+
+    #[test]
+    fn flushed_memtables_are_not_kept_as_write_history() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider =
+            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+        let db = provider.0.db_rw();
+        let cf = db.cf_handle(TestTable::NAME).unwrap();
+
+        provider.put::<TestTable>(1, &b"a".to_vec()).unwrap();
+        provider.flush(&[TestTable::NAME]).unwrap();
+        // RocksDB trims write history lazily: the first write after a flush schedules the trim
+        // and the next write runs it.
+        provider.put::<TestTable>(2, &b"b".to_vec()).unwrap();
+        provider.put::<TestTable>(3, &b"c".to_vec()).unwrap();
+
+        let retained = db
+            .property_int_value_cf(cf, rocksdb::properties::NUM_IMMUTABLE_MEM_TABLE_FLUSHED)
+            .unwrap()
+            .unwrap();
+        assert_eq!(retained, 0, "flushed memtable kept in memory as write history");
+    }
 
     #[test]
     fn max_open_files_adapts_to_file_descriptor_limit() {
