@@ -48,6 +48,39 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
         HP: reth_storage_api::HeaderProvider + ?Sized,
         HP::Header: alloy_rlp::Encodable,
     {
+        let lowest_block_number = self.state.block_hashes.lowest().map(|(number, _)| number);
+        let mut exec_witness = self.into_execution_witness_without_headers(state_provider, mode)?;
+
+        let smallest = lowest_block_number.unwrap_or_else(|| block_number.saturating_sub(1));
+        let range = smallest..block_number;
+
+        exec_witness.headers = headers_provider
+            .headers_range(range)?
+            .into_iter()
+            .map(|header| {
+                let mut buf = Vec::new();
+                alloy_rlp::Encodable::encode(&header, &mut buf);
+                buf.into()
+            })
+            .collect();
+
+        Ok(exec_witness)
+    }
+
+    /// Generates state proofs and codes without fetching ancestor headers.
+    ///
+    /// Callers witnessing non-canonical blocks can supply headers by following parent hashes.
+    #[cfg(feature = "witness")]
+    pub fn into_execution_witness_without_headers<SP>(
+        self,
+        state_provider: &SP,
+        mode: ExecutionWitnessMode,
+    ) -> reth_storage_errors::provider::ProviderResult<alloy_rpc_types_debug::ExecutionWitness>
+    where
+        SP: reth_storage_api::HashedPostStateProvider
+            + reth_storage_api::StateProofProvider
+            + ?Sized,
+    {
         let codes = match mode {
             ExecutionWitnessMode::Legacy => self
                 .state
@@ -77,28 +110,10 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
             }
         };
 
-        let lowest_block_number =
-            self.state.block_hashes.lowest().map(|(block_number, _)| block_number);
         let (hashed_state, keys) = self.hashed_post_state(state_provider)?;
 
         let state = state_provider.witness(Default::default(), hashed_state, mode)?;
-        let mut exec_witness =
-            alloy_rpc_types_debug::ExecutionWitness { state, codes, keys, ..Default::default() };
-
-        let smallest = lowest_block_number.unwrap_or_else(|| block_number.saturating_sub(1));
-        let range = smallest..block_number;
-
-        exec_witness.headers = headers_provider
-            .headers_range(range)?
-            .into_iter()
-            .map(|header| {
-                let mut buf = Vec::new();
-                alloy_rlp::Encodable::encode(&header, &mut buf);
-                buf.into()
-            })
-            .collect();
-
-        Ok(exec_witness)
+        Ok(alloy_rpc_types_debug::ExecutionWitness { state, codes, keys, ..Default::default() })
     }
 
     #[cfg(feature = "witness")]

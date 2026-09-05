@@ -1,6 +1,7 @@
 //! Execution witness generation for the SSZ Engine API extension.
 
 use crate::engine_ssz_containers::ExecutionWitnessV1;
+use alloy_primitives::B256;
 use alloy_rpc_types_engine::ExecutionData;
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{execute::Executor, ConfigureEvm};
@@ -12,6 +13,9 @@ use reth_trie_common::ExecutionWitnessMode;
 use std::{future::Future, pin::Pin};
 
 /// Re-executes validated payloads against their parent state for `/payloads/witness`.
+///
+/// The parent state must be available through the provider (persisted, canonical in-memory,
+/// or pending). Parents present only in the engine tree are temporarily unavailable.
 #[derive(Clone, Debug)]
 pub struct EngineSszWitnessGenerator<Provider, Evm> {
     provider: Provider,
@@ -35,7 +39,11 @@ where
     fn generate_witness(
         &self,
         payload: ExecutionData,
-    ) -> Pin<Box<dyn Future<Output = Result<ExecutionWitnessV1, String>> + Send + '_>> {
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<ExecutionWitnessV1, EngineSszWitnessError>> + Send + 'static,
+        >,
+    > {
         let provider = self.provider.clone();
         let evm_config = self.evm_config.clone();
         let task_spawner = self.task_spawner.clone();
@@ -47,17 +55,21 @@ where
                     let block = payload
                         .payload
                         .try_into_block_with_sidecar::<TransactionSigned>(&payload.sidecar)
-                        .map_err(|err| err.to_string())?
+                        .map_err(eyre::Report::new)?
                         .try_into_recovered()
-                        .map_err(|err| err.to_string())?;
+                        .map_err(eyre::Report::new)?;
 
                     let block_number = block.header().number;
                     let parent_hash = block.header().parent_hash;
                     let state_provider =
-                        provider.state_by_block_hash(parent_hash).map_err(|err| err.to_string())?;
+                        provider.state_by_block_hash(parent_hash).map_err(|source| {
+                            EngineSszWitnessError::ParentStateUnavailable {
+                                parent: parent_hash,
+                                source: eyre::Report::new(source),
+                            }
+                        })?;
                     let block_executor =
                         evm_config.executor(StateProviderDatabase::new(state_provider));
-                    let mode = ExecutionWitnessMode::Canonical;
                     let mut witness = None;
                     let mut first_header = block_number.saturating_sub(1);
                     block_executor
@@ -65,29 +77,28 @@ where
                             if let Some((number, _)) = statedb.block_hashes.lowest() {
                                 first_header = number;
                             }
-                            witness =
-                                Some(ExecutionWitnessRecord::new(statedb).into_execution_witness(
-                                    &statedb.database.0,
-                                    &provider,
-                                    block_number,
-                                    mode,
-                                ));
+                            witness = Some(
+                                ExecutionWitnessRecord::new(statedb)
+                                    .into_execution_witness_without_headers(
+                                        &statedb.database.0,
+                                        ExecutionWitnessMode::Canonical,
+                                    ),
+                            );
                         })
-                        .map_err(|err| err.to_string())?;
+                        .map_err(eyre::Report::new)?;
 
                     let witness = witness
                         .expect("state closure is called after successful execution")
-                        .map_err(|err| err.to_string())?;
+                        .map_err(eyre::Report::new)?;
 
-                    // Submitted payloads can extend a side chain. Number-based header lookups
-                    // in the debug witness helper may belong to a different canonical ancestor.
+                    // Header numbers may refer to a different canonical ancestor.
                     let mut headers = Vec::new();
                     let mut hash = parent_hash;
                     for _ in first_header..block_number {
                         let header = provider
                             .header(hash)
-                            .map_err(|err| err.to_string())?
-                            .ok_or_else(|| format!("ancestor {hash} not found for witness"))?;
+                            .map_err(eyre::Report::new)?
+                            .ok_or_else(|| eyre::eyre!("ancestor {hash} not found for witness"))?;
                         hash = header.parent_hash();
                         headers.push(alloy_rlp::encode(&header));
                     }
@@ -100,7 +111,7 @@ where
                     })
                 })
                 .await
-                .map_err(|err| format!("witness generation task failed: {err}"))?
+                .map_err(eyre::Report::new)?
         })
     }
 }
@@ -111,5 +122,50 @@ pub trait EngineSszWitness: Send + Sync + 'static {
     fn generate_witness(
         &self,
         payload: ExecutionData,
-    ) -> Pin<Box<dyn Future<Output = Result<ExecutionWitnessV1, String>> + Send + '_>>;
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<ExecutionWitnessV1, EngineSszWitnessError>> + Send + 'static,
+        >,
+    >;
+}
+
+/// Failure to produce a witness for a validated payload.
+#[derive(Debug)]
+pub enum EngineSszWitnessError {
+    /// The parent state is not available through the provider yet.
+    ParentStateUnavailable {
+        /// Parent block whose state is required.
+        parent: B256,
+        /// Provider failure while accessing the state.
+        source: eyre::Report,
+    },
+    /// Witness execution or proof generation failed.
+    Internal(eyre::Report),
+}
+
+impl From<eyre::Report> for EngineSszWitnessError {
+    fn from(error: eyre::Report) -> Self {
+        Self::Internal(error)
+    }
+}
+
+impl std::fmt::Display for EngineSszWitnessError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ParentStateUnavailable { parent, source } => {
+                write!(f, "parent state {parent} is unavailable through the provider: {source}")
+            }
+            Self::Internal(error) => std::fmt::Display::fmt(error, f),
+        }
+    }
+}
+
+impl std::error::Error for EngineSszWitnessError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::ParentStateUnavailable { source, .. } | Self::Internal(source) => {
+                Some(source.as_ref())
+            }
+        }
+    }
 }
