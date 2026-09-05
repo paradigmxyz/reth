@@ -78,7 +78,7 @@ pub(crate) struct EngineApiLatencyMetrics {
 pub(crate) struct InclusionListMetrics {
     /// Number of transactions returned by `engine_getInclusionListV1`
     pub(crate) transaction_count: Histogram,
-    /// RLP-encoded size of inclusion lists returned by `engine_getInclusionListV1`
+    /// Total EIP-2718 transaction bytes returned by `engine_getInclusionListV1`
     pub(crate) encoded_size_bytes: Histogram,
 }
 
