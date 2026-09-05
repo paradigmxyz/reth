@@ -1,10 +1,6 @@
 use crate::path::PathToken;
 
 pub const SCHEMA_ID: &str = "pureth-receipt-v0";
-pub const SCHEMA_DIGEST: [u8; 32] = [
-    0xff, 0xc4, 0x1a, 0xe4, 0xab, 0xb3, 0xe6, 0xf0, 0x45, 0x94, 0xd5, 0x65, 0x88, 0x14, 0xb7, 0xd0,
-    0x44, 0x6f, 0x1d, 0xab, 0xcc, 0x34, 0x79, 0x82, 0xe7, 0xa3, 0x7e, 0xf2, 0x3e, 0xe0, 0xda, 0xce,
-];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResolvedPath {
@@ -14,7 +10,7 @@ pub enum ResolvedPath {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UnsupportedPath;
 
-pub fn resolve_v0(tokens: &[PathToken]) -> Result<ResolvedPath, UnsupportedPath> {
+pub fn resolve(tokens: &[PathToken]) -> Result<ResolvedPath, UnsupportedPath> {
     match tokens {
         [PathToken::Index(receipt_index), PathToken::Field(logs), PathToken::Index(log_index), PathToken::Field(address)]
             if logs == "logs" && address == "address" =>
@@ -46,6 +42,25 @@ pub fn validate_runtime_bounds(
     let log_count = receipt_log_counts.get(receipt_index).ok_or(BoundsError::ReceiptOutOfBounds)?;
 
     if log_index >= *log_count {
+        return Err(BoundsError::LogOutOfBounds);
+    }
+
+    Ok((receipt_index, log_index))
+}
+
+pub(crate) fn validate_runtime_lengths(
+    path: ResolvedPath,
+    receipt_count: usize,
+    log_count: usize,
+) -> Result<(usize, usize), BoundsError> {
+    let ResolvedPath::ReceiptLogAddress { receipt_index, log_index } = path;
+    let receipt_index = usize::try_from(receipt_index).map_err(|_| BoundsError::IndexTooLarge)?;
+    let log_index = usize::try_from(log_index).map_err(|_| BoundsError::IndexTooLarge)?;
+
+    if receipt_index >= receipt_count {
+        return Err(BoundsError::ReceiptOutOfBounds);
+    }
+    if log_index >= log_count {
         return Err(BoundsError::LogOutOfBounds);
     }
 
@@ -114,16 +129,20 @@ pub fn container_field_gindex(field_count: usize, field_index: usize) -> Result<
 }
 
 pub fn receipt_log_address_gindex(path: ResolvedPath) -> Result<u64, GindexError> {
-    let ResolvedPath::ReceiptLogAddress { receipt_index, log_index } = path;
+    let ResolvedPath::ReceiptLogAddress { log_index, .. } = path;
 
     let segments = [
-        progressive_chunk_gindex(receipt_index)?,
-        container_field_gindex(5, 4)?,
+        receipt_logs_gindex(path)?,
         progressive_chunk_gindex(log_index)?,
         container_field_gindex(3, 0)?,
     ];
 
     segments.into_iter().try_fold(1_u64, compose_gindices)
+}
+
+pub(crate) fn receipt_logs_gindex(path: ResolvedPath) -> Result<u64, GindexError> {
+    let ResolvedPath::ReceiptLogAddress { receipt_index, .. } = path;
+    compose_gindices(progressive_chunk_gindex(receipt_index)?, container_field_gindex(5, 4)?)
 }
 
 pub fn branch_positions(mut gindex: u64) -> Result<Vec<u64>, GindexError> {
