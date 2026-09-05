@@ -60,51 +60,6 @@ type EthEngineApi<Provider, Pool, Validator, ChainSpec> =
     EngineApi<Provider, EthEngineTypes, Pool, Validator, ChainSpec>;
 type SharedEngineApi<Api> = Arc<RwLock<Option<Api>>>;
 
-/// API surface required by the SSZ Engine API proxy.
-pub trait EngineSszApi: Clone + Send + Sync + 'static {
-    /// Returns the Engine API identity response.
-    fn identity(&self) -> HttpResponse;
-
-    /// Handles a new payload request.
-    fn new_payload(
-        &self,
-        fork: EngineSszFork,
-        body: Bytes,
-    ) -> impl Future<Output = HttpResponse> + Send;
-
-    /// Handles a getPayload request.
-    fn get_payload(
-        &self,
-        fork: EngineSszFork,
-        payload_id: PayloadId,
-    ) -> impl Future<Output = HttpResponse> + Send;
-
-    /// Handles a forkchoice update request.
-    fn forkchoice_updated(
-        &self,
-        fork: EngineSszFork,
-        body: Bytes,
-    ) -> impl Future<Output = HttpResponse> + Send;
-
-    /// Handles a getPayloadBodiesByHash request.
-    fn get_payload_bodies_by_hash(
-        &self,
-        fork: EngineSszFork,
-        body: Bytes,
-    ) -> impl Future<Output = HttpResponse> + Send;
-
-    /// Handles a getPayloadBodiesByRange request.
-    fn get_payload_bodies_by_range(
-        &self,
-        fork: EngineSszFork,
-        start: u64,
-        count: u64,
-    ) -> impl Future<Output = HttpResponse> + Send;
-
-    /// Handles a getBlobs request.
-    fn get_blobs(&self, version: u8, body: Bytes) -> impl Future<Output = HttpResponse> + Send;
-}
-
 /// Shared handle used by [`EngineSszProxyLayer`].
 pub struct EngineSszProxyHandle<Api = ()> {
     engine_api: SharedEngineApi<Api>,
@@ -617,6 +572,51 @@ where
     }
 }
 
+/// API surface required by the SSZ Engine API proxy.
+pub trait EngineSszApi: Clone + Send + Sync + 'static {
+    /// Returns the Engine API identity response.
+    fn identity(&self) -> HttpResponse;
+
+    /// Handles a new payload request.
+    fn new_payload(
+        &self,
+        fork: EngineSszFork,
+        body: Bytes,
+    ) -> impl Future<Output = HttpResponse> + Send;
+
+    /// Handles a getPayload request.
+    fn get_payload(
+        &self,
+        fork: EngineSszFork,
+        payload_id: PayloadId,
+    ) -> impl Future<Output = HttpResponse> + Send;
+
+    /// Handles a forkchoice update request.
+    fn forkchoice_updated(
+        &self,
+        fork: EngineSszFork,
+        body: Bytes,
+    ) -> impl Future<Output = HttpResponse> + Send;
+
+    /// Handles a getPayloadBodiesByHash request.
+    fn get_payload_bodies_by_hash(
+        &self,
+        fork: EngineSszFork,
+        body: Bytes,
+    ) -> impl Future<Output = HttpResponse> + Send;
+
+    /// Handles a getPayloadBodiesByRange request.
+    fn get_payload_bodies_by_range(
+        &self,
+        fork: EngineSszFork,
+        start: u64,
+        count: u64,
+    ) -> impl Future<Output = HttpResponse> + Send;
+
+    /// Handles a getBlobs request.
+    fn get_blobs(&self, version: u8, body: Bytes) -> impl Future<Output = HttpResponse> + Send;
+}
+
 impl<Provider, Pool, Validator, ChainSpec> EngineSszApi
     for EthEngineApi<Provider, Pool, Validator, ChainSpec>
 where
@@ -656,21 +656,17 @@ where
         async move { handle_forkchoice_updated(engine_api, fork, body.as_ref()).await }
     }
 
-    fn get_payload_bodies_by_hash(
-        &self,
-        _fork: EngineSszFork,
-        _body: Bytes,
-    ) -> impl Future<Output = HttpResponse> + Send {
-        async { text_response(STATUS_NOT_FOUND, "getPayloadBodiesByHash not implemented") }
+    async fn get_payload_bodies_by_hash(&self, _fork: EngineSszFork, _body: Bytes) -> HttpResponse {
+        text_response(STATUS_NOT_FOUND, "getPayloadBodiesByHash not implemented")
     }
 
-    fn get_payload_bodies_by_range(
+    async fn get_payload_bodies_by_range(
         &self,
         _fork: EngineSszFork,
         _start: u64,
         _count: u64,
-    ) -> impl Future<Output = HttpResponse> + Send {
-        async { text_response(STATUS_NOT_FOUND, "getPayloadBodiesByRange not implemented") }
+    ) -> HttpResponse {
+        text_response(STATUS_NOT_FOUND, "getPayloadBodiesByRange not implemented")
     }
 
     fn get_blobs(&self, version: u8, body: Bytes) -> impl Future<Output = HttpResponse> + Send {

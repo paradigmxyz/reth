@@ -339,6 +339,11 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
     let auth_url = auth_server.http_url();
     let auth_header = secret_to_bearer_header(auth_server.jwt_secret());
 
+    for route in [ENGINE_CAPABILITIES_ROUTE, ENGINE_PAYLOADS_ROUTE] {
+        let response = client.get(format!("{auth_url}{route}")).send().await?;
+        assert_eq!(response.status(), reqwest::StatusCode::UNAUTHORIZED);
+    }
+
     let capabilities_response = client
         .get(format!("{auth_url}{ENGINE_CAPABILITIES_ROUTE}"))
         .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
