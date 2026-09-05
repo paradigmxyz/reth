@@ -2,7 +2,7 @@ use alloy_primitives::B256;
 use serde::Deserialize;
 
 use crate::{
-    address_target_node, branch_positions, parse_path, receipt_log_address_gindex, resolve_v0,
+    address_target_node, branch_positions, parse_path, receipt_log_address_gindex, resolve,
     validate_runtime_bounds,
     vector::{decode_fixed, validate_receipt_fixture, ReceiptFixture, VectorError},
     SCHEMA_ID,
@@ -115,7 +115,7 @@ pub(crate) fn load_proof_case(
     let tokens = parse_path(&proof.path)
         .map_err(|error| VectorError::Invalid(format!("invalid vector path: {error:?}")))?;
     let resolved =
-        resolve_v0(&tokens).map_err(|_| VectorError::Invalid("unsupported vector path".into()))?;
+        resolve(&tokens).map_err(|_| VectorError::Invalid("unsupported vector path".into()))?;
     let (receipt_index, log_index) = validate_runtime_bounds(resolved, &fixture.log_counts)
         .map_err(|error| {
             VectorError::Invalid(format!("vector index is out of bounds: {error:?}"))

@@ -10,7 +10,7 @@ pub enum ResolvedPath {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UnsupportedPath;
 
-pub fn resolve_v0(tokens: &[PathToken]) -> Result<ResolvedPath, UnsupportedPath> {
+pub fn resolve(tokens: &[PathToken]) -> Result<ResolvedPath, UnsupportedPath> {
     match tokens {
         [PathToken::Index(receipt_index), PathToken::Field(logs), PathToken::Index(log_index), PathToken::Field(address)]
             if logs == "logs" && address == "address" =>

@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 use crate::{
     path::{parse_path, ParseError},
     schema::{
-        compose_gindices, receipt_log_address_gindex, receipt_logs_gindex, resolve_v0,
+        compose_gindices, receipt_log_address_gindex, receipt_logs_gindex, resolve,
         validate_runtime_lengths, BoundsError, GindexError, SCHEMA_ID,
     },
 };
@@ -97,7 +97,7 @@ pub fn verify_receipt_log_address(
         return Err(EnvelopeError::WrongSchema);
     }
     let tokens = parse_path(path).map_err(EnvelopeError::InvalidPath)?;
-    let resolved = resolve_v0(&tokens).map_err(|_| EnvelopeError::UnsupportedPath)?;
+    let resolved = resolve(&tokens).map_err(|_| EnvelopeError::UnsupportedPath)?;
     let gindex = receipt_log_address_gindex(resolved).map_err(EnvelopeError::InvalidGindex)?;
     let logs_gindex = receipt_logs_gindex(resolved).map_err(EnvelopeError::InvalidGindex)?;
     let logs_length_gindex =

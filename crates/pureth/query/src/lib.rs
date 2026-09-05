@@ -16,7 +16,7 @@ pub use proof::{
 };
 pub use schema::{
     branch_positions, compose_gindices, container_field_gindex, progressive_chunk_gindex,
-    receipt_log_address_gindex, resolve_v0, validate_runtime_bounds, BoundsError, GindexError,
+    receipt_log_address_gindex, resolve, validate_runtime_bounds, BoundsError, GindexError,
     ResolvedPath, UnsupportedPath, SCHEMA_ID,
 };
 

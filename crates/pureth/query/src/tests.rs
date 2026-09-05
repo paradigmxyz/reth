@@ -59,7 +59,7 @@ fn parser_rejects_invalid_syntax() {
 
 #[test]
 fn resolver_accepts_only_the_v0_receipt_log_address_shape() {
-    let resolved = resolve_v0(&parse_path("[5].logs[12].address").unwrap());
+    let resolved = resolve(&parse_path("[5].logs[12].address").unwrap());
     assert_eq!(resolved, Ok(ResolvedPath::ReceiptLogAddress { receipt_index: 5, log_index: 12 }));
 
     for path in [
@@ -71,7 +71,7 @@ fn resolver_accepts_only_the_v0_receipt_log_address_shape() {
         "[0].logs[0].address.extra",
     ] {
         let tokens = parse_path(path).unwrap();
-        assert_eq!(resolve_v0(&tokens), Err(UnsupportedPath), "path: {path}");
+        assert_eq!(resolve(&tokens), Err(UnsupportedPath), "path: {path}");
     }
 }
 
