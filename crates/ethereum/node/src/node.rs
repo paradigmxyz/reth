@@ -326,7 +326,7 @@ where
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
     RpcMiddleware: RethRpcMiddleware,
     AuthHttpMiddleware: RethAuthHttpMiddleware<Identity>,
-    Stack<AuthHttpMiddleware, EngineSszProxyLayer<EB::EngineApi>>: RethAuthHttpMiddleware<Identity>,
+    Stack<EngineSszProxyLayer<EB::EngineApi>, AuthHttpMiddleware>: RethAuthHttpMiddleware<Identity>,
 {
     type Handle = RpcHandle<N, EthB::EthApi>;
 
@@ -359,7 +359,7 @@ where
                     ssz_proxy_handle.set_engine_api_sync(engine_api);
                 })
             })
-            .layer_auth_http_middleware(ssz_proxy_layer)
+            .map_auth_http_middleware(|middleware| Stack::new(ssz_proxy_layer, middleware))
             .launch_add_ons_with(ctx, move |container| {
                 container.modules.merge_if_module_configured(
                     RethRpcModule::Flashbots,
@@ -414,7 +414,7 @@ where
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
     RpcMiddleware: RethRpcMiddleware,
     AuthHttpMiddleware: RethAuthHttpMiddleware<Identity>,
-    Stack<AuthHttpMiddleware, EngineSszProxyLayer<EB::EngineApi>>: RethAuthHttpMiddleware<Identity>,
+    Stack<EngineSszProxyLayer<EB::EngineApi>, AuthHttpMiddleware>: RethAuthHttpMiddleware<Identity>,
 {
     type EthApi = EthB::EthApi;
 

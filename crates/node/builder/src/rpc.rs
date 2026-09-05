@@ -602,26 +602,7 @@ where
         self,
         engine_api_builder: T,
     ) -> RpcAddOns<Node, EthB, PVB, T, EVB, RpcMiddleware, AuthHttpMiddleware> {
-        let Self {
-            hooks,
-            eth_api_builder,
-            payload_validator_builder,
-            engine_validator_builder,
-            rpc_middleware,
-            auth_http_middleware,
-            tokio_runtime,
-            ..
-        } = self;
-        RpcAddOns {
-            hooks,
-            eth_api_builder,
-            payload_validator_builder,
-            engine_api_builder,
-            engine_validator_builder,
-            rpc_middleware,
-            auth_http_middleware,
-            tokio_runtime,
-        }
+        self.map_engine_api(|_| engine_api_builder)
     }
 
     /// Maps the existing [`EngineApiBuilder`] builder value.
@@ -823,6 +804,33 @@ where
             engine_validator_builder,
             rpc_middleware,
             auth_http_middleware,
+            tokio_runtime,
+        }
+    }
+
+    /// Maps the existing auth HTTP middleware, preserving its configuration.
+    pub fn map_auth_http_middleware<T>(
+        self,
+        f: impl FnOnce(AuthHttpMiddleware) -> T,
+    ) -> RpcAddOns<Node, EthB, PVB, EB, EVB, RpcMiddleware, T> {
+        let Self {
+            hooks,
+            eth_api_builder,
+            payload_validator_builder,
+            engine_api_builder,
+            engine_validator_builder,
+            rpc_middleware,
+            auth_http_middleware,
+            tokio_runtime,
+        } = self;
+        RpcAddOns {
+            hooks,
+            eth_api_builder,
+            payload_validator_builder,
+            engine_api_builder,
+            engine_validator_builder,
+            rpc_middleware,
+            auth_http_middleware: f(auth_http_middleware),
             tokio_runtime,
         }
     }
