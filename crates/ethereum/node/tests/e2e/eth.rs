@@ -19,6 +19,7 @@ use reth_node_core::{
 };
 use reth_node_ethereum::{
     engine_ssz_containers::{
+        BodiesByHashRequest, BodiesResponsePrague,
         ForkchoiceUpdateResponse as SszForkchoiceUpdateResponse, PayloadStatus as SszPayloadStatus,
     },
     engine_ssz_proxy::EngineSszProxyLayer,
@@ -378,7 +379,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
             },
             "unscoped_endpoints": ["capabilities", "identity"],
             "limits": {
-                "bodies.max_count": 128,
+                "bodies.max_count": 32,
                 "blobs.max_versioned_hashes": 128,
                 "payload.max_bytes": 67108864,
             },
@@ -470,6 +471,32 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
     assert_eq!(fcu.payload_status.status, PayloadStatusEnum::Valid);
 
     node.wait_block(1, block_hash, false).await?;
+
+    for (fork, available) in [("prague", true), ("cancun", false)] {
+        let response = client
+            .post(format!("{auth_url}/engine/v1/bodies/hash"))
+            .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
+            .header(ENGINE_EXECUTION_VERSION_HEADER, fork)
+            .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+            .body(BodiesByHashRequest { block_hashes: vec![block_hash, B256::ZERO] }.as_ssz_bytes())
+            .send()
+            .await?;
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let bodies = BodiesResponsePrague::from_ssz_bytes(&response.bytes().await?).unwrap();
+        assert_eq!(bodies.entries.len(), 2);
+        assert_eq!(bodies.entries[0].available, available);
+        assert!(!bodies.entries[1].available);
+    }
+    let response = client
+        .get(format!("{auth_url}/engine/v1/bodies?from=1&count=32"))
+        .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
+        .header(ENGINE_EXECUTION_VERSION_HEADER, "prague")
+        .send()
+        .await?;
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let bodies = BodiesResponsePrague::from_ssz_bytes(&response.bytes().await?).unwrap();
+    assert_eq!(bodies.entries.len(), 1);
+    assert!(bodies.entries[0].available);
 
     Ok(())
 }
