@@ -9,8 +9,8 @@ use alloy_provider::{
 };
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
-    BuilderBlockValidationRequestV6, SignedBidSubmissionV3, SignedBidSubmissionV4,
-    SignedBidSubmissionV6,
+    BuilderBlockValidationRequestV5, BuilderBlockValidationRequestV6, SignedBidSubmissionV3,
+    SignedBidSubmissionV4, SignedBidSubmissionV5, SignedBidSubmissionV6,
 };
 use alloy_rpc_types_engine::{
     BlobsBundleV1, CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar,
@@ -27,7 +27,10 @@ use alloy_rpc_types_trace::geth::{
 use jsonrpsee::core::client::{ClientT, Subscription, SubscriptionClientT};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::{ChainSpecBuilder, EthChainSpec, MAINNET};
-use reth_e2e_test_utils::{setup_engine, wallet::Wallet, E2ETestSetupBuilder};
+use reth_e2e_test_utils::{
+    setup_engine, transaction::TransactionTestContext, wallet::Wallet, E2ETestSetupBuilder,
+    NodeHelperType,
+};
 use reth_network::{types::NatResolver, PeersInfo};
 use reth_node_builder::{NodeBuilder, NodeHandle};
 use reth_node_core::{
@@ -58,6 +61,16 @@ alloy_sol_types::sol! {
             }
         }
     }
+}
+
+async fn inject_blob_transaction(
+    node: &NodeHelperType<EthereumNode>,
+    wallet: &Wallet,
+) -> eyre::Result<()> {
+    let blob_wallet = wallet.wallet_gen().swap_remove(0);
+    let blob_tx = TransactionTestContext::tx_with_blobs_bytes(1, blob_wallet).await?;
+    node.rpc.inject_tx(blob_tx).await?;
+    Ok(())
 }
 
 #[tokio::test]
@@ -539,7 +552,77 @@ async fn test_flashbots_validate_v4() -> eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+// Keep blob JSON decoding off the test thread's deeper debug stack.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_flashbots_validate_v5() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .osaka_activated()
+            .build(),
+    );
+
+    let (mut nodes, wallet) =
+        E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, eth_payload_attributes)
+            .with_node_config_modifier(|config| {
+                config.with_rpc(
+                    RpcServerArgs::default()
+                        .with_unused_ports()
+                        .with_http()
+                        .with_http_api(RpcModuleSelection::All)
+                        .with_force_blob_sidecar_upcasting(),
+                )
+            })
+            .build()
+            .await?;
+    let mut node = nodes.pop().unwrap();
+    let provider = ProviderBuilder::new()
+        .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
+        .connect_http(node.rpc_url());
+
+    inject_blob_transaction(&node, &wallet).await?;
+    let payload = node.new_payload().await?;
+    let envelope = payload.clone().try_into_v5()?;
+    assert!(!envelope.blobs_bundle.blobs.is_empty());
+
+    let mut request = BuilderBlockValidationRequestV5 {
+        request: SignedBidSubmissionV5 {
+            message: BidTrace {
+                parent_hash: payload.block().parent_hash,
+                block_hash: payload.block().hash(),
+                gas_used: payload.block().gas_used,
+                gas_limit: payload.block().gas_limit,
+                ..Default::default()
+            },
+            execution_payload: envelope.execution_payload,
+            blobs_bundle: envelope.blobs_bundle,
+            execution_requests: envelope.execution_requests.try_into().unwrap(),
+            signature: Default::default(),
+        },
+        parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
+        registered_gas_limit: payload.block().gas_limit,
+    };
+
+    provider
+        .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV5".into(), (&request,))
+        .await
+        .expect("request should validate");
+
+    request.request.blobs_bundle.proofs[0] = request.request.blobs_bundle.proofs[1];
+    let err = provider
+        .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV5".into(), (&request,))
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("invalid KZG proof"), "{err}");
+
+    Ok(())
+}
+
+// Keep blob JSON decoding off the test thread's deeper debug stack.
+#[tokio::test(flavor = "multi_thread")]
 async fn test_flashbots_validate_v6() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
@@ -551,30 +634,33 @@ async fn test_flashbots_validate_v6() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
+    let (mut nodes, wallet) = E2ETestSetupBuilder::<EthereumNode, _>::new(
         1,
-        chain_spec.clone(),
-        false,
-        Default::default(),
+        chain_spec,
         eth_payload_attributes_amsterdam,
     )
+    .with_node_config_modifier(|config| {
+        config.with_rpc(
+            RpcServerArgs::default()
+                .with_unused_ports()
+                .with_http()
+                .with_http_api(RpcModuleSelection::All)
+                .with_force_blob_sidecar_upcasting(),
+        )
+    })
+    .build()
     .await?;
     let mut node = nodes.pop().unwrap();
     let provider = ProviderBuilder::new()
         .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
         .connect_http(node.rpc_url());
 
-    for nonce in 0..3 {
-        let _ = provider
-            .send_transaction(TransactionRequest::default().to(Address::ZERO).nonce(nonce))
-            .await?;
-    }
-
+    inject_blob_transaction(&node, &wallet).await?;
     let payload = node.new_payload().await?;
     assert!(payload.block_access_list().is_some());
-    assert!(payload.block().body().transactions().count() >= 3);
 
     let envelope = payload.clone().try_into_v6()?;
+    assert!(!envelope.blobs_bundle.blobs.is_empty());
     let mut request = BuilderBlockValidationRequestV6 {
         request: SignedBidSubmissionV6 {
             message: BidTrace {
@@ -597,6 +683,18 @@ async fn test_flashbots_validate_v6() -> eyre::Result<()> {
         .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV6".into(), (&request,))
         .await
         .expect("request should validate");
+
+    let mut invalid_proof_request = request.clone();
+    invalid_proof_request.request.blobs_bundle.proofs[0] =
+        invalid_proof_request.request.blobs_bundle.proofs[1];
+    let err = provider
+        .raw_request::<_, ()>(
+            "flashbots_validateBuilderSubmissionV6".into(),
+            (&invalid_proof_request,),
+        )
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("invalid KZG proof"), "{err}");
 
     request.registered_gas_limit -= 1;
     assert!(provider
