@@ -60,10 +60,10 @@ const STATUS_SERVICE_UNAVAILABLE: u16 = 503;
 const STATUS_UNSUPPORTED_MEDIA_TYPE: u16 = 415;
 
 const MAX_BLOB_LIMIT: usize = crate::engine_ssz_containers::MAX_BLOBS_REQUEST;
-const MAX_BLOB_REQUEST_BYTES: u64 = 4 + 16 + MAX_BLOB_LIMIT as u64 * 32;
+const MAX_BLOB_REQUEST_BYTES: usize = 4 + 16 + MAX_BLOB_LIMIT * 32;
 const MAX_BODIES_REQUEST: usize = crate::engine_ssz_containers::MAX_BODIES_REQUEST;
-const MAX_BODIES_REQUEST_BYTES: u64 = 4 + (MAX_BODIES_REQUEST as u64 * 32);
-const MAX_PAYLOAD_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_BODIES_REQUEST_BYTES: usize = 4 + MAX_BODIES_REQUEST * 32;
+const MAX_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
 const PROBLEM_JSON: &str = "application/problem+json";
 
 type EthEngineApi<Provider, Pool, Validator, ChainSpec> =
@@ -573,41 +573,11 @@ where
             let Some(fork) = request_fork(&request) else {
                 return problem_response(STATUS_BAD_REQUEST, "unsupported-fork", None)
             };
-            let Some(query) = request.uri().query() else {
-                return problem_response(
-                    STATUS_BAD_REQUEST,
-                    "invalid-request",
-                    Some("missing payload bodies query".to_string()),
-                )
-            };
-            let mut start = None;
-            let mut count = None;
-            for pair in query.split('&') {
-                let Some((key, value)) = pair.split_once('=') else {
-                    return problem_response(STATUS_BAD_REQUEST, "invalid-request", None)
+            let (start, count) =
+                match parse_bodies_range_query(request.uri().query().unwrap_or_default()) {
+                    Ok(range) => range,
+                    Err(response) => return response,
                 };
-                match key {
-                    "from" => match value.parse() {
-                        Ok(value) => start = Some(value),
-                        Err(_) => {
-                            return problem_response(STATUS_BAD_REQUEST, "invalid-request", None)
-                        }
-                    },
-                    "count" => match value.parse() {
-                        Ok(value) => count = Some(value),
-                        Err(_) => {
-                            return problem_response(STATUS_BAD_REQUEST, "invalid-request", None)
-                        }
-                    },
-                    _ => return problem_response(STATUS_BAD_REQUEST, "invalid-request", None),
-                }
-            }
-            let (Some(start), Some(count)) = (start, count) else {
-                return problem_response(STATUS_BAD_REQUEST, "invalid-request", None)
-            };
-            if count > MAX_BODIES_REQUEST as u64 {
-                return problem_response(STATUS_PAYLOAD_TOO_LARGE, "request-too-large", None)
-            };
             let Some(engine_api) = handle.engine_api().await else {
                 return problem_response(STATUS_SERVICE_UNAVAILABLE, "service-unavailable", None)
             };
@@ -735,53 +705,58 @@ where
     let include_bal = fork == EngineSszFork::Amsterdam;
     let response = match request {
         PayloadBodiesRequest::Hash(hashes) => {
-            engine_api.get_payload_bodies_by_hash_with_timestamps(hashes, include_bal).await
+            engine_api.get_payload_bodies_by_hash_with_timestamps_metered(hashes, include_bal).await
         }
         PayloadBodiesRequest::Range { start, count } => {
-            engine_api.get_payload_bodies_by_range_with_timestamps(start, count, include_bal).await
+            engine_api
+                .get_payload_bodies_by_range_with_timestamps_metered(start, count, include_bal)
+                .await
         }
     };
-    let chain_spec = engine_api.chain_spec();
-    if include_bal {
-        return payload_bodies_http_response(
+    let chain_spec = engine_api.chain_spec().as_ref();
+    match fork {
+        EngineSszFork::Amsterdam => payload_bodies_http_response(
             response,
             |body| ExecutionPayloadBodyAmsterdam::try_from(body).ok(),
             fork,
-            chain_spec.as_ref(),
-        )
-    }
-    let response = response.map(|bodies| {
-        bodies
-            .into_iter()
-            .map(|body| {
-                body.map(|(timestamp, body)| {
-                    (
-                        timestamp,
-                        ExecutionPayloadBodyV1 {
-                            transactions: body.transactions,
-                            withdrawals: body.withdrawals,
-                        },
-                    )
-                })
-            })
-            .collect()
-    });
-    if fork == EngineSszFork::Paris {
-        payload_bodies_http_response(
+            chain_spec,
+        ),
+        EngineSszFork::Paris => payload_bodies_http_response(
             response,
-            |body| ExecutionPayloadBodyParis::try_from(body).ok(),
+            |body| ExecutionPayloadBodyParis::try_from(ExecutionPayloadBodyV1::from(body)).ok(),
             fork,
-            chain_spec.as_ref(),
-        )
-    } else {
-        payload_bodies_http_response(
+            chain_spec,
+        ),
+        _ => payload_bodies_http_response(
             response,
-            |body| ExecutionPayloadBodyShanghai::try_from(body).ok(),
+            |body| ExecutionPayloadBodyShanghai::try_from(ExecutionPayloadBodyV1::from(body)).ok(),
             fork,
-            chain_spec.as_ref(),
-        )
+            chain_spec,
+        ),
     }
 }
+
+fn parse_bodies_range_query(query: &str) -> Result<(u64, u64), HttpResponse> {
+    let invalid = || problem_response(STATUS_BAD_REQUEST, "invalid-request", None);
+    let mut start = None;
+    let mut count = None;
+    for pair in query.split('&') {
+        let (key, value) = pair.split_once('=').ok_or_else(invalid)?;
+        let field = match key {
+            "from" if start.is_none() => &mut start,
+            "count" if count.is_none() => &mut count,
+            _ => return Err(invalid()),
+        };
+        *field = Some(value.parse::<u64>().map_err(|_| invalid())?);
+    }
+    let range = (start.ok_or_else(invalid)?, count.ok_or_else(invalid)?);
+    if range.1 > MAX_BODIES_REQUEST as u64 {
+        return Err(problem_response(STATUS_PAYLOAD_TOO_LARGE, "request-too-large", None))
+    }
+    Ok(range)
+}
+
+/// Amsterdam bodies with a missing or pruned BAL are unavailable, just like pruned blocks.
 
 fn payload_bodies_response<LegacyBody, ForkBody>(
     response: Result<Vec<Option<(u64, LegacyBody)>>, EngineApiError>,
@@ -842,7 +817,7 @@ fn timestamp_matches_fork<ChainSpec: EthereumHardforks>(
     }
 }
 
-async fn read_ssz_body(request: HttpRequest, max_bytes: u64) -> Result<Bytes, HttpResponse> {
+async fn read_ssz_body(request: HttpRequest, max_bytes: usize) -> Result<Bytes, HttpResponse> {
     let content_type = request.headers().get(CONTENT_TYPE).and_then(|value| value.to_str().ok());
     if content_type != Some(OCTET_STREAM) {
         return Err(problem_response(STATUS_UNSUPPORTED_MEDIA_TYPE, "unsupported-media-type", None))
@@ -850,7 +825,7 @@ async fn read_ssz_body(request: HttpRequest, max_bytes: u64) -> Result<Bytes, Ht
 
     if let Some(content_length) = request.headers().get("content-length") {
         let Some(content_length) =
-            content_length.to_str().ok().and_then(|value| value.parse::<u64>().ok())
+            content_length.to_str().ok().and_then(|value| value.parse::<usize>().ok())
         else {
             return Err(problem_response(STATUS_BAD_REQUEST, "invalid-request", None))
         };
@@ -859,10 +834,7 @@ async fn read_ssz_body(request: HttpRequest, max_bytes: u64) -> Result<Bytes, Ht
         }
     }
 
-    let Ok(limit) = usize::try_from(max_bytes) else {
-        return Err(problem_response(STATUS_INTERNAL_SERVER_ERROR, "internal", None))
-    };
-    match Limited::new(request.into_body(), limit).collect().await {
+    match Limited::new(request.into_body(), max_bytes).collect().await {
         Ok(body) => Ok(body.to_bytes().into()),
         Err(err) if err.downcast_ref::<LengthLimitError>().is_some() => {
             Err(problem_response(STATUS_PAYLOAD_TOO_LARGE, "request-too-large", None))
@@ -1303,6 +1275,18 @@ mod tests {
             let problem: serde_json::Value = serde_json::from_slice(&body).unwrap();
             assert_eq!(problem["type"], format!("/engine-api/errors/{kind}"));
         }
+    }
+
+    #[test]
+    fn bodies_range_query_validation() {
+        assert_eq!(parse_bodies_range_query("from=1&count=32").unwrap(), (1, 32));
+        assert_eq!(parse_bodies_range_query("count=2&from=3").unwrap(), (3, 2));
+        for query in
+            ["", "from=1", "from=x&count=1", "from=1&count=1&count=2", "from=1&count=1&other=0"]
+        {
+            assert_eq!(parse_bodies_range_query(query).unwrap_err().status(), 400);
+        }
+        assert_eq!(parse_bodies_range_query("from=1&count=33").unwrap_err().status(), 413);
     }
 
     #[test]
