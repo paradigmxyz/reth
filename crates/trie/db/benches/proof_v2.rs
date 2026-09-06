@@ -364,37 +364,57 @@ fn bench_storage_trie_writes(c: &mut Criterion) {
         drop(cursor);
         tx.commit().unwrap();
 
-        let tx = db.tx().unwrap();
-        let actual = tx
-            .cursor_read::<tables::PackedStoragesTrie>()
-            .unwrap()
-            .walk(None)
-            .unwrap()
-            .map(Result::unwrap)
-            .collect::<Vec<_>>();
-        let expected = updates
-            .storage_nodes
-            .iter()
-            .map(|(path, node)| {
-                (
-                    address,
-                    PackedStorageTrieEntry { nibbles: (*path).into(), node: node.clone().unwrap() },
-                )
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(actual, expected);
-        drop(tx);
+        for change in ["unchanged", "changed"] {
+            let mut updates = updates.clone();
+            if change == "changed" {
+                for (_, node) in &mut updates.storage_nodes {
+                    let node = node.as_mut().unwrap();
+                    Arc::make_mut(&mut node.hashes)[0] = keccak256(node.hashes[0]);
+                }
+            }
+            let tx = db.tx_mut().unwrap();
+            let mut cursor = DatabaseStorageTrieCursor::<_, PackedKeyAdapter>::new(
+                tx.cursor_dup_write::<tables::PackedStoragesTrie>().unwrap(),
+                address,
+            );
+            assert_eq!(cursor.write_storage_trie_updates_sorted(&updates).unwrap(), 4096);
+            drop(cursor);
+            let actual = tx
+                .cursor_read::<tables::PackedStoragesTrie>()
+                .unwrap()
+                .walk(None)
+                .unwrap()
+                .map(Result::unwrap)
+                .collect::<Vec<_>>();
+            let expected = updates
+                .storage_nodes
+                .iter()
+                .map(|(path, node)| {
+                    (
+                        address,
+                        PackedStorageTrieEntry {
+                            nibbles: (*path).into(),
+                            node: node.clone().unwrap(),
+                        },
+                    )
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(actual, expected);
+            drop(tx);
 
-        group.bench_function(BenchmarkId::new("metrics", metrics), |b| {
-            b.iter(|| {
-                let tx = db.tx_mut().unwrap();
-                let mut cursor = DatabaseStorageTrieCursor::<_, PackedKeyAdapter>::new(
-                    tx.cursor_dup_write::<tables::PackedStoragesTrie>().unwrap(),
-                    address,
-                );
-                std::hint::black_box(cursor.write_storage_trie_updates_sorted(&updates).unwrap());
-            })
-        });
+            group.bench_function(BenchmarkId::new(format!("{change}/metrics"), metrics), |b| {
+                b.iter(|| {
+                    let tx = db.tx_mut().unwrap();
+                    let mut cursor = DatabaseStorageTrieCursor::<_, PackedKeyAdapter>::new(
+                        tx.cursor_dup_write::<tables::PackedStoragesTrie>().unwrap(),
+                        address,
+                    );
+                    std::hint::black_box(
+                        cursor.write_storage_trie_updates_sorted(&updates).unwrap(),
+                    );
+                })
+            });
+        }
     }
     group.finish();
 }

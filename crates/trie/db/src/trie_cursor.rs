@@ -276,7 +276,9 @@ where
         + DbDupCursorRO<A::StorageTrieTable>
         + DbDupCursorRW<A::StorageTrieTable>,
 {
-    /// Writes storage updates that are already sorted
+    /// Writes storage updates that are already sorted.
+    ///
+    /// Returns the number of non-root updates processed, including unchanged and absent nodes.
     pub fn write_storage_trie_updates_sorted(
         &mut self,
         updates: &StorageTrieUpdatesSorted,
@@ -286,13 +288,14 @@ where
         {
             num_entries += 1;
             let nibbles = A::StorageSubKey::from(*nibbles);
-            // Delete the old entry if it exists.
-            if self
-                .cursor
-                .seek_by_key_subkey(self.hashed_address, nibbles.clone())?
-                .as_ref()
-                .is_some_and(|e| *e.nibbles() == nibbles)
+            if let Some(entry) =
+                self.cursor.seek_by_key_subkey(self.hashed_address, nibbles.clone())? &&
+                *entry.nibbles() == nibbles
             {
+                // Rewriting an unchanged node still copies and dirties its database page.
+                if maybe_updated.as_ref() == Some(entry.node()) {
+                    continue
+                }
                 self.cursor.delete_current()?;
             }
 
