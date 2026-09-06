@@ -96,6 +96,8 @@ jobs:
               echo "ethereum.tags=${REGISTRY}/reth:nightly"
               echo "ethereum.args.RETH_ENGINE_TXPOOL_PREWARMING=true"
               echo "ethereum.args.RETH_ENGINE_SENDER_RECOVERY_CACHE=true"
+              echo "ethereum.args.RETH_ENGINE_PERSISTENCE_THRESHOLD=50"
+              echo "ethereum.args.RETH_ENGINE_NUM_STATE_MASKING_BLOCKS=30"
               echo "EOF"
             } >> "$GITHUB_OUTPUT"
 

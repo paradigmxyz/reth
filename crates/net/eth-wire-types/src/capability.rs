@@ -207,7 +207,8 @@ impl From<EthVersion> for Capability {
 impl<'a> arbitrary::Arbitrary<'a> for Capability {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let version = u.int_in_range(66..=71)?; // Valid eth protocol versions are 66-71
-                                                // Only generate valid eth protocol name for now since it's the only supported protocol
+                                                // Only generate valid eth protocol name for now
+                                                // since it's the only supported protocol
         Ok(Self::new_static("eth", version))
     }
 }

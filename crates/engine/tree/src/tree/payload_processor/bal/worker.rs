@@ -2,7 +2,7 @@ use super::BalExecutionError;
 use alloy_consensus::Transaction;
 use alloy_eip7928::BlockAccessIndex;
 use alloy_evm::{
-    block::{BlockExecutionError, BlockExecutor, BlockExecutorFactory},
+    block::{BlockExecutionError, BlockExecutor, BlockExecutorFactory, BlockValidationError},
     Evm,
 };
 use alloy_primitives::Address;
@@ -28,7 +28,9 @@ impl From<BalWorkerError> for BalExecutionError {
     fn from(err: BalWorkerError) -> Self {
         match err {
             BalWorkerError::Setup(err) => err,
-            BalWorkerError::Transaction(err) => Self::Other(err),
+            BalWorkerError::Transaction(err) => {
+                Self::Execution(BlockValidationError::Other(err).into())
+            }
             BalWorkerError::Execution(err) => Self::Execution(err),
         }
     }

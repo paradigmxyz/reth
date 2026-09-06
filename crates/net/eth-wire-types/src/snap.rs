@@ -140,6 +140,12 @@ impl AccountData {
             code_hash: SlimAccountBody::restore(&slim.code_hash, KECCAK256_EMPTY)?,
         })
     }
+
+    /// Consumes the wire value and returns its hashed key with the decoded trie account.
+    pub fn into_trie_entry(self) -> alloy_rlp::Result<(B256, TrieAccount)> {
+        let account = self.trie_account()?;
+        Ok((self.hash, account))
+    }
 }
 
 /// Response containing a number of consecutive accounts and the Merkle proofs for the entire range.
@@ -885,12 +891,14 @@ mod tests {
     #[test]
     fn slim_body_elides_empty_storage_and_code() {
         let account = trie_account(EMPTY_ROOT_HASH, KECCAK256_EMPTY);
-        let encoded = AccountData::from_trie_account(B256::repeat_byte(1), &account);
+        let hash = B256::repeat_byte(1);
+        let encoded = AccountData::from_trie_account(hash, &account);
 
         let body = SlimAccountBody::decode(&mut encoded.body.as_ref()).unwrap();
         assert!(body.storage_root.is_empty());
         assert!(body.code_hash.is_empty());
         assert_eq!(encoded.trie_account().unwrap(), account);
+        assert_eq!(encoded.into_trie_entry().unwrap(), (hash, account));
     }
 
     #[test]

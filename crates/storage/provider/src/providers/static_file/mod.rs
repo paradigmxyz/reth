@@ -752,7 +752,7 @@ mod tests {
                     })
                     .collect();
 
-                let changeset = generate_test_changesets(block_num, addresses.clone());
+                let changeset = generate_test_changesets(block_num, addresses);
 
                 writer.append_account_changeset(changeset, block_num).unwrap();
             }

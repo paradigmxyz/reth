@@ -302,13 +302,13 @@ mod tests {
             EngineApiError::UnknownPayload,
         );
 
-        // Malformed payload params, e.g. undecodable block access list bytes, are rejected with
-        // an invalid params error instead of an `INVALID` payload status.
+        // Processing errors explicitly classified as malformed request parameters are rejected
+        // with an invalid params error instead of an `INVALID` payload status.
         ensure_engine_rpc_error(
             INVALID_PARAMS_CODE,
             INVALID_PARAMS_MSG,
             EngineApiError::NewPayload(BeaconOnNewPayloadError::InvalidParams(
-                "undecodable block access list".into(),
+                "malformed payload parameters".into(),
             )),
         );
 

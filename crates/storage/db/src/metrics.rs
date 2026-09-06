@@ -1,7 +1,7 @@
 use crate::Tables;
 use metrics::Histogram;
-use quanta::Instant;
 use reth_metrics::{metrics::Counter, Metrics};
+use reth_primitives_traits::FastInstant as Instant;
 use rustc_hash::FxHashMap;
 use std::{array, sync::Arc, time::Duration};
 use strum::{EnumCount, EnumIter, IntoEnumIterator};

@@ -15,11 +15,13 @@ workspace = true
 # reth
 reth-config.workspace = true
 reth-consensus.workspace = true
+reth-eth-wire-types.workspace = true
 reth-network-p2p.workspace = true
 reth-network-peers.workspace = true
 reth-primitives-traits.workspace = true
 reth-storage-api.workspace = true
 reth-tasks.workspace = true
+reth-trie-common.workspace = true
 
 # optional deps for the test-utils feature
 reth-ethereum-primitives = { workspace = true, optional = true }
@@ -30,13 +32,13 @@ reth-testing-utils = { workspace = true, optional = true }
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
-alloy-rlp = { workspace = true, optional = true }
+alloy-rlp.workspace = true
 
 # async
 futures.workspace = true
 futures-util.workspace = true
 pin-project.workspace = true
-tokio = { workspace = true, features = ["sync", "fs", "io-util"] }
+tokio = { workspace = true, features = ["sync", "fs", "io-util", "rt"] }
 tokio-stream.workspace = true
 tokio-util = { workspace = true, features = ["codec"] }
 async-compression = { workspace = true, features = ["gzip", "tokio"], optional = true }
@@ -72,7 +74,7 @@ itertools.workspace = true
 
 [features]
 default = []
-file-client = ["dep:async-compression", "dep:alloy-rlp", "dep:itertools"]
+file-client = ["dep:async-compression", "dep:itertools"]
 test-utils = [
     "tempfile",
     "reth-consensus/test-utils",
@@ -84,4 +86,5 @@ test-utils = [
     "dep:reth-ethereum-primitives",
     "reth-ethereum-primitives?/test-utils",
     "reth-tasks/test-utils",
+    "reth-trie-common/test-utils",
 ]

@@ -95,9 +95,13 @@ impl MetricServer {
         } = &self.config;
 
         let hooks_for_endpoint = hooks.clone();
+        let executor_for_hooks = task_executor.clone();
         self.start_endpoint(
             *listen_addr,
-            Arc::new(move || hooks_for_endpoint.iter().for_each(|hook| hook())),
+            Arc::new(move || {
+                hooks_for_endpoint.refresh_background(&executor_for_hooks);
+                hooks_for_endpoint.iter().for_each(|hook| hook());
+            }),
             task_executor.clone(),
             pprof_dump_dir.clone(),
         )
@@ -209,6 +213,7 @@ impl MetricServer {
                         break;
                     }
                     _ = tokio::time::sleep(interval) => {
+                        hooks.refresh_background(&executor);
                         let hooks = hooks.clone();
                         let metrics_handle = handle.handle().clone();
                         let metrics = match executor.spawn_blocking(move || {
@@ -487,7 +492,10 @@ mod tests {
     use reqwest::Client;
     use reth_tasks::Runtime;
     use socket2::{Domain, Socket, Type};
-    use std::net::{SocketAddr, TcpListener};
+    use std::{
+        net::{SocketAddr, TcpListener},
+        sync::atomic::{AtomicUsize, Ordering},
+    };
 
     fn get_random_available_addr() -> SocketAddr {
         let addr = &"127.0.0.1:0".parse::<SocketAddr>().unwrap().into();
@@ -553,6 +561,68 @@ mod tests {
         assert!(body.contains("prune_config="), "expected prune config label");
 
         // Make sure the runtime is dropped after the test runs.
+        drop(runtime);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_background_hooks_do_not_block_collection() {
+        install_prometheus_recorder();
+
+        let collections = Arc::new(AtomicUsize::new(0));
+        let hooks = Hooks::builder()
+            .with_background_interval(Duration::from_secs(60))
+            .with_background_hook({
+                let collections = collections.clone();
+                move || {
+                    std::thread::sleep(Duration::from_secs(2));
+                    let collections = collections.fetch_add(1, Ordering::Relaxed) + 1;
+                    metrics::gauge!("test_background_hook_collections").set(collections as f64);
+                }
+            })
+            .build();
+
+        let runtime = Runtime::test();
+        let listen_addr = get_random_available_addr();
+        let config = MetricServerConfig::new(
+            listen_addr,
+            VersionInfo {
+                version: "test",
+                build_timestamp: "test",
+                cargo_features: "test",
+                git_sha: "test",
+                target_triple: "test",
+                build_profile: "test",
+            },
+            ChainSpecInfo { name: "test".to_string() },
+            runtime.clone(),
+            hooks,
+            std::env::temp_dir(),
+        );
+
+        MetricServer::new(config).serve().await.unwrap();
+
+        // the first scrape kicks off the background hook but must not wait for it
+        let url = format!("http://{listen_addr}");
+        let started = std::time::Instant::now();
+        let response =
+            Client::new().get(&url).timeout(Duration::from_millis(500)).send().await.unwrap();
+        assert!(response.status().is_success());
+        assert!(started.elapsed() < Duration::from_secs(1), "scrape waited for the hook");
+        assert_eq!(collections.load(Ordering::Relaxed), 0);
+
+        // once it completes, its values are rendered by the following scrape
+        while collections.load(Ordering::Relaxed) == 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let body = Client::new().get(&url).send().await.unwrap().text().await.unwrap();
+        assert!(
+            body.contains("test_background_hook_collections"),
+            "background hook metric missing: {body}"
+        );
+
+        // and scrapes within the interval do not collect again
+        assert_eq!(collections.load(Ordering::Relaxed), 1);
+
         drop(runtime);
     }
 }

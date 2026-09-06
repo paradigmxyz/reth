@@ -27,7 +27,7 @@ use reth_network_types::{
 use std::{
     collections::VecDeque,
     fmt::Display,
-    io::{self},
+    io,
     net::{IpAddr, SocketAddr},
     pin::Pin,
     task::{Context, Poll},
