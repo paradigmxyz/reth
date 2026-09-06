@@ -3,19 +3,21 @@
 //! Covers the appendability check that decides whether a block satisfies the inclusion list it
 //! was given, and the bounded store of lists retained from `engine_newPayloadV6`.
 
-use alloy_consensus::Transaction;
-use alloy_eips::eip2718::Decodable2718;
+use alloy_consensus::{constants::KECCAK_EMPTY, Transaction};
+use alloy_eips::{
+    eip2718::Decodable2718,
+    eip4844::{DATA_GAS_PER_BLOB, VERSIONED_HASH_VERSION_KZG},
+};
 use alloy_primitives::{
-    map::{B256Map, B256Set},
+    map::{AddressMap, B256Map, B256Set},
     Bytes, B256, U256,
 };
 use reth_errors::ProviderResult;
 use reth_primitives_traits::{BlockBody as _, NodePrimitives, RecoveredBlock, SignedTransaction};
 use reth_provider::StateProviderBox;
 use revm::{
-    context_interface::cfg::gas_params::Eip2780TxInfo,
-    interpreter::gas::calculate_initial_tx_gas,
-    primitives::{eip3860::MAX_INITCODE_SIZE, hardfork::SpecId},
+    context_interface::cfg::gas_params::Eip2780TxInfo, interpreter::gas::calculate_initial_tx_gas,
+    primitives::hardfork::SpecId,
 };
 use std::collections::VecDeque;
 
@@ -30,6 +32,14 @@ pub(super) struct InclusionListContext {
     pub(super) available_gas: u64,
     /// EIP-7825 cap on a single transaction's gas limit.
     pub(super) tx_gas_limit_cap: u64,
+    /// EIP-3860 init code bound, as raised by EIP-7954 from Amsterdam on.
+    pub(super) max_initcode_size: usize,
+    /// Blob gas still unspent at the end of the block.
+    pub(super) blob_gas_available: u64,
+    /// The block's blob gas price, from its own excess blob gas.
+    pub(super) blob_gas_price: u128,
+    /// EIP-7840 cap on the blobs a single transaction may carry.
+    pub(super) max_blobs_per_tx: Option<u64>,
 }
 
 /// Returns whether the block satisfies its EIP-7805 inclusion list, i.e. no inclusion-list
@@ -47,40 +57,75 @@ pub(super) fn inclusion_list_satisfied<N: NodePrimitives>(
         .transactions_iter()
         .map(SignedTransaction::recalculate_hash)
         .collect::<B256Set>();
+    let withdrawn = withdrawal_credits::<N>(block);
 
     for encoded in transactions {
         let Ok(transaction) = N::SignedTx::decode_2718_exact(encoded) else { continue };
         if included.contains(&transaction.recalculate_hash()) {
             continue
         }
-        if could_append_transaction::<N>(&transaction, state, ctx)? {
+        if could_append_transaction::<N>(&transaction, state, ctx, &withdrawn)? {
             return Ok(false)
         }
     }
     Ok(true)
 }
 
+/// Wei this block credited to each address by withdrawal.
+///
+/// The spec's `apply_body` runs the inclusion-list check after the block's transactions but before
+/// `process_withdrawals`, so a sender funded only by a withdrawal in the same block is not yet
+/// includable. The state read by the check is the block's post-state, which already holds those
+/// credits; withdrawals only add balance and never touch nonce or code, so subtracting them per
+/// address reconstructs the balance the spec sees.
+fn withdrawal_credits<N: NodePrimitives>(block: &RecoveredBlock<N::Block>) -> AddressMap<U256> {
+    let mut credits = AddressMap::default();
+    for withdrawal in block.body().withdrawals().into_iter().flatten() {
+        *credits.entry(withdrawal.address).or_insert(U256::ZERO) += withdrawal.amount_wei();
+    }
+    credits
+}
+
 /// Returns whether `transaction` could have been validly appended to the end of the block.
 ///
-/// Mirrors `check_inclusion_list_transactions` in the execution spec
-/// (`src/ethereum/forks/amsterdam/fork.py`). Conditions rejected here must also be ones the
-/// payload builder rejects, otherwise reth reports its own blocks as unsatisfied.
+/// Mirrors the execution spec's `check_inclusion_list_transactions`
+/// (`src/ethereum/forks/amsterdam/fork.py`), which admits a transaction that passes
+/// `validate_transaction` and `check_transaction` against the block's post-transaction state.
+///
+/// Conditions rejected here must also be rejected by the payload builder, otherwise reth reports
+/// its own blocks as unsatisfied. Blob transactions are a known exception: the spec judges them
+/// appendable, while the payload builder skips every EIP-4844 transaction in an inclusion list
+/// instead of looking its sidecar up in the blob store. The two can only disagree on a list
+/// aggregated from another proposer, since `engine_getInclusionListV1` does not offer blob
+/// transactions of our own.
 fn could_append_transaction<N: NodePrimitives>(
     transaction: &N::SignedTx,
     state: &StateProviderBox,
     ctx: &InclusionListContext,
+    withdrawn: &AddressMap<U256>,
 ) -> ProviderResult<bool> {
     // EIP-2681 reserves the maximum nonce; execution could not increment past it.
     if transaction.nonce() == u64::MAX {
         return Ok(false)
     }
 
-    // An inclusion list carries only EIP-2718 bytes, so the sidecar a blob transaction needs is
-    // unavailable and no proposer can append one from the list. The payload builder skips them
-    // for the same reason; treating them as appendable here would report our own blocks as
-    // unsatisfied.
-    if transaction.blob_count().is_some() {
-        return Ok(false)
+    // EIP-4844 form, from the spec's `validate_transaction`: a blob transaction must carry blobs,
+    // no more than the EIP-7840 per-transaction cap, and only KZG-versioned hashes.
+    if let Some(blob_versioned_hashes) = transaction.blob_versioned_hashes() {
+        if blob_versioned_hashes.is_empty() ||
+            ctx.max_blobs_per_tx.is_some_and(|max| blob_versioned_hashes.len() as u64 > max) ||
+            blob_versioned_hashes.iter().any(|hash| hash[0] != VERSIONED_HASH_VERSION_KZG)
+        {
+            return Ok(false)
+        }
+
+        // The blob dimension has its own remaining budget (`check_block_gas_capacity`), and the
+        // fee cap is measured against the block's blob gas price (`check_max_fee_per_blob_gas`).
+        if blob_gas(transaction) > ctx.blob_gas_available ||
+            transaction.max_fee_per_blob_gas().unwrap_or_default() < ctx.blob_gas_price
+        {
+            return Ok(false)
+        }
     }
 
     // EIP-7702 requires a non-empty authorization list.
@@ -100,8 +145,9 @@ fn could_append_transaction<N: NodePrimitives>(
         return Ok(false)
     }
 
-    // EIP-3860 init code bound.
-    if transaction.is_create() && transaction.input().len() > MAX_INITCODE_SIZE {
+    // EIP-3860 init code bound. The limit is fork-dependent — EIP-7954 raises it in Amsterdam —
+    // so it is taken from the block's own EVM environment.
+    if transaction.is_create() && transaction.input().len() > ctx.max_initcode_size {
         return Ok(false)
     }
 
@@ -145,9 +191,19 @@ fn could_append_transaction<N: NodePrimitives>(
     }
 
     let account = state.basic_account(&sender)?.unwrap_or_default();
+    // The balance the spec sees precedes this block's withdrawals; see `withdrawal_credits`.
+    let balance =
+        account.balance.saturating_sub(withdrawn.get(&sender).copied().unwrap_or(U256::ZERO));
 
-    // An account carrying code is not an EOA unless the code is an EIP-7702 delegation.
-    if account.has_bytecode() && !state.account_code(&sender)?.is_some_and(|code| code.is_eip7702())
+    // An account carrying code is not an EOA unless the code is an EIP-7702 delegation, mirroring
+    // the spec's `sender_account.code_hash != EMPTY_CODE_HASH`.
+    //
+    // The comparison is against the code hash rather than `Account::has_bytecode`, because a state
+    // provider may report a codeless account as `Some(KECCAK_EMPTY)`: only accounts that went
+    // through `Account::from_revm_account` are normalized to `None`. `has_bytecode` would classify
+    // most plain senders as contracts.
+    if account.get_bytecode_hash() != KECCAK_EMPTY &&
+        !state.account_code(&sender)?.is_some_and(|code| code.is_eip7702())
     {
         return Ok(false)
     }
@@ -155,9 +211,21 @@ fn could_append_transaction<N: NodePrimitives>(
     let max_gas_cost = U256::from(transaction.gas_limit())
         .checked_mul(U256::from(transaction.max_fee_per_gas()))
         .unwrap_or(U256::MAX);
-    let max_cost = max_gas_cost.checked_add(transaction.value()).unwrap_or(U256::MAX);
+    // A blob transaction also prepays its blob gas at its own fee cap.
+    let max_blob_cost = U256::from(blob_gas(transaction))
+        .checked_mul(U256::from(transaction.max_fee_per_blob_gas().unwrap_or_default()))
+        .unwrap_or(U256::MAX);
+    let max_cost = max_gas_cost
+        .checked_add(max_blob_cost)
+        .and_then(|cost| cost.checked_add(transaction.value()))
+        .unwrap_or(U256::MAX);
 
-    Ok(account.nonce == transaction.nonce() && account.balance >= max_cost)
+    Ok(account.nonce == transaction.nonce() && balance >= max_cost)
+}
+
+/// Blob gas a transaction consumes, zero for every non-blob type.
+fn blob_gas(transaction: &impl Transaction) -> u64 {
+    transaction.blob_versioned_hashes().map_or(0, |hashes| hashes.len() as u64) * DATA_GAS_PER_BLOB
 }
 
 /// Upper bound on the inclusion lists retained from `engine_newPayloadV6`.
@@ -234,6 +302,10 @@ mod inclusion_list_tests {
             base_fee_per_gas: Some(BASE_FEE),
             available_gas: 1_000_000,
             tx_gas_limit_cap: 500_000,
+            max_initcode_size: revm::primitives::eip7954::MAX_INITCODE_SIZE,
+            blob_gas_available: 6 * DATA_GAS_PER_BLOB,
+            blob_gas_price: 1,
+            max_blobs_per_tx: Some(6),
         }
     }
 
@@ -276,7 +348,7 @@ mod inclusion_list_tests {
         ctx: InclusionListContext,
     ) -> bool {
         let (signed, state) = with_sender(tx, account);
-        could_append_transaction::<EthPrimitives>(&signed, &state, &ctx)
+        could_append_transaction::<EthPrimitives>(&signed, &state, &ctx, &AddressMap::default())
             .expect("mock state provider does not fail")
     }
 
@@ -360,6 +432,13 @@ mod inclusion_list_tests {
         assert!(!could_append(legacy_tx(Some(CHAIN_ID), 0, 100_000), funded(0), ctx));
     }
 
+    /// A versioned hash the KZG check accepts.
+    fn kzg_hash(seed: u8) -> B256 {
+        let mut hash = B256::repeat_byte(seed);
+        hash.0[0] = VERSIONED_HASH_VERSION_KZG;
+        hash
+    }
+
     fn blob_tx(blob_versioned_hashes: Vec<B256>, max_fee_per_blob_gas: u128) -> EthTransaction {
         EthTransaction::Eip4844(TxEip4844 {
             chain_id: CHAIN_ID,
@@ -410,11 +489,66 @@ mod inclusion_list_tests {
     }
 
     #[test]
-    fn blob_transactions_are_never_appendable() {
-        // The list carries only EIP-2718 bytes, so the sidecar is unavailable and the payload
-        // builder skips them. The check here has to agree, or we flag our own blocks.
-        assert!(!could_append(blob_tx(vec![B256::ZERO], 1), funded(0), context()));
+    fn same_block_withdrawal_credit_does_not_fund_a_sender() {
+        // The spec checks the list before `process_withdrawals`, so a sender funded only by a
+        // withdrawal in this same block is not yet includable.
+        let mut rng = generators::rng();
+        let tx = legacy_tx(Some(CHAIN_ID), 0, 100_000);
+        let signed = sign_tx_with_key_pair(generate_key(&mut rng), tx);
+        let sender = signed.try_recover().expect("signature is valid");
+
+        let balance = U256::from(100_000u64) * U256::from(BASE_FEE);
+        let provider = MockEthProvider::default();
+        provider.add_account(sender, ExtendedAccount::new(0, balance));
+        let state = provider.latest().expect("mock provider always has a latest state");
+
+        let appendable = |withdrawn: AddressMap<U256>| {
+            could_append_transaction::<EthPrimitives>(&signed, &state, &context(), &withdrawn)
+                .expect("mock state provider does not fail")
+        };
+
+        assert!(appendable(AddressMap::default()));
+        // The whole balance arrived as a withdrawal in this block.
+        assert!(!appendable(std::iter::once((sender, balance)).collect()));
+    }
+
+    #[test]
+    fn well_formed_blob_transaction_is_appendable() {
+        // A blob transaction is appendable like any other type: the list carries the consensus
+        // form, and a proposer holding the sidecar can include it.
+        assert!(could_append(blob_tx(vec![kzg_hash(1)], 1), funded(0), context()));
+    }
+
+    #[test]
+    fn malformed_blob_transactions_are_not_appendable() {
+        // No blobs at all, more blobs than a transaction may carry, and a hash that is not
+        // KZG-versioned are each rejected by `validate_transaction`.
         assert!(!could_append(blob_tx(Vec::new(), 1), funded(0), context()));
+        let too_many = (0..7).map(kzg_hash).collect::<Vec<_>>();
+        assert!(!could_append(blob_tx(too_many, 1), funded(0), context()));
+        assert!(!could_append(blob_tx(vec![B256::ZERO], 1), funded(0), context()));
+    }
+
+    #[test]
+    fn blob_transaction_over_the_block_blob_budget_is_not_appendable() {
+        let ctx = InclusionListContext { blob_gas_available: DATA_GAS_PER_BLOB - 1, ..context() };
+        assert!(!could_append(blob_tx(vec![kzg_hash(1)], 1), funded(0), ctx));
+    }
+
+    #[test]
+    fn blob_transaction_below_the_blob_gas_price_is_not_appendable() {
+        let ctx = InclusionListContext { blob_gas_price: 2, ..context() };
+        assert!(!could_append(blob_tx(vec![kzg_hash(1)], 1), funded(0), ctx));
+    }
+
+    #[test]
+    fn blob_fee_counts_toward_the_senders_balance() {
+        // The sender prepays blob gas at its own fee cap, so a balance that covers only the
+        // execution gas is not enough.
+        let tx = blob_tx(vec![kzg_hash(1)], 1_000_000_000_000);
+        let execution_only = U256::from(100_000u64) * U256::from(BASE_FEE);
+        assert!(!could_append(tx.clone(), ExtendedAccount::new(0, execution_only), context()));
+        assert!(could_append(tx, funded(0), context()));
     }
 
     #[test]
@@ -432,6 +566,45 @@ mod inclusion_list_tests {
             input: Default::default(),
         });
         assert!(!could_append(tx, funded(0), context()));
+    }
+
+    #[test]
+    fn init_code_bound_follows_the_fork() {
+        // EIP-7954 raises the EIP-3860 limit in Amsterdam, so a creation whose init code falls
+        // between the two limits is appendable and one above the raised limit is not.
+        let create = |input_len: usize| {
+            EthTransaction::Legacy(TxLegacy {
+                chain_id: Some(CHAIN_ID),
+                nonce: 0,
+                gas_price: BASE_FEE as u128,
+                gas_limit: 30_000_000,
+                to: TxKind::Create,
+                value: U256::ZERO,
+                input: vec![0u8; input_len].into(),
+            })
+        };
+        let ctx = InclusionListContext {
+            available_gas: 30_000_000,
+            tx_gas_limit_cap: 30_000_000,
+            ..context()
+        };
+
+        assert!(could_append(
+            create(revm::primitives::eip3860::MAX_INITCODE_SIZE + 1),
+            funded(0),
+            ctx
+        ));
+        assert!(!could_append(create(ctx.max_initcode_size + 1), funded(0), ctx));
+    }
+
+    #[test]
+    fn sender_with_an_empty_code_hash_is_appendable() {
+        // A sender read from state the block did not touch arrives with
+        // `bytecode_hash: Some(KECCAK_EMPTY)`, which is the common case, so only the code hash
+        // itself distinguishes it from a contract.
+        let account = ExtendedAccount::new(0, U256::from(10u64).pow(U256::from(20u64)))
+            .with_bytecode(Bytes::new());
+        assert!(could_append(legacy_tx(Some(CHAIN_ID), 0, 100_000), account, context()));
     }
 
     #[test]
