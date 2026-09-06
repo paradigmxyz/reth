@@ -353,7 +353,7 @@ if [ "${BENCH_TRACING_CHROME:-false}" = "true" ]; then
 fi
 
 if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
-  SAMPLY="$(which samply)"
+  SAMPLY="${BENCH_SAMPLY_BIN:-$(which samply)}"
   # shellcheck disable=SC2024
   sudo systemd-run --quiet --scope --collect --unit="$RETH_SCOPE" \
     -p MemoryMax="$MEM_LIMIT" -p AllowedCPUs="$RETH_CPUS" \

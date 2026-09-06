@@ -1009,6 +1009,10 @@ jobs:
             sudo install "$HOME/.cargo/bin/samply" /usr/local/bin/
           fi
 
+      - name: Build profiler with larger event buffers
+        if: env.BENCH_SAMPLY == 'true'
+        run: .github/scripts/bench-samply-buffer.sh
+
       # Verify all required tools are available
       - name: Check dependencies
         run: |
