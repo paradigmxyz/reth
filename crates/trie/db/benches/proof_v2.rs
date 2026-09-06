@@ -2,8 +2,9 @@
 
 use alloy_primitives::{keccak256, map::B256Map, B256, U256};
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
-use reth_db::test_utils::create_test_rw_db;
+use reth_db::test_utils::{create_test_rw_db, TempDatabase};
 use reth_db_api::{
+    cursor::DbCursorRO,
     tables,
     transaction::{DbTx, DbTxMut},
     Database,
@@ -16,11 +17,15 @@ use reth_trie::{
     StateRoot, StorageRoot,
 };
 use reth_trie_common::{
-    prefix_set::PrefixSetMut, HashedPostState, HashedStorage, Nibbles, ProofV2Target,
+    prefix_set::PrefixSetMut, updates::StorageTrieUpdatesSorted, BranchNodeCompact,
+    HashedPostState, HashedStorage, Nibbles, PackedStorageTrieEntry, ProofV2Target,
     ProofV2TargetParent, StorageTrieEntry,
 };
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, LegacyKeyAdapter};
-use std::collections::BTreeMap;
+use reth_trie_db::{
+    DatabaseHashedCursorFactory, DatabaseStorageTrieCursor, DatabaseTrieCursorFactory,
+    LegacyKeyAdapter, PackedKeyAdapter,
+};
+use std::{collections::BTreeMap, sync::Arc};
 
 fn key(index: usize) -> B256 {
     keccak256((index as u64).to_be_bytes())
@@ -334,10 +339,71 @@ fn bench_storage_account_scan(c: &mut Criterion) {
     }
 }
 
+fn bench_storage_trie_writes(c: &mut Criterion) {
+    let mut group = c.benchmark_group("StorageTrieWrite");
+    let address = key(0);
+    let nodes = (0..4096)
+        .map(|index| {
+            let path = Nibbles::unpack((index as u32).to_be_bytes());
+            let hashes = (0..8).map(|child| key(index * 8 + child)).collect();
+            let node = BranchNodeCompact::new(0xff, 0xff, 0xff, hashes, None);
+            (path, Some(node))
+        })
+        .collect();
+    let updates = StorageTrieUpdatesSorted { storage_nodes: nodes };
+    for metrics in [false, true] {
+        let temp = Arc::try_unwrap(create_test_rw_db()).unwrap();
+        let path = temp.path().to_path_buf();
+        let db = TempDatabase::new(temp.into_inner_db().with_metrics_if(metrics), path);
+        let tx = db.tx_mut().unwrap();
+        let mut cursor = DatabaseStorageTrieCursor::<_, PackedKeyAdapter>::new(
+            tx.cursor_dup_write::<tables::PackedStoragesTrie>().unwrap(),
+            address,
+        );
+        assert_eq!(cursor.write_storage_trie_updates_sorted(&updates).unwrap(), 4096);
+        drop(cursor);
+        tx.commit().unwrap();
+
+        let tx = db.tx().unwrap();
+        let actual = tx
+            .cursor_read::<tables::PackedStoragesTrie>()
+            .unwrap()
+            .walk(None)
+            .unwrap()
+            .map(Result::unwrap)
+            .collect::<Vec<_>>();
+        let expected = updates
+            .storage_nodes
+            .iter()
+            .map(|(path, node)| {
+                (
+                    address,
+                    PackedStorageTrieEntry { nibbles: (*path).into(), node: node.clone().unwrap() },
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(actual, expected);
+        drop(tx);
+
+        group.bench_function(BenchmarkId::new("metrics", metrics), |b| {
+            b.iter(|| {
+                let tx = db.tx_mut().unwrap();
+                let mut cursor = DatabaseStorageTrieCursor::<_, PackedKeyAdapter>::new(
+                    tx.cursor_dup_write::<tables::PackedStoragesTrie>().unwrap(),
+                    address,
+                );
+                std::hint::black_box(cursor.write_storage_trie_updates_sorted(&updates).unwrap());
+            })
+        });
+    }
+    group.finish();
+}
+
 criterion_group!(
     proofs,
     bench_database_proofs,
     bench_database_account_proofs,
-    bench_storage_account_scan
+    bench_storage_account_scan,
+    bench_storage_trie_writes
 );
 criterion_main!(proofs);
