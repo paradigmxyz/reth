@@ -492,3 +492,61 @@ fn all_storage_slots_deleted_exact_keys() {
     let result = cursor.next().unwrap();
     assert_eq!(result, None, "Expected None from next() but got {:?}", result);
 }
+
+#[test]
+fn reused_storage_cursor_crosses_empty_address_ranges_with_overlay_changes() {
+    let db = create_test_rw_db();
+    let mut expected = BTreeMap::<B256, BTreeMap<B256, U256>>::new();
+    db.update(|tx| {
+        for address in [32, 128, 240] {
+            let address = B256::with_last_byte(address);
+            for slot in [0, 32, 255] {
+                let key = B256::with_last_byte(slot);
+                let value = U256::from(u16::from(slot) + 1);
+                tx.put::<tables::HashedStorages>(address, StorageEntry { key, value }).unwrap();
+                expected.entry(address).or_default().insert(key, value);
+            }
+        }
+    })
+    .unwrap();
+
+    let mut overlay = HashedPostState::default();
+    for (address, slot, value) in
+        [(48, 3, 7), (128, 0, 0), (128, 32, 0), (128, 255, 0), (240, 32, 9)]
+    {
+        let address = B256::with_last_byte(address);
+        let key = B256::with_last_byte(slot);
+        let value = U256::from(value);
+        overlay.storages.entry(address).or_default().storage.insert(key, value);
+        let entries = expected.entry(address).or_default();
+        if value.is_zero() {
+            entries.remove(&key);
+        } else {
+            entries.insert(key, value);
+        }
+    }
+    let overlay = overlay.into_sorted();
+    let tx = db.tx().unwrap();
+    let factory =
+        HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(&tx), &overlay);
+    let mut cursor = factory.hashed_storage_cursor(B256::ZERO).unwrap();
+    let addresses =
+        (0..=255).map(B256::with_last_byte).chain([B256::repeat_byte(0xff)]).collect::<Vec<_>>();
+    let empty = BTreeMap::new();
+    for address in addresses.iter().chain(addresses.iter().rev()).chain(addresses.iter().step_by(7))
+    {
+        cursor.set_hashed_address(*address);
+        let entries = expected.get(address).unwrap_or(&empty);
+        assert_eq!(cursor.is_storage_empty().unwrap(), entries.is_empty());
+        let mut actual = Vec::new();
+        let mut entry = cursor.seek(B256::ZERO).unwrap();
+        while let Some(pair) = entry {
+            actual.push(pair);
+            entry = cursor.next().unwrap();
+        }
+        assert_eq!(actual, entries.iter().map(|(&key, &value)| (key, value)).collect::<Vec<_>>());
+        assert!(cursor.next().unwrap().is_none());
+        cursor.set_hashed_address(*address);
+        assert!(cursor.seek(B256::repeat_byte(0xff)).unwrap().is_none());
+    }
+}

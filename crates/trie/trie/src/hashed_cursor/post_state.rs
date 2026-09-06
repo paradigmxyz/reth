@@ -400,6 +400,15 @@ where
     /// This function should be called before attempting to call [`HashedCursor::seek`] or
     /// [`HashedCursor::next`].
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
+        if self.post_state_cursor.is_empty() {
+            return self.cursor.is_storage_empty()
+        }
+        if self.post_state_cursor.has_any(|(_, value)| !value.is_zero()) {
+            return Ok(false)
+        }
+
+        // An overlay containing only deletions can remove every stored slot. Merge it with the
+        // database to find a surviving slot.
         let is_empty = self.seek(B256::ZERO)?.is_none();
         self.reset();
         Ok(is_empty)

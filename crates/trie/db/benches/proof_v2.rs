@@ -284,5 +284,60 @@ fn bench_database_account_proofs(c: &mut Criterion) {
     }
 }
 
-criterion_group!(proofs, bench_database_proofs, bench_database_account_proofs);
+fn bench_storage_account_scan(c: &mut Criterion) {
+    let mut group = c.benchmark_group("StorageAccountScan");
+    let mut addresses = (0..4096).map(key).collect::<Vec<_>>();
+    addresses.sort_unstable();
+    let slot = key(0);
+    let value = U256::from(1);
+    let stored_root = reth_trie::test_utils::storage_root_prehashed([(slot, value)]);
+    for stride in [1, 64] {
+        let db = create_test_rw_db();
+        let tx = db.tx_mut().unwrap();
+        for &address in addresses.iter().step_by(stride) {
+            tx.put::<tables::HashedStorages>(address, StorageEntry { key: slot, value }).unwrap();
+        }
+        tx.commit().unwrap();
+        let tx = db.tx().unwrap();
+        let overlay = HashedPostState::default().into_sorted();
+        let trie_factory = DatabaseTrieCursorFactory::<_, LegacyKeyAdapter>::new(&tx);
+        let hashed_factory =
+            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(&tx), &overlay);
+        let mut calculator = StorageProofCalculator::new_storage(
+            trie_factory.storage_trie_cursor(B256::ZERO).unwrap(),
+            hashed_factory.hashed_storage_cursor(B256::ZERO).unwrap(),
+        );
+        for (index, &address) in addresses.iter().enumerate() {
+            let node = calculator.storage_root_node(address).unwrap();
+            let root = if index % stride == 0 { stored_root } else { reth_trie::EMPTY_ROOT_HASH };
+            assert_eq!(calculator.compute_root_hash(&[node]).unwrap(), Some(root));
+        }
+        for order in ["sorted", "permuted"] {
+            let order = if order == "sorted" {
+                (order, addresses.clone())
+            } else {
+                (
+                    order,
+                    (0..addresses.len())
+                        .map(|index| addresses[(index * 13) % addresses.len()])
+                        .collect(),
+                )
+            };
+            group.bench_function(BenchmarkId::new(order.0, stride), |b| {
+                b.iter(|| {
+                    for &address in &order.1 {
+                        std::hint::black_box(calculator.storage_root_node(address).unwrap());
+                    }
+                });
+            });
+        }
+    }
+}
+
+criterion_group!(
+    proofs,
+    bench_database_proofs,
+    bench_database_account_proofs,
+    bench_storage_account_scan
+);
 criterion_main!(proofs);
