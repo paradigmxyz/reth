@@ -573,7 +573,7 @@ mod tests {
 
         let collections = Arc::new(AtomicUsize::new(0));
         let (release, wait_for_release) = mpsc::channel();
-        let wait_for_release = Mutex::new(wait_for_release);
+        let wait_for_release = Mutex::new(Some(wait_for_release));
         let completed = Arc::new(tokio::sync::Notify::new());
         let hooks = Hooks::builder()
             .with_background_interval(Duration::from_secs(60))
@@ -582,7 +582,9 @@ mod tests {
                 let completed = completed.clone();
                 move || {
                     // Dropping the sender also unblocks the hook if a scrape assertion fails.
-                    if wait_for_release.lock().unwrap().recv().is_err() {
+                    if let Some(wait_for_release) = wait_for_release.lock().unwrap().take() &&
+                        wait_for_release.recv().is_err()
+                    {
                         return
                     }
                     let collections = collections.fetch_add(1, Ordering::Relaxed) + 1;
