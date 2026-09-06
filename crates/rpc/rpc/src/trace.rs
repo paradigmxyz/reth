@@ -241,7 +241,12 @@ where
             .spawn_trace_transaction_in_block(
                 hash,
                 TracingInspectorConfig::default_parity(),
-                move |tx_info, inspector, _, _| Ok(localized_trace_at(inspector, tx_info, index)),
+                move |tx_info, inspector, _, _| {
+                    Ok(inspector
+                        .into_parity_builder()
+                        .into_localized_transaction_traces_iter(tx_info)
+                        .nth(index))
+                },
             )
             .await
             .map(Option::flatten)
@@ -857,15 +862,6 @@ pub struct BlockStorageAccess {
     pub transactions: Vec<TransactionStorageAccess>,
 }
 
-/// Selects a localized trace without materializing the remaining trace results.
-fn localized_trace_at(
-    inspector: TracingInspector,
-    tx_info: alloy_rpc_types_eth::TransactionInfo,
-    index: usize,
-) -> Option<LocalizedTransactionTrace> {
-    inspector.into_parity_builder().into_localized_transaction_traces_iter(tx_info).nth(index)
-}
-
 /// Helper to construct a [`LocalizedTransactionTrace`] that describes a reward to the block
 /// beneficiary.
 fn reward_trace<H: BlockHeader>(
@@ -891,141 +887,6 @@ fn reward_trace<H: BlockHeader>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_rpc_types_eth::TransactionInfo;
-    use revm::interpreter::InstructionResult;
-    use revm_inspectors::tracing::types::{CallTrace, CallTraceNode};
-
-    fn trace_get_fixture(count: usize) -> TracingInspector {
-        let mut inspector = TracingInspector::new(TracingInspectorConfig::default_parity());
-        let nodes = inspector.traces_mut().nodes_mut();
-        nodes.clear();
-        fn append(nodes: &mut Vec<CallTraceNode>, parent: Option<usize>, count: usize) {
-            if count == 0 {
-                return;
-            }
-            let idx = nodes.len();
-            let depth = parent.map_or(0, |parent| nodes[parent].trace.depth + 1);
-            nodes.push(CallTraceNode {
-                idx,
-                parent,
-                trace: CallTrace {
-                    depth,
-                    caller: Address::with_last_byte(16),
-                    address: Address::with_last_byte(17),
-                    success: true,
-                    data: Bytes::from(vec![1; 128]),
-                    output: Bytes::from(vec![2; 128]),
-                    status: Some(InstructionResult::Return),
-                    ..Default::default()
-                },
-                ..Default::default()
-            });
-            if let Some(parent) = parent {
-                nodes[parent].children.push(idx);
-            }
-            let remaining = count - 1;
-            for child in 0..4 {
-                append(nodes, Some(idx), remaining / 4 + usize::from(child < remaining % 4));
-            }
-        }
-        append(nodes, None, count);
-        inspector
-    }
-
-    #[test]
-    fn trace_get_matches_transaction_trace_order() {
-        let mut inspector = trace_get_fixture(21);
-        let nodes = inspector.traces_mut().nodes_mut();
-        // Precompiles are omitted; a selfdestruct contributes an additional trace.
-        nodes[20].trace.maybe_precompile = Some(true);
-        nodes[16].children.retain(|&idx| idx != 20);
-        nodes[2].trace.status = Some(InstructionResult::Revert);
-        nodes[2].trace.success = false;
-        nodes[19].trace.status = Some(InstructionResult::SelfDestruct);
-        nodes[19].trace.selfdestruct_address = Some(Address::with_last_byte(17));
-        nodes[19].trace.selfdestruct_refund_target = Some(Address::with_last_byte(18));
-        nodes[19].trace.selfdestruct_transferred_value = Some(U256::from(123));
-        let info = TransactionInfo {
-            hash: Some(B256::repeat_byte(1)),
-            index: Some(7),
-            block_hash: Some(B256::repeat_byte(2)),
-            block_number: Some(123),
-            ..Default::default()
-        };
-        let expected =
-            inspector.clone().into_parity_builder().into_localized_transaction_traces(info);
-        assert!(expected.iter().any(|trace| trace.trace.action.is_selfdestruct()));
-        assert!(expected.iter().any(|trace| trace.trace.error.is_some()));
-        for index in (0..=expected.len()).chain([usize::MAX]) {
-            assert_eq!(
-                localized_trace_at(inspector.clone(), info, index).as_ref(),
-                expected.get(index)
-            );
-        }
-        assert!(localized_trace_at(trace_get_fixture(0), info, 0).is_none());
-    }
-
-    #[tokio::test]
-    async fn trace_get_missing_transaction_and_invalid_indices() {
-        use crate::{eth::helpers::types::EthRpcConverter, EthApi};
-        use reth_chainspec::ChainSpec;
-        use reth_evm_ethereum::EthEvmConfig;
-        use reth_network_api::noop::NoopNetwork;
-        use reth_provider::test_utils::NoopProvider;
-        use reth_transaction_pool::test_utils::testing_pool;
-
-        let eth_api = EthApi::<_, EthRpcConverter<ChainSpec>>::builder(
-            NoopProvider::default(),
-            testing_pool(),
-            NoopNetwork::default(),
-            EthEvmConfig::mainnet(),
-        )
-        .build();
-        let api = TraceApi::new(eth_api, BlockingTaskGuard::new(1), EthConfig::default());
-        for indices in [vec![], vec![0, 1], vec![0], vec![usize::MAX]] {
-            assert!(api.trace_get(B256::ZERO, indices).await.unwrap().is_none());
-        }
-    }
-
-    #[test]
-    #[ignore = "isolated conversion benchmark; run with --release --ignored --nocapture"]
-    fn trace_get_conversion_benchmark() {
-        use std::{hint::black_box, time::Instant};
-        for count in [1, 64, 1024] {
-            let fixture = trace_get_fixture(count);
-            for index in [0, count / 2, count - 1, count] {
-                let mut elapsed = [0u128; 2];
-                let iterations = 1000;
-                for iteration in 0..iterations {
-                    for offset in 0..2 {
-                        let variant = (iteration + offset) % 2;
-                        let inspector = black_box(fixture.clone());
-                        let start = Instant::now();
-                        let result = if variant == 0 {
-                            inspector
-                                .into_parity_builder()
-                                .into_localized_transaction_traces(TransactionInfo::default())
-                                .into_iter()
-                                .nth(black_box(index))
-                        } else {
-                            localized_trace_at(
-                                inspector,
-                                TransactionInfo::default(),
-                                black_box(index),
-                            )
-                        };
-                        drop(black_box(result));
-                        elapsed[variant] += start.elapsed().as_nanos();
-                    }
-                }
-                println!(
-                    "nodes={count} index={index} iterations={iterations} eager_ns={} lazy_ns={}",
-                    elapsed[0] / iterations as u128,
-                    elapsed[1] / iterations as u128
-                );
-            }
-        }
-    }
 
     fn localized_transaction_trace(
         block_number: u64,
