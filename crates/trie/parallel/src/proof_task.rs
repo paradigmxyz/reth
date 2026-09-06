@@ -578,8 +578,7 @@ pub(crate) enum StorageWorkerJob {
 
 /// Worker for storage trie operations.
 ///
-/// Each worker maintains a dedicated database transaction and processes
-/// storage proof requests.
+/// Each storage proof job uses its own database transaction.
 struct StorageProofWorker<Factory> {
     /// Shared task context with database factory and prefix sets
     task_ctx: ProofTaskCtx<Factory>,
@@ -628,26 +627,14 @@ where
 
     /// Runs the worker loop, processing jobs until the channel closes.
     ///
-    /// # Lifecycle
-    ///
-    /// 1. Initializes database provider and transaction
-    /// 2. Advertises availability
-    /// 3. Processes jobs in a loop:
-    ///    - Receives job from channel
-    ///    - Marks worker as busy
-    ///    - Processes the job
-    ///    - Marks worker as available
-    /// 4. Shuts down when channel closes
+    /// Each job opens a database snapshot and releases it before the worker becomes idle.
+    /// This lets the database reuse old pages while the worker waits for another job.
     ///
     /// # Panic Safety
     ///
     /// If this function panics, the worker thread terminates but other workers
     /// continue operating and the system degrades gracefully.
     fn run(mut self) -> ProviderResult<()> {
-        // Create provider from factory
-        let provider = self.task_ctx.factory.database_provider_ro()?;
-        let proof_tx = ProofTaskTx::new(provider, self.worker_id);
-
         trace!(
             target: "trie::proof_task",
             worker_id = self.worker_id,
@@ -656,19 +643,6 @@ where
 
         let mut storage_proofs_processed = 0u64;
         let mut cursor_metrics_cache = ProofTaskCursorMetricsCache::default();
-        let trie_cursor = proof_tx.provider.storage_trie_cursor(B256::ZERO)?;
-        let hashed_cursor = proof_tx.provider.hashed_storage_cursor(B256::ZERO)?;
-        let instrumented_trie_cursor =
-            InstrumentedTrieCursor::new(trie_cursor, &mut cursor_metrics_cache.storage_trie_cursor);
-        let instrumented_hashed_cursor = InstrumentedHashedCursor::new(
-            hashed_cursor,
-            &mut cursor_metrics_cache.storage_hashed_cursor,
-        );
-        let mut v2_calculator = proof_v2::StorageProofCalculator::new_storage(
-            instrumented_trie_cursor,
-            instrumented_hashed_cursor,
-        );
-
         // Initially mark this worker as available.
         self.availability.mark_idle(self.worker_id);
 
@@ -694,6 +668,24 @@ where
                 std::thread::sleep(jitter);
             }
 
+            let provider = self.task_ctx.factory.database_provider_ro()?;
+            let proof_tx = ProofTaskTx::new(provider, self.worker_id);
+
+            let trie_cursor = proof_tx.provider.storage_trie_cursor(B256::ZERO)?;
+            let hashed_cursor = proof_tx.provider.hashed_storage_cursor(B256::ZERO)?;
+            let instrumented_trie_cursor = InstrumentedTrieCursor::new(
+                trie_cursor,
+                &mut cursor_metrics_cache.storage_trie_cursor,
+            );
+            let instrumented_hashed_cursor = InstrumentedHashedCursor::new(
+                hashed_cursor,
+                &mut cursor_metrics_cache.storage_hashed_cursor,
+            );
+            let mut v2_calculator = proof_v2::StorageProofCalculator::new_storage(
+                instrumented_trie_cursor,
+                instrumented_hashed_cursor,
+            );
+
             match job {
                 StorageWorkerJob::StorageProof { input, proof_result_sender } => {
                     self.process_storage_proof(
@@ -706,14 +698,14 @@ where
                 }
             }
 
+            drop(v2_calculator);
+            drop(proof_tx);
+
             // Mark worker as available again.
             self.availability.mark_idle(self.worker_id);
 
             idle_start = Instant::now();
         }
-
-        // Drop calculator to release mutable borrows on cursor_metrics_cache.
-        drop(v2_calculator);
 
         trace!(
             target: "trie::proof_task",
@@ -791,8 +783,7 @@ where
 
 /// Worker for account trie operations.
 ///
-/// Each worker maintains a dedicated database transaction and processes
-/// account multiproof requests.
+/// Each account multiproof job uses its own database transaction.
 struct AccountProofWorker<Factory> {
     /// Shared task context with database factory and prefix sets
     task_ctx: ProofTaskCtx<Factory>,
@@ -846,24 +837,14 @@ where
 
     /// Runs the worker loop, processing jobs until the channel closes.
     ///
-    /// # Lifecycle
-    ///
-    /// 1. Initializes database provider and transaction
-    /// 2. Advertises availability
-    /// 3. Processes jobs in a loop:
-    ///    - Receives job from channel
-    ///    - Marks worker as busy
-    ///    - Processes the job
-    ///    - Marks worker as available
-    /// 4. Shuts down when channel closes
+    /// Each job opens a database snapshot and releases it before the worker becomes idle.
+    /// This lets the database reuse old pages while the worker waits for another job.
     ///
     /// # Panic Safety
     ///
     /// If this function panics, the worker thread terminates but other workers
     /// continue operating and the system degrades gracefully.
     fn run(mut self) -> ProviderResult<()> {
-        let provider = self.task_ctx.factory.database_provider_ro()?;
-
         trace!(
             target: "trie::proof_task",
             worker_id=self.worker_id,
@@ -873,53 +854,6 @@ where
         let mut account_proofs_processed = 0u64;
         let mut cursor_metrics_cache = ProofTaskCursorMetricsCache::default();
 
-        // Create both account and storage calculators for V2 proofs.
-        // The storage calculator is wrapped in Rc<RefCell<...>> for sharing with value encoders.
-        let account_trie_cursor = provider.account_trie_cursor()?;
-        let account_hashed_cursor = provider.hashed_account_cursor()?;
-
-        let storage_trie_cursor = provider.storage_trie_cursor(B256::ZERO)?;
-        let storage_hashed_cursor = provider.hashed_storage_cursor(B256::ZERO)?;
-
-        let instrumented_account_trie_cursor = InstrumentedTrieCursor::new(
-            account_trie_cursor,
-            &mut cursor_metrics_cache.account_trie_cursor,
-        );
-        let instrumented_account_hashed_cursor = InstrumentedHashedCursor::new(
-            account_hashed_cursor,
-            &mut cursor_metrics_cache.account_hashed_cursor,
-        );
-        let instrumented_storage_trie_cursor = InstrumentedTrieCursor::new(
-            storage_trie_cursor,
-            &mut cursor_metrics_cache.storage_trie_cursor,
-        );
-        let instrumented_storage_hashed_cursor = InstrumentedHashedCursor::new(
-            storage_hashed_cursor,
-            &mut cursor_metrics_cache.storage_hashed_cursor,
-        );
-
-        let mut v2_account_calculator =
-            proof_v2::ProofCalculator::<
-                _,
-                _,
-                AsyncAccountValueEncoder<
-                    InstrumentedTrieCursor<
-                        '_,
-                        <Factory::Provider as TrieCursorFactory>::StorageTrieCursor<'_>,
-                    >,
-                    InstrumentedHashedCursor<
-                        '_,
-                        <Factory::Provider as HashedCursorFactory>::StorageCursor<'_>,
-                    >,
-                >,
-            >::new(instrumented_account_trie_cursor, instrumented_account_hashed_cursor);
-        let v2_storage_calculator =
-            Rc::new(RefCell::new(proof_v2::StorageProofCalculator::new_storage(
-                instrumented_storage_trie_cursor,
-                instrumented_storage_hashed_cursor,
-            )));
-
-        // Count this worker as available only after successful initialization.
         self.availability.mark_idle(self.worker_id);
 
         let mut total_idle_time = Duration::ZERO;
@@ -945,6 +879,57 @@ where
                 std::thread::sleep(jitter);
             }
 
+            let provider = self.task_ctx.factory.database_provider_ro()?;
+
+            // Create both account and storage calculators for V2 proofs.
+            // The storage calculator is wrapped in Rc<RefCell<...>> for sharing with value
+            // encoders.
+            let account_trie_cursor = provider.account_trie_cursor()?;
+            let account_hashed_cursor = provider.hashed_account_cursor()?;
+
+            let storage_trie_cursor = provider.storage_trie_cursor(B256::ZERO)?;
+            let storage_hashed_cursor = provider.hashed_storage_cursor(B256::ZERO)?;
+
+            let instrumented_account_trie_cursor = InstrumentedTrieCursor::new(
+                account_trie_cursor,
+                &mut cursor_metrics_cache.account_trie_cursor,
+            );
+            let instrumented_account_hashed_cursor = InstrumentedHashedCursor::new(
+                account_hashed_cursor,
+                &mut cursor_metrics_cache.account_hashed_cursor,
+            );
+            let instrumented_storage_trie_cursor = InstrumentedTrieCursor::new(
+                storage_trie_cursor,
+                &mut cursor_metrics_cache.storage_trie_cursor,
+            );
+            let instrumented_storage_hashed_cursor = InstrumentedHashedCursor::new(
+                storage_hashed_cursor,
+                &mut cursor_metrics_cache.storage_hashed_cursor,
+            );
+
+            let mut v2_account_calculator = proof_v2::ProofCalculator::<
+                _,
+                _,
+                AsyncAccountValueEncoder<
+                    InstrumentedTrieCursor<
+                        '_,
+                        <Factory::Provider as TrieCursorFactory>::StorageTrieCursor<'_>,
+                    >,
+                    InstrumentedHashedCursor<
+                        '_,
+                        <Factory::Provider as HashedCursorFactory>::StorageCursor<'_>,
+                    >,
+                >,
+            >::new(
+                instrumented_account_trie_cursor,
+                instrumented_account_hashed_cursor,
+            );
+            let v2_storage_calculator =
+                Rc::new(RefCell::new(proof_v2::StorageProofCalculator::new_storage(
+                    instrumented_storage_trie_cursor,
+                    instrumented_storage_hashed_cursor,
+                )));
+
             match job {
                 AccountWorkerJob::AccountMultiproof { input } => {
                     let value_encoder_stats = self.process_account_multiproof::<Factory::Provider>(
@@ -958,15 +943,15 @@ where
                 }
             }
 
+            drop(v2_account_calculator);
+            drop(v2_storage_calculator);
+            drop(provider);
+
             // Mark worker as available again.
             self.availability.mark_idle(self.worker_id);
 
             idle_start = Instant::now();
         }
-
-        // Drop calculators to release mutable borrows on cursor_metrics_cache.
-        drop(v2_account_calculator);
-        drop(v2_storage_calculator);
 
         trace!(
             target: "trie::proof_task",
@@ -1178,6 +1163,10 @@ mod tests {
     use super::*;
     use reth_chainspec::ChainSpec;
     use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
+    use reth_trie::{
+        hashed_cursor::noop::NoopHashedCursor,
+        trie_cursor::noop::{NoopAccountTrieCursor, NoopStorageTrieCursor},
+    };
     use std::sync::Arc;
 
     fn test_ctx<Factory>(factory: Factory) -> ProofTaskCtx<Factory> {
@@ -1208,5 +1197,151 @@ mod tests {
 
         // Workers shut down automatically when handle is dropped
         drop(proof_handle);
+    }
+
+    #[test]
+    fn workers_release_each_snapshot_before_receiving_the_next_job() {
+        for job_count in [0, 2] {
+            let opens = Arc::new(AtomicUsize::new(0));
+            let (drop_tx, drop_rx) = unbounded();
+            let factory = CountingFactory { opens: opens.clone(), drop_tx };
+            let roots = Arc::new(DashMap::default());
+            let (work_tx, work_rx) = unbounded();
+            let (result_tx, result_rx) = unbounded();
+            let dropped = drop_rx.clone();
+            let producer = std::thread::spawn(move || {
+                for _ in 0..job_count {
+                    work_tx
+                        .send(StorageWorkerJob::StorageProof {
+                            input: StorageProofInput::new(B256::ZERO, Vec::new(), true),
+                            proof_result_sender: result_tx.clone(),
+                        })
+                        .unwrap();
+                    dropped.recv_timeout(Duration::from_secs(5)).unwrap();
+                }
+            });
+            StorageProofWorker::new(
+                test_ctx(factory.clone()),
+                work_rx,
+                0,
+                Arc::new(AvailabilitySheet::new(1)),
+                roots.clone(),
+                #[cfg(feature = "metrics")]
+                ProofTaskTrieMetrics::default(),
+                #[cfg(feature = "metrics")]
+                ProofTaskCursorMetrics::new(),
+            )
+            .run()
+            .unwrap();
+            producer.join().unwrap();
+            let results: Vec<_> = result_rx.try_iter().collect();
+            assert_eq!(results.len(), job_count);
+            for message in results {
+                assert_eq!(message.result.unwrap().root, Some(reth_trie::EMPTY_ROOT_HASH));
+            }
+            assert_eq!(opens.load(Ordering::Relaxed), job_count);
+
+            let (work_tx, work_rx) = unbounded();
+            let (result_tx, result_rx) = unbounded();
+            let (storage_tx, _storage_rx) = unbounded();
+            let dropped = drop_rx.clone();
+            let producer = std::thread::spawn(move || {
+                for _ in 0..job_count {
+                    work_tx
+                        .send(AccountWorkerJob::AccountMultiproof {
+                            input: Box::new(AccountMultiproofInput {
+                                targets: MultiProofTargetsV2::default(),
+                                proof_result_sender: ProofResultContext::new(
+                                    result_tx.clone(),
+                                    HashedPostState::default(),
+                                    Instant::now(),
+                                ),
+                            }),
+                        })
+                        .unwrap();
+                    dropped.recv_timeout(Duration::from_secs(5)).unwrap();
+                }
+            });
+            AccountProofWorker::new(
+                test_ctx(factory),
+                work_rx,
+                0,
+                storage_tx,
+                Arc::new(AvailabilitySheet::new(1)),
+                roots,
+                #[cfg(feature = "metrics")]
+                ProofTaskTrieMetrics::default(),
+                #[cfg(feature = "metrics")]
+                ProofTaskCursorMetrics::new(),
+            )
+            .run()
+            .unwrap();
+            producer.join().unwrap();
+            let results: Vec<_> = result_rx.try_iter().collect();
+            assert_eq!(results.len(), job_count);
+            for message in results {
+                let proof = message.result.unwrap();
+                assert!(proof.account_proofs.is_empty());
+                assert!(proof.storage_proofs.is_empty());
+            }
+            assert_eq!(opens.load(Ordering::Relaxed), 2 * job_count);
+        }
+    }
+
+    #[derive(Clone)]
+    struct CountingFactory {
+        opens: Arc<AtomicUsize>,
+        drop_tx: CrossbeamSender<()>,
+    }
+
+    struct CountingProvider {
+        drop_tx: CrossbeamSender<()>,
+    }
+
+    impl Drop for CountingProvider {
+        fn drop(&mut self) {
+            self.drop_tx.send(()).unwrap();
+        }
+    }
+
+    impl DatabaseProviderROFactory for CountingFactory {
+        type Provider = CountingProvider;
+
+        fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
+            self.opens.fetch_add(1, Ordering::Relaxed);
+            Ok(CountingProvider { drop_tx: self.drop_tx.clone() })
+        }
+    }
+
+    impl TrieCursorFactory for CountingProvider {
+        type AccountTrieCursor<'a> = NoopAccountTrieCursor;
+        type StorageTrieCursor<'a> = NoopStorageTrieCursor;
+
+        fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
+            Ok(NoopAccountTrieCursor::default())
+        }
+
+        fn storage_trie_cursor(
+            &self,
+            _hashed_address: B256,
+        ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
+            Ok(NoopStorageTrieCursor::default())
+        }
+    }
+
+    impl HashedCursorFactory for CountingProvider {
+        type AccountCursor<'a> = NoopHashedCursor<reth_primitives_traits::Account>;
+        type StorageCursor<'a> = NoopHashedCursor<U256>;
+
+        fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
+            Ok(NoopHashedCursor::default())
+        }
+
+        fn hashed_storage_cursor(
+            &self,
+            _hashed_address: B256,
+        ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
+            Ok(NoopHashedCursor::default())
+        }
     }
 }
