@@ -48,7 +48,7 @@ jobs:
           cargo nextest run \
             --no-fail-fast \
             --locked --features "asm-keccak" \
-            --workspace \
+            --workspace --test e2e_testsuite \
             --exclude 'example-*' \
             --exclude 'exex-subscription' \
             --exclude 'ef-tests' \
