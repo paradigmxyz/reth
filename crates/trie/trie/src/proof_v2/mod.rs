@@ -2094,10 +2094,23 @@ mod tests {
         legacy_nodes: &[ProofTrieNodeV2],
         targets: &[ProofV2Target],
     ) -> Vec<ProofTrieNodeV2> {
+        let max_path_len =
+            legacy_nodes.iter().map(|node| node.path.len()).max().unwrap_or_default();
+        let mut nodes_by_path = BTreeMap::new();
+        for node in legacy_nodes {
+            assert!(nodes_by_path.insert(node.path, node).is_none(), "duplicate legacy node path");
+        }
+
+        // Only ancestors of a target can contribute to its projection, including nodes whose
+        // compressed key crosses the requested parent boundary.
         let mut projected = targets
             .iter()
             .flat_map(|target| {
-                legacy_nodes.iter().filter_map(move |node| project_legacy_proof_node(node, target))
+                let nodes_by_path = &nodes_by_path;
+                (0..=max_path_len.min(target.key_nibbles.len())).filter_map(move |len| {
+                    let node = nodes_by_path.get(&target.key_nibbles.slice(..len))?;
+                    project_legacy_proof_node(node, target)
+                })
             })
             .collect::<Vec<_>>();
         projected.sort_unstable_by(|a, b| depth_first::cmp(&a.path, &b.path));
@@ -2602,6 +2615,31 @@ mod tests {
         assert_eq!(root_proof.len(), 1);
         assert!(matches!(root_proof[0].node, TrieNodeV2::EmptyRoot));
         assert_eq!(root, Some(EMPTY_ROOT_HASH));
+    }
+
+    #[test]
+    fn test_indexed_legacy_projection_matches_full_scan() {
+        let slots = [
+            B256::right_padding_from(&[0xae, 0xd4, 0x00]),
+            B256::right_padding_from(&[0xae, 0xd4, 0x10]),
+            B256::right_padding_from(&[0xf0]),
+        ];
+        let harness = ProofTestHarness::new(slots.map(|key| (key, U256::from(1))).into());
+        let (nodes, _) = harness.proof_v2(&mut slots.map(ProofV2Target::new));
+
+        for key in slots.into_iter().chain([B256::ZERO, B256::repeat_byte(0xae)]) {
+            for parent in std::iter::once(ProofV2TargetParent::NONE)
+                .chain((0..64).map(ProofV2TargetParent::new))
+            {
+                let target = ProofV2Target::new(key).with_parent(parent);
+                let mut expected = nodes
+                    .iter()
+                    .filter_map(|node| project_legacy_proof_node(node, &target))
+                    .collect::<Vec<_>>();
+                expected.sort_unstable_by(|a, b| depth_first::cmp(&a.path, &b.path));
+                assert_eq!(project_legacy_proof(&nodes, &[target]), expected);
+            }
+        }
     }
 
     #[test]
