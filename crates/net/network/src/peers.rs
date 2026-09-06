@@ -2903,8 +2903,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_tick() {
+    #[tokio::test]
+    async fn test_tick() {
         let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2));
         let socket_addr = SocketAddr::new(ip, 8008);
         let config = PeersConfig::test();
@@ -2913,7 +2913,6 @@ mod tests {
         peer_manager.add_peer(peer_id, PeerAddr::from_tcp(socket_addr), None);
 
         // Age the last tick directly so each reputation update sees a full elapsed second.
-
         peer_manager.last_tick -= Duration::from_secs(1);
         peer_manager.tick();
 
