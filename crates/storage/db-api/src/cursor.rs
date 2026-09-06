@@ -5,7 +5,7 @@ use std::{
 
 use crate::{
     common::{IterPairResult, PairResult, ValueOnlyResult},
-    table::{DupSort, Table, TableRow},
+    table::{Compress, DupSort, Encode, Table, TableRow},
     DatabaseError,
 };
 
@@ -127,6 +127,35 @@ pub trait DbCursorRW<T: Table> {
 
 /// Read Write Cursor over `DupSort` table.
 pub trait DbDupCursorRW<T: DupSort> {
+    /// Inserts a value, replacing the entry at the same key and subkey if present.
+    ///
+    /// The encoded subkey must be a fixed-length prefix of the compressed value. Each key and
+    /// subkey pair must identify at most one entry. Equal encoded values leave the entry unchanged.
+    fn upsert_by_subkey(
+        &mut self,
+        key: T::Key,
+        subkey: T::SubKey,
+        value: &T::Value,
+    ) -> Result<(), DatabaseError>
+    where
+        Self: DbCursorRW<T> + DbDupCursorRO<T>,
+    {
+        let encoded_subkey = subkey.clone().encode();
+        let mut encoded_value = Vec::new();
+        value.compress_to_buf(&mut encoded_value);
+        debug_assert!(encoded_value.starts_with(encoded_subkey.as_ref()));
+        if let Some(existing) = self.seek_by_key_subkey(key.clone(), subkey)? {
+            let existing = existing.compress();
+            if existing.as_ref() == encoded_value.as_slice() {
+                return Ok(())
+            }
+            if existing.as_ref().starts_with(encoded_subkey.as_ref()) {
+                self.delete_current()?;
+            }
+        }
+        self.upsert(key, value)
+    }
+
     /// Delete all duplicate entries for current key.
     fn delete_current_duplicates(&mut self) -> Result<(), DatabaseError>;
 

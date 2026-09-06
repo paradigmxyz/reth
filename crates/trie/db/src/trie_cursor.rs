@@ -288,21 +288,17 @@ where
         {
             num_entries += 1;
             let nibbles = A::StorageSubKey::from(*nibbles);
-            if let Some(entry) =
+            if let Some(node) = maybe_updated {
+                self.cursor.upsert_by_subkey(
+                    self.hashed_address,
+                    nibbles.clone(),
+                    &A::StorageValue::new(nibbles, node.clone()),
+                )?;
+            } else if let Some(entry) =
                 self.cursor.seek_by_key_subkey(self.hashed_address, nibbles.clone())? &&
                 *entry.nibbles() == nibbles
             {
-                // Rewriting an unchanged node still copies and dirties its database page.
-                if maybe_updated.as_ref() == Some(entry.node()) {
-                    continue
-                }
                 self.cursor.delete_current()?;
-            }
-
-            // There is an updated version of this node, insert new entry.
-            if let Some(node) = maybe_updated {
-                self.cursor
-                    .upsert(self.hashed_address, &A::StorageValue::new(nibbles, node.clone()))?;
             }
         }
 

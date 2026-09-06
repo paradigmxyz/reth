@@ -326,6 +326,49 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
 }
 
 impl<T: DupSort> DbDupCursorRW<T> for Cursor<RW, T> {
+    fn upsert_by_subkey(
+        &mut self,
+        key: T::Key,
+        subkey: T::SubKey,
+        value: &T::Value,
+    ) -> Result<(), DatabaseError> {
+        let key = key.encode();
+        let subkey = subkey.encode();
+        let value = compress_to_buf_or_ref!(self, value);
+        debug_assert!(value.unwrap_or(&self.buf).starts_with(subkey.as_ref()));
+
+        // Compare the stored bytes before any write can invalidate the cursor's borrowed value.
+        // The old value needs no allocation or branch-node decoding.
+        if let Some(existing) = self
+            .inner
+            .get_both_range::<Cow<'_, [u8]>>(key.as_ref(), subkey.as_ref())
+            .map_err(|e| DatabaseError::Read(e.into()))?
+        {
+            if existing.as_ref() == value.unwrap_or(&self.buf) {
+                return Ok(())
+            }
+            if existing.starts_with(subkey.as_ref()) {
+                self.delete_current()?;
+            }
+        }
+
+        self.execute_with_operation_metric(
+            Operation::CursorUpsert,
+            Some(value.unwrap_or(&self.buf).len()),
+            |inner, buf| {
+                inner.put(key.as_ref(), value.unwrap_or(buf), WriteFlags::UPSERT).map_err(|e| {
+                    DatabaseWriteError {
+                        info: e.into(),
+                        operation: DatabaseWriteOperation::CursorUpsert,
+                        table_name: T::NAME,
+                        key: key.into_vec(),
+                    }
+                    .into()
+                })
+            },
+        )
+    }
+
     fn delete_current_duplicates(&mut self) -> Result<(), DatabaseError> {
         self.execute_with_operation_metric(
             Operation::CursorDeleteCurrentDuplicates,
