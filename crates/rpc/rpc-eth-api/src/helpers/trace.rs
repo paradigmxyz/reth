@@ -16,7 +16,7 @@ use reth_primitives_traits::{BlockBody, BlockTy, Recovered, RecoveredBlock};
 use reth_rpc_eth_types::cache::db::{attach_bal_before_tx, StateCacheDb};
 use reth_storage_api::{ProviderBlock, ProviderTx};
 use revm::{context::Block, context_interface::result::ResultAndState, state::bal::Bal as RevmBal};
-use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
+use revm_inspectors::tracing::{DebugInspector, TracingInspector, TracingInspectorConfig};
 use std::sync::Arc;
 
 /// Executes CPU heavy tasks.
@@ -34,6 +34,22 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             .evm_with_env_and_inspector(db, evm_env, inspector)
             .transact(tx_env)
             .map_err(Self::Error::from_evm_err)
+    }
+
+    /// Executes a debug trace, bypassing inspector hooks for tracers that only use the
+    /// execution result. Transaction validation and execution are unchanged.
+    fn inspect_debug(
+        &self,
+        db: &mut StateCacheDb,
+        evm_env: EvmEnvFor<Self::Evm>,
+        tx_env: impl IntoTxEnv<TxEnvFor<Self::Evm>>,
+        inspector: &mut DebugInspector,
+    ) -> Result<ResultAndState<HaltReasonFor<Self::Evm>>, Self::Error> {
+        let enabled =
+            !matches!(inspector, DebugInspector::Noop(_) | DebugInspector::StateGasTracer(_));
+        let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env, inspector);
+        evm.set_inspector_enabled(enabled);
+        evm.transact(tx_env).map_err(Self::Error::from_evm_err)
     }
 
     /// Retrieves the transaction if it exists and returns its trace.
@@ -179,6 +195,31 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         target_tx_env: impl IntoTxEnv<TxEnvFor<Self::Evm>>,
         bal: Option<&DecodedBal<Arc<RevmBal>>>,
     ) -> Result<(ResultAndState<HaltReasonFor<Self::Evm>>, EvmEnvFor<Self::Evm>), Self::Error> {
+        self.inspect_transaction_in_block_with_inspector_enabled(
+            block,
+            db,
+            inspector,
+            target_tx_index,
+            target_tx_env,
+            bal,
+            true,
+        )
+    }
+
+    /// Like [`Self::inspect_transaction_in_block`], with control over whether the target
+    /// transaction invokes inspector hooks. Set `inspect_target` to false for inspectors that
+    /// derive their output entirely from the execution result.
+    #[expect(clippy::type_complexity, clippy::too_many_arguments)]
+    fn inspect_transaction_in_block_with_inspector_enabled<'a>(
+        &self,
+        block: &RecoveredBlock<BlockTy<Self::Primitives>>,
+        db: &'a mut StateCacheDb,
+        inspector: impl InspectorFor<Self::Evm, &'a mut StateCacheDb>,
+        target_tx_index: usize,
+        target_tx_env: impl IntoTxEnv<TxEnvFor<Self::Evm>>,
+        bal: Option<&DecodedBal<Arc<RevmBal>>>,
+        inspect_target: bool,
+    ) -> Result<(ResultAndState<HaltReasonFor<Self::Evm>>, EvmEnvFor<Self::Evm>), Self::Error> {
         if let Some(bal) = bal {
             // the BAL also covers the block's pre-execution changes
             attach_bal_before_tx(db, bal, target_tx_index);
@@ -196,8 +237,8 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                 block.transactions_recovered(),
                 target_tx_index,
             )?;
-            evm.enable_inspector();
         }
+        evm.set_inspector_enabled(inspect_target);
 
         let res = evm.transact(target_tx_env).map_err(Self::Error::from_evm_err)?;
 

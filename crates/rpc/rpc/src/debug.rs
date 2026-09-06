@@ -132,6 +132,7 @@ where
                 let inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
                 let mut evm =
                     eth_api.evm_config().evm_with_env_and_inspector(&mut db, evm_env, inspector);
+                evm.set_inspector_enabled(debug_inspector_requires_hooks(evm.inspector()));
                 while let Some((index, tx)) = transactions.next() {
                     let tx_env = eth_api.evm_config().tx_env(tx);
 
@@ -200,6 +201,7 @@ where
                 let mut evm =
                     eth_api.evm_config().evm_with_env_and_inspector(&mut db, evm_env, inspector);
 
+                evm.set_inspector_enabled(debug_inspector_requires_hooks(evm.inspector()));
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = *tx.tx_hash();
                     let tx_env = eth_api.evm_config().tx_env(tx);
@@ -335,13 +337,15 @@ where
 
                 let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
                 let tx_env = eth_api.evm_config().tx_env(&tx);
-                let (res, evm_env) = eth_api.inspect_transaction_in_block(
+                let inspect_target = debug_inspector_requires_hooks(&inspector);
+                let (res, evm_env) = eth_api.inspect_transaction_in_block_with_inspector_enabled(
                     &block,
                     &mut db,
                     &mut inspector,
                     index,
                     tx_env.clone(),
                     bal.as_deref(),
+                    inspect_target,
                 )?;
 
                 let trace = inspector
@@ -399,7 +403,7 @@ where
             .spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
                 let mut inspector =
                     DebugInspector::new(tracing_options).map_err(Eth::Error::from_eth_err)?;
-                let res = this.eth_api().inspect(
+                let res = this.eth_api().inspect_debug(
                     &mut *db,
                     evm_env.clone(),
                     tx_env.clone(),
@@ -465,8 +469,12 @@ where
 
                 let mut inspector =
                     DebugInspector::new(tracing_options).map_err(Eth::Error::from_eth_err)?;
-                let res =
-                    eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?;
+                let res = eth_api.inspect_debug(
+                    &mut db,
+                    evm_env.clone(),
+                    tx_env.clone(),
+                    &mut inspector,
+                )?;
                 let trace = inspector
                     .get_result(None, &tx_env, &evm_env.block_env, &res, &mut db)
                     .map_err(Eth::Error::from_eth_err)?;
@@ -553,7 +561,7 @@ where
                         let (evm_env, tx_env) =
                             eth_api.prepare_call_env(evm_env.clone(), tx, &mut db, overrides)?;
 
-                        let res = eth_api.inspect(
+                        let res = eth_api.inspect_debug(
                             &mut db,
                             evm_env.clone(),
                             tx_env.clone(),
@@ -1499,6 +1507,11 @@ impl<B: BlockTrait> Default for BadBlockStore<B> {
     }
 }
 
+/// These tracers read only the execution result and never record inspector events.
+const fn debug_inspector_requires_hooks(inspector: &DebugInspector) -> bool {
+    !matches!(inspector, DebugInspector::Noop(_) | DebugInspector::StateGasTracer(_))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1516,6 +1529,155 @@ mod tests {
         database::{states::StorageSlot, AccountStatus, BundleAccount, BundleState},
         state::AccountInfo as RevmAccountInfo,
     };
+
+    fn debug_hook_fixture(code: &str) -> (StateCacheDb, revm::context::TxEnv) {
+        use reth_revm::database::StateProviderDatabase;
+        use reth_storage_api::StateProviderBox;
+        use revm::{bytecode::Bytecode, context::TxEnv};
+        let provider: StateProviderBox = Box::<NoopProvider<ChainSpec>>::default();
+        let mut db = State::builder().with_database(StateProviderDatabase::new(provider)).build();
+        let caller = Address::repeat_byte(16);
+        let target = Address::repeat_byte(17);
+        db.insert_account(caller, RevmAccountInfo { balance: U256::MAX, ..Default::default() });
+        let code = Bytecode::new_raw(alloy_primitives::hex::decode(code).unwrap().into());
+        db.insert_account(
+            target,
+            RevmAccountInfo { code_hash: code.hash_slow(), code: Some(code), ..Default::default() },
+        );
+        (
+            db,
+            TxEnv {
+                caller,
+                kind: alloy_primitives::TxKind::Call(target),
+                gas_limit: 1_000_000,
+                ..Default::default()
+            },
+        )
+    }
+
+    #[tokio::test]
+    async fn debug_result_only_tracers_preserve_execution() {
+        use reth_rpc_eth_api::helpers::Trace;
+        use revm::primitives::hardfork::SpecId;
+        let eth_api = EthApi::<_, EthRpcConverter<ChainSpec>>::builder(
+            NoopProvider::default(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::mainnet(),
+        )
+        .build();
+        for spec in [SpecId::CANCUN, SpecId::PRAGUE, SpecId::OSAKA, SpecId::AMSTERDAM] {
+            let mut env = EvmEnvFor::<EthEvmConfig>::default();
+            env.cfg_env.set_spec_and_mainnet_gas_params(spec);
+            for tracer in ["noopTracer", "stateGasTracer"] {
+                for code in
+                    ["602a60005560005460005260206000f3", "602a60005560006000fd", "fe", "5b600056"]
+                {
+                    for nonce in [0, 1] {
+                        let opts: GethDebugTracingOptions =
+                            serde_json::from_value(serde_json::json!({"tracer": tracer})).unwrap();
+                        let mut old_inspector = DebugInspector::new(opts.clone()).unwrap();
+                        let mut new_inspector = DebugInspector::new(opts).unwrap();
+                        assert!(!debug_inspector_requires_hooks(&new_inspector));
+                        let (mut old_db, mut tx) = debug_hook_fixture(code);
+                        tx.nonce = nonce;
+                        let (mut new_db, _) = debug_hook_fixture(code);
+                        let old = eth_api.inspect(
+                            &mut old_db,
+                            env.clone(),
+                            tx.clone(),
+                            &mut old_inspector,
+                        );
+                        let new = eth_api.inspect_debug(
+                            &mut new_db,
+                            env.clone(),
+                            tx.clone(),
+                            &mut new_inspector,
+                        );
+                        match (old, new) {
+                            (Ok(old), Ok(new)) => {
+                                assert_eq!(nonce, 0);
+                                assert_eq!(old.result.is_success(), code.ends_with("f3"));
+                                assert_eq!(
+                                    matches!(
+                                        old.result,
+                                        revm::context::result::ExecutionResult::Revert { .. }
+                                    ),
+                                    code.ends_with("fd")
+                                );
+                                assert_eq!(old, new, "{spec:?} {tracer} {code}");
+                                assert_eq!(
+                                    old_inspector
+                                        .get_result(None, &tx, &env.block_env, &old, &mut old_db)
+                                        .unwrap(),
+                                    new_inspector
+                                        .get_result(None, &tx, &env.block_env, &new, &mut new_db)
+                                        .unwrap()
+                                );
+                            }
+                            (Err(old), Err(new)) => assert_eq!(old.to_string(), new.to_string()),
+                            pair => panic!("execution diverged: {pair:?}"),
+                        }
+                    }
+                }
+            }
+        }
+        for opts in [
+            serde_json::json!({}),
+            serde_json::json!({"tracer":"callTracer"}),
+            serde_json::json!({"tracer":"prestateTracer"}),
+            serde_json::json!({"tracer":"4byteTracer"}),
+        ] {
+            assert!(debug_inspector_requires_hooks(
+                &DebugInspector::new(serde_json::from_value(opts).unwrap()).unwrap()
+            ));
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "isolated EVM benchmark; run with --release --ignored --nocapture"]
+    async fn debug_result_only_tracers_benchmark() {
+        use reth_rpc_eth_api::helpers::Trace;
+        use std::{hint::black_box, time::Instant};
+        let eth_api = EthApi::<_, EthRpcConverter<ChainSpec>>::builder(
+            NoopProvider::default(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::mainnet(),
+        )
+        .build();
+        let mut env = EvmEnvFor::<EthEvmConfig>::default();
+        env.cfg_env.set_spec_and_mainnet_gas_params(revm::primitives::hardfork::SpecId::PRAGUE);
+        for tracer in ["noopTracer", "stateGasTracer"] {
+            for loops in [1u64, 1000, 10000] {
+                let mut elapsed = [0u128; 2];
+                let iterations = 1000;
+                for iteration in 0..iterations {
+                    for offset in 0..2 {
+                        let variant = (iteration + offset) % 2;
+                        let (mut db, mut tx) = debug_hook_fixture("6000355b60019003806003575000");
+                        tx.data = Bytes::copy_from_slice(&U256::from(loops).to_be_bytes::<32>());
+                        let mut inspector = DebugInspector::new(
+                            serde_json::from_value(serde_json::json!({"tracer":tracer})).unwrap(),
+                        )
+                        .unwrap();
+                        let env = black_box(env.clone());
+                        let start = Instant::now();
+                        let result = if variant == 0 {
+                            eth_api.inspect(&mut db, env, tx, &mut inspector)
+                        } else {
+                            eth_api.inspect_debug(&mut db, env, tx, &mut inspector)
+                        }
+                        .unwrap();
+                        assert!(result.result.is_success(), "{tracer} {loops}: {result:?}");
+                        drop(black_box(result));
+                        elapsed[variant] += start.elapsed().as_nanos();
+                    }
+                }
+                println!("tracer={tracer} loops={loops} iterations={iterations} hooks_ns={} direct_ns={}", elapsed[0] / iterations as u128, elapsed[1] / iterations as u128);
+            }
+        }
+    }
 
     #[tokio::test]
     async fn trace_call_out_of_range_block_error() {
