@@ -85,7 +85,7 @@ use std::{
 };
 use tokio::sync::{mpsc, oneshot, oneshot::error::RecvError};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, trace};
+use tracing::{debug, info, trace};
 
 /// The future for importing transactions into the pool.
 ///
@@ -346,6 +346,10 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     bad_imports: LruCache<TxHash, FbBuildHasher<32>>,
     /// All the connected peers.
     peers: HashMap<PeerId, PeerMetadata<N>, FbBuildHasher<64>>,
+    /// Last observed full-transaction recipient set, for change-only topology logs.
+    logged_full_transaction_peers: SmallVec<[PeerId; 8]>,
+    /// Limits cumulative broadcast summaries to one per peer every ten seconds.
+    last_broadcast_summary: Instant,
     /// Send half for the command channel.
     ///
     /// This is kept so that a new [`TransactionsHandle`] can be created at any time.
@@ -439,6 +443,8 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             pending_pool_imports_info,
             bad_imports: LruCache::with_hasher(DEFAULT_MAX_COUNT_BAD_IMPORTS, Default::default()),
             peers: Default::default(),
+            logged_full_transaction_peers: Default::default(),
+            last_broadcast_summary: Instant::now(),
             command_tx,
             command_rx: UnboundedReceiverStream::new(command_rx),
             pending_transactions: pending,
@@ -1080,6 +1086,7 @@ where
 
         // send full transactions to a set of the connected peers based on the configured mode
         let max_num_full = self.config.propagation_mode.full_peer_count(self.peers.len());
+        let mut full_transaction_peers = SmallVec::<[PeerId; 8]>::new();
 
         // Note: Assuming ~random~ order due to random state of the peers map hasher
         let mut num_full_peers = 0;
@@ -1092,6 +1099,7 @@ where
             // determine whether to send full tx objects or hashes.
             let mut builder = if num_full_peers < max_num_full {
                 num_full_peers += 1;
+                full_transaction_peers.push(*peer_id);
                 PropagateTransactionsBuilder::full(peer.version, to_propagate.len())
             } else {
                 PropagateTransactionsBuilder::pooled(peer.version, to_propagate.len())
@@ -1161,10 +1169,39 @@ where
                 }
 
                 trace!(target: "net::tx", ?peer_id, num_txs=?new_full_transactions.len(), "Propagating full transactions to peer");
+                peer.full_transactions_broadcast += new_full_transactions.len() as u64;
+                peer.full_transaction_broadcast_batches += 1;
 
                 // send full transactions
                 self.network.send_broadcast_pool_transactions(*peer_id, new_full_transactions);
             }
+        }
+
+        full_transaction_peers.sort_unstable();
+        if full_transaction_peers != self.logged_full_transaction_peers {
+            info!(
+                target: "net::tx::topology",
+                local_peer_id = ?self.network.peer_id(),
+                connected_peers = self.peers.len(),
+                ?full_transaction_peers,
+                "Full transaction broadcast recipient set changed"
+            );
+            self.logged_full_transaction_peers = full_transaction_peers;
+        }
+        if self.last_broadcast_summary.elapsed() >= Duration::from_secs(10) {
+            for (remote_peer_id, peer) in &self.peers {
+                if peer.full_transaction_broadcast_batches > 0 {
+                    info!(
+                        target: "net::tx::topology",
+                        local_peer_id = ?self.network.peer_id(),
+                        ?remote_peer_id,
+                        full_transactions = peer.full_transactions_broadcast,
+                        batches = peer.full_transaction_broadcast_batches,
+                        "Cumulative full transaction broadcasts for peer session"
+                    );
+                }
+            }
+            self.last_broadcast_summary = Instant::now();
         }
 
         // Update propagated transactions metrics
@@ -2225,6 +2262,11 @@ impl TransactionSource {
 /// Tracks a single peer in the context of [`TransactionsManager`].
 #[derive(Debug)]
 pub struct PeerMetadata<N: NetworkPrimitives = EthNetworkPrimitives> {
+    /// Broadcast attempts during this peer session, not delivery acknowledgements or fetch
+    /// replies.
+    full_transactions_broadcast: u64,
+    /// Nonempty full-transaction broadcast messages during this peer session.
+    full_transaction_broadcast_batches: u64,
     /// Optimistically keeps track of transactions that we know the peer has seen. Optimistic, in
     /// the sense that transactions are preemptively marked as seen by peer when they are sent to
     /// the peer.
@@ -2249,6 +2291,8 @@ impl<N: NetworkPrimitives> PeerMetadata<N> {
         peer_kind: PeerKind,
     ) -> Self {
         Self {
+            full_transactions_broadcast: 0,
+            full_transaction_broadcast_batches: 0,
             seen_transactions: LruCache::with_hasher(
                 max_transactions_seen_by_peer,
                 Default::default(),
@@ -3379,6 +3423,9 @@ mod tests {
         assert!(prop_txs[0].is_hash());
 
         let peer = tx_manager.peers.get(&peer_id).unwrap();
+        assert_eq!(peer.full_transactions_broadcast, 1);
+        assert_eq!(peer.full_transaction_broadcast_batches, 1);
+        assert_eq!(tx_manager.logged_full_transaction_peers.as_slice(), &[peer_id]);
         assert!(peer.seen_transactions.contains(eip1559_tx.transaction.hash()));
         assert!(peer.seen_transactions.contains(eip1559_tx.transaction.hash()));
         peer.seen_transactions.contains(eip4844_tx.transaction.hash());
@@ -3389,6 +3436,14 @@ mod tests {
             PropagationMode::Basic,
         );
         assert!(propagated.is_empty());
+        let peer = tx_manager.peers.get(&peer_id).unwrap();
+        assert_eq!(peer.full_transactions_broadcast, 1);
+        assert_eq!(peer.full_transaction_broadcast_batches, 1);
+        assert_eq!(tx_manager.logged_full_transaction_peers.as_slice(), &[peer_id]);
+
+        tx_manager.peers.remove(&peer_id);
+        tx_manager.propagate_transactions(Vec::new(), PropagationMode::Basic);
+        assert!(tx_manager.logged_full_transaction_peers.is_empty());
     }
 
     #[test]
