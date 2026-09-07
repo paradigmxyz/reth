@@ -343,6 +343,9 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     /// [`TransactionPool::pending_transactions_listener`] and arrive at the `pending_transactions`
     /// receiver.
     pool_imports: FuturesUnordered<PoolImportFuture>,
+    /// One fetched response awaiting import capacity. While occupied, fetch responses are not
+    /// drained and new requests are not dispatched, bounding the backlog by existing requests.
+    pending_fetch_response: Option<(PeerId, PooledTransactions<N::PooledTransaction>)>,
     /// Stats on pending pool imports that help the node self-monitor.
     pending_pool_imports_info: PendingPoolImportsInfo,
     /// Bad imports.
@@ -438,6 +441,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             transaction_fetcher,
             transactions_by_peers: Default::default(),
             pool_imports: Default::default(),
+            pending_fetch_response: None,
             pending_pool_imports_info,
             bad_imports: LruCache::with_hasher(DEFAULT_MAX_COUNT_BAD_IMPORTS, Default::default()),
             peers: Default::default(),
@@ -1320,24 +1324,23 @@ where
 
         let mut transactions = transactions.0;
 
-        // Unsolicited transactions are cut down to the remaining import capacity, to bound the
-        // work on all subsequent processing. Well-behaved peers follow the 4096 soft limit, so
-        // oversized payloads are likely malicious and we avoid wasting CPU on them. Requested
-        // transactions always go through: the fetcher sized its requests by that capacity and
-        // has already stopped tracking them, so dropping them here would lose them.
-        if source.is_broadcast() {
-            if !self.has_capacity_for_pending_pool_imports() {
-                return
-            }
-            let capacity = self.remaining_pool_import_capacity();
-            if transactions.len() > capacity {
-                let skipped = transactions.len() - capacity;
-                transactions.truncate(capacity);
+        // Broadcasts may be discarded at capacity. Fetched transactions are already settled
+        // by the fetcher, so keep their remainder until imports complete instead of losing them.
+        let capacity = self.remaining_pool_import_capacity();
+        if transactions.len() > capacity {
+            if source.is_broadcast() {
                 self.metrics
                     .skipped_transactions_pending_pool_imports_at_capacity
-                    .increment(skipped as u64);
-                trace!(target: "net::tx", skipped, capacity, "Truncated transactions batch to capacity");
+                    .increment((transactions.len() - capacity) as u64);
+                transactions.truncate(capacity);
+            } else {
+                debug_assert!(self.pending_fetch_response.is_none());
+                let remainder = transactions.split_off(capacity);
+                self.pending_fetch_response = Some((peer_id, PooledTransactions(remainder)));
             }
+        }
+        if transactions.is_empty() {
+            return
         }
 
         let Some(peer) = self.peers.get_mut(&peer_id) else { return };
@@ -1558,6 +1561,13 @@ where
             |event| this.on_network_event(event)
         );
 
+        // Admit buffered responses before broadcasts can consume newly available capacity.
+        if this.has_capacity_for_pending_pool_imports() &&
+            let Some((peer_id, transactions)) = this.pending_fetch_response.take()
+        {
+            this.import_transactions(peer_id, transactions, TransactionSource::Response);
+        }
+
         // Advance incoming transaction events (stream new txns/announcements from
         // network manager and queue for import to pool/fetch txns).
         //
@@ -1595,7 +1605,11 @@ where
             "net::tx",
             "Transaction fetch events stream",
             DEFAULT_BUDGET_TRY_DRAIN_STREAM,
-            this.transaction_fetcher.poll_next_unpin(cx),
+            if this.pending_fetch_response.is_none() {
+                this.transaction_fetcher.poll_next_unpin(cx)
+            } else {
+                Poll::Pending
+            },
             |event| this.on_fetch_event(event),
         );
 
@@ -1661,15 +1675,18 @@ where
             this.on_new_pending_transactions(new_txs);
         }
 
-        // Send `GetPooledTransactions` requests for announced hashes to idle peers. The number
-        // of hashes inflight is bounded by the remaining pool import capacity, so we don't fetch
-        // more than we can import.
+        // Stop dispatching while a response awaits admission. The fetcher may exceed its
+        // scheduling budget to make progress around slow peers; response admission enforces
+        // the concurrent import limit.
         duration_metered_exec!(
             {
                 // Peers whose session channel was full are retried on the next poll, which any
                 // other event triggers.
                 let budget = this.remaining_pool_import_capacity();
-                if budget > 0 && this.transaction_fetcher.dispatch(&this.peers, budget) > 0 {
+                if this.pending_fetch_response.is_none() &&
+                    budget > 0 &&
+                    this.transaction_fetcher.dispatch(&this.peers, budget) > 0
+                {
                     // poll the fetcher again so the new inflight requests register their wakers
                     maybe_more_tx_fetch_events = true;
                 }
@@ -1695,7 +1712,9 @@ where
             maybe_more_tx_events ||
             maybe_more_tx_fetch_events ||
             maybe_more_pool_imports ||
-            maybe_more_pending_txns
+            maybe_more_pending_txns ||
+            (this.pending_fetch_response.is_some() &&
+                this.has_capacity_for_pending_pool_imports())
         {
             // make sure we're woken up again
             cx.waker().wake_by_ref();

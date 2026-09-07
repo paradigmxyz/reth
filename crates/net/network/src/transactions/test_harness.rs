@@ -196,6 +196,7 @@ mod tests {
     use super::*;
     use crate::transactions::constants::tx_fetcher::MIN_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST;
     use alloy_primitives::map::{B256Map, B256Set};
+    use futures::StreamExt;
     use reth_eth_wire::NewPooledTransactionHashes68;
     use reth_network_p2p::error::RequestError;
     use reth_transaction_pool::{test_utils::TransactionGenerator, TransactionPool};
@@ -349,6 +350,91 @@ mod tests {
         assert_eq!(responses, 200);
         assert_eq!(harness.num_tracked_hashes(), 0);
         assert_eq!(harness.pool().get_all(hashes).len(), 200, "all transactions are imported");
+    }
+
+    #[tokio::test]
+    async fn concurrent_responses_wait_for_pool_import_capacity() {
+        let txs = pooled_txs(2);
+        let hashes = txs.iter().map(|tx| *tx.tx_hash()).collect::<Vec<_>>();
+        let config =
+            TransactionsManagerConfig { max_pending_pool_imports: 1, ..Default::default() };
+        let mut harness =
+            TxFetchHarness::with_config(config, [PEER_A, PEER_B], EthVersion::Eth68).await;
+        harness.announce(PEER_A, announcement(&hashes[..1]));
+        harness.announce(PEER_B, announcement(&hashes[1..]));
+        harness.poll_until_idle();
+        let requests = harness.take_requests();
+        assert_eq!(requests.len(), 2);
+        for request in requests {
+            let tx = txs.iter().find(|tx| request.request.0.contains(tx.tx_hash())).unwrap();
+            request.response.send(Ok(PooledTransactions(vec![tx.clone()]))).unwrap();
+        }
+
+        // Both responses resolve before either import future is polled.
+        for _ in 0..2 {
+            let event = harness.manager.transaction_fetcher.next().await.unwrap();
+            harness.manager.on_fetch_event(event);
+            assert_eq!(
+                harness
+                    .manager
+                    .pending_pool_imports_info
+                    .pending_pool_imports
+                    .load(Ordering::Relaxed),
+                1,
+            );
+        }
+        assert!(harness.manager.pending_fetch_response.is_some());
+        harness.poll_until_idle();
+        assert!(harness.manager.pending_fetch_response.is_none());
+        assert_eq!(harness.pool().get_all(hashes).len(), 2);
+    }
+
+    #[tokio::test]
+    async fn fetched_response_is_admitted_after_broadcasts_in_bounded_chunks() {
+        for broadcast_count in [1, 2] {
+            let txs = pooled_txs(2 + broadcast_count);
+            let hashes = txs.iter().map(|tx| *tx.tx_hash()).collect::<Vec<_>>();
+            let config =
+                TransactionsManagerConfig { max_pending_pool_imports: 2, ..Default::default() };
+            let mut harness =
+                TxFetchHarness::with_config(config, [PEER_A, PEER_B], EthVersion::Eth68).await;
+            harness.announce(PEER_A, announcement(&hashes[..2]));
+            harness.poll_until_idle();
+            let mut requests = harness.take_requests();
+            assert_eq!(requests.len(), 1);
+
+            // A broadcast consumes some or all capacity while the request is inflight.
+            harness.manager.import_transactions(
+                PEER_B,
+                PooledTransactions(txs[2..].to_vec()),
+                crate::transactions::TransactionSource::Broadcast,
+            );
+            requests
+                .pop()
+                .unwrap()
+                .response
+                .send(Ok(PooledTransactions(txs[..2].to_vec())))
+                .unwrap();
+            let event = harness.manager.transaction_fetcher.next().await.unwrap();
+            harness.manager.on_fetch_event(event);
+            assert_eq!(
+                harness
+                    .manager
+                    .pending_pool_imports_info
+                    .pending_pool_imports
+                    .load(Ordering::Relaxed),
+                2,
+            );
+            assert_eq!(
+                harness.manager.pending_fetch_response.as_ref().unwrap().1 .0.len(),
+                broadcast_count,
+            );
+
+            // Completion wakes admission of the remainder without a new network event.
+            harness.poll_until_idle();
+            assert!(harness.manager.pending_fetch_response.is_none());
+            assert_eq!(harness.pool().get_all(hashes).len(), txs.len());
+        }
     }
 
     #[tokio::test]
