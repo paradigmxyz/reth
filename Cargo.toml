@@ -696,7 +696,7 @@ vergen-git2 = "10.0.1"
 ipnet = "2.11"
 
 [patch.crates-io]
-revm-inspectors = { git = "https://github.com/Soubhik-10/revm-inspectors", rev = "cab5f7051b50d20450bfd52878323a9f363b40c4" }
+revm-inspectors = { git = "https://github.com/Soubhik-10/revm-inspectors", rev = "422f289" }
 # EIP-8141 Alloy consensus, networking, RPC, signer, and transport stack.
 alloy-consensus = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
 alloy-consensus-any = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
