@@ -772,8 +772,40 @@ pub(crate) struct ValidationMetrics {
 
 #[cfg(test)]
 mod tests {
-    use super::{hash_disallow_list, AddressSet};
-    use alloy_primitives::Address;
+    use super::{
+        decode_and_validate_bal_gas_limit, hash_disallow_list, AddressSet, ValidationApiError,
+    };
+    use alloy_eip7928::{bal::Bal, AccountChanges, BlockAccessListGasError, ITEM_COST};
+    use alloy_primitives::{Address, U256};
+    use reth_errors::ConsensusError;
+
+    #[test]
+    fn test_bal_gas_budget_boundary() {
+        let bal = Bal::new(vec![AccountChanges::new(Address::ZERO)
+            .with_storage_read(U256::from(1))
+            .with_storage_read(U256::from(2))]);
+        assert_eq!(bal.total_bal_items(), 3);
+
+        decode_and_validate_bal_gas_limit(alloy_rlp::encode(&bal).into(), 3 * ITEM_COST as u64)
+            .unwrap();
+    }
+
+    #[test]
+    fn test_bal_gas_budget_boundary_plus_one() {
+        let bal = Bal::new(vec![AccountChanges::new(Address::ZERO)
+            .with_storage_read(U256::from(1))
+            .with_storage_read(U256::from(2))
+            .with_storage_read(U256::from(3))]);
+        let gas_limit = 3 * ITEM_COST as u64;
+        let err = decode_and_validate_bal_gas_limit(alloy_rlp::encode(&bal).into(), gas_limit)
+            .unwrap_err();
+        let ValidationApiError::Consensus(ConsensusError::BlockAccessListCostMoreThanGasLimit(err)) =
+            err
+        else {
+            panic!("expected BAL gas-limit error, got {err:?}");
+        };
+        assert_eq!(*err, BlockAccessListGasError::new(4, gas_limit));
+    }
 
     #[test]
     fn test_hash_disallow_list_deterministic() {
