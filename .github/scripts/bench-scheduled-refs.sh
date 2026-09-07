@@ -26,8 +26,8 @@
 #   nightly-created — ISO timestamp of the nightly build (nightly only)
 #   release-tag     — release tag name (release mode only, e.g. "v2.0.0")
 #
-# Reads BENCH_<MODE>_LAST_FEATURE_REF repository Actions variables.
-# Requires: gh, jq, date, git (hourly mode), GH_TOKEN and BENCH_STATE_TOKEN.
+# Reads bench-state-<mode> Actions artifacts from successful runs on this branch.
+# Requires: gh, jq, unzip, date, git (hourly mode), GH_TOKEN with actions:read.
 set -euxo pipefail
 
 FORCE="${1:-false}"
@@ -70,9 +70,9 @@ if [ "$MODE" = "hourly" ]; then
   fi
   echo "::endgroup::"
 
-  # --- Step 3: Read last successful feature ref from repository variables ---
+  # --- Step 3: Read last successful feature ref from Actions artifacts ---
   echo "::group::Reading persisted state"
-  LAST_FEATURE_REF=$(bash "$(dirname "$0")/bench-state.sh" get "$REPO" "BENCH_HOURLY_LAST_FEATURE_REF")
+  LAST_FEATURE_REF=$(bash "$(dirname "$0")/bench-state.sh" "$REPO" hourly)
   echo "Previous feature ref: ${LAST_FEATURE_REF:-none}"
   echo "::endgroup::"
 
@@ -171,9 +171,9 @@ if [ "$MODE" = "release" ]; then
   echo "Release commit (baseline): $BASELINE_REF"
   echo "::endgroup::"
 
-  # --- Step 3: Read last successful feature ref from repository variables ---
+  # --- Step 3: Read last successful feature ref from Actions artifacts ---
   echo "::group::Reading persisted state"
-  LAST_FEATURE_REF=$(bash "$(dirname "$0")/bench-state.sh" get "$REPO" "BENCH_RELEASE_LAST_FEATURE_REF")
+  LAST_FEATURE_REF=$(bash "$(dirname "$0")/bench-state.sh" "$REPO" release)
   echo "Previous feature ref: ${LAST_FEATURE_REF:-none}"
   echo "::endgroup::"
 
@@ -262,9 +262,9 @@ else
 fi
 echo "::endgroup::"
 
-# --- Step 3: Read last successful feature ref from repository variables ---
+# --- Step 3: Read last successful feature ref from Actions artifacts ---
 echo "::group::Reading persisted state"
-LAST_FEATURE_REF=$(bash "$(dirname "$0")/bench-state.sh" get "$REPO" "BENCH_NIGHTLY_LAST_FEATURE_REF")
+LAST_FEATURE_REF=$(bash "$(dirname "$0")/bench-state.sh" "$REPO" nightly)
   echo "Previous feature ref: ${LAST_FEATURE_REF:-none}"
 echo "::endgroup::"
 

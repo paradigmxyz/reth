@@ -9,9 +9,9 @@
 #   release — Compares the latest GitHub release tag against the current nightly
 #             Docker build. Runs daily to track nightly vs release performance.
 #
-# State is persisted in repository Actions variables: each
-# successful run saves the feature commit SHA so the next run knows what to
-# compare against.
+# State is an Actions artifact containing the feature SHA from a successful run,
+# scoped by mode and branch. After 90 days without retained state, the existing
+# first-run baseline rules apply. No PAT or separate repository is needed.
 
 on:
   schedule:
@@ -144,7 +144,6 @@ jobs:
         id: refs
         env:
           GH_TOKEN: ${{ github.token }}
-          BENCH_STATE_TOKEN: ${{ secrets.DEREK_PAT }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           INPUT_FORCE: ${{ inputs.force || 'false' }}
@@ -1040,18 +1039,21 @@ jobs:
     if: success()
     name: save-state
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    permissions: {}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          sparse-checkout: .github/scripts
-          sparse-checkout-cone-mode: true
+      - name: Prepare benchmark state
+        env:
+          FEATURE_REF: ${{ needs.resolve-refs.outputs.feature-ref }}
+        run: |
+          [[ "$FEATURE_REF" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          mkdir -p "$RUNNER_TEMP/bench-state"
+          printf '%s\n' "$FEATURE_REF" > "$RUNNER_TEMP/bench-state/feature-ref"
 
       - name: Save benchmark state
-        env:
-          GH_TOKEN: ${{ secrets.DEREK_PAT }}
-          MODE: ${{ needs.resolve-refs.outputs.mode }}
-          FEATURE_REF: ${{ needs.resolve-refs.outputs.feature-ref }}
-        run: bash .github/scripts/bench-state.sh set "$GITHUB_REPOSITORY" "BENCH_${MODE^^}_LAST_FEATURE_REF" "$FEATURE_REF"
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bench-state-${{ needs.resolve-refs.outputs.mode }}
+          path: ${{ runner.temp }}/bench-state/feature-ref
+          retention-days: 90
+          if-no-files-found: error
+          overwrite: true
