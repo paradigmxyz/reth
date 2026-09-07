@@ -32,7 +32,16 @@ async fn can_run_dev_node() -> eyre::Result<()> {
         .launch_with_debug_capabilities()
         .await?;
 
+    let canon_state = node.provider.canonical_in_memory_state();
+    let mut safe_block = canon_state.subscribe_safe_block();
+    let mut finalized_block = canon_state.subscribe_finalized_block();
+
     assert_chain_advances(&node).await;
+
+    let (safe_changed, finalized_changed) =
+        tokio::join!(safe_block.changed(), finalized_block.changed());
+    safe_changed?;
+    finalized_changed?;
 
     let chain_info = node.provider.chain_info()?;
     assert_eq!(node.provider.safe_block_num_hash()?, Some(chain_info.into()));

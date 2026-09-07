@@ -299,10 +299,7 @@ mod tests {
 
         for (id, entry) in collector.iter().unwrap().enumerate() {
             let expected = entries[id];
-            assert_eq!(
-                entry.unwrap(),
-                (expected.0.encode().to_vec(), expected.1.compress().clone())
-            );
+            assert_eq!(entry.unwrap(), (expected.0.encode().to_vec(), expected.1.compress()));
         }
 
         let temp_dir_path = collector.dir.as_ref().unwrap().path().to_path_buf();

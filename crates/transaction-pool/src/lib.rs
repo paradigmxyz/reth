@@ -641,6 +641,13 @@ where
         self.pool.all_transactions()
     }
 
+    fn all_transactions_by_sender(
+        &self,
+        sender: Address,
+    ) -> AllPoolTransactions<Self::Transaction> {
+        self.pool.all_transactions_by_sender(sender)
+    }
+
     fn all_transaction_hashes(&self) -> Vec<TxHash> {
         self.pool.all_transaction_hashes()
     }

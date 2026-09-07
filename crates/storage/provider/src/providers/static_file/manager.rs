@@ -356,16 +356,15 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
 
         if let Some(block_index) = block_index {
             // Find first block range that contains the requested block
-            if let Some((_, range)) = block_index.iter().find(|(max_block, _)| block <= **max_block)
-            {
+            if let Some((_, range)) = block_index.range(block..).next() {
                 // Found matching range for an existing file using block index
                 return *range;
             } else if let Some((_, range)) = block_index.last_key_value() {
                 // Didn't find matching range for an existing file, derive a new range from the end
                 // of the last existing file range.
                 //
-                // `block` is always higher than `range.end()` here, because we iterated over all
-                // `block_index` ranges above and didn't find one that contains our block
+                // `block` is always higher than `range.end()` here, because `block_index` holds no
+                // range with a `max_block` greater than or equal to `block`
                 let blocks_after_last_range = block - range.end();
                 let segments_to_skip = (blocks_after_last_range - 1) / blocks_per_file;
                 let start = range.end() + 1 + segments_to_skip * blocks_per_file;

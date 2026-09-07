@@ -343,7 +343,10 @@ where
         let url = self.rpc_url();
         let beacon_handle = self.inner.add_ons_handle.beacon_engine_handle.clone();
 
-        Ok(crate::testsuite::NodeClient::new_with_beacon_engine(rpc, auth, url, beacon_handle))
+        let mut client =
+            crate::testsuite::NodeClient::new_with_beacon_engine(rpc, auth, url, beacon_handle);
+        client.payload_builder = Some(self.inner.payload_builder_handle.clone());
+        Ok(client)
     }
 
     /// Calls the `testing_buildBlockV1` RPC on this node.
