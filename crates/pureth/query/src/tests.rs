@@ -1,6 +1,54 @@
 use super::*;
 use crate::schema::validate_runtime_lengths;
-use alloy_primitives::B256;
+use alloy_consensus::{TxLegacy, TxType};
+use alloy_primitives::{Address, Bytes, Log, Signature, TxKind, B256};
+use reth_ethereum_primitives::{
+    Block, BlockBody, Receipt, Transaction as EthereumTransaction, TransactionSigned,
+};
+use reth_primitives_traits::RecoveredBlock;
+use reth_pureth_receipt::convert_receipts;
+
+fn transaction(nonce: u64) -> TransactionSigned {
+    TransactionSigned::new_unhashed(
+        EthereumTransaction::Legacy(TxLegacy {
+            nonce,
+            to: TxKind::Call(Address::ZERO),
+            ..Default::default()
+        }),
+        Signature::test_signature(),
+    )
+}
+
+fn receipt(cumulative_gas_used: u64, logs: Vec<Log>) -> Receipt {
+    Receipt { tx_type: TxType::Legacy, success: true, cumulative_gas_used, logs }
+}
+
+fn log(address: Address) -> Log {
+    Log::new_unchecked(address, Vec::new(), Bytes::new())
+}
+
+fn converted_receipts(addresses: &[&[Address]]) -> ReceiptsSsz {
+    let transactions =
+        (0..addresses.len()).map(|index| transaction(index as u64)).collect::<Vec<_>>();
+    let senders = vec![Address::repeat_byte(0x11); addresses.len()];
+    let block = RecoveredBlock::try_new_unhashed(
+        Block {
+            header: Default::default(),
+            body: BlockBody { transactions, ..Default::default() },
+        },
+        senders,
+    )
+    .unwrap();
+    let receipts = addresses
+        .iter()
+        .enumerate()
+        .map(|(index, addresses)| {
+            receipt(21_000 * (index as u64 + 1), addresses.iter().copied().map(log).collect())
+        })
+        .collect::<Vec<_>>();
+
+    convert_receipts(&block, &receipts).unwrap()
+}
 
 #[test]
 fn parser_accepts_valid_syntax() {
@@ -100,6 +148,91 @@ fn runtime_bounds_are_checked_after_resolution() {
         ),
         Err(BoundsError::LogOutOfBounds)
     );
+}
+
+#[test]
+fn typed_resolution_selects_from_the_converted_object() {
+    let expected_address = Address::repeat_byte(0x22);
+    let addresses = [expected_address];
+    let receipts = converted_receipts(&[&addresses]);
+    let path = resolve(&parse_path("[0].logs[0].address").unwrap()).unwrap();
+
+    let (address, gindex) = resolve_receipt_log_address(&receipts, path).unwrap();
+
+    assert_eq!(receipts.len(), 1);
+    assert_eq!(receipts.get(0).unwrap().logs().len(), 1);
+    assert_eq!(address, expected_address);
+    assert_eq!(gindex, 576);
+}
+
+#[test]
+fn typed_resolution_checks_receipt_and_log_bounds() {
+    let empty = converted_receipts(&[]);
+    let address = Address::repeat_byte(0x22);
+    let addresses = [address];
+    let receipts = converted_receipts(&[&addresses]);
+
+    assert_eq!(
+        resolve_receipt_log_address(
+            &empty,
+            ResolvedPath::ReceiptLogAddress { receipt_index: 0, log_index: 0 },
+        ),
+        Err(ReceiptResolutionError::Bounds(BoundsError::ReceiptOutOfBounds))
+    );
+    assert_eq!(
+        resolve_receipt_log_address(
+            &receipts,
+            ResolvedPath::ReceiptLogAddress { receipt_index: 1, log_index: 0 },
+        ),
+        Err(ReceiptResolutionError::Bounds(BoundsError::ReceiptOutOfBounds))
+    );
+    assert_eq!(
+        resolve_receipt_log_address(
+            &receipts,
+            ResolvedPath::ReceiptLogAddress { receipt_index: 0, log_index: 1 },
+        ),
+        Err(ReceiptResolutionError::Bounds(BoundsError::LogOutOfBounds))
+    );
+}
+
+#[test]
+fn typed_resolution_preserves_receipt_and_log_order() {
+    let first = Address::repeat_byte(0x21);
+    let second = Address::repeat_byte(0x22);
+    let third = Address::repeat_byte(0x23);
+    let first_receipt = [first, second];
+    let second_receipt = [third];
+    let receipts = converted_receipts(&[&first_receipt, &second_receipt]);
+
+    assert_eq!(receipts.len(), 2);
+    assert_eq!(receipts.get(0).unwrap().logs().len(), 2);
+    assert_eq!(receipts.get(1).unwrap().logs().len(), 1);
+
+    for (path, expected_address, expected_gindex) in [
+        ("[0].logs[0].address", first, 576),
+        ("[0].logs[1].address", second, 4640),
+        ("[1].logs[0].address", third, 5184),
+    ] {
+        let path = resolve(&parse_path(path).unwrap()).unwrap();
+        assert_eq!(
+            resolve_receipt_log_address(&receipts, path),
+            Ok((expected_address, expected_gindex))
+        );
+    }
+}
+
+#[test]
+fn typed_resolution_reads_a_changed_address() {
+    let original = Address::repeat_byte(0x21);
+    let changed = Address::repeat_byte(0x31);
+    let original_addresses = [original];
+    let changed_addresses = [changed];
+    let original_receipts = converted_receipts(&[&original_addresses]);
+    let changed_receipts = converted_receipts(&[&changed_addresses]);
+    let path = resolve(&parse_path("[0].logs[0].address").unwrap()).unwrap();
+
+    assert_eq!(resolve_receipt_log_address(&original_receipts, path).unwrap().0, original);
+    assert_eq!(resolve_receipt_log_address(&changed_receipts, path).unwrap().0, changed);
 }
 
 #[test]

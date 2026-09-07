@@ -9,9 +9,13 @@ repository.workspace = true
 
 [dependencies]
 alloy-primitives.workspace = true
+reth-pureth-receipt.workspace = true
 sha2.workspace = true
 
 [dev-dependencies]
+alloy-consensus.workspace = true
+reth-ethereum-primitives.workspace = true
+reth-primitives-traits.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 

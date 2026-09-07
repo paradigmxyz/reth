@@ -9863,7 +9863,11 @@ dependencies = [
 name = "reth-pureth-query"
 version = "2.5.2"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
+ "reth-ethereum-primitives",
+ "reth-primitives-traits",
+ "reth-pureth-receipt",
  "serde",
  "serde_json",
  "sha2 0.10.9",
