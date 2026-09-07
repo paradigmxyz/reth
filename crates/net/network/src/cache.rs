@@ -53,6 +53,28 @@ impl<T: Hash + Eq + fmt::Debug, S: BuildHasher> LruCache<T, S> {
         is_new
     }
 
+    /// Inserts a duplicate-free sequence and returns the number of cache hits.
+    ///
+    /// After a capacity-sized prefix of distinct entries, every later entry must be a miss.
+    /// The final capacity-sized suffix determines the cache's contents and recency order.
+    pub(crate) fn insert_unique(&mut self, entries: &[T]) -> usize
+    where
+        T: Clone,
+    {
+        // Ordinary insert uses the backing map's limit, including its extra eviction slot.
+        let capacity = self.inner.limiter().max_length() as usize;
+        if capacity == 0 {
+            return 0
+        }
+        let suffix_start = capacity.max(entries.len().saturating_sub(capacity));
+        entries
+            .iter()
+            .take(capacity)
+            .chain(entries.iter().skip(suffix_start))
+            .filter(|entry| !self.insert((*entry).clone()))
+            .count()
+    }
+
     /// Same as [`insert`](Self::insert) but returns a tuple, where the second index is the evicted
     /// value, if one was evicted.
     pub fn insert_and_get_evicted(&mut self, entry: T) -> (bool, Option<T>) {
@@ -215,6 +237,43 @@ mod test {
     use super::*;
     use derive_more::{Constructor, Display};
     use std::hash::Hasher;
+
+    #[test]
+    fn insert_unique_matches_sequential_hits_and_recency() {
+        for limit in [0, 1, 2, 3, 319, 320] {
+            let capacity = limit as usize + 1;
+            for len in [
+                0,
+                1,
+                capacity - 1,
+                capacity,
+                capacity + 1,
+                2 * capacity - 1,
+                2 * capacity,
+                2 * capacity + 1,
+                4096,
+            ] {
+                for offset in [0, 1, capacity, capacity + 1] {
+                    let mut sequential = LruCache::new(limit);
+                    let mut batched = LruCache::new(limit);
+                    sequential.extend(0..capacity);
+                    batched.extend(0..capacity);
+                    let entries: Vec<_> =
+                        (0..len).map(|index| (index + offset) % (len + capacity)).collect();
+                    // Repeat the announcement to exercise eviction between messages as well.
+                    for _ in 0..2 {
+                        let expected_hits =
+                            entries.iter().filter(|entry| !sequential.insert(**entry)).count();
+                        assert_eq!(batched.insert_unique(&entries), expected_hits);
+                        assert_eq!(
+                            batched.iter().collect::<Vec<_>>(),
+                            sequential.iter().collect::<Vec<_>>()
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     #[derive(Debug, Hash, PartialEq, Eq, Display, Clone, Copy)]
     struct Key(i8);

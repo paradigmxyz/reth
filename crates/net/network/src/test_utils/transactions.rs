@@ -4,8 +4,10 @@
 
 use crate::{
     transactions::{
+        announcement::{AnnouncedTransaction, TransactionMetadata},
         constants::tx_manager::DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
-        fetcher::TransactionFetcher, PeerMetadata, TransactionsManager, TransactionsManagerConfig,
+        fetcher::TransactionFetcher,
+        PeerMetadata, TransactionsManager, TransactionsManagerConfig,
     },
     NetworkConfigBuilder, NetworkManager,
 };
@@ -59,7 +61,13 @@ pub fn buffer_hash_to_tx_fetcher(
     peer_id: PeerId,
     tx_encoded_length: Option<usize>,
 ) {
-    tx_fetcher.on_announcement(peer_id, [(hash, tx_encoded_length.map(|size| (0u8, size)))]);
+    tx_fetcher.on_announcement(
+        peer_id,
+        [AnnouncedTransaction {
+            hash,
+            metadata: tx_encoded_length.map(|size| TransactionMetadata { tx_type: 0, size }),
+        }],
+    );
 }
 
 /// Mock a new session, returns (peer, channel-to-send-get-pooled-tx-response-on).
