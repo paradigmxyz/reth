@@ -30,11 +30,11 @@ const DEFAULT_ADVANCE_AFTER: u64 = SERVED_STATE_WINDOW - DEFAULT_HEAD_DISTANCE /
 /// Distance and history bounds that decide where a generation is anchored.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SnapPivotPolicy {
-    /// Blocks behind the head to anchor at when no finalized block is available.
+    // Blocks behind the head to anchor at when no finalized block is available.
     head_distance: u64,
-    /// Pivot lag that triggers re-anchoring while ranges are still downloading.
+    // Pivot lag that triggers re-anchoring while ranges are still downloading.
     advance_after: u64,
-    /// Blocks of block access list history a peer is assumed to still serve.
+    // Blocks of block access list history a peer is assumed to still serve.
     history: u64,
 }
 
@@ -63,8 +63,8 @@ impl SnapPivotPolicy {
 
     /// Returns this policy assuming `history` blocks of block access lists remain servable.
     ///
-    /// Applying that many lists is cheaper than downloading the state again, so the default is the
-    /// full EIP-7928 retention period rather than a shorter catch-up bound.
+    /// Defaults to the full EIP-7928 retention period, since applying lists beats downloading the
+    /// state again.
     pub const fn with_history(mut self, history: u64) -> Self {
         self.history = history;
         self
@@ -72,9 +72,8 @@ impl SnapPivotPolicy {
 
     /// Returns the block a pivot anchored under `head` targets.
     ///
-    /// Prefers a `finalized` block that peers should still be serving, since it cannot be reorged
-    /// at all. Falls back to `head_distance` before the first forkchoice update, and whenever
-    /// finality has stalled past the point where its state is served.
+    /// Prefers a finalized block that peers still serve state for, since it cannot be reorged, and
+    /// falls back to the head distance.
     pub const fn pivot_block(&self, head: u64, finalized: Option<u64>) -> Option<u64> {
         if let Some(finalized) = finalized &&
             head.saturating_sub(finalized) <= self.advance_after
@@ -86,46 +85,50 @@ impl SnapPivotPolicy {
 
     /// Returns whether `generation` should be re-anchored under `head`.
     ///
-    /// Advancing costs one block access list per intervening block, which stays far cheaper than
-    /// restarting the download, so this triggers well before peers stop serving the old root.
+    /// Advancing stays far cheaper than restarting, so this triggers well before peers stop
+    /// serving the old root.
     pub const fn needs_advance(&self, generation: SnapGeneration, head: u64) -> bool {
         generation.lag(head) > self.advance_after
     }
 
     /// Returns whether the block access lists `generation` still needs remain servable.
     ///
-    /// Once they are not, the downloaded state can no longer be carried forward and the attempt
-    /// has to be restarted from a fresh pivot.
+    /// Once they are not, its state cannot be carried forward and the attempt has to restart.
     pub const fn is_catchable(&self, generation: SnapGeneration, head: u64) -> bool {
         generation.lag(head) <= self.history
     }
 
     /// Returns a fresh generation for the canonical pivot under `head`.
     ///
-    /// `None` means the chain is not ready to be pivoted on: it is shorter than the head distance,
-    /// its pivot header is not downloaded yet, or EIP-7928 is not active at the pivot, so no block
-    /// access list can carry that state forward.
+    /// A candidate that is not eligible falls back to the head distance; `None` means no candidate
+    /// can anchor a sync yet.
     pub fn select(
         &self,
         provider: &impl HeaderProvider,
         head: u64,
         finalized: Option<u64>,
     ) -> Result<Option<SnapGeneration>, SnapSyncError> {
-        let Some(block_number) = self.pivot_block(head, finalized) else { return Ok(None) };
-        let Some(header) = provider.sealed_header(block_number).map_err(db_error)? else {
-            return Ok(None)
-        };
-        if header.block_access_list_hash().is_none() {
-            return Ok(None)
+        let preferred = self.pivot_block(head, finalized);
+        let fallback =
+            head.checked_sub(self.head_distance).filter(|block| Some(*block) != preferred);
+        for block_number in preferred.into_iter().chain(fallback) {
+            let Some(header) = provider.sealed_header(block_number).map_err(db_error)? else {
+                continue
+            };
+            if header.block_access_list_hash().is_some() {
+                return Ok(Some(SnapGeneration::new(
+                    block_number,
+                    header.hash(),
+                    header.state_root(),
+                )))
+            }
         }
-        Ok(Some(SnapGeneration::new(block_number, header.hash(), header.state_root())))
+        Ok(None)
     }
 
     /// Returns whether an interrupted generation is still worth finishing under `head`.
     ///
-    /// A fully downloaded generation only needs its trie rebuilt, so it stays worth finishing
-    /// however far the head has moved on. Whether its anchor is still canonical is reported
-    /// separately by [`SnapGeneration::is_canonical`].
+    /// A fully downloaded generation only needs its trie rebuilt, so it always is.
     pub const fn is_finishable(&self, generation: SnapGeneration, head: u64) -> bool {
         matches!(generation.phase(), SnapPhase::Trie) || self.is_catchable(generation, head)
     }
@@ -229,10 +232,26 @@ mod tests {
     }
 
     #[test]
+    fn an_ineligible_finalized_pivot_falls_back_to_the_head_distance() {
+        // Block access lists only start at block 2, so the finalized block predates activation.
+        let headers = chain(Some(2));
+        let fallback = headers[2].clone();
+        let provider = provider_with(headers);
+
+        let generation = policy().select(&provider, 3, Some(1)).unwrap().unwrap();
+
+        // HEAD-1, rather than waiting for finality to reach activation.
+        assert_eq!(generation.target_block(), 2);
+        assert_eq!(generation.target_hash(), fallback.hash_slow());
+    }
+
+    #[test]
     fn pivot_without_a_bal_commitment_is_not_selectable() {
         let provider = provider_with(chain(Some(3)));
 
         assert_eq!(policy().select(&provider, 3, None).unwrap(), None);
+        // Neither the finalized anchor nor the fallback carries a commitment.
+        assert_eq!(policy().select(&provider, 3, Some(1)).unwrap(), None);
     }
 
     #[test]

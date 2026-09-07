@@ -10,15 +10,15 @@ use reth_storage_api::HeaderProvider;
 /// still on the canonical chain, and the root is what downloaded ranges authenticate against.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SnapGeneration {
-    /// Pivot block number.
+    // Pivot block number.
     target_block: u64,
-    /// Pivot block hash.
+    // Pivot block hash.
     target_hash: B256,
-    /// State root that downloaded ranges authenticate against.
+    // Root downloaded ranges authenticate against.
     state_root: B256,
-    /// Stage reached so far.
+    // Stage reached so far.
     phase: SnapPhase,
-    /// First block whose block access list has not been applied.
+    // First block whose block access list has not been applied.
     next_block: u64,
 }
 
@@ -66,8 +66,8 @@ impl SnapGeneration {
 
     /// Returns whether the block this generation is anchored to is still canonical.
     ///
-    /// A generation whose anchor was orphaned can still be recovered from the block access lists
-    /// of the abandoned branch, so this is reported separately from whether it is worth finishing.
+    /// Separate from whether it is worth finishing: an orphaned anchor is recoverable from the
+    /// abandoned branch's lists.
     pub fn is_canonical(&self, provider: &impl HeaderProvider) -> Result<bool, SnapSyncError> {
         let header = provider.sealed_header(self.target_block).map_err(db_error)?;
         Ok(header.is_some_and(|header| header.hash() == self.target_hash))
