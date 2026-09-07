@@ -25,6 +25,7 @@ const {
   verdict,
   isWin,
   loadSamplyUrls,
+  loadTracingChromeUrls,
   blocksLabel,
   metricRows,
 } = require('./bench-utils');
@@ -81,6 +82,16 @@ function profileLinks(samplyUrls, prefix) {
     });
 }
 
+function chromeTraceLinks(tracingChromeUrls, prefix) {
+  return Object.entries(tracingChromeUrls)
+    .filter(([run]) => run.startsWith(`${prefix}-`))
+    .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
+    .map(([run, url]) => {
+      const index = run.slice(prefix.length + 1);
+      return `<${url}|Chrome ${index}>`;
+    });
+}
+
 // Slack shortcodes for verdict (Block Kit header doesn't support unicode emoji)
 const SLACK_VERDICT = {
   '⚠️': ':warning:',
@@ -124,6 +135,7 @@ function buildSuccessBlocks({
   jobUrl,
   repo,
   samplyUrls,
+  tracingChromeUrls,
 }) {
   const { emoji, label } = verdict(summary.changes);
   const headerEmoji = SLACK_VERDICT[emoji] || emoji;
@@ -143,16 +155,17 @@ function buildSuccessBlocks({
   let baselineLine = `*Baseline:* ${baselineLink}`;
   const baselineProfiles = profileLinks(samplyUrls, 'baseline');
   if (baselineProfiles.length) baselineLine += ` | ${baselineProfiles.join(' | ')}`;
+  const baselineTraces = chromeTraceLinks(tracingChromeUrls, 'baseline');
+  if (baselineTraces.length) baselineLine += ` | ${baselineTraces.join(' | ')}`;
 
   let featureLine = `*Feature:* ${featureLink}`;
   const featureProfiles = profileLinks(samplyUrls, 'feature');
   if (featureProfiles.length) featureLine += ` | ${featureProfiles.join(' | ')}`;
+  const featureTraces = chromeTraceLinks(tracingChromeUrls, 'feature');
+  if (featureTraces.length) featureLine += ` | ${featureTraces.join(' | ')}`;
 
   const countsLine = blocksLabel(summary).map(p => `*${p.key}:* ${p.value}`).join(' | ');
-  let configLine = benchConfigLine();
-  if (process.env.BENCH_TRACING_CHROME === 'true') {
-    configLine += `\nChrome traces: download the bench-results artifact from <${jobUrl}|the run> and open in <https://ui.perfetto.dev/|Perfetto>.`;
-  }
+  const configLine = benchConfigLine();
 
   const baselineArgs = process.env.BENCH_BASELINE_ARGS || '';
   const featureArgs = process.env.BENCH_FEATURE_ARGS || '';
@@ -275,6 +288,7 @@ async function success({ core, context }) {
     `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
   const samplyUrls = loadSamplyUrls(process.env.BENCH_WORK_DIR);
+  const tracingChromeUrls = loadTracingChromeUrls(process.env.BENCH_WORK_DIR);
 
   const slackUsers = loadSlackUsers(process.env.GITHUB_WORKSPACE || '.');
   const actorSlackId = slackUsers[actor];
@@ -287,6 +301,7 @@ async function success({ core, context }) {
     jobUrl,
     repo,
     samplyUrls,
+    tracingChromeUrls,
   });
   const text = `Bench: ${summary.baseline.name} vs ${summary.feature.name}`;
 

@@ -18,6 +18,7 @@ const fs = require('fs');
 const {
   verdict,
   loadSamplyUrls,
+  loadTracingChromeUrls,
   blocksLabel,
   metricRows,
   waitTimeRows,
@@ -110,7 +111,7 @@ module.exports = async function ({ core, context, grafanaUrl, logsUrl, tracesUrl
     md += '\n';
   }
 
-  md += fs.readFileSync(process.env.BENCH_WORK_DIR + '/charts/charts.md', 'utf8');
+  md += fs.readFileSync(process.env.BENCH_WORK_DIR + '/charts.md', 'utf8');
 
   // Samply profiles
   const samplyUrls = loadSamplyUrls(process.env.BENCH_WORK_DIR);
@@ -119,9 +120,11 @@ module.exports = async function ({ core, context, grafanaUrl, logsUrl, tracesUrl
     md += `### Samply Profiles\n\n${samplyLinks.join('\n')}\n\n`;
   }
 
-  if (process.env.BENCH_TRACING_CHROME === 'true') {
-    const runUrl = process.env.BENCH_RUN_URL || `https://github.com/${repo}/actions/runs/${runId}`;
-    md += `### Chrome Traces\n\nDownload the [bench-results artifact](${runUrl}), then open each run's tracing-chrome-profile.json in [Perfetto](https://ui.perfetto.dev/).\n\n`;
+  const tracingChromeUrls = loadTracingChromeUrls(process.env.BENCH_WORK_DIR);
+  const tracingChromeLinks = Object.entries(tracingChromeUrls)
+    .map(([run, url]) => `- **${run}**: [Perfetto](${url})`);
+  if (tracingChromeLinks.length > 0) {
+    md += `### Chrome Traces\n\n${tracingChromeLinks.join('\n')}\n\n`;
   }
 
   // Observability

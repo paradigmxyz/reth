@@ -9,7 +9,7 @@
 #   release — Compares the latest GitHub release tag against the current nightly
 #             Docker build. Runs daily to track nightly vs release performance.
 #
-# State is persisted between runs via GitHub Actions artifacts: each
+# State is persisted between runs via the decofe/reth-bench-charts repo: each
 # successful run saves the feature commit SHA so the next run knows what to
 # compare against.
 
@@ -144,6 +144,7 @@ jobs:
         id: refs
         env:
           GH_TOKEN: ${{ github.token }}
+          DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           INPUT_FORCE: ${{ inputs.force || 'false' }}
@@ -718,18 +719,19 @@ jobs:
           # shellcheck disable=SC2086
           uv run --with matplotlib python3 .github/scripts/bench-reth-charts.py $CHART_ARGS
 
-      - name: Upload chart attachments
-        if: success() && env.BENCH_MODE != 'hourly'
-        env:
-          GH_TOKEN: ${{ secrets.DEREK_TOKEN }}
-        run: node .github/scripts/bench-upload-charts.js "$GITHUB_REPOSITORY" "$BENCH_WORK_DIR/charts"
-
       - name: Upload results
         if: "!cancelled()"
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bench-scheduled-results
           path: ${{ env.BENCH_WORK_DIR }}
+
+      - name: Upload chart attachments
+        id: upload-charts
+        if: success() && env.BENCH_MODE != 'hourly'
+        env:
+          GH_TOKEN: ${{ secrets.DEREK_TOKEN }}
+        run: bash .github/scripts/bench-upload-charts.sh "$GITHUB_REPOSITORY" "$BENCH_WORK_DIR/charts" > "$BENCH_WORK_DIR/charts.md"
 
       - name: Write job summary
         if: success()
@@ -781,7 +783,7 @@ jobs:
             }
 
             if (process.env.BENCH_MODE !== 'hourly') {
-              md += fs.readFileSync(process.env.BENCH_WORK_DIR + '/charts/charts.md', 'utf8');
+              md += fs.readFileSync(process.env.BENCH_WORK_DIR + '/charts.md', 'utf8');
             }
 
             const grafanaUrl = '${{ steps.metrics.outputs.grafana-url }}';
@@ -1038,18 +1040,33 @@ jobs:
     name: save-state
     runs-on: ubuntu-latest
     steps:
-      - name: Prepare benchmark state
-        env:
-          FEATURE_REF: ${{ needs.resolve-refs.outputs.feature-ref }}
-        run: |
-          mkdir -p benchmark-state
-          printf '%s\n' "$FEATURE_REF" > benchmark-state/last-feature-ref
-
-      - name: Upload benchmark state
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          name: ${{ needs.resolve-refs.outputs.mode }}-last-feature-ref
-          path: benchmark-state/last-feature-ref
-          retention-days: 90
-          if-no-files-found: error
-          overwrite: true
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: true
+
+      - name: Push state to charts repo
+        env:
+          DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
+        run: |
+          MODE="${{ needs.resolve-refs.outputs.mode }}"
+          FEATURE_REF="${{ needs.resolve-refs.outputs.feature-ref }}"
+          CHARTS_REPO="https://x-access-token:${DEREK_TOKEN}@github.com/decofe/reth-bench-charts.git"
+
+          TMP_DIR=$(mktemp -d)
+          if git clone --depth 1 --branch state "${CHARTS_REPO}" "${TMP_DIR}" 2>/dev/null; then
+            true
+          else
+            git init "${TMP_DIR}"
+            git -C "${TMP_DIR}" remote add origin "${CHARTS_REPO}"
+          fi
+          .github/scripts/configure-git-token-user.sh "${TMP_DIR}" "${DEREK_TOKEN}"
+
+          mkdir -p "${TMP_DIR}/state"
+          echo "${FEATURE_REF}" > "${TMP_DIR}/state/${MODE}-last-feature-ref"
+          git -C "${TMP_DIR}" add state/
+          git -C "${TMP_DIR}" diff --cached --quiet && echo "No state change" && exit 0
+          git -C "${TMP_DIR}" commit -m "bench: update ${MODE} state to ${FEATURE_REF}"
+          git -C "${TMP_DIR}" push origin HEAD:state
+          rm -rf "${TMP_DIR}"

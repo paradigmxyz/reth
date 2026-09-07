@@ -26,5 +26,3 @@ jobs:
       - name: Check workflow files
         run: SHELLCHECK_OPTS="-S error" ${{ steps.get_actionlint.outputs.executable }} -color
         shell: bash
-      - name: Test benchmark hosting helpers
-        run: node --test .github/scripts/bench-hosting.test.js

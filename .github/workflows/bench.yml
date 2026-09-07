@@ -1635,10 +1635,11 @@ jobs:
           uv run --with matplotlib python3 .github/scripts/bench-reth-charts.py $CHART_ARGS
 
       - name: Upload chart attachments
+        id: upload-charts
         if: success()
         env:
           GH_TOKEN: ${{ secrets.DEREK_TOKEN }}
-        run: node .github/scripts/bench-upload-charts.js "$GITHUB_REPOSITORY" "$BENCH_WORK_DIR/charts"
+        run: bash .github/scripts/bench-upload-charts.sh "$GITHUB_REPOSITORY" "$BENCH_WORK_DIR/charts" > "$BENCH_WORK_DIR/charts.md"
 
       - name: Upload results
         if: "!cancelled()"
@@ -1646,6 +1647,100 @@ jobs:
         with:
           name: bench-results
           path: ${{ env.BENCH_WORK_DIR }}
+
+      - name: Push Chrome traces
+        id: push-traces
+        if: success() && env.BENCH_TRACING_CHROME == 'true'
+        env:
+          DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          PR_NUMBER="${BENCH_PR:-0}"
+          CHART_DIR="pr/${PR_NUMBER}/${RUN_ID}"
+          CHARTS_REPO="https://x-access-token:${DEREK_TOKEN}@github.com/decofe/reth-bench-charts.git"
+
+          TMP_DIR=""
+          prepare_artifacts() {
+            if [ -n "${TMP_DIR}" ]; then
+              rm -rf "${TMP_DIR}"
+            fi
+
+            TMP_DIR=$(mktemp -d)
+            if git clone --depth 1 --filter=blob:none --sparse "${CHARTS_REPO}" "${TMP_DIR}" 2>/dev/null; then
+              git -C "${TMP_DIR}" sparse-checkout set --no-cone "${CHART_DIR}"
+              true
+            else
+              git init "${TMP_DIR}"
+              git -C "${TMP_DIR}" remote add origin "${CHARTS_REPO}"
+            fi
+            .github/scripts/configure-git-token-user.sh "${TMP_DIR}" "${DEREK_TOKEN}"
+
+            mkdir -p "${TMP_DIR}/${CHART_DIR}"
+            if [ "${BENCH_TRACING_CHROME:-false}" = "true" ]; then
+              TRACE_DIR="${CHART_DIR}/tracing-chrome"
+              mkdir -p "${TMP_DIR}/${TRACE_DIR}"
+              mapfile -t RUN_DIRS < <(find "$BENCH_WORK_DIR" -mindepth 1 -maxdepth 1 -type d \( -name 'baseline-*' -o -name 'feature-*' \) -printf '%f\n' | sort -V)
+              for run_dir in "${RUN_DIRS[@]}"; do
+                TRACE="$BENCH_WORK_DIR/$run_dir/tracing-chrome-profile.json"
+                if [ ! -f "$TRACE" ]; then continue; fi
+
+                TRACE_SIZE=$(du -h "$TRACE" | cut -f1)
+                echo "Adding $run_dir Chrome trace (${TRACE_SIZE}) to benchmark artifacts..."
+                gzip -c "$TRACE" > "${TMP_DIR}/${TRACE_DIR}/${run_dir}.json.gz"
+              done
+            fi
+            git -C "${TMP_DIR}" add "${CHART_DIR}"
+          }
+
+          prepare_artifacts
+          if git -C "${TMP_DIR}" diff --cached --quiet; then
+            echo "Artifacts for ${CHART_DIR} are already present, skipping push"
+            PUSH_SHA="$(git -C "${TMP_DIR}" rev-parse HEAD)"
+          else
+            for attempt in 1 2 3 4 5; do
+              git -C "${TMP_DIR}" commit -m "bench artifacts for PR #${PR_NUMBER} run ${RUN_ID}"
+              if git -C "${TMP_DIR}" push origin HEAD:main; then
+                break
+              fi
+              if [ "$attempt" -eq 5 ]; then
+                echo "::error::Failed to push benchmark artifacts after ${attempt} attempts"
+                rm -rf "${TMP_DIR}"
+                exit 1
+              fi
+              sleep "$attempt"
+              prepare_artifacts
+            done
+
+            PUSH_SHA="$(git -C "${TMP_DIR}" rev-parse HEAD)"
+          fi
+
+          if [ "${BENCH_TRACING_CHROME:-false}" = "true" ]; then
+            RAW_BASE="https://raw.githubusercontent.com/decofe/reth-bench-charts/${PUSH_SHA}/${CHART_DIR}/tracing-chrome"
+            mapfile -t RUN_DIRS < <(find "$BENCH_WORK_DIR" -mindepth 1 -maxdepth 1 -type d \( -name 'baseline-*' -o -name 'feature-*' \) -printf '%f\n' | sort -V)
+            for run_dir in "${RUN_DIRS[@]}"; do
+              if [ ! -f "${TMP_DIR}/${CHART_DIR}/tracing-chrome/${run_dir}.json.gz" ]; then continue; fi
+
+              RAW_URL="${RAW_BASE}/${run_dir}.json.gz"
+              PERFETTO_URL="$(python3 - "$RAW_URL" "${run_dir}.json.gz" <<'PY'
+          import sys
+          from urllib.parse import quote
+
+          raw_url, file_name = sys.argv[1:3]
+          print(
+              "https://ui.perfetto.dev/#!/?url="
+              + quote(raw_url, safe="")
+              + "&fileName="
+              + quote(file_name, safe="")
+          )
+          PY
+          )"
+              echo "$PERFETTO_URL" > "$BENCH_WORK_DIR/$run_dir/tracing-chrome-profile-url.txt"
+              echo "Perfetto URL for $run_dir: $PERFETTO_URL"
+            done
+          fi
+
+          echo "sha=${PUSH_SHA}" >> "$GITHUB_OUTPUT"
+          rm -rf "${TMP_DIR}"
 
       - name: Compare & comment
         if: success() && env.BENCH_COMMENT_ID
@@ -1662,7 +1757,7 @@ jobs:
               comment = '⚠️ Benchmark completed but failed to generate comparison.';
             }
 
-            comment += fs.readFileSync(process.env.BENCH_WORK_DIR + '/charts/charts.md', 'utf8');
+            comment += fs.readFileSync(process.env.BENCH_WORK_DIR + '/charts.md', 'utf8');
 
             // Samply profile links (URLs point directly to Firefox Profiler)
             if (process.env.BENCH_SAMPLY === 'true') {
@@ -1678,8 +1773,15 @@ jobs:
             }
 
             if (process.env.BENCH_TRACING_CHROME === 'true') {
-              const runUrl = process.env.BENCH_RUN_URL || `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-              comment += `\n\n### Chrome Traces\n\nDownload the [bench-results artifact](${runUrl}), then open each run's tracing-chrome-profile.json in [Perfetto](https://ui.perfetto.dev/).\n`;
+              const { loadTracingChromeUrls } = require('./.github/scripts/bench-utils');
+              const tracingChromeUrls = loadTracingChromeUrls(process.env.BENCH_WORK_DIR);
+              const links = [];
+              for (const [run, url] of Object.entries(tracingChromeUrls)) {
+                links.push(`- **${run}**: [Perfetto](${url})`);
+              }
+              if (links.length > 0) {
+                comment += `\n\n### Chrome Traces\n\n${links.join('\n')}\n`;
+              }
             }
 
             // Node errors (panics / ERROR logs)
