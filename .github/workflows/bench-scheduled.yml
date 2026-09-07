@@ -1,33 +1,57 @@
-name: Benchmark state smoke
+name: Benchmark artifact state smoke
 on:
   workflow_dispatch:
-permissions:
-  contents: read
+    inputs:
+      expected:
+        description: Expected restored feature SHA (empty on first run)
+        default: ""
+        type: string
+      feature:
+        description: Feature SHA to save (deliberately distinct from workflow SHA)
+        default: "280a76318d7ab933f4a1536d1942ffeb4c742d1a"
+        type: string
+      fail:
+        description: Fail after upload to test failed-run exclusion
+        default: false
+        type: boolean
+permissions: {}
 jobs:
   state:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     strategy:
       fail-fast: false
       matrix:
-        token: [DEREK_TOKEN, GH_PROJECT_TOKEN]
+        mode: [hourly, nightly, release]
     env:
-      GH_TOKEN: ${{ secrets[matrix.token] }}
-      STATE_NAME: BENCH_SMOKE_${{ github.run_id }}_${{ matrix.token }}_LAST_FEATURE_REF
+      GH_TOKEN: ${{ github.token }}
+      EXPECTED: ${{ inputs.expected }}
+      FEATURE_REF: ${{ inputs.feature }}
+      MODE: ${{ matrix.mode }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Verify missing state
-        run: test -z "$(bash .github/scripts/bench-state.sh get "$GITHUB_REPOSITORY" "$STATE_NAME")"
-      - name: Write state
-        id: write
-        run: bash .github/scripts/bench-state.sh set "$GITHUB_REPOSITORY" "$STATE_NAME" "$GITHUB_SHA"
-      - name: Read and update state
+          sparse-checkout: .github/scripts
+      - name: Restore previous successful state
+        run: test "$(bash .github/scripts/bench-state.sh "$GITHUB_REPOSITORY" "$MODE")" = "$EXPECTED"
+      - name: Verify branch isolation
+        run: test -z "$(GITHUB_REF_NAME=artifact-state-isolation-unwritten bash .github/scripts/bench-state.sh "$GITHUB_REPOSITORY" "$MODE")"
+      - name: Prepare benchmark state
         run: |
-          test "$(bash .github/scripts/bench-state.sh get "$GITHUB_REPOSITORY" "$STATE_NAME")" = "$GITHUB_SHA"
-          previous=$(git rev-parse HEAD)
-          bash .github/scripts/bench-state.sh set "$GITHUB_REPOSITORY" "$STATE_NAME" "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-          test "$(bash .github/scripts/bench-state.sh get "$GITHUB_REPOSITORY" "$STATE_NAME")" = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      - name: Remove test state
-        if: always() && steps.write.outcome == 'success'
-        run: gh variable delete "$STATE_NAME" --repo "$GITHUB_REPOSITORY"
+          [[ "$FEATURE_REF" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          mkdir -p "$RUNNER_TEMP/bench-state"
+          printf '%s\n' "$FEATURE_REF" > "$RUNNER_TEMP/bench-state/feature-ref"
+      - name: Save benchmark state
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bench-state-${{ matrix.mode }}
+          path: ${{ runner.temp }}/bench-state/feature-ref
+          retention-days: 90
+          if-no-files-found: error
+          overwrite: true
+      - name: Intentional failure
+        if: inputs.fail
+        run: exit 1
