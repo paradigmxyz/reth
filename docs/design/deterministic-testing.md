@@ -6,6 +6,9 @@ building, EVM validation, forkchoice, live block download, and persistence under
 Production and simulation share their application drivers. Separate Loom and real-database crash
 tests cover properties that the cooperative executor cannot establish.
 
+For a native node experiment that controls OS threads and syscalls with Hermit,
+see [Running a native Reth node under Hermit](hermit-dst.md).
+
 ## Running and replaying
 
 Run the simulation campaigns with:
