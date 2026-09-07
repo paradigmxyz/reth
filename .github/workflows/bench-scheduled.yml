@@ -6,9 +6,13 @@ permissions:
 jobs:
   state:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        token: [DEREK_TOKEN, GH_PROJECT_TOKEN]
     env:
-      GH_TOKEN: ${{ secrets.DEREK_PAT }}
-      STATE_NAME: BENCH_SMOKE_${{ github.run_id }}_LAST_FEATURE_REF
+      GH_TOKEN: ${{ secrets[matrix.token] }}
+      STATE_NAME: BENCH_SMOKE_${{ github.run_id }}_${{ matrix.token }}_LAST_FEATURE_REF
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
         with:
