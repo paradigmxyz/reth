@@ -7195,6 +7195,7 @@ version = "2.5.2"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
+ "sha2 0.10.9",
  "tree_hash",
 ]
 
