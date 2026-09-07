@@ -11007,7 +11007,7 @@ dependencies = [
 [[package]]
 name = "revm-inspectors"
 version = "0.43.0"
-source = "git+https://github.com/Soubhik-10/revm-inspectors?rev=422f289185239fe052d935aefa39ffd5fb330deb#422f289185239fe052d935aefa39ffd5fb330deb"
+source = "git+https://github.com/Soubhik-10/revm-inspectors?rev=9672f97deb6d5197d436502629a6dd9bb5efcb2c#9672f97deb6d5197d436502629a6dd9bb5efcb2c"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
