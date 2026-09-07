@@ -621,7 +621,7 @@ impl<C: Send + Sync + 'static, N: NodePrimitives> StateProviderFactory for NoopP
         _parent_hash: BlockHash,
         _block: ExecutedBlock<N>,
     ) -> ProviderResult<StateProviderBox> {
-        Err(ProviderError::UnsupportedProvider)
+        Ok(Box::new(self.clone()))
     }
 
     fn state_by_block_number_or_tag(
