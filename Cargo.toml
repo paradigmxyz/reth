@@ -433,7 +433,7 @@ reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
 reth-zstd-compressors = { version = "0.7.0", default-features = false }
 
 # revm
-revm = { version = "43.0.0", default-features = false }
+revm = { version = "43.0.1", default-features = false }
 revmc = { git = "https://github.com/paradigmxyz/revmc", branch = "main", default-features = false, features = ["llvm-prefer-static"] }
 revm-inspectors = "0.43.0"
 
