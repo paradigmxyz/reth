@@ -18,7 +18,6 @@ const fs = require('fs');
 const {
   verdict,
   loadSamplyUrls,
-  loadTracingChromeUrls,
   blocksLabel,
   metricRows,
   waitTimeRows,
@@ -120,11 +119,8 @@ module.exports = async function ({ core, context, grafanaUrl, logsUrl, tracesUrl
     md += `### Samply Profiles\n\n${samplyLinks.join('\n')}\n\n`;
   }
 
-  const tracingChromeUrls = loadTracingChromeUrls(process.env.BENCH_WORK_DIR);
-  const tracingChromeLinks = Object.entries(tracingChromeUrls)
-    .map(([run, url]) => `- **${run}**: [Perfetto](${url})`);
-  if (tracingChromeLinks.length > 0) {
-    md += `### Chrome Traces\n\n${tracingChromeLinks.join('\n')}\n\n`;
+  if (process.env.BENCH_TRACING_CHROME === 'true') {
+    md += `### Chrome Traces\n\n[Download bench-results](${process.env.BENCH_RESULTS_URL}), extract the archive, and open each run's \`tracing-chrome-profile.json\` in [Perfetto](https://ui.perfetto.dev/). GitHub sign-in is required; downloads are available until the artifact expires.\n\n`;
   }
 
   // Observability

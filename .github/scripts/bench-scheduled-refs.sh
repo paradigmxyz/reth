@@ -26,12 +26,8 @@
 #   nightly-created — ISO timestamp of the nightly build (nightly only)
 #   release-tag     — release tag name (release mode only, e.g. "v2.0.0")
 #
-# Reads:
-#   state/nightly-last-feature-ref  (nightly, from decofe/reth-bench-charts repo)
-#   state/hourly-last-feature-ref   (hourly, from decofe/reth-bench-charts repo)
-#   state/release-last-feature-ref  (release, from decofe/reth-bench-charts repo)
-#
-# Requires: gh (GitHub CLI), jq, date, git (hourly mode), curl, DEREK_TOKEN env
+# Reads BENCH_<MODE>_LAST_FEATURE_REF repository Actions variables.
+# Requires: gh, jq, date, git (hourly mode), GH_TOKEN and BENCH_STATE_TOKEN.
 set -euxo pipefail
 
 FORCE="${1:-false}"
@@ -74,16 +70,10 @@ if [ "$MODE" = "hourly" ]; then
   fi
   echo "::endgroup::"
 
-  # --- Step 3: Read last successful feature ref from charts repo ---
+  # --- Step 3: Read last successful feature ref from repository variables ---
   echo "::group::Reading persisted state"
-  LAST_FEATURE_REF=""
-  STATE_URL="https://raw.githubusercontent.com/decofe/reth-bench-charts/state/state/hourly-last-feature-ref"
-  if RAW=$(curl -sfL -H "Authorization: token ${DEREK_TOKEN}" "$STATE_URL"); then
-    LAST_FEATURE_REF=$(echo "$RAW" | tr -d '[:space:]')
-    echo "Previous feature ref: $LAST_FEATURE_REF"
-  else
-    echo "No persisted state found (first run)"
-  fi
+  LAST_FEATURE_REF=$(bash "$(dirname "$0")/bench-state.sh" get "$REPO" "BENCH_HOURLY_LAST_FEATURE_REF")
+  echo "Previous feature ref: ${LAST_FEATURE_REF:-none}"
   echo "::endgroup::"
 
   # --- Step 4: Determine baseline and skip logic ---
@@ -181,16 +171,10 @@ if [ "$MODE" = "release" ]; then
   echo "Release commit (baseline): $BASELINE_REF"
   echo "::endgroup::"
 
-  # --- Step 3: Read last successful feature ref from charts repo ---
+  # --- Step 3: Read last successful feature ref from repository variables ---
   echo "::group::Reading persisted state"
-  LAST_FEATURE_REF=""
-  STATE_URL="https://raw.githubusercontent.com/decofe/reth-bench-charts/state/state/release-last-feature-ref"
-  if RAW=$(curl -sfL -H "Authorization: token ${DEREK_TOKEN}" "$STATE_URL"); then
-    LAST_FEATURE_REF=$(echo "$RAW" | tr -d '[:space:]')
-    echo "Previous feature ref: $LAST_FEATURE_REF"
-  else
-    echo "No persisted state found (first run)"
-  fi
+  LAST_FEATURE_REF=$(bash "$(dirname "$0")/bench-state.sh" get "$REPO" "BENCH_RELEASE_LAST_FEATURE_REF")
+  echo "Previous feature ref: ${LAST_FEATURE_REF:-none}"
   echo "::endgroup::"
 
   # --- Step 4: Skip logic ---
@@ -278,16 +262,10 @@ else
 fi
 echo "::endgroup::"
 
-# --- Step 3: Read last successful feature ref from charts repo ---
+# --- Step 3: Read last successful feature ref from repository variables ---
 echo "::group::Reading persisted state"
-LAST_FEATURE_REF=""
-STATE_URL="https://raw.githubusercontent.com/decofe/reth-bench-charts/state/state/nightly-last-feature-ref"
-if RAW=$(curl -sfL -H "Authorization: token ${DEREK_TOKEN}" "$STATE_URL"); then
-  LAST_FEATURE_REF=$(echo "$RAW" | tr -d '[:space:]')
-  echo "Previous feature ref: $LAST_FEATURE_REF"
-else
-  echo "No persisted state found (first run)"
-fi
+LAST_FEATURE_REF=$(bash "$(dirname "$0")/bench-state.sh" get "$REPO" "BENCH_NIGHTLY_LAST_FEATURE_REF")
+  echo "Previous feature ref: ${LAST_FEATURE_REF:-none}"
 echo "::endgroup::"
 
 # --- Step 4: Determine baseline and skip logic ---
