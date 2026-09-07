@@ -457,6 +457,21 @@ pub struct DownloadCommand<C: ChainSpecParser> {
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCommand<C> {
     /// Runs the download command in single-archive or manifest mode.
     pub async fn execute<N>(self) -> Result<Option<PreparedSnapshotDownload>> {
+        self.execute_with_pre_install::<N, _>(|_| Ok(())).await
+    }
+
+    /// Runs the download command, validating the prepared modular snapshot before installation.
+    ///
+    /// The validator runs after the manifest and component selection are resolved, but before
+    /// the target data directory is modified or any archives are requested. It is not called for
+    /// listing or legacy single-archive downloads.
+    pub async fn execute_with_pre_install<N, F>(
+        self,
+        validate: F,
+    ) -> Result<Option<PreparedSnapshotDownload>>
+    where
+        F: FnOnce(&PreparedSnapshotDownload) -> Result<()>,
+    {
         let chain = self.env.chain.chain();
 
         // --list: print available snapshots and exit
@@ -502,6 +517,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             self.resolve_download(chain.id()).await?;
         let data_dir = self.env.datadir.clone().resolve_datadir(chain).data_dir().to_path_buf();
         let prepared = PreparedSnapshotDownload { manifest, data_dir };
+        validate(&prepared)?;
         if self.print_plan_json {
             DownloadPlan::from_planned(&prepared.manifest, &planned)
                 .write_json(std::io::stdout().lock())?;
@@ -1277,6 +1293,44 @@ mod tests {
         ]);
 
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn pre_install_validation_runs_before_target_creation() {
+        let temp = tempfile::tempdir().unwrap();
+        let manifest_path = temp.path().join("manifest.json");
+        let data_dir = temp.path().join("data");
+        let manifest = SnapshotManifest {
+            block: 1,
+            chain_id: MAINNET.chain.id(),
+            storage_version: 2,
+            timestamp: 0,
+            base_url: None,
+            reth_version: None,
+            components: BTreeMap::new(),
+            extensions: BTreeMap::new(),
+        };
+        std::fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        let args = CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from([
+            "reth",
+            "--manifest-path",
+            manifest_path.to_str().unwrap(),
+            "--datadir",
+            data_dir.to_str().unwrap(),
+            "--minimal",
+        ])
+        .args;
+
+        let err = args
+            .execute_with_pre_install::<(), _>(|prepared| {
+                assert_eq!(prepared.manifest.block, 1);
+                Err(eyre::eyre!("rejected by downstream validator"))
+            })
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("rejected by downstream validator"));
+        assert!(!data_dir.exists());
     }
 
     #[test]
