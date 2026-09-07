@@ -11,14 +11,14 @@ export UPLOAD_TEST_LOG="$scratch/calls"
 export UPLOAD_TEST_MODE=dry
 gh() {
   printf '%s\n' "$*" >> "$UPLOAD_TEST_LOG"
-  [[ "$UPLOAD_TEST_MODE" != dry ]]
+  [[ "$UPLOAD_TEST_MODE" != dry ]] || return 1
   if [[ "$2" == repos/owner/repo ]]; then
     printf '123\n'
     return
   fi
-  [[ "$2" == https://uploads.github.com/user-attachments/assets ]]
-  [[ "$*" == *'content_type=image/png'* && "$*" == *'repository_id=123'* ]]
-  [[ "$*" == *'Content-Type: application/octet-stream'* ]]
+  [[ "$2" == https://uploads.github.com/user-attachments/assets ]] || return 1
+  [[ "$*" == *'content_type=image/png'* && "$*" == *'repository_id=123'* ]] || return 1
+  [[ "$*" == *'Content-Type: application/octet-stream'* ]] || return 1
   if [[ "$UPLOAD_TEST_MODE" == failure ]]; then
     echo 'HTTP 401' >&2
     return 1

@@ -1638,7 +1638,7 @@ jobs:
         id: upload-charts
         if: success()
         env:
-          GH_TOKEN: ${{ secrets.DEREK_TOKEN }}
+          GH_TOKEN: ${{ secrets.DEREK_PAT }}
         run: bash .github/scripts/bench-upload-charts.sh "$GITHUB_REPOSITORY" "$BENCH_WORK_DIR/charts" > "$BENCH_WORK_DIR/charts.md"
 
       - name: Upload results
