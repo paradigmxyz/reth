@@ -9871,7 +9871,7 @@ dependencies = [
 
 [[package]]
 name = "reth-pureth-receipt"
-version = "2.5.1"
+version = "2.5.2"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives",
