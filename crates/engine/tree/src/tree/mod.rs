@@ -2155,10 +2155,12 @@ where
                 "backfill action should only be emitted when backfill is idle"
             );
 
+            let persistence_in_progress = self.persistence_state.in_progress();
+            let state_trie_needs_catchup = self.persistence_state.last_state_trie_persisted_block !=
+                self.persistence_state.last_persisted_block;
             if self.payload_builds.is_active() ||
-                self.persistence_state.in_progress() ||
-                self.persistence_state.last_state_trie_persisted_block !=
-                    self.persistence_state.last_persisted_block
+                persistence_in_progress ||
+                state_trie_needs_catchup
             {
                 // Backfill can remove the same in-memory blocks as an active payload job or a
                 // persistence task. Enter pending mode to prevent new payload jobs and
