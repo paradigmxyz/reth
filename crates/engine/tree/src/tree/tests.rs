@@ -720,15 +720,13 @@ fn backfill_action_waits_while_payload_build_is_active() {
     let payload_build = test_harness.tree.payload_builds.acquire();
 
     test_harness.tree.emit_event(EngineApiEvent::BackfillAction(action.clone()));
-    assert!(test_harness.tree.pending_backfill_revalidation);
-    assert!(test_harness.tree.backfill_sync_state.is_pending());
+    assert!(test_harness.tree.backfill_sync_state.is_pending_revalidation());
     assert!(test_harness.from_tree_rx.try_recv().is_err());
 
     drop(payload_build);
     assert!(matches!(test_harness.tree.wait_for_event(), super::LoopEvent::PayloadBuildFinished));
     test_harness.tree.advance_persistence().unwrap();
 
-    assert!(!test_harness.tree.pending_backfill_revalidation);
     assert!(test_harness.tree.backfill_sync_state.is_pending());
     let EngineApiEvent::BackfillAction(emitted_action) =
         test_harness.from_tree_rx.try_recv().unwrap()
@@ -768,8 +766,7 @@ fn backfill_action_catches_up_state_trie_before_starting_pipeline() {
 
     test_harness.tree.emit_event(EngineApiEvent::BackfillAction(action.clone()));
 
-    assert!(test_harness.tree.pending_backfill_revalidation);
-    assert!(test_harness.tree.backfill_sync_state.is_pending());
+    assert!(test_harness.tree.backfill_sync_state.is_pending_revalidation());
     assert!(test_harness.from_tree_rx.try_recv().is_err());
 
     test_harness.tree.advance_persistence().unwrap();
@@ -804,7 +801,6 @@ fn backfill_action_catches_up_state_trie_before_starting_pipeline() {
 
     test_harness.tree.advance_persistence().unwrap();
 
-    assert!(!test_harness.tree.pending_backfill_revalidation);
     assert!(test_harness.tree.backfill_sync_state.is_pending());
     let emitted = test_harness.from_tree_rx.try_recv().unwrap();
     let EngineApiEvent::BackfillAction(emitted_action) = emitted else {
@@ -822,7 +818,7 @@ fn deferred_backfill_is_dropped_when_target_becomes_local() {
     test_harness.tree.persistence_state.last_persisted_block = database_tip;
 
     test_harness.tree.emit_event(EngineApiEvent::BackfillAction(action));
-    assert!(test_harness.tree.pending_backfill_revalidation);
+    assert!(test_harness.tree.backfill_sync_state.is_pending_revalidation());
 
     // A newer FCU points at the local head while persistence is draining. Re-evaluation must use
     // this current target instead of replaying the original backfill action.
@@ -839,7 +835,6 @@ fn deferred_backfill_is_dropped_when_target_becomes_local() {
 
     test_harness.tree.advance_persistence().unwrap();
 
-    assert!(!test_harness.tree.pending_backfill_revalidation);
     assert!(test_harness.tree.backfill_sync_state.is_idle());
     assert!(test_harness.from_tree_rx.try_recv().is_err());
 }
@@ -889,8 +884,7 @@ fn backfill_request_is_preserved_while_persistence_is_in_flight() {
 
     test_harness.tree.emit_event(EngineApiEvent::BackfillAction(action.clone()));
 
-    assert!(test_harness.tree.pending_backfill_revalidation);
-    assert!(test_harness.tree.backfill_sync_state.is_pending());
+    assert!(test_harness.tree.backfill_sync_state.is_pending_revalidation());
     assert!(test_harness.from_tree_rx.try_recv().is_err());
 
     persistence_tx
@@ -918,7 +912,6 @@ fn backfill_request_is_preserved_while_persistence_is_in_flight() {
 
     test_harness.tree.advance_persistence().unwrap();
 
-    assert!(!test_harness.tree.pending_backfill_revalidation);
     assert!(test_harness.tree.backfill_sync_state.is_pending());
     let emitted = test_harness.from_tree_rx.try_recv().unwrap();
     let EngineApiEvent::BackfillAction(emitted_action) = emitted else {

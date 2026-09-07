@@ -308,8 +308,6 @@ where
     persistence_state: PersistenceState,
     /// Flag indicating the state of the node's backfill synchronization process.
     backfill_sync_state: BackfillSyncState,
-    /// Whether a backfill request must be re-evaluated after persistence and payload jobs drain.
-    pending_backfill_revalidation: bool,
     /// Keeps track of the state of the canonical chain that isn't persisted yet.
     /// This is intended to be accessed from external sources, such as rpc.
     canonical_in_memory_state: CanonicalInMemoryState<N>,
@@ -352,7 +350,6 @@ where
             .field("persistence", &self.persistence)
             .field("persistence_state", &self.persistence_state)
             .field("backfill_sync_state", &self.backfill_sync_state)
-            .field("pending_backfill_revalidation", &self.pending_backfill_revalidation)
             .field("canonical_in_memory_state", &self.canonical_in_memory_state)
             .field("payload_builder", &self.payload_builder)
             .field("config", &self.config)
@@ -417,7 +414,6 @@ where
             persistence,
             persistence_state,
             backfill_sync_state: BackfillSyncState::Idle,
-            pending_backfill_revalidation: false,
             state,
             canonical_in_memory_state,
             payload_builder,
@@ -1444,10 +1440,11 @@ where
     /// Persistence completion is handled separately via the `wait_for_event` method.
     fn advance_persistence(&mut self) -> Result<(), AdvancePersistenceError> {
         if !self.persistence_state.in_progress() {
+            let payload_build_active = self.payload_builds.is_active();
             if let Some(new_tip_num) = self.find_disk_reorg()? {
                 self.remove_blocks(new_tip_num)
-            } else if self.pending_backfill_revalidation &&
-                !self.payload_builds.is_active() &&
+            } else if self.backfill_sync_state.is_pending_revalidation() &&
+                !payload_build_active &&
                 self.persistence_state.last_state_trie_persisted_block !=
                     self.persistence_state.last_persisted_block
             {
@@ -1455,7 +1452,7 @@ where
                     return Err(AdvancePersistenceError::StateTrieCatchupUnavailable)
                 };
                 self.persist_blocks(input);
-            } else if self.pending_backfill_revalidation && !self.payload_builds.is_active() {
+            } else if self.backfill_sync_state.is_pending_revalidation() && !payload_build_active {
                 self.revalidate_pending_backfill()?;
             } else if let Some(input) = self.get_save_blocks_input(PersistTarget::Threshold) {
                 self.persist_blocks(input);
@@ -1590,7 +1587,6 @@ where
             FromEngine::Event(event) => match event {
                 FromOrchestrator::BackfillSyncStarted => {
                     debug!(target: "engine::tree", "received backfill sync started event");
-                    self.pending_backfill_revalidation = false;
                     self.backfill_sync_state = BackfillSyncState::Active;
                 }
                 FromOrchestrator::BackfillSyncFinished(ctrl) => {
@@ -1838,7 +1834,6 @@ where
         ctrl: ControlFlow,
     ) -> Result<(), InsertBlockFatalError> {
         debug!(target: "engine::tree", "received backfill sync finished event");
-        self.pending_backfill_revalidation = false;
         self.backfill_sync_state = BackfillSyncState::Idle;
 
         // Pipeline unwound, memorize the invalid block and wait for CL for next sync target.
@@ -2098,8 +2093,7 @@ where
 
     /// Re-evaluates whether a deferred backfill is still required after persistence catches up.
     fn revalidate_pending_backfill(&mut self) -> ProviderResult<()> {
-        debug_assert!(self.pending_backfill_revalidation);
-        debug_assert!(self.backfill_sync_state.is_pending());
+        debug_assert!(self.backfill_sync_state.is_pending_revalidation());
 
         let sync_target_state = self.state.forkchoice_state_tracker.sync_target_state();
         let backfill_target = if let Some(state) = sync_target_state {
@@ -2123,7 +2117,6 @@ where
             None
         };
 
-        self.pending_backfill_revalidation = false;
         if let Some(target) = backfill_target {
             self.dispatch_backfill_action(BackfillAction::Start(target.into()));
             return Ok(())
@@ -2174,8 +2167,7 @@ where
                         .number,
                     "deferring backfill until persistence and payload jobs drain"
                 );
-                self.pending_backfill_revalidation = true;
-                self.backfill_sync_state = BackfillSyncState::Pending;
+                self.backfill_sync_state = BackfillSyncState::PendingRevalidation;
                 return
             }
 
@@ -2189,10 +2181,10 @@ where
     /// Dispatches a validated backfill action to the orchestrator.
     fn dispatch_backfill_action(&mut self, action: BackfillAction) {
         debug_assert!(
-            self.backfill_sync_state.is_idle() || self.backfill_sync_state.is_pending(),
-            "backfill action can only be dispatched while idle or pending"
+            self.backfill_sync_state.is_idle() ||
+                self.backfill_sync_state.is_pending_revalidation(),
+            "backfill action can only be dispatched while idle or pending revalidation"
         );
-        self.pending_backfill_revalidation = false;
         self.backfill_sync_state = BackfillSyncState::Pending;
         self.metrics.engine.pipeline_runs.increment(1);
         debug!(target: "engine::tree", "emitting backfill action event");
@@ -2226,8 +2218,7 @@ where
             PersistTarget::Persisted => {
                 // Catch-up persistence is the transition into pipeline sync, so it deliberately
                 // runs while backfill is pending and bypasses the normal threshold gates.
-                debug_assert!(self.pending_backfill_revalidation);
-                debug_assert!(self.backfill_sync_state.is_pending());
+                debug_assert!(self.backfill_sync_state.is_pending_revalidation());
                 debug_assert!(!self.payload_builds.is_active());
                 (prev_db_tip, prev_db_tip)
             }
