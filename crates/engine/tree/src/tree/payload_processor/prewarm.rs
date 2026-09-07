@@ -28,8 +28,8 @@ use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     AccountReader, BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory,
-    DatabaseProviderROFactory, PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
-    StorageChangeSetReader, StorageSettingsCache,
+    DatabaseProviderROFactory, HistoryReader, PruneCheckpointReader, StageCheckpointReader,
+    StateProviderBox, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_storage_overlay::OverlayStateProviderFactory;
@@ -100,6 +100,7 @@ where
         + ChangeSetReader
         + StorageChangeSetReader
         + StorageSettingsCache
+        + HistoryReader
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
@@ -428,15 +429,18 @@ where
             });
 
             pool.begin_block(build, caches, ctx.env.txpool_snapshot.clone());
+            let dispatch_start = Instant::now();
             for account in prefetch_bal.as_bal() {
-                pool.warm_account(account.address);
-                for change in &account.storage_changes {
-                    pool.warm_storage(account.address, change.slot.into());
-                }
-                for &slot in &account.storage_reads {
-                    pool.warm_storage(account.address, slot.into());
-                }
+                pool.warm_account(
+                    account.address,
+                    account
+                        .storage_changes
+                        .iter()
+                        .map(|change| change.slot.into())
+                        .chain(account.storage_reads.iter().map(|&slot| slot.into())),
+                );
             }
+            ctx.metrics.bal_slot_iteration_duration.record(dispatch_start.elapsed());
             pool.end_block();
         }
 
@@ -585,6 +589,7 @@ where
         + ChangeSetReader
         + StorageChangeSetReader
         + StorageSettingsCache
+        + HistoryReader
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {

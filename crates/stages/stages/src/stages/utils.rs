@@ -1,5 +1,8 @@
 //! Utils for `stages`.
-use alloy_primitives::{map::AddressMap, Address, BlockNumber, TxNumber, B256};
+use alloy_primitives::{
+    map::{AddressMap, HashMap},
+    Address, BlockNumber, TxNumber, B256,
+};
 use reth_config::config::EtlConfig;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -20,7 +23,7 @@ use reth_provider::{
 use reth_stages_api::StageError;
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{ChangeSetReader, StorageChangeSetReader};
-use std::{collections::HashMap, hash::Hash, ops::RangeBounds};
+use std::{hash::Hash, ops::RangeBounds};
 use tracing::info;
 
 /// Number of blocks before pushing indices from cache to [`Collector`]
@@ -81,7 +84,7 @@ where
         cache.entry(key).or_default().push(block_number);
 
         if idx > 0 && idx.is_multiple_of(interval) && total_changesets > 1000 {
-            info!(target: "sync::stages::index_history", progress = %format!("{:.4}%", (idx as f64 / total_changesets as f64) * 100.0), "Collecting indices");
+            info!(target: "sync::stages::index_history", progress = %format_args!("{:.4}%", (idx as f64 / total_changesets as f64) * 100.0), "Collecting indices");
         }
 
         // Make sure we only flush the cache every DEFAULT_CACHE_THRESHOLD blocks.
@@ -259,7 +262,7 @@ where
         let new_list = BlockNumberList::decompress_owned(v)?;
 
         if index > 0 && index.is_multiple_of(interval) && total_entries > 10 {
-            info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");
+            info!(target: "sync::stages::index_history", progress = %format_args!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");
         }
 
         let address = sharded_key.key;
@@ -467,7 +470,7 @@ where
         let new_list = BlockNumberList::decompress_owned(v)?;
 
         if index > 0 && index.is_multiple_of(interval) && total_entries > 10 {
-            info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");
+            info!(target: "sync::stages::index_history", progress = %format_args!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");
         }
 
         let partial_key = (sharded_key.address, sharded_key.sharded_key.key);

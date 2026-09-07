@@ -2,7 +2,7 @@ use super::mask::{ColumnSelectorOne, ColumnSelectorThree, ColumnSelectorTwo};
 use alloy_primitives::B256;
 use derive_more::{Deref, DerefMut};
 use reth_db_api::table::Decompress;
-use reth_nippy_jar::{DataReader, NippyJar, NippyJarCursor};
+use reth_nippy_jar::{DataReader, NippyJar, NippyJarCursor, RefRow};
 use reth_static_file_types::SegmentHeader;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::sync::Arc;
@@ -31,7 +31,7 @@ impl<'a> StaticFileCursor<'a> {
         &mut self,
         key_or_num: KeyOrNumber<'_>,
         mask: usize,
-    ) -> ProviderResult<Option<Vec<&'_ [u8]>>> {
+    ) -> ProviderResult<Option<RefRow<'_>>> {
         if self.jar().rows() == 0 {
             return Ok(None)
         }

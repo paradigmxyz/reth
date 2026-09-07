@@ -98,7 +98,7 @@ where
                 receipts,
             )
             .unwrap_or_default();
-            entries.insert(block.number(), fee_history_entry);
+            entries.insert(block.number(), Arc::new(fee_history_entry));
         }
 
         // enforce bounds by popping the oldest entries
@@ -145,7 +145,7 @@ where
         &self,
         start_block: u64,
         end_block: u64,
-    ) -> Option<Vec<FeeHistoryEntry<H>>> {
+    ) -> Option<Vec<Arc<FeeHistoryEntry<H>>>> {
         if end_block < start_block {
             // invalid range, return None
             return None
@@ -210,7 +210,7 @@ struct FeeHistoryCacheInner<H> {
     /// and max number of blocks
     config: FeeHistoryCacheConfig,
     /// Stores the entries of the cache
-    entries: tokio::sync::RwLock<BTreeMap<u64, FeeHistoryEntry<H>>>,
+    entries: tokio::sync::RwLock<BTreeMap<u64, Arc<FeeHistoryEntry<H>>>>,
 }
 
 /// Awaits for new chain events and directly inserts them into the cache so they're available

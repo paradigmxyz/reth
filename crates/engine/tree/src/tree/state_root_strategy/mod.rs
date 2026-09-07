@@ -85,8 +85,6 @@ pub use reth_trie_parallel::{
         StateRootSink, StateRootTaskCancelGuard, StateRootUpdateHook, StateRootUpdateStream,
     },
 };
-#[cfg(feature = "trie-debug")]
-use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 use reth_trie_sparse::{
     ArenaParallelSparseTrie, RevealableSparseTrie, SparseStateTrie, TrieNodeEpoch,
 };
@@ -1094,29 +1092,15 @@ where
         output: &BlockExecutionOutput<N::Receipt>,
         outcome: StateRootComputeOutcome,
     ) -> StateRootJobOutcome {
-        let StateRootComputeOutcome {
-            state_root,
-            trie_updates,
-            hashed_state: _hashed_state,
-            #[cfg(feature = "trie-debug")]
-            debug_recorders,
-        } = outcome;
+        let StateRootComputeOutcome { state_root, trie_updates, hashed_state: _hashed_state } =
+            outcome;
 
         if self.compare_trie_updates {
-            let _has_diff = compare_trie_updates_with_serial(
+            compare_trie_updates_with_serial(
                 self.state_provider_factory.clone(),
                 output,
                 trie_updates.as_ref().clone(),
             );
-            #[cfg(feature = "trie-debug")]
-            if _has_diff {
-                write_trie_debug_recorders(_block.header().number(), &debug_recorders);
-            }
-        }
-
-        #[cfg(feature = "trie-debug")]
-        if state_root != _block.header().state_root() {
-            write_trie_debug_recorders(_block.header().number(), &debug_recorders);
         }
 
         StateRootJobOutcome::new(state_root, trie_updates)
@@ -1298,40 +1282,6 @@ where
         }
     }
     false
-}
-
-/// Writes trie debug recorders to a JSON file for the given block number.
-///
-/// The file is written to the current working directory as `trie_debug_block_{block_number}.json`.
-#[cfg(feature = "trie-debug")]
-fn write_trie_debug_recorders(block_number: u64, recorders: &[(Option<B256>, TrieDebugRecorder)]) {
-    let path = format!("trie_debug_block_{block_number}.json");
-    match serde_json::to_string_pretty(recorders) {
-        Ok(json) => match std::fs::write(&path, json) {
-            Ok(()) => {
-                warn!(
-                    target: "engine::tree::state_root_strategy",
-                    %path,
-                    "Wrote trie debug recorders to file"
-                );
-            }
-            Err(err) => {
-                warn!(
-                    target: "engine::tree::state_root_strategy",
-                    %err,
-                    %path,
-                    "Failed to write trie debug recorders"
-                );
-            }
-        },
-        Err(err) => {
-            warn!(
-                target: "engine::tree::state_root_strategy",
-                %err,
-                "Failed to serialize trie debug recorders"
-            );
-        }
-    }
 }
 
 #[cfg(test)]

@@ -403,7 +403,7 @@ impl ChangesetCache {
         let overlay = overlay_manager
             .overlay_builder(finish.hash)
             .with_no_reverts()
-            .build_state_trie_overlay_at_frontiers(provider, partial_state_trie, finish)?;
+            .build_state_trie_overlay_at_frontiers(provider, partial_state_trie, finish, true)?;
         let state_trie_provider = OverlayStateProvider::<&P, N>::new_with_state_trie(
             provider,
             overlay,
@@ -644,7 +644,7 @@ mod tests {
     }
 
     fn empty_overlay() -> StateTrieOverlay {
-        StateTrieOverlay::new(Arc::default(), Arc::default())
+        StateTrieOverlay::new(TrieInputSorted::default())
     }
 
     fn insert_test_changesets(

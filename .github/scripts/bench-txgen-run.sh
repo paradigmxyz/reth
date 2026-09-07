@@ -298,7 +298,7 @@ if [ "${BENCH_OTLP_DISABLED:-false}" != "true" ]; then
     RETH_ARGS+=(--tracing-otlp="${BENCH_OTLP_TRACES_ENDPOINT}" --tracing-otlp.service-name=reth-bench --tracing-otlp.service-version="${LABEL}")
   fi
   if [ -n "${BENCH_OTLP_LOGS_ENDPOINT:-}" ]; then
-    RETH_ARGS+=(--logs-otlp="${BENCH_OTLP_LOGS_ENDPOINT}" --logs-otlp.filter=debug)
+    RETH_ARGS+=(--logs-otlp="${BENCH_OTLP_LOGS_ENDPOINT}" --logs-otlp.filter=debug,storage::overlay=off)
   fi
 fi
 

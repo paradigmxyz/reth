@@ -40,6 +40,7 @@ itertools.workspace = true
 
 [dev-dependencies]
 secp256k1 = { workspace = true, features = ["rand"] }
+criterion.workspace = true
 assert_matches.workspace = true
 rand_08.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
@@ -58,3 +59,7 @@ serde = [
     "reth-ethereum-forks/serde",
 ]
 test-utils = ["dep:rand_08"]
+
+[[bench]]
+name = "codec"
+harness = false

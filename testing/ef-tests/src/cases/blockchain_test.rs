@@ -332,7 +332,7 @@ fn decode_blocks(
             .map_err(|err| Error::block_failed(block_number, err))?;
 
         let recovered_block =
-            decoded.clone().try_recover().map_err(|err| Error::block_failed(block_number, err))?;
+            decoded.try_recover().map_err(|err| Error::block_failed(block_number, err))?;
 
         blocks.push(recovered_block);
     }

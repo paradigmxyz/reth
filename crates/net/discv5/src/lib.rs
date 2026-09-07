@@ -540,6 +540,13 @@ pub fn build_local_enr(
 }
 
 /// Bootstraps underlying [`discv5::Discv5`] node with configured peers.
+///
+/// Boot nodes given as an ENR are added to the kbuckets right away. Boot nodes given as an enode
+/// need their ENR requested over the wire first, which is driven in the background: an unreachable
+/// boot node only answers after the discv5 request timeout, and waiting for that would stall node
+/// startup.
+///
+/// Stays `async` because spawning those requests requires a tokio runtime context.
 pub async fn bootstrap(
     bootstrap_nodes: HashSet<BootNode>,
     discv5: &Arc<discv5::Discv5>,
@@ -573,7 +580,11 @@ pub async fn bootstrap(
     }
 
     // If a session is established, the ENR is added straight away to discv5 kbuckets
-    Ok(_ = join_all(enr_requests).await)
+    if !enr_requests.is_empty() {
+        task::spawn(join_all(enr_requests));
+    }
+
+    Ok(())
 }
 
 /// Backgrounds regular look up queries, in order to keep kbuckets populated.

@@ -14,11 +14,10 @@ use crate::{
     AccountReader, BlockBodyWriter, BlockExecutionWriter, BlockHashReader, BlockNumReader,
     BlockReader, BlockWriter, BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter,
     DBProvider, DbTxProvider, EitherReader, EitherWriter, EitherWriterDestination, HashingWriter,
-    HeaderProvider, HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef,
-    HistoryWriter, LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown,
-    PersistenceFrontiers, ProviderError, PruneCheckpointReader, PruneCheckpointWriter,
-    RawRocksDBBatch, RevertsInit, RocksBatchArg, RocksDBProviderFactory, StageCheckpointReader,
-    StateProviderBox, StateWriter, StaticFileProviderFactory, StatsReader, StorageReader,
+    HeaderProvider, HeaderSyncGapProvider, HistoryWriter, LatestStateProviderRef,
+    OriginalValuesKnown, PersistenceFrontiers, ProviderError, PruneCheckpointReader,
+    PruneCheckpointWriter, RawRocksDBBatch, RevertsInit, RocksBatchArg, RocksDBProviderFactory,
+    StageCheckpointReader, StateWriter, StaticFileProviderFactory, StatsReader, StorageReader,
     StorageTrieWriter, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
     TrieWriter,
 };
@@ -62,9 +61,9 @@ use reth_prune_types::{
 use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, BlockBodyReader, MetadataProvider, MetadataWriter,
-    NodePrimitivesProvider, StateProvider, StateReader, StateWriteConfig, StorageChangeSetReader,
-    StoragePath, StorageSettingsCache, TryIntoHistoricalStateProvider, WriteStateInput,
+    BlockBodyIndicesProvider, BlockBodyReader, HistoryInfo, HistoryReader, MetadataProvider,
+    MetadataWriter, NodePrimitivesProvider, StateProvider, StateWriteConfig,
+    StorageChangeSetReader, StoragePath, StorageSettingsCache, WriteStateInput,
 };
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_storage_overlay::OverlayManager;
@@ -297,57 +296,6 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     pub fn latest<'a>(&'a self) -> Box<dyn StateProvider + 'a> {
         trace!(target: "providers::db", "Returning latest state provider");
         Box::new(LatestStateProviderRef::new(self))
-    }
-
-    /// Storage provider for state at that given block hash
-    pub fn history_by_block_hash<'a>(
-        &'a self,
-        block_hash: BlockHash,
-    ) -> ProviderResult<Box<dyn StateProvider + 'a>> {
-        let block_number =
-            self.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-        self.history_by_block_number(block_number)
-    }
-
-    /// Storage provider for state at that given block number
-    pub fn history_by_block_number<'a>(
-        &'a self,
-        mut block_number: BlockNumber,
-    ) -> ProviderResult<Box<dyn StateProvider + 'a>> {
-        if block_number == self.best_block_number().unwrap_or_default() &&
-            block_number == self.last_block_number().unwrap_or_default()
-        {
-            return Ok(Box::new(LatestStateProviderRef::new(self)))
-        }
-
-        // +1 as the changeset that we want is the one that was applied after this block.
-        block_number += 1;
-
-        let account_history_prune_checkpoint =
-            self.get_prune_checkpoint(PruneSegment::AccountHistory)?;
-        let storage_history_prune_checkpoint =
-            self.get_prune_checkpoint(PruneSegment::StorageHistory)?;
-
-        let mut state_provider =
-            HistoricalStateProviderRef::new(self, block_number, self.overlay_manager.clone());
-        // If we pruned account or storage history, we can't return state on every historical block.
-        // Instead, we should cap it at the latest prune checkpoint for corresponding prune segment.
-        if let Some(prune_checkpoint_block_number) =
-            account_history_prune_checkpoint.and_then(|checkpoint| checkpoint.block_number)
-        {
-            state_provider = state_provider.with_lowest_available_account_history_block_number(
-                prune_checkpoint_block_number + 1,
-            );
-        }
-        if let Some(prune_checkpoint_block_number) =
-            storage_history_prune_checkpoint.and_then(|checkpoint| checkpoint.block_number)
-        {
-            state_provider = state_provider.with_lowest_available_storage_history_block_number(
-                prune_checkpoint_block_number + 1,
-            );
-        }
-
-        Ok(Box::new(state_provider))
     }
 
     #[cfg(feature = "test-utils")]
@@ -991,58 +939,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     }
 }
 
-impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for DatabaseProvider<TX, N> {
-    fn try_into_history_at_block(
-        self,
-        mut block_number: BlockNumber,
-    ) -> ProviderResult<StateProviderBox> {
-        let best_block = self.best_block_number().unwrap_or_default();
-
-        // Reject requests for blocks beyond the best block
-        if block_number > best_block {
-            return Err(ProviderError::BlockNotExecuted {
-                requested: block_number,
-                executed: best_block,
-            });
-        }
-
-        // If requesting state at the best block, use the latest state provider
-        if block_number == best_block {
-            return Ok(Box::new(LatestStateProvider::new(self)));
-        }
-
-        // +1 as the changeset that we want is the one that was applied after this block.
-        block_number += 1;
-
-        let account_history_prune_checkpoint =
-            self.get_prune_checkpoint(PruneSegment::AccountHistory)?;
-        let storage_history_prune_checkpoint =
-            self.get_prune_checkpoint(PruneSegment::StorageHistory)?;
-        let overlay_manager = self.overlay_manager.clone();
-
-        let mut state_provider = HistoricalStateProvider::new(self, block_number, overlay_manager);
-
-        // If we pruned account or storage history, we can't return state on every historical block.
-        // Instead, we should cap it at the latest prune checkpoint for corresponding prune segment.
-        if let Some(prune_checkpoint_block_number) =
-            account_history_prune_checkpoint.and_then(|checkpoint| checkpoint.block_number)
-        {
-            state_provider = state_provider.with_lowest_available_account_history_block_number(
-                prune_checkpoint_block_number + 1,
-            );
-        }
-        if let Some(prune_checkpoint_block_number) =
-            storage_history_prune_checkpoint.and_then(|checkpoint| checkpoint.block_number)
-        {
-            state_provider = state_provider.with_lowest_available_storage_history_block_number(
-                prune_checkpoint_block_number + 1,
-            );
-        }
-
-        Ok(Box::new(state_provider))
-    }
-}
-
 /// For a given key, unwind all history shards that contain block numbers at or above the given
 /// block number.
 ///
@@ -1338,7 +1234,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     /// Populate a [`BundleStateInit`] and [`RevertsInit`] using cursors over the
     /// [`tables::PlainAccountState`] and [`tables::PlainStorageState`] tables, based on the given
     /// storage and account changesets.
-    fn populate_bundle_state(
+    pub(crate) fn populate_bundle_state(
         &self,
         account_changeset: Vec<(u64, AccountBeforeTx)>,
         storage_changeset: Vec<(BlockNumberAddress, StorageEntry)>,
@@ -1453,20 +1349,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
                     .filter(|s| s.key == hashed_storage_key)
                     .map(|s| s.value))
             },
-        )
-    }
-
-    fn populate_bundle_state_with_provider(
-        &self,
-        account_changeset: Vec<(u64, AccountBeforeTx)>,
-        storage_changeset: Vec<(BlockNumberAddress, StorageEntry)>,
-        state_provider: impl StateProvider,
-    ) -> ProviderResult<(BundleStateInit, RevertsInit)> {
-        self.populate_bundle_state(
-            account_changeset,
-            storage_changeset,
-            |address| state_provider.basic_account(&address),
-            |address, storage_key| state_provider.storage(address, storage_key),
         )
     }
 }
@@ -1732,40 +1614,47 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
     }
 }
 
-impl<Tx: DbTx + 'static, N: NodeTypesForProvider> StateReader for DatabaseProvider<Tx, N> {
-    type Receipt = ReceiptTy<N>;
-
-    fn get_state(
+impl<TX: DbTx + 'static, N: NodeTypes> HistoryReader for DatabaseProvider<TX, N> {
+    fn account_history_info(
         &self,
-        block: BlockNumber,
-    ) -> ProviderResult<Option<ExecutionOutcome<Self::Receipt>>> {
-        let Some(block_body) = self.block_body_indices(block)? else { return Ok(None) };
+        address: Address,
+        block_number: BlockNumber,
+        lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo> {
+        let visible_tip = self.best_block_number()?;
+        self.with_rocksdb_snapshot(|rocksdb_ref| {
+            let mut reader = EitherReader::new_accounts_history(self, rocksdb_ref)?;
+            reader
+                .account_history_info(
+                    address,
+                    block_number,
+                    lowest_available_block_number,
+                    visible_tip,
+                )
+                .map(Into::into)
+        })
+    }
 
-        let from_transaction_num = block_body.first_tx_num();
-        let to_transaction_num = block_body.last_tx_num();
-
-        let account_changeset = self.account_changesets_range(block..=block)?;
-        let storage_changeset = self.storage_changeset(block)?;
-
-        let Some(block_hash) = self.block_hash(block)? else { return Ok(None) };
-        let state_provider = self.history_by_block_hash(block_hash)?;
-        let (state, reverts) = self.populate_bundle_state_with_provider(
-            account_changeset,
-            storage_changeset,
-            state_provider,
-        )?;
-
-        let receipts = self.receipts_by_tx_range(from_transaction_num..=to_transaction_num)?;
-
-        Ok(Some(ExecutionOutcome::new_init(
-            state,
-            reverts,
-            // We skip new contracts since we never delete them from the database
-            Vec::new(),
-            vec![receipts],
-            block,
-            Vec::new(),
-        )))
+    fn storage_history_info(
+        &self,
+        address: Address,
+        storage_key: B256,
+        block_number: BlockNumber,
+        lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo> {
+        let visible_tip = self.best_block_number()?;
+        self.with_rocksdb_snapshot(|rocksdb_ref| {
+            let mut reader = EitherReader::new_storages_history(self, rocksdb_ref)?;
+            reader
+                .storage_history_info(
+                    address,
+                    storage_key,
+                    block_number,
+                    lowest_available_block_number,
+                    visible_tip,
+                )
+                .map(Into::into)
+        })
     }
 }
 
@@ -5037,44 +4926,6 @@ mod tests {
     }
 
     #[test]
-    fn test_try_into_history_rejects_unexecuted_blocks() {
-        use reth_storage_api::TryIntoHistoricalStateProvider;
-
-        let factory = create_test_provider_factory();
-
-        // Insert genesis block to have some data
-        let data = BlockchainTestData::default();
-        let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
-        provider_rw
-            .write_state(
-                &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
-                crate::OriginalValuesKnown::No,
-                StateWriteConfig::default(),
-            )
-            .unwrap();
-        provider_rw.commit().unwrap();
-
-        // Get a fresh provider - Execution checkpoint is 0, no receipts written beyond genesis
-        let provider = factory.provider().unwrap();
-
-        // Requesting historical state for block 0 (executed) should succeed
-        let result = provider.try_into_history_at_block(0);
-        assert!(result.is_ok(), "Block 0 should be available");
-
-        // Get another provider and request state for block 100 (not executed)
-        let provider = factory.provider().unwrap();
-        let result = provider.try_into_history_at_block(100);
-
-        // Should fail with BlockNotExecuted error
-        match result {
-            Err(ProviderError::BlockNotExecuted { requested: 100, .. }) => {}
-            Err(e) => panic!("Expected BlockNotExecuted error, got: {e:?}"),
-            Ok(_) => panic!("Expected error, got Ok"),
-        }
-    }
-
-    #[test]
     fn test_unwind_storage_hashing_with_hashed_state() {
         let factory = create_test_provider_factory();
         let storage_settings = StorageSettings::v2();
@@ -5330,8 +5181,7 @@ mod tests {
     }
 
     #[test]
-    fn test_write_state_and_historical_read_hashed() {
-        use reth_storage_api::StateProvider;
+    fn test_write_state_hashed() {
         use reth_trie::{HashedPostState, KeccakKeyHasher};
         use revm::{database::BundleState, state::AccountInfo};
 
@@ -5430,12 +5280,6 @@ mod tests {
         let account_cs = sf.account_block_changeset(1).unwrap();
         assert!(!account_cs.is_empty());
         assert_eq!(account_cs[0].address, address);
-
-        let historical_value =
-            HistoricalStateProviderRef::new(&*provider_rw, 0, OverlayManager::default())
-                .storage(address, slot_key)
-                .unwrap();
-        assert_eq!(historical_value, None);
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]

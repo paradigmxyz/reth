@@ -407,6 +407,11 @@ RPC:
 
           If no path is provided, a secret will be generated and stored in the datadir under `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.local/share/reth/mainnet/jwt.hex` by default.
 
+      --authrpc.jwtsecret-hex <HEX>
+          Hex encoded JWT secret to use for the authenticated engine-API RPC server.
+
+          This will enforce JWT authentication for all requests coming from the consensus layer. Cannot be used together with `--authrpc.jwtsecret`.
+
       --auth-ipc
           Enable auth engine API over IPC
 

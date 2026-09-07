@@ -93,9 +93,9 @@ impl SnapClient for TestSnapClient {
     fn get_byte_codes_with_priority(
         &self,
         _request: GetByteCodesMessage,
-        _priority: Priority,
+        priority: Priority,
     ) -> Self::Output {
-        unsupported()
+        self.next(priority)
     }
 
     fn get_block_access_lists_with_priority(
