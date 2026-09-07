@@ -10270,6 +10270,7 @@ dependencies = [
  "reth-static-file-types",
  "reth-storage-api",
  "thiserror 2.0.18",
+ "tokio-util",
 ]
 
 [[package]]

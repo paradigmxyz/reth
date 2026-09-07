@@ -33,7 +33,12 @@
 mod error;
 mod generation;
 mod pivot;
+mod session;
+
+#[cfg(test)]
+mod test_utils;
 
 pub use error::SnapSyncError;
 pub use generation::{SnapGeneration, SnapPhase};
 pub use pivot::SnapPivotPolicy;
+pub use session::{SnapSession, SnapSessionState};
