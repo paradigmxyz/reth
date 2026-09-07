@@ -132,18 +132,18 @@ for mode in hourly nightly release; do
     : > "$GITHUB_OUTPUT"
     bash "$scripts/bench-scheduled-refs.sh" false "$mode" > "$scratch/log" 2>&1
     if [[ "$value" == "$feature" ]]; then
-      rg -q '^should-skip=true$' "$GITHUB_OUTPUT"
+      grep -q '^should-skip=true$' "$GITHUB_OUTPUT"
     else
-      rg -q '^should-skip=false$' "$GITHUB_OUTPUT"
+      grep -q '^should-skip=false$' "$GITHUB_OUTPUT"
     fi
     if [[ "$value" == "$previous" ]]; then
-      rg -q "^baseline-ref=$previous$" "$GITHUB_OUTPUT"
+      grep -q "^baseline-ref=$previous$" "$GITHUB_OUTPUT"
     fi
   done
   export STATE_TEST_VALUE="$feature"
   : > "$GITHUB_OUTPUT"
   bash "$scripts/bench-scheduled-refs.sh" true "$mode" > "$scratch/log" 2>&1
-  rg -q '^should-skip=false$' "$GITHUB_OUTPUT"
+  grep -q '^should-skip=false$' "$GITHUB_OUTPUT"
   export STATE_TEST_FAILURE=list
   if bash "$scripts/bench-scheduled-refs.sh" false "$mode" > "$scratch/log" 2>&1; then exit 1; fi
   export STATE_TEST_FAILURE=""
