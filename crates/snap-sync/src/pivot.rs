@@ -15,16 +15,15 @@ use alloy_eip7928::BAL_RETENTION_PERIOD_SLOTS;
 use reth_primitives_traits::AlloyBlockHeader;
 use reth_storage_api::HeaderProvider;
 
-// EIP-8189 gives HEAD-64 as its example anchor, matching go-ethereum's `fsMinFullBlocks`.
+// EIP-8189's example anchor, matching go-ethereum's `fsMinFullBlocks`.
 const DEFAULT_HEAD_DISTANCE: u64 = 64;
 
-// Blocks of state history a serving peer is assumed to still hold. Mirrors reth's own
-// `SNAPSHOT_STATE_RETENTION`, which bounds the roots it will answer range requests for.
+// Blocks of state history a serving peer is assumed to still hold, mirroring reth's own
+// `SNAPSHOT_STATE_RETENTION`.
 const SERVED_STATE_WINDOW: u64 = 128;
 
-// Re-anchor before the pivot reaches the edge of the served window, so ranges already in flight do
-// not fail against a root peers have just dropped. go-ethereum re-anchors at
-// `2 * fsMinFullBlocks` minus a reorg-protection delay for the same reason.
+// Re-anchor before the pivot reaches the edge of that window, so ranges in flight do not fail
+// against a root peers just dropped.
 const DEFAULT_ADVANCE_AFTER: u64 = SERVED_STATE_WINDOW - DEFAULT_HEAD_DISTANCE / 2;
 
 /// Distance and history bounds that decide where a generation is anchored.

@@ -9,23 +9,27 @@ use tokio_util::sync::CancellationToken;
 /// Targets come from the local chain, never from a peer: peers only supply state, which is
 /// authenticated against the target's state root.
 #[derive(Debug)]
-pub struct SnapSession {
+pub struct SnapSyncSession {
     // Decides which blocks are eligible targets.
     policy: SnapPivotPolicy,
     // How far the attempt has got.
-    state: SnapSessionState,
+    state: SnapSyncSessionState,
     // Cancelled once, watched by whatever took the target.
     cancellation: CancellationToken,
 }
 
-impl SnapSession {
+impl SnapSyncSession {
     /// Creates a session waiting for its first eligible target.
     pub fn new(policy: SnapPivotPolicy) -> Self {
-        Self { policy, state: SnapSessionState::Waiting, cancellation: CancellationToken::new() }
+        Self {
+            policy,
+            state: SnapSyncSessionState::Waiting,
+            cancellation: CancellationToken::new(),
+        }
     }
 
     /// What the session is doing.
-    pub const fn state(&self) -> &SnapSessionState {
+    pub const fn state(&self) -> &SnapSyncSessionState {
         &self.state
     }
 
@@ -49,11 +53,11 @@ impl SnapSession {
         provider: &impl HeaderProvider,
         head: u64,
         finalized: Option<u64>,
-    ) -> Result<&SnapSessionState, SnapSyncError> {
-        if matches!(self.state, SnapSessionState::Waiting | SnapSessionState::Selected(_)) {
+    ) -> Result<&SnapSyncSessionState, SnapSyncError> {
+        if matches!(self.state, SnapSyncSessionState::Waiting | SnapSyncSessionState::Selected(_)) {
             self.state = match self.policy.select(provider, head, finalized)? {
-                Some(generation) => SnapSessionState::Selected(generation),
-                None => SnapSessionState::Waiting,
+                Some(generation) => SnapSyncSessionState::Selected(generation),
+                None => SnapSyncSessionState::Waiting,
             };
         }
         Ok(&self.state)
@@ -64,8 +68,8 @@ impl SnapSession {
     /// Taking the target is what starts it, so only the first caller gets one: a target already
     /// being downloaded has an owner, and a waiting or cancelled session has nothing to hand out.
     pub fn start(&mut self) -> Option<(SnapGeneration, CancellationToken)> {
-        let SnapSessionState::Selected(generation) = self.state else { return None };
-        self.state = SnapSessionState::Downloading(generation);
+        let SnapSyncSessionState::Selected(generation) = self.state else { return None };
+        self.state = SnapSyncSessionState::Downloading(generation);
         Some((generation, self.cancellation.clone()))
     }
 
@@ -74,13 +78,13 @@ impl SnapSession {
     /// Terminal: a later attempt needs a new session.
     pub fn cancel(&mut self) {
         self.cancellation.cancel();
-        self.state = SnapSessionState::Cancelled;
+        self.state = SnapSyncSessionState::Cancelled;
     }
 }
 
-/// What a [`SnapSession`] is doing.
+/// What a [`SnapSyncSession`] is doing.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SnapSessionState {
+pub enum SnapSyncSessionState {
     /// No block is eligible yet, so the session holds no target.
     Waiting,
     /// A target is selected, but no work has taken it yet.
@@ -91,7 +95,7 @@ pub enum SnapSessionState {
     Cancelled,
 }
 
-impl SnapSessionState {
+impl SnapSyncSessionState {
     /// Target of this state, if it has one.
     pub const fn target(&self) -> Option<&SnapGeneration> {
         match self {
@@ -106,8 +110,8 @@ mod tests {
     use super::*;
     use crate::test_utils::{chain, policy, provider_with};
 
-    fn session() -> SnapSession {
-        SnapSession::new(policy())
+    fn session() -> SnapSyncSession {
+        SnapSyncSession::new(policy())
     }
 
     #[test]
@@ -116,7 +120,7 @@ mod tests {
         let provider = provider_with(chain(Some(3)));
         let mut session = session();
 
-        assert_eq!(session.select(&provider, 3, None).unwrap(), &SnapSessionState::Waiting);
+        assert_eq!(session.select(&provider, 3, None).unwrap(), &SnapSyncSessionState::Waiting);
         assert_eq!(session.target(), None);
         assert!(session.start().is_none());
     }
@@ -156,7 +160,7 @@ mod tests {
         // The head has run past the downloaded headers, so no candidate confirms the old target.
         session.select(&provider, 9, None).unwrap();
 
-        assert_eq!(session.state(), &SnapSessionState::Waiting);
+        assert_eq!(session.state(), &SnapSyncSessionState::Waiting);
         assert!(session.start().is_none());
     }
 
@@ -169,7 +173,7 @@ mod tests {
 
         session.select(&provider, 3, None).unwrap();
 
-        assert_eq!(session.state(), &SnapSessionState::Downloading(started));
+        assert_eq!(session.state(), &SnapSyncSessionState::Downloading(started));
     }
 
     #[test]
@@ -193,7 +197,7 @@ mod tests {
 
         assert!(outstanding.is_cancelled());
         assert!(session.is_cancelled());
-        assert_eq!(session.state(), &SnapSessionState::Cancelled);
+        assert_eq!(session.state(), &SnapSyncSessionState::Cancelled);
         assert_eq!(session.target(), None);
     }
 
@@ -203,7 +207,7 @@ mod tests {
         let mut session = session();
         session.cancel();
 
-        assert_eq!(session.select(&provider, 3, None).unwrap(), &SnapSessionState::Cancelled);
+        assert_eq!(session.select(&provider, 3, None).unwrap(), &SnapSyncSessionState::Cancelled);
         assert!(session.start().is_none());
     }
 }
