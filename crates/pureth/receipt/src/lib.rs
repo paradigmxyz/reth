@@ -144,6 +144,7 @@ mod tests {
     };
 
     fn block(transactions: Vec<TransactionSigned>, senders: Vec<Address>) -> RecoveredBlock<Block> {
+        assert_eq!(transactions.len(), senders.len());
         RecoveredBlock::try_new_unhashed(
             Block {
                 header: Default::default(),
