@@ -731,12 +731,12 @@ alloy-transport-ws = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a
 alloy-tx-macros = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
 
 # EIP-8141 execution adapter and VM.
-alloy-evm = { git = "https://github.com/Soubhik-10/evm", rev = "19c03f2eaf5c57a9b22ad004d76e17202b0105b0" }
-reth-codecs = { git = "https://github.com/Soubhik-10/reth-core", rev = "d84cc16" }
-reth-codecs-derive = { git = "https://github.com/Soubhik-10/reth-core", rev = "d84cc16" }
-reth-primitives-traits = { git = "https://github.com/Soubhik-10/reth-core", rev = "d84cc16" }
-reth-rpc-traits = { git = "https://github.com/Soubhik-10/reth-core", rev = "d84cc16" }
-reth-zstd-compressors = { git = "https://github.com/Soubhik-10/reth-core", rev = "d84cc16" }
+alloy-evm = { git = "https://github.com/Soubhik-10/evm", rev = "bca84e0" }
+reth-codecs = { git = "https://github.com/Soubhik-10/reth-core", rev = "fb70257" }
+reth-codecs-derive = { git = "https://github.com/Soubhik-10/reth-core", rev = "fb70257" }
+reth-primitives-traits = { git = "https://github.com/Soubhik-10/reth-core", rev = "fb70257" }
+reth-rpc-traits = { git = "https://github.com/Soubhik-10/reth-core", rev = "fb70257" }
+reth-zstd-compressors = { git = "https://github.com/Soubhik-10/reth-core", rev = "fb70257" }
 revm = { git = "https://github.com/Soubhik-10/revm", rev = "14eb71cb" }
 revm-bytecode = { git = "https://github.com/Soubhik-10/revm", rev = "14eb71cb" }
 revm-context = { git = "https://github.com/Soubhik-10/revm", rev = "14eb71cb" }

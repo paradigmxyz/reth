@@ -304,7 +304,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.39.0"
-source = "git+https://github.com/Soubhik-10/evm?rev=19c03f2eaf5c57a9b22ad004d76e17202b0105b0#19c03f2eaf5c57a9b22ad004d76e17202b0105b0"
+source = "git+https://github.com/Soubhik-10/evm?rev=bca84e0#bca84e02f28881efe18f4dfef5ec79eb29a85aad"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -8045,7 +8045,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs"
 version = "0.7.0"
-source = "git+https://github.com/Soubhik-10/reth-core?rev=d84cc16#d84cc1669df0873062c67e93dcb75c81871e5021"
+source = "git+https://github.com/Soubhik-10/reth-core?rev=fb70257#fb70257e5eb9807130fb65ccfcd955858a0fa644"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -8065,7 +8065,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs-derive"
 version = "0.7.0"
-source = "git+https://github.com/Soubhik-10/reth-core?rev=d84cc16#d84cc1669df0873062c67e93dcb75c81871e5021"
+source = "git+https://github.com/Soubhik-10/reth-core?rev=fb70257#fb70257e5eb9807130fb65ccfcd955858a0fa644"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9790,7 +9790,7 @@ dependencies = [
 [[package]]
 name = "reth-primitives-traits"
 version = "0.7.0"
-source = "git+https://github.com/Soubhik-10/reth-core?rev=d84cc16#d84cc1669df0873062c67e93dcb75c81871e5021"
+source = "git+https://github.com/Soubhik-10/reth-core?rev=fb70257#fb70257e5eb9807130fb65ccfcd955858a0fa644"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -10321,7 +10321,7 @@ dependencies = [
 [[package]]
 name = "reth-rpc-traits"
 version = "0.7.0"
-source = "git+https://github.com/Soubhik-10/reth-core?rev=d84cc16#d84cc1669df0873062c67e93dcb75c81871e5021"
+source = "git+https://github.com/Soubhik-10/reth-core?rev=fb70257#fb70257e5eb9807130fb65ccfcd955858a0fa644"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -10872,7 +10872,7 @@ dependencies = [
 [[package]]
 name = "reth-zstd-compressors"
 version = "0.7.0"
-source = "git+https://github.com/Soubhik-10/reth-core?rev=d84cc16#d84cc1669df0873062c67e93dcb75c81871e5021"
+source = "git+https://github.com/Soubhik-10/reth-core?rev=fb70257#fb70257e5eb9807130fb65ccfcd955858a0fa644"
 dependencies = [
  "zstd",
 ]
