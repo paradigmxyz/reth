@@ -432,7 +432,7 @@ reth-zstd-compressors = { version = "0.7.0", default-features = false }
 
 # revm
 revm = { version = "43.0.0", default-features = false }
-revmc = { git = "https://github.com/Soubhik-10/revmc", rev = "7fe21bebcdbb706387f523f10e752b85372ce0a7", default-features = false, features = ["llvm-prefer-static"] }
+revmc = { git = "https://github.com/Soubhik-10/revmc", rev = "10511b73b45eb29a5834f4960331478b662a1890", default-features = false, features = ["llvm-prefer-static"] }
 revm-inspectors = "0.43.0"
 
 # eth
