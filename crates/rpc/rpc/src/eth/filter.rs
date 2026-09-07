@@ -290,6 +290,14 @@ where
                             .map(|num| self.provider().convert_block_number(num))
                             .transpose()?
                             .flatten();
+                        // a filter whose own range is invalid keeps reporting that, it is not a
+                        // range the cursor has exhausted
+                        if let (Some(from), Some(to)) = (from, to) &&
+                            from > to
+                        {
+                            return Err(EthFilterError::InvalidBlockRangeParams)
+                        }
+
                         // only the blocks since the last poll, clamped to the filter's own range
                         (
                             from.map_or(start_block, |from| from.max(start_block)),
@@ -2643,5 +2651,22 @@ mod tests {
             eth_filter.active_filters().contains(&id).await,
             "a filter polled on a chain that does not advance must not be evicted as stale"
         );
+    }
+
+    #[tokio::test]
+    async fn test_filter_changes_reports_an_invalid_range() {
+        let provider = MockEthProvider::default();
+        add_blocks_with_log(&provider, 0..=3);
+        let eth_filter = EthFilter::new(
+            build_test_eth_api(provider),
+            EthFilterConfig::default(),
+            Runtime::test(),
+        );
+
+        // a filter that can never match must not look like one the cursor exhausted
+        let id =
+            eth_filter.new_filter(Filter::new().from_block(3u64).to_block(1u64)).await.unwrap();
+        let err = eth_filter.filter_changes(id).await.unwrap_err();
+        assert!(matches!(err, EthFilterError::InvalidBlockRangeParams), "{err:?}");
     }
 }
