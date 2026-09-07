@@ -33,7 +33,7 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
             if let Some(cached_bal) =
                 self.cache().get_bal(block.hash()).await.map_err(Self::Error::from_eth_err)?
             {
-                let (bal, _) = DecodedBal::from_rlp_bytes(cached_bal.as_raw().clone())
+                let (bal, _) = DecodedBal::from_raw_bal(cached_bal.as_raw_bal().clone())
                     .map_err(RethError::other)
                     .map_err(Self::Error::from_eth_err)?
                     .split();
