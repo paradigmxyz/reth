@@ -6,7 +6,6 @@ use alloy_eips::eip8141::{
     Frame, FrameLimits, FrameMode, FrameSignature, SignatureScheme, TransactionFees,
     ATOMIC_BATCH_FLAG, EXPIRY_VERIFIER,
 };
-use alloy_genesis::Genesis;
 use alloy_primitives::{Address, Bytes, U256};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
@@ -20,26 +19,15 @@ const VERIFY_GAS: u64 = 10_000;
 const USER_OP_GAS: u64 = 30_000;
 const MAX_FEE_PER_GAS: u64 = 20_000_000_000;
 const MAX_PRIORITY_FEE_PER_GAS: u64 = 2_000_000_000;
-/// `PUSH1 3; PUSH0; PUSH0; APPROVE; STOP`: approve the sender and payer.
-const FRAME_APPROVER_RUNTIME: &[u8] = &[0x60, 0x03, 0x5f, 0x5f, 0xaa, 0x00];
-
 const fn recipient() -> Address {
     Address::repeat_byte(0x11)
 }
 
-fn chain_spec(sender: Address) -> Arc<reth_chainspec::ChainSpec> {
-    let mut genesis: Genesis =
-        serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
-    genesis
-        .alloc
-        .get_mut(&sender)
-        .expect("the E2E wallet must be funded in the test genesis")
-        .code = Some(Bytes::from_static(FRAME_APPROVER_RUNTIME));
-
+fn chain_spec() -> Arc<reth_chainspec::ChainSpec> {
     Arc::new(
         ChainSpecBuilder::default()
             .chain(MAINNET.chain)
-            .genesis(genesis)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
             // The Frames devnet aliases Bogotá to Amsterdam. The E2E chain enables both so the
             // pool gate and the V6 payload path exercise the same configuration.
             .bogota_activated()
@@ -122,7 +110,7 @@ async fn self_verify_frame_is_admitted_and_mined() -> eyre::Result<()> {
     let signer = Wallet::default().wallet_gen().into_iter().next().unwrap();
     let (mut nodes, _) = setup_engine::<EthereumNode>(
         1,
-        chain_spec(signer.address()),
+        chain_spec(),
         false,
         Default::default(),
         eth_payload_attributes_amsterdam,
@@ -141,7 +129,7 @@ async fn expiry_prefix_frame_is_admitted_and_mined() -> eyre::Result<()> {
     let signer = Wallet::default().wallet_gen().into_iter().next().unwrap();
     let (mut nodes, _) = setup_engine::<EthereumNode>(
         1,
-        chain_spec(signer.address()),
+        chain_spec(),
         false,
         Default::default(),
         eth_payload_attributes_amsterdam,
@@ -168,7 +156,7 @@ async fn atomic_frame_body_is_admitted_and_mined() -> eyre::Result<()> {
     let signer = Wallet::default().wallet_gen().into_iter().next().unwrap();
     let (mut nodes, _) = setup_engine::<EthereumNode>(
         1,
-        chain_spec(signer.address()),
+        chain_spec(),
         false,
         Default::default(),
         eth_payload_attributes_amsterdam,
@@ -192,7 +180,7 @@ async fn sequential_frames_share_a_payload() -> eyre::Result<()> {
     let signer = Wallet::default().wallet_gen().into_iter().next().unwrap();
     let (mut nodes, _) = setup_engine::<EthereumNode>(
         1,
-        chain_spec(signer.address()),
+        chain_spec(),
         false,
         Default::default(),
         eth_payload_attributes_amsterdam,
