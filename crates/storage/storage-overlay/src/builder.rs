@@ -366,6 +366,12 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             return Ok(AnchorForParent::NoReverts { anchor })
         }
 
+        // Reverts reconstruct canonical state by block number, so they cannot recover an anchor
+        // from another fork even if its number is covered by the available changesets.
+        if provider.block_hash(anchor.number)? != Some(anchor.hash) {
+            return Err(ProviderError::BlockHashNotFound(anchor.hash))
+        }
+
         // Otherwise reverts are required; we check the changesets to make sure they are actually
         // available before signaling that they are required.
         let account_history = provider
@@ -1053,6 +1059,27 @@ mod tests {
         let error = builder.build_state_trie_overlay(&provider).unwrap_err();
 
         assert!(error.to_string().contains("reverts are disabled"));
+    }
+
+    #[test]
+    fn appended_overlay_rejects_noncanonical_anchor_when_reverts_are_required() {
+        let (factory, blocks) = setup_frontiers(1, 3);
+        let provider = factory.provider().unwrap();
+        let parent_hash = B256::with_last_byte(100);
+        assert_ne!(parent_hash, blocks[1].recovered_block().hash());
+        let block = TestBlockBuilder::eth()
+            .get_executed_block_with_number(blocks[2].block_number(), parent_hash);
+        let builder =
+            OverlayManager::default().overlay_builder(parent_hash).with_appended_block(block);
+
+        assert!(matches!(
+            builder.execution_overlay(&provider),
+            Err(ProviderError::BlockHashNotFound(hash)) if hash == parent_hash
+        ));
+        assert!(matches!(
+            builder.build_state_trie_overlay(&provider),
+            Err(ProviderError::BlockHashNotFound(hash)) if hash == parent_hash
+        ));
     }
 
     #[test]
