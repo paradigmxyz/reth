@@ -17,6 +17,10 @@ STATE_TEST_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 gh() {
   case "$1" in
     api)
+      if [[ "$2" == *'/git/'* ]]; then
+        if [[ "$*" == *'.object.type'* ]]; then printf 'commit\n'; else printf '%s\n' bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb; fi
+        return
+      fi
       [[ "$GH_TOKEN" == state-test-token && "$*" == *'--paginate'* ]] || return 1
       [[ "$STATE_TEST_FAILURE" == false ]] || return 1
       printf '%s\n' "$STATE_TEST_VALUE"
@@ -24,6 +28,9 @@ gh() {
     variable)
       [[ "$STATE_TEST_FAILURE" == false ]] || return 1
       [[ "$*" == 'variable set BENCH_TEST_LAST_FEATURE_REF --repo owner/repo --body aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' ]]
+      ;;
+    release)
+      printf '{"tagName":"v1.0.0"}\n'
       ;;
     run)
       if [[ "$*" == *'--status=in_progress'* ]]; then
@@ -61,23 +68,32 @@ echo 'PASS: missing state, SHA validation, credential selection, and API failure
 
 for resolver in bench-scheduled-refs.sh bench-replay-scheduled-refs.sh bench-e2e-scheduled-refs.sh; do
   [[ -f "$scripts/$resolver" ]] || continue
-  args=(false)
-  [[ "$resolver" != bench-scheduled-refs.sh ]] || args+=(hourly)
-  for value in "" "$feature" "$previous"; do
-    export STATE_TEST_VALUE="$value"
+  modes=("")
+  [[ "$resolver" != bench-scheduled-refs.sh ]] || modes=(hourly nightly release)
+  for mode in "${modes[@]}"; do
+    args=(false)
+    [[ -z "$mode" ]] || args+=("$mode")
+    for value in "" "$feature" "$previous"; do
+      export STATE_TEST_VALUE="$value"
+      : > "$GITHUB_OUTPUT"
+      bash "$scripts/$resolver" "${args[@]}" > "$scratch/log" 2>&1
+      if [[ "$value" == "$feature" ]]; then
+        rg -q '^should-skip=true$' "$GITHUB_OUTPUT"
+      else
+        rg -q '^should-skip=false$' "$GITHUB_OUTPUT"
+      fi
+      if [[ "$value" == "$previous" ]]; then
+        rg -q "^baseline-ref=$previous$" "$GITHUB_OUTPUT"
+      fi
+    done
+    export STATE_TEST_VALUE="$feature"
+    args[0]=true
     : > "$GITHUB_OUTPUT"
     bash "$scripts/$resolver" "${args[@]}" > "$scratch/log" 2>&1
-    if [[ "$value" == "$feature" ]]; then
-      rg -q '^should-skip=true$' "$GITHUB_OUTPUT"
-    else
-      rg -q '^should-skip=false$' "$GITHUB_OUTPUT"
-    fi
-    if [[ "$value" == "$previous" ]]; then
-      rg -q "^baseline-ref=$previous$" "$GITHUB_OUTPUT"
-    fi
+    rg -q '^should-skip=false$' "$GITHUB_OUTPUT"
+    export STATE_TEST_FAILURE=true
+    if bash "$scripts/$resolver" "${args[@]}" > "$scratch/log" 2>&1; then exit 1; fi
+    export STATE_TEST_FAILURE=false
+    echo "PASS: $resolver $mode first run, unchanged/changed commit, force, and API failure"
   done
-  export STATE_TEST_FAILURE=true
-  if bash "$scripts/$resolver" "${args[@]}" > "$scratch/log" 2>&1; then exit 1; fi
-  export STATE_TEST_FAILURE=false
-  echo "PASS: $resolver first run, unchanged/changed commit, and API failure"
 done
