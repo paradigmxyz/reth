@@ -27,6 +27,7 @@ parking_lot.workspace = true
 thread-priority.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
+reth-rayon = { workspace = true, optional = true }
 commonware-runtime = { workspace = true, optional = true }
 
 # feature `rayon`
@@ -41,8 +42,8 @@ libc.workspace = true
 tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "time", "macros"] }
 
 [features]
-rayon = ["dep:rayon", "dep:crossbeam-utils", "pin-project"]
+rayon = ["dep:reth-rayon", "dep:rayon", "dep:crossbeam-utils", "pin-project"]
 test-utils = [
     "commonware-runtime?/test-utils",
 ]
-deterministic = ["dep:commonware-runtime"]
+deterministic = ["dep:commonware-runtime", "dep:reth-rayon"]

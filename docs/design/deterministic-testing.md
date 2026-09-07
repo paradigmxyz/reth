@@ -332,6 +332,52 @@ These are process-crash tests: the host kernel and page cache remain alive. They
 power-loss safety or explore cuts inside backend FFI. Simulating those requires a lower I/O
 boundary or a separate filesystem/VM fault harness, validated against the real storage engines.
 
+## Rayon routing
+
+`reth-rayon` routes bounded joins, independent scoped jobs, collection, sorting, and detached
+jobs to native Rayon in production and inline execution under DST. `TaskRuntime` installs the
+routing context around every deterministic task poll and future destruction. Root futures that
+call providers directly use `TaskRuntime::scope`. The thread-local context is restored before a
+poll returns, including on panic; it follows the future when the executor moves it to another
+thread. This is not a process-wide switch.
+
+Storage provider scopes and sorting, storage-history collection, static-file transaction hash
+jobs, overlay joins and dedicated submissions, trie-data joins, ETL sorting, stage hashing and
+sender recovery, static-file production, network recovery, CLI archive packaging, and RPC's
+blocking Rayon pool use this routing. The node campaign configures the production overlay pool;
+its work runs inline instead of omitting background overlay precomputation.
+
+Sender recovery shares its batch read/decode/recovery body between native and simulated drivers.
+DST skips the OS-thread coordinator. Every result channel holds a full chunk, so completing all
+chunks before receiving their results cannot block. Hashing stages use the same bounded-channel
+property. The ordered-iterator adapter visits an indexed iterator's producer on the calling thread,
+preserving its non-Send consumer and avoiding both native workers and condition-variable waits.
+
+`HashedPostState::from_par_iter` accepts opaque Rayon iterators, which cannot in general be
+converted to ordinary iterators. Its compatibility collector synchronously runs on a private
+single-worker pool, with inline context inherited by nested application work. This is one real OS
+worker per calling thread that uses the collector, not a Commonware actor. The caller waits for
+completion, so simulated actors cannot race it and Rayon cannot use multiple workers. Prefer the
+ordinary iterator helpers when possible. This does not make ambient randomness or unordered input
+iteration deterministic.
+
+BAL's bounded execution kernel shares speculative transaction execution and canonical commit
+logic with production, using one inline worker for a fully available input batch. The
+`execute_block_with_runtime` adapter cooperatively awaits streamed input before entering that
+kernel, without holding database state across waits. Early stream closure returns an error; the
+synchronous entry rejects incomplete inline input instead of blocking. Focused tests compare
+inline BAL receipts, gas, requests, and state against serial execution and replay delayed input
+and early closure. The node campaign remains Cancun-based; enabling BAL in that profile and
+exploring interleavings between BAL transactions remain separate work.
+
+Each inline operation is atomic to the simulator. Inline jobs must not wait for their caller or
+a later submission. Stable sorts retain equal-key order; unstable sorts require a total key when
+tie order affects observable behavior. Raw `WorkerPool` access under inline context fails before
+initializing or using native workers, requiring callers to use the routing or cooperative APIs.
+Arbitrary raw Rayon calls are not intercepted; existing sparse-trie and prewarming paths still
+use their explicit cooperative alternatives. Database background threads remain outside this
+routing boundary.
+
 ## Converting another subsystem
 
 Pass `TaskRuntime` into the component, use its clock and spawn operations, and make long-running

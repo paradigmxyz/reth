@@ -278,6 +278,11 @@ impl<N: NodePrimitives> OverlayManager<N> {
             return
         }
 
+        #[cfg(feature = "rayon")]
+        let Some(worker_pool) = self.worker_pool.clone() else {
+            return
+        };
+
         #[cfg(not(feature = "rayon"))]
         let _ = cached_parent_overlays;
 
@@ -285,8 +290,24 @@ impl<N: NodePrimitives> OverlayManager<N> {
         // overlay for it
         #[cfg(feature = "rayon")]
         {
+            let parent_span = span;
             for anchor_hash in cached_parent_overlays {
-                self.precompute_execution_overlay(hash, anchor_hash);
+                let manager = self.clone();
+                let parent_span = parent_span.clone();
+                reth_rayon::spawn_with(
+                    move || {
+                        let _span = tracing::trace_span!(
+                            target: "storage::overlay::manager",
+                            parent: parent_span,
+                            "precompute_execution_overlay",
+                            tip_hash = %hash,
+                            anchor_hash = %anchor_hash,
+                        )
+                        .entered();
+                        let _ = manager.precompute_execution_overlay_for_parent(hash, anchor_hash);
+                    },
+                    |job| worker_pool.spawn(job),
+                );
             }
         }
     }
@@ -674,10 +695,13 @@ impl<N: NodePrimitives> OverlayManager<N> {
             if let Some(worker_pool) = &self.worker_pool {
                 let compute_span = _span;
                 let metrics = self.metrics.clone();
-                return worker_pool.spawn_and_wait(move || {
-                    let _guard = compute_span.enter();
-                    compute_overlay(compute_input, anchor_hash, &metrics)
-                })
+                return reth_rayon::run_with(
+                    move || {
+                        let _guard = compute_span.enter();
+                        compute_overlay(compute_input, anchor_hash, &metrics)
+                    },
+                    |job| worker_pool.spawn_and_wait(job),
+                )
             }
         }
 
@@ -704,10 +728,13 @@ impl<N: NodePrimitives> OverlayManager<N> {
             if let Some(worker_pool) = &self.worker_pool {
                 let compute_span = _span;
                 let metrics = self.execution_metrics.clone();
-                return worker_pool.spawn_and_wait(move || {
-                    let _guard = compute_span.enter();
-                    compute_execution_overlay_inner(compute_input, anchor_hash, &metrics)
-                })
+                return reth_rayon::run_with(
+                    move || {
+                        let _guard = compute_span.enter();
+                        compute_execution_overlay_inner(compute_input, anchor_hash, &metrics)
+                    },
+                    |job| worker_pool.spawn_and_wait(job),
+                )
             }
         }
 
@@ -927,7 +954,7 @@ fn extend_overlay(
 ) {
     #[cfg(feature = "rayon")]
     {
-        rayon::join(
+        reth_rayon::join(
             || {
                 if !hashed_state.is_empty() {
                     Arc::make_mut(&mut overlay.state).extend_ref_and_sort(hashed_state);

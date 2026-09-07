@@ -124,7 +124,7 @@ where
                 let (tx, rx) = mpsc::sync_channel(chunk.len());
                 channels.push(rx);
                 // Spawn the hashing task onto the global rayon pool
-                rayon::spawn(move || {
+                reth_rayon::spawn(move || {
                     // Cache hashed address since PlainStorageState is sorted by address
                     let (mut last_addr, mut hashed_addr) = (Address::ZERO, HASHED_ZERO_ADDRESS);
                     for (address, slot) in chunk {
@@ -298,6 +298,15 @@ mod tests {
     /// Execute with low clean threshold so as to hash whole storage
     #[tokio::test]
     async fn execute_clean_storage_hashing() {
+        execute_clean_storage_hashing_case().await;
+    }
+
+    #[tokio::test]
+    async fn inline_execute_clean_storage_hashing() {
+        reth_rayon::deterministic(execute_clean_storage_hashing_case()).await;
+    }
+
+    async fn execute_clean_storage_hashing_case() {
         let (previous_stage, stage_progress) = (500, 100);
 
         // Set up the runner

@@ -56,6 +56,16 @@ impl TaskRuntime {
         })))
     }
 
+    /// Runs a root future with this runtime's parallel execution context. Spawned tasks install
+    /// their own context automatically; use this for work performed directly by a test runner.
+    pub async fn scope<F: Future>(&self, future: F) -> F::Output {
+        match self.0.as_ref() {
+            Backend::Production(_) => future.await,
+            #[cfg(feature = "deterministic")]
+            Backend::Deterministic(_) => reth_rayon::deterministic(future).await,
+        }
+    }
+
     /// Spawns a cooperative future. Dropping its handle leaves the task running.
     pub fn spawn<F, T>(&self, name: &'static str, future: F) -> TaskHandle<T>
     where
@@ -137,14 +147,14 @@ impl TaskRuntime {
             #[cfg(feature = "deterministic")]
             Backend::Deterministic(simulation) => {
                 if matches!(kind, AsyncKind::Named) {
-                    simulation.spawn_named(name, Box::pin(future));
+                    simulation.spawn_named(name, Box::pin(reth_rayon::deterministic(future)));
                 } else {
                     drop(
                         simulation
                             .context
                             .child("task")
                             .with_attribute("name", name)
-                            .spawn(|_| future),
+                            .spawn(|_| reth_rayon::deterministic(future)),
                     );
                 }
             }
@@ -283,14 +293,17 @@ impl TaskRuntime {
             #[cfg(feature = "deterministic")]
             Backend::Deterministic(simulation) => {
                 if matches!(kind, JobKind::Named) {
-                    simulation.spawn_named(name, Box::pin(async move { job() }));
+                    simulation.spawn_named(
+                        name,
+                        Box::pin(reth_rayon::deterministic(async move { job() })),
+                    );
                 } else {
                     drop(
                         simulation
                             .context
                             .child("job")
                             .with_attribute("name", name)
-                            .spawn(|_| async move { job() }),
+                            .spawn(|_| reth_rayon::deterministic(async move { job() })),
                     );
                 }
             }
@@ -691,6 +704,21 @@ mod tests {
                 .with_timeout(Some(Duration::from_secs(5)));
             deterministic::Runner::new(config).start(|context| async move {
                 let runtime = TaskRuntime::deterministic(context.child("execution"));
+                assert!(!reth_rayon::is_inline());
+                runtime
+                    .scope(async {
+                        assert!(reth_rayon::is_inline());
+                    })
+                    .await;
+                assert!(!reth_rayon::is_inline());
+                runtime
+                    .spawn("routing", async {
+                        assert!(reth_rayon::is_inline());
+                    })
+                    .await
+                    .unwrap();
+                runtime.spawn_named("routing", || assert!(reth_rayon::is_inline())).await.unwrap();
+                runtime.spawn_cpu("routing", || assert!(reth_rayon::is_inline())).await.unwrap();
                 let canceled_executed = Arc::new(AtomicBool::new(false));
                 let executed = Arc::clone(&canceled_executed);
                 let canceled = runtime.spawn_named("canceled_lane", move || {

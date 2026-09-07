@@ -3,7 +3,6 @@
 use crate::{segments, segments::Segment, StaticFileProducerEvent};
 use alloy_primitives::BlockNumber;
 use parking_lot::Mutex;
-use rayon::prelude::*;
 use reth_codecs::Compact;
 use reth_db_api::table::Value;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
@@ -135,14 +134,15 @@ where
             segments.push((Box::new(segments::Receipts), block_range));
         }
 
-        segments.par_iter().try_for_each(|(segment, block_range)| -> ProviderResult<()> {
+        reth_rayon::try_map_collect(&segments, |(segment, block_range)| -> ProviderResult<()> {
             debug!(target: "static_file", segment = %segment.segment(), ?block_range, "StaticFileProducer segment");
             let start = Instant::now();
 
             // Create a new database transaction on every segment to prevent long-lived read-only
             // transactions
-            let provider = self.provider.database_provider_ro()?.disable_long_read_transaction_safety();
-            segment.copy_to_static_files(provider,  block_range.clone())?;
+            let provider =
+                self.provider.database_provider_ro()?.disable_long_read_transaction_safety();
+            segment.copy_to_static_files(provider, block_range.clone())?;
 
             let elapsed = start.elapsed(); // TODO(alexey): track in metrics
             debug!(target: "static_file", segment = %segment.segment(), ?block_range, ?elapsed, "Finished StaticFileProducer segment");

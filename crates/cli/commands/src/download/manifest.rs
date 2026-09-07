@@ -1,6 +1,5 @@
 use blake3::Hasher;
 use eyre::Result;
-use rayon::prelude::*;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -629,15 +628,13 @@ pub fn generate_manifest(
         }
 
         if found_any {
-            let mut packaged_chunks = planned_chunks
-                .into_par_iter()
-                .map(|planned| -> Result<PackagedChunk> {
+            let mut packaged_chunks =
+                reth_rayon::map_collect(planned_chunks, |planned| -> Result<PackagedChunk> {
                     let output_files =
                         write_chunk_archive(&planned.archive_path, &planned.source_files)?;
                     let size = std::fs::metadata(&planned.archive_path)?.len();
                     Ok(PackagedChunk { chunk_idx: planned.chunk_idx, size, output_files })
                 })
-                .collect::<Vec<_>>()
                 .into_iter()
                 .collect::<Result<Vec<_>>>()?;
 

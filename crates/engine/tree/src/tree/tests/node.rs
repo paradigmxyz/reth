@@ -416,9 +416,9 @@ fn simulate_node(seed: u64) -> NodeOutcome {
     let native = reth_tasks::Runtime::test();
     let mut producer_storage = NodeStorage::new(chain.clone());
     let mut follower_storage = NodeStorage::new(chain.clone());
-    let producer_overlay = OverlayManager::default();
+    let producer_overlay = OverlayManager::new(native.state_trie_overlay_worker_pool());
     let producer_factory = producer_storage.open(producer_overlay.clone(), native.clone());
-    let follower_overlay = OverlayManager::default();
+    let follower_overlay = OverlayManager::new(native.state_trie_overlay_worker_pool());
     let follower_factory = follower_storage.open(follower_overlay.clone(), native.clone());
     init_genesis_with_settings(&producer_factory, StorageSettings::v2()).unwrap();
     init_genesis_with_settings(&follower_factory, StorageSettings::v2()).unwrap();
@@ -430,156 +430,190 @@ fn simulate_node(seed: u64) -> NodeOutcome {
         .with_timeout(Some(Duration::from_secs(30)));
     let outcome = deterministic::Runner::new(config).start(|context| async move {
         let tasks = TaskRuntime::deterministic(context.child("nodes"));
-        let blocks = Arc::new(Mutex::new(BTreeMap::from([(0, genesis_block)])));
-        let producer = Node::launch(
-            producer_factory,
-            producer_overlay,
-            blocks.clone(),
-            TaskRuntime::deterministic(context.child("producer")),
-            native.clone(),
-            seed,
-        )
-        .await;
-        let follower = Node::launch(
-            follower_factory,
-            follower_overlay,
-            blocks.clone(),
-            TaskRuntime::deterministic(context.child("follower")),
-            native.clone(),
-            seed.wrapping_add(1),
-        )
-        .await;
-        let genesis = SealedHeader::seal_slow(chain.genesis_header().clone());
-        let one = producer.build(&genesis, 0, 0).await;
-        producer.import(&one).await;
-        // Build both candidates while the real pool still validates the next nonces against their
-        // common parent; then switch the canonical head from the first candidate to the second.
-        let abandoned =
-            producer.build(one.block().sealed_header(), TRANSACTIONS_PER_BLOCK, 0).await;
-        let two = producer.build(one.block().sealed_header(), TRANSACTIONS_PER_BLOCK, 1).await;
-        producer.import(&abandoned).await;
-        producer.import(&two).await;
-        assert_ne!(two.block().hash(), abandoned.block().hash());
-        assert_ne!(two.block().state_root(), abandoned.block().state_root());
-        let three =
-            producer.build(two.block().sealed_header(), 2 * TRANSACTIONS_PER_BLOCK, 1).await;
-        producer.import(&three).await;
-        let four =
-            producer.build(three.block().sealed_header(), 3 * TRANSACTIONS_PER_BLOCK, 1).await;
-        // Rehash each invalid header so rejection reaches EVM receipt/state-root validation.
-        for corrupt_state in [false, true] {
-            let mut invalid_block = four.block().clone().into_block();
-            if corrupt_state {
-                invalid_block.header.state_root = B256::repeat_byte(0xa5);
-            } else {
-                invalid_block.header.receipts_root = B256::repeat_byte(0x5a);
-            }
-            let (payload, sidecar) =
-                alloy_rpc_types_engine::ExecutionPayload::from_block_slow(&invalid_block);
-            let status = producer.new_payload(ExecutionData::new(payload, sidecar)).await;
-            assert!(status.is_invalid(), "corrupt_state={corrupt_state}: {status:?}");
-            let expected =
-                if corrupt_state { "mismatched block state root" } else { "receipt root mismatch" };
-            assert!(
-                status.status.validation_error().unwrap_or_default().contains(expected),
-                "{status:?}"
-            );
-        }
-        producer.import(&four).await;
-        for payload in [&one, &two, &three, &four] {
-            blocks.lock().unwrap().insert(payload.block().number(), payload.block().clone());
-        }
-        // The follower knows only genesis. Its real downloader fetches the missing ancestry over
-        // fragmented ETH protocol frames after forkchoice names an unknown head.
-        assert!(follower.forkchoice(four.block().hash()).await.is_syncing());
-        loop {
-            tasks.sleep(Duration::from_millis(5)).await;
-            if follower.forkchoice(four.block().hash()).await.is_valid() {
-                break;
-            }
-        }
-        let canonical: Vec<_> =
-            [&one, &two, &three, &four].into_iter().map(|p| p.block().hash()).collect();
-        assert_eq!(producer.provider.best_block_number().unwrap(), 4);
-        assert_eq!(follower.provider.best_block_number().unwrap(), 4);
-        follower.assert_sparse_root(four.block().state_root());
-        for (index, hash) in canonical.iter().enumerate() {
-            assert_eq!(follower.provider.block_hash(index as u64 + 1).unwrap(), Some(*hash));
-        }
-        // Observe a real threshold-triggered write before graceful shutdown flushes the tail.
-        loop {
-            let producer_tip =
-                producer.provider.database_provider_ro().unwrap().best_block_number().unwrap();
-            let follower_tip =
-                follower.provider.database_provider_ro().unwrap().best_block_number().unwrap();
-            if producer_tip >= 3 && follower_tip >= 3 {
-                break;
-            }
-            tasks.sleep(Duration::from_millis(1)).await;
-        }
-        let sender = Address::from_str("f39fd6e51aad88f6f4ce6ab8827279cfffb92266").unwrap();
-        let producer_account = producer.provider.latest().unwrap().basic_account(&sender).unwrap();
-        let follower_account = follower.provider.latest().unwrap().basic_account(&sender).unwrap();
-        assert_eq!(producer_account, follower_account);
-        assert_eq!(producer_account.unwrap().nonce, 4 * TRANSACTIONS_PER_BLOCK);
-        let wire = follower.peer.trace();
-        assert!(wire
-            .iter()
-            .any(|event| matches!(event, WireEvent::Response { headers: true, .. })));
-        assert!(wire
-            .iter()
-            .any(|event| matches!(event, WireEvent::Response { headers: false, .. })));
-        assert!(follower.peer.stats().fragments.into_iter().all(|count| count > 1));
-        assert_eq!(follower.peer.bad_messages(), 0);
-        let producer_prewarming = Arc::clone(&producer.prewarming);
-        let follower_prewarming = Arc::clone(&follower.prewarming);
-        producer.shutdown().await;
-        follower.shutdown().await;
-        // Drop every native handle and volatile overlay, reopen the datadir, then execute another
-        // transaction through a new payload service and engine.
-        let restart_overlay = OverlayManager::default();
-        let restart_factory = follower_storage.open(restart_overlay.clone(), native.clone());
-        assert_eq!(restart_factory.check_consistency().unwrap(), (None, None));
-        let restarted = Node::launch(
-            restart_factory,
-            restart_overlay,
-            blocks,
-            TaskRuntime::deterministic(context.child("restarted")),
-            native.clone(),
-            seed.wrapping_add(2),
-        )
-        .await;
-        assert_eq!(restarted.provider.best_block_number().unwrap(), 4);
-        let five =
-            restarted.build(four.block().sealed_header(), 4 * TRANSACTIONS_PER_BLOCK, 1).await;
-        restarted.import(&five).await;
-        let restarted_prewarming = Arc::clone(&restarted.prewarming);
-        restarted.shutdown().await;
-        let final_factory = follower_storage.open(OverlayManager::default(), native);
-        assert_eq!(final_factory.check_consistency().unwrap(), (None, None));
-        let persisted = BlockchainProvider::new(final_factory).unwrap();
-        let sender = Address::from_str("f39fd6e51aad88f6f4ce6ab8827279cfffb92266").unwrap();
-        let account = persisted.latest().unwrap().basic_account(&sender).unwrap().unwrap();
-        assert_eq!(account.nonce, 5 * TRANSACTIONS_PER_BLOCK);
-        assert_eq!(persisted.best_block_number().unwrap(), 5);
-        assert_eq!(persisted.block_hash(5).unwrap(), Some(five.block().hash()));
-        let prewarmed_transactions =
-            [producer_prewarming, follower_prewarming, restarted_prewarming]
-                .map(|counter| counter.load(std::sync::atomic::Ordering::Relaxed));
-        assert!(
-            prewarmed_transactions.into_iter().all(|count| count > 0),
-            "no speculative execution on a node: {prewarmed_transactions:?}"
-        );
-        NodeOutcome {
-            audit: context.auditor().state(),
-            canonical,
-            first_block: one.block().clone(),
-            wire,
-            persisted_head: five.block().hash(),
-            sender_nonce: account.nonce,
-            sender_balance: account.balance,
-            prewarmed_transactions,
-        }
+        tasks
+            .clone()
+            .scope(async move {
+                let blocks = Arc::new(Mutex::new(BTreeMap::from([(0, genesis_block)])));
+                let producer = Node::launch(
+                    producer_factory,
+                    producer_overlay,
+                    blocks.clone(),
+                    TaskRuntime::deterministic(context.child("producer")),
+                    native.clone(),
+                    seed,
+                )
+                .await;
+                let follower = Node::launch(
+                    follower_factory,
+                    follower_overlay,
+                    blocks.clone(),
+                    TaskRuntime::deterministic(context.child("follower")),
+                    native.clone(),
+                    seed.wrapping_add(1),
+                )
+                .await;
+                let genesis = SealedHeader::seal_slow(chain.genesis_header().clone());
+                let one = producer.build(&genesis, 0, 0).await;
+                producer.import(&one).await;
+                // Build both candidates while the real pool still validates the next nonces against
+                // their common parent; then switch the canonical head from the
+                // first candidate to the second.
+                let abandoned =
+                    producer.build(one.block().sealed_header(), TRANSACTIONS_PER_BLOCK, 0).await;
+                let two =
+                    producer.build(one.block().sealed_header(), TRANSACTIONS_PER_BLOCK, 1).await;
+                producer.import(&abandoned).await;
+                producer.import(&two).await;
+                assert_ne!(two.block().hash(), abandoned.block().hash());
+                assert_ne!(two.block().state_root(), abandoned.block().state_root());
+                let three = producer
+                    .build(two.block().sealed_header(), 2 * TRANSACTIONS_PER_BLOCK, 1)
+                    .await;
+                producer.import(&three).await;
+                let four = producer
+                    .build(three.block().sealed_header(), 3 * TRANSACTIONS_PER_BLOCK, 1)
+                    .await;
+                // Rehash each invalid header so rejection reaches EVM receipt/state-root
+                // validation.
+                for corrupt_state in [false, true] {
+                    let mut invalid_block = four.block().clone().into_block();
+                    if corrupt_state {
+                        invalid_block.header.state_root = B256::repeat_byte(0xa5);
+                    } else {
+                        invalid_block.header.receipts_root = B256::repeat_byte(0x5a);
+                    }
+                    let (payload, sidecar) =
+                        alloy_rpc_types_engine::ExecutionPayload::from_block_slow(&invalid_block);
+                    let status = producer.new_payload(ExecutionData::new(payload, sidecar)).await;
+                    assert!(status.is_invalid(), "corrupt_state={corrupt_state}: {status:?}");
+                    let expected = if corrupt_state {
+                        "mismatched block state root"
+                    } else {
+                        "receipt root mismatch"
+                    };
+                    assert!(
+                        status.status.validation_error().unwrap_or_default().contains(expected),
+                        "{status:?}"
+                    );
+                }
+                producer.import(&four).await;
+                for payload in [&one, &two, &three, &four] {
+                    blocks
+                        .lock()
+                        .unwrap()
+                        .insert(payload.block().number(), payload.block().clone());
+                }
+                // The follower knows only genesis. Its real downloader fetches the missing ancestry
+                // over fragmented ETH protocol frames after forkchoice names an
+                // unknown head.
+                assert!(follower.forkchoice(four.block().hash()).await.is_syncing());
+                loop {
+                    tasks.sleep(Duration::from_millis(5)).await;
+                    if follower.forkchoice(four.block().hash()).await.is_valid() {
+                        break;
+                    }
+                }
+                let canonical: Vec<_> =
+                    [&one, &two, &three, &four].into_iter().map(|p| p.block().hash()).collect();
+                assert_eq!(producer.provider.best_block_number().unwrap(), 4);
+                assert_eq!(follower.provider.best_block_number().unwrap(), 4);
+                follower.assert_sparse_root(four.block().state_root());
+                for (index, hash) in canonical.iter().enumerate() {
+                    assert_eq!(
+                        follower.provider.block_hash(index as u64 + 1).unwrap(),
+                        Some(*hash)
+                    );
+                }
+                // Observe a real threshold-triggered write before graceful shutdown flushes the
+                // tail.
+                loop {
+                    let producer_tip = producer
+                        .provider
+                        .database_provider_ro()
+                        .unwrap()
+                        .best_block_number()
+                        .unwrap();
+                    let follower_tip = follower
+                        .provider
+                        .database_provider_ro()
+                        .unwrap()
+                        .best_block_number()
+                        .unwrap();
+                    if producer_tip >= 3 && follower_tip >= 3 {
+                        break;
+                    }
+                    tasks.sleep(Duration::from_millis(1)).await;
+                }
+                let sender = Address::from_str("f39fd6e51aad88f6f4ce6ab8827279cfffb92266").unwrap();
+                let producer_account =
+                    producer.provider.latest().unwrap().basic_account(&sender).unwrap();
+                let follower_account =
+                    follower.provider.latest().unwrap().basic_account(&sender).unwrap();
+                assert_eq!(producer_account, follower_account);
+                assert_eq!(producer_account.unwrap().nonce, 4 * TRANSACTIONS_PER_BLOCK);
+                let wire = follower.peer.trace();
+                assert!(wire
+                    .iter()
+                    .any(|event| matches!(event, WireEvent::Response { headers: true, .. })));
+                assert!(wire
+                    .iter()
+                    .any(|event| matches!(event, WireEvent::Response { headers: false, .. })));
+                assert!(follower.peer.stats().fragments.into_iter().all(|count| count > 1));
+                assert_eq!(follower.peer.bad_messages(), 0);
+                let producer_prewarming = Arc::clone(&producer.prewarming);
+                let follower_prewarming = Arc::clone(&follower.prewarming);
+                producer.shutdown().await;
+                follower.shutdown().await;
+                // Drop every native handle and volatile overlay, reopen the datadir, then execute
+                // another transaction through a new payload service and engine.
+                let restart_overlay = OverlayManager::new(native.state_trie_overlay_worker_pool());
+                let restart_factory =
+                    follower_storage.open(restart_overlay.clone(), native.clone());
+                assert_eq!(restart_factory.check_consistency().unwrap(), (None, None));
+                let restarted = Node::launch(
+                    restart_factory,
+                    restart_overlay,
+                    blocks,
+                    TaskRuntime::deterministic(context.child("restarted")),
+                    native.clone(),
+                    seed.wrapping_add(2),
+                )
+                .await;
+                assert_eq!(restarted.provider.best_block_number().unwrap(), 4);
+                let five = restarted
+                    .build(four.block().sealed_header(), 4 * TRANSACTIONS_PER_BLOCK, 1)
+                    .await;
+                restarted.import(&five).await;
+                let restarted_prewarming = Arc::clone(&restarted.prewarming);
+                restarted.shutdown().await;
+                let final_factory = follower_storage
+                    .open(OverlayManager::new(native.state_trie_overlay_worker_pool()), native);
+                assert_eq!(final_factory.check_consistency().unwrap(), (None, None));
+                let persisted = BlockchainProvider::new(final_factory).unwrap();
+                let sender = Address::from_str("f39fd6e51aad88f6f4ce6ab8827279cfffb92266").unwrap();
+                let account = persisted.latest().unwrap().basic_account(&sender).unwrap().unwrap();
+                assert_eq!(account.nonce, 5 * TRANSACTIONS_PER_BLOCK);
+                assert_eq!(persisted.best_block_number().unwrap(), 5);
+                assert_eq!(persisted.block_hash(5).unwrap(), Some(five.block().hash()));
+                let prewarmed_transactions =
+                    [producer_prewarming, follower_prewarming, restarted_prewarming]
+                        .map(|counter| counter.load(std::sync::atomic::Ordering::Relaxed));
+                assert!(
+                    prewarmed_transactions.into_iter().all(|count| count > 0),
+                    "no speculative execution on a node: {prewarmed_transactions:?}"
+                );
+                NodeOutcome {
+                    audit: context.auditor().state(),
+                    canonical,
+                    first_block: one.block().clone(),
+                    wire,
+                    persisted_head: five.block().hash(),
+                    sender_nonce: account.nonce,
+                    sender_balance: account.balance,
+                    prewarmed_transactions,
+                }
+            })
+            .await
     });
     drop(producer_storage);
     outcome

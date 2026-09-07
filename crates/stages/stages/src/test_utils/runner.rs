@@ -58,6 +58,17 @@ pub(crate) trait ExecuteStageTestRunner: StageTestRunner {
         rx
     }
 
+    /// Runs the stage on the caller so inline routing reaches its production execution body.
+    async fn execute_inline(&self, input: ExecInput) -> Result<ExecOutput, StageError> {
+        assert!(reth_rayon::is_inline());
+        let mut stage = self.stage();
+        stage.execute_ready(input).await?;
+        let provider = self.db().factory.provider_rw().unwrap();
+        let result = stage.execute(&provider, input);
+        provider.commit().expect("failed to commit");
+        result
+    }
+
     /// Run a hook after [`Stage::execute`]. Required for Headers & Bodies stages.
     async fn after_execution(&self, _seed: Self::Seed) -> Result<(), TestRunnerError> {
         Ok(())

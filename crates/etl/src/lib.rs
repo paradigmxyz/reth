@@ -24,7 +24,6 @@ use std::{
 /// Key len and Value len encode use [`usize::to_be_bytes()`] the length is 8.
 const KV_LEN: usize = 8;
 
-use rayon::prelude::*;
 use reth_db_api::table::{Compress, Encode, Key, Value};
 use tempfile::{NamedTempFile, TempDir};
 
@@ -132,7 +131,7 @@ where
 
     fn flush(&mut self) -> io::Result<()> {
         self.buffer_size_bytes = 0;
-        self.buffer.par_sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        reth_rayon::sort_unstable_by(&mut self.buffer, |a, b| a.0.cmp(&b.0));
         let mut buf = Vec::with_capacity(self.buffer.len());
         std::mem::swap(&mut buf, &mut self.buffer);
 

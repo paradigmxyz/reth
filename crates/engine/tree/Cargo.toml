@@ -11,6 +11,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+reth-rayon.workspace = true
 # reth
 reth-chain-state.workspace = true
 reth-chainspec = { workspace = true, optional = true }

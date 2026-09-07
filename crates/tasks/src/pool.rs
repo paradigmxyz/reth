@@ -90,6 +90,8 @@ impl BlockingTaskPool {
     /// function's return value.
     ///
     /// If the function panics, the future will resolve to an error.
+    /// Under DST, bounded work completes inline before returning the handle. The function
+    /// must not wait for another simulated actor or a later submission.
     pub fn spawn<F, R>(&self, func: F) -> BlockingTaskHandle<R>
     where
         F: FnOnce() -> R + Send + 'static,
@@ -97,9 +99,12 @@ impl BlockingTaskPool {
     {
         let (tx, rx) = oneshot::channel();
 
-        self.pool.spawn(move || {
-            let _result = tx.send(catch_unwind(AssertUnwindSafe(func)));
-        });
+        reth_rayon::spawn_with(
+            move || {
+                let _result = tx.send(catch_unwind(AssertUnwindSafe(func)));
+            },
+            |job| self.pool.spawn(job),
+        );
 
         BlockingTaskHandle { rx }
     }
@@ -111,6 +116,8 @@ impl BlockingTaskPool {
     /// function's return value.
     ///
     /// If the function panics, the future will resolve to an error.
+    /// Under DST, bounded work completes inline before returning the handle. The function
+    /// must not wait for another simulated actor or a later submission.
     pub fn spawn_fifo<F, R>(&self, func: F) -> BlockingTaskHandle<R>
     where
         F: FnOnce() -> R + Send + 'static,
@@ -118,9 +125,12 @@ impl BlockingTaskPool {
     {
         let (tx, rx) = oneshot::channel();
 
-        self.pool.spawn_fifo(move || {
-            let _result = tx.send(catch_unwind(AssertUnwindSafe(func)));
-        });
+        reth_rayon::spawn_with(
+            move || {
+                let _result = tx.send(catch_unwind(AssertUnwindSafe(func)));
+            },
+            |job| self.pool.spawn_fifo(job),
+        );
 
         BlockingTaskHandle { rx }
     }
@@ -195,6 +205,10 @@ impl WorkerPool {
 
     /// Returns a reference to the underlying rayon pool, creating it on first access.
     fn pool(&self) -> &rayon::ThreadPool {
+        assert!(
+            !reth_rayon::is_inline(),
+            "native WorkerPool access under DST; route bounded work or use a cooperative worker"
+        );
         self.pool.get_or_init(|| {
             let prefix = self.thread_name_prefix;
             build_pool_with_panic_handler(
@@ -502,6 +516,29 @@ impl Worker {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn inline_worker_pool_escape_is_rejected() {
+        let pool = super::WorkerPool::new(1, "dst-escape");
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            reth_rayon::inline(|| pool.spawn(|| panic!("must not run")));
+        }))
+        .is_err());
+        assert!(!pool.is_initialized());
+    }
+
+    #[tokio::test]
+    async fn inline_blocking_pool_preserves_results_and_panics() {
+        let pool = super::BlockingTaskPool::build().unwrap();
+        let caller = std::thread::current().id();
+        let result =
+            reth_rayon::inline(|| pool.spawn(|| std::thread::current().id())).await.unwrap();
+        assert_eq!(result, caller);
+        let result =
+            reth_rayon::inline(|| pool.spawn_fifo(|| std::thread::current().id())).await.unwrap();
+        assert_eq!(result, caller);
+        assert!(reth_rayon::inline(|| pool.spawn(|| panic!("job"))).await.is_err());
+    }
+
     use super::*;
 
     #[tokio::test]
