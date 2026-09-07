@@ -8045,7 +8045,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs"
 version = "0.7.0"
-source = "git+https://github.com/Soubhik-10/reth-core?rev=1ddcfece6bcd4ef742ab4d2d1d644586dec45f44#1ddcfece6bcd4ef742ab4d2d1d644586dec45f44"
+source = "git+https://github.com/Soubhik-10/reth-core?rev=d84cc16#d84cc1669df0873062c67e93dcb75c81871e5021"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -8065,7 +8065,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs-derive"
 version = "0.7.0"
-source = "git+https://github.com/Soubhik-10/reth-core?rev=1ddcfece6bcd4ef742ab4d2d1d644586dec45f44#1ddcfece6bcd4ef742ab4d2d1d644586dec45f44"
+source = "git+https://github.com/Soubhik-10/reth-core?rev=d84cc16#d84cc1669df0873062c67e93dcb75c81871e5021"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9790,7 +9790,7 @@ dependencies = [
 [[package]]
 name = "reth-primitives-traits"
 version = "0.7.0"
-source = "git+https://github.com/Soubhik-10/reth-core?rev=1ddcfece6bcd4ef742ab4d2d1d644586dec45f44#1ddcfece6bcd4ef742ab4d2d1d644586dec45f44"
+source = "git+https://github.com/Soubhik-10/reth-core?rev=d84cc16#d84cc1669df0873062c67e93dcb75c81871e5021"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -10321,7 +10321,7 @@ dependencies = [
 [[package]]
 name = "reth-rpc-traits"
 version = "0.7.0"
-source = "git+https://github.com/Soubhik-10/reth-core?rev=1ddcfece6bcd4ef742ab4d2d1d644586dec45f44#1ddcfece6bcd4ef742ab4d2d1d644586dec45f44"
+source = "git+https://github.com/Soubhik-10/reth-core?rev=d84cc16#d84cc1669df0873062c67e93dcb75c81871e5021"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -10872,7 +10872,7 @@ dependencies = [
 [[package]]
 name = "reth-zstd-compressors"
 version = "0.7.0"
-source = "git+https://github.com/Soubhik-10/reth-core?rev=1ddcfece6bcd4ef742ab4d2d1d644586dec45f44#1ddcfece6bcd4ef742ab4d2d1d644586dec45f44"
+source = "git+https://github.com/Soubhik-10/reth-core?rev=d84cc16#d84cc1669df0873062c67e93dcb75c81871e5021"
 dependencies = [
  "zstd",
 ]
@@ -11007,7 +11007,7 @@ dependencies = [
 [[package]]
 name = "revm-inspectors"
 version = "0.43.0"
-source = "git+https://github.com/Soubhik-10/revm-inspectors?rev=060ecd74114a6c1496bc80496a7b7500c5c5a5cd#060ecd74114a6c1496bc80496a7b7500c5c5a5cd"
+source = "git+https://github.com/Soubhik-10/revm-inspectors?rev=cab5f7051b50d20450bfd52878323a9f363b40c4#cab5f7051b50d20450bfd52878323a9f363b40c4"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -11088,7 +11088,7 @@ dependencies = [
 [[package]]
 name = "revmc"
 version = "0.1.0"
-source = "git+https://github.com/Soubhik-10/revmc?rev=25167111d064712f132bca89cdb1b40e3f868e87#25167111d064712f132bca89cdb1b40e3f868e87"
+source = "git+https://github.com/Soubhik-10/revmc?rev=7fe21bebcdbb706387f523f10e752b85372ce0a7#7fe21bebcdbb706387f523f10e752b85372ce0a7"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -11108,7 +11108,7 @@ dependencies = [
 [[package]]
 name = "revmc-backend"
 version = "0.1.0"
-source = "git+https://github.com/Soubhik-10/revmc?rev=25167111d064712f132bca89cdb1b40e3f868e87#25167111d064712f132bca89cdb1b40e3f868e87"
+source = "git+https://github.com/Soubhik-10/revmc?rev=7fe21bebcdbb706387f523f10e752b85372ce0a7#7fe21bebcdbb706387f523f10e752b85372ce0a7"
 dependencies = [
  "eyre",
  "ruint",
@@ -11117,12 +11117,12 @@ dependencies = [
 [[package]]
 name = "revmc-build"
 version = "0.1.0"
-source = "git+https://github.com/Soubhik-10/revmc?rev=25167111d064712f132bca89cdb1b40e3f868e87#25167111d064712f132bca89cdb1b40e3f868e87"
+source = "git+https://github.com/Soubhik-10/revmc?rev=7fe21bebcdbb706387f523f10e752b85372ce0a7#7fe21bebcdbb706387f523f10e752b85372ce0a7"
 
 [[package]]
 name = "revmc-builtins"
 version = "0.1.0"
-source = "git+https://github.com/Soubhik-10/revmc?rev=25167111d064712f132bca89cdb1b40e3f868e87#25167111d064712f132bca89cdb1b40e3f868e87"
+source = "git+https://github.com/Soubhik-10/revmc?rev=7fe21bebcdbb706387f523f10e752b85372ce0a7#7fe21bebcdbb706387f523f10e752b85372ce0a7"
 dependencies = [
  "paste",
  "revm-bytecode",
@@ -11137,7 +11137,7 @@ dependencies = [
 [[package]]
 name = "revmc-codegen"
 version = "0.1.0"
-source = "git+https://github.com/Soubhik-10/revmc?rev=25167111d064712f132bca89cdb1b40e3f868e87#25167111d064712f132bca89cdb1b40e3f868e87"
+source = "git+https://github.com/Soubhik-10/revmc?rev=7fe21bebcdbb706387f523f10e752b85372ce0a7#7fe21bebcdbb706387f523f10e752b85372ce0a7"
 dependencies = [
  "alloy-primitives",
  "bitflags 2.13.1",
@@ -11168,7 +11168,7 @@ dependencies = [
 [[package]]
 name = "revmc-context"
 version = "0.1.0"
-source = "git+https://github.com/Soubhik-10/revmc?rev=25167111d064712f132bca89cdb1b40e3f868e87#25167111d064712f132bca89cdb1b40e3f868e87"
+source = "git+https://github.com/Soubhik-10/revmc?rev=7fe21bebcdbb706387f523f10e752b85372ce0a7#7fe21bebcdbb706387f523f10e752b85372ce0a7"
 dependencies = [
  "revm-context",
  "revm-context-interface",
@@ -11183,7 +11183,7 @@ dependencies = [
 [[package]]
 name = "revmc-llvm"
 version = "0.1.0"
-source = "git+https://github.com/Soubhik-10/revmc?rev=25167111d064712f132bca89cdb1b40e3f868e87#25167111d064712f132bca89cdb1b40e3f868e87"
+source = "git+https://github.com/Soubhik-10/revmc?rev=7fe21bebcdbb706387f523f10e752b85372ce0a7#7fe21bebcdbb706387f523f10e752b85372ce0a7"
 dependencies = [
  "alloy-primitives",
  "cc",
@@ -11196,7 +11196,7 @@ dependencies = [
 [[package]]
 name = "revmc-runtime"
 version = "0.1.0"
-source = "git+https://github.com/Soubhik-10/revmc?rev=25167111d064712f132bca89cdb1b40e3f868e87#25167111d064712f132bca89cdb1b40e3f868e87"
+source = "git+https://github.com/Soubhik-10/revmc?rev=7fe21bebcdbb706387f523f10e752b85372ce0a7#7fe21bebcdbb706387f523f10e752b85372ce0a7"
 dependencies = [
  "alloy-evm",
  "alloy-primitives",
