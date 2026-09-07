@@ -220,6 +220,13 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         AllPoolTransactions::default()
     }
 
+    fn all_transactions_by_sender(
+        &self,
+        _sender: Address,
+    ) -> AllPoolTransactions<Self::Transaction> {
+        AllPoolTransactions::default()
+    }
+
     fn all_transaction_hashes(&self) -> Vec<TxHash> {
         vec![]
     }
