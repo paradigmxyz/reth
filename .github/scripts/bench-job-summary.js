@@ -12,13 +12,12 @@
 //
 // Usage from actions/github-script:
 //   const jobSummary = require('./.github/scripts/bench-job-summary.js');
-//   await jobSummary({ core, context, chartSha, grafanaUrl, logsUrl, tracesUrl, runId });
+//   await jobSummary({ core, context, grafanaUrl, logsUrl, tracesUrl, runId });
 
 const fs = require('fs');
 const {
   verdict,
   loadSamplyUrls,
-  loadTracingChromeUrls,
   blocksLabel,
   metricRows,
   waitTimeRows,
@@ -39,7 +38,7 @@ function fmtTargetMetricValue(metric, v) {
   return fmtMetricValue(v);
 }
 
-module.exports = async function ({ core, context, chartSha, grafanaUrl, logsUrl, tracesUrl, runId }) {
+module.exports = async function ({ core, context, grafanaUrl, logsUrl, tracesUrl, runId }) {
   let summary;
   try {
     summary = JSON.parse(fs.readFileSync(process.env.BENCH_WORK_DIR + '/summary.json', 'utf8'));
@@ -111,22 +110,7 @@ module.exports = async function ({ core, context, chartSha, grafanaUrl, logsUrl,
     md += '\n';
   }
 
-  // Charts
-  if (chartSha) {
-    const prNum = prNumber || '0';
-    const baseUrl = `https://raw.githubusercontent.com/decofe/reth-bench-charts/${chartSha}/pr/${prNum}/${runId}`;
-    const charts = [
-      { file: 'latency_throughput.png', label: 'Latency, Throughput & Diff' },
-      { file: 'wait_breakdown.png', label: 'Wait Time Breakdown' },
-      { file: 'gas_vs_latency.png', label: 'Gas vs Latency' },
-    ];
-    md += `### Charts\n\n`;
-    for (const chart of charts) {
-      md += `<details><summary>${chart.label}</summary>\n\n`;
-      md += `![${chart.label}](${baseUrl}/${chart.file})\n\n`;
-      md += `</details>\n\n`;
-    }
-  }
+  md += fs.readFileSync(process.env.BENCH_WORK_DIR + '/charts/charts.md', 'utf8');
 
   // Samply profiles
   const samplyUrls = loadSamplyUrls(process.env.BENCH_WORK_DIR);
@@ -135,11 +119,9 @@ module.exports = async function ({ core, context, chartSha, grafanaUrl, logsUrl,
     md += `### Samply Profiles\n\n${samplyLinks.join('\n')}\n\n`;
   }
 
-  const tracingChromeUrls = loadTracingChromeUrls(process.env.BENCH_WORK_DIR);
-  const tracingChromeLinks = Object.entries(tracingChromeUrls)
-    .map(([run, url]) => `- **${run}**: [Perfetto](${url})`);
-  if (tracingChromeLinks.length > 0) {
-    md += `### Chrome Traces\n\n${tracingChromeLinks.join('\n')}\n\n`;
+  if (process.env.BENCH_TRACING_CHROME === 'true') {
+    const runUrl = process.env.BENCH_RUN_URL || `https://github.com/${repo}/actions/runs/${runId}`;
+    md += `### Chrome Traces\n\nDownload the [bench-results artifact](${runUrl}), then open each run's tracing-chrome-profile.json in [Perfetto](https://ui.perfetto.dev/).\n\n`;
   }
 
   // Observability
