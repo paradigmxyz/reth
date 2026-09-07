@@ -1,0 +1,290 @@
+//! Chooses the canonical block a snap generation is anchored to.
+//!
+//! [EIP-8189](https://eips.ethereum.org/EIPS/eip-8189#synchronization-algorithm) pivot selection
+//! anchors synchronization at a block "sufficiently behind the chain head [...] to reduce the
+//! likelihood of P being reorged while remaining recent enough that serving peers still hold its
+//! state in memory". Those two pressures are what this policy balances: too close to the head and
+//! the anchor is reorged, too far and no peer will serve its state.
+//!
+//! Two choices depart from the EIP's example: a finalized block is preferred as the anchor when one
+//! is available, and re-anchoring starts once a pivot lags by 96 blocks rather than at the edge of
+//! the window peers still serve state for.
+
+use crate::{error::db_error, SnapGeneration, SnapPhase, SnapSyncError};
+use alloy_eip7928::BAL_RETENTION_PERIOD_SLOTS;
+use reth_primitives_traits::AlloyBlockHeader;
+use reth_storage_api::HeaderProvider;
+
+// EIP-8189 gives HEAD-64 as its example anchor, matching go-ethereum's `fsMinFullBlocks`.
+const DEFAULT_HEAD_DISTANCE: u64 = 64;
+
+// Blocks of state history a serving peer is assumed to still hold. Mirrors reth's own
+// `SNAPSHOT_STATE_RETENTION`, which bounds the roots it will answer range requests for.
+const SERVED_STATE_WINDOW: u64 = 128;
+
+// Re-anchor before the pivot reaches the edge of the served window, so ranges already in flight do
+// not fail against a root peers have just dropped. go-ethereum re-anchors at
+// `2 * fsMinFullBlocks` minus a reorg-protection delay for the same reason.
+const DEFAULT_ADVANCE_AFTER: u64 = SERVED_STATE_WINDOW - DEFAULT_HEAD_DISTANCE / 2;
+
+/// Distance and history bounds that decide where a generation is anchored.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SnapPivotPolicy {
+    /// Blocks behind the head to anchor at when no finalized block is available.
+    head_distance: u64,
+    /// Pivot lag that triggers re-anchoring while ranges are still downloading.
+    advance_after: u64,
+    /// Blocks of block access list history a peer is assumed to still serve.
+    history: u64,
+}
+
+impl Default for SnapPivotPolicy {
+    fn default() -> Self {
+        Self {
+            head_distance: DEFAULT_HEAD_DISTANCE,
+            advance_after: DEFAULT_ADVANCE_AFTER,
+            history: BAL_RETENTION_PERIOD_SLOTS,
+        }
+    }
+}
+
+impl SnapPivotPolicy {
+    /// Returns this policy anchoring `head_distance` blocks behind the head.
+    pub const fn with_head_distance(mut self, head_distance: u64) -> Self {
+        self.head_distance = head_distance;
+        self
+    }
+
+    /// Returns this policy re-anchoring once a pivot lags by `advance_after` blocks.
+    pub const fn with_advance_after(mut self, advance_after: u64) -> Self {
+        self.advance_after = advance_after;
+        self
+    }
+
+    /// Returns this policy assuming `history` blocks of block access lists remain servable.
+    ///
+    /// Applying that many lists is cheaper than downloading the state again, so the default is the
+    /// full EIP-7928 retention period rather than a shorter catch-up bound.
+    pub const fn with_history(mut self, history: u64) -> Self {
+        self.history = history;
+        self
+    }
+
+    /// Returns the block a pivot anchored under `head` targets.
+    ///
+    /// Prefers a `finalized` block that peers should still be serving, since it cannot be reorged
+    /// at all. Falls back to `head_distance` before the first forkchoice update, and whenever
+    /// finality has stalled past the point where its state is served.
+    pub const fn pivot_block(&self, head: u64, finalized: Option<u64>) -> Option<u64> {
+        if let Some(finalized) = finalized &&
+            head.saturating_sub(finalized) <= self.advance_after
+        {
+            return Some(finalized)
+        }
+        head.checked_sub(self.head_distance)
+    }
+
+    /// Returns whether `generation` should be re-anchored under `head`.
+    ///
+    /// Advancing costs one block access list per intervening block, which stays far cheaper than
+    /// restarting the download, so this triggers well before peers stop serving the old root.
+    pub const fn needs_advance(&self, generation: SnapGeneration, head: u64) -> bool {
+        generation.lag(head) > self.advance_after
+    }
+
+    /// Returns whether the block access lists `generation` still needs remain servable.
+    ///
+    /// Once they are not, the downloaded state can no longer be carried forward and the attempt
+    /// has to be restarted from a fresh pivot.
+    pub const fn is_catchable(&self, generation: SnapGeneration, head: u64) -> bool {
+        generation.lag(head) <= self.history
+    }
+
+    /// Returns a fresh generation for the canonical pivot under `head`.
+    ///
+    /// `None` means the chain is not ready to be pivoted on: it is shorter than the head distance,
+    /// its pivot header is not downloaded yet, or EIP-7928 is not active at the pivot, so no block
+    /// access list can carry that state forward.
+    pub fn select(
+        &self,
+        provider: &impl HeaderProvider,
+        head: u64,
+        finalized: Option<u64>,
+    ) -> Result<Option<SnapGeneration>, SnapSyncError> {
+        let Some(block_number) = self.pivot_block(head, finalized) else { return Ok(None) };
+        let Some(header) = provider.sealed_header(block_number).map_err(db_error)? else {
+            return Ok(None)
+        };
+        if header.block_access_list_hash().is_none() {
+            return Ok(None)
+        }
+        Ok(Some(SnapGeneration::new(block_number, header.hash(), header.state_root())))
+    }
+
+    /// Returns whether an interrupted generation is still worth finishing under `head`.
+    ///
+    /// A fully downloaded generation only needs its trie rebuilt, so it stays worth finishing
+    /// however far the head has moved on. Whether its anchor is still canonical is reported
+    /// separately by [`SnapGeneration::is_canonical`].
+    pub const fn is_finishable(&self, generation: SnapGeneration, head: u64) -> bool {
+        matches!(generation.phase(), SnapPhase::Trie) || self.is_catchable(generation, head)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::Header;
+    use alloy_primitives::B256;
+    use reth_provider::{
+        test_utils::create_test_provider_factory, DatabaseProviderFactory,
+        StaticFileProviderFactory, StaticFileWriter,
+    };
+    use reth_static_file_types::StaticFileSegment;
+
+    // Small bounds keep header fixtures short without changing the policy's decisions.
+    fn policy() -> SnapPivotPolicy {
+        SnapPivotPolicy::default().with_head_distance(1).with_advance_after(4).with_history(8)
+    }
+
+    fn header(number: u64, parent_hash: B256, block_access_list_hash: Option<B256>) -> Header {
+        Header {
+            number,
+            parent_hash,
+            state_root: B256::repeat_byte(number as u8),
+            block_access_list_hash,
+            ..Default::default()
+        }
+    }
+
+    fn provider_with(
+        headers: impl IntoIterator<Item = Header>,
+    ) -> impl HeaderProvider<Header = Header> {
+        let factory = create_test_provider_factory();
+        let static_files = factory.static_file_provider();
+        let mut writer = static_files.latest_writer(StaticFileSegment::Headers).unwrap();
+        for header in headers {
+            let hash = header.hash_slow();
+            writer.append_header(&header, &hash).unwrap();
+        }
+        writer.commit().unwrap();
+        drop(writer);
+        drop(static_files);
+        factory.database_provider_ro().unwrap()
+    }
+
+    fn chain(bal_from: Option<u64>) -> Vec<Header> {
+        let mut headers = Vec::new();
+        let mut parent = B256::ZERO;
+        for number in 0..=3 {
+            let bal =
+                bal_from.filter(|from| number >= *from).map(|_| B256::with_last_byte(number as u8));
+            let header = header(number, parent, bal);
+            parent = header.hash_slow();
+            headers.push(header);
+        }
+        headers
+    }
+
+    #[test]
+    fn selects_the_bal_capable_pivot_behind_the_head() {
+        let headers = chain(Some(0));
+        let expected = headers[2].clone();
+        let provider = provider_with(headers);
+
+        let generation = policy().select(&provider, 3, None).unwrap().unwrap();
+
+        assert_eq!(generation.target_block(), 2);
+        assert_eq!(generation.target_hash(), expected.hash_slow());
+        assert_eq!(generation.state_root(), expected.state_root);
+        assert_eq!(generation.phase(), SnapPhase::Accounts);
+        assert_eq!(generation.next_block(), 3);
+    }
+
+    #[test]
+    fn a_recent_finalized_block_is_anchored_to_instead_of_the_head_distance() {
+        let headers = chain(Some(0));
+        let expected = headers[1].clone();
+        let provider = provider_with(headers);
+
+        let generation = policy().select(&provider, 3, Some(1)).unwrap().unwrap();
+
+        assert_eq!(generation.target_block(), 1);
+        assert_eq!(generation.target_hash(), expected.hash_slow());
+    }
+
+    #[test]
+    fn finality_stalled_outside_the_advance_window_falls_back_to_the_head_distance() {
+        let headers = chain(Some(0));
+        let fallback = headers[2].clone();
+        let provider = provider_with(headers);
+        // A finalized block two behind the head is outside this policy's advance window.
+        let policy = policy().with_advance_after(1);
+
+        let generation = policy.select(&provider, 3, Some(1)).unwrap().unwrap();
+
+        // HEAD-1, not the stale finalized block 1.
+        assert_eq!(generation.target_block(), 2);
+        assert_eq!(generation.target_hash(), fallback.hash_slow());
+    }
+
+    #[test]
+    fn pivot_without_a_bal_commitment_is_not_selectable() {
+        let provider = provider_with(chain(Some(3)));
+
+        assert_eq!(policy().select(&provider, 3, None).unwrap(), None);
+    }
+
+    #[test]
+    fn pivot_beyond_downloaded_headers_is_not_selectable() {
+        let provider = provider_with(chain(Some(0)));
+
+        assert_eq!(policy().select(&provider, 9, None).unwrap(), None);
+    }
+
+    #[test]
+    fn chain_shorter_than_the_head_distance_has_no_pivot() {
+        let provider = provider_with(chain(Some(0)));
+
+        assert_eq!(policy().with_head_distance(4).select(&provider, 0, None).unwrap(), None);
+    }
+
+    #[test]
+    fn a_pivot_lagging_past_the_advance_window_is_re_anchored() {
+        let policy = policy();
+        let generation = SnapGeneration::new(0, B256::ZERO, B256::ZERO);
+
+        assert!(!policy.needs_advance(generation, 4));
+        assert!(policy.needs_advance(generation, 5));
+    }
+
+    #[test]
+    fn generation_outside_the_bal_window_is_not_finishable() {
+        let headers = chain(Some(0));
+        let anchor = headers[1].clone();
+        let provider = provider_with(headers);
+        let generation = SnapGeneration::new(1, anchor.hash_slow(), anchor.state_root);
+        let policy = policy();
+
+        assert!(generation.is_canonical(&provider).unwrap());
+        assert!(policy.is_finishable(generation, 9));
+        assert!(!policy.is_finishable(generation, 10));
+    }
+
+    #[test]
+    fn downloaded_state_finishes_outside_the_bal_window() {
+        let anchor = chain(Some(0))[1].clone();
+        let generation = SnapGeneration::new(1, anchor.hash_slow(), anchor.state_root)
+            .with_phase(SnapPhase::Trie);
+
+        assert!(policy().is_finishable(generation, 1_000));
+    }
+
+    #[test]
+    fn reorged_anchor_is_not_canonical() {
+        let provider = provider_with(chain(Some(0)));
+        let generation = SnapGeneration::new(1, B256::repeat_byte(0xff), B256::ZERO);
+
+        assert!(!generation.is_canonical(&provider).unwrap());
+    }
+}

@@ -10259,6 +10259,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-snap-sync"
+version = "2.5.2"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eip7928",
+ "alloy-primitives",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-static-file-types",
+ "reth-storage-api",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "reth-stages"
 version = "2.5.2"
 dependencies = [
