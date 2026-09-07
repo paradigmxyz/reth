@@ -1,4 +1,4 @@
-use crate::OverlayManager;
+use crate::{manager::OverlayCacheConfig, OverlayManager};
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{
     map::{AddressMap, AddressSet, B256Map, U256Map},
@@ -225,6 +225,8 @@ pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
     reused_sparse_trie_anchor_hash: Option<B256>,
     /// Whether building the overlay may query revert changesets.
     no_reverts: bool,
+    /// Cache behavior for the overlays this builder resolves.
+    overlay_cache_config: OverlayCacheConfig,
     /// Metrics for overlay construction.
     metrics: OverlayBuilderMetrics,
 }
@@ -242,6 +244,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             parent_state,
             reused_sparse_trie_anchor_hash: None,
             no_reverts: false,
+            overlay_cache_config: OverlayCacheConfig::default(),
             metrics: OverlayBuilderMetrics::default(),
         }
     }
@@ -269,6 +272,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         self.parent_state =
             Some(BlockState::with_parent(block, self.parent_state.take().map(Arc::new)));
         self.reused_sparse_trie_anchor_hash = None;
+        self.overlay_cache_config.write_to_cache = false;
         self
     }
 
@@ -618,7 +622,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 ))
             })?;
             self.overlay_manager
-                .overlay_for_parent(parent_state, anchor_hash)
+                .overlay_for_parent(parent_state, anchor_hash, self.overlay_cache_config)
                 .map_err(ProviderError::other)
         }
     }
@@ -635,7 +639,11 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 ProviderError::other(std::io::Error::other("missing in-memory parent state"))
             })?;
             self.overlay_manager
-                .execution_overlay_for_block_state(parent_state, anchor_hash)
+                .execution_overlay_for_block_state(
+                    parent_state,
+                    anchor_hash,
+                    self.overlay_cache_config,
+                )
                 .map_err(ProviderError::other)
         }
     }
