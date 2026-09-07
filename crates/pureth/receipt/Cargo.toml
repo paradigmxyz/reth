@@ -1,0 +1,18 @@
+[package]
+name = "reth-pureth-receipt"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Pureth receipt and log types"
+
+[lints]
+workspace = true
+
+[dependencies]
+alloy-consensus.workspace = true
+alloy-primitives.workspace = true
+reth-ethereum-primitives.workspace = true
+reth-primitives-traits.workspace = true

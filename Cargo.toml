@@ -80,6 +80,7 @@ members = [
     "crates/prune/prune",
     "crates/prune/types",
     "crates/pureth/query",
+    "crates/pureth/receipt",
     "crates/pureth/withdrawal-root/",
     "crates/revm/",
     "crates/rpc/ipc/",
@@ -400,6 +401,7 @@ reth-primitives-traits = { version = "0.7.0", default-features = false }
 reth-provider = { path = "crates/storage/provider" }
 reth-prune = { path = "crates/prune/prune" }
 reth-prune-types = { path = "crates/prune/types", default-features = false }
+reth-pureth-receipt = { path = "crates/pureth/receipt" }
 reth-revm = { path = "crates/revm", default-features = false }
 reth-rpc = { path = "crates/rpc/rpc" }
 reth-rpc-api = { path = "crates/rpc/rpc-api" }
