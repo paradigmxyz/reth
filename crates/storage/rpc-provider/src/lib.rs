@@ -32,6 +32,7 @@ use alloy_provider::{ext::DebugApi, network::Network, Provider};
 use alloy_rpc_types::{AccountInfo, BlockId};
 use alloy_rpc_types_engine::ForkchoiceState;
 use dashmap::DashMap;
+use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainInfo, ChainSpecProvider};
 use reth_db_api::{
     mock::{DatabaseMock, TxMock},
@@ -741,6 +742,14 @@ where
 
     fn latest(&self) -> Result<StateProviderBox, ProviderError> {
         Ok(Box::new(self.create_state_provider(self.best_block_number()?.into())))
+    }
+
+    fn state_with_block_appended(
+        &self,
+        _parent_hash: BlockHash,
+        _block: ExecutedBlock<PrimitivesTy<Node>>,
+    ) -> ProviderResult<StateProviderBox> {
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn state_by_block_id(&self, block_id: BlockId) -> Result<StateProviderBox, ProviderError> {
@@ -1802,6 +1811,14 @@ where
 
     fn latest(&self) -> Result<StateProviderBox, ProviderError> {
         Ok(Box::new(self.with_block_id(self.best_block_number()?.into())))
+    }
+
+    fn state_with_block_appended(
+        &self,
+        _parent_hash: BlockHash,
+        _block: ExecutedBlock<PrimitivesTy<Node>>,
+    ) -> ProviderResult<StateProviderBox> {
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn state_by_block_id(&self, block_id: BlockId) -> Result<StateProviderBox, ProviderError> {

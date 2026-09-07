@@ -30,7 +30,7 @@ use core::{
 };
 #[cfg(feature = "chain-state")]
 use reth_chain_state::{
-    CanonStateNotifications, CanonStateSubscriptions, ForkChoiceNotifications,
+    CanonStateNotifications, CanonStateSubscriptions, ExecutedBlock, ForkChoiceNotifications,
     ForkChoiceSubscriptions, PersistedBlockNotifications, PersistedBlockSubscriptions,
 };
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, MAINNET};
@@ -613,6 +613,15 @@ impl<C: Send + Sync + 'static, N: NodePrimitives> StateProviderFactory for NoopP
 
     fn latest(&self) -> ProviderResult<StateProviderBox> {
         Ok(Box::new(self.clone()))
+    }
+
+    #[cfg(feature = "chain-state")]
+    fn state_with_block_appended(
+        &self,
+        _parent_hash: BlockHash,
+        _block: ExecutedBlock<N>,
+    ) -> ProviderResult<StateProviderBox> {
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn state_by_block_number_or_tag(

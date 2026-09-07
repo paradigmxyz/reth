@@ -149,11 +149,9 @@ pub trait StateProviderFactory: BlockIdReader + Send {
     #[cfg(feature = "chain-state")]
     fn state_with_block_appended(
         &self,
-        _parent_hash: BlockHash,
-        _block: ExecutedBlock<Self::Primitives>,
-    ) -> ProviderResult<StateProviderBox> {
-        self.latest()
-    }
+        parent_hash: BlockHash,
+        block: ExecutedBlock<Self::Primitives>,
+    ) -> ProviderResult<StateProviderBox>;
 
     /// Returns a [`StateProvider`] indexed by the given [`BlockId`].
     ///

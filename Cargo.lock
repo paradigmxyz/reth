@@ -10489,6 +10489,7 @@ dependencies = [
  "alloy-rpc-types",
  "alloy-rpc-types-engine",
  "dashmap",
+ "reth-chain-state",
  "reth-chainspec",
  "reth-db-api",
  "reth-errors",
