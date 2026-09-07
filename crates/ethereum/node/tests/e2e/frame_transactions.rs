@@ -71,10 +71,14 @@ fn frame_tx(signer: &PrivateKeySigner, nonce: u64, frames: Vec<Frame>) -> Bytes 
         },
         ..Default::default()
     };
-    let signature = signer.sign_hash_sync(&tx.signature_hash()).unwrap().as_bytes();
+    let signature = signer.sign_hash_sync(&tx.signature_hash()).unwrap();
     let mut frame_signature = Vec::with_capacity(65);
-    frame_signature.push(signature[64]);
-    frame_signature.extend_from_slice(&signature[..64]);
+    // EIP-8141 encodes secp256k1 signatures as `v || r || s`, with `v` as
+    // the raw recovery bit. Alloy's byte representation uses Ethereum's
+    // legacy `27/28` notation, so construct the frame encoding explicitly.
+    frame_signature.push(u8::from(signature.v()));
+    frame_signature.extend_from_slice(&signature.r().to_be_bytes::<32>());
+    frame_signature.extend_from_slice(&signature.s().to_be_bytes::<32>());
     tx.signatures[0].signature = frame_signature.into();
 
     let mut raw = Vec::with_capacity(tx.eip2718_encoded_length());
