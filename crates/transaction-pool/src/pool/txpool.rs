@@ -650,10 +650,11 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.all_transactions.sender_info.extend(changed_senders);
 
         // Process the sub-pool updates
-        let update = self.process_updates(updates);
+        let mut outcome = UpdateOutcome::default();
+        self.process_updates(updates, &mut outcome);
         // update the metrics after the update
         self.update_size_metrics();
-        update
+        outcome
     }
 
     /// Updates the entire pool after a new block was mined.
@@ -756,7 +757,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             .update(on_chain_nonce, on_chain_balance);
 
         match self.all_transactions.insert_tx(tx, on_chain_balance, on_chain_nonce) {
-            Ok(InsertOk { transaction, move_to, replaced_tx, mut updates, state }) => {
+            Ok(InsertOk { transaction, move_to, replaced_tx, updates, state }) => {
                 // Interleave update processing and new-tx insertion so that live
                 // `BestTransactions` iterators always receive transactions in nonce order.
                 // Updates are already in nonce-ascending order, so we split them around
@@ -765,31 +766,13 @@ impl<T: TransactionOrdering> TxPool<T> {
                 //  2. Add the new transaction
                 //  3. Promote higher-nonce txs last   (e.g. gap-fill scenario)
                 let new_nonce = transaction.id().nonce;
-                let split = updates.iter().position(|u| u.id.nonce >= new_nonce);
-                let (promoted, discarded) = match split {
-                    // All updates are lower-nonce — promote them first, then add new tx
-                    None => {
-                        let UpdateOutcome { promoted, discarded } = self.process_updates(updates);
-                        self.add_new_transaction(transaction.clone(), replaced_tx.clone(), move_to);
-                        (promoted, discarded)
-                    }
-                    // All updates are higher-nonce — add new tx first, then promote
-                    Some(0) => {
-                        self.add_new_transaction(transaction.clone(), replaced_tx.clone(), move_to);
-                        let UpdateOutcome { promoted, discarded } = self.process_updates(updates);
-                        (promoted, discarded)
-                    }
-                    // Mixed — split and interleave
-                    Some(i) => {
-                        let after = updates.split_off(i);
-                        let mut outcome = self.process_updates(updates);
-                        self.add_new_transaction(transaction.clone(), replaced_tx.clone(), move_to);
-                        let after_outcome = self.process_updates(after);
-                        outcome.promoted.extend(after_outcome.promoted);
-                        outcome.discarded.extend(after_outcome.discarded);
-                        (outcome.promoted, outcome.discarded)
-                    }
-                };
+                let split = updates.partition_point(|u| u.id.nonce < new_nonce);
+                let mut outcome = UpdateOutcome::default();
+                let mut updates = updates.into_iter();
+                self.process_updates(updates.by_ref().take(split), &mut outcome);
+                self.add_new_transaction(transaction.clone(), replaced_tx.clone(), move_to);
+                self.process_updates(updates, &mut outcome);
+                let UpdateOutcome { promoted, discarded } = outcome;
                 self.metrics.inserted_transactions.increment(1);
 
                 let replaced = replaced_tx.map(|(tx, _)| tx);
@@ -974,8 +957,11 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// Maintenance task to apply a series of updates.
     ///
     /// This will move/discard the given transaction according to the `PoolUpdate`
-    fn process_updates(&mut self, updates: Vec<PoolUpdate>) -> UpdateOutcome<T::Transaction> {
-        let mut outcome = UpdateOutcome::default();
+    fn process_updates(
+        &mut self,
+        updates: impl IntoIterator<Item = PoolUpdate>,
+        outcome: &mut UpdateOutcome<T::Transaction>,
+    ) {
         let mut removed = 0;
         for PoolUpdate { id, current, destination } in updates {
             match destination {
@@ -1002,8 +988,6 @@ impl<T: TransactionOrdering> TxPool<T> {
         if removed > 0 {
             self.metrics.removed_transactions.increment(removed);
         }
-
-        outcome
     }
 
     /// Moves a transaction from one sub pool to another.
@@ -1106,7 +1090,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         // After a tx is removed, its descendants must become parked due to the nonce gap
         let updates = self.all_transactions.park_descendant_transactions(tx.id());
-        self.process_updates(updates);
+        self.process_updates(updates, &mut UpdateOutcome::default());
         self.remove_from_subpool(pool, tx.id())
     }
 
