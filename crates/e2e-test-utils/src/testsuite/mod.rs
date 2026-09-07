@@ -4,7 +4,7 @@ use crate::{
     testsuite::actions::{Action, ActionBox},
     NodeBuilderHelper,
 };
-use alloy_primitives::B256;
+use alloy_primitives::{Bytes, B256};
 use eyre::Result;
 use jsonrpsee::http_client::HttpClient;
 use reth_node_api::{EngineTypes, PayloadTypes};
@@ -76,6 +76,16 @@ where
             .get_block_by_number(number)
             .await
             .map_err(|e| eyre::eyre!("Failed to get block by number: {}", e))
+    }
+
+    /// Submit a raw transaction using the alloy provider.
+    pub async fn send_raw_transaction(&self, raw_tx: Bytes) -> Result<B256> {
+        let pending = self
+            .provider
+            .send_raw_transaction(&raw_tx)
+            .await
+            .map_err(|e| eyre::eyre!("Failed to send raw transaction: {}", e))?;
+        Ok(*pending.tx_hash())
     }
 
     /// Check if the node is ready by attempting to get the latest block
