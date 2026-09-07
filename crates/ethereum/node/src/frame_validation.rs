@@ -49,10 +49,17 @@ where
     let inspector = FrameValidationInspector::new(frame.sender, prefix);
     let mut evm =
         evm_config.evm_with_env_and_inspector(StateProviderDatabase::new(&state), env, inspector);
-    let result = evm
-        .validate_frame_transaction(tx, prefix.prefix_end)
-        .ok_or(Eip8141PoolTransactionError::PublicMempoolValidationUnavailable)?
-        .map_err(|_| policy("validation prefix execution failed"))?;
+    let result = match evm.validate_frame_transaction(tx, prefix.prefix_end) {
+        Some(Ok(result)) => result,
+        Some(Err(error)) => {
+            eprintln!(
+                "EIP-8141 pool prefix validation failed: sender={:#x}, nonce={}, prefix_end={}, error={error}",
+                frame.sender, frame.nonce, prefix.prefix_end,
+            );
+            return Err(policy("validation prefix execution failed"))
+        }
+        None => return Err(Eip8141PoolTransactionError::PublicMempoolValidationUnavailable.into()),
+    };
     let inspector = evm.components().1;
     if let Some(reason) = inspector.error() {
         return Err(policy(reason))

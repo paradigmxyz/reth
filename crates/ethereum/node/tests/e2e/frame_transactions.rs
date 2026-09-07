@@ -79,6 +79,14 @@ fn frame_tx(signer: &PrivateKeySigner, nonce: u64, frames: Vec<Frame>) -> Bytes 
 
     let mut raw = Vec::with_capacity(tx.eip2718_encoded_length());
     tx.eip2718_encode(&mut raw);
+    eprintln!(
+        "EIP-8141 E2E envelope: hash={:#x}, sender={:#x}, nonce={}, frames={:?}, signature={:#x}",
+        tx.tx_hash(),
+        tx.sender,
+        tx.nonce,
+        tx.frames,
+        tx.signatures[0].signature,
+    );
     raw.into()
 }
 
@@ -88,18 +96,21 @@ async fn assert_mined_from_pool(
 ) -> eyre::Result<()> {
     for hash in expected {
         assert!(node.inner.pool.contains(hash), "frame transaction was not admitted to the pool");
+        eprintln!("EIP-8141 E2E pool admission confirmed: hash={hash:#x}");
     }
 
     let payload = node.new_payload().await?;
     let hashes = payload.block().body().transactions().map(|tx| *tx.tx_hash()).collect::<Vec<_>>();
     for hash in expected {
         assert!(hashes.contains(hash), "frame transaction was not selected for the payload");
+        eprintln!("EIP-8141 E2E payload inclusion confirmed: hash={hash:#x}");
     }
 
     let block_hash = node.submit_payload(payload).await?;
     node.update_forkchoice(block_hash, block_hash).await?;
     for hash in expected {
         assert!(!node.inner.pool.contains(hash), "canonical frame transaction remained in pool");
+        eprintln!("EIP-8141 E2E canonical removal confirmed: hash={hash:#x}");
     }
     Ok(())
 }
