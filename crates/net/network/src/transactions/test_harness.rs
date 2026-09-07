@@ -194,7 +194,7 @@ impl Wake for WakeFlag {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transactions::constants::tx_fetcher::MIN_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST;
+    use crate::transactions::constants::SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST;
     use alloy_primitives::map::{B256Map, B256Set};
     use futures::StreamExt;
     use reth_eth_wire::NewPooledTransactionHashes68;
@@ -477,7 +477,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fetching_is_bounded_by_pool_import_capacity() {
+    async fn fetching_is_bounded_by_request_limits() {
         let txs = pooled_txs(1000);
         let hashes = txs.iter().map(|tx| *tx.tx_hash()).collect::<Vec<_>>();
         let by_hash = txs.iter().map(|tx| (*tx.tx_hash(), tx.clone())).collect::<B256Map<_>>();
@@ -499,14 +499,11 @@ mod tests {
             if requests.is_empty() {
                 break
             }
-            // the inflight hashes stay within the import capacity, apart from the minimum
-            // request every idle peer is granted
+            // Fetching is bounded by request slots; response admission separately enforces
+            // the smaller concurrent pool-import limit.
             let inflight = requests.iter().map(|r| r.request.0.len()).sum::<usize>();
-            let bound = 300 + peers.len() * MIN_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST;
-            assert!(
-                inflight <= bound,
-                "requested {inflight} hashes with an import capacity of 300"
-            );
+            let bound = peers.len() * SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST;
+            assert!(inflight <= bound, "requested {inflight} hashes beyond the request-slot bound");
             total_requests += requests.len();
             // responses arrive one by one and the pool imports each before the next one arrives
             for request in requests {

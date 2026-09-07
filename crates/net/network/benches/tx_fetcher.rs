@@ -158,7 +158,7 @@ fn bench_announce(c: &mut Criterion) {
         b.iter_batched_ref(
             || Rig::new(PEERS),
             |rig| rig.announce_gossip(&fixtures.announcement),
-            BatchSize::LargeInput,
+            BatchSize::PerIteration,
         )
     });
 
@@ -167,7 +167,7 @@ fn bench_announce(c: &mut Criterion) {
         b.iter_batched_ref(
             || Rig::new(PEERS),
             |rig| rig.announce_disjoint(&fixtures.announcement),
-            BatchSize::LargeInput,
+            BatchSize::PerIteration,
         )
     });
 
@@ -193,7 +193,7 @@ fn bench_dispatch(c: &mut Criterion) {
                 rig
             },
             |rig| rig.dispatch(),
-            BatchSize::LargeInput,
+            BatchSize::PerIteration,
         )
     });
 
@@ -233,7 +233,7 @@ fn bench_fetch(c: &mut Criterion) {
                     response
                 })
             },
-            BatchSize::LargeInput,
+            BatchSize::PerIteration,
         )
     });
 
@@ -251,7 +251,7 @@ fn bench_fetch(c: &mut Criterion) {
                 rig
             },
             |rig| rig.run_to_completion(|_| PooledTransactions::default()),
-            BatchSize::LargeInput,
+            BatchSize::PerIteration,
         )
     });
 

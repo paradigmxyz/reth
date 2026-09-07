@@ -281,7 +281,7 @@ pub struct TransactionFetcherMetrics {
     /// fetcher already tracks the maximum number of hashes.
     pub(crate) hashes_evicted_at_capacity: Counter,
     /// Total number of announced hashes that were dropped because the fetcher already tracks the
-    /// maximum number of hashes and none of the oldest ones is pending.
+    /// maximum number of hashes and no pending eviction victim was found within the search budget.
     pub(crate) announced_hashes_dropped_at_capacity: Counter,
     /// Total number of announced hashes that were dropped because the announcing peer is already
     /// a candidate for the maximum number of hashes.

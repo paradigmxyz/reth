@@ -17,7 +17,8 @@
 //! is built by draining its queue in the order the announcements were processed, skipping hashes
 //! that are being fetched from another peer or are not tracked anymore, until the request is
 //! full. Packing a request is therefore proportional to the request size and independent of the
-//! total number of pending hashes.
+//! total number of pending hashes. FIFO refers to the fetcher's input order; callers may
+//! reorder or deduplicate hashes within a wire announcement.
 //!
 //! When a request resolves, delivered hashes are dropped from tracking. Undelivered hashes go back
 //! to pending and are queued for their remaining candidates, most recent announcers first, or are
@@ -51,7 +52,6 @@ use super::{
         tx_fetcher::{
             AVERAGE_BYTE_SIZE_TX_ENCODED, MAX_COUNT_CANDIDATE_PEERS_PER_HASH,
             MAX_COUNT_EAGER_CANDIDATE_PEERS_PER_HASH,
-            MIN_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST,
         },
         SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
         SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST,
@@ -351,21 +351,20 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
 
     /// Sends `GetPooledTransactions` requests to idle peers that have queued hashes.
     ///
-    /// Stops when the global inflight request limit is reached. `max_fetching_hashes` is the
-    /// number of hashes the caller can handle being inflight at once: requests are cut down to
-    /// what that budget leaves, but never below
-    /// [`MIN_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST`], so that peers that don't respond
-    /// to their requests can't stop fetching from the others. The floor is capped by the supplied
-    /// budget, so budgets below 16 send smaller requests and zero sends nothing.
+    /// Stops when the global inflight request limit is reached. `max_hashes_per_request` caps
+    /// each request independently of hashes inflight to other peers, so stalled peers cannot
+    /// shrink requests to responsive peers. Zero sends nothing. The caller must enforce its
+    /// concurrent import limit when admitting responses; decoded responses remain bounded by
+    /// the configured inflight request limit.
     ///
     /// Returns the number of requests sent. New requests are only polled by the next call to
     /// [`Stream::poll_next`], so the caller must poll the fetcher again if any were sent.
     pub fn dispatch(
         &mut self,
         peers: &HashMap<PeerId, PeerMetadata<N>, FbBuildHasher<64>>,
-        max_fetching_hashes: usize,
+        max_hashes_per_request: usize,
     ) -> usize {
-        if max_fetching_hashes == 0 {
+        if max_hashes_per_request == 0 {
             return 0
         }
         let max_inflight = self.config.max_inflight_requests as usize;
@@ -384,10 +383,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             // the session is gone if the manager doesn't know the peer anymore
             let Some(session) = peers.get(&peer_id) else { continue };
 
-            let limit = max_fetching_hashes
-                .saturating_sub(self.num_fetching)
-                .max(MIN_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST)
-                .min(max_fetching_hashes)
+            let limit = max_hashes_per_request
                 .min(SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST);
             let request_id = self.next_request_id;
             self.next_request_id += 1;
@@ -567,9 +563,9 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     /// Evicts a pending hash to make room for one announced by `announcer` and returns whether
     /// one was found.
     ///
-    /// The peer tracking the most hashes gives up its oldest pending hash, so a group of peers
-    /// flooding the fetcher with announcements evicts its own hashes rather than those of other
-    /// peers. The announcer gives way when it tracks as many hashes as the busiest peer. If the
+    /// Prefer the oldest exclusively announced pending hash of the peer tracking the most
+    /// hashes, so a group of peers flooding the fetcher gives up its own hashes when possible. The
+    /// announcer gives way when it tracks as many hashes as the busiest peer. If the
     /// chosen peer has no exclusively announced pending hash, the oldest pending hash overall
     /// is evicted. Preferring exclusive hashes protects other peers' work when possible, while
     /// the fallback prevents co-announcements from making the entire cache unevictable.
@@ -1545,8 +1541,8 @@ mod tests {
             self.dispatch_with_budget(usize::MAX)
         }
 
-        fn dispatch_with_budget(&mut self, max_fetching_hashes: usize) -> usize {
-            let sent = self.fetcher.dispatch(&self.peers, max_fetching_hashes);
+        fn dispatch_with_budget(&mut self, max_hashes_per_request: usize) -> usize {
+            let sent = self.fetcher.dispatch(&self.peers, max_hashes_per_request);
             self.verify();
             sent
         }
@@ -2651,7 +2647,7 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_respects_hash_budget() {
+    fn dispatch_applies_the_request_limit_independently_to_each_peer() {
         let mut rig = Rig::new();
         let peer_a = peer(1);
         let peer_b = peer(2);
@@ -2663,24 +2659,39 @@ mod tests {
 
         assert_eq!(rig.dispatch_with_budget(0), 0);
 
-        // requests are cut down to what the budget leaves, and a used up budget doesn't stop
-        // other peers, they get the minimum request instead
+        // Each peer can use the full request limit regardless of other inflight requests.
         assert_eq!(rig.dispatch_with_budget(40), 2);
         let (requested, response_a) = rig.take_request(peer_a).unwrap();
         assert_eq!(requested, hashes(0..40));
         let (requested, _) = rig.take_request(peer_b).unwrap();
-        assert_eq!(requested.len(), MIN_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST);
-        assert_eq!(
-            rig.fetcher.num_fetching_hashes(),
-            40 + MIN_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST
-        );
+        assert_eq!(requested, hashes(100..140));
+        assert_eq!(rig.fetcher.num_fetching_hashes(), 80);
 
-        // a budget below the minimum caps the request
+        // A smaller request limit is respected too.
         response_a.send(Err(RequestError::BadResponse)).unwrap();
         rig.next_event().unwrap();
         assert_eq!(rig.dispatch_with_budget(10), 1);
         let (requested, _) = rig.take_request(peer_a).unwrap();
         assert_eq!(requested, hashes(40..50));
+    }
+
+    #[test]
+    fn stalled_peers_do_not_shrink_requests_to_an_idle_peer() {
+        let mut rig = Rig::new();
+        for n in 0..16 {
+            let p = peer(n + 1);
+            rig.add_peer(p);
+            rig.announce(p, &hashes(u64::from(n) * 256..u64::from(n + 1) * 256));
+        }
+        assert_eq!(rig.dispatch_with_budget(4096), 16);
+        assert_eq!(rig.fetcher.num_fetching_hashes(), 4096);
+        // All earlier peers keep their requests open. The newly ready peer still gets a
+        // full request instead of being throttled by their inflight hashes.
+        let honest = peer(17);
+        rig.add_peer(honest);
+        rig.announce(honest, &hashes(4096..4352));
+        assert_eq!(rig.dispatch_with_budget(4096), 1);
+        assert_eq!(rig.take_request(honest).unwrap().0, hashes(4096..4352));
     }
 
     #[test]

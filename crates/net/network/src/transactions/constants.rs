@@ -127,19 +127,6 @@ pub mod tx_fetcher {
     pub const MAX_COUNT_EAGER_CANDIDATE_PEERS_PER_HASH: usize =
         MAX_COUNT_CANDIDATE_PEERS_PER_HASH / 2;
 
-    /// Minimum number of hashes in a
-    /// [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) request while the number of
-    /// hashes the pool can import is used up by inflight requests. Instead of stopping, requests
-    /// shrink to this size, so that peers that don't respond can't stop fetching from the others.
-    ///
-    /// This is kept small because responses to these requests may exceed what the pool can
-    /// import at once.
-    ///
-    /// Default is a sixteenth of [`SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST`],
-    /// which is spec'd at 256 hashes, so 16 hashes.
-    pub const MIN_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST: usize =
-        SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST / 16;
-
     /// Assumed byte size of a transaction whose size wasn't announced, used when packing
     /// requests.
     ///

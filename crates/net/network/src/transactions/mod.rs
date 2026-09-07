@@ -1707,9 +1707,8 @@ where
             this.on_new_pending_transactions(new_txs);
         }
 
-        // Stop dispatching while a response awaits admission. The fetcher may exceed its
-        // scheduling budget to make progress around slow peers; response admission enforces
-        // the concurrent import limit.
+        // Stop dispatching while a response awaits admission. Request sizes are independent
+        // of other inflight requests; response admission enforces the concurrent import limit.
         duration_metered_exec!(
             {
                 // Peers whose session channel was full are retried on the next poll, which any
