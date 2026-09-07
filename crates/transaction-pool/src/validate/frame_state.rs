@@ -10,8 +10,10 @@ use alloy_primitives::{Address, TxHash, B256, U256};
 pub struct FrameValidation {
     /// Frame sender.
     pub sender: Address,
-    /// Sender nonce.
+    /// Transaction nonce.
     pub sender_nonce: u64,
+    /// Sender nonce in the canonical state used for validation.
+    pub state_nonce: u64,
     /// Sender balance at validation time.
     pub sender_balance: U256,
     /// Sender bytecode hash, if present.
@@ -48,7 +50,6 @@ pub struct FrameDependencies {
 pub struct FrameReservations {
     frames: HashMap<TxHash, Arc<FrameValidation>>,
     sender_nonce: HashMap<(Address, u64), TxHash>,
-    sender: HashMap<Address, TxHash>,
     payer: HashMap<Address, PayerUsage>,
     accounts: HashMap<Address, HashSet<TxHash>>,
     code: HashMap<Address, HashSet<TxHash>>,
@@ -106,8 +107,6 @@ impl FrameReservations {
             }
         } else if self.sender_nonce.contains_key(&(metadata.sender, metadata.sender_nonce)) {
             return Err("sender nonce already reserved");
-        } else if self.sender.contains_key(&metadata.sender) {
-            return Err("sender already reserved");
         }
         let usage = self.payer.get(&metadata.payer).copied().unwrap_or_default();
         let old_cost =
@@ -137,7 +136,6 @@ impl FrameReservations {
         self.remove_inner(replaces);
         self.frames.insert(hash, metadata.clone());
         self.sender_nonce.insert((metadata.sender, metadata.sender_nonce), hash);
-        self.sender.insert(metadata.sender, hash);
         let entry = self.payer.entry(metadata.payer).or_default();
         entry.balance = metadata.payer_balance;
         entry.frame_cost = frame_cost;
@@ -172,7 +170,6 @@ impl FrameReservations {
         let Some(hash) = hash else { return };
         let Some(m) = self.frames.remove(&hash) else { return };
         self.sender_nonce.remove(&(m.sender, m.sender_nonce));
-        self.sender.remove(&m.sender);
         if let Some(p) = self.payer.get_mut(&m.payer) {
             p.frame_cost = p.frame_cost.checked_sub(m.max_cost).unwrap_or(U256::ZERO);
             p.frame_count = p.frame_count.saturating_sub(1);
@@ -269,6 +266,7 @@ mod tests {
         FrameValidation {
             sender: Address::repeat_byte(sender),
             sender_nonce: nonce,
+            state_nonce: nonce,
             sender_balance: U256::MAX,
             sender_code_hash: None,
             payer: Address::repeat_byte(payer),
@@ -314,9 +312,9 @@ mod tests {
         let mut stale = m(2, 0, 1, 2);
         stale.head_hash = B256::repeat_byte(7);
         assert_eq!(put(&mut r, 2, stale), Err("stale head"));
-        assert_eq!(put(&mut r, 3, m(1, 1, 2, 1)), Err("sender already reserved"));
+        assert!(put(&mut r, 3, m(1, 1, 2, 1)).is_ok());
         assert_eq!(r.payer_exposure(&Address::repeat_byte(1)), U256::from(3));
-        assert_eq!(r.hashes().count(), 1);
+        assert_eq!(r.hashes().count(), 2);
     }
 
     #[test]

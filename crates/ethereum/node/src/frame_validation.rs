@@ -39,8 +39,12 @@ where
     let state = client
         .state_by_block_hash(head.hash())
         .map_err(|_| policy("canonical state unavailable"))?;
-    let env =
+    let mut env =
         evm_config.evm_env(&head).map_err(|_| policy("cannot configure frame validation EVM"))?;
+    // Public-pool validation may inspect a nonce-gapped transaction. The pool queues such
+    // transactions behind their missing ancestors; this simulation only validates the frame
+    // prefix and must not reject a valid future nonce before the pool can do that bookkeeping.
+    env.cfg_env.disable_nonce_check = true;
     let tx = TxEnvFor::<EvmConfig>::from_recovered_tx_with_gas_params(
         transaction.transaction.inner(),
         frame.sender,
@@ -97,7 +101,8 @@ where
         payer.bytecode_hash.is_some_and(|hash| hash != alloy_consensus::constants::KECCAK_EMPTY);
     Ok(Arc::new(FrameValidation {
         sender: frame.sender,
-        sender_nonce: sender.nonce,
+        sender_nonce: frame.nonce,
+        state_nonce: sender.nonce,
         sender_balance: sender.balance,
         sender_code_hash: sender.bytecode_hash,
         payer: result.payer,

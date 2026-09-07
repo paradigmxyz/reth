@@ -712,7 +712,7 @@ where
         };
         let account = if let Some(metadata) = frame_metadata {
             let account = Account {
-                nonce: metadata.sender_nonce,
+                nonce: metadata.state_nonce,
                 balance: metadata.sender_balance,
                 bytecode_hash: metadata.sender_code_hash,
             };
@@ -742,7 +742,8 @@ where
         }
 
         // Checks for nonce
-        if transaction.requires_nonce_check() &&
+        if transaction.frame_validation().is_none() &&
+            transaction.requires_nonce_check() &&
             let Err(err) = self.validate_sender_nonce(&transaction, &account)
         {
             return TransactionValidationOutcome::Invalid(transaction, err)
