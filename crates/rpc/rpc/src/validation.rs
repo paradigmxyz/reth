@@ -3,7 +3,7 @@ use alloy_consensus::{
 };
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash};
 use alloy_eips::eip7685::RequestsOrHash;
-use alloy_primitives::{map::AddressSet, Address, B256, U256};
+use alloy_primitives::{map::AddressSet, Address, Bytes, B256, U256};
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequest, BuilderBlockValidationRequestV2,
     BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
@@ -469,9 +469,10 @@ where
         &self,
         request: BuilderBlockValidationRequestV6,
     ) -> Result<(), ValidationApiError> {
-        let decoded_bal =
-            DecodedBal::from_rlp_bytes(request.request.execution_payload.block_access_list.clone())
-                .map_err(ValidationApiError::InvalidBlockAccessList)?;
+        decode_and_validate_bal_gas_limit(
+            request.request.execution_payload.block_access_list.clone(),
+            request.request.execution_payload.payload_inner.payload_inner.payload_inner.gas_limit,
+        )?;
 
         let block = self.payload_validator.ensure_well_formed_payload(ExecutionData {
             payload: ExecutionPayload::V4(request.request.execution_payload),
@@ -504,7 +505,7 @@ where
             block,
             request.request.message,
             request.registered_gas_limit,
-            Some(decoded_bal),
+            None,
         )
         .await
     }
@@ -633,6 +634,17 @@ pub struct ValidationApiInner<Provider, E: ConfigureEvm, T: PayloadTypes> {
     task_spawner: Runtime,
     /// Validation metrics
     metrics: ValidationMetrics,
+}
+
+/// Decodes the submitted BAL and checks its EIP-7928 item budget before blob verification.
+fn decode_and_validate_bal_gas_limit(
+    bytes: Bytes,
+    gas_limit: u64,
+) -> Result<(), ValidationApiError> {
+    let decoded_bal =
+        DecodedBal::from_rlp_bytes(bytes).map_err(ValidationApiError::InvalidBlockAccessList)?;
+    decoded_bal.as_bal().validate_gas_limit(gas_limit).map_err(ConsensusError::from)?;
+    Ok(())
 }
 
 /// Calculates a deterministic hash of the blocklist for change detection.
