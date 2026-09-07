@@ -545,8 +545,21 @@ pub struct RpcServerArgs {
     /// If no path is provided, a secret will be generated and stored in the datadir under
     /// `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.local/share/reth/mainnet/jwt.hex`
     /// by default.
-    #[arg(long = "authrpc.jwtsecret", value_name = "PATH", global = true, required = false, default_value = Resettable::from(DefaultRpcServerArgs::get_global().auth_jwtsecret.as_ref().map(|v| v.to_string_lossy().into())))]
+    #[arg(long = "authrpc.jwtsecret", value_name = "PATH", global = true, required = false, conflicts_with = "auth_jwtsecret_hex", default_value = Resettable::from(DefaultRpcServerArgs::get_global().auth_jwtsecret.as_ref().map(|v| v.to_string_lossy().into())))]
     pub auth_jwtsecret: Option<PathBuf>,
+
+    /// Hex encoded JWT secret to use for the authenticated engine-API RPC server.
+    ///
+    /// This will enforce JWT authentication for all requests coming from the consensus layer.
+    /// Cannot be used together with `--authrpc.jwtsecret`.
+    #[arg(
+        long = "authrpc.jwtsecret-hex",
+        value_name = "HEX",
+        global = true,
+        required = false,
+        conflicts_with = "auth_jwtsecret"
+    )]
+    pub auth_jwtsecret_hex: Option<JwtSecret>,
 
     /// Enable auth engine API over IPC
     #[arg(long, default_value_t = DefaultRpcServerArgs::get_global().auth_ipc)]
@@ -949,6 +962,7 @@ impl Default for RpcServerArgs {
             auth_addr,
             auth_port,
             auth_jwtsecret,
+            auth_jwtsecret_hex: None,
             auth_ipc,
             auth_ipc_path,
             disable_auth_server,
@@ -1172,6 +1186,7 @@ mod tests {
             auth_addr: "127.0.0.1".parse().unwrap(),
             auth_port: 8551,
             auth_jwtsecret: Some(std::path::PathBuf::from("/tmp/jwt.hex")),
+            auth_jwtsecret_hex: None,
             auth_ipc: false,
             auth_ipc_path: "engine.ipc".to_string(),
             disable_auth_server: false,
@@ -1315,5 +1330,42 @@ mod tests {
         .args;
 
         assert_eq!(parsed_args, args);
+    }
+
+    #[test]
+    fn parse_auth_jwtsecret_hex() {
+        let hex = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--authrpc.jwtsecret-hex", hex])
+                .args;
+
+        let expected = JwtSecret::from_hex(hex).unwrap();
+        assert_eq!(args.auth_jwtsecret_hex, Some(expected));
+        assert_eq!(args.auth_jwtsecret, None);
+    }
+
+    #[test]
+    fn parse_auth_jwtsecret_hex_with_0x_prefix() {
+        let hex = "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--authrpc.jwtsecret-hex", hex])
+                .args;
+
+        let expected = JwtSecret::from_hex(hex).unwrap();
+        assert_eq!(args.auth_jwtsecret_hex, Some(expected));
+        assert_eq!(args.auth_jwtsecret, None);
+    }
+
+    #[test]
+    fn test_auth_jwtsecret_and_hex_are_mutually_exclusive() {
+        let result = CommandParser::<RpcServerArgs>::try_parse_from([
+            "reth",
+            "--authrpc.jwtsecret",
+            "/tmp/jwt.hex",
+            "--authrpc.jwtsecret-hex",
+            "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+        ]);
+
+        assert!(result.is_err());
     }
 }

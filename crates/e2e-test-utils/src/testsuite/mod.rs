@@ -8,7 +8,7 @@ use alloy_primitives::B256;
 use eyre::Result;
 use jsonrpsee::http_client::HttpClient;
 use reth_node_api::{EngineTypes, PayloadTypes};
-use reth_payload_builder::PayloadId;
+use reth_payload_builder::{PayloadBuilderHandle, PayloadId};
 use std::{collections::HashMap, marker::PhantomData};
 pub mod actions;
 pub mod setup;
@@ -32,6 +32,8 @@ where
     pub engine: AuthServerHandle,
     /// Beacon consensus engine handle for direct interaction with the consensus engine
     pub beacon_engine_handle: Option<ConsensusEngineHandle<Payload>>,
+    /// Local payload builder used to wait for an in-progress build before requesting it over RPC.
+    pub(crate) payload_builder: Option<PayloadBuilderHandle<Payload>>,
     /// Alloy provider for interacting with the node
     provider: Arc<dyn Provider + Send + Sync>,
 }
@@ -44,7 +46,7 @@ where
     pub fn new(rpc: HttpClient, engine: AuthServerHandle, url: Url) -> Self {
         let provider =
             Arc::new(ProviderBuilder::new().connect_http(url)) as Arc<dyn Provider + Send + Sync>;
-        Self { rpc, engine, beacon_engine_handle: None, provider }
+        Self { rpc, engine, beacon_engine_handle: None, payload_builder: None, provider }
     }
 
     /// Instantiates a new [`NodeClient`] with the given handles, RPC URL, and beacon engine handle
@@ -56,7 +58,13 @@ where
     ) -> Self {
         let provider =
             Arc::new(ProviderBuilder::new().connect_http(url)) as Arc<dyn Provider + Send + Sync>;
-        Self { rpc, engine, beacon_engine_handle: Some(beacon_engine_handle), provider }
+        Self {
+            rpc,
+            engine,
+            beacon_engine_handle: Some(beacon_engine_handle),
+            payload_builder: None,
+            provider,
+        }
     }
 
     /// Get a block by number using the alloy provider

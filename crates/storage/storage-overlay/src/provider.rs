@@ -52,7 +52,7 @@ pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
     factory: F,
     /// Overlay builder containing the configuration and overlay calculation logic.
     overlay_builder: OverlayBuilder<N>,
-    /// A cache mapping `(state_trie_tip, finish_tip)` to [`StateTrieOverlay`].
+    /// A cache mapping `(state_trie_tip, finish_tip, trie_changesets)` to [`StateTrieOverlay`].
     ///
     /// Under partial persistence the overlay depends on both durable frontiers, so both hashes are
     /// part of the cache key.
@@ -129,6 +129,7 @@ pub struct OverlayStateProvider<Provider, N: NodePrimitives = EthPrimitives> {
     state_trie_overlay_cache: StateTrieOverlayCache,
     metrics: OverlayStateProviderFactoryMetrics,
     state_trie_overlay: OnceCell<StateTrieOverlay>,
+    state_trie_overlay_with_trie_changesets: OnceCell<StateTrieOverlay>,
     execution_overlay: OnceCell<CachedExecutionOverlay>,
     is_v2: bool,
 }
@@ -162,6 +163,7 @@ impl<Provider, N: NodePrimitives> OverlayStateProvider<OwnedProvider<Provider>, 
             state_trie_overlay_cache,
             metrics,
             state_trie_overlay: OnceCell::new(),
+            state_trie_overlay_with_trie_changesets: OnceCell::new(),
             execution_overlay: OnceCell::new(),
             is_v2,
         }
@@ -179,6 +181,7 @@ impl<Provider, N: NodePrimitives> OverlayStateProvider<OwnedProvider<Provider>, 
             state_trie_overlay_cache: Default::default(),
             metrics: Default::default(),
             state_trie_overlay: OnceCell::new(),
+            state_trie_overlay_with_trie_changesets: OnceCell::new(),
             execution_overlay: OnceCell::from(CachedExecutionOverlay {
                 overlay: execution_overlay,
                 historical_fallback: None,
@@ -201,6 +204,7 @@ impl<'a, Provider, N: NodePrimitives> OverlayStateProvider<&'a Provider, N> {
             state_trie_overlay_cache: Default::default(),
             metrics: Default::default(),
             state_trie_overlay: OnceCell::new(),
+            state_trie_overlay_with_trie_changesets: OnceCell::new(),
             execution_overlay: OnceCell::new(),
             is_v2,
         }
@@ -216,7 +220,8 @@ impl<'a, Provider, N: NodePrimitives> OverlayStateProvider<&'a Provider, N> {
             overlay_builder: None,
             state_trie_overlay_cache: Default::default(),
             metrics: Default::default(),
-            state_trie_overlay: OnceCell::from(state_trie_overlay),
+            state_trie_overlay: OnceCell::from(state_trie_overlay.clone()),
+            state_trie_overlay_with_trie_changesets: OnceCell::from(state_trie_overlay),
             execution_overlay: OnceCell::new(),
             is_v2,
         }
@@ -232,7 +237,7 @@ where
         &self.provider
     }
 
-    fn state_trie_overlay(&self) -> ProviderResult<&StateTrieOverlay>
+    fn state_trie_overlay(&self, trie_changesets: bool) -> ProviderResult<&StateTrieOverlay>
     where
         Provider::Target: StageCheckpointReader
             + PruneCheckpointReader
@@ -242,15 +247,17 @@ where
             + BlockNumReader
             + StorageSettingsCache,
     {
-        if let Some(overlay) = self.state_trie_overlay.get() {
+        let state_trie_overlay = self.state_trie_overlay_mut(trie_changesets);
+        if let Some(overlay) = state_trie_overlay.get() {
             return Ok(overlay)
         }
 
         let (state_trie_tip_block, finish_tip_block) = database_state_frontiers(self.provider())?;
-        let overlay = match self
-            .state_trie_overlay_cache
-            .entry((state_trie_tip_block.hash, finish_tip_block.hash))
-        {
+        let overlay = match self.state_trie_overlay_cache.entry((
+            state_trie_tip_block.hash,
+            finish_tip_block.hash,
+            trie_changesets,
+        )) {
             dashmap::Entry::Occupied(entry) => entry.get().clone(),
             dashmap::Entry::Vacant(entry) => {
                 self.metrics.state_trie_overlay_cache_misses.increment(1);
@@ -262,6 +269,7 @@ where
                         self.provider(),
                         state_trie_tip_block,
                         finish_tip_block,
+                        trie_changesets,
                     )?;
                 if !overlay.skipped_for_reused_sparse_trie() {
                     entry.insert(overlay.clone());
@@ -269,11 +277,23 @@ where
                 overlay
             }
         };
-        let _ = self.state_trie_overlay.set(overlay);
-        Ok(self.state_trie_overlay.get().expect("state trie overlay was just initialized"))
+        let _ = state_trie_overlay.set(overlay);
+        Ok(state_trie_overlay.get().expect("state trie overlay was just initialized"))
     }
 
-    fn build_overlay(&self, input: TrieInputSorted) -> ProviderResult<TrieInputSorted>
+    const fn state_trie_overlay_mut(&self, trie_changesets: bool) -> &OnceCell<StateTrieOverlay> {
+        if trie_changesets {
+            &self.state_trie_overlay_with_trie_changesets
+        } else {
+            &self.state_trie_overlay
+        }
+    }
+
+    fn build_overlay(
+        &self,
+        input: TrieInputSorted,
+        trie_changesets: bool,
+    ) -> ProviderResult<TrieInputSorted>
     where
         Provider::Target: StageCheckpointReader
             + PruneCheckpointReader
@@ -283,13 +303,14 @@ where
             + BlockNumReader
             + StorageSettingsCache,
     {
-        let overlay = self.state_trie_overlay()?;
+        let overlay = self.state_trie_overlay(trie_changesets)?;
         if overlay.skipped_for_reused_sparse_trie() {
             return Err(ProviderError::UnsupportedProvider)
         }
-        let TrieInputSorted { nodes: input_nodes, state: input_state, prefix_sets } = input;
-        let mut nodes = Arc::clone(&overlay.trie_updates);
-        let mut state = Arc::clone(&overlay.hashed_post_state);
+        let TrieInputSorted { nodes: input_nodes, state: input_state, mut prefix_sets } = input;
+        let overlay_input = overlay.input();
+        let mut nodes = Arc::clone(&overlay_input.nodes);
+        let mut state = Arc::clone(&overlay_input.state);
 
         if !input_nodes.is_empty() {
             Arc::make_mut(&mut nodes).extend_ref_and_sort(&input_nodes);
@@ -298,6 +319,7 @@ where
             Arc::make_mut(&mut state).extend_ref_and_sort(&input_state);
         }
 
+        prefix_sets.extend_ref(&overlay_input.prefix_sets);
         Ok(TrieInputSorted::new(nodes, state, prefix_sets))
     }
 
@@ -511,16 +533,17 @@ where
 {
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
-            let input = self.build_overlay(TrieInputSorted::from_unsorted(
-                TrieInput::from_state(hashed_state),
-            ))?;
+            let input = self.build_overlay(
+                TrieInputSorted::from_unsorted(TrieInput::from_state(hashed_state)),
+                false,
+            )?;
             Ok(<DbStateRoot<'_, _, A>>::overlay_root_from_nodes(self.provider().tx(), input)?)
         })
     }
 
     fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
-            let input = self.build_overlay(TrieInputSorted::from_unsorted(input))?;
+            let input = self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
             Ok(<DbStateRoot<'_, _, A> as DatabaseStateRoot<_>>::overlay_root_from_nodes(
                 self.provider().tx(),
                 input,
@@ -533,9 +556,10 @@ where
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
-            let input = self.build_overlay(TrieInputSorted::from_unsorted(
-                TrieInput::from_state(hashed_state),
-            ))?;
+            let input = self.build_overlay(
+                TrieInputSorted::from_unsorted(TrieInput::from_state(hashed_state)),
+                true,
+            )?;
             Ok(<DbStateRoot<'_, _, A>>::overlay_root_from_nodes_with_updates(
                 self.provider().tx(),
                 input,
@@ -548,7 +572,7 @@ where
         input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
-            let input = self.build_overlay(TrieInputSorted::from_unsorted(input))?;
+            let input = self.build_overlay(TrieInputSorted::from_unsorted(input), true)?;
             Ok(
                 <DbStateRoot<'_, _, A> as DatabaseStateRoot<_>>::overlay_root_from_nodes_with_updates(
                     self.provider().tx(),
@@ -576,12 +600,15 @@ where
         hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
-            let input = self.build_overlay(TrieInputSorted::from_unsorted(
-                TrieInput::from_state(HashedPostState::from_hashed_storage(
-                    alloy_primitives::keccak256(address),
-                    hashed_storage,
+            let input = self.build_overlay(
+                TrieInputSorted::from_unsorted(TrieInput::from_state(
+                    HashedPostState::from_hashed_storage(
+                        alloy_primitives::keccak256(address),
+                        hashed_storage,
+                    ),
                 )),
-            ))?;
+                false,
+            )?;
             let hashed_storage = input
                 .state
                 .account_storages()
@@ -601,12 +628,15 @@ where
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageProof> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
-            let input = self.build_overlay(TrieInputSorted::from_unsorted(
-                TrieInput::from_state(HashedPostState::from_hashed_storage(
-                    alloy_primitives::keccak256(address),
-                    hashed_storage,
+            let input = self.build_overlay(
+                TrieInputSorted::from_unsorted(TrieInput::from_state(
+                    HashedPostState::from_hashed_storage(
+                        alloy_primitives::keccak256(address),
+                        hashed_storage,
+                    ),
                 )),
-            ))?;
+                false,
+            )?;
             let hashed_storage = input
                 .state
                 .account_storages()
@@ -631,12 +661,15 @@ where
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
-            let input = self.build_overlay(TrieInputSorted::from_unsorted(
-                TrieInput::from_state(HashedPostState::from_hashed_storage(
-                    alloy_primitives::keccak256(address),
-                    hashed_storage,
+            let input = self.build_overlay(
+                TrieInputSorted::from_unsorted(TrieInput::from_state(
+                    HashedPostState::from_hashed_storage(
+                        alloy_primitives::keccak256(address),
+                        hashed_storage,
+                    ),
                 )),
-            ))?;
+                false,
+            )?;
             let hashed_storage = input
                 .state
                 .account_storages()
@@ -674,7 +707,7 @@ where
     ) -> ProviderResult<AccountProof> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
             let TrieInputSorted { nodes, state, prefix_sets } =
-                self.build_overlay(TrieInputSorted::from_unsorted(input))?;
+                self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
             let input = TrieInput::new(
                 Arc::unwrap_or_clone(nodes).into(),
                 Arc::unwrap_or_clone(state).into(),
@@ -692,7 +725,7 @@ where
     ) -> ProviderResult<MultiProof> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
             let TrieInputSorted { nodes, state, prefix_sets } =
-                self.build_overlay(TrieInputSorted::from_unsorted(input))?;
+                self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
             let input = TrieInput::new(
                 Arc::unwrap_or_clone(nodes).into(),
                 Arc::unwrap_or_clone(state).into(),
@@ -710,7 +743,7 @@ where
     ) -> ProviderResult<DecodedMultiProofV2> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
             let TrieInputSorted { nodes, state, prefix_sets } =
-                self.build_overlay(TrieInputSorted::from_unsorted(input))?;
+                self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
             let input = TrieInput::new(
                 Arc::unwrap_or_clone(nodes).into(),
                 Arc::unwrap_or_clone(state).into(),
@@ -729,7 +762,7 @@ where
     ) -> ProviderResult<Vec<alloy_primitives::Bytes>> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
             let TrieInputSorted { nodes, state, prefix_sets } =
-                self.build_overlay(TrieInputSorted::from_unsorted(input))?;
+                self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
             let witness = TrieWitness::new(
                 InMemoryTrieCursorFactory::new(
                     DatabaseTrieCursorFactory::<_, A>::new(self.provider().tx()),
@@ -778,7 +811,7 @@ where
             return Ok(hashed_state)
         }
 
-        let overlay_state = self.build_overlay(TrieInputSorted::default())?.state;
+        let overlay_state = self.build_overlay(TrieInputSorted::default(), false)?.state;
         zero_destroyed_account_storage(
             &HashedPostStateCursorFactory::new(
                 DatabaseHashedCursorFactory::new(self.provider().tx()),
@@ -893,7 +926,7 @@ where
         Self: 'a;
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
-        let overlay = self.state_trie_overlay().map_err(into_database_error)?;
+        let overlay = self.state_trie_overlay(true).map_err(into_database_error)?;
         let cursor: Box<dyn TrieCursor + Send> = if self.is_v2 {
             Box::new(DatabaseAccountTrieCursor::<_, PackedKeyAdapter>::new(
                 self.provider().tx().cursor_read::<PackedAccountsTrie>()?,
@@ -903,14 +936,14 @@ where
                 self.provider().tx().cursor_read::<tables::AccountsTrie>()?,
             ))
         };
-        Ok(InMemoryTrieCursor::new_account(cursor, &overlay.trie_updates))
+        Ok(InMemoryTrieCursor::new_account(cursor, &overlay.input().nodes))
     }
 
     fn storage_trie_cursor(
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
-        let overlay = self.state_trie_overlay().map_err(into_database_error)?;
+        let overlay = self.state_trie_overlay(true).map_err(into_database_error)?;
         let cursor: Box<dyn TrieStorageCursor + Send> = if self.is_v2 {
             Box::new(DatabaseStorageTrieCursor::<_, PackedKeyAdapter>::new(
                 self.provider().tx().cursor_dup_read::<PackedStoragesTrie>()?,
@@ -922,7 +955,7 @@ where
                 hashed_address,
             ))
         };
-        Ok(InMemoryTrieCursor::new_storage(cursor, &overlay.trie_updates, hashed_address))
+        Ok(InMemoryTrieCursor::new_storage(cursor, &overlay.input().nodes, hashed_address))
     }
 }
 
@@ -954,10 +987,10 @@ where
         Self: 'a;
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
-        let overlay = self.state_trie_overlay().map_err(into_database_error)?;
+        let overlay = self.state_trie_overlay(true).map_err(into_database_error)?;
         HashedPostStateCursorFactory::new(
             DatabaseHashedCursorFactory::new(self.provider().tx()),
-            &overlay.hashed_post_state,
+            &overlay.input().state,
         )
         .hashed_account_cursor()
     }
@@ -966,10 +999,10 @@ where
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
-        let overlay = self.state_trie_overlay().map_err(into_database_error)?;
+        let overlay = self.state_trie_overlay(true).map_err(into_database_error)?;
         HashedPostStateCursorFactory::new(
             DatabaseHashedCursorFactory::new(self.provider().tx()),
-            &overlay.hashed_post_state,
+            &overlay.input().state,
         )
         .hashed_storage_cursor(hashed_address)
     }
@@ -987,7 +1020,7 @@ pub(crate) struct OverlayStateProviderFactoryMetrics {
     state_trie_overlay_cache_misses: Counter,
 }
 
-type StateTrieOverlayCache = Arc<DashMap<(BlockHash, BlockHash), StateTrieOverlay>>;
+type StateTrieOverlayCache = Arc<DashMap<(BlockHash, BlockHash, bool), StateTrieOverlay>>;
 
 #[derive(Clone, Debug)]
 struct CachedExecutionOverlay {
@@ -1122,11 +1155,11 @@ mod tests {
     }
 
     fn account_keys(overlay: &StateTrieOverlay) -> Vec<B256> {
-        overlay.hashed_post_state.accounts.iter().map(|(key, _)| *key).collect()
+        overlay.input().state.accounts.iter().map(|(key, _)| *key).collect()
     }
 
     fn account_node_paths(overlay: &StateTrieOverlay) -> Vec<Nibbles> {
-        overlay.trie_updates.account_nodes_ref().iter().map(|(path, _)| *path).collect()
+        overlay.input().nodes.account_nodes_ref().iter().map(|(path, _)| *path).collect()
     }
 
     #[test]
@@ -1142,7 +1175,7 @@ mod tests {
         );
 
         let provider = state_provider_factory.database_provider_ro().unwrap();
-        let first = provider.state_trie_overlay().unwrap().clone();
+        let first = provider.state_trie_overlay(false).unwrap().clone();
         assert_eq!(account_keys(&first), vec![B256::with_last_byte(3), B256::with_last_byte(4)]);
         drop(provider);
 
@@ -1158,7 +1191,7 @@ mod tests {
         provider_rw.commit().unwrap();
 
         let provider = state_provider_factory.database_provider_ro().unwrap();
-        let second = provider.state_trie_overlay().unwrap().clone();
+        let second = provider.state_trie_overlay(false).unwrap().clone();
         assert_eq!(account_keys(&second), vec![B256::with_last_byte(4)]);
         assert_eq!(account_node_paths(&second), vec![Nibbles::from_nibbles([4])]);
         assert_eq!(state_provider_factory.state_trie_overlay_cache.len(), 2);
@@ -1192,6 +1225,39 @@ mod tests {
     }
 
     #[test]
+    fn state_trie_overlay_cache_is_keyed_by_trie_changesets() {
+        let (factory, blocks) = setup_frontiers(1, 3);
+        let manager = OverlayManager::default();
+        for block in &blocks[2..=3] {
+            manager.insert_block(block.clone());
+        }
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            factory,
+            manager.overlay_builder(blocks[3].recovered_block().hash()),
+        );
+        let provider = state_provider_factory.database_provider_ro().unwrap();
+
+        provider.state_trie_overlay(false).unwrap();
+        provider.state_trie_overlay(true).unwrap();
+
+        assert_eq!(state_provider_factory.state_trie_overlay_cache.len(), 2);
+    }
+
+    #[test]
+    fn supplied_state_trie_overlay_is_available_in_both_modes() {
+        let (factory, _) = setup_frontiers(1, 1);
+        let provider = factory.provider().unwrap();
+        let provider = OverlayStateProvider::<&_, EthPrimitives>::new_with_state_trie(
+            &provider,
+            StateTrieOverlay::new(TrieInputSorted::default()),
+            false,
+        );
+
+        assert!(provider.state_trie_overlay(false).is_ok());
+        assert!(provider.state_trie_overlay(true).is_ok());
+    }
+
+    #[test]
     fn lazy_overlays_survive_manager_block_removal() {
         let (factory, blocks) = setup_frontiers(1, 1);
         let manager = OverlayManager::default();
@@ -1212,7 +1278,7 @@ mod tests {
             [blocks[2].recovered_block().num_hash(), blocks[3].recovered_block().num_hash()]
         );
         assert_eq!(
-            account_keys(provider.state_trie_overlay().unwrap()),
+            account_keys(provider.state_trie_overlay(false).unwrap()),
             vec![B256::with_last_byte(3), B256::with_last_byte(4)]
         );
     }
@@ -1230,7 +1296,7 @@ mod tests {
         );
 
         let provider = state_provider_factory.database_provider_ro().unwrap();
-        assert!(provider.state_trie_overlay().unwrap().skipped_for_reused_sparse_trie());
+        assert!(provider.state_trie_overlay(false).unwrap().skipped_for_reused_sparse_trie());
         assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
         assert!(matches!(
             provider.state_root(HashedPostState::default()),

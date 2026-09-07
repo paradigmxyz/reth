@@ -458,6 +458,16 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     /// Consumer: RPC
     fn all_transactions(&self) -> AllPoolTransactions<Self::Transaction>;
 
+    /// Returns all transactions of the given sender that are currently in the pool, grouped by
+    /// whether they are ready for inclusion in the next block or not.
+    ///
+    /// Both groups are collected from one snapshot of the pool, so a transaction that is moved
+    /// between sub-pools concurrently shows up in exactly one of them.
+    ///
+    /// Consumer: RPC
+    fn all_transactions_by_sender(&self, sender: Address)
+        -> AllPoolTransactions<Self::Transaction>;
+
     /// Returns the _hashes_ of all transactions regardless of whether they can be propagated or
     /// not.
     ///

@@ -192,7 +192,8 @@ async fn test_testsuite_produce_blocks() -> Result<()> {
     let test = TestBuilder::new()
         .with_setup(setup)
         .with_action(ProduceBlocks::<EthEngineTypes>::new(5))
-        .with_action(MakeCanonical::new());
+        .with_action(MakeCanonical::new())
+        .with_action(AssertChainTip::new(5));
 
     test.run::<EthereumNode>().await?;
 
