@@ -39,6 +39,7 @@ fn create_database_with_beacon_root_contract() -> CacheDB<EmptyDB> {
         nonce: 1,
         code: Some(Bytecode::new_raw(BEACON_ROOTS_CODE.clone())),
         account_id: None,
+        extension: Default::default(),
     };
 
     db.insert_account_info(BEACON_ROOTS_ADDRESS, beacon_root_contract_account);
@@ -55,6 +56,7 @@ fn create_database_with_withdrawal_requests_contract() -> CacheDB<EmptyDB> {
         code_hash: keccak256(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone()),
         code: Some(Bytecode::new_raw(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone())),
         account_id: None,
+        extension: Default::default(),
     };
 
     db.insert_account_info(
@@ -342,6 +344,7 @@ fn create_database_with_block_hashes(latest_block: u64) -> CacheDB<EmptyDB> {
         code: Some(Bytecode::new_raw(HISTORY_STORAGE_CODE.clone())),
         nonce: 1,
         account_id: None,
+        extension: Default::default(),
     };
 
     db.insert_account_info(HISTORY_STORAGE_ADDRESS, blockhashes_contract_account);

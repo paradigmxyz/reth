@@ -933,6 +933,7 @@ mod tests {
             balance: U256::from(1),
             nonce: 3,
             bytecode_hash: Some(B256::repeat_byte(0xaa)),
+            extension: Default::default(),
         }));
 
         assert_eq!(account.balance, U256::from(10));

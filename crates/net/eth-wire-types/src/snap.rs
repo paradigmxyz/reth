@@ -116,7 +116,7 @@ pub struct AccountData {
 
 impl AccountData {
     /// Encodes `account` in snap/2's slim format.
-    pub fn from_trie_account(hash: B256, account: &TrieAccount) -> Self {
+    pub fn from_trie_account<E>(hash: B256, account: &TrieAccount<E>) -> Self {
         let body = alloy_rlp::encode(SlimAccountBodyRef {
             nonce: account.nonce,
             balance: account.balance,

@@ -5189,7 +5189,15 @@ mod tests {
                 .tx
                 .cursor_write::<tables::PlainAccountState>()
                 .unwrap()
-                .upsert(address, &Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None })
+                .upsert(
+                    address,
+                    &Account {
+                        nonce: 0,
+                        balance: U256::ZERO,
+                        bytecode_hash: None,
+                        ..Default::default()
+                    },
+                )
                 .unwrap();
             provider_rw.commit().unwrap();
         }
@@ -5202,8 +5210,18 @@ mod tests {
         state_init.insert(
             address,
             (
-                Some(Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None }),
-                Some(Account { nonce: 1, balance: U256::ZERO, bytecode_hash: None }),
+                Some(Account {
+                    nonce: 0,
+                    balance: U256::ZERO,
+                    bytecode_hash: None,
+                    ..Default::default()
+                }),
+                Some(Account {
+                    nonce: 1,
+                    balance: U256::ZERO,
+                    bytecode_hash: None,
+                    ..Default::default()
+                }),
                 storage_map,
             ),
         );
@@ -5213,7 +5231,12 @@ mod tests {
         block_reverts.insert(
             address,
             (
-                Some(Some(Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None })),
+                Some(Some(Account {
+                    nonce: 0,
+                    balance: U256::ZERO,
+                    bytecode_hash: None,
+                    ..Default::default()
+                })),
                 vec![StorageEntry { key: slot_key, value: U256::ZERO }],
             ),
         );
@@ -5815,7 +5838,12 @@ mod tests {
                 .unwrap()
                 .upsert(
                     hashed_address,
-                    &Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None },
+                    &Account {
+                        nonce: 0,
+                        balance: U256::ZERO,
+                        bytecode_hash: None,
+                        ..Default::default()
+                    },
                 )
                 .unwrap();
             provider_rw.commit().unwrap();

@@ -54,7 +54,7 @@ mod account_extension_tests {
     use alloy_trie::TrieAccountExtension;
     use reth_primitives_traits::{Account, InMemorySize};
 
-    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, reth_codecs::Compact)]
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     struct TestExtension(u64);
 

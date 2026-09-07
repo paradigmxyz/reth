@@ -740,7 +740,7 @@ where
             db.database.storage_root(address, hashed_storage).map_err(Eth::Error::from_eth_err)?
         };
 
-        Ok(Some(Account { balance, nonce, code_hash, storage_root }))
+        Ok(Some(Account { balance, nonce, code_hash, storage_root, extension: Default::default() }))
     }
 
     /// Retrieves the account's balance, nonce, and code from the given state.

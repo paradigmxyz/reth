@@ -9,7 +9,7 @@ use alloy_primitives::{
 use alloy_rlp::EMPTY_STRING_CODE;
 use reth_db::{cursor::DbCursorRW, tables};
 use reth_db_api::transaction::DbTxMut;
-use reth_primitives_traits::{Account, StorageEntry};
+use reth_primitives_traits::{Account, EmptyAccountExtension, StorageEntry};
 use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
 use reth_storage_api::StorageSettingsCache;
 use reth_trie::{
@@ -43,7 +43,10 @@ fn includes_empty_node_preimage() {
         )
         .with_execution_witness_mode(ExecutionWitnessMode::Legacy)
         .compute(HashedPostState {
-            accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
+            accounts: HashMap::from_iter([(
+                hashed_address,
+                Some(Account::<EmptyAccountExtension>::default()),
+            )]),
             storages: HashMap::default(),
         })
         .unwrap();
@@ -58,7 +61,10 @@ fn includes_empty_node_preimage() {
         )
         .with_execution_witness_mode(ExecutionWitnessMode::Canonical)
         .compute(HashedPostState {
-            accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
+            accounts: HashMap::from_iter([(
+                hashed_address,
+                Some(Account::<EmptyAccountExtension>::default()),
+            )]),
             storages: HashMap::default(),
         })
         .unwrap();
@@ -82,7 +88,10 @@ fn includes_empty_node_preimage() {
         )
         .with_execution_witness_mode(ExecutionWitnessMode::Legacy)
         .compute(HashedPostState {
-            accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
+            accounts: HashMap::from_iter([(
+                hashed_address,
+                Some(Account::<EmptyAccountExtension>::default()),
+            )]),
             storages: HashMap::from_iter([(
                 hashed_address,
                 HashedStorage::from_iter([(hashed_slot, U256::from(1))]),
@@ -101,7 +110,10 @@ fn includes_empty_node_preimage() {
         )
         .with_execution_witness_mode(ExecutionWitnessMode::Canonical)
         .compute(HashedPostState {
-            accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
+            accounts: HashMap::from_iter([(
+                hashed_address,
+                Some(Account::<EmptyAccountExtension>::default()),
+            )]),
             storages: HashMap::from_iter([(
                 hashed_address,
                 HashedStorage::from_iter([(hashed_slot, U256::from(1))]),
@@ -147,7 +159,10 @@ fn includes_nodes_for_destroyed_storage_nodes() {
             DatabaseHashedCursorFactory::new(provider.tx_ref()),
         )
         .compute(HashedPostState {
-            accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
+            accounts: HashMap::from_iter([(
+                hashed_address,
+                Some(Account::<EmptyAccountExtension>::default()),
+            )]),
             storages: HashMap::from_iter([(
                 hashed_address,
                 HashedStorage::from_iter([(hashed_slot, U256::ZERO)]),
@@ -200,7 +215,10 @@ fn correctly_decodes_branch_node_values() {
             DatabaseHashedCursorFactory::new(provider.tx_ref()),
         )
         .compute(HashedPostState {
-            accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
+            accounts: HashMap::from_iter([(
+                hashed_address,
+                Some(Account::<EmptyAccountExtension>::default()),
+            )]),
             storages: HashMap::from_iter([(
                 hashed_address,
                 HashedStorage::from_iter(
@@ -231,7 +249,7 @@ fn skips_storage_root_node_for_account_only_changes_in_canonical_mode() {
     provider
         .insert_account_for_hashing([(
             address,
-            Some(Account { balance: U256::from(1), ..Default::default() }),
+            Some(Account::<EmptyAccountExtension> { balance: U256::from(1), ..Default::default() }),
         )])
         .unwrap();
     provider
@@ -250,7 +268,10 @@ fn skips_storage_root_node_for_account_only_changes_in_canonical_mode() {
         let target_state = HashedPostState {
             accounts: HashMap::from_iter([(
                 hashed_address,
-                Some(Account { balance: U256::from(2), ..Default::default() }),
+                Some(Account::<EmptyAccountExtension> {
+                    balance: U256::from(2),
+                    ..Default::default()
+                }),
             )]),
             storages: HashMap::default(),
         };
@@ -342,7 +363,10 @@ fn canonical_mode_handles_mixed_storage_inserts_and_removals() {
 
         // Apply one removal and one insertion in the same storage trie subtree.
         let state_diff = HashedPostState {
-            accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
+            accounts: HashMap::from_iter([(
+                hashed_address,
+                Some(Account::<EmptyAccountExtension>::default()),
+            )]),
             storages: HashMap::from_iter([(
                 hashed_address,
                 HashedStorage::from_iter([

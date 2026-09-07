@@ -1393,6 +1393,7 @@ mod tests {
                     code_hash: KECCAK_EMPTY,
                     code: Some(Default::default()),
                     account_id: None,
+                    extension: Default::default(),
                 };
                 account.storage = storage;
                 account.status = AccountStatus::Touched;

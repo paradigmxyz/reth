@@ -824,6 +824,7 @@ mod tests {
                     code_hash: KECCAK_EMPTY,
                     code: None,
                     account_id: None,
+                    extension: Default::default(),
                 },
             )
             .build();

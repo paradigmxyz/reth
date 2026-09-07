@@ -1885,11 +1885,13 @@ mod tests {
         use std::collections::HashMap;
 
         let address = alloy_primitives::Address::with_last_byte(1);
-        let account = reth_primitives_traits::Account {
-            nonce: 1,
-            balance: U256::from(1000),
-            bytecode_hash: None,
-        };
+        let account =
+            reth_primitives_traits::Account::<reth_primitives_traits::EmptyAccountExtension> {
+                nonce: 1,
+                balance: U256::from(1000),
+                bytecode_hash: None,
+                extension: Default::default(),
+            };
         let slot = U256::from(0x42);
         let slot_b256 = B256::from(slot);
 
@@ -1970,11 +1972,13 @@ mod tests {
         let (database_blocks, in_memory_blocks) = random_blocks(&mut rng, 1, 1, None, None, 0..1);
 
         let address = alloy_primitives::Address::with_last_byte(1);
-        let account = reth_primitives_traits::Account {
-            nonce: 1,
-            balance: U256::from(1000),
-            bytecode_hash: None,
-        };
+        let account =
+            reth_primitives_traits::Account::<reth_primitives_traits::EmptyAccountExtension> {
+                nonce: 1,
+                balance: U256::from(1000),
+                bytecode_hash: None,
+                extension: Default::default(),
+            };
         let slot = U256::from(0x42);
 
         let provider_rw = factory.provider_rw()?;
@@ -2069,11 +2073,13 @@ mod tests {
         let (database_blocks, in_memory_blocks) = random_blocks(&mut rng, 2, 1, None, None, 0..1);
 
         let address = alloy_primitives::Address::with_last_byte(1);
-        let account = reth_primitives_traits::Account {
-            nonce: 1,
-            balance: U256::from(1000),
-            bytecode_hash: None,
-        };
+        let account =
+            reth_primitives_traits::Account::<reth_primitives_traits::EmptyAccountExtension> {
+                nonce: 1,
+                balance: U256::from(1000),
+                bytecode_hash: None,
+                extension: Default::default(),
+            };
         let slot = U256::from(0x42);
 
         let provider_rw = factory.provider_rw()?;

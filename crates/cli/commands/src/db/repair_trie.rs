@@ -19,6 +19,7 @@ use reth_node_metrics::{
     server::{MetricServer, MetricServerConfig},
     version::VersionInfo,
 };
+use reth_primitives_traits::EmptyAccountExtension;
 use reth_provider::{
     providers::ProviderNodeTypes, ChainSpecProvider, HeaderProvider, StageCheckpointReader,
 };
@@ -126,7 +127,7 @@ fn verify_only<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
 
 fn do_verify_only<TX: DbTx, A: TrieTableAdapter>(tx: &TX) -> eyre::Result<()> {
     // Create the verifier
-    let hashed_cursor_factory = DatabaseHashedCursorFactory::new(tx);
+    let hashed_cursor_factory = DatabaseHashedCursorFactory::<_, EmptyAccountExtension>::new(tx);
     let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
     let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory)?;
 
@@ -248,7 +249,7 @@ where
     // Create the cursor factories. These cannot accept the `&mut` tx above because they
     // require it to be AsRef.
     let tx = provider_rw.tx_ref();
-    let hashed_cursor_factory = DatabaseHashedCursorFactory::new(tx);
+    let hashed_cursor_factory = DatabaseHashedCursorFactory::<_, EmptyAccountExtension>::new(tx);
     let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
 
     // Create the verifier

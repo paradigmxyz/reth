@@ -47,6 +47,7 @@ parking_lot = { workspace = true, optional = true }
 
 [dev-dependencies]
 # reth
+reth-codecs.workspace = true
 reth-primitives-traits = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
@@ -57,6 +58,7 @@ triehash.workspace = true
 # misc
 assert_matches.workspace = true
 criterion.workspace = true
+modular-bitfield.workspace = true
 parking_lot.workspace = true
 pretty_assertions.workspace = true
 proptest-arbitrary-interop.workspace = true

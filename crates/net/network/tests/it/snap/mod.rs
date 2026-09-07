@@ -222,7 +222,15 @@ async fn account_range_roundtrip_carries_slim_encoding_and_proof() {
     let factory = genesis_provider_factory();
     let accounts: Vec<(Address, Account)> = (0..5u64)
         .map(|nonce| {
-            (Address::random(), Account { nonce, balance: U256::from(nonce), bytecode_hash: None })
+            (
+                Address::random(),
+                Account {
+                    nonce,
+                    balance: U256::from(nonce),
+                    bytecode_hash: None,
+                    ..Default::default()
+                },
+            )
         })
         .collect();
 
@@ -296,7 +304,15 @@ async fn account_range_bounded_by_response_bytes_excludes_trailing_account() {
     let factory = genesis_provider_factory();
     let accounts: Vec<(Address, Account)> = (0..5u64)
         .map(|nonce| {
-            (Address::random(), Account { nonce, balance: U256::from(nonce), bytecode_hash: None })
+            (
+                Address::random(),
+                Account {
+                    nonce,
+                    balance: U256::from(nonce),
+                    bytecode_hash: None,
+                    ..Default::default()
+                },
+            )
         })
         .collect();
 
@@ -360,7 +376,8 @@ async fn storage_range_roundtrip_carries_rlp_values_and_proof() {
 
     let factory = genesis_provider_factory();
     let address = Address::random();
-    let account = Account { nonce: 1, balance: U256::from(1), bytecode_hash: None };
+    let account =
+        Account { nonce: 1, balance: U256::from(1), bytecode_hash: None, ..Default::default() };
     let slots: Vec<StorageEntry> = (0..6u8)
         .map(|i| StorageEntry { key: B256::with_last_byte(i), value: U256::from(i as u64 + 1) })
         .collect();
@@ -430,7 +447,8 @@ async fn storage_range_empty_window_returns_boundary_slot() {
 
     let factory = genesis_provider_factory();
     let address = Address::random();
-    let account = Account { nonce: 1, balance: U256::from(1), bytecode_hash: None };
+    let account =
+        Account { nonce: 1, balance: U256::from(1), bytecode_hash: None, ..Default::default() };
     let slots: Vec<StorageEntry> = (0..4u8)
         .map(|i| StorageEntry { key: B256::with_last_byte(i), value: U256::from(i as u64 + 1) })
         .collect();
@@ -496,10 +514,14 @@ async fn storage_ranges_multi_account_bounds_only_first_account() {
     reth_tracing::init_test_tracing();
 
     let factory = genesis_provider_factory();
-    let (address_a, account_a) =
-        (Address::random(), Account { nonce: 1, balance: U256::from(1), bytecode_hash: None });
-    let (address_b, account_b) =
-        (Address::random(), Account { nonce: 2, balance: U256::from(2), bytecode_hash: None });
+    let (address_a, account_a) = (
+        Address::random(),
+        Account { nonce: 1, balance: U256::from(1), bytecode_hash: None, ..Default::default() },
+    );
+    let (address_b, account_b) = (
+        Address::random(),
+        Account { nonce: 2, balance: U256::from(2), bytecode_hash: None, ..Default::default() },
+    );
     // 2 slots for A (fits fully in the byte budget below), 5 for B (doesn't).
     let slots_a: Vec<StorageEntry> = (0..2u8)
         .map(|i| StorageEntry { key: B256::with_last_byte(i), value: U256::from(i as u64 + 1) })
@@ -606,8 +628,10 @@ async fn retained_and_expired_account_range_requests_resolve_without_hanging() {
     let mut rng = generators::rng();
 
     // Real trie root of `expired_account` alone, committed to block 0.
-    let expired_account =
-        (Address::random(), Account { nonce: 3, balance: U256::from(3), bytecode_hash: None });
+    let expired_account = (
+        Address::random(),
+        Account { nonce: 3, balance: U256::from(3), bytecode_hash: None, ..Default::default() },
+    );
     {
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw
@@ -618,8 +642,10 @@ async fn retained_and_expired_account_range_requests_resolve_without_hanging() {
     let expired_root = factory.latest().unwrap().state_root(HashedPostState::default()).unwrap();
 
     // Real trie root of `expired_account` + `retained_account` together, committed to block 64.
-    let retained_account =
-        (Address::random(), Account { nonce: 7, balance: U256::from(7), bytecode_hash: None });
+    let retained_account = (
+        Address::random(),
+        Account { nonce: 7, balance: U256::from(7), bytecode_hash: None, ..Default::default() },
+    );
     {
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw

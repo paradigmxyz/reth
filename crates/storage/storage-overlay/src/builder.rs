@@ -999,6 +999,7 @@ mod tests {
             code_hash,
             code: Some(code.clone()),
             account_id: AccountId::new(6),
+            extension: Default::default(),
         };
         let state = BundleState::builder(0..=0)
             .state_present_account_info(address, account.clone())

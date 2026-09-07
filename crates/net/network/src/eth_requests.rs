@@ -1144,9 +1144,22 @@ mod tests {
             vec![
                 (
                     first_hash,
-                    Account { nonce: 1, balance: U256::from(2), bytecode_hash: Some(code_hash) },
+                    Account {
+                        nonce: 1,
+                        balance: U256::from(2),
+                        bytecode_hash: Some(code_hash),
+                        ..Default::default()
+                    },
                 ),
-                (second_hash, Account { nonce: 3, balance: U256::from(4), bytecode_hash: None }),
+                (
+                    second_hash,
+                    Account {
+                        nonce: 3,
+                        balance: U256::from(4),
+                        bytecode_hash: None,
+                        ..Default::default()
+                    },
+                ),
             ],
             // A hash-limit stop (not an exhausted trie) so a boundary proof is still expected,
             // matching the mocked `proof` below.
@@ -1195,7 +1208,15 @@ mod tests {
         let provider = MockEthProvider::default();
         let hash = B256::repeat_byte(0x01);
         provider.set_snap_account_range(
-            vec![(hash, Account { nonce: 1, balance: U256::from(2), bytecode_hash: None })],
+            vec![(
+                hash,
+                Account {
+                    nonce: 1,
+                    balance: U256::from(2),
+                    bytecode_hash: None,
+                    ..Default::default()
+                },
+            )],
             RangeEnd::Exhausted,
         );
         provider.set_snap_storage_root(hash, EMPTY_ROOT_HASH);

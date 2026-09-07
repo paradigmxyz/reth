@@ -272,7 +272,13 @@ pub trait EthState: LoadState + SpawnBlocking {
                     .storage_root(address, Default::default())
                     .map_err(Self::Error::from_eth_err)?;
 
-                Ok(Some(Account { balance, nonce, code_hash, storage_root }))
+                Ok(Some(Account {
+                    balance,
+                    nonce,
+                    code_hash,
+                    storage_root,
+                    extension: Default::default(),
+                }))
             })
             .await
         }

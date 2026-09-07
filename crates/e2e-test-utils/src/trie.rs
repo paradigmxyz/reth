@@ -2,6 +2,7 @@
 
 use alloy_consensus::BlockHeader;
 use eyre::{ensure, eyre, Result};
+use reth_primitives_traits::EmptyAccountExtension;
 use reth_provider::{
     BlockNumReader, DBProvider, DatabaseProviderFactory, HeaderProvider, StorageSettingsCache,
 };
@@ -64,7 +65,7 @@ where
         // storage tables.
         let recomputed = StateRoot::new(
             DatabaseTrieCursorFactory::<_, A>::new(tx),
-            DatabaseHashedCursorFactory::new(tx),
+            DatabaseHashedCursorFactory::<_, EmptyAccountExtension>::new(tx),
         )
         .with_prefix_sets(TriePrefixSets {
             account_prefix_set: PrefixSetMut::all().freeze(),
@@ -78,7 +79,10 @@ where
         );
 
         let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
-        let verifier = Verifier::new(&trie_cursor_factory, DatabaseHashedCursorFactory::new(tx))?;
+        let verifier = Verifier::new(
+            &trie_cursor_factory,
+            DatabaseHashedCursorFactory::<_, EmptyAccountExtension>::new(tx),
+        )?;
         let mut inconsistencies = Vec::new();
         for output in verifier {
             match output? {

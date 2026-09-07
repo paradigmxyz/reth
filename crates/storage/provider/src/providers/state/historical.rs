@@ -993,13 +993,19 @@ mod tests {
         )
         .unwrap();
 
-        let acc_plain = Account { nonce: 100, balance: U256::ZERO, bytecode_hash: None };
-        let acc_at15 = Account { nonce: 15, balance: U256::ZERO, bytecode_hash: None };
-        let acc_at10 = Account { nonce: 10, balance: U256::ZERO, bytecode_hash: None };
-        let acc_at7 = Account { nonce: 7, balance: U256::ZERO, bytecode_hash: None };
-        let acc_at3 = Account { nonce: 3, balance: U256::ZERO, bytecode_hash: None };
+        let acc_plain =
+            Account { nonce: 100, balance: U256::ZERO, bytecode_hash: None, ..Default::default() };
+        let acc_at15 =
+            Account { nonce: 15, balance: U256::ZERO, bytecode_hash: None, ..Default::default() };
+        let acc_at10 =
+            Account { nonce: 10, balance: U256::ZERO, bytecode_hash: None, ..Default::default() };
+        let acc_at7 =
+            Account { nonce: 7, balance: U256::ZERO, bytecode_hash: None, ..Default::default() };
+        let acc_at3 =
+            Account { nonce: 3, balance: U256::ZERO, bytecode_hash: None, ..Default::default() };
 
-        let higher_acc_plain = Account { nonce: 4, balance: U256::ZERO, bytecode_hash: None };
+        let higher_acc_plain =
+            Account { nonce: 4, balance: U256::ZERO, bytecode_hash: None, ..Default::default() };
 
         // setup
         tx.put::<tables::AccountChangeSets>(1, AccountBeforeTx { address: ADDRESS, info: None })
@@ -1379,9 +1385,21 @@ mod tests {
 
         let slot = U256::from_be_bytes(*STORAGE);
         let account: revm::state::AccountInfo =
-            Account { nonce: 1, balance: U256::from(1000), bytecode_hash: None }.into();
+            Account::<reth_primitives_traits::EmptyAccountExtension> {
+                nonce: 1,
+                balance: U256::from(1000),
+                bytecode_hash: None,
+                ..Default::default()
+            }
+            .into();
         let higher_account: revm::state::AccountInfo =
-            Account { nonce: 1, balance: U256::from(2000), bytecode_hash: None }.into();
+            Account::<reth_primitives_traits::EmptyAccountExtension> {
+                nonce: 1,
+                balance: U256::from(2000),
+                bytecode_hash: None,
+                ..Default::default()
+            }
+            .into();
 
         let mut rng = generators::rng();
         let blocks = random_block_range(
@@ -1448,14 +1466,24 @@ mod tests {
             .tx_ref()
             .put::<tables::HashedAccounts>(
                 hashed_address,
-                Account { nonce: 1, balance: U256::from(1000), bytecode_hash: None },
+                Account {
+                    nonce: 1,
+                    balance: U256::from(1000),
+                    bytecode_hash: None,
+                    ..Default::default()
+                },
             )
             .unwrap();
         provider_rw
             .tx_ref()
             .put::<tables::HashedAccounts>(
                 hashed_higher_address,
-                Account { nonce: 1, balance: U256::from(2000), bytecode_hash: None },
+                Account {
+                    nonce: 1,
+                    balance: U256::from(2000),
+                    bytecode_hash: None,
+                    ..Default::default()
+                },
             )
             .unwrap();
         provider_rw.commit().unwrap();

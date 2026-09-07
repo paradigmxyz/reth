@@ -1139,7 +1139,12 @@ mod tests {
         let mut hashed_state = HashedPostState::default();
         hashed_state.accounts.insert(
             address,
-            Some(Account { balance: U256::from(100), nonce: 1, bytecode_hash: None }),
+            Some(Account {
+                balance: U256::from(100),
+                nonce: 1,
+                bytecode_hash: None,
+                ..Default::default()
+            }),
         );
         let mut storage = reth_trie::HashedStorage::default();
         storage.storage.insert(slot, value);
@@ -1208,11 +1213,14 @@ mod tests {
             nonce: 7,
             balance: U256::from(42),
             bytecode_hash: Some(B256::from([0xAA; 32])),
+            extension: Default::default(),
         });
         let mut account_rlp_buf = vec![0x00, 0x01];
 
         let encoded = encode_account_leaf_value(account, storage_root, &mut account_rlp_buf);
-        let decoded = TrieAccount::decode(&mut &encoded[..]).expect("valid account RLP");
+        let decoded =
+            TrieAccount::<reth_primitives_traits::EmptyAccountExtension>::decode(&mut &encoded[..])
+                .expect("valid account RLP");
 
         assert_eq!(decoded.nonce, 7);
         assert_eq!(decoded.balance, U256::from(42));
