@@ -60,9 +60,10 @@ where
     if !result.sender_approved || result.prefix_end != prefix.prefix_end {
         return Err(policy("validation prefix did not grant required approvals"))
     }
-    if (result.execution_gas > prefix.declared_execution_gas) ||
-        (result.state_gas > prefix.state_gas)
-    {
+    if result.execution_gas > prefix.declared_execution_gas {
+        return Err(policy("validation prefix exceeded its declared work budget"))
+    }
+    if result.state_gas > prefix.state_gas {
         return Err(policy("validation prefix exceeded its declared work budget"))
     }
     let expiry = inspector.expiry();
