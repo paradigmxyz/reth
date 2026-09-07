@@ -520,7 +520,8 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     /// The peer tracking the most hashes gives up its oldest pending hash, so a group of peers
     /// flooding the fetcher with announcements evicts its own hashes rather than those of other
     /// peers. The announcer gives way when it tracks as many hashes as the busiest peer. If the
-    /// chosen peer has no pending hash, the oldest pending hash overall is evicted.
+    /// chosen peer has no exclusively announced pending hash, the oldest such hash overall is
+    /// evicted. Shared hashes are preserved so co-announcing another peer's work cannot evict it.
     ///
     /// `queued` are the hashes of the current announcement that are not in the announcer's queue
     /// yet, `queued_start` marks how many of them were evicted again already.
@@ -545,21 +546,33 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         }
         if key == announcer && *queued_start < queued.len() {
             let hash = queued[*queued_start];
-            *queued_start += 1;
-            self.remove_hash(&hash);
-            return true
+            if self.hashes.get(&hash).is_some_and(|entry| entry.candidates.len() == 1) {
+                *queued_start += 1;
+                self.remove_hash(&hash);
+                return true
+            }
         }
         self.evict_oldest_pending()
     }
 
-    /// Evicts the oldest pending hash queued for the peer and returns whether one was found.
+    /// Evicts the oldest pending hash announced only by this peer, if one exists.
     ///
     /// Queue entries that are drained on the way are handled like when packing a request.
     fn evict_oldest_pending_of(&mut self, key: PeerKey) -> bool {
         let Some(peer) = self.peers.get_mut(&key) else { return false };
         let mut evict = None;
-        while let Some(hash) = peer.queue.pop_front() {
+        // Shared entries stay queued. Bound scanning so repeated announcements at capacity
+        // cannot repeatedly walk a peer's entire queue of shared hashes.
+        for _ in 0..peer.queue.len().min(MAX_EVICTION_ATTEMPTS) {
+            let Some(hash) = peer.queue.pop_front() else { break };
             let Some(entry) = self.hashes.get_mut(&hash) else { continue };
+            if !entry.candidates.iter().any(|candidate| candidate.peer == key) {
+                continue
+            }
+            if entry.candidates.len() > 1 {
+                peer.queue.push_back(hash);
+                continue
+            }
             let Some(candidate) = entry.candidate_mut(key) else { continue };
             candidate.set_queued(false);
             if entry.fetching_by.is_some() {
@@ -580,15 +593,14 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         true
     }
 
-    /// Evicts the oldest pending hash overall to make room for a new one.
+    /// Evicts the oldest exclusively announced pending hash to make room for a new one.
     ///
-    /// Returns `false` if only hashes that are being fetched were found among the oldest tracked
-    /// hashes.
+    /// Returns `false` if only shared or fetching hashes were found within the search budget.
     fn evict_oldest_pending(&mut self) -> bool {
         let mut attempts = 0;
         while let Some(hash) = self.order.pop_front() {
             let Some(entry) = self.hashes.get(&hash) else { continue };
-            if entry.fetching_by.is_some() {
+            if entry.fetching_by.is_some() || entry.candidates.len() > 1 {
                 self.order.push_back(hash);
                 attempts += 1;
                 if attempts >= MAX_EVICTION_ATTEMPTS {
@@ -2125,6 +2137,55 @@ mod tests {
         // the flooders gave up their oldest hashes
         assert!(rig.fetcher.candidate_peers(&hashes(100..101)[0]).is_empty());
         assert_eq!(rig.fetcher.candidate_peers(&hashes(259..260)[0]), vec![flooders[1]]);
+    }
+
+    #[test]
+    fn capacity_eviction_preserves_coannounced_hashes() {
+        let config = TransactionFetcherConfig {
+            max_capacity_cache_txns_pending_fetch: 4,
+            ..Default::default()
+        };
+        let mut rig = Rig::with_config(config);
+        let honest = peer(1);
+        let flooder = peer(2);
+        let newcomer = peer(3);
+        for peer_id in [honest, flooder, newcomer] {
+            rig.add_peer(peer_id);
+        }
+        let shared = hash(0);
+        rig.announce(honest, &[shared]);
+        rig.announce(flooder, &hashes(0..4));
+        rig.announce(newcomer, &[hash(4)]);
+        assert_eq!(rig.fetcher.num_hashes(), 4);
+        assert_eq!(rig.fetcher.candidate_peers(&shared), vec![honest, flooder]);
+        assert!(rig.fetcher.candidate_peers(&hash(1)).is_empty());
+        assert_eq!(rig.fetcher.candidate_peers(&hash(4)), vec![newcomer]);
+        rig.dispatch();
+        assert_eq!(rig.fetcher.fetching_peer(&shared), Some(honest));
+    }
+
+    #[test]
+    fn capacity_with_only_shared_hashes_rejects_new_announcements() {
+        let config = TransactionFetcherConfig {
+            max_capacity_cache_txns_pending_fetch: 2,
+            ..Default::default()
+        };
+        let mut rig = Rig::with_config(config);
+        for peer_id in [peer(1), peer(2), peer(3)] {
+            rig.add_peer(peer_id);
+        }
+        for peer_id in [peer(1), peer(2)] {
+            rig.announce(peer_id, &hashes(0..2));
+        }
+        // The global fallback must preserve shared hashes too.
+        rig.announce(peer(3), &[hash(2)]);
+        assert_eq!(rig.fetcher.num_hashes(), 2);
+        assert!(rig.fetcher.candidate_peers(&hash(2)).is_empty());
+        for hash in hashes(0..2) {
+            assert_eq!(rig.fetcher.candidate_peers(&hash), vec![peer(1), peer(2)]);
+        }
+        rig.dispatch();
+        assert_eq!(rig.fetcher.num_fetching_hashes(), 2);
     }
 
     #[test]
