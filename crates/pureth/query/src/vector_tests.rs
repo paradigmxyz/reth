@@ -1,19 +1,20 @@
 use crate::{
-    vector::{decode_fixed, decode_hex},
-    vector_records::{load_fixture, load_manifest, load_proof_case, load_root_case},
-    verify_receipt_log_address, LogInput, ReceiptFixture, ReceiptInput,
+    vector::{decode_fixed, decode_hex, LogInput, ReceiptFixture, ReceiptInput},
+    vector_records::{load_fixture, load_proof_case, load_root_case},
+    verify_receipt_log_address, EnvelopeError, ProofError,
 };
+use alloy_primitives::B256;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{fs, path::PathBuf};
 
 #[derive(Clone)]
 struct Node {
-    root: [u8; 32],
+    root: B256,
     children: Option<(Box<Self>, Box<Self>)>,
 }
 
-const fn leaf(root: [u8; 32]) -> Node {
+const fn leaf(root: B256) -> Node {
     Node { root, children: None }
 }
 
@@ -21,24 +22,27 @@ fn pair(left: Node, right: Node) -> Node {
     let mut hasher = Sha256::new();
     hasher.update(left.root);
     hasher.update(right.root);
-    Node { root: hasher.finalize().into(), children: Some((Box::new(left), Box::new(right))) }
+    Node {
+        root: B256::from(<[u8; 32]>::from(hasher.finalize())),
+        children: Some((Box::new(left), Box::new(right))),
+    }
 }
 
 const fn zero() -> Node {
-    leaf([0; 32])
+    leaf(B256::ZERO)
 }
 
 fn uint_node(value: u64, byte_length: usize) -> Node {
     let mut root = [0; 32];
     root[..byte_length].copy_from_slice(&value.to_le_bytes()[..byte_length]);
-    leaf(root)
+    leaf(B256::from(root))
 }
 
 fn bytes_node(value: &[u8]) -> Node {
     assert!(value.len() <= 32);
     let mut root = [0; 32];
     root[..value.len()].copy_from_slice(value);
-    leaf(root)
+    leaf(B256::from(root))
 }
 
 fn merkleize(mut nodes: Vec<Node>, width: usize) -> Node {
@@ -58,7 +62,7 @@ fn merkleize(mut nodes: Vec<Node>, width: usize) -> Node {
 fn mix_in_length(contents: Node, length: u64) -> Node {
     let mut length_node = [0; 32];
     length_node[..8].copy_from_slice(&length.to_le_bytes());
-    pair(contents, leaf(length_node))
+    pair(contents, leaf(B256::from(length_node)))
 }
 
 fn progressive_contents(nodes: &[Node], group_size: usize) -> Node {
@@ -81,7 +85,7 @@ fn progressive_bytes(bytes: &[u8]) -> Node {
     progressive_list(bytes.chunks(32).map(bytes_node).collect(), bytes.len())
 }
 
-fn branch_at(root: &Node, gindex: u64) -> Vec<[u8; 32]> {
+fn branch_at(root: &Node, gindex: u64) -> Vec<B256> {
     let depth = u64::BITS - 1 - gindex.leading_zeros();
     let mut current = root;
     let mut branch = Vec::with_capacity(depth as usize);
@@ -100,8 +104,8 @@ fn branch_at(root: &Node, gindex: u64) -> Vec<[u8; 32]> {
     branch
 }
 
-fn decode_node(value: &str) -> [u8; 32] {
-    decode_fixed(value).unwrap()
+fn decode_node(value: &str) -> B256 {
+    B256::from(decode_fixed(value).unwrap())
 }
 
 fn build_log(log: &LogInput) -> Node {
@@ -146,67 +150,49 @@ fn read_vector(path: &str) -> Vec<u8> {
     fs::read(vectors().join(path)).unwrap()
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
-    let digest = Sha256::digest(bytes);
-    let mut output = String::from("0x");
-    for byte in digest {
-        output.push_str(&format!("{byte:02x}"));
-    }
-    output
-}
+fn proof_cases() -> Vec<(String, String, String)> {
+    let mut cases = Vec::new();
+    for directory in fs::read_dir(vectors()).unwrap() {
+        let directory = directory.unwrap();
+        if !directory.file_type().unwrap().is_dir() {
+            continue;
+        }
 
-#[test]
-fn manifest_binds_all_supplied_test_data() {
-    let schema = include_bytes!("../test-data/pureth_receipt_v0.schema.json");
-    let manifest = load_manifest(schema, &read_vector("manifest.json")).unwrap();
-    let case_ids = manifest.cases.iter().map(|case| case.case_id.as_str()).collect::<Vec<_>>();
-    assert_eq!(
-        case_ids,
-        [
-            "empty_receipts",
-            "singleton_baseline",
-            "two_receipts",
-            "two_logs",
-            "ordering_mutation",
-            "progressive_boundary",
-            "value_mutation",
-        ]
-    );
-
-    for case in &manifest.cases {
-        assert!(!case.fixtures.is_empty());
-        for fixture in &case.fixtures {
-            assert_eq!(fixture.sha256, sha256_hex(&read_vector(&fixture.path)));
+        let case_id = directory.file_name().to_string_lossy().into_owned();
+        for entry in fs::read_dir(directory.path()).unwrap() {
+            let name = entry.unwrap().file_name().to_string_lossy().into_owned();
+            if name.starts_with("proof") && name.ends_with(".json") {
+                let fixture = name.replacen("proof", "fixture", 1);
+                cases.push((
+                    case_id.clone(),
+                    format!("{case_id}/{fixture}"),
+                    format!("{case_id}/{name}"),
+                ));
+            }
         }
     }
+    cases.sort();
+    assert!(!cases.is_empty());
+    cases
 }
 
 #[test]
 fn every_proof_matches_the_independent_tree_and_verifier() {
-    let schema = include_bytes!("../test-data/pureth_receipt_v0.schema.json");
-    for (fixture_path, proof_path) in [
-        ("singleton_baseline/fixture.json", "singleton_baseline/proof.json"),
-        ("two_receipts/fixture.json", "two_receipts/proof.json"),
-        ("two_logs/fixture.json", "two_logs/proof.json"),
-        ("progressive_boundary/fixture_6.json", "progressive_boundary/proof_6.json"),
-        ("value_mutation/fixture_mutated.json", "value_mutation/proof_mutated.json"),
-    ] {
-        let case =
-            load_proof_case(schema, &read_vector(fixture_path), &read_vector(proof_path)).unwrap();
+    for (case_id, fixture_path, proof_path) in proof_cases() {
+        let case = load_proof_case(&read_vector(&fixture_path), &read_vector(&proof_path)).unwrap();
+        assert_eq!(case.proof.case_id, case_id);
         let tree = build_receipts(&case.fixture.fixture);
         assert_eq!(tree.root, case.root, "{proof_path}");
         assert_eq!(branch_at(&tree, case.gindex), case.branch, "{proof_path}");
         assert_eq!(
             verify_receipt_log_address(
                 &case.proof.schema_id,
-                case.fixture.schema_digest,
                 &case.proof.path,
-                &case.fixture.log_counts,
                 &case.selected_address,
                 &case.branch,
                 case.root,
             ),
-            Ok(true),
+            Ok(()),
             "{proof_path}"
         );
     }
@@ -214,10 +200,7 @@ fn every_proof_matches_the_independent_tree_and_verifier() {
 
 #[test]
 fn empty_ordering_boundary_and_value_mutation_records_match() {
-    let schema = include_bytes!("../test-data/pureth_receipt_v0.schema.json");
-
     let empty = load_root_case(
-        schema,
         &read_vector("empty_receipts/fixture.json"),
         &read_vector("empty_receipts/root.json"),
     )
@@ -227,10 +210,8 @@ fn empty_ordering_boundary_and_value_mutation_records_match() {
 
     let ordering: Value =
         serde_json::from_slice(&read_vector("ordering_mutation/roots.json")).unwrap();
-    let original =
-        load_fixture(schema, &read_vector("ordering_mutation/fixture_original.json")).unwrap();
-    let swapped =
-        load_fixture(schema, &read_vector("ordering_mutation/fixture_swapped.json")).unwrap();
+    let original = load_fixture(&read_vector("ordering_mutation/fixture_original.json")).unwrap();
+    let swapped = load_fixture(&read_vector("ordering_mutation/fixture_swapped.json")).unwrap();
     let original_root = build_receipts(&original.fixture).root;
     let swapped_root = build_receipts(&swapped.fixture).root;
     assert_eq!(decode_node(ordering["original_root"].as_str().unwrap()), original_root);
@@ -239,8 +220,8 @@ fn empty_ordering_boundary_and_value_mutation_records_match() {
 
     let boundary: Value =
         serde_json::from_slice(&read_vector("progressive_boundary/roots.json")).unwrap();
-    let five = load_fixture(schema, &read_vector("progressive_boundary/fixture_5.json")).unwrap();
-    let six = load_fixture(schema, &read_vector("progressive_boundary/fixture_6.json")).unwrap();
+    let five = load_fixture(&read_vector("progressive_boundary/fixture_5.json")).unwrap();
+    let six = load_fixture(&read_vector("progressive_boundary/fixture_6.json")).unwrap();
     let five_root = build_receipts(&five.fixture).root;
     let six_root = build_receipts(&six.fixture).root;
     assert_eq!(decode_node(boundary["five_root"].as_str().unwrap()), five_root);
@@ -248,13 +229,11 @@ fn empty_ordering_boundary_and_value_mutation_records_match() {
     assert_ne!(five_root, six_root);
 
     let original_proof = load_proof_case(
-        schema,
         &read_vector("singleton_baseline/fixture.json"),
         &read_vector("singleton_baseline/proof.json"),
     )
     .unwrap();
     let mutated = load_proof_case(
-        schema,
         &read_vector("value_mutation/fixture_mutated.json"),
         &read_vector("value_mutation/proof_mutated.json"),
     )
@@ -262,24 +241,31 @@ fn empty_ordering_boundary_and_value_mutation_records_match() {
     assert_eq!(
         verify_receipt_log_address(
             &original_proof.proof.schema_id,
-            original_proof.fixture.schema_digest,
             &original_proof.proof.path,
-            &original_proof.fixture.log_counts,
             &mutated.selected_address,
             &original_proof.branch,
             original_proof.root,
         ),
-        Ok(false)
+        Err(EnvelopeError::InvalidProof(ProofError::RootMismatch))
     );
 }
 
 #[test]
-fn loader_rejects_record_drift_before_proof_verification() {
-    let schema = include_bytes!("../test-data/pureth_receipt_v0.schema.json");
+fn record_counts_are_not_used_as_proof_bounds() {
     let fixture = read_vector("two_receipts/fixture.json");
     let proof = String::from_utf8(read_vector("two_receipts/proof.json"))
         .unwrap()
         .replace("\"log_counts\": [\n    1,\n    1\n  ]", "\"log_counts\": [1]");
-    let error = load_proof_case(schema, &fixture, proof.as_bytes()).unwrap_err().to_string();
-    assert!(error.contains("log counts mismatch"));
+    let case = load_proof_case(&fixture, proof.as_bytes()).unwrap();
+
+    assert_eq!(
+        verify_receipt_log_address(
+            &case.proof.schema_id,
+            &case.proof.path,
+            &case.selected_address,
+            &case.branch,
+            case.root,
+        ),
+        Ok(())
+    );
 }

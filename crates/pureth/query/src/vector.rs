@@ -6,7 +6,7 @@ use crate::SCHEMA_ID;
 const ROOT_TYPE: &str = "ReceiptsSSZ";
 
 #[derive(Debug)]
-pub enum VectorError {
+pub(crate) enum VectorError {
     Json(serde_json::Error),
     Invalid(String),
 }
@@ -30,7 +30,7 @@ impl From<serde_json::Error> for VectorError {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ReceiptFixture {
+pub(crate) struct ReceiptFixture {
     pub schema_id: String,
     pub root_type: String,
     pub receipt_count: usize,
@@ -42,7 +42,7 @@ pub struct ReceiptFixture {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ReceiptInput {
+pub(crate) struct ReceiptInput {
     pub tx_type: u8,
     pub success: bool,
     pub gas_used: u64,
@@ -52,7 +52,7 @@ pub struct ReceiptInput {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct LogInput {
+pub(crate) struct LogInput {
     pub address: String,
     pub topics: Vec<String>,
     pub data: String,
@@ -60,7 +60,7 @@ pub struct LogInput {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct FirstTarget {
+pub(crate) struct FirstTarget {
     pub receipt_index: usize,
     pub log_index: usize,
     pub field: String,

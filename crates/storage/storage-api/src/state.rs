@@ -101,7 +101,7 @@ pub trait HashedPostStateProvider {
     /// updates for parent storage of accounts that were destroyed but remain in the post-state.
     ///
     /// Providers backed by an exact parent-state view also materialize terminally destroyed
-    /// accounts so the result can be persisted without storage wipe markers.
+    /// accounts with explicit zero-valued storage updates.
     fn hashed_post_state(&self, bundle_state: &BundleState) -> ProviderResult<HashedPostState>;
 }
 
@@ -110,15 +110,6 @@ pub trait HashedPostStateProvider {
 pub trait BytecodeReader {
     /// Get account code by its hash
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>>;
-}
-
-/// Trait implemented for database providers that can be converted into a historical state provider.
-pub trait TryIntoHistoricalStateProvider {
-    /// Returns a historical [`StateProvider`] indexed by the given historic block number.
-    fn try_into_history_at_block(
-        self,
-        block_number: BlockNumber,
-    ) -> ProviderResult<StateProviderBox>;
 }
 
 /// Light wrapper that returns `StateProvider` implementations that correspond to the given

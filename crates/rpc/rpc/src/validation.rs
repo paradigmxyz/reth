@@ -726,8 +726,7 @@ impl From<ValidationApiError> for ErrorObject<'static> {
             ValidationApiError::Blob(_) => invalid_params_rpc_err(error.to_string()),
 
             ValidationApiError::Consensus(
-                error @ (ConsensusError::BlockAccessListDecode(_) |
-                ConsensusError::BlockAccessListCostMoreThanGasLimit(_) |
+                error @ (ConsensusError::BlockAccessListCostMoreThanGasLimit(_) |
                 ConsensusError::BlockAccessListHashMismatch(_)),
             ) => invalid_params_rpc_err(error.to_string()),
             ValidationApiError::MissingLatestBlock |

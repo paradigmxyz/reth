@@ -15,7 +15,7 @@ use super::{bal_prewarm_pool::BalPrewarmPool, StateRootHintStream, StateRootUpda
 use crate::tree::{
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
-    PayloadExecutionCache, SavedCache, StateProviderBuilder,
+    PayloadExecutionCache, SavedCache,
 };
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
@@ -27,11 +27,12 @@ use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx,
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, FastInstant as Instant, NodePrimitives};
 use reth_provider::{
-    AccountReader, BlockExecutionOutput, BlockNumReader, DatabaseProviderFactory,
-    PruneCheckpointReader, StageCheckpointReader, StorageSettingsCache,
-    TryIntoHistoricalStateProvider,
+    AccountReader, BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory,
+    DatabaseProviderROFactory, HistoryReader, PruneCheckpointReader, StageCheckpointReader,
+    StateProviderBox, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::database::StateProviderDatabase;
+use reth_storage_overlay::OverlayStateProviderFactory;
 use reth_tasks::{pool::WorkerPool, Runtime};
 use reth_trie_common::MultiProofTargetsV2;
 use std::sync::{
@@ -96,8 +97,10 @@ where
     P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
+        + ChangeSetReader
+        + StorageChangeSetReader
         + StorageSettingsCache
-        + TryIntoHistoricalStateProvider
+        + HistoryReader
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
@@ -418,19 +421,26 @@ where
             // This runs side-by-side with the parallel transaction execution reducing the time it
             // spends blocking on the data.
             let caches = saved_cache.cache().clone();
-            let provider_builder = ctx.provider.clone();
-            let build = Arc::new(move || provider_builder.build());
+            let state_provider_factory = ctx.provider.clone();
+            let build = Arc::new(move || {
+                state_provider_factory
+                    .database_provider_ro()
+                    .map(|provider| Box::new(provider) as _)
+            });
 
             pool.begin_block(build, caches, ctx.env.txpool_snapshot.clone());
+            let dispatch_start = Instant::now();
             for account in prefetch_bal.as_bal() {
-                pool.warm_account(account.address);
-                for change in &account.storage_changes {
-                    pool.warm_storage(account.address, change.slot.into());
-                }
-                for &slot in &account.storage_reads {
-                    pool.warm_storage(account.address, slot.into());
-                }
+                pool.warm_account(
+                    account.address,
+                    account
+                        .storage_changes
+                        .iter()
+                        .map(|change| change.slot.into())
+                        .chain(account.storage_reads.iter().map(|&slot| slot.into())),
+                );
             }
+            ctx.metrics.bal_slot_iteration_duration.record(dispatch_start.elapsed());
             pool.end_block();
         }
 
@@ -536,7 +546,7 @@ where
     /// The saved cache.
     pub saved_cache: Option<SavedCache>,
     /// Provider to obtain the state
-    pub provider: StateProviderBuilder<N, P>,
+    pub provider: OverlayStateProviderFactory<P, N>,
     /// Dedicated blocking pool for warming the BAL read-set. `Some` only on the BAL parallel
     /// execution path; the pool is owned by the [`PayloadProcessor`](super::PayloadProcessor).
     pub(crate) bal_prewarm_pool: Option<Arc<BalPrewarmPool>>,
@@ -576,16 +586,18 @@ where
     P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
+        + ChangeSetReader
+        + StorageChangeSetReader
         + StorageSettingsCache
-        + TryIntoHistoricalStateProvider
+        + HistoryReader
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Creates a per-thread EVM for prewarming.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn evm_for_ctx(&self) -> PrewarmEvmState<Evm> {
-        let mut state_provider = match self.provider.build() {
-            Ok(provider) => provider,
+        let mut state_provider: StateProviderBox = match self.provider.database_provider_ro() {
+            Ok(provider) => Box::new(provider),
             Err(err) => {
                 trace!(
                     target: "engine::tree::payload_processor::prewarm",
@@ -680,7 +692,7 @@ where
         // changes to start processing them before potentially hitting the db in the next step.
         if !account_changes.storage_changes.is_empty() {
             let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
-            let mut storage_map = reth_trie::HashedStorage::new(false);
+            let mut storage_map = reth_trie::HashedStorage::default();
 
             for slot_changes in &account_changes.storage_changes {
                 let hashed_slot = keccak256(slot_changes.slot.to_be_bytes::<32>());
@@ -704,7 +716,7 @@ where
                 )
                 .entered();
 
-                let inner = match self.provider.build() {
+                let inner = match self.provider.database_provider_ro() {
                     Ok(p) => p,
                     Err(err) => {
                         warn!(
@@ -834,7 +846,7 @@ mod tests {
     };
     use alloy_primitives::{address, bytes};
     use reth_chainspec::ChainSpec;
-    use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
+    use reth_ethereum_primitives::TransactionSigned;
     use reth_evm::{execute::WithTxEnv, TxEnvFor};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_provider::test_utils::MockEthProvider;
@@ -847,10 +859,9 @@ mod tests {
             env: ExecutionEnv::test_default(),
             evm_config: EthEvmConfig::new(Arc::new(ChainSpec::default())),
             saved_cache: None,
-            provider: StateProviderBuilder::<EthPrimitives, _>::new(
+            provider: OverlayStateProviderFactory::new(
                 MockEthProvider::default(),
-                B256::ZERO,
-                OverlayManager::default(),
+                OverlayManager::default().overlay_builder(B256::ZERO),
             ),
             bal_prewarm_pool: None,
             metrics: PrewarmMetrics::default(),

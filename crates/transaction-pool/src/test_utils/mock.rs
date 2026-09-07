@@ -17,6 +17,7 @@ use alloy_consensus::{
 };
 use alloy_eips::{
     eip1559::MIN_PROTOCOL_BASE_FEE,
+    eip2718::Encodable2718,
     eip2930::AccessList,
     eip4844::{BlobTransactionSidecar, BlobTransactionValidationError, DATA_GAS_PER_BLOB},
     eip7594::BlobTransactionSidecarVariant,
@@ -711,6 +712,10 @@ impl PoolTransaction for MockTransaction {
     type Consensus = TransactionSigned;
 
     type Pooled = PooledTransactionVariant;
+
+    fn encoded_2718_consensus(&self) -> Bytes {
+        self.clone_into_consensus().encoded_2718().into()
+    }
 
     fn consensus_ref(&self) -> Recovered<&Self::Consensus> {
         unimplemented!("mock transaction does not wrap a consensus transaction")

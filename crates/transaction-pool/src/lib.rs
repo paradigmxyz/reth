@@ -71,7 +71,7 @@
 //!   activation)
 //! - **Size**: Input data ≤ 128KB (default)
 //! - **Gas**: Limit ≤ block gas limit
-//! - **Fees**: Priority fee ≤ max fee; local tx fee cap; external minimum priority fee
+//! - **Fees**: Priority fee ≤ max fee; local tx fee cap; minimum priority fee
 //! - **Chain ID**: Must match current chain
 //! - **Intrinsic Gas**: Sufficient for data and access lists
 //! - **Blobs** (EIP-4844): Valid count, KZG proofs
@@ -639,6 +639,13 @@ where
 
     fn all_transactions(&self) -> AllPoolTransactions<Self::Transaction> {
         self.pool.all_transactions()
+    }
+
+    fn all_transactions_by_sender(
+        &self,
+        sender: Address,
+    ) -> AllPoolTransactions<Self::Transaction> {
+        self.pool.all_transactions_by_sender(sender)
     }
 
     fn all_transaction_hashes(&self) -> Vec<TxHash> {

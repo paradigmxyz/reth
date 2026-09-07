@@ -1081,11 +1081,7 @@ impl DiscoveryArgs {
     ///
     /// Discv5 is enabled by default and can be disabled with `--disable-discv5-discovery`.
     const fn should_enable_discv5(&self) -> bool {
-        if self.disable_discovery || self.disable_discv5_discovery {
-            return false;
-        }
-
-        true
+        !(self.disable_discovery || self.disable_discv5_discovery)
     }
 
     /// Set the discovery ports to zero, to allow the OS to assign random unused ports when

@@ -59,28 +59,16 @@ impl TrieUpdatesDiff {
 
 #[derive(Debug, Default)]
 struct StorageTrieUpdatesDiff {
-    is_deleted: Option<EntryDiff<bool>>,
     storage_nodes: HashMap<Nibbles, EntryDiff<Option<BranchNodeCompact>>>,
     removed_nodes: HashMap<Nibbles, EntryDiff<bool>>,
 }
 
 impl StorageTrieUpdatesDiff {
     fn has_differences(&self) -> bool {
-        self.is_deleted.is_some() ||
-            !self.storage_nodes.is_empty() ||
-            !self.removed_nodes.is_empty()
+        !self.storage_nodes.is_empty() || !self.removed_nodes.is_empty()
     }
 
     fn log_differences(&self, address: B256) {
-        if let Some(EntryDiff {
-            task: task_deleted,
-            regular: regular_deleted,
-            database: database_not_exists,
-        }) = self.is_deleted
-        {
-            warn!(target: "engine::tree", ?address, ?task_deleted, ?regular_deleted, ?database_not_exists, "Difference in storage trie deletion");
-        }
-
         for (path, EntryDiff { task, regular, database }) in &self.storage_nodes {
             warn!(target: "engine::tree", ?address, ?path, ?task, ?regular, ?database, "Difference in storage trie updates");
         }
@@ -192,20 +180,7 @@ fn compare_storage_trie_updates<C: TrieCursor>(
     task: &mut StorageTrieUpdates,
     regular: &mut StorageTrieUpdates,
 ) -> Result<StorageTrieUpdatesDiff, DatabaseError> {
-    // Check if the storage trie exists by seeking to the first entry
-    let database_not_exists = trie_cursor()?.seek(Nibbles::default())?.is_none();
-    let mut diff = StorageTrieUpdatesDiff {
-        // If the deletion is a no-op, meaning that the entry is not in the
-        // database, do not add it to the diff.
-        is_deleted: (task.is_deleted != regular.is_deleted && !database_not_exists).then_some(
-            EntryDiff {
-                task: task.is_deleted,
-                regular: regular.is_deleted,
-                database: database_not_exists,
-            },
-        ),
-        ..Default::default()
-    };
+    let mut diff = StorageTrieUpdatesDiff::default();
 
     // compare storage nodes
     let mut storage_trie_cursor = trie_cursor()?;

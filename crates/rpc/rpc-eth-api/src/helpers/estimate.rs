@@ -29,7 +29,7 @@ use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GA
 use revm::{
     context::Block,
     context_interface::{result::ExecutionResult, Cfg, Transaction},
-    primitives::KECCAK_EMPTY,
+    Database as _,
 };
 use tracing::trace;
 
@@ -116,15 +116,16 @@ pub trait EstimateCall: Call {
 
         let mut tx_env = self.create_txn_env(&evm_env, request, &mut db)?;
 
-        // Check if this is a basic transfer (no input data to account with no code)
+        // Check whether this is a basic transfer: empty input to an account without bytecode.
         let is_basic_transfer = if tx_env.input().is_empty() &&
             let TxKind::Call(to) = tx_env.kind()
         {
-            match db.database.basic_account(&to) {
-                Ok(Some(account)) => {
-                    account.bytecode_hash.is_none() || account.bytecode_hash == Some(KECCAK_EMPTY)
-                }
-                _ => true,
+            // Fetch the account through `Database::basic` so the state overrides applied above
+            // are visible.
+            match db.basic(to) {
+                Ok(Some(account)) => account.is_empty_code_hash(),
+                Ok(None) => true,
+                Err(_) => false,
             }
         } else {
             false
@@ -145,13 +146,11 @@ pub trait EstimateCall: Call {
         // Create EVM instance once and reuse it throughout the entire estimation process
         let mut evm = self.evm_config().evm_with_env(&mut db, evm_env);
 
-        // For basic transfers, try using minimum gas before running full binary search
+        // For basic transfers, try 21_000 gas before running the full binary search.
         if is_basic_transfer {
-            // If the tx is a simple transfer (call to an account with no code) we can
-            // shortcircuit. But simply returning
-            // `MIN_TRANSACTION_GAS` is dangerous because there might be additional
-            // field combos that bump the price up, so we try executing the function
-            // with the minimum gas limit to make sure.
+            // A basic transfer executes no bytecode and receives no refunds, so the amount
+            // consumed by a successful run is the exact gas required. EIP-2780 can make that less
+            // than 21_000.
             let mut min_tx_env = tx_env.clone();
             min_tx_env.set_gas_limit(MIN_TRANSACTION_GAS);
 
@@ -159,7 +158,7 @@ pub trait EstimateCall: Call {
             if let Ok(res) = evm.transact(min_tx_env).map_err(Self::Error::from_evm_err) &&
                 res.result.is_success()
             {
-                return Ok(U256::from(MIN_TRANSACTION_GAS))
+                return Ok(U256::from(res.result.tx_gas_used()))
             }
         }
 

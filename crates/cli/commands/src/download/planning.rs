@@ -418,6 +418,7 @@ mod tests {
             base_url: Some("https://example.com".to_string()),
             reth_version: None,
             components,
+            extensions: Default::default(),
         };
 
         let selections = BTreeMap::from([
@@ -494,6 +495,7 @@ mod tests {
             base_url: Some("https://example.com/mainnet".to_string()),
             reth_version: None,
             components,
+            extensions: Default::default(),
         };
         let selections =
             BTreeMap::from([(SnapshotComponentType::Transactions, ComponentSelection::All)]);

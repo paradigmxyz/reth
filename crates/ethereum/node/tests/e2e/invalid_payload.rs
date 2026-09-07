@@ -7,7 +7,6 @@ use crate::utils::{eth_payload_attributes, eth_payload_attributes_amsterdam};
 use alloy_eips::eip7685::RequestsOrHash;
 use alloy_primitives::{keccak256, Bytes, B256};
 use alloy_rpc_types_engine::{ExecutionPayloadV3, PayloadStatusEnum};
-use jsonrpsee::types::error::INVALID_PARAMS_CODE;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::{setup_engine, transaction::TransactionTestContext};
@@ -358,10 +357,10 @@ async fn can_handle_invalid_payload_with_transactions() -> eyre::Result<()> {
     Ok(())
 }
 
-/// Tests that `engine_newPayloadV5` rejects undecodable block access list bytes with an invalid
-/// params error (`-32602`) instead of an `INVALID` payload status.
+/// Tests that `engine_newPayloadV5` returns `INVALID` with no latest valid hash for undecodable
+/// block access list bytes.
 #[tokio::test]
-async fn undecodable_bal_is_rejected_as_invalid_params() -> eyre::Result<()> {
+async fn undecodable_bal_is_invalid_payload() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let chain_spec = Arc::new(
@@ -402,20 +401,16 @@ async fn undecodable_bal_is_rejected_as_invalid_params() -> eyre::Result<()> {
 
     let engine = node.auth_server_handle().http_client();
     let parent_beacon_block_root = block.header().parent_beacon_block_root.unwrap();
-    let err = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v5(
+    let invalid_status = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v5(
         &engine,
         corrupted,
         vec![],
         parent_beacon_block_root,
         RequestsOrHash::Requests(envelope.execution_requests.clone()),
     )
-    .await
-    .unwrap_err();
-
-    let jsonrpsee::core::client::Error::Call(err) = err else {
-        panic!("expected an invalid params error object, got {err:?}")
-    };
-    assert_eq!(err.code(), INVALID_PARAMS_CODE);
+    .await?;
+    assert!(matches!(invalid_status.status, PayloadStatusEnum::Invalid { .. }));
+    assert_eq!(invalid_status.latest_valid_hash, None);
 
     // The same block with well-formed block access list bytes is processed normally.
     let status = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v5(

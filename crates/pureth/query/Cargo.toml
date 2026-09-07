@@ -8,9 +8,12 @@ homepage.workspace = true
 repository.workspace = true
 
 [dependencies]
+alloy-primitives.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-sha2.workspace = true
 
 [lints]
 workspace = true

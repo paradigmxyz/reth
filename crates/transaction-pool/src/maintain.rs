@@ -9,7 +9,7 @@ use crate::{
     TransactionOrigin,
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Typed2718};
-use alloy_eips::{BlockNumberOrTag, Decodable2718, Encodable2718};
+use alloy_eips::{BlockNumberOrTag, Decodable2718};
 use alloy_primitives::{
     map::{AddressSet, HashSet},
     Address, BlockHash, BlockNumber, Bytes,
@@ -770,12 +770,7 @@ where
 
     let local_transactions = local_transactions
         .into_iter()
-        .map(|tx| {
-            let consensus_tx = tx.to_consensus().into_inner();
-            let rlp_data = consensus_tx.encoded_2718();
-
-            TxBackup { rlp: rlp_data.into(), origin: tx.origin }
-        })
+        .map(|tx| TxBackup { rlp: tx.encoded_2718_consensus(), origin: tx.origin })
         .collect::<Vec<_>>();
 
     let json_data = match serde_json::to_string(&local_transactions) {

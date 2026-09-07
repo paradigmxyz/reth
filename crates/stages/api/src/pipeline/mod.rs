@@ -512,7 +512,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                             total: total_stages,
                         },
                         stage_id,
-                        result: out.clone(),
+                        result: out,
                     });
                     if let Some(metrics_tx) = &mut self.metrics_tx {
                         let _ = metrics_tx.send(MetricEvent::StageCheckpoint {
@@ -585,6 +585,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                         target: "sync::pipeline",
                         stage = %stage_id,
                         bad_block = %block.block.number,
+                        bad_block_hash = %block.block.hash,
                         "Stage encountered a validation error: {validation_error}"
                     );
 
@@ -609,6 +610,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                         target: "sync::pipeline",
                         stage = %stage_id,
                         bad_block = %block.block.number,
+                        bad_block_hash = %block.block.hash,
                         "Stage encountered an execution error: {execution_error}"
                     );
                 }

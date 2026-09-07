@@ -573,10 +573,9 @@ where
             }
         }
 
-        // Drop non-local transactions with a fee lower than the configured fee for acceptance into
-        // the pool.
-        if !is_local &&
-            transaction.is_dynamic_fee() &&
+        // Drop dynamic fee transactions with a fee lower than the configured fee for acceptance
+        // into the pool.
+        if transaction.is_dynamic_fee() &&
             transaction.max_priority_fee_per_gas() < self.minimum_priority_fee
         {
             return Err(InvalidPoolTransactionError::PriorityFeeBelowMinimum {
@@ -1951,24 +1950,27 @@ mod tests {
         let validator =
             create_validator_with_minimum_fee(provider, Some(minimum_priority_fee), None);
 
-        // External transaction should be rejected due to low priority fee
-        let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
-        assert!(outcome.is_invalid());
-
-        if let TransactionValidationOutcome::Invalid(_, err) = outcome {
+        for origin in
+            [TransactionOrigin::External, TransactionOrigin::Local, TransactionOrigin::Private]
+        {
+            let outcome = validator.validate_one(origin, transaction.clone());
             assert!(matches!(
-                err,
-                InvalidPoolTransactionError::PriorityFeeBelowMinimum { minimum_priority_fee: min_fee }
-                if min_fee == minimum_priority_fee
+                outcome,
+                TransactionValidationOutcome::Invalid(
+                    _,
+                    InvalidPoolTransactionError::PriorityFeeBelowMinimum {
+                        minimum_priority_fee: min_fee
+                    }
+                ) if min_fee == minimum_priority_fee
             ));
         }
 
-        // Test pool integration
+        // Local submission is the path used by `eth_sendRawTransaction`.
         let blob_store = InMemoryBlobStore::default();
         let pool =
             Pool::new(validator, CoinbaseTipOrdering::default(), blob_store, Default::default());
 
-        let res = pool.add_external_transaction(transaction.clone()).await;
+        let res = pool.add_transaction(TransactionOrigin::Local, transaction.clone()).await;
         assert!(res.is_err());
         assert!(matches!(
             res.unwrap_err().kind,
@@ -1978,14 +1980,6 @@ mod tests {
         ));
         let tx = pool.get(transaction.hash());
         assert!(tx.is_none());
-
-        // Local transactions should still be accepted regardless of minimum priority fee
-        let (_, local_provider) = setup_priority_fee_test();
-        let validator_local =
-            create_validator_with_minimum_fee(local_provider, Some(minimum_priority_fee), None);
-
-        let local_outcome = validator_local.validate_one(TransactionOrigin::Local, transaction);
-        assert!(local_outcome.is_valid());
     }
 
     #[tokio::test]

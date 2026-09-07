@@ -316,10 +316,11 @@ where
         tx_hash: B256,
         opts: GethDebugTracingOptions,
     ) -> Result<GethTrace, Eth::Error> {
-        let (transaction, block) = match self.eth_api().transaction_and_block(tx_hash).await? {
-            None => return Err(EthApiError::TracingTransactionNotFound.into()),
-            Some(res) => res,
-        };
+        let (transaction, block, bal) =
+            match self.eth_api().transaction_and_block_and_maybe_bal(tx_hash).await? {
+                None => return Err(EthApiError::TracingTransactionNotFound.into()),
+                Some(res) => res,
+            };
 
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
@@ -340,6 +341,7 @@ where
                     &mut inspector,
                     index,
                     tx_env.clone(),
+                    bal.as_deref(),
                 )?;
 
                 let trace = inspector
@@ -423,9 +425,9 @@ where
         overrides: EvmOverrides,
     ) -> Result<GethTrace, Eth::Error> {
         // Get the target block to check transaction count
-        let block = self
+        let (block, bal) = self
             .eth_api()
-            .recovered_block(block_id)
+            .recovered_block_and_maybe_bal(block_id)
             .await?
             .ok_or(EthApiError::HeaderNotFound(block_id))?;
 
@@ -439,12 +441,16 @@ where
             .into())
         }
 
+        // state overrides commit changes to the database, which an attached BAL would take read
+        // precedence over, so only position via BAL if there are none
+        let bal = bal.filter(|_| !overrides.has_state());
+
         let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
-                // 1. replay the required number of transactions
-                eth_api.replay_block_until(&mut db, &block, tx_index)?;
+                // 1. position the state before the transaction at the index
+                eth_api.replay_block_until(&mut db, &block, tx_index, bal.as_deref())?;
 
                 // 2. now execute the trace call on this state
                 let (evm_env, tx_env) =
@@ -515,8 +521,10 @@ where
                 if replay_block_txs {
                     // only need to replay the transactions in the block if not all transactions are
                     // to be replayed
-                    // Execute all transactions until index
-                    eth_api.replay_block_until(&mut db, &block, num_txs)?;
+                    // Execute all transactions until index. No BAL positioning here: bundle
+                    // transactions commit state on top, and an attached BAL would take read
+                    // precedence over the committed changes
+                    eth_api.replay_block_until(&mut db, &block, num_txs, None)?;
                 }
 
                 // Trace all bundles
@@ -1534,7 +1542,6 @@ mod tests {
         let hashed_state = provider.hashed_post_state(&bundle_state).unwrap();
         let storage = &hashed_state.storages[&hashed_address];
 
-        assert!(!storage.wiped);
         assert_eq!(storage.storage[&hashed_old_slot], U256::ZERO);
         assert_eq!(storage.storage[&hashed_new_slot], new_value);
     }

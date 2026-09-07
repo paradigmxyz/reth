@@ -71,10 +71,10 @@ use reth_node_metrics::{
 };
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
-    BalStoreHandle, BlockHashReader, BlockNumReader, DBProvider, DatabaseProviderFactory,
-    MetadataProvider, MetadataWriter, ProviderError, ProviderFactory, ProviderResult,
-    RocksDBBalStore, RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
-    StaticFileProviderFactory, StorageSettingsCache,
+    BalConfig, BalStoreHandle, BlockHashReader, BlockNumReader, DBProvider,
+    DatabaseProviderFactory, InMemoryBalStore, MetadataProvider, MetadataWriter, ProviderError,
+    ProviderFactory, ProviderResult, RocksDBProviderFactory, StageCheckpointReader,
+    StaticFileProviderBuilder, StaticFileProviderFactory, StorageSettingsCache,
 };
 use reth_prune::{PruneMode, PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -87,10 +87,7 @@ use reth_stages::{
 use reth_static_file::{blocks_per_file_for_prune_distance, StaticFileProducer, StaticFileSegment};
 use reth_storage_overlay::OverlayManager;
 use reth_tasks::TaskExecutor;
-use reth_tracing::{
-    throttle,
-    tracing::{debug, error, info, warn},
-};
+use reth_tracing::tracing::{debug, error, info, warn};
 use reth_transaction_pool::TransactionPool;
 use std::{num::NonZeroUsize, sync::Arc, thread::available_parallelism, time::Duration};
 use tokio::sync::{
@@ -524,15 +521,14 @@ where
                 .build()?
         };
 
-        let bal_store = self
+        let balstore_cache_size = self
             .node_config()
             .db
             .balstore_cache_size
-            .map(|distance| {
-                RocksDBBalStore::with_buffer_retention_distance(rocksdb_provider.clone(), distance)
-            })
-            .unwrap_or_else(|| RocksDBBalStore::new(rocksdb_provider.clone()));
-        let bal_store = BalStoreHandle::new(bal_store);
+            .unwrap_or(BalConfig::DEFAULT_IN_MEMORY_RETENTION_DISTANCE);
+        let bal_store = BalStoreHandle::new(InMemoryBalStore::new(
+            BalConfig::with_in_memory_retention_distance(balstore_cache_size),
+        ));
         let factory = ProviderFactory::new(
             self.right().clone(),
             self.chain_spec(),
@@ -1376,25 +1372,28 @@ where
 }
 
 /// Returns the metrics hooks for the node.
+///
+/// The storage hooks walk their backing store, which scales with the dataset, so they are
+/// registered as background hooks: metrics collection still refreshes them at most every 5
+/// minutes, but renders the values of the previous refresh instead of waiting for the walk.
 pub fn metrics_hooks<N: NodeTypesWithDB>(provider_factory: &ProviderFactory<N>) -> Hooks {
     Hooks::builder()
-        .with_hook({
+        .with_background_interval(Duration::from_secs(5 * 60))
+        .with_background_hook({
             let db = provider_factory.db_ref().clone();
-            move || throttle!(Duration::from_secs(5 * 60), || db.report_metrics())
+            move || db.report_metrics()
         })
-        .with_hook({
+        .with_background_hook({
             let sfp = provider_factory.static_file_provider();
             move || {
-                throttle!(Duration::from_secs(5 * 60), || {
-                    if let Err(error) = sfp.report_metrics() {
-                        error!(%error, "Failed to report metrics from static file provider");
-                    }
-                })
+                if let Err(error) = sfp.report_metrics() {
+                    error!(%error, "Failed to report metrics from static file provider");
+                }
             }
         })
-        .with_hook({
+        .with_background_hook({
             let rocksdb = provider_factory.rocksdb_provider();
-            move || throttle!(Duration::from_secs(5 * 60), || rocksdb.report_metrics())
+            move || rocksdb.report_metrics()
         })
         .build()
 }

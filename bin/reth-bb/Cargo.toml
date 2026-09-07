@@ -122,8 +122,6 @@ min-trace-logs = [
     "reth-node-core/min-trace-logs",
 ]
 
-partial-persistence = ["reth-node-core/partial-persistence"]
-
 [[bin]]
 name = "reth-bb"
 path = "src/main.rs"

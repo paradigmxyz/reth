@@ -12,7 +12,8 @@ use std::{str::FromStr, sync::Arc};
 hardfork!(
     /// The name of a bsc hardfork.
     ///
-    /// When building a list of hardforks for a chain, it's still expected to mix with [`EthereumHardfork`].
+    /// When building a list of hardforks for a chain, it's still expected to mix with
+    /// [`EthereumHardfork`].
     BscHardfork {
         /// BSC `Ramanujan` hardfork
         Ramanujan,
