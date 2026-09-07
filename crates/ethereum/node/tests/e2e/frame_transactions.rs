@@ -1,4 +1,4 @@
-//! End-to-end EIP-8141 pool coverage using Spamoor-compatible frame envelopes.
+//! End-to-end EIP-8141 pool coverage using externally submitted frame envelopes.
 
 use crate::utils::eth_payload_attributes_amsterdam;
 use alloy_consensus::TxEip8141;
@@ -19,6 +19,10 @@ const VERIFY_GAS: u64 = 5_000;
 const USER_OP_GAS: u64 = 30_000;
 const MAX_FEE_PER_GAS: u64 = 20_000_000_000;
 const MAX_PRIORITY_FEE_PER_GAS: u64 = 2_000_000_000;
+
+fn recipient() -> Address {
+    Address::repeat_byte(0x11)
+}
 
 fn chain_spec() -> Arc<reth_chainspec::ChainSpec> {
     Arc::new(
@@ -50,8 +54,8 @@ fn sender_frame(target: Address) -> Frame {
     }
 }
 
-/// Builds the `v || r || s` SEC256K1 signature form emitted by Spamoor.
-fn spamoor_frame_tx(signer: &PrivateKeySigner, nonce: u64, frames: Vec<Frame>) -> Bytes {
+/// Builds an EIP-8141 envelope using the `v || r || s` SEC256K1 signature encoding.
+fn frame_tx(signer: &PrivateKeySigner, nonce: u64, frames: Vec<Frame>) -> Bytes {
     let mut tx = TxEip8141 {
         chain_id: 1,
         nonce,
@@ -102,7 +106,7 @@ async fn assert_mined_from_pool(
 }
 
 #[tokio::test]
-async fn spamoor_self_verify_frame_is_admitted_and_mined() -> eyre::Result<()> {
+async fn self_verify_frame_is_admitted_and_mined() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let (mut nodes, wallets) = setup_engine::<EthereumNode>(
         1,
@@ -114,18 +118,14 @@ async fn spamoor_self_verify_frame_is_admitted_and_mined() -> eyre::Result<()> {
     .await?;
     let mut node = nodes.pop().unwrap();
     let wallets = wallets.wallet_gen();
-    let raw = spamoor_frame_tx(
-        &wallets[0],
-        0,
-        vec![self_verify_frame(), sender_frame(wallets[1].address())],
-    );
+    let raw = frame_tx(&wallets[0], 0, vec![self_verify_frame(), sender_frame(recipient())]);
     let hash = node.rpc.inject_tx(raw).await?;
 
     assert_mined_from_pool(&mut node, &[hash]).await
 }
 
 #[tokio::test]
-async fn spamoor_expiry_prefix_frame_is_admitted_and_mined() -> eyre::Result<()> {
+async fn expiry_prefix_frame_is_admitted_and_mined() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let (mut nodes, wallets) = setup_engine::<EthereumNode>(
         1,
@@ -145,18 +145,15 @@ async fn spamoor_expiry_prefix_frame_is_admitted_and_mined() -> eyre::Result<()>
         data: Bytes::copy_from_slice(&deadline),
         ..Default::default()
     };
-    let raw = spamoor_frame_tx(
-        &wallets[0],
-        0,
-        vec![expiry, self_verify_frame(), sender_frame(wallets[1].address())],
-    );
+    let raw =
+        frame_tx(&wallets[0], 0, vec![expiry, self_verify_frame(), sender_frame(recipient())]);
     let hash = node.rpc.inject_tx(raw).await?;
 
     assert_mined_from_pool(&mut node, &[hash]).await
 }
 
 #[tokio::test]
-async fn spamoor_atomic_frame_body_is_admitted_and_mined() -> eyre::Result<()> {
+async fn atomic_frame_body_is_admitted_and_mined() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let (mut nodes, wallets) = setup_engine::<EthereumNode>(
         1,
@@ -168,14 +165,14 @@ async fn spamoor_atomic_frame_body_is_admitted_and_mined() -> eyre::Result<()> {
     .await?;
     let mut node = nodes.pop().unwrap();
     let wallets = wallets.wallet_gen();
-    let mut first = sender_frame(wallets[1].address());
+    let mut first = sender_frame(recipient());
     first.flags = ATOMIC_BATCH_FLAG;
-    let mut second = sender_frame(wallets[1].address());
+    let mut second = sender_frame(recipient());
     second.flags = ATOMIC_BATCH_FLAG;
-    let raw = spamoor_frame_tx(
+    let raw = frame_tx(
         &wallets[0],
         0,
-        vec![self_verify_frame(), first, second, sender_frame(wallets[1].address())],
+        vec![self_verify_frame(), first, second, sender_frame(recipient())],
     );
     let hash = node.rpc.inject_tx(raw).await?;
 
@@ -183,7 +180,7 @@ async fn spamoor_atomic_frame_body_is_admitted_and_mined() -> eyre::Result<()> {
 }
 
 #[tokio::test]
-async fn spamoor_frames_from_independent_senders_share_a_payload() -> eyre::Result<()> {
+async fn sequential_frames_share_a_payload() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let (mut nodes, wallets) = setup_engine::<EthereumNode>(
         1,
@@ -197,19 +194,11 @@ async fn spamoor_frames_from_independent_senders_share_a_payload() -> eyre::Resu
     let wallets = wallets.wallet_gen();
     let first = node
         .rpc
-        .inject_tx(spamoor_frame_tx(
-            &wallets[0],
-            0,
-            vec![self_verify_frame(), sender_frame(wallets[2].address())],
-        ))
+        .inject_tx(frame_tx(&wallets[0], 0, vec![self_verify_frame(), sender_frame(recipient())]))
         .await?;
     let second = node
         .rpc
-        .inject_tx(spamoor_frame_tx(
-            &wallets[1],
-            0,
-            vec![self_verify_frame(), sender_frame(wallets[2].address())],
-        ))
+        .inject_tx(frame_tx(&wallets[0], 1, vec![self_verify_frame(), sender_frame(recipient())]))
         .await?;
 
     assert_mined_from_pool(&mut node, &[first, second]).await
