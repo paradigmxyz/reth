@@ -475,6 +475,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             return Ok(None);
         }
 
+        let data_dir = self.env.datadir.clone().resolve_datadir(chain);
+        let static_files_dir = data_dir.static_files();
+        let static_files_dir = (static_files_dir != data_dir.data_dir().join("static_files"))
+            .then_some(static_files_dir);
+
         // Legacy single-URL mode: download one archive and extract it
         if let Some(ref url) = self.url {
             let cancel_token = CancellationToken::new();
@@ -496,7 +501,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             stream_and_extract(
                 url,
                 data_dir.data_dir(),
-                None,
+                static_files_dir.as_deref(),
                 self.resumable,
                 Some(request_limiter),
                 cancel_token.clone(),
@@ -525,7 +530,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             clear_existing_datadir(target_dir)?;
         }
         fs::create_dir_all(target_dir)?;
-        let startup_summary = summarize_download_startup(&planned.archives, target_dir)?;
+        let startup_summary =
+            summarize_download_startup(&planned.archives, target_dir, static_files_dir.as_deref())?;
         info!(target: "reth::cli",
             reusable = startup_summary.reusable,
             needs_download = startup_summary.needs_download,
@@ -542,6 +548,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         run_modular_downloads(
             planned,
             target_dir,
+            static_files_dir.as_deref(),
             self.download_concurrency.max(1),
             cancel_token.clone(),
             self.retry_backoff,

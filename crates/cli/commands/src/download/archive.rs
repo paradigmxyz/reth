@@ -29,6 +29,7 @@ const DOWNLOAD_CACHE_DIR: &str = ".download-cache";
 pub(crate) async fn run_modular_downloads(
     planned_downloads: PlannedDownloads,
     target_dir: &Path,
+    static_files_dir: Option<&Path>,
     download_concurrency: usize,
     cancel_token: CancellationToken,
     retry_backoff: Option<Duration>,
@@ -48,8 +49,12 @@ pub(crate) async fn run_modular_downloads(
         cancel_token,
     )
     .with_retry_backoff(retry_backoff);
-    let ctx =
-        ArchiveProcessContext::new(target_dir.to_path_buf(), Some(download_cache_dir), session);
+    let ctx = ArchiveProcessContext::new(
+        target_dir.to_path_buf(),
+        static_files_dir.map(Path::to_path_buf),
+        Some(download_cache_dir),
+        session,
+    );
 
     ModularDownloadJob::new(ctx, download_concurrency).run(planned_downloads).await
 }
@@ -220,7 +225,7 @@ impl ArchiveProcessor {
 
     /// Returns the verifier for this archive's output files.
     fn output_verifier(&self) -> OutputVerifier<'_> {
-        OutputVerifier::new(self.ctx.target_dir())
+        OutputVerifier::new(self.ctx.target_dir(), self.ctx.static_files_dir())
     }
 
     /// Returns `true` if this archive can be reused from existing verified outputs.
@@ -304,6 +309,7 @@ impl ArchiveProcessor {
             &self.archive().url,
             format,
             self.ctx.target_dir(),
+            self.ctx.static_files_dir(),
             self.ctx.session(),
         )
     }
@@ -316,6 +322,7 @@ impl ArchiveProcessor {
             file,
             format,
             self.ctx.target_dir(),
+            self.ctx.static_files_dir(),
             Some(&mut extraction_progress),
         );
         extraction_progress.finish();

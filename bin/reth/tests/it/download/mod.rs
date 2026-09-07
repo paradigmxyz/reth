@@ -96,6 +96,15 @@ fn success(output: Output) -> String {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn manifest_selection_reuse_and_repair() {
+    check_manifest_selection_reuse_and_repair(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn custom_static_files_selection_reuse_and_repair() {
+    check_manifest_selection_reuse_and_repair(true).await;
+}
+
+async fn check_manifest_selection_reuse_and_repair(custom_static_files: bool) {
     let snapshot = Snapshot::new();
     let state = &snapshot.files["/snapshot/state.tar.zst"];
     let offset = state.len() / 2;
@@ -103,19 +112,28 @@ async fn manifest_selection_reuse_and_repair() {
     fs::create_dir(dir.path().join(".download-cache")).unwrap();
     fs::write(dir.path().join(".download-cache/state.tar.zst.part"), &state[..offset]).unwrap();
     let server = snapshot.serve(true).await;
-    let args = ["--with-txs-since", "10"];
+    let custom_dir = tempfile::tempdir().unwrap();
+    let static_files = if custom_static_files {
+        custom_dir.path().join("nested/static")
+    } else {
+        dir.path().join("static_files")
+    };
+    let mut args = vec!["--with-txs-since", "10"];
+    if custom_static_files {
+        args.extend(["--datadir.static-files", static_files.to_str().unwrap()]);
+    }
     success(download(&server, dir.path(), &args));
     for (path, expected) in [
-        ("db/snapshot", "state.tar.zst"),
-        ("static_files/headers", "headers.tar.zst"),
-        ("static_files/txs-1", "txs-1.tar.zst"),
+        (dir.path().join("db/snapshot"), "state.tar.zst"),
+        (static_files.join("headers"), "headers.tar.zst"),
+        (static_files.join("txs-1"), "txs-1.tar.zst"),
     ] {
-        assert_eq!(fs::read(dir.path().join(path)).unwrap(), expected.as_bytes());
+        assert_eq!(fs::read(path).unwrap(), expected.as_bytes());
     }
     assert!(server.requests().iter().any(|(path, range)| {
         path.ends_with("state.tar.zst") && range.as_deref() == Some(&format!("bytes={offset}-"))
     }));
-    assert!(!dir.path().join("static_files/txs-0").exists());
+    assert!(!static_files.join("txs-0").exists());
     assert!(!server.requests().iter().any(|(path, _)| path.ends_with("txs-0.tar.zst")));
     let config: toml::Value =
         toml::from_str(&fs::read_to_string(dir.path().join("reth.toml")).unwrap()).unwrap();
@@ -126,15 +144,18 @@ async fn manifest_selection_reuse_and_repair() {
     assert_eq!(server.requests(), vec![("/snapshot/manifest.json".into(), None)]);
 
     // Same-size corruption must be detected by checksum, not just the file length.
-    fs::write(dir.path().join("static_files/txs-1"), b"bad-1.tar.zst").unwrap();
+    fs::write(static_files.join("txs-1"), b"bad-1.tar.zst").unwrap();
     server.clear_requests();
     success(download(&server, dir.path(), &args));
-    assert_eq!(fs::read(dir.path().join("static_files/txs-1")).unwrap(), b"txs-1.tar.zst");
+    assert_eq!(fs::read(static_files.join("txs-1")).unwrap(), b"txs-1.tar.zst");
     assert!(server.requests().iter().any(|(path, _)| path.ends_with("txs-1.tar.zst")));
     assert!(server
         .requests()
         .iter()
         .all(|(path, _)| path.ends_with("manifest.json") || path.ends_with("txs-1.tar.zst")));
+    if custom_static_files {
+        assert!(!dir.path().join("static_files").exists());
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -180,6 +201,41 @@ async fn legacy_streaming_and_resume() {
                 .iter()
                 .any(|(_, range)| range.as_deref() == Some(&format!("bytes={offset}-"))));
         }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn custom_static_files_legacy_http_and_local_archives() {
+    for local in [false, true] {
+        let bytes = archive_bytes("./static_files/nested/headers", b"snapshot contents");
+        let archive_name = "headers.tar.zst";
+        let source = tempfile::tempdir().unwrap();
+        let archive_path = source.path().join(archive_name);
+        fs::write(&archive_path, &bytes).unwrap();
+        let server =
+            SnapshotServer::start(BTreeMap::from([(format!("/{archive_name}"), bytes)]), true)
+                .await;
+        let url = if local {
+            format!("file://{}", archive_path.display())
+        } else {
+            format!("{}/{archive_name}", server.url)
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let static_dir = tempfile::tempdir().unwrap();
+        reth_ok(&[
+            "download",
+            "--url",
+            &url,
+            "--datadir",
+            dir.path().to_str().unwrap(),
+            "--datadir.static-files",
+            static_dir.path().to_str().unwrap(),
+        ]);
+        assert_eq!(
+            fs::read(static_dir.path().join("nested/headers")).unwrap(),
+            b"snapshot contents"
+        );
+        assert!(!dir.path().join("static_files").exists());
     }
 }
 
