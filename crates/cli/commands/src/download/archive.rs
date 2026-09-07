@@ -31,6 +31,7 @@ pub(crate) async fn run_modular_downloads(
     target_dir: &Path,
     download_concurrency: usize,
     cancel_token: CancellationToken,
+    retry_backoff: Option<Duration>,
 ) -> Result<()> {
     let download_cache_dir = target_dir.join(DOWNLOAD_CACHE_DIR);
     fs::create_dir_all(&download_cache_dir)?;
@@ -45,7 +46,8 @@ pub(crate) async fn run_modular_downloads(
         Some(Arc::clone(&shared)),
         Some(DownloadRequestLimiter::new(download_concurrency)),
         cancel_token,
-    );
+    )
+    .with_retry_backoff(retry_backoff);
     let ctx =
         ArchiveProcessContext::new(target_dir.to_path_buf(), Some(download_cache_dir), session);
 
@@ -185,7 +187,9 @@ impl ArchiveProcessor {
                     if attempt >= MAX_DOWNLOAD_RETRIES {
                         state = ArchiveAttemptState::Fail;
                     } else {
-                        std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
+                        std::thread::sleep(
+                            self.ctx.session().retry_delay(Duration::from_secs(RETRY_BACKOFF_SECS)),
+                        );
                         attempt += 1;
                         state = ArchiveAttemptState::RunAttempt;
                     }

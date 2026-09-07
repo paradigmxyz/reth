@@ -644,16 +644,19 @@ impl<T: TransactionOrdering> TxPool<T> {
         changed_senders: FxHashMap<SenderId, SenderInfo>,
     ) -> UpdateOutcome<T::Transaction> {
         // Apply the state changes to the total set of transactions which triggers sub-pool updates.
-        let updates = self.all_transactions.update(&changed_senders);
+        let mut updates = self.all_transactions.update(&changed_senders);
 
         // track changed accounts
         self.all_transactions.sender_info.extend(changed_senders);
 
         // Process the sub-pool updates
-        let update = self.process_updates(updates);
+        let mut outcome = UpdateOutcome::default();
+        #[expect(clippy::iter_with_drain, reason = "retain the scratch buffer allocation")]
+        self.process_updates(updates.drain(..), &mut outcome);
+        self.all_transactions.update_buffer = updates;
         // update the metrics after the update
         self.update_size_metrics();
-        update
+        outcome
     }
 
     /// Updates the entire pool after a new block was mined.
@@ -765,31 +768,15 @@ impl<T: TransactionOrdering> TxPool<T> {
                 //  2. Add the new transaction
                 //  3. Promote higher-nonce txs last   (e.g. gap-fill scenario)
                 let new_nonce = transaction.id().nonce;
-                let split = updates.iter().position(|u| u.id.nonce >= new_nonce);
-                let (promoted, discarded) = match split {
-                    // All updates are lower-nonce — promote them first, then add new tx
-                    None => {
-                        let UpdateOutcome { promoted, discarded } = self.process_updates(updates);
-                        self.add_new_transaction(transaction.clone(), replaced_tx.clone(), move_to);
-                        (promoted, discarded)
-                    }
-                    // All updates are higher-nonce — add new tx first, then promote
-                    Some(0) => {
-                        self.add_new_transaction(transaction.clone(), replaced_tx.clone(), move_to);
-                        let UpdateOutcome { promoted, discarded } = self.process_updates(updates);
-                        (promoted, discarded)
-                    }
-                    // Mixed — split and interleave
-                    Some(i) => {
-                        let after = updates.split_off(i);
-                        let mut outcome = self.process_updates(updates);
-                        self.add_new_transaction(transaction.clone(), replaced_tx.clone(), move_to);
-                        let after_outcome = self.process_updates(after);
-                        outcome.promoted.extend(after_outcome.promoted);
-                        outcome.discarded.extend(after_outcome.discarded);
-                        (outcome.promoted, outcome.discarded)
-                    }
-                };
+                let split = updates.partition_point(|u| u.id.nonce < new_nonce);
+                let mut outcome = UpdateOutcome::default();
+                #[expect(clippy::iter_with_drain, reason = "retain the scratch buffer allocation")]
+                let mut drain = updates.drain(..);
+                self.process_updates(drain.by_ref().take(split), &mut outcome);
+                self.add_new_transaction(transaction.clone(), replaced_tx.clone(), move_to);
+                self.process_updates(drain, &mut outcome);
+                self.all_transactions.update_buffer = updates;
+                let UpdateOutcome { promoted, discarded } = outcome;
                 self.metrics.inserted_transactions.increment(1);
 
                 let replaced = replaced_tx.map(|(tx, _)| tx);
@@ -974,8 +961,11 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// Maintenance task to apply a series of updates.
     ///
     /// This will move/discard the given transaction according to the `PoolUpdate`
-    fn process_updates(&mut self, updates: Vec<PoolUpdate>) -> UpdateOutcome<T::Transaction> {
-        let mut outcome = UpdateOutcome::default();
+    fn process_updates(
+        &mut self,
+        updates: impl IntoIterator<Item = PoolUpdate>,
+        outcome: &mut UpdateOutcome<T::Transaction>,
+    ) {
         let mut removed = 0;
         for PoolUpdate { id, current, destination } in updates {
             match destination {
@@ -1002,8 +992,6 @@ impl<T: TransactionOrdering> TxPool<T> {
         if removed > 0 {
             self.metrics.removed_transactions.increment(removed);
         }
-
-        outcome
     }
 
     /// Moves a transaction from one sub pool to another.
@@ -1105,8 +1093,10 @@ impl<T: TransactionOrdering> TxPool<T> {
         let (tx, pool) = self.all_transactions.remove_transaction_by_hash(tx_hash)?;
 
         // After a tx is removed, its descendants must become parked due to the nonce gap
-        let updates = self.all_transactions.park_descendant_transactions(tx.id());
-        self.process_updates(updates);
+        let mut updates = self.all_transactions.park_descendant_transactions(tx.id());
+        #[expect(clippy::iter_with_drain, reason = "retain the scratch buffer allocation")]
+        self.process_updates(updates.drain(..), &mut UpdateOutcome::default());
+        self.all_transactions.update_buffer = updates;
         self.remove_from_subpool(pool, tx.id())
     }
 
@@ -1418,6 +1408,9 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     /// Number of transactions in the pool by transaction type, tracked incrementally so metrics
     /// updates don't require iterating the entire pool.
     tx_type_counts: TxTypeCounts,
+    /// Scratch space for sub-pool changes. Update methods take this buffer and return it to
+    /// `TxPool`, which drains the updates and restores the empty buffer for reuse.
+    update_buffer: Vec<PoolUpdate>,
     /// All Transactions metrics
     metrics: AllTransactionsMetrics,
 }
@@ -1529,8 +1522,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         &mut self,
         changed_accounts: &FxHashMap<SenderId, SenderInfo>,
     ) -> Vec<PoolUpdate> {
-        // pre-allocate a few updates
-        let mut updates = Vec::with_capacity(64);
+        let mut updates = std::mem::take(&mut self.update_buffer);
         let pending_fees = self.pending_fees;
 
         let update_all = self.last_full_update_fees != self.pending_fees ||
@@ -1834,7 +1826,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         &mut self,
         tx_id: &TransactionId,
     ) -> Vec<PoolUpdate> {
-        let mut updates = Vec::new();
+        let mut updates = std::mem::take(&mut self.update_buffer);
 
         for (id, tx) in self.descendant_txs_mut(tx_id) {
             let current_pool = tx.subpool;
@@ -2054,7 +2046,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
         let inserted_tx_id = *transaction.id();
         let mut state = TxState::default();
         let mut cumulative_cost = U256::ZERO;
-        let mut updates = Vec::new();
 
         // Current tx does not exceed block gas limit after ensure_valid check
         state.insert(TxState::NOT_TOO_MUCH_GAS);
@@ -2152,6 +2143,9 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 self.auths.entry(*auth).or_default().insert(*tx_hash);
             }
         }
+
+        // Take the scratch buffer only after all fallible checks so rejected inserts retain it.
+        let mut updates = std::mem::take(&mut self.update_buffer);
 
         // The next transaction of this sender
         let on_chain_id = TransactionId::new(transaction.sender_id(), on_chain_nonce);
@@ -2278,6 +2272,7 @@ impl<T: PoolTransaction> Default for AllTransactions<T> {
             local_transactions_config: Default::default(),
             auths: Default::default(),
             tx_type_counts: Default::default(),
+            update_buffer: Default::default(),
             metrics: Default::default(),
         }
     }
@@ -4358,6 +4353,72 @@ mod tests {
             pool.assert_invariants();
             assert!(pool.size().blob <= blob_limit.max_txs);
         }
+    }
+
+    #[test]
+    fn reuse_update_buffer_across_pool_operations() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(
+            MockOrdering::default(),
+            PoolConfig { max_account_slots: 128, ..Default::default() },
+        );
+        let mut tx = MockTransaction::eip1559().set_gas_price(100).inc_limit();
+        let first = f.validated(tx.clone());
+        for _ in 0..80 {
+            pool.add_transaction(f.validated(tx.clone()), U256::MAX, 0, None).unwrap();
+            tx = tx.next();
+        }
+        assert_eq!(pool.all_transactions.update_buffer.capacity(), 0);
+
+        let changed = |balance, state_nonce| {
+            FxHashMap::from_iter([(first.sender_id(), SenderInfo { balance, state_nonce })])
+        };
+        let outcome = pool.update_accounts(changed(U256::ZERO, 0));
+        assert!(outcome.promoted.is_empty());
+        assert!(outcome.discarded.is_empty());
+        assert_eq!(pool.queued_pool.len(), 80);
+        let capacity = pool.all_transactions.update_buffer.capacity();
+        assert!(capacity >= 80);
+        let buffer = pool.all_transactions.update_buffer.as_ptr();
+
+        for _ in 0..2 {
+            let outcome = pool.update_accounts(changed(U256::MAX, 0));
+            assert_eq!(outcome.promoted.len(), 80);
+            assert!(outcome.discarded.is_empty());
+            assert_eq!(pool.pending_pool.len(), 80);
+
+            let outcome = pool.update_accounts(FxHashMap::default());
+            assert!(outcome.promoted.is_empty());
+            assert!(outcome.discarded.is_empty());
+
+            pool.remove_transaction_by_hash(first.hash()).unwrap();
+            assert_eq!(pool.queued_pool.len(), 79);
+
+            // A rejected replacement must leave the reusable allocation available.
+            let replacement = f.validated(first.transaction.next());
+            assert!(pool.add_transaction(replacement, U256::MAX, 0, None).is_err());
+            assert_eq!(pool.all_transactions.update_buffer.as_ptr(), buffer);
+
+            let added = pool.add_transaction(first.clone(), U256::MAX, 0, None).unwrap();
+            let AddedTransaction::Pending(added) = added else { panic!("expected pending") };
+            assert_eq!(added.promoted.len(), 79);
+            assert!(added.discarded.is_empty());
+            assert_eq!(pool.pending_pool.len(), 80);
+
+            pool.update_accounts(changed(U256::ZERO, 0));
+            assert_eq!(pool.queued_pool.len(), 80);
+            assert!(pool.all_transactions.update_buffer.is_empty());
+            assert_eq!(pool.all_transactions.update_buffer.capacity(), capacity);
+            assert_eq!(pool.all_transactions.update_buffer.as_ptr(), buffer);
+            pool.assert_invariants();
+        }
+
+        let outcome = pool.update_accounts(changed(U256::MAX, 80));
+        assert_eq!(outcome.discarded.len(), 80);
+        assert!(outcome.promoted.is_empty());
+        assert!(pool.is_empty());
+        assert!(pool.all_transactions.update_buffer.is_empty());
+        assert_eq!(pool.all_transactions.update_buffer.as_ptr(), buffer);
     }
 
     #[test]
