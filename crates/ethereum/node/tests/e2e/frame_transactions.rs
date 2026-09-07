@@ -23,7 +23,7 @@ const MAX_PRIORITY_FEE_PER_GAS: u64 = 2_000_000_000;
 /// `PUSH1 3; PUSH0; PUSH0; APPROVE; STOP`: approve the sender and payer.
 const FRAME_APPROVER_RUNTIME: &[u8] = &[0x60, 0x03, 0x5f, 0x5f, 0xaa, 0x00];
 
-fn recipient() -> Address {
+const fn recipient() -> Address {
     Address::repeat_byte(0x11)
 }
 
