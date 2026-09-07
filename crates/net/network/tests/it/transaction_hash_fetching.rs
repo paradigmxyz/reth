@@ -121,7 +121,6 @@ async fn transactions_announced_by_many_peers_are_fetched() {
     let net = Testnet::create_with(num_peers, provider.clone()).await;
     let net = net.with_eth_pool_config(hashes_only());
     let handle = net.spawn();
-    handle.connect_peers().await;
 
     let txs = funded_transactions(&provider, 400);
     let hashes = txs.iter().map(|tx| *tx.hash()).collect::<Vec<_>>();
@@ -131,6 +130,8 @@ async fn transactions_announced_by_many_peers_are_fetched() {
             outcome.unwrap();
         }
     }
+
+    handle.connect_peers().await;
 
     let listening_peer = &handle.peers()[num_peers - 1];
     wait_for_transactions(listening_peer.pool().unwrap(), &hashes).await;

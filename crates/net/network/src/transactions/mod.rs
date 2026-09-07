@@ -29,7 +29,10 @@ use policy::NetworkPolicies;
 
 pub(crate) use fetcher::{FetchEvent, TransactionFetcher};
 
-use self::constants::{tx_manager::*, DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE};
+use self::constants::{
+    tx_manager::*, DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE,
+    SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST,
+};
 use crate::{
     budget::{
         DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS,
@@ -345,7 +348,8 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     pool_imports: FuturesUnordered<PoolImportFuture>,
     /// One fetched response awaiting import capacity. While occupied, fetch responses are not
     /// drained and new requests are not dispatched, bounding the backlog by existing requests.
-    pending_fetch_response: Option<(PeerId, PooledTransactions<N::PooledTransaction>)>,
+    pending_fetch_response:
+        Option<(PeerId, PooledTransactions<N::PooledTransaction>, TransactionSource)>,
     /// Stats on pending pool imports that help the node self-monitor.
     pending_pool_imports_info: PendingPoolImportsInfo,
     /// Bad imports.
@@ -1322,13 +1326,34 @@ where
             return
         }
 
+        let (version, client_version) = match &source {
+            TransactionSource::Broadcast => {
+                let Some(peer) = self.peers.get(&peer_id) else { return };
+                (peer.version(), peer.client_version.clone())
+            }
+            TransactionSource::Response { version, client_version } => {
+                (*version, client_version.clone())
+            }
+        };
+        let is_broadcast = source.is_broadcast();
         let mut transactions = transactions.0;
 
         // Broadcasts may be discarded at capacity. Fetched transactions are already settled
         // by the fetcher, so keep their remainder until imports complete instead of losing them.
-        let capacity = self.remaining_pool_import_capacity();
+        let mut capacity = self.remaining_pool_import_capacity();
+        if is_broadcast && self.transaction_fetcher.num_hashes() > 0 {
+            // Reserve one batch (or half a small import budget) for fetched transactions.
+            // Broadcasts are processed first and must not consume every newly freed slot.
+            let reserved = self
+                .pending_pool_imports_info
+                .max_pending_pool_imports
+                .div_ceil(2)
+                .min(SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST);
+            capacity = capacity
+                .saturating_sub(reserved.max(self.transaction_fetcher.num_fetching_hashes()));
+        }
         if transactions.len() > capacity {
-            if source.is_broadcast() {
+            if is_broadcast {
                 self.metrics
                     .skipped_transactions_pending_pool_imports_at_capacity
                     .increment((transactions.len() - capacity) as u64);
@@ -1336,33 +1361,30 @@ where
             } else {
                 debug_assert!(self.pending_fetch_response.is_none());
                 let remainder = transactions.split_off(capacity);
-                self.pending_fetch_response = Some((peer_id, PooledTransactions(remainder)));
+                self.pending_fetch_response =
+                    Some((peer_id, PooledTransactions(remainder), source));
             }
         }
         if transactions.is_empty() {
             return
         }
 
-        let Some(peer) = self.peers.get_mut(&peer_id) else { return };
-        let client_version = peer.client_version.clone();
-
         let start = Instant::now();
 
-        // stop tracking announced hashes that arrived over broadcast. Transactions received in a
-        // response were already untracked by the fetcher when it resolved the request.
-        if source.is_broadcast() {
-            self.transaction_fetcher
-                .on_transactions_received(transactions.iter().map(|tx| tx.tx_hash()));
-        }
+        // A buffered response may have been announced again while it waited for admission.
+        self.transaction_fetcher
+            .on_transactions_received(transactions.iter().map(|tx| tx.tx_hash()));
 
         // track that the peer knows these transaction, but only if this is a new broadcast.
         // If we received the transactions as the response to our `GetPooledTransactions``
         // requests (based on received `NewPooledTransactionHashes`) then we already
         // recorded the hashes as seen by this peer in `Self::on_new_pooled_transaction_hashes`.
         let mut num_already_seen_by_peer = 0;
-        for tx in &transactions {
-            if source.is_broadcast() && !peer.seen_transactions.insert(*tx.tx_hash()) {
-                num_already_seen_by_peer += 1;
+        if is_broadcast && let Some(peer) = self.peers.get_mut(&peer_id) {
+            for tx in &transactions {
+                if !peer.seen_transactions.insert(*tx.tx_hash()) {
+                    num_already_seen_by_peer += 1;
+                }
             }
         }
 
@@ -1370,7 +1392,7 @@ where
         // EIP-8070, so their sidecars can never validate. Drop them before touching the pool;
         // geth equivalently diverts these bodies into a buffer that is completed with cells
         // fetched via `GetCells`, which is not implemented yet.
-        if peer.version() == EthVersion::Eth72 {
+        if version == EthVersion::Eth72 {
             let len_before = transactions.len();
             transactions.retain(|tx| !tx.is_eip4844());
             let dropped = len_before - transactions.len();
@@ -1504,8 +1526,18 @@ where
     /// Processes a [`FetchEvent`].
     fn on_fetch_event(&mut self, fetch_event: FetchEvent<N::PooledTransaction>) {
         match fetch_event {
-            FetchEvent::TransactionsFetched { peer_id, transactions, report_peer } => {
-                self.import_transactions(peer_id, transactions, TransactionSource::Response);
+            FetchEvent::TransactionsFetched {
+                peer_id,
+                transactions,
+                report_peer,
+                version,
+                client_version,
+            } => {
+                self.import_transactions(
+                    peer_id,
+                    transactions,
+                    TransactionSource::Response { version, client_version },
+                );
                 if report_peer {
                     self.report_peer(peer_id, ReputationChangeKind::BadTransactions);
                 }
@@ -1563,9 +1595,9 @@ where
 
         // Admit buffered responses before broadcasts can consume newly available capacity.
         if this.has_capacity_for_pending_pool_imports() &&
-            let Some((peer_id, transactions)) = this.pending_fetch_response.take()
+            let Some((peer_id, transactions, source)) = this.pending_fetch_response.take()
         {
-            this.import_transactions(peer_id, transactions, TransactionSource::Response);
+            this.import_transactions(peer_id, transactions, source);
         }
 
         // Advance incoming transaction events (stream new txns/announcements from
@@ -2131,11 +2163,16 @@ impl PooledTransactionsHashesBuilder {
 }
 
 /// How we received the transactions.
+#[derive(Debug)]
 enum TransactionSource {
     /// Transactions were broadcast to us via [`Transactions`] message.
     Broadcast,
     /// Transactions were sent as the response to a `GetPooledTransactions` request issued by us.
-    Response,
+    Response {
+        /// Session metadata remains available after the responding peer disconnects.
+        version: EthVersion,
+        client_version: Arc<str>,
+    },
 }
 
 // === impl TransactionSource ===

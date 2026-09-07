@@ -286,8 +286,8 @@ pub struct TransactionFetcherMetrics {
     /// Total number of announced hashes that were dropped because the announcing peer is already
     /// a candidate for the maximum number of hashes.
     pub(crate) announced_hashes_dropped_peer_limit: Counter,
-    /// Total number of tracked hashes that were dropped because no peer is left to fetch them
-    /// from, e.g. because all peers that announced them failed to deliver them.
+    /// Total number of tracked hashes dropped because no candidate remains or the bounded
+    /// fetch-attempt budget was exhausted.
     pub(crate) hashes_dropped_no_candidate_peers: Counter,
 }
 

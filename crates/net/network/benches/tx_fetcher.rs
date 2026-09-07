@@ -77,7 +77,7 @@ impl Rig {
     /// Answers every queued request with the given handler and processes the resulting events.
     fn respond_all(
         &mut self,
-        respond: impl Fn(&[TxHash]) -> PooledTransactions<PooledTransactionVariant>,
+        mut respond: impl FnMut(&[TxHash]) -> PooledTransactions<PooledTransactionVariant>,
     ) {
         for (_, rx) in &mut self.sessions {
             while let Ok(PeerRequest::GetPooledTransactions { request, response }) = rx.try_recv() {
@@ -92,7 +92,7 @@ impl Rig {
     /// requests that were sent.
     fn run_to_completion(
         &mut self,
-        respond: impl Fn(&[TxHash]) -> PooledTransactions<PooledTransactionVariant>,
+        mut respond: impl FnMut(&[TxHash]) -> PooledTransactions<PooledTransactionVariant>,
     ) -> usize {
         let mut requests = 0;
         loop {
@@ -101,7 +101,7 @@ impl Rig {
                 break
             }
             requests += sent;
-            self.respond_all(&respond);
+            self.respond_all(&mut respond);
         }
         assert_eq!(self.fetcher.num_hashes(), 0, "all hashes must be fetched or given up on");
         requests
@@ -177,7 +177,7 @@ fn bench_announce(c: &mut Criterion) {
 fn bench_dispatch(c: &mut Criterion) {
     let fixtures = Fixtures::new();
     let mut group = c.benchmark_group("tx_fetcher/dispatch");
-    group.throughput(Throughput::Elements(TXS as u64));
+    group.throughput(Throughput::Elements((MAX_COUNT_EAGER_CANDIDATE_PEERS_PER_HASH * 256) as u64));
 
     // sanity check the workload: a hash is only queued for the first peers that announced it, so
     // one dispatch sends a request of 256 hashes to each of them
@@ -215,9 +215,24 @@ fn bench_fetch(c: &mut Criterion) {
             || {
                 let mut rig = Rig::new(PEERS);
                 rig.announce_gossip(&fixtures.announcement);
-                rig
+                // Bodies and response vectors are fixture work, outside the measured path.
+                let responses = fixtures
+                    .announcement
+                    .chunks(256)
+                    .map(|chunk| {
+                        let hashes = chunk.iter().map(|(hash, _)| *hash).collect::<Vec<_>>();
+                        (hashes[0], fixtures.deliver(&hashes))
+                    })
+                    .collect::<B256Map<_>>();
+                (rig, responses)
             },
-            |rig| rig.run_to_completion(|hashes| fixtures.deliver(hashes)),
+            |(rig, responses)| {
+                rig.run_to_completion(|hashes| {
+                    let response = responses.remove(&hashes[0]).expect("prepared response");
+                    assert_eq!(response.len(), hashes.len());
+                    response
+                })
+            },
             BatchSize::LargeInput,
         )
     });

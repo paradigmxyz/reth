@@ -313,7 +313,13 @@ mod tests {
             polls > 1,
             "the fetch events exceed the budget of a single poll, got {polls} polls"
         );
-        // no peer is left to fetch the hashes from
+        // Each sole source gets one timeout retry, still processed across multiple polls.
+        let retries = harness.take_requests();
+        assert_eq!(retries.len(), 64);
+        for request in retries {
+            request.response.send(Err(RequestError::Timeout)).unwrap();
+        }
+        harness.poll_until_idle();
         assert_eq!(harness.num_tracked_hashes(), 0);
         assert!(harness.take_requests().is_empty());
     }
@@ -403,12 +409,6 @@ mod tests {
             let mut requests = harness.take_requests();
             assert_eq!(requests.len(), 1);
 
-            // A broadcast consumes some or all capacity while the request is inflight.
-            harness.manager.import_transactions(
-                PEER_B,
-                PooledTransactions(txs[2..].to_vec()),
-                crate::transactions::TransactionSource::Broadcast,
-            );
             requests
                 .pop()
                 .unwrap()
@@ -416,6 +416,12 @@ mod tests {
                 .send(Ok(PooledTransactions(txs[..2].to_vec())))
                 .unwrap();
             let event = harness.manager.transaction_fetcher.next().await.unwrap();
+            // Competing imports consume capacity before the fetched batch is admitted.
+            harness.manager.import_transactions(
+                PEER_B,
+                PooledTransactions(txs[2..].to_vec()),
+                crate::transactions::TransactionSource::Broadcast,
+            );
             harness.manager.on_fetch_event(event);
             assert_eq!(
                 harness
@@ -430,11 +436,44 @@ mod tests {
                 broadcast_count,
             );
 
-            // Completion wakes admission of the remainder without a new network event.
+            // A disconnect must not discard the buffered bodies, and re-announcements while
+            // buffered must not result in another download when dispatch resumes.
+            harness.manager.peers.remove(&PEER_A);
+            harness.manager.transaction_fetcher.on_peer_disconnected(&PEER_A);
+            harness.announce(PEER_B, announcement(&hashes[..2]));
             harness.poll_until_idle();
+            assert!(harness.take_requests().is_empty());
             assert!(harness.manager.pending_fetch_response.is_none());
             assert_eq!(harness.pool().get_all(hashes).len(), txs.len());
         }
+    }
+
+    #[tokio::test]
+    async fn broadcasts_cannot_starve_announced_transactions() {
+        let txs = pooled_txs(3);
+        let hashes = txs.iter().map(|tx| *tx.tx_hash()).collect::<Vec<_>>();
+        let config =
+            TransactionsManagerConfig { max_pending_pool_imports: 2, ..Default::default() };
+        let mut harness =
+            TxFetchHarness::with_config(config, [PEER_A, PEER_B], EthVersion::Eth68).await;
+        harness.announce(PEER_A, announcement(&hashes[..1]));
+        for _ in 0..10 {
+            harness.manager.import_transactions(
+                PEER_B,
+                PooledTransactions(txs[1..].to_vec()),
+                crate::transactions::TransactionSource::Broadcast,
+            );
+            assert!(harness.manager.remaining_pool_import_capacity() >= 1);
+        }
+        harness.poll_until_idle();
+        let request =
+            harness.take_requests().pop().expect("broadcast pressure leaves fetch capacity");
+        request.response.send(Ok(PooledTransactions(txs[..1].to_vec()))).unwrap();
+        // The response retains its original session metadata even if disconnect is processed first.
+        harness.manager.peers.remove(&PEER_A);
+        harness.manager.transaction_fetcher.on_peer_disconnected(&PEER_A);
+        harness.poll_until_idle();
+        assert_eq!(harness.pool().get_all(vec![hashes[0]]).len(), 1);
     }
 
     #[tokio::test]
