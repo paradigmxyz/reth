@@ -694,3 +694,6 @@ vergen-git2 = "10.0.1"
 
 # networking
 ipnet = "2.11"
+
+[patch.crates-io]
+alloy-eip7928 = { git = "https://github.com/lean-apple/alloy-eips", rev = "b05480a7bb8dd4581184f32c69ee112e2f7b42f0" }

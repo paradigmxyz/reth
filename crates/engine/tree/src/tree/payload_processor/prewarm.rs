@@ -431,14 +431,7 @@ where
             pool.begin_block(build, caches, ctx.env.txpool_snapshot.clone());
             let dispatch_start = Instant::now();
             for account in prefetch_bal.as_bal() {
-                pool.warm_account(
-                    account.address,
-                    account
-                        .storage_changes
-                        .iter()
-                        .map(|change| change.slot.into())
-                        .chain(account.storage_reads.iter().map(|&slot| slot.into())),
-                );
+                pool.warm_account(account.address, account.storage_slots().map(Into::into));
             }
             ctx.metrics.bal_slot_iteration_duration.record(dispatch_start.elapsed());
             pool.end_block();
@@ -778,13 +771,13 @@ struct BalAccountStateFields {
 impl BalAccountStateFields {
     fn from_changes(account_changes: &alloy_eip7928::AccountChanges) -> Self {
         Self {
-            balance: account_changes.balance_changes.last().map(|change| change.post_balance),
-            nonce: account_changes.nonce_changes.last().map(|change| change.new_nonce),
-            code_hash: account_changes.code_changes.last().map(|code_change| {
-                if code_change.new_code.is_empty() {
+            balance: account_changes.balance_post_state(),
+            nonce: account_changes.nonce_post_state(),
+            code_hash: account_changes.code_post_state().map(|code| {
+                if code.is_empty() {
                     alloy_consensus::constants::KECCAK_EMPTY
                 } else {
-                    keccak256(&code_change.new_code)
+                    keccak256(code)
                 }
             }),
         }
