@@ -10,6 +10,7 @@ repository.workspace = true
 [lints]
 
 [dependencies]
+reth-rayon.workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-cli.workspace = true
@@ -90,7 +91,6 @@ reqwest = { workspace = true, features = ["blocking"] }
 url.workspace = true
 metrics.workspace = true
 blake3.workspace = true
-rayon.workspace = true
 
 # io
 fdlimit.workspace = true

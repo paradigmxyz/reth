@@ -12,6 +12,7 @@ description = "Reth storage provider."
 workspace = true
 
 [dependencies]
+reth-rayon = { workspace = true }
 # reth
 reth-chainspec.workspace = true
 reth-execution-types.workspace = true
@@ -65,7 +66,6 @@ tokio = { workspace = true, features = ["sync"], optional = true }
 reth-ethereum-engine-primitives = { workspace = true, optional = true }
 
 # parallel utils
-rayon.workspace = true
 
 rocksdb.workspace = true
 

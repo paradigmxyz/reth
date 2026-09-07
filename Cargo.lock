@@ -8535,7 +8535,6 @@ dependencies = [
  "proptest",
  "proptest-arbitrary-interop",
  "ratatui",
- "rayon",
  "reqwest",
  "reth-chainspec",
  "reth-cli",
@@ -8574,6 +8573,7 @@ dependencies = [
  "reth-provider",
  "reth-prune",
  "reth-prune-types",
+ "reth-rayon",
  "reth-revm",
  "reth-stages",
  "reth-stages-types",
@@ -8936,7 +8936,6 @@ dependencies = [
  "metrics",
  "pin-project",
  "rand 0.9.4",
- "rayon",
  "reth-chainspec",
  "reth-config",
  "reth-consensus",
@@ -8947,6 +8946,7 @@ dependencies = [
  "reth-network-peers",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-rayon",
  "reth-storage-api",
  "reth-tasks",
  "reth-testing-utils",
@@ -9150,6 +9150,7 @@ dependencies = [
  "reth-provider",
  "reth-prune",
  "reth-prune-types",
+ "reth-rayon",
  "reth-revm",
  "reth-stages",
  "reth-stages-api",
@@ -9517,8 +9518,8 @@ name = "reth-etl"
 version = "2.5.2"
 dependencies = [
  "alloy-primitives",
- "rayon",
  "reth-db-api",
+ "reth-rayon",
  "tempfile",
 ]
 
@@ -9862,7 +9863,6 @@ dependencies = [
  "pin-project",
  "rand 0.8.6",
  "rand 0.9.4",
- "rayon",
  "reth-chainspec",
  "reth-consensus",
  "reth-discv4",
@@ -9885,6 +9885,7 @@ dependencies = [
  "reth-network-types",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-rayon",
  "reth-stages-types",
  "reth-storage-api",
  "reth-tasks",
@@ -10439,7 +10440,6 @@ dependencies = [
  "notify",
  "parking_lot",
  "rand 0.9.4",
- "rayon",
  "reth-chain-state",
  "reth-chainspec",
  "reth-codecs",
@@ -10455,6 +10455,7 @@ dependencies = [
  "reth-node-types",
  "reth-primitives-traits",
  "reth-prune-types",
+ "reth-rayon",
  "reth-stages-types",
  "reth-static-file-types",
  "reth-storage-api",
@@ -10525,6 +10526,13 @@ dependencies = [
  "thiserror 2.0.18",
  "toml",
  "tracing",
+]
+
+[[package]]
+name = "reth-rayon"
+version = "2.5.2"
+dependencies = [
+ "rayon",
 ]
 
 [[package]]
@@ -10952,7 +10960,6 @@ dependencies = [
  "page_size",
  "paste",
  "rand 0.9.4",
- "rayon",
  "reqwest",
  "reth-chainspec",
  "reth-codecs",
@@ -10980,6 +10987,7 @@ dependencies = [
  "reth-provider",
  "reth-prune",
  "reth-prune-types",
+ "reth-rayon",
  "reth-revm",
  "reth-stages-api",
  "reth-static-file",
@@ -11054,12 +11062,12 @@ dependencies = [
  "alloy-primitives",
  "assert_matches",
  "parking_lot",
- "rayon",
  "reth-codecs",
  "reth-db-api",
  "reth-primitives-traits",
  "reth-provider",
  "reth-prune-types",
+ "reth-rayon",
  "reth-stages",
  "reth-stages-types",
  "reth-static-file-types",
@@ -11141,7 +11149,6 @@ dependencies = [
  "alloy-primitives",
  "metrics",
  "parking_lot",
- "rayon",
  "reth-chain-state",
  "reth-db",
  "reth-db-api",
@@ -11151,6 +11158,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-provider",
  "reth-prune-types",
+ "reth-rayon",
  "reth-stages-types",
  "reth-storage-api",
  "reth-storage-errors",
@@ -11205,6 +11213,7 @@ dependencies = [
  "pin-project",
  "rayon",
  "reth-metrics",
+ "reth-rayon",
  "thiserror 2.0.18",
  "thread-priority",
  "tokio",
@@ -11383,6 +11392,7 @@ dependencies = [
  "rayon",
  "reth-codecs",
  "reth-primitives-traits",
+ "reth-rayon",
  "revm",
  "serde",
  "serde_json",

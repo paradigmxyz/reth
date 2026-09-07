@@ -40,6 +40,8 @@ use std::sync::Arc;
 use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
 
 /// Executes one block on the BAL path using the runtime's persistent BAL worker pool.
+/// Under inline routing all transactions must already be queued; use
+/// [`execute_block_with_runtime`] to await a live stream before opening state.
 #[expect(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     runtime: &Runtime,
@@ -63,12 +65,31 @@ where
     MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync + 'a,
     ReceiptTy<Evm::Primitives>: Clone,
 {
+    if reth_rayon::is_inline() {
+        if txs.len() != transaction_count {
+            return Err(BalExecutionError::other(
+                "inline BAL execution requires all transactions; use execute_block_with_runtime for a live stream",
+            ));
+        }
+        return execute_block_inner(
+            None,
+            evm_config,
+            make_db,
+            input_bal,
+            evm_env,
+            ctx,
+            transaction_count,
+            txs,
+            receipt_tx,
+            usize::from(transaction_count > 0),
+        );
+    }
     let worker_pool = runtime.bal_streaming_pool();
     let worker_count = worker_pool.current_num_threads().max(1).min(transaction_count);
 
     worker_pool.in_place_scope(|scope| {
         execute_block_inner(
-            scope,
+            Some(scope),
             evm_config,
             make_db,
             input_bal,
@@ -82,9 +103,75 @@ where
     })
 }
 
+/// Awaits a transaction stream before entering the atomic BAL execution operation under DST.
+/// Native execution retains streaming Rayon workers. No database is opened while collecting
+/// simulated input, allowing other actors (including persistence) to make progress.
+#[expect(clippy::too_many_arguments)]
+pub async fn execute_block_with_runtime<'a, Evm, Tx, Err, DB, MakeDb>(
+    tasks: &reth_tasks::TaskRuntime,
+    runtime: &Runtime,
+    evm_config: &'a Evm,
+    make_db: &'a MakeDb,
+    input_bal: Arc<DecodedBal>,
+    evm_env: EvmEnvFor<Evm>,
+    ctx: ExecutionCtxFor<'a, Evm>,
+    transaction_count: usize,
+    txs: Receiver<(usize, Result<Tx, Err>)>,
+    receipt_tx: tokio::sync::mpsc::UnboundedSender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
+) -> Result<
+    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList),
+    BalExecutionError,
+>
+where
+    Evm: ConfigureEvm + 'static,
+    Tx: ExecutableTxFor<Evm> + Send + 'a,
+    Err: core::error::Error + Send + Sync + 'static,
+    DB: Database + Send + 'a,
+    MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync + 'a,
+    ReceiptTy<Evm::Primitives>: Clone,
+{
+    tasks
+        .scope(async move {
+            let txs = if reth_rayon::is_inline() {
+                let (ready_tx, ready_rx) = crossbeam_channel::unbounded();
+                for _ in 0..transaction_count {
+                    loop {
+                        match txs.try_recv() {
+                            Ok(tx) => {
+                                let _ = ready_tx.send(tx);
+                                break;
+                            }
+                            Err(crossbeam_channel::TryRecvError::Empty) => tasks.yield_now().await,
+                            Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                                return Err(BalExecutionError::other(
+                                    "BAL transaction stream closed early",
+                                ))
+                            }
+                        }
+                    }
+                }
+                ready_rx
+            } else {
+                txs
+            };
+            execute_block(
+                runtime,
+                evm_config,
+                make_db,
+                input_bal,
+                evm_env,
+                ctx,
+                transaction_count,
+                txs,
+                receipt_tx,
+            )
+        })
+        .await
+}
+
 #[expect(clippy::too_many_arguments, clippy::type_complexity)]
 fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
-    scope: &rayon::Scope<'scope>,
+    scope: Option<&rayon::Scope<'scope>>,
     evm_config: &'scope Evm,
     make_db: &'scope MakeDb,
     input_bal: Arc<DecodedBal>,
@@ -833,6 +920,85 @@ mod tests {
             serial.bundle_state, bal_out.state,
             "bundle_state diverges — the canonical state transitions don't match",
         );
+    }
+
+    #[test]
+    fn deterministic_bal_waits_for_stream_before_opening_state() {
+        use commonware_runtime::{deterministic, Runner, Supervisor};
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        fn run(seed: u64, close_early: bool) -> String {
+            deterministic::Runner::new(deterministic::Config::default().with_seed(seed)).start(
+                |context| async move {
+                    let tasks = reth_tasks::TaskRuntime::deterministic(context.child("bal"));
+                    let native = Runtime::test();
+                    let evm_config = EthEvmConfig::mainnet();
+                    let block = empty_amsterdam_block(B256::ZERO);
+                    let bal = to_arc_decoded(reference_bal_for_empty_block(&evm_config));
+                    let sent = Arc::new(AtomicBool::new(false));
+                    let marker = sent.clone();
+                    let (tx, rx) = crossbeam_channel::unbounded::<(
+                        usize,
+                        Result<Recovered<TransactionSigned>, std::io::Error>,
+                    )>();
+                    let producer_tasks = tasks.clone();
+                    let producer = tasks.spawn("transactions", async move {
+                        producer_tasks.yield_now().await;
+                        marker.store(true, Ordering::Relaxed);
+                        if !close_early {
+                            tx.send((0, Err(std::io::Error::other("conversion failed")))).unwrap();
+                        }
+                    });
+                    let make_db = |_: bool| {
+                        assert!(
+                            sent.load(Ordering::Relaxed),
+                            "opened state before receiving input"
+                        );
+                        Ok(system_contracts_db())
+                    };
+                    let (receipts, _) = tokio::sync::mpsc::unbounded_channel();
+                    let result = execute_block_with_runtime(
+                        &tasks,
+                        &native,
+                        &evm_config,
+                        &make_db,
+                        bal,
+                        evm_config.evm_env(block.header()).unwrap(),
+                        evm_config.context_for_block(&block).unwrap(),
+                        1,
+                        rx,
+                        receipts,
+                    )
+                    .await;
+                    let error = result.unwrap_err().to_string();
+                    assert!(
+                        error.contains(if close_early {
+                            "closed early"
+                        } else {
+                            "conversion failed"
+                        }),
+                        "{error}"
+                    );
+                    producer.await.unwrap();
+                    context.auditor().state()
+                },
+            )
+        }
+        for seed in 0..4 {
+            for close_early in [false, true] {
+                assert_eq!(run(seed, close_early), run(seed, close_early));
+            }
+        }
+    }
+
+    #[test]
+    fn inline_bal_matches_serial_execution() {
+        reth_rayon::inline(|| {
+            shadow_empty_block();
+            shadow_multi_value_transfer();
+            shadow_tx_with_revert();
+            rejects_tx_gas_limit_that_exceeds_remaining_block_gas();
+        });
     }
 
     #[test]

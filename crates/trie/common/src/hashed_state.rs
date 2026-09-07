@@ -15,7 +15,7 @@ pub use rayon::*;
 use reth_primitives_traits::Account;
 
 #[cfg(feature = "rayon")]
-use rayon::prelude::{FromParallelIterator, IntoParallelIterator, ParallelIterator};
+use rayon::prelude::{FromParallelIterator, IntoParallelIterator};
 
 use revm::database::BundleAccount;
 
@@ -340,7 +340,7 @@ impl FromParallelIterator<(B256, Option<Account>, Option<HashedStorage>)> for Ha
     where
         I: IntoParallelIterator<Item = (B256, Option<Account>, Option<HashedStorage>)>,
     {
-        let vec: Vec<_> = par_iter.into_par_iter().collect();
+        let vec = reth_rayon::collect(par_iter);
         vec.into_iter().collect()
     }
 }

@@ -51,7 +51,7 @@ type WorkerResultSender<Cfg> =
 
 #[expect(clippy::too_many_arguments)]
 pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
-    scope: &rayon::Scope<'scope>,
+    scope: Option<&rayon::Scope<'scope>>,
     tx_rx: Receiver<(usize, Result<Tx, Err>)>,
     abort_rx: Receiver<()>,
     result_tx: WorkerResultSender<Evm>,
@@ -67,7 +67,7 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
     DB: Database + Send + 'scope,
     MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync + 'scope,
 {
-    scope.spawn(move |_| {
+    let job = move || {
         let worker_result = (|| -> Result<(), BalWorkerError> {
             // Create a database with fill_on_miss=true ensuring misses
             // are inserted for the other workers.
@@ -81,12 +81,21 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
             let mut executor = evm_config.create_executor_with_state(evm, ctx.clone());
 
             loop {
-                let (index, tx) = crossbeam_channel::select_biased! {
-                    recv(abort_rx) -> _ => break,
-                    recv(tx_rx) -> msg => match msg {
-                        Ok(ix_tx) => ix_tx,
+                let (index, tx) = if reth_rayon::is_inline() {
+                    // The inline entry point supplies a complete batch. Never wait for a
+                    // producer on the simulator's thread, even if its sender is still alive.
+                    match tx_rx.try_recv() {
+                        Ok(tx) => tx,
                         Err(_) => break,
-                    },
+                    }
+                } else {
+                    crossbeam_channel::select_biased! {
+                        recv(abort_rx) -> _ => break,
+                        recv(tx_rx) -> msg => match msg {
+                            Ok(ix_tx) => ix_tx,
+                            Err(_) => break,
+                        },
+                    }
                 };
                 let tx = tx.map_err(|e| BalWorkerError::Transaction(Box::new(e)))?;
                 let signer = *tx.signer();
@@ -111,5 +120,10 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
         if let Err(err) = worker_result {
             let _ = result_tx.send(Err(err));
         }
-    });
+    };
+    if let Some(scope) = scope {
+        scope.spawn(move |_| job());
+    } else {
+        job();
+    }
 }

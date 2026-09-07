@@ -12,6 +12,7 @@ description = "Staged syncing primitives used in reth."
 workspace = true
 
 [dependencies]
+reth-rayon = { workspace = true }
 # reth
 reth-chainspec.workspace = true
 reth-codecs.workspace = true
@@ -60,7 +61,6 @@ tracing.workspace = true
 # misc
 thiserror.workspace = true
 itertools.workspace = true
-rayon.workspace = true
 page_size.workspace = true
 num-traits.workspace = true
 tempfile = { workspace = true, optional = true }

@@ -12,6 +12,7 @@ description = "Implementations of various block downloaders"
 workspace = true
 
 [dependencies]
+reth-rayon.workspace = true
 # reth
 reth-config.workspace = true
 reth-consensus.workspace = true
@@ -48,7 +49,6 @@ reth-metrics.workspace = true
 metrics.workspace = true
 
 # misc
-rayon.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 

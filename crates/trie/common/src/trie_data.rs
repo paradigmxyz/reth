@@ -230,7 +230,7 @@ impl LazyTrieDataProducer {
         trie_updates: Arc<TrieUpdates>,
     ) -> ComputedTrieData {
         #[cfg(feature = "rayon")]
-        let (sorted_hashed_state, sorted_trie_updates) = rayon::join(
+        let (sorted_hashed_state, sorted_trie_updates) = reth_rayon::join(
             || match Arc::try_unwrap(hashed_state) {
                 Ok(state) => state.into_sorted(),
                 Err(arc) => arc.clone_into_sorted(),

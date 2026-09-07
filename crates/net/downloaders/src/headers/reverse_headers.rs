@@ -7,7 +7,6 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{BlockNumber, Sealable, B256};
 use futures::{stream::Stream, FutureExt};
 use futures_util::{stream::FuturesUnordered, StreamExt};
-use rayon::prelude::*;
 use reth_config::config::HeadersConfig;
 use reth_consensus::HeaderValidator;
 use reth_network_p2p::{
@@ -258,8 +257,7 @@ where
     ) -> Result<(), ReverseHeadersDownloaderError<H::Header>> {
         let mut validated = Vec::with_capacity(headers.len());
 
-        let sealed_headers =
-            headers.into_par_iter().map(SealedHeader::seal_slow).collect::<Vec<_>>();
+        let sealed_headers = reth_rayon::map_collect(headers, SealedHeader::seal_slow);
         for parent in sealed_headers {
             // Validate that the header is the parent header of the last validated header.
             if let Some(validated_header) =

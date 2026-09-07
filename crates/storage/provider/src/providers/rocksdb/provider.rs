@@ -8,7 +8,6 @@ use alloy_primitives::{
 use itertools::Itertools;
 use metrics::Label;
 use parking_lot::Mutex;
-use rayon::prelude::*;
 use reth_chain_state::ExecutedBlock;
 use reth_db_api::{
     database_metrics::DatabaseMetrics,
@@ -1393,23 +1392,23 @@ impl RocksDBProvider {
         // Propagate tracing context into rayon-spawned threads so that RocksDB
         // write spans appear as children of write_blocks_data in traces.
         let span = tracing::Span::current();
-        runtime.storage_pool().in_place_scope(|s| {
+        reth_rayon::in_place_scope(runtime.storage_pool(), |s| {
             if write_tx_hash {
-                s.spawn(|_| {
+                s.spawn(|| {
                     let _guard = span.enter();
                     r_tx_hash = Some(self.write_tx_hash_numbers(blocks, tx_nums, &ctx));
                 });
             }
 
             if write_account_history {
-                s.spawn(|_| {
+                s.spawn(|| {
                     let _guard = span.enter();
                     r_account_history = Some(self.write_account_history(blocks, &ctx));
                 });
             }
 
             if write_storage_history {
-                s.spawn(|_| {
+                s.spawn(|| {
                     let _guard = span.enter();
                     r_storage_history = Some(self.write_storage_history(blocks, &ctx));
                 });
@@ -1523,12 +1522,10 @@ impl RocksDBProvider {
             }
         }
 
-        let shard_puts = storage_history
-            .into_par_iter()
-            .map(|((address, slot), indices)| {
+        let shard_puts =
+            reth_rayon::try_map_collect(storage_history, |((address, slot), indices)| {
                 self.storage_history_shards_to_put(address, slot, indices)
-            })
-            .collect::<ProviderResult<Vec<_>>>()?;
+            })?;
 
         let mut batch = self.batch();
         for shards in shard_puts {
