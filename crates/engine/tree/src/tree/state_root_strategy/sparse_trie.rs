@@ -433,10 +433,8 @@ where
                 self.trie.calculate_subtries(self.new_epoch);
             }
         } else if !updates_queued {
-            // If we don't have any pending updates, apply them to the trie,
-            let t = Instant::now();
-            self.process_new_updates()?;
-            self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
+            // Let the event loop reveal queued proofs before applying buffered leaves, so
+            // updates do not retry blinded paths whose proofs are already available.
             self.dispatch_pending_targets()?;
         } else if self.pending_targets.len() > self.chunk_size {
             // Make sure to dispatch targets if we've accumulated a lot of them.
@@ -1212,6 +1210,87 @@ mod tests {
         assert_eq!(decoded.balance, U256::from(42));
         assert_eq!(decoded.storage_root, storage_root);
         assert_eq!(account_rlp_buf, encoded);
+    }
+
+    #[test]
+    fn ready_proof_precedes_buffered_leaf_application() {
+        let runtime = reth_tasks::Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayManager::<reth_chain_state::EthPrimitives>::default()
+                .overlay_builder(anchor_hash),
+        );
+        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
+        let proof_worker_handle = ProofWorkerHandle::new(
+            &runtime,
+            ProofTaskCtx::new(state_provider_factory),
+            false,
+            proof_result_tx.clone(),
+        );
+
+        let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+        let trie = SparseStateTrie::default()
+            .with_accounts_trie(default_trie.clone())
+            .with_default_storage_trie(default_trie)
+            .with_updates(true);
+
+        let parent_state_root = B256::from([0x55; 32]);
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (_cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
+        let mut task = SparseTrieCacheTask::new_with_trie(
+            &runtime,
+            updates_rx,
+            cancel_rx,
+            std::sync::mpsc::channel().0,
+            proof_worker_handle,
+            proof_result_tx.clone(),
+            proof_result_rx,
+            SparseTrieTaskMetrics::default(),
+            trie,
+            parent_state_root,
+            TrieNodeEpoch::UNMODIFIED,
+            1,
+        );
+
+        let address = B256::repeat_byte(0x11);
+        let mut state = HashedPostState::default();
+        state.accounts.insert(address, Some(Account { nonce: 1, ..Default::default() }));
+        task.on_hashed_state_update(state);
+        task.pending_updates = 1;
+        task.finished_state_updates = true;
+        task.in_flight_proof_batches = 1;
+        proof_result_tx
+            .send(ProofResultMessage {
+                result: Ok(DecodedMultiProofV2 {
+                    account_proofs: vec![reth_trie_common::ProofTrieNodeV2::empty()],
+                    ..Default::default()
+                }),
+                elapsed: std::time::Duration::ZERO,
+                state: HashedPostState::default(),
+            })
+            .unwrap();
+
+        assert!(!task.make_progress().unwrap());
+        assert!(task.fetched_account_targets.is_empty(), "ready proof must not be requested again");
+        assert_eq!(task.pending_updates, 1);
+
+        let result = task.proof_result_rx.try_recv().unwrap();
+        task.on_proof_results(result, &mut Instant::now()).unwrap();
+        assert!(task.make_progress().unwrap());
+        assert!(task.fetched_account_targets.is_empty());
+        assert_eq!(
+            task.trie.root(task.new_epoch).unwrap(),
+            reth_trie::root::state_root([(
+                address,
+                TrieAccount { nonce: 1, ..Default::default() }
+            ),])
+        );
+        drop(updates_tx);
+        drop(proof_result_tx);
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
     }
 
     #[test]
