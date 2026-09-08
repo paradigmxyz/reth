@@ -28,7 +28,7 @@ reth-primitives-traits = { workspace = true, features = ["rayon", "dashmap"] }
 reth-ethereum-primitives.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
-reth-revm = { workspace = true, features = ["optional-balance-check", "optional-no-base-fee"] }
+reth-revm = { workspace = true, features = ["optional-balance-check", "optional-no-base-fee", "witness"] }
 reth-stages-api.workspace = true
 reth-storage-overlay = { workspace = true, features = ["rayon"] }
 reth-tasks = { workspace = true, features = ["rayon"] }
@@ -45,6 +45,7 @@ alloy-eip7928 = { workspace = true, features = ["rlp"] }
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-rpc-types-engine.workspace = true
+alloy-rpc-types-debug.workspace = true
 
 revm.workspace = true
 

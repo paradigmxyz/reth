@@ -1513,6 +1513,10 @@ where
             ctx.node.task_executor().clone(),
         );
 
+        if let Some(requests) = ctx.beacon_engine_handle.witness_requests() {
+            validator = validator.with_witness_requests(requests.clone());
+        }
+
         if txpool_prewarming {
             validator = validator
                 .with_txpool_prewarming(txpool_prewarm::Source::new(ctx.node.pool().clone()));

@@ -19,7 +19,9 @@ use alloy_rpc_types_engine::{
 use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
 use reth_chainspec::EthereumHardforks;
-use reth_engine_primitives::{ConsensusEngineHandle, EngineApiValidator, EngineTypes};
+use reth_engine_primitives::{
+    ConsensusEngineHandle, EngineApiValidator, EngineTypes, PayloadWitnessRequest,
+};
 use reth_network_api::{CellCustody, NetworkInfo};
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
@@ -27,7 +29,7 @@ use reth_payload_primitives::{
     PayloadOrAttributes, PayloadTypes,
 };
 use reth_primitives_traits::{AlloyBlockHeader, Block, BlockBody};
-use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
+use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule, PayloadStatusWithWitness};
 use reth_storage_api::{BalProvider, BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::Runtime;
 use reth_transaction_pool::{BestTransactions, TransactionPool};
@@ -105,6 +107,14 @@ where
         network: impl NetworkInfo + 'static,
     ) -> Self {
         let cell_custody = network.cell_custody().clone();
+        let capabilities = if beacon_consensus.witness_requests().is_some_and(|r| r.is_enabled()) {
+            capabilities
+        } else {
+            EngineCapabilities::new(capabilities.list().into_iter().filter(|method| {
+                method != "engine_newPayloadWithWitnessV4" &&
+                    method != "engine_newPayloadWithWitnessV5"
+            }))
+        };
         let is_syncing = Arc::new(move || network.is_syncing());
         let inner = Arc::new(EngineApiInner {
             provider,
@@ -1439,6 +1449,64 @@ where
         Ok(self.new_payload_v5_metered(payload).await?)
     }
 
+    async fn new_payload_with_witness_v4(
+        &self,
+        payload: ExecutionPayloadV3,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+        requests: RequestsOrHash,
+    ) -> RpcResult<PayloadStatusWithWitness> {
+        let capture = self
+            .inner
+            .beacon_consensus
+            .witness_requests()
+            .filter(|requests| requests.is_enabled())
+            .ok_or_else(|| {
+                jsonrpsee_types::ErrorObjectOwned::from(
+                    jsonrpsee_types::error::ErrorCode::MethodNotFound,
+                )
+            })?
+            .register(payload.payload_inner.payload_inner.block_hash);
+        let status = EngineApiServer::<EngineT>::new_payload_v4(
+            self,
+            payload,
+            versioned_hashes,
+            parent_beacon_block_root,
+            requests,
+        )
+        .await?;
+        witness_response(status, &capture)
+    }
+
+    async fn new_payload_with_witness_v5(
+        &self,
+        payload: ExecutionPayloadV4,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+        requests: RequestsOrHash,
+    ) -> RpcResult<PayloadStatusWithWitness> {
+        let capture = self
+            .inner
+            .beacon_consensus
+            .witness_requests()
+            .filter(|requests| requests.is_enabled())
+            .ok_or_else(|| {
+                jsonrpsee_types::ErrorObjectOwned::from(
+                    jsonrpsee_types::error::ErrorCode::MethodNotFound,
+                )
+            })?
+            .register(payload.payload_inner.payload_inner.payload_inner.block_hash);
+        let status = EngineApiServer::<EngineT>::new_payload_v5(
+            self,
+            payload,
+            versioned_hashes,
+            parent_beacon_block_root,
+            requests,
+        )
+        .await?;
+        witness_response(status, &capture)
+    }
+
     /// Handler for `engine_newPayloadV6`.
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/bogota.md#engine_newpayloadv6>
@@ -1795,6 +1863,25 @@ where
     fn clone(&self) -> Self {
         Self { inner: Arc::clone(&self.inner) }
     }
+}
+
+/// Attaches capture only to a valid response, without changing consensus validation results.
+fn witness_response(
+    status: PayloadStatus,
+    capture: &PayloadWitnessRequest,
+) -> RpcResult<PayloadStatusWithWitness> {
+    let witness = if status.is_valid() {
+        capture.result().cloned().transpose().map_err(|error| {
+            jsonrpsee_types::ErrorObjectOwned::owned(
+                jsonrpsee_types::error::INTERNAL_ERROR_CODE,
+                error,
+                None::<()>,
+            )
+        })?
+    } else {
+        None
+    };
+    Ok(PayloadStatusWithWitness { payload_status: status, witness })
 }
 
 /// The container type for the engine API internals.
@@ -2249,6 +2336,66 @@ mod tests {
         chain_spec: Arc<ChainSpec>,
         provider: Arc<MockEthProvider>,
         from_api: UnboundedReceiver<BeaconEngineMessage<EthEngineTypes>>,
+    }
+
+    #[tokio::test]
+    async fn witness_endpoints_require_a_connected_validator() {
+        let (_handle, api) = setup_engine_api();
+        assert!(!api.capabilities().as_set().contains("engine_newPayloadWithWitnessV4"));
+        assert!(!api.capabilities().as_set().contains("engine_newPayloadWithWitnessV5"));
+        let error = EngineApiServer::<EthEngineTypes>::new_payload_with_witness_v4(
+            &api,
+            ExecutionPayloadV3::from_block_slow(&Block::default()),
+            Vec::new(),
+            B256::ZERO,
+            RequestsOrHash::Requests(Requests::default()),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code(), jsonrpsee_types::error::METHOD_NOT_FOUND_CODE);
+    }
+
+    #[test]
+    fn witness_response_preserves_status_and_omits_invalid_capture() {
+        let requests = reth_engine_primitives::PayloadWitnessRequests::default();
+        let capture = requests.register(B256::ZERO);
+        requests.pending(&B256::ZERO).unwrap().publish(Ok(Bytes::from_static(b"witness")));
+        let status = PayloadStatus::new(PayloadStatusEnum::Valid, Some(B256::ZERO));
+        let response = witness_response(status.clone(), &capture).unwrap();
+        assert_eq!(response.payload_status, status);
+        assert_eq!(
+            serde_json::to_value(response).unwrap(),
+            serde_json::json!({
+                "status": "VALID", "latestValidHash": B256::ZERO, "validationError": null,
+                "witness": "0x7769746e657373"
+            })
+        );
+        for status in [
+            PayloadStatusEnum::Syncing,
+            PayloadStatusEnum::Invalid { validation_error: "invalid".into() },
+        ] {
+            let status = PayloadStatus::from_status(status);
+            let response = witness_response(status.clone(), &capture).unwrap();
+            assert!(response.witness.is_none());
+            assert_eq!(
+                serde_json::to_value(response).unwrap(),
+                serde_json::to_value(status).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn witness_failure_is_separate_from_payload_validity() {
+        let requests = reth_engine_primitives::PayloadWitnessRequests::default();
+        let capture = requests.register(B256::ZERO);
+        let valid = PayloadStatus::new(PayloadStatusEnum::Valid, Some(B256::ZERO));
+        assert!(witness_response(valid.clone(), &capture).unwrap().witness.is_none());
+        requests.pending(&B256::ZERO).unwrap().publish(Err("proof unavailable".into()));
+        let error = witness_response(valid, &capture).unwrap_err();
+        assert_eq!(error.code(), jsonrpsee_types::error::INTERNAL_ERROR_CODE);
+        assert_eq!(error.message(), "proof unavailable");
+        assert!(witness_response(PayloadStatus::from_status(PayloadStatusEnum::Syncing), &capture)
+            .is_ok());
     }
 
     #[tokio::test]
