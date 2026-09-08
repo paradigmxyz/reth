@@ -2,6 +2,7 @@
 
 use alloy_primitives::{Address, StorageKey};
 use reth_execution_cache::{CachedStateProvider, ExecutionCache, TxPoolPrewarmCacheSnapshot};
+use reth_primitives_traits::{AccountExtension, EmptyAccountExtension};
 use reth_provider::{
     AccountReader, BytecodeReader, ProviderResult, StateProvider, StateProviderBox,
 };
@@ -17,7 +18,7 @@ use tracing::trace;
 
 /// Builds a fresh `StateProviderBox` over the block's parent state. Type-erased so the pool is not
 /// generic over the provider factory; each worker builds its own per block.
-pub type BuildProviderFn<Ext = reth_primitives_traits::EmptyAccountExtension> =
+pub type BuildProviderFn<Ext = EmptyAccountExtension> =
     dyn Fn() -> ProviderResult<StateProviderBox<Ext>> + Send + Sync;
 
 /// A single warm request: a whole account (basic account + its bytecode) followed by a batch of
@@ -29,7 +30,7 @@ enum PrewarmTarget {
 
 /// A message in a worker's queue. The per-block lifecycle is explicit and ordered (the queue is
 /// FIFO): one `BeginBlock`, then the worker's share of `Warm`s, then one `EndBlock`.
-enum PrewarmMsg<Ext: reth_primitives_traits::AccountExtension> {
+enum PrewarmMsg<Ext: AccountExtension> {
     /// Open a read txn for the new block: build a provider over the parent state and hold it.
     BeginBlock {
         build: Arc<BuildProviderFn<Ext>>,
@@ -44,9 +45,7 @@ enum PrewarmMsg<Ext: reth_primitives_traits::AccountExtension> {
 
 /// Long-lived pool of blocking threads that warm the BAL read-set into the shared execution cache.
 #[derive(Debug)]
-pub struct BalPrewarmPool<
-    Ext: reth_primitives_traits::AccountExtension = reth_primitives_traits::EmptyAccountExtension,
-> {
+pub struct BalPrewarmPool<Ext: AccountExtension = EmptyAccountExtension> {
     /// One queue per worker. `BeginBlock`/`EndBlock` are broadcast to all; `Warm`s round-robin.
     workers: Vec<crossbeam_channel::Sender<PrewarmMsg<Ext>>>,
     /// Round-robin cursor for distributing warm requests across workers.
@@ -54,7 +53,7 @@ pub struct BalPrewarmPool<
     _handles: Vec<JoinHandle<()>>,
 }
 
-impl<Ext: reth_primitives_traits::AccountExtension> BalPrewarmPool<Ext> {
+impl<Ext: AccountExtension> BalPrewarmPool<Ext> {
     /// Spawns `num_threads` long-lived blocking worker threads. Owned by the
     /// [`PayloadProcessor`](super::PayloadProcessor); the threads exit when the pool is dropped.
     pub fn new(num_threads: usize) -> Arc<Self> {
@@ -161,9 +160,7 @@ pub const DEFAULT_BAL_PREWARM_THREADS: usize = 128;
 /// the workers on blocks whose read-set is concentrated in a few accounts.
 const WARM_BATCH_SIZE: usize = 8;
 
-fn prewarm_loop<Ext: reth_primitives_traits::AccountExtension>(
-    rx: crossbeam_channel::Receiver<PrewarmMsg<Ext>>,
-) {
+fn prewarm_loop<Ext: AccountExtension>(rx: crossbeam_channel::Receiver<PrewarmMsg<Ext>>) {
     // The provider (and its MDBX read txn) held for the current block, between `BeginBlock` and
     // `EndBlock`. `None` while idle, so no read txn is pinned across the inter-block gap.
     let mut provider: Option<CachedStateProvider<StateProviderBox<Ext>>> = None;

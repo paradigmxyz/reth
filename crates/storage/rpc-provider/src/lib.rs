@@ -41,7 +41,9 @@ use reth_errors::{ProviderError, ProviderResult};
 use reth_node_types::{
     Block, BlockBody, BlockTy, HeaderTy, NodeTypes, PrimitivesTy, ReceiptTy, TxTy,
 };
-use reth_primitives_traits::{Account, Bytecode, RecoveredBlock, SealedHeader};
+use reth_primitives_traits::{
+    Account, AccountExtensionTy, Bytecode, EmptyAccountExtension, RecoveredBlock, SealedHeader,
+};
 use reth_provider::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BytecodeReader,
     CanonChainTracker, CanonStateNotification, CanonStateNotifications, CanonStateSubscriptions,
@@ -151,13 +153,13 @@ where
 impl<P, Node: NodeTypes, N: Network> reth_provider::AccountExtensionProvider
     for RpcBlockchainProvider<P, Node, N>
 {
-    type AccountExtension = reth_primitives_traits::EmptyAccountExtension;
+    type AccountExtension = EmptyAccountExtension;
 }
 
 impl<P, Node: NodeTypes, N> reth_provider::AccountExtensionProvider
     for RpcBlockchainStateProvider<P, Node, N>
 {
-    type AccountExtension = reth_primitives_traits::EmptyAccountExtension;
+    type AccountExtension = EmptyAccountExtension;
 }
 
 impl<P, Node: NodeTypes, N: Network> std::fmt::Debug for RpcBlockchainProvider<P, Node, N> {
@@ -1035,9 +1037,9 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
         N: Network,
     {
         // Ethereum account RPC responses have no chain-specific payload to decode.
-        reth_storage_api::ensure_no_account_extensions::<
-            reth_primitives_traits::AccountExtensionTy<Node::Primitives>,
-        >("Ethereum account RPC")?;
+        reth_storage_api::ensure_no_account_extensions::<AccountExtensionTy<Node::Primitives>>(
+            "Ethereum account RPC",
+        )?;
         let account_info = self.block_on_async(async {
             // Get account info in a single RPC call using `eth_getAccountInfo`
             if self.reth_rpc_support {

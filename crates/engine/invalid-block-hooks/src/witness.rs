@@ -4,7 +4,7 @@ use alloy_rpc_types_debug::ExecutionWitness;
 use pretty_assertions::Comparison;
 use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{execute::Executor, ConfigureEvm};
-use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
+use reth_primitives_traits::{AccountExtension, NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderBox, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
@@ -115,7 +115,7 @@ fn sort_bundle_state_for_comparison(bundle_state: &BundleState) -> BundleStateSo
 }
 
 /// Extracts execution data including codes, preimages, and hashed state from database
-fn collect_execution_data<E: reth_primitives_traits::AccountExtension>(
+fn collect_execution_data<E: AccountExtension>(
     mut db: State<StateProviderDatabase<StateProviderBox<E>>>,
 ) -> eyre::Result<CollectionResult<E>> {
     let bundle_state = db.take_bundle();
@@ -153,7 +153,7 @@ fn collect_execution_data<E: reth_primitives_traits::AccountExtension>(
 }
 
 /// Generates execution witness from collected codes, preimages, and hashed state
-fn generate<E: reth_primitives_traits::AccountExtension>(
+fn generate<E: AccountExtension>(
     codes: BTreeMap<B256, Bytes>,
     preimages: BTreeMap<B256, Bytes>,
     hashed_state: reth_trie::HashedPostState<E>,
@@ -417,6 +417,7 @@ mod tests {
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_evm_ethereum::EthEvmConfig;
+    use reth_primitives_traits::EmptyAccountExtension;
     use reth_provider::test_utils::MockEthProvider;
     use reth_revm::db::{BundleAccount, BundleState};
     use revm::database::states::reverts::AccountRevert;
@@ -674,9 +675,8 @@ mod tests {
     fn test_proof_generator_generate() {
         // Use existing MockEthProvider
         let mock_provider = MockEthProvider::default();
-        let state_provider: Box<
-            dyn StateProvider<AccountExtension = reth_primitives_traits::EmptyAccountExtension>,
-        > = Box::new(mock_provider);
+        let state_provider: Box<dyn StateProvider<AccountExtension = EmptyAccountExtension>> =
+            Box::new(mock_provider);
 
         // Mock Data
         let mut codes = BTreeMap::new();

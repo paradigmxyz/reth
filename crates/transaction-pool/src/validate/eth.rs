@@ -12,8 +12,6 @@ use crate::{
     Address, EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig,
     TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
-use reth_primitives_traits::AccountExtensionTy;
-
 use alloy_consensus::{
     constants::{
         EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
@@ -30,8 +28,8 @@ use alloy_rlp::Encodable;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_primitives_traits::{
-    transaction::error::InvalidTransactionError, Account, BlockTy, GotExpected, HeaderTy,
-    SealedBlock,
+    transaction::error::InvalidTransactionError, Account, AccountExtension, AccountExtensionTy,
+    BlockTy, EmptyAccountExtension, GotExpected, HeaderTy, SealedBlock,
 };
 use reth_storage_api::{
     errors::ProviderError, AccountInfoReader, BlockReaderIdExt, BytecodeReader, StateProviderBox,
@@ -60,7 +58,7 @@ pub type StatelessValidationFn<T> =
 ///
 /// Receives the transaction origin, a reference to the transaction, and an account state reader.
 /// Returns `Ok(())` if the transaction passes or `Err` to reject it.
-pub type StatefulValidationFn<T, E = reth_primitives_traits::EmptyAccountExtension> = Arc<
+pub type StatefulValidationFn<T, E = EmptyAccountExtension> = Arc<
     dyn Fn(
             TransactionOrigin,
             &T,
@@ -744,7 +742,7 @@ where
     pub fn validate_sender_bytecode(
         &self,
         transaction: &Tx,
-        sender: &Account<impl reth_primitives_traits::AccountExtension>,
+        sender: &Account<impl AccountExtension>,
         state: impl BytecodeReader,
     ) -> Result<Result<(), InvalidPoolTransactionError>, TransactionValidationOutcome<Tx>> {
         // Unless Prague is active, the signer account shouldn't have bytecode.
@@ -781,7 +779,7 @@ where
     pub fn validate_sender_nonce(
         &self,
         transaction: &Tx,
-        sender: &Account<impl reth_primitives_traits::AccountExtension>,
+        sender: &Account<impl AccountExtension>,
     ) -> Result<(), InvalidPoolTransactionError> {
         let tx_nonce = transaction.nonce();
 
@@ -799,7 +797,7 @@ where
     pub fn validate_sender_balance(
         &self,
         transaction: &Tx,
-        sender: &Account<impl reth_primitives_traits::AccountExtension>,
+        sender: &Account<impl AccountExtension>,
     ) -> Result<(), InvalidPoolTransactionError> {
         let cost = transaction.cost();
 

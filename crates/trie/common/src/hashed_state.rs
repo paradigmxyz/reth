@@ -1625,6 +1625,7 @@ pub mod serde_bincode_compat {
     use alloc::{borrow::Cow, vec::Vec};
     use alloy_primitives::{map::B256Map, B256, U256};
     use core::fmt;
+    use reth_primitives_traits::{AccountExtension, EmptyAccountExtension};
     use serde::{
         de::{Error as _, SeqAccess, Visitor},
         Deserialize, Deserializer, Serialize, Serializer,
@@ -1648,17 +1649,12 @@ pub mod serde_bincode_compat {
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
     #[serde(bound = "")]
-    pub struct HashedPostState<
-        'a,
-        E: reth_primitives_traits::AccountExtension = reth_primitives_traits::EmptyAccountExtension,
-    > {
+    pub struct HashedPostState<'a, E: AccountExtension = EmptyAccountExtension> {
         accounts: Cow<'a, B256Map<Option<Account<E>>>>,
         storages: B256Map<HashedStorage<'a>>,
     }
 
-    impl<'a, E: reth_primitives_traits::AccountExtension> From<&'a super::HashedPostState<E>>
-        for HashedPostState<'a, E>
-    {
+    impl<'a, E: AccountExtension> From<&'a super::HashedPostState<E>> for HashedPostState<'a, E> {
         fn from(value: &'a super::HashedPostState<E>) -> Self {
             Self {
                 accounts: Cow::Borrowed(&value.accounts),
@@ -1667,9 +1663,7 @@ pub mod serde_bincode_compat {
         }
     }
 
-    impl<'a, E: reth_primitives_traits::AccountExtension> From<HashedPostState<'a, E>>
-        for super::HashedPostState<E>
-    {
+    impl<'a, E: AccountExtension> From<HashedPostState<'a, E>> for super::HashedPostState<E> {
         fn from(value: HashedPostState<'a, E>) -> Self {
             Self {
                 accounts: value.accounts.into_owned(),
@@ -1678,9 +1672,7 @@ pub mod serde_bincode_compat {
         }
     }
 
-    impl<E: reth_primitives_traits::AccountExtension> SerializeAs<super::HashedPostState<E>>
-        for HashedPostState<'_, E>
-    {
+    impl<E: AccountExtension> SerializeAs<super::HashedPostState<E>> for HashedPostState<'_, E> {
         fn serialize_as<S>(
             source: &super::HashedPostState<E>,
             serializer: S,
@@ -1692,8 +1684,8 @@ pub mod serde_bincode_compat {
         }
     }
 
-    impl<'de, E: reth_primitives_traits::AccountExtension>
-        DeserializeAs<'de, super::HashedPostState<E>> for HashedPostState<'de, E>
+    impl<'de, E: AccountExtension> DeserializeAs<'de, super::HashedPostState<E>>
+        for HashedPostState<'de, E>
     {
         fn deserialize_as<D>(deserializer: D) -> Result<super::HashedPostState<E>, D::Error>
         where
@@ -1770,15 +1762,12 @@ pub mod serde_bincode_compat {
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
     #[serde(bound = "")]
-    pub struct HashedPostStateSorted<
-        'a,
-        E: reth_primitives_traits::AccountExtension = reth_primitives_traits::EmptyAccountExtension,
-    > {
+    pub struct HashedPostStateSorted<'a, E: AccountExtension = EmptyAccountExtension> {
         accounts: Cow<'a, [(B256, Option<Account<E>>)]>,
         storages: B256Map<HashedStorageSorted<'a>>,
     }
 
-    impl<'a, E: reth_primitives_traits::AccountExtension> From<&'a super::HashedPostStateSorted<E>>
+    impl<'a, E: AccountExtension> From<&'a super::HashedPostStateSorted<E>>
         for HashedPostStateSorted<'a, E>
     {
         fn from(value: &'a super::HashedPostStateSorted<E>) -> Self {
@@ -1789,7 +1778,7 @@ pub mod serde_bincode_compat {
         }
     }
 
-    impl<'a, E: reth_primitives_traits::AccountExtension> From<HashedPostStateSorted<'a, E>>
+    impl<'a, E: AccountExtension> From<HashedPostStateSorted<'a, E>>
         for super::HashedPostStateSorted<E>
     {
         fn from(value: HashedPostStateSorted<'a, E>) -> Self {
@@ -1800,7 +1789,7 @@ pub mod serde_bincode_compat {
         }
     }
 
-    impl<E: reth_primitives_traits::AccountExtension> SerializeAs<super::HashedPostStateSorted<E>>
+    impl<E: AccountExtension> SerializeAs<super::HashedPostStateSorted<E>>
         for HashedPostStateSorted<'_, E>
     {
         fn serialize_as<S>(
@@ -1814,8 +1803,8 @@ pub mod serde_bincode_compat {
         }
     }
 
-    impl<'de, E: reth_primitives_traits::AccountExtension>
-        DeserializeAs<'de, super::HashedPostStateSorted<E>> for HashedPostStateSorted<'de, E>
+    impl<'de, E: AccountExtension> DeserializeAs<'de, super::HashedPostStateSorted<E>>
+        for HashedPostStateSorted<'de, E>
     {
         fn deserialize_as<D>(deserializer: D) -> Result<super::HashedPostStateSorted<E>, D::Error>
         where

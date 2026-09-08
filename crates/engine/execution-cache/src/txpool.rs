@@ -1,7 +1,7 @@
 //! Immutable snapshots produced by txpool-driven state prewarming.
 
 use alloy_primitives::{Address, StorageKey, StorageValue, B256, U256};
-use reth_primitives_traits::{Account, Bytecode};
+use reth_primitives_traits::{Account, AccountExtension, Bytecode};
 use reth_revm::cached::CachedReads;
 use std::sync::Arc;
 
@@ -27,10 +27,7 @@ impl TxPoolPrewarmCacheSnapshot {
     }
 
     /// Returns a cached account, preserving cached non-existence.
-    pub fn account<E: reth_primitives_traits::AccountExtension>(
-        &self,
-        address: &Address,
-    ) -> Option<Option<Account<E>>> {
+    pub fn account<E: AccountExtension>(&self, address: &Address) -> Option<Option<Account<E>>> {
         self.reads.accounts.get(address).map(|account| account.info.as_ref().map(Account::from))
     }
 
@@ -62,6 +59,7 @@ impl TxPoolPrewarmCacheSnapshot {
 mod tests {
     use super::*;
     use alloy_primitives::map::U256Map;
+    use reth_primitives_traits::EmptyAccountExtension;
     use reth_revm::{
         cached::CachedAccount,
         revm::{bytecode::Bytecode as RevmBytecode, state::AccountInfo},
@@ -85,25 +83,13 @@ mod tests {
 
         let snapshot = TxPoolPrewarmCacheSnapshot::new(B256::ZERO, Arc::new(reads));
 
+        assert_eq!(snapshot.account::<EmptyAccountExtension>(&owner).unwrap().unwrap().nonce, 3);
         assert_eq!(
-            snapshot
-                .account::<reth_primitives_traits::EmptyAccountExtension>(&owner)
-                .unwrap()
-                .unwrap()
-                .nonce,
-            3
-        );
-        assert_eq!(
-            snapshot.account::<reth_primitives_traits::EmptyAccountExtension>(&missing),
+            snapshot.account::<EmptyAccountExtension>(&missing),
             Some(None),
             "non-existence is a cacheable fact"
         );
-        assert_eq!(
-            snapshot.account::<reth_primitives_traits::EmptyAccountExtension>(
-                &Address::repeat_byte(0x03)
-            ),
-            None
-        );
+        assert_eq!(snapshot.account::<EmptyAccountExtension>(&Address::repeat_byte(0x03)), None);
 
         let slot = |n: u64| B256::from(U256::from(n));
         assert_eq!(snapshot.storage(owner, slot(1)), Some(U256::from(7)));

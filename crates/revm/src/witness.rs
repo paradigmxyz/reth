@@ -1,18 +1,19 @@
 use alloc::vec::Vec;
 use alloy_primitives::{keccak256, Bytes, B256};
+use reth_primitives_traits::{AccountExtension, EmptyAccountExtension};
 use reth_trie::{ExecutionWitnessMode, HashedPostState};
 use revm::database::State;
 
 /// Borrows finalized execution state for witness generation.
 #[derive(Debug, Clone)]
-pub struct ExecutionWitnessRecord<'a, DB, E = reth_primitives_traits::EmptyAccountExtension> {
+pub struct ExecutionWitnessRecord<'a, DB, E = EmptyAccountExtension> {
     /// State after execution.
     state: &'a State<DB>,
     /// Additional hashed state to include in the witness.
     additional_state: Option<HashedPostState<E>>,
 }
 
-impl<'a, DB, E: reth_primitives_traits::AccountExtension> ExecutionWitnessRecord<'a, DB, E> {
+impl<'a, DB, E: AccountExtension> ExecutionWitnessRecord<'a, DB, E> {
     /// Creates a new record from the state after execution.
     pub const fn new(state: &'a State<DB>) -> Self {
         Self { state, additional_state: None }
@@ -168,7 +169,7 @@ mod tests {
     };
 
     impl reth_storage_api::AccountExtensionProvider for ExpandedStateProvider {
-        type AccountExtension = reth_primitives_traits::EmptyAccountExtension;
+        type AccountExtension = EmptyAccountExtension;
     }
 
     #[derive(Debug)]
@@ -185,7 +186,7 @@ mod tests {
     }
 
     impl reth_storage_api::AccountExtensionProvider for StaticStateProvider {
-        type AccountExtension = reth_primitives_traits::EmptyAccountExtension;
+        type AccountExtension = EmptyAccountExtension;
     }
 
     #[derive(Debug)]

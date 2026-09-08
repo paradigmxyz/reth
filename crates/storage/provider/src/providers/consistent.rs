@@ -1430,7 +1430,7 @@ mod tests {
     use reth_db_api::models::AccountBeforeTx;
     use reth_ethereum_primitives::Block;
     use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, ExecutionOutcome};
-    use reth_primitives_traits::{RecoveredBlock, SealedBlock};
+    use reth_primitives_traits::{Account, EmptyAccountExtension, RecoveredBlock, SealedBlock};
     use reth_storage_api::{BlockReader, BlockSource, ChangeSetReader, StateReader};
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_eoa_accounts, BlockRangeParams,
@@ -1828,13 +1828,12 @@ mod tests {
         use std::collections::HashMap;
 
         let address = alloy_primitives::Address::with_last_byte(1);
-        let account =
-            reth_primitives_traits::Account::<reth_primitives_traits::EmptyAccountExtension> {
-                nonce: 1,
-                balance: U256::from(1000),
-                bytecode_hash: None,
-                extension: Default::default(),
-            };
+        let account = Account::<EmptyAccountExtension> {
+            nonce: 1,
+            balance: U256::from(1000),
+            bytecode_hash: None,
+            extension: Default::default(),
+        };
         let slot = U256::from(0x42);
         let slot_b256 = B256::from(slot);
 
@@ -1913,13 +1912,12 @@ mod tests {
         let (database_blocks, in_memory_blocks) = random_blocks(&mut rng, 1, 1, None, None, 0..1);
 
         let address = alloy_primitives::Address::with_last_byte(1);
-        let account =
-            reth_primitives_traits::Account::<reth_primitives_traits::EmptyAccountExtension> {
-                nonce: 1,
-                balance: U256::from(1000),
-                bytecode_hash: None,
-                extension: Default::default(),
-            };
+        let account = Account::<EmptyAccountExtension> {
+            nonce: 1,
+            balance: U256::from(1000),
+            bytecode_hash: None,
+            extension: Default::default(),
+        };
         let slot = U256::from(0x42);
 
         let provider_rw = factory.provider_rw()?;
@@ -2014,13 +2012,12 @@ mod tests {
         let (database_blocks, in_memory_blocks) = random_blocks(&mut rng, 2, 1, None, None, 0..1);
 
         let address = alloy_primitives::Address::with_last_byte(1);
-        let account =
-            reth_primitives_traits::Account::<reth_primitives_traits::EmptyAccountExtension> {
-                nonce: 1,
-                balance: U256::from(1000),
-                bytecode_hash: None,
-                extension: Default::default(),
-            };
+        let account = Account::<EmptyAccountExtension> {
+            nonce: 1,
+            balance: U256::from(1000),
+            bytecode_hash: None,
+            extension: Default::default(),
+        };
         let slot = U256::from(0x42);
 
         let provider_rw = factory.provider_rw()?;

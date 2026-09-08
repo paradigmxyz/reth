@@ -6,14 +6,14 @@ use alloy_primitives::{Address, BlockNumber};
 use auto_impl::auto_impl;
 use core::ops::{RangeBounds, RangeInclusive};
 use reth_db_models::AccountBeforeTx;
-use reth_primitives_traits::Account;
+use reth_primitives_traits::{Account, AccountExtension, EmptyAccountExtension};
 use reth_storage_errors::provider::ProviderResult;
 
 /// Account type selected by a state or changeset provider.
 #[auto_impl(&, Arc, Box)]
 pub trait AccountExtensionProvider {
     /// Chain-specific data carried by every account returned by this provider.
-    type AccountExtension: reth_primitives_traits::AccountExtension;
+    type AccountExtension: AccountExtension;
 }
 
 /// Account reader
@@ -144,12 +144,10 @@ crate::macros::auto_impl_provider_refs!(T: AccountReader {
 ///
 /// This checks the selected type, not the feature flag or an individual account's value:
 /// Ethereum remains supported in builds that also enable custom chains.
-pub fn ensure_no_account_extensions<E: reth_primitives_traits::AccountExtension>(
+pub fn ensure_no_account_extensions<E: AccountExtension>(
     protocol: &'static str,
 ) -> ProviderResult<()> {
-    if core::any::TypeId::of::<E>() !=
-        core::any::TypeId::of::<reth_primitives_traits::EmptyAccountExtension>()
-    {
+    if core::any::TypeId::of::<E>() != core::any::TypeId::of::<EmptyAccountExtension>() {
         return Err(reth_storage_errors::provider::ProviderError::AccountExtensionsUnsupported(
             protocol,
         ));

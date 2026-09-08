@@ -1,7 +1,9 @@
 use crate::primitives::alloy_primitives::{BlockNumber, StorageKey, StorageValue};
 use alloy_primitives::{Address, B256, U256};
 use core::ops::{Deref, DerefMut};
-use reth_primitives_traits::Account;
+use reth_primitives_traits::{
+    Account, AccountExtension, Bytecode as RethBytecode, EmptyAccountExtension,
+};
 use reth_storage_api::{AccountReader, BlockHashReader, BytecodeReader, StateProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
@@ -11,7 +13,7 @@ use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
 /// This serves as the data layer for [`Database`].
 pub trait EvmStateProvider {
     /// Chain-specific account data passed through to the EVM.
-    type AccountExtension: reth_primitives_traits::AccountExtension;
+    type AccountExtension: AccountExtension;
 
     /// Get basic account information.
     ///
@@ -26,10 +28,7 @@ pub trait EvmStateProvider {
     fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>>;
 
     /// Get account code by hash.
-    fn bytecode_by_hash(
-        &self,
-        code_hash: &B256,
-    ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>>;
+    fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<RethBytecode>>;
 
     /// Get storage of the given account.
     fn storage(
@@ -54,10 +53,7 @@ impl<T: StateProvider> EvmStateProvider for T {
         <T as BlockHashReader>::block_hash(self, number)
     }
 
-    fn bytecode_by_hash(
-        &self,
-        code_hash: &B256,
-    ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>> {
+    fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<RethBytecode>> {
         <T as BytecodeReader>::bytecode_by_hash(self, code_hash)
     }
 
@@ -191,7 +187,7 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
 /// distinguish missing bytecode from the database's default bytecode and wraps whatever the
 /// database returns in `Some`.
 #[derive(Clone)]
-pub struct DatabaseStateProvider<DB, E = reth_primitives_traits::EmptyAccountExtension>(
+pub struct DatabaseStateProvider<DB, E = EmptyAccountExtension>(
     pub DB,
     core::marker::PhantomData<E>,
 );
@@ -219,7 +215,7 @@ impl<DB, E> core::fmt::Debug for DatabaseStateProvider<DB, E> {
     }
 }
 
-impl<DB, E: reth_primitives_traits::AccountExtension> reth_storage_api::AccountExtensionProvider
+impl<DB, E: AccountExtension> reth_storage_api::AccountExtensionProvider
     for DatabaseStateProvider<DB, E>
 where
     DB: DatabaseRef<Error = ProviderError>,
@@ -227,7 +223,7 @@ where
     type AccountExtension = E;
 }
 
-impl<DB, E: reth_primitives_traits::AccountExtension> AccountReader for DatabaseStateProvider<DB, E>
+impl<DB, E: AccountExtension> AccountReader for DatabaseStateProvider<DB, E>
 where
     DB: DatabaseRef<Error = ProviderError>,
 {
@@ -240,19 +236,15 @@ impl<DB, E> BytecodeReader for DatabaseStateProvider<DB, E>
 where
     DB: DatabaseRef<Error = ProviderError>,
 {
-    fn bytecode_by_hash(
-        &self,
-        code_hash: &B256,
-    ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>> {
-        Ok(Some(reth_primitives_traits::Bytecode(self.0.code_by_hash_ref(*code_hash)?)))
+    fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<RethBytecode>> {
+        Ok(Some(RethBytecode(self.0.code_by_hash_ref(*code_hash)?)))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    type DatabaseStateProvider<DB> =
-        super::DatabaseStateProvider<DB, reth_primitives_traits::EmptyAccountExtension>;
+    type DatabaseStateProvider<DB> = super::DatabaseStateProvider<DB, EmptyAccountExtension>;
     use crate::cached::CachedReads;
     use alloy_consensus::constants::KECCAK_EMPTY;
     use alloy_primitives::Bytes;
@@ -378,10 +370,7 @@ mod tests {
                 ..Default::default()
             })
         );
-        assert_eq!(
-            provider.bytecode_by_hash(&code_hash).unwrap(),
-            Some(reth_primitives_traits::Bytecode(bytecode))
-        );
+        assert_eq!(provider.bytecode_by_hash(&code_hash).unwrap(), Some(RethBytecode(bytecode)));
     }
 
     #[test]
@@ -393,7 +382,7 @@ mod tests {
 
         assert_eq!(
             provider.bytecode_by_hash(&unknown_hash).unwrap(),
-            Some(reth_primitives_traits::Bytecode(Bytecode::default()))
+            Some(RethBytecode(Bytecode::default()))
         );
     }
 
@@ -458,12 +447,9 @@ mod tests {
 
         assert_eq!(
             provider.bytecode_by_hash(&code_hash).unwrap(),
-            Some(reth_primitives_traits::Bytecode(bytecode.clone()))
+            Some(RethBytecode(bytecode.clone()))
         );
-        assert_eq!(
-            provider.bytecode_by_hash(&code_hash).unwrap(),
-            Some(reth_primitives_traits::Bytecode(bytecode))
-        );
+        assert_eq!(provider.bytecode_by_hash(&code_hash).unwrap(), Some(RethBytecode(bytecode)));
         assert_eq!(bytecode_reads.load(Ordering::Relaxed), 1);
     }
 }

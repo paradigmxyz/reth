@@ -6,7 +6,9 @@ use alloy_primitives::{
     map::{AddressMap, B256Map, HashMap},
     Address, BlockNumber, Bloom, Log, B256, U256,
 };
-use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
+use reth_primitives_traits::{
+    Account, AccountExtension, Bytecode, EmptyAccountExtension, Receipt, StorageEntry,
+};
 use reth_trie_common::{HashedPostState, KeyHasher};
 use revm::{
     database::{states::BundleState, BundleAccount},
@@ -14,15 +16,15 @@ use revm::{
 };
 
 /// Type used to initialize revms bundle state.
-pub type BundleStateInit<E = reth_primitives_traits::EmptyAccountExtension> =
+pub type BundleStateInit<E = EmptyAccountExtension> =
     AddressMap<(Option<Account<E>>, Option<Account<E>>, B256Map<(U256, U256)>)>;
 
 /// Types used inside `RevertsInit` to initialize revms reverts.
-pub type AccountRevertInit<E = reth_primitives_traits::EmptyAccountExtension> =
+pub type AccountRevertInit<E = EmptyAccountExtension> =
     (Option<Option<Account<E>>>, Vec<StorageEntry>);
 
 /// Type used to initialize revms reverts.
-pub type RevertsInit<E = reth_primitives_traits::EmptyAccountExtension> =
+pub type RevertsInit<E = EmptyAccountExtension> =
     HashMap<BlockNumber, AddressMap<AccountRevertInit<E>>>;
 
 /// Represents a changed account
@@ -96,7 +98,7 @@ impl<T> ExecutionOutcome<T> {
     ///
     /// This constructor initializes a new `ExecutionOutcome` instance using detailed
     /// initialization parameters.
-    pub fn new_init<E: reth_primitives_traits::AccountExtension>(
+    pub fn new_init<E: AccountExtension>(
         state_init: BundleStateInit<E>,
         revert_init: RevertsInit<E>,
         contracts_init: impl IntoIterator<Item = (B256, Bytecode)>,
@@ -189,10 +191,7 @@ impl<T> ExecutionOutcome<T> {
     }
 
     /// Get account if account is known.
-    pub fn account<E: reth_primitives_traits::AccountExtension>(
-        &self,
-        address: &Address,
-    ) -> Option<Option<Account<E>>> {
+    pub fn account<E: AccountExtension>(&self, address: &Address) -> Option<Option<Account<E>>> {
         self.bundle.account(address).map(|a| a.info.as_ref().map(Into::into))
     }
 
@@ -215,9 +214,7 @@ impl<T> ExecutionOutcome<T> {
 
     /// Returns [`HashedPostState`] for this execution outcome.
     /// See [`HashedPostState::from_bundle_state`] for more info.
-    pub fn hash_state_slow<KH: KeyHasher, E: reth_primitives_traits::AccountExtension>(
-        &self,
-    ) -> HashedPostState<E> {
+    pub fn hash_state_slow<KH: KeyHasher, E: AccountExtension>(&self) -> HashedPostState<E> {
         HashedPostState::from_bundle_state::<KH>(&self.bundle.state)
     }
 

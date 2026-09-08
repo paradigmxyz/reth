@@ -15,7 +15,10 @@ use reth_chain_state::CanonStateNotification;
 use reth_execution_cache::SavedCache;
 use reth_payload_builder_primitives::{Events, PayloadBuilderError, PayloadEvents};
 use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind, PayloadTypes};
-use reth_primitives_traits::{AccountExtensionTy, FastInstant as Instant, NodePrimitives};
+use reth_primitives_traits::{
+    AccountExtension, AccountExtensionTy, EmptyAccountExtension, FastInstant as Instant,
+    NodePrimitives,
+};
 use reth_trie_parallel::state_root_task::PayloadStateRootHandle;
 use std::{
     future::Future,
@@ -254,7 +257,7 @@ where
     Gen::Job: PayloadJob<PayloadAttributes = T::PayloadAttributes>,
     <Gen::Job as PayloadJob>::BuiltPayload: Into<T::BuiltPayload>
         + BuiltPayload<
-            Primitives: reth_primitives_traits::NodePrimitives<
+            Primitives: NodePrimitives<
                 AccountExtension = AccountExtensionTy<
                     <T::BuiltPayload as BuiltPayload>::Primitives,
                 >,
@@ -411,7 +414,7 @@ where
     Gen::Job: PayloadJob<PayloadAttributes = T::PayloadAttributes>,
     <Gen::Job as PayloadJob>::BuiltPayload: Into<T::BuiltPayload>
         + BuiltPayload<
-            Primitives: reth_primitives_traits::NodePrimitives<
+            Primitives: NodePrimitives<
                 AccountExtension = AccountExtensionTy<
                     <T::BuiltPayload as BuiltPayload>::Primitives,
                 >,
@@ -582,10 +585,7 @@ pub enum PayloadServiceCommand<T: PayloadTypes> {
 
 /// A request to build a new payload.
 #[derive(Debug)]
-pub struct BuildNewPayload<
-    T,
-    E: reth_primitives_traits::AccountExtension = reth_primitives_traits::EmptyAccountExtension,
-> {
+pub struct BuildNewPayload<T, E: AccountExtension = EmptyAccountExtension> {
     /// The attributes for the new payload
     pub attributes: T,
     /// The parent hash of the new payload
@@ -594,7 +594,7 @@ pub struct BuildNewPayload<
     pub resources: PayloadBuilderResources<E>,
 }
 
-impl<T: PayloadAttributes, E: reth_primitives_traits::AccountExtension> BuildNewPayload<T, E> {
+impl<T: PayloadAttributes, E: AccountExtension> BuildNewPayload<T, E> {
     /// Returns the payload id for the new payload.
     pub fn payload_id(&self) -> PayloadId {
         self.attributes.payload_id(&self.parent_hash)
@@ -603,9 +603,7 @@ impl<T: PayloadAttributes, E: reth_primitives_traits::AccountExtension> BuildNew
 
 /// Resources loaned to a payload builder job by the engine.
 #[derive(Debug, Default)]
-pub struct PayloadBuilderResources<
-    E: reth_primitives_traits::AccountExtension = reth_primitives_traits::EmptyAccountExtension,
-> {
+pub struct PayloadBuilderResources<E: AccountExtension = EmptyAccountExtension> {
     /// Optional execution cache to use for the payload.
     ///
     /// Only provided if `--engine.share-execution-cache-with-payload-builder` is enabled.
@@ -616,7 +614,7 @@ pub struct PayloadBuilderResources<
     leases: Vec<PayloadBuilderLease>,
 }
 
-impl<E: reth_primitives_traits::AccountExtension> PayloadBuilderResources<E> {
+impl<E: AccountExtension> PayloadBuilderResources<E> {
     /// Creates a new payload builder resource bundle.
     pub const fn new(
         execution_cache: Option<SavedCache<E>>,

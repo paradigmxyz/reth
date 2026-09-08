@@ -25,7 +25,10 @@ use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
 use reth_metrics::Metrics;
-use reth_primitives_traits::{Account, AccountExtensionTy, FastInstant as Instant, NodePrimitives};
+use reth_primitives_traits::{
+    Account, AccountExtension, AccountExtensionTy, EmptyAccountExtension, FastInstant as Instant,
+    NodePrimitives,
+};
 use reth_provider::{
     AccountReader, BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory,
     DatabaseProviderROFactory, HistoryReader, PruneCheckpointReader, StageCheckpointReader,
@@ -48,10 +51,7 @@ use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 /// Each variant carries the state-root capability its producers use, so the capability dies
 /// with the workers instead of outliving them.
 #[derive(Debug)]
-pub enum PrewarmMode<
-    Tx,
-    Ext: reth_primitives_traits::AccountExtension = reth_primitives_traits::EmptyAccountExtension,
-> {
+pub enum PrewarmMode<Tx, Ext: AccountExtension = EmptyAccountExtension> {
     /// Prewarm by executing transactions from a stream, each paired with its block index.
     Transactions {
         /// Stream of transactions pending prewarm execution.
@@ -801,10 +801,7 @@ impl BalAccountStateFields {
         self.balance.is_none() || self.nonce.is_none() || self.code_hash.is_none()
     }
 
-    fn into_account<E: reth_primitives_traits::AccountExtension>(
-        self,
-        existing_account: Option<Account<E>>,
-    ) -> Account<E> {
+    fn into_account<E: AccountExtension>(self, existing_account: Option<Account<E>>) -> Account<E> {
         let existing_account = existing_account.as_ref();
         Account {
             balance: self.balance.unwrap_or_else(|| {

@@ -16,7 +16,10 @@ use reth_evm::{
     execute::{ExecutableTxFor, WithTxEnv},
     ConfigureEvm, ConvertTx, ExecutableTxIterator, ExecutableTxTuple, SpecFor, TxEnvFor,
 };
-use reth_primitives_traits::{AccountExtensionTy, FastInstant as Instant, NodePrimitives};
+use reth_primitives_traits::{
+    AccountExtension, AccountExtensionTy, EmptyAccountExtension, FastInstant as Instant,
+    NodePrimitives,
+};
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory, HistoryReader,
     PruneCheckpointReader, StageCheckpointReader, StorageChangeSetReader, StorageSettingsCache,
@@ -561,12 +564,7 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
 /// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the
 /// caching task without cloning the expensive `BundleState`.
 #[derive(Debug)]
-pub struct PayloadHandle<
-    Tx,
-    Err,
-    R,
-    Ext: reth_primitives_traits::AccountExtension = reth_primitives_traits::EmptyAccountExtension,
-> {
+pub struct PayloadHandle<Tx, Err, R, Ext: AccountExtension = EmptyAccountExtension> {
     prewarm_handle: CacheTaskHandle<R, Ext>,
     /// Stream of block transactions and their indices in the block.
     transactions: IndexedTxReceiver<Tx, Err>,
@@ -574,9 +572,7 @@ pub struct PayloadHandle<
     _span: Span,
 }
 
-impl<Tx, Err, R: Send + Sync + 'static, Ext: reth_primitives_traits::AccountExtension>
-    PayloadHandle<Tx, Err, R, Ext>
-{
+impl<Tx, Err, R: Send + Sync + 'static, Ext: AccountExtension> PayloadHandle<Tx, Err, R, Ext> {
     /// Returns a clone of the caches used by prewarming
     pub fn caches(&self) -> Option<ExecutionCache<Ext>> {
         self.prewarm_handle.saved_cache.as_ref().map(|cache| cache.cache().clone())
@@ -632,10 +628,7 @@ impl<Tx, Err, R: Send + Sync + 'static, Ext: reth_primitives_traits::AccountExte
 /// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the
 /// prewarm task without cloning the expensive `BundleState`.
 #[derive(Debug)]
-pub struct CacheTaskHandle<
-    R,
-    Ext: reth_primitives_traits::AccountExtension = reth_primitives_traits::EmptyAccountExtension,
-> {
+pub struct CacheTaskHandle<R, Ext: AccountExtension = EmptyAccountExtension> {
     /// The shared cache the task operates with.
     saved_cache: Option<SavedCache<Ext>>,
     /// Channel to the spawned prewarm task if any
@@ -647,9 +640,7 @@ pub struct CacheTaskHandle<
     cache_metrics: Option<CachedStateMetrics>,
 }
 
-impl<R: Send + Sync + 'static, Ext: reth_primitives_traits::AccountExtension>
-    CacheTaskHandle<R, Ext>
-{
+impl<R: Send + Sync + 'static, Ext: AccountExtension> CacheTaskHandle<R, Ext> {
     /// Terminates the pre-warming transaction processing.
     ///
     /// Note: This does not terminate the task yet.
@@ -680,7 +671,7 @@ impl<R: Send + Sync + 'static, Ext: reth_primitives_traits::AccountExtension>
     }
 }
 
-impl<R, Ext: reth_primitives_traits::AccountExtension> Drop for CacheTaskHandle<R, Ext> {
+impl<R, Ext: AccountExtension> Drop for CacheTaskHandle<R, Ext> {
     fn drop(&mut self) {
         // Ensure we always terminate on drop - send None without needing Send + Sync bounds
         if let Some(tx) = self.to_prewarm_task.take() {

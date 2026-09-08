@@ -633,7 +633,7 @@ mod tests {
         tables,
         transaction::DbTxMut,
     };
-    use reth_primitives_traits::{Account, StorageEntry};
+    use reth_primitives_traits::{Account, EmptyAccountExtension, StorageEntry};
     use reth_provider::{
         test_utils::create_test_provider_factory, StaticFileProviderFactory, StaticFileSegment,
         StaticFileWriter,
@@ -699,7 +699,7 @@ mod tests {
         range: RangeInclusive<BlockNumber>,
     ) -> TrieUpdatesSorted
     where
-        Provider: DBProvider<AccountExtension = reth_primitives_traits::EmptyAccountExtension>
+        Provider: DBProvider<AccountExtension = EmptyAccountExtension>
             + ChangeSetReader
             + StorageChangeSetReader
             + BlockNumReader
@@ -718,7 +718,7 @@ mod tests {
         block_number: BlockNumber,
     ) -> TrieUpdatesSorted
     where
-        Provider: DBProvider<AccountExtension = reth_primitives_traits::EmptyAccountExtension>
+        Provider: DBProvider<AccountExtension = EmptyAccountExtension>
             + ChangeSetReader
             + StorageChangeSetReader
             + BlockNumReader
@@ -734,7 +734,7 @@ mod tests {
         block_number: BlockNumber,
     ) -> TrieUpdatesSorted
     where
-        Provider: DBProvider<AccountExtension = reth_primitives_traits::EmptyAccountExtension>
+        Provider: DBProvider<AccountExtension = EmptyAccountExtension>
             + ChangeSetReader
             + StorageChangeSetReader
             + BlockNumReader
@@ -786,8 +786,7 @@ mod tests {
 
     fn seed_tip_trie_tables<Provider, A>(provider: &Provider)
     where
-        Provider: DBProvider<AccountExtension = reth_primitives_traits::EmptyAccountExtension>
-            + TrieWriter,
+        Provider: DBProvider<AccountExtension = EmptyAccountExtension> + TrieWriter,
         A: TrieTableAdapter,
     {
         type DbStateRoot<'a, TX, A> =

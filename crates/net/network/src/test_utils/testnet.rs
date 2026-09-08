@@ -27,6 +27,7 @@ use reth_network_api::{
     NetworkEvent, NetworkEventListenerProvider, NetworkInfo, Peers,
 };
 use reth_network_peers::PeerId;
+use reth_primitives_traits::EmptyAccountExtension;
 use reth_storage_api::{
     noop::NoopProvider, BalProvider, BlockReader, BlockReaderIdExt, HeaderProvider,
     StateProviderFactory, StateRangeProviderFactory,
@@ -182,7 +183,7 @@ where
 impl<C, Pool> Testnet<C, Pool>
 where
     C: ChainSpecProvider<ChainSpec: EthereumHardforks>
-        + StateProviderFactory<AccountExtension = reth_primitives_traits::EmptyAccountExtension>
+        + StateProviderFactory<AccountExtension = EmptyAccountExtension>
         + BlockReaderIdExt
         + HeaderProvider<Header = alloy_consensus::Header>
         + Clone
@@ -249,7 +250,7 @@ where
             Header = alloy_consensus::Header,
         > + HeaderProvider
         + BalProvider
-        + StateProviderFactory<AccountExtension = reth_primitives_traits::EmptyAccountExtension>
+        + StateProviderFactory<AccountExtension = EmptyAccountExtension>
         + StateRangeProviderFactory
         + Clone
         + Unpin
@@ -324,7 +325,7 @@ where
             Header = alloy_consensus::Header,
         > + HeaderProvider
         + BalProvider
-        + StateProviderFactory<AccountExtension = reth_primitives_traits::EmptyAccountExtension>
+        + StateProviderFactory<AccountExtension = EmptyAccountExtension>
         + StateRangeProviderFactory
         + Unpin
         + 'static,
@@ -592,7 +593,7 @@ where
             Header = alloy_consensus::Header,
         > + HeaderProvider
         + BalProvider
-        + StateProviderFactory<AccountExtension = reth_primitives_traits::EmptyAccountExtension>
+        + StateProviderFactory<AccountExtension = EmptyAccountExtension>
         + StateRangeProviderFactory
         + Unpin
         + 'static,

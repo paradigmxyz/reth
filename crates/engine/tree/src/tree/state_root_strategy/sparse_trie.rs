@@ -12,7 +12,9 @@ use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender
 use metrics::{Gauge, Histogram};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reth_metrics::Metrics;
-use reth_primitives_traits::{Account, FastInstant as Instant};
+use reth_primitives_traits::{
+    Account, AccountExtension, EmptyAccountExtension, FastInstant as Instant,
+};
 use reth_tasks::Runtime;
 use reth_trie::{
     updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, TrieAccount, EMPTY_ROOT_HASH,
@@ -37,7 +39,7 @@ use tracing::{debug, debug_span, error, instrument, trace_span};
 pub(super) struct SparseTrieCacheTask<
     A = ArenaParallelSparseTrie,
     S = ArenaParallelSparseTrie,
-    E: reth_primitives_traits::AccountExtension = reth_primitives_traits::EmptyAccountExtension,
+    E: AccountExtension = EmptyAccountExtension,
 > {
     /// Sender for proof results.
     proof_result_tx: ProofResultSender,
@@ -128,7 +130,7 @@ pub(super) struct SparseTrieCacheTask<
     metrics: SparseTrieTaskMetrics,
 }
 
-impl<A, S, E: reth_primitives_traits::AccountExtension> SparseTrieCacheTask<A, S, E>
+impl<A, S, E: AccountExtension> SparseTrieCacheTask<A, S, E>
 where
     A: SparseTrie + Default,
     S: SparseTrie + Default + Clone,
@@ -1046,7 +1048,7 @@ fn dispatch_with_chunking<T, I>(
 /// for post-Merge state because EIP-7523 (<https://eips.ethereum.org/EIPS/eip-7523>) prohibits
 /// empty accounts. Do not use this encoding rule when replaying historical pre-Merge state, where
 /// an empty account and a missing account can have different trie representations.
-fn encode_account_leaf_value<E: reth_primitives_traits::AccountExtension>(
+fn encode_account_leaf_value<E: AccountExtension>(
     account: Option<Account<E>>,
     storage_root: B256,
     account_rlp_buf: &mut Vec<u8>,
@@ -1183,7 +1185,7 @@ mod tests {
     #[test]
     fn test_encode_account_leaf_value_deletion_and_empty_root_is_empty() {
         let mut account_rlp_buf = vec![0xAB];
-        let encoded = encode_account_leaf_value::<reth_primitives_traits::EmptyAccountExtension>(
+        let encoded = encode_account_leaf_value::<EmptyAccountExtension>(
             None,
             EMPTY_ROOT_HASH,
             &mut account_rlp_buf,
@@ -1311,7 +1313,7 @@ mod tests {
     fn test_encode_account_leaf_value_empty_account_and_empty_root_is_empty() {
         let mut account_rlp_buf = vec![0xAB];
         let encoded = encode_account_leaf_value(
-            Some(Account::<reth_primitives_traits::EmptyAccountExtension>::default()),
+            Some(Account::<EmptyAccountExtension>::default()),
             EMPTY_ROOT_HASH,
             &mut account_rlp_buf,
         );
@@ -1333,9 +1335,8 @@ mod tests {
         let mut account_rlp_buf = vec![0x00, 0x01];
 
         let encoded = encode_account_leaf_value(account, storage_root, &mut account_rlp_buf);
-        let decoded =
-            TrieAccount::<reth_primitives_traits::EmptyAccountExtension>::decode(&mut &encoded[..])
-                .expect("valid account RLP");
+        let decoded = TrieAccount::<EmptyAccountExtension>::decode(&mut &encoded[..])
+            .expect("valid account RLP");
 
         assert_eq!(decoded.nonce, 7);
         assert_eq!(decoded.balance, U256::from(42));
@@ -1370,7 +1371,7 @@ mod tests {
         let parent_state_root = B256::from([0x55; 32]);
         let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
         let (_cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
-        let mut task = SparseTrieCacheTask::<_, _, reth_primitives_traits::EmptyAccountExtension>::new_with_trie(
+        let mut task = SparseTrieCacheTask::<_, _, EmptyAccountExtension>::new_with_trie(
             &runtime,
             updates_rx,
             cancel_rx,
@@ -1424,7 +1425,7 @@ mod tests {
 
         let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
         let (_cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
-        let mut task = SparseTrieCacheTask::<_, _, reth_primitives_traits::EmptyAccountExtension>::new_with_trie(
+        let mut task = SparseTrieCacheTask::<_, _, EmptyAccountExtension>::new_with_trie(
             &runtime,
             updates_rx,
             cancel_rx,
@@ -1511,7 +1512,7 @@ mod tests {
 
         let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
         let (cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
-        let mut task = SparseTrieCacheTask::<_, _, reth_primitives_traits::EmptyAccountExtension>::new_with_trie(
+        let mut task = SparseTrieCacheTask::<_, _, EmptyAccountExtension>::new_with_trie(
             &runtime,
             updates_rx,
             cancel_rx,
@@ -1564,7 +1565,7 @@ mod tests {
 
         let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
         let (cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
-        let mut task = SparseTrieCacheTask::<_, _, reth_primitives_traits::EmptyAccountExtension>::new_with_trie(
+        let mut task = SparseTrieCacheTask::<_, _, EmptyAccountExtension>::new_with_trie(
             &runtime,
             updates_rx,
             cancel_rx,

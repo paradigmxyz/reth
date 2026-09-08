@@ -4,11 +4,12 @@ use alloc::vec;
 use alloc::{format, string::String, vec::Vec};
 use alloy_primitives::{Address, BlockNumber, B256, U256};
 use core::ops::RangeInclusive;
+use reth_primitives_traits::EmptyAccountExtension;
 use reth_trie_common::{hash_builder::HashBuilderState, StoredSubNode};
 
 /// Saves the progress of Merkle stage.
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
-pub struct MerkleCheckpoint<E = reth_primitives_traits::EmptyAccountExtension> {
+pub struct MerkleCheckpoint<E = EmptyAccountExtension> {
     /// The target block number.
     pub target_block: BlockNumber,
     /// The last hashed account key processed.
@@ -111,7 +112,7 @@ impl<E: reth_codecs::Compact> reth_codecs::Compact for MerkleCheckpoint<E> {
 ///
 /// This contains the walker stack, hash builder state, and the last storage key processed.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StorageRootMerkleCheckpoint<E = reth_primitives_traits::EmptyAccountExtension> {
+pub struct StorageRootMerkleCheckpoint<E = EmptyAccountExtension> {
     /// The last storage key processed.
     pub last_storage_key: B256,
     /// Previously recorded walker stack.
@@ -615,9 +616,8 @@ stage_unit_checkpoints!(
 #[cfg(test)]
 mod tests {
     use super::*;
-    type MerkleCheckpoint = super::MerkleCheckpoint<reth_primitives_traits::EmptyAccountExtension>;
-    type StorageRootMerkleCheckpoint =
-        super::StorageRootMerkleCheckpoint<reth_primitives_traits::EmptyAccountExtension>;
+    type MerkleCheckpoint = super::MerkleCheckpoint<EmptyAccountExtension>;
+    type StorageRootMerkleCheckpoint = super::StorageRootMerkleCheckpoint<EmptyAccountExtension>;
     use alloy_primitives::b256;
     use rand::Rng;
     use reth_codecs::Compact;
@@ -657,7 +657,7 @@ mod tests {
             account_nonce: 0,
             account_balance: U256::ZERO,
             account_bytecode_hash: B256::ZERO,
-            account_extension: reth_primitives_traits::EmptyAccountExtension,
+            account_extension: EmptyAccountExtension,
         };
 
         let mut buf = Vec::new();
@@ -672,7 +672,7 @@ mod tests {
 
         // Create a storage root checkpoint
         let storage_checkpoint = StorageRootMerkleCheckpoint {
-            account_extension: reth_primitives_traits::EmptyAccountExtension,
+            account_extension: EmptyAccountExtension,
             last_storage_key: rng.random(),
             walker_stack: vec![StoredSubNode {
                 key: B256::random_with(&mut rng).to_vec(),
