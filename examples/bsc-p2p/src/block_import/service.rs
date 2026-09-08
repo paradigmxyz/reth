@@ -413,7 +413,7 @@ mod tests {
         tokio::spawn(async move {
             while let Some(message) = from_engine.recv().await {
                 match message {
-                    BeaconEngineMessage::NewPayload { payload: _, tx } => {
+                    BeaconEngineMessage::NewPayload { payload: _, tx, .. } => {
                         tx.send(Ok(PayloadStatus::new(responses.new_payload.clone(), None)))
                             .unwrap();
                     }

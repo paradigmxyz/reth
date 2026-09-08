@@ -359,6 +359,37 @@ pub fn validate_slot_number_presence<T: EthereumHardforks>(
     Ok(())
 }
 
+/// Validates the presence of the EIP-7805 `inclusionListTransactions` field according to the
+/// engine method version.
+/// `engine_forkchoiceUpdatedV5` payload attributes must carry the field.
+/// Before Bogota, no version may carry it.
+///
+/// `engine_newPayloadV6` is exempt from the requirement: the field is a positional parameter
+/// there, so a missing one is rejected before this check.
+pub const fn validate_inclusion_list_presence(
+    version: EngineApiMessageVersion,
+    message_validation_kind: MessageValidationKind,
+    has_inclusion_list: bool,
+) -> Result<(), EngineObjectValidationError> {
+    match (version, message_validation_kind) {
+        (EngineApiMessageVersion::V5, MessageValidationKind::PayloadAttributes) => {
+            if !has_inclusion_list {
+                return Err(message_validation_kind
+                    .to_error(VersionSpecificValidationError::NoInclusionListPostBogota))
+            }
+        }
+        (EngineApiMessageVersion::V6, MessageValidationKind::Payload) => {}
+        _ => {
+            if has_inclusion_list {
+                return Err(message_validation_kind
+                    .to_error(VersionSpecificValidationError::InclusionListNotSupported))
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Validates the presence of the `withdrawals` field according to the payload timestamp.
 /// After Shanghai, withdrawals field must be [Some].
 /// Before Shanghai, withdrawals field must be [None];
@@ -576,6 +607,12 @@ where
         payload_or_attrs.message_validation_kind(),
         payload_or_attrs.timestamp(),
         payload_or_attrs.slot_number().is_some(),
+    )?;
+
+    validate_inclusion_list_presence(
+        version,
+        payload_or_attrs.message_validation_kind(),
+        payload_or_attrs.inclusion_list_transactions().is_some(),
     )?;
 
     validate_withdrawals_presence(
@@ -883,6 +920,85 @@ mod tests {
             MessageValidationKind::GetPayload,
         );
         assert_matches!(res, Ok(()));
+    }
+
+    #[test]
+    fn validate_inclusion_list_presence_by_version() {
+        // `PayloadAttributesV5` carries the list as an object member, so omitting it does not
+        // match the structure.
+        assert_matches!(
+            validate_inclusion_list_presence(
+                EngineApiMessageVersion::V5,
+                MessageValidationKind::PayloadAttributes,
+                true,
+            ),
+            Ok(())
+        );
+        assert_matches!(
+            validate_inclusion_list_presence(
+                EngineApiMessageVersion::V5,
+                MessageValidationKind::PayloadAttributes,
+                false,
+            ),
+            Err(EngineObjectValidationError::PayloadAttributes(
+                VersionSpecificValidationError::NoInclusionListPostBogota
+            ))
+        );
+        assert_matches!(
+            validate_inclusion_list_presence(
+                EngineApiMessageVersion::V6,
+                MessageValidationKind::Payload,
+                true,
+            ),
+            Ok(())
+        );
+        // The V6 parameter is positional, so a missing one never reaches this check.
+        assert_matches!(
+            validate_inclusion_list_presence(
+                EngineApiMessageVersion::V6,
+                MessageValidationKind::Payload,
+                false,
+            ),
+            Ok(())
+        );
+
+        // An inclusion list does not match `PayloadAttributesV4`.
+        assert_matches!(
+            validate_inclusion_list_presence(
+                EngineApiMessageVersion::V4,
+                MessageValidationKind::PayloadAttributes,
+                true,
+            ),
+            Err(EngineObjectValidationError::PayloadAttributes(
+                VersionSpecificValidationError::InclusionListNotSupported
+            ))
+        );
+        // `engine_newPayloadV5` takes no inclusion list parameter.
+        assert_matches!(
+            validate_inclusion_list_presence(
+                EngineApiMessageVersion::V5,
+                MessageValidationKind::Payload,
+                true,
+            ),
+            Err(EngineObjectValidationError::Payload(
+                VersionSpecificValidationError::InclusionListNotSupported
+            ))
+        );
+        for version in [
+            EngineApiMessageVersion::V1,
+            EngineApiMessageVersion::V2,
+            EngineApiMessageVersion::V3,
+            EngineApiMessageVersion::V4,
+        ] {
+            assert_matches!(
+                validate_inclusion_list_presence(
+                    version,
+                    MessageValidationKind::PayloadAttributes,
+                    false,
+                ),
+                Ok(())
+            );
+        }
     }
 
     #[test]

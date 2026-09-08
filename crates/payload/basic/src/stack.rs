@@ -86,6 +86,13 @@ where
             Self::Right(r) => r.slot_number(),
         }
     }
+
+    fn inclusion_list_transactions(&self) -> Option<&[Bytes]> {
+        match self {
+            Self::Left(l) => l.inclusion_list_transactions(),
+            Self::Right(r) => r.inclusion_list_transactions(),
+        }
+    }
 }
 
 /// this structure enables the chaining of multiple `PayloadBuilder` implementations,

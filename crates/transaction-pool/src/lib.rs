@@ -307,7 +307,7 @@ use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip7594::BlobTransactionSidecarVariant,
 };
-use alloy_primitives::{map::AddressSet, Address, TxHash, B128, B256, U256};
+use alloy_primitives::{map::AddressSet, Address, Bytes, TxHash, B128, B256, U256};
 use aquamarine as _;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_eth_wire_types::HandleMempoolData;
@@ -316,7 +316,7 @@ use reth_evm_ethereum::EthEvmConfig;
 use reth_execution_types::ChangedAccount;
 use reth_primitives_traits::{HeaderTy, Recovered};
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::mpsc::Receiver;
 use tracing::{instrument, trace};
 
@@ -605,6 +605,32 @@ where
         best_transactions_attributes: BestTransactionsAttributes,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
         self.pool.best_transactions_with_attributes(best_transactions_attributes)
+    }
+
+    fn build_inclusion_list(&self, max_size: usize) -> Vec<Bytes> {
+        let mut total_size = 0;
+        let mut inclusion_list = Vec::new();
+        let mut per_sender: HashMap<Address, usize> = HashMap::new();
+
+        for pool_tx in self.best_transactions().without_blobs().without_updates() {
+            let taken = per_sender.entry(pool_tx.sender()).or_default();
+            if *taken >= MAX_INCLUSION_LIST_TXS_PER_SENDER {
+                continue
+            }
+
+            let encoded = pool_tx.encoded_2718_consensus();
+            // Only transaction bytes count toward the cap, without additional list framing.
+            let new_size = total_size + encoded.len();
+            if new_size > max_size {
+                break
+            }
+
+            *taken += 1;
+            total_size = new_size;
+            inclusion_list.push(encoded);
+        }
+
+        inclusion_list
     }
 
     fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {

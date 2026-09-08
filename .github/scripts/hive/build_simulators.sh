@@ -14,6 +14,11 @@ case "${fixture_variant}" in
         eels_branch="mainnet"
         eels_fork="Osaka"
         ;;
+    bogota)
+        eels_fixtures="https://github.com/ethereum/execution-specs/releases/download/tests-focil-devnet@v0.2.0/fixtures_focil-devnet.tar.gz"
+        eels_branch="devnets/focil/0"
+        eels_fork="Bogota"
+        ;;
     *)
         echo "unknown hive fixture variant: ${fixture_variant}"
         exit 1
