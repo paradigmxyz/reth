@@ -8,7 +8,13 @@ on:
 permissions: {}
 
 jobs:
+  cargo-cooldown:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/cargo-cooldown.yml
+
   build:
+    needs: cargo-cooldown
     if: github.repository == 'paradigmxyz/reth'
     name: build reproducible binaries
     runs-on: ${{ matrix.runner }}

@@ -77,7 +77,7 @@ build-debug: ## Build the reth binary into `target/debug` directory.
 	cargo build --bin reth --features "$(FEATURES)"
 # Builds the reth binary natively.
 build-native-%:
-	$(if $(EXTRA_RUSTFLAGS),RUSTFLAGS="$(EXTRA_RUSTFLAGS)") cargo build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
+	$(if $(EXTRA_RUSTFLAGS),RUSTFLAGS="$(EXTRA_RUSTFLAGS)") cargo build --locked --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
 
 # The following commands use `cross` to build a cross-compile.
 #
@@ -101,7 +101,7 @@ build-native-aarch64-unknown-linux-gnu: export JEMALLOC_SYS_WITH_LG_PAGE=16
 # See: https://github.com/cross-rs/cross/wiki/FAQ#undefined-reference-with-build-std
 build-%:
 	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc $(EXTRA_RUSTFLAGS)" \
-		cross build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
+		cross build --locked --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
 
 # Unfortunately we can't easily use cross to build for Darwin because of licensing issues.
 # If we wanted to, we would need to build a custom Docker image with the SDK available.

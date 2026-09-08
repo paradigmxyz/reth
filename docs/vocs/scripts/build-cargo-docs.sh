@@ -10,6 +10,6 @@ echo "Building cargo docs..."
 
 # Build the documentation
 export RUSTDOCFLAGS="--cfg docsrs --show-type-layout --generate-link-to-definition --enable-index-page -Zunstable-options"
-cargo +nightly docs --exclude "example-*"
+cargo +nightly docs --locked --exclude "example-*"
 
 echo "Cargo docs built successfully at ./target/doc"

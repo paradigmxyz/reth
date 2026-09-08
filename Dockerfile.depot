@@ -15,7 +15,7 @@ RUN /tmp/install_llvm.sh && rm /tmp/install_llvm.sh && \
     apt-get install -y --no-install-recommends libclang-dev m4 pkg-config
 
 # Install sccache for compilation caching
-RUN cargo install sccache --locked
+RUN cargo install sccache@0.17.0 --locked
 ENV RUSTC_WRAPPER=sccache
 ENV SCCACHE_DIR=/sccache
 ENV SCCACHE_WEBDAV_ENDPOINT=https://cache.depot.dev

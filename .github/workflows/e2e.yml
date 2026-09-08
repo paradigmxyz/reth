@@ -20,7 +20,13 @@ concurrency:
 permissions: {}
 
 jobs:
+  cargo-cooldown:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/cargo-cooldown.yml
+
   test:
+    needs: cargo-cooldown
     name: e2e-testsuite
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
     permissions:
@@ -46,9 +52,9 @@ jobs:
           cache-on-failure: true
       - name: Run e2e tests
         run: |
-          cargo nextest run \
+          cargo nextest run --locked \
             --no-fail-fast \
-            --locked --features "asm-keccak" \
+            --features "asm-keccak" \
             --workspace --test e2e_testsuite \
             --exclude 'example-*' \
             --exclude 'exex-subscription' \
@@ -57,6 +63,7 @@ jobs:
             -E 'binary(e2e_testsuite)'
 
   rocksdb:
+    needs: cargo-cooldown
     name: e2e-rocksdb
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
     permissions:
@@ -80,9 +87,8 @@ jobs:
           cache-on-failure: true
       - name: Run RocksDB e2e tests
         run: |
-          cargo nextest run \
+          cargo nextest run --locked \
             --no-fail-fast \
-            --locked \
             -p reth-e2e-test-utils \
             -E 'binary(rocksdb)'
       - name: Free disk before post steps

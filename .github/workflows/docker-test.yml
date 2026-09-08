@@ -16,7 +16,13 @@ on:
 permissions: {}
 
 jobs:
+  cargo-cooldown:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/cargo-cooldown.yml
+
   build:
+    needs: cargo-cooldown
     timeout-minutes: 45
     runs-on: ubuntu-latest
     permissions:

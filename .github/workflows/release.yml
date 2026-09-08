@@ -29,6 +29,13 @@ env:
   RELEASE_REF: ${{ inputs.ref || github.ref }}
 
 jobs:
+  cargo-cooldown:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/cargo-cooldown.yml
+    with:
+      ref: ${{ inputs.ref || github.ref }}
+
   dry-run:
     name: check dry run
     runs-on: ubuntu-latest
@@ -59,13 +66,13 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    needs: extract-version
+    needs: [cargo-cooldown, extract-version]
     if: ${{ github.event.inputs.dry_run != 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ env.RELEASE_REF }}
+          ref: ${{ needs.cargo-cooldown.outputs.sha }}
       - uses: dtolnay/rust-toolchain@stable
       - name: Verify crate version matches tag
         # Check that the Cargo version starts with the tag,
@@ -73,7 +80,7 @@ jobs:
         run: |
           tag="${{ needs.extract-version.outputs.VERSION }}"
           tag=${tag#v}
-          cargo_ver=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          cargo_ver=$(cargo metadata --locked --no-deps --format-version 1 | jq -r '.packages[0].version')
           [[ "$tag" == "$cargo_ver"* ]] || { echo "Tag $tag doesn’t match the Cargo version $cargo_ver"; exit 1; }
 
   build:
@@ -81,7 +88,7 @@ jobs:
     runs-on: ${{ matrix.configs.os }}
     permissions:
       contents: read
-    needs: extract-version
+    needs: [cargo-cooldown, extract-version]
     continue-on-error: ${{ matrix.configs.allow_fail }}
     strategy:
       fail-fast: true
@@ -111,7 +118,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ env.RELEASE_REF }}
+          ref: ${{ needs.cargo-cooldown.outputs.sha }}
       - uses: rui314/setup-mold@7e4f20ad28a2e8ca6fd0892ccf72e2abb706b9c3 # v1
       - uses: dtolnay/rust-toolchain@stable
         with:
