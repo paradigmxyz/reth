@@ -407,7 +407,7 @@ where
     ) {
         let mut cells_response = Cells { cell_mask: request.cell_mask, ..Default::default() };
         let mut total_bytes = 0;
-        let cell_mask = request.numeric_cell_mask();
+        let cell_mask = request.cell_mask();
 
         for hash in request.hashes.into_iter().take(MAX_CELLS_SERVE) {
             let Some(cells) = self.blob_store.get_cells(hash, cell_mask).unwrap_or_default() else {
@@ -858,7 +858,7 @@ mod tests {
     use alloy_consensus::constants::EMPTY_ROOT_HASH;
     use alloy_eips::{
         eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
-        eip7594::{BlobTransactionSidecarVariant, Cell},
+        eip7594::{BlobCellMask, BlobTransactionSidecarVariant, Cell},
     };
     use alloy_primitives::{keccak256, Address, TxHash, B128, U256};
     use reth_network_api::test_utils::PeersHandle;
@@ -878,7 +878,7 @@ mod tests {
     #[derive(Debug, Default)]
     struct CountingBlobStore {
         get_cells_calls: Arc<AtomicUsize>,
-        expected_cell_mask: Option<B128>,
+        expected_cell_mask: Option<BlobCellMask>,
     }
 
     impl BlobStore for CountingBlobStore {
@@ -955,7 +955,7 @@ mod tests {
         fn get_by_versioned_hashes_v4(
             &self,
             versioned_hashes: &[B256],
-            _indices_bitarray: B128,
+            _cell_mask: BlobCellMask,
         ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError> {
             Ok(vec![None; versioned_hashes.len()])
         }
@@ -970,11 +970,11 @@ mod tests {
         fn get_cells(
             &self,
             _tx_hash: TxHash,
-            indices_bitarray: B128,
+            cell_mask: BlobCellMask,
         ) -> Result<Option<Vec<Cell>>, BlobStoreError> {
             self.get_cells_calls.fetch_add(1, Ordering::Relaxed);
             if let Some(expected) = self.expected_cell_mask {
-                assert_eq!(indices_bitarray, expected);
+                assert_eq!(cell_mask, expected);
                 return Ok(Some(vec![Cell::default()]))
             }
             Ok(None)
@@ -1029,7 +1029,7 @@ mod tests {
         let (_incoming_tx, incoming_rx) = mpsc::channel(1);
         let numeric_mask = 1u128 << index;
         let blob_store = CountingBlobStore {
-            expected_cell_mask: Some(B128::from(numeric_mask)),
+            expected_cell_mask: Some(BlobCellMask::from_bits(numeric_mask)),
             ..Default::default()
         };
         let handler = EthRequestHandler::<NoopProvider>::new(

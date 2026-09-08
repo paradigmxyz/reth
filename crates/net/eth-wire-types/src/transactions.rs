@@ -3,7 +3,7 @@
 use crate::broadcast::decode_list_with_memory_budget;
 use alloc::vec::Vec;
 use alloy_consensus::transaction::{PooledTransaction, TxHashRef};
-use alloy_eips::eip7594::Cell;
+use alloy_eips::eip7594::{BlobCellMask, Cell};
 use alloy_primitives::{B128, B256};
 use alloy_rlp::{Decodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use derive_more::{Constructor, Deref, IntoIterator};
@@ -128,12 +128,9 @@ pub struct GetCells {
 }
 
 impl GetCells {
-    /// Returns the requested cell indices as a numeric mask.
-    ///
-    /// The wire bitvector stores the lowest cell indices in the first byte, while numeric masks
-    /// represent the lowest bits in the last byte.
-    pub fn numeric_cell_mask(&self) -> B128 {
-        B128::from(u128::from_le_bytes(self.cell_mask.into()))
+    /// Returns the requested cell indices, decoded from the little-endian wire bitvector.
+    pub fn cell_mask(&self) -> BlobCellMask {
+        BlobCellMask::from_bits(u128::from_le_bytes(self.cell_mask.into()))
     }
 }
 
