@@ -596,8 +596,6 @@ where
         self.process_leaf_updates(true)?;
 
         for (address, mut new) in self.new_storage_updates.drain() {
-            // Applying new leaves can change the paths of previously blocked updates.
-            self.retry_storage_updates.insert(address);
             match self.storage_updates.entry(address) {
                 Entry::Vacant(entry) => {
                     entry.insert(new); // insert the whole map at once, no per-slot loop
@@ -676,9 +674,9 @@ where
                 }
             })?;
             let updates_len_after = updates.len();
-            // Keep retrying after structural changes within this trie. If nothing applied,
-            // only a proof or a new update for this address can change the next attempt.
-            if !new && updates_len_after > 0 && updates_len_after < updates_len_before {
+            // Applied new leaves can unblock older updates; partial retries can unblock
+            // remaining leaves. A completely blocked batch already requested its proofs.
+            if updates_len_after < updates_len_before && (new || updates_len_after > 0) {
                 self.retry_storage_updates.insert(*address);
             }
             self.storage_cache_hits += (updates_len_before - updates_len_after) as u64;
@@ -1538,6 +1536,122 @@ mod tests {
     }
 
     #[test]
+    fn applied_storage_insertion_unblocks_pending_deletion() {
+        let runtime = reth_tasks::Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayManager::<reth_chain_state::EthPrimitives>::default()
+                .overlay_builder(anchor_hash),
+        );
+        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
+        let proof_worker_handle = ProofWorkerHandle::new(
+            &runtime,
+            ProofTaskCtx::new(state_provider_factory),
+            false,
+            proof_result_tx.clone(),
+        );
+
+        let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+        let trie = SparseStateTrie::default()
+            .with_accounts_trie(default_trie.clone())
+            .with_default_storage_trie(default_trie)
+            .with_updates(true);
+
+        let parent_state_root = B256::from([0x55; 32]);
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (_cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
+        let mut task = SparseTrieCacheTask::new_with_trie(
+            &runtime,
+            updates_rx,
+            cancel_rx,
+            std::sync::mpsc::channel().0,
+            proof_worker_handle,
+            proof_result_tx,
+            proof_result_rx,
+            SparseTrieTaskMetrics::default(),
+            trie,
+            parent_state_root,
+            TrieNodeEpoch::UNMODIFIED,
+            1,
+        );
+
+        use reth_trie_common::{
+            BranchNodeV2, LeafNode, Nibbles, ProofTrieNodeV2, RlpNode, TrieMask, TrieNodeV2,
+        };
+        let address = B256::repeat_byte(0x44);
+        let first = B256::repeat_byte(0x11);
+        let second = B256::repeat_byte(0x22);
+        let third = B256::repeat_byte(0x33);
+        let storage_value = U256::MAX;
+        let value = alloy_rlp::encode(storage_value);
+        let first_leaf =
+            TrieNodeV2::Leaf(LeafNode::new(Nibbles::from_nibbles([1; 63]), value.clone()));
+        let second_leaf =
+            TrieNodeV2::Leaf(LeafNode::new(Nibbles::from_nibbles([2; 63]), value.clone()));
+        task.on_proof_result(DecodedMultiProofV2 {
+            storage_proofs: B256Map::from_iter([(
+                address,
+                vec![
+                    ProofTrieNodeV2 {
+                        path: Nibbles::default(),
+                        node: TrieNodeV2::Branch(BranchNodeV2 {
+                            key: Nibbles::default(),
+                            stack: vec![
+                                RlpNode::from_rlp(&alloy_rlp::encode(&first_leaf)),
+                                RlpNode::from_rlp(&alloy_rlp::encode(&second_leaf)),
+                            ],
+                            state_mask: TrieMask::new(0b110),
+                            branch_rlp_node: None,
+                        }),
+                        masks: None,
+                    },
+                    ProofTrieNodeV2 {
+                        path: Nibbles::from_nibbles([1]),
+                        node: first_leaf,
+                        masks: None,
+                    },
+                ],
+            )]),
+            ..Default::default()
+        })
+        .unwrap();
+        task.storage_updates
+            .entry(address)
+            .or_default()
+            .insert(first, LeafUpdate::Changed(Vec::new()));
+        task.process_leaf_updates(false).unwrap();
+        assert_eq!(
+            task.storage_updates[&address].len(),
+            1,
+            "deletion needs the blinded sibling to collapse the branch"
+        );
+        assert!(!task.retry_storage_updates.contains(&address));
+        let misses = task.storage_cache_misses;
+        task.process_leaf_updates(false).unwrap();
+        assert_eq!(task.storage_cache_misses, misses);
+
+        // A third branch child lets the pending deletion succeed without revealing the sibling.
+        task.new_storage_updates
+            .entry(address)
+            .or_default()
+            .insert(third, LeafUpdate::Changed(value));
+        task.pending_updates = 1;
+        task.process_new_updates().unwrap();
+        assert!(task.retry_storage_updates.contains(&address));
+        task.process_leaf_updates(false).unwrap();
+        assert!(task.storage_updates[&address].is_empty());
+        assert_eq!(
+            task.trie.storage_root(&address, task.new_epoch).unwrap(),
+            reth_trie_common::root::storage_root([(second, storage_value), (third, storage_value)])
+        );
+        drop(updates_tx);
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
+    }
+
+    #[test]
     fn storage_retries_follow_proofs_and_new_updates() {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
@@ -1610,7 +1724,7 @@ mod tests {
         assert_eq!(task.storage_updates[&second].len(), 1);
         assert_eq!(task.storage_cache_misses, misses);
 
-        // A new update must re-enable pending work for its address even without another proof.
+        // New leaves that also fail must not retry unchanged pending work.
         task.on_prewarm_targets(MultiProofTargetsV2 {
             storage_targets: B256Map::from_iter([(
                 second,
@@ -1622,9 +1736,9 @@ mod tests {
         task.process_new_updates().unwrap();
         let misses = task.storage_cache_misses;
         task.process_leaf_updates(false).unwrap();
-        assert_eq!(task.storage_cache_misses, misses + 2);
+        assert_eq!(task.storage_cache_misses, misses);
         task.process_leaf_updates(false).unwrap();
-        assert_eq!(task.storage_cache_misses, misses + 2);
+        assert_eq!(task.storage_cache_misses, misses);
 
         task.on_proof_result(DecodedMultiProofV2 {
             storage_proofs: B256Map::from_iter([(
