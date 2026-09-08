@@ -3979,7 +3979,7 @@ mod tests {
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
     use reth_primitives_traits::SealedBlock;
-    use reth_storage_api::{MetadataProvider, MetadataWriter};
+    use reth_storage_api::{DatabaseProviderFactory, MetadataProvider, MetadataWriter};
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
         HashedPostState, KeccakKeyHasher, Nibbles, SortedTrieData, StoredNibbles,
@@ -4006,6 +4006,44 @@ mod tests {
             None,
             SaveBlocksMode::Full,
         )
+    }
+
+    #[test]
+    fn snap_attempt_guards_finish_checkpoint_writers() {
+        use alloy_eips::BlockNumHash;
+        use reth_db_api::models::{SnapAttempt, SnapAttemptId};
+
+        let factory = create_test_provider_factory();
+        let provider = factory.database_provider_rw().unwrap();
+        provider.update_pipeline_stages(5, false).unwrap();
+        let mut attempt = SnapAttempt::start(
+            SnapAttemptId::FIRST,
+            BlockNumHash::new(10, B256::repeat_byte(1)),
+            B256::repeat_byte(2),
+        );
+        provider.write_snap_attempt(&attempt).unwrap();
+        provider.commit().unwrap();
+
+        let provider = factory.database_provider_rw().unwrap();
+        assert!(provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(10)).is_err());
+        assert!(provider.update_pipeline_stages(10, false).is_err());
+        for stage in [StageId::Finish, StageId::Headers] {
+            assert_eq!(provider.get_stage_checkpoint(stage).unwrap().unwrap().block_number, 5);
+        }
+
+        // Header progress does not claim the downloaded state is complete.
+        provider.save_stage_checkpoint(StageId::Headers, StageCheckpoint::new(10)).unwrap();
+        attempt.verify();
+        provider.write_snap_attempt(&attempt).unwrap();
+        provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(10)).unwrap();
+        provider.update_pipeline_stages(11, false).unwrap();
+        provider.commit().unwrap();
+
+        let provider = factory.database_provider_ro().unwrap();
+        assert_eq!(
+            provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap().block_number,
+            11
+        );
     }
 
     #[test]
