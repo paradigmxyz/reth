@@ -1,7 +1,7 @@
 use alloy_primitives::{
     keccak256,
     map::{HashMap, HashSet},
-    BlockNumber, B256,
+    Address, BlockNumber, B256,
 };
 use core::ops::RangeInclusive;
 use reth_db_api::{
@@ -50,9 +50,20 @@ where
 
     // Walk storage changesets using the provider (handles static files + database)
     let storage_changesets = provider.storage_changesets_range(range)?;
+    // Rows are ordered by `BlockNumberAddress`, so all slots of one account arrive consecutively.
+    // Memoizing the last address avoids re-hashing it once per slot; the repeated account prefix
+    // insert can be skipped because `PrefixSetMut::freeze` deduplicates anyway.
+    let mut last_address: Option<(Address, B256)> = None;
     for (BlockNumberAddress((_, address)), storage_entry) in storage_changesets {
-        let hashed_address = keccak256(address);
-        account_prefix_set.insert(Nibbles::unpack(hashed_address));
+        let hashed_address = match last_address {
+            Some((last, hashed)) if last == address => hashed,
+            _ => {
+                let hashed = keccak256(address);
+                account_prefix_set.insert(Nibbles::unpack(hashed));
+                last_address = Some((address, hashed));
+                hashed
+            }
+        };
         storage_prefix_sets
             .entry(hashed_address)
             .or_default()

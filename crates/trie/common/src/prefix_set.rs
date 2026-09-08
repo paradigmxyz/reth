@@ -334,6 +334,28 @@ impl PrefixSet {
         false
     }
 
+    /// Returns `true` if any key in the set is at or after `start`.
+    #[inline]
+    pub fn contains_from(&mut self, start: &Nibbles) -> bool {
+        if self.all {
+            return true
+        }
+
+        let keys = self.keys.as_deref().map(Vec::as_slice).unwrap_or_default();
+        while self.index > 0 && &keys[self.index] > start {
+            self.index -= 1;
+        }
+
+        for (idx, key) in keys[self.index..].iter().enumerate() {
+            if key >= start {
+                self.index += idx;
+                return true
+            }
+        }
+
+        false
+    }
+
     /// Returns an iterator over reference to _all_ nibbles regardless of cursor position.
     pub fn iter(&self) -> core::slice::Iter<'_, Nibbles> {
         self.slice().iter()
@@ -386,6 +408,19 @@ mod tests {
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([4, 5])));
         assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([7, 8])));
         assert_eq!(prefix_set.len(), 3); // Length should be 3 (excluding duplicate)
+    }
+
+    #[test]
+    fn test_contains_from() {
+        let first = Nibbles::from_nibbles([1, 2, 3]);
+        let middle = Nibbles::from_nibbles([1, 2, 4]);
+        let last = Nibbles::from_nibbles([4, 5, 6]);
+        let mut prefix_set = PrefixSetMut::from([first, middle, last]).freeze();
+
+        assert!(prefix_set.contains_range(&first..&middle));
+        assert!(prefix_set.contains_from(&middle));
+        assert!(prefix_set.contains_from(&last));
+        assert!(!prefix_set.contains_from(&Nibbles::from_nibbles([5])));
     }
 
     #[test]

@@ -75,7 +75,7 @@ pub trait RethRpcServerConfig {
     /// the filesystem. This file can then be used to provision the counterpart client.
     ///
     /// The `default_jwt_path` provided as an argument will be used as the default location for the
-    /// jwt secret in case the `auth_jwtsecret` argument is not provided.
+    /// jwt secret in case neither `--authrpc.jwtsecret` nor `--authrpc.jwtsecret-hex` is provided.
     fn auth_jwt_secret(&self, default_jwt_path: PathBuf) -> Result<JwtSecret, JwtError>;
 
     /// Returns the configured jwt secret key for the regular rpc servers, if any.
@@ -254,12 +254,17 @@ impl RethRpcServerConfig for RpcServerArgs {
     }
 
     fn auth_jwt_secret(&self, default_jwt_path: PathBuf) -> Result<JwtSecret, JwtError> {
-        match self.auth_jwtsecret.as_ref() {
-            Some(fpath) => {
-                debug!(target: "reth::cli", user_path=?fpath, "Reading JWT auth secret file");
-                JwtSecret::from_file(fpath)
+        if let Some(secret) = self.auth_jwtsecret_hex {
+            debug!(target: "reth::cli", "Using JWT auth secret from hex");
+            Ok(secret)
+        } else {
+            match self.auth_jwtsecret.as_ref() {
+                Some(fpath) => {
+                    debug!(target: "reth::cli", user_path=?fpath, "Reading JWT auth secret file");
+                    JwtSecret::from_file(fpath)
+                }
+                None => get_or_create_jwt_secret_from_path(&default_jwt_path),
             }
-            None => get_or_create_jwt_secret_from_path(&default_jwt_path),
         }
     }
 
@@ -273,6 +278,7 @@ mod tests {
     use clap::{Args, Parser};
     use reth_node_core::args::RpcServerArgs;
     use reth_rpc_eth_types::RPC_DEFAULT_GAS_CAP;
+    use reth_rpc_layer::JwtSecret;
     use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
     use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
@@ -425,5 +431,16 @@ mod tests {
         let config = args.eth_config().filter_config();
         assert_eq!(config.max_blocks_per_filter, Some(100));
         assert_eq!(config.max_logs_per_response, Some(200));
+    }
+
+    #[test]
+    fn test_auth_jwt_secret_from_hex() {
+        let hex = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--authrpc.jwtsecret-hex", hex])
+                .args;
+
+        let secret = args.auth_jwt_secret(std::env::temp_dir().join("unused.jwt")).unwrap();
+        assert_eq!(secret, JwtSecret::from_hex(hex).unwrap());
     }
 }

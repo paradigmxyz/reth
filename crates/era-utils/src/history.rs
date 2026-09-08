@@ -826,7 +826,7 @@ where
         let (hash, number) = hash_to_number?;
 
         if index != 0 && index.is_multiple_of(interval) {
-            info!(target: "era::history::import", progress = %format!("{:.2}%", (index as f64 / total_headers as f64) * 100.0), "Writing headers hash index");
+            info!(target: "era::history::import", progress = %format_args!("{:.2}%", (index as f64 / total_headers as f64) * 100.0), "Writing headers hash index");
         }
 
         let hash = RawKey::<BlockHash>::from_vec(hash);
