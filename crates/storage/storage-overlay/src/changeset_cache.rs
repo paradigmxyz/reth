@@ -72,7 +72,6 @@ pub(crate) fn compute_block_trie_updates<N, Provider>(
 where
     N: NodePrimitives,
     Provider: DBProvider<AccountExtension = N::AccountExtension>
-        + reth_storage_api::HistoryReader
         + ChangeSetReader
         + StorageChangeSetReader
         + PruneCheckpointReader
@@ -93,7 +92,6 @@ fn compute_block_trie_updates_inner<N, Provider, A>(
 where
     N: NodePrimitives,
     Provider: DBProvider<AccountExtension = N::AccountExtension>
-        + reth_storage_api::HistoryReader
         + ChangeSetReader
         + StorageChangeSetReader
         + PruneCheckpointReader
@@ -224,7 +222,6 @@ impl ChangesetCache {
     where
         N: NodePrimitives,
         P: DBProvider<AccountExtension = N::AccountExtension>
-            + reth_storage_api::HistoryReader
             + ChangeSetReader
             + StorageChangeSetReader
             + StageCheckpointReader
@@ -278,7 +275,6 @@ impl ChangesetCache {
     where
         N: NodePrimitives,
         P: DBProvider<AccountExtension = N::AccountExtension>
-            + reth_storage_api::HistoryReader
             + ChangeSetReader
             + StorageChangeSetReader
             + StageCheckpointReader

@@ -248,7 +248,6 @@ where
             + ChangeSetReader
             + StorageChangeSetReader
             + DBProvider<AccountExtension = N::AccountExtension>
-            + HistoryReader
             + BlockNumReader
             + StorageSettingsCache,
     {
@@ -308,7 +307,6 @@ where
             + ChangeSetReader
             + StorageChangeSetReader
             + DBProvider<AccountExtension = N::AccountExtension>
-            + HistoryReader
             + BlockNumReader
             + StorageSettingsCache,
     {
@@ -341,7 +339,6 @@ where
             + ChangeSetReader
             + StorageChangeSetReader
             + DBProvider<AccountExtension = N::AccountExtension>
-            + HistoryReader
             + BlockNumReader,
     {
         if let Some(overlay) = self.execution_overlay.get() {
@@ -411,14 +408,7 @@ impl<Provider, N: NodePrimitives> reth_storage_api::AccountExtensionProvider
     for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider<AccountExtension = N::AccountExtension>
-        + HistoryReader
-        + StorageSettingsCache
-        + StageCheckpointReader
-        + PruneCheckpointReader
-        + ChangeSetReader
-        + StorageChangeSetReader
-        + BlockNumReader,
+    Provider::Target: DBProvider<AccountExtension = N::AccountExtension>,
 {
     type AccountExtension = N::AccountExtension;
 }
@@ -496,7 +486,6 @@ where
     Provider: Deref,
     Provider::Target: BlockHashReader
         + DBProvider<AccountExtension = N::AccountExtension>
-        + HistoryReader
         + Sized
         + StageCheckpointReader
         + PruneCheckpointReader
@@ -535,7 +524,6 @@ impl<Provider, N: NodePrimitives> BytecodeReader for OverlayStateProvider<Provid
 where
     Provider: Deref,
     Provider::Target: DBProvider<AccountExtension = N::AccountExtension>
-        + HistoryReader
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -558,7 +546,6 @@ impl<Provider, N: NodePrimitives> StateRootProvider for OverlayStateProvider<Pro
 where
     Provider: Deref,
     Provider::Target: DBProvider<AccountExtension = N::AccountExtension>
-        + HistoryReader
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -626,7 +613,6 @@ impl<Provider, N: NodePrimitives> StorageRootProvider for OverlayStateProvider<P
 where
     Provider: Deref,
     Provider::Target: DBProvider<AccountExtension = N::AccountExtension>
-        + HistoryReader
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -736,7 +722,6 @@ impl<Provider, N: NodePrimitives> StateProofProvider for OverlayStateProvider<Pr
 where
     Provider: Deref,
     Provider::Target: DBProvider<AccountExtension = N::AccountExtension>
-        + HistoryReader
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -844,7 +829,6 @@ impl<Provider, N: NodePrimitives> HashedPostStateProvider for OverlayStateProvid
 where
     Provider: Deref,
     Provider::Target: DBProvider<AccountExtension = N::AccountExtension>
-        + HistoryReader
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -963,7 +947,6 @@ impl<Provider, N: NodePrimitives> TrieCursorFactory for OverlayStateProvider<Pro
 where
     Provider: Deref,
     Provider::Target: DBProvider<AccountExtension = N::AccountExtension>
-        + HistoryReader
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -1019,7 +1002,6 @@ impl<Provider, N: NodePrimitives> HashedCursorFactory for OverlayStateProvider<P
 where
     Provider: Deref,
     Provider::Target: DBProvider<AccountExtension = N::AccountExtension>
-        + HistoryReader
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader

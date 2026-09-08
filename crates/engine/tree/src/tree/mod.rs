@@ -377,7 +377,6 @@ where
         + PruneCheckpointReader
         + StageCheckpointReader
         + ChangeSetReader<AccountExtension = N::AccountExtension>
-        + reth_provider::HistoryReader
         + StorageChangeSetReader
         + StorageSettingsCache
         + 'static,

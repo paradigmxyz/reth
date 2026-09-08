@@ -411,7 +411,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             + ChangeSetReader<AccountExtension = N::AccountExtension>
             + StorageChangeSetReader
             + DBProvider
-            + reth_storage_api::HistoryReader
             + BlockNumReader
             + StorageSettingsCache,
     {
@@ -444,7 +443,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         Provider: ChangeSetReader<AccountExtension = N::AccountExtension>
             + StorageChangeSetReader
             + DBProvider
-            + reth_storage_api::HistoryReader
             + BlockNumReader
             + StageCheckpointReader
             + PruneCheckpointReader
@@ -604,7 +602,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             + ChangeSetReader<AccountExtension = N::AccountExtension>
             + StorageChangeSetReader
             + DBProvider
-            + reth_storage_api::HistoryReader
             + BlockNumReader,
     {
         let (state_trie_tip_block, finish_tip_block) = database_state_frontiers(provider)?;
@@ -628,7 +625,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         Provider: ChangeSetReader<AccountExtension = N::AccountExtension>
             + StorageChangeSetReader
             + DBProvider
-            + reth_storage_api::HistoryReader
             + BlockNumReader
             + PruneCheckpointReader,
     {

@@ -120,7 +120,6 @@ impl<N: NodePrimitives> OverlayManager<N> {
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
         P: DBProvider<AccountExtension = N::AccountExtension>
-            + reth_storage_api::HistoryReader
             + ChangeSetReader
             + StorageChangeSetReader
             + StageCheckpointReader
@@ -146,7 +145,6 @@ impl<N: NodePrimitives> OverlayManager<N> {
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
         P: DBProvider<AccountExtension = N::AccountExtension>
-            + reth_storage_api::HistoryReader
             + ChangeSetReader
             + StorageChangeSetReader
             + StageCheckpointReader
@@ -170,7 +168,6 @@ impl<N: NodePrimitives> OverlayManager<N> {
     ) -> ProviderResult<TrieUpdatesSorted>
     where
         P: DBProvider<AccountExtension = N::AccountExtension>
-            + reth_storage_api::HistoryReader
             + ChangeSetReader
             + StorageChangeSetReader
             + PruneCheckpointReader
