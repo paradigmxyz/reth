@@ -1,7 +1,7 @@
 //! End-to-end EIP-8141 pool coverage using externally submitted frame envelopes.
 
 use crate::utils::eth_payload_attributes_amsterdam;
-use alloy_consensus::TxEip8141;
+use alloy_consensus::{BlockHeader, TxEip8141};
 use alloy_eips::eip8141::{
     Frame, FrameLimits, FrameMode, FrameSignature, SignatureScheme, TransactionFees,
     ATOMIC_BATCH_FLAG, EXPIRY_VERIFIER,
@@ -110,10 +110,31 @@ async fn assert_mined_from_pool(
         eprintln!("EIP-8141 E2E payload inclusion confirmed: hash={hash:#x}");
     }
 
+    let block_number = payload.block().number();
     let block_hash = node.submit_payload(payload).await?;
     node.update_forkchoice(block_hash, block_hash).await?;
+
+    // The transaction pool is maintained by a separate task subscribed to the canonical-state
+    // stream. Wait until the block is persisted before checking that task's asynchronous removal.
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        node.wait_block(block_number, block_hash, false),
+    )
+    .await
+    .map_err(|_| eyre::eyre!("timed out waiting for the frame block to become canonical"))??;
+
+    let removed = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            if expected.iter().all(|hash| !node.inner.pool.contains(hash)) {
+                break true;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap_or(false);
+    eyre::ensure!(removed, "canonical frame transaction remained in pool");
     for hash in expected {
-        assert!(!node.inner.pool.contains(hash), "canonical frame transaction remained in pool");
         eprintln!("EIP-8141 E2E canonical removal confirmed: hash={hash:#x}");
     }
     Ok(())
