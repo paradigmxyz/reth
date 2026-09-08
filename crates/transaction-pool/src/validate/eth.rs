@@ -742,8 +742,7 @@ where
         }
 
         // Checks for nonce
-        if transaction.frame_validation().is_none() &&
-            transaction.requires_nonce_check() &&
+        if transaction.requires_nonce_check() &&
             let Err(err) = self.validate_sender_nonce(&transaction, &account)
         {
             return TransactionValidationOutcome::Invalid(transaction, err)
@@ -1733,6 +1732,64 @@ mod tests {
             alloy_consensus::transaction::Recovered::new_unchecked(tx, sender),
             encoded_length,
         )
+    }
+
+    #[test]
+    fn eip8141_validated_prefix_still_checks_state_nonce() {
+        let sender = Address::repeat_byte(0x41);
+        for (tx_nonce, state_nonce, valid) in [(0, 0, true), (0, 1, false), (2, 1, true)] {
+            let provider = MockEthProvider::default().with_genesis_block();
+            let mut validator =
+                EthTransactionValidatorBuilder::new(provider.clone(), test_evm_config())
+                    .set_bogota(true)
+                    .build(InMemoryBlobStore::default());
+            validator.set_frame_validation(Arc::new(move |tx: &EthPooledTransaction| {
+                Ok(Arc::new(FrameValidation {
+                    sender,
+                    sender_nonce: tx.nonce(),
+                    state_nonce,
+                    sender_balance: U256::MAX,
+                    sender_code_hash: None,
+                    payer: sender,
+                    max_cost: U256::ZERO,
+                    payer_balance: U256::MAX,
+                    head_hash: B256::ZERO,
+                    dependencies: Default::default(),
+                    expires_at: None,
+                    exclusive_payer: false,
+                }))
+            }));
+            let mut frame = eip8141_tx(validator.chain_id(), sender)
+                .transaction
+                .as_eip8141()
+                .unwrap()
+                .clone()
+                .into_inner();
+            frame.nonce = tx_nonce;
+            let encoded_length = frame.eip2718_encoded_length();
+            let transaction = EthPooledTransaction::new(
+                alloy_consensus::transaction::Recovered::new_unchecked(
+                    reth_ethereum_primitives::TransactionSigned::Eip8141(frame.seal_slow()),
+                    sender,
+                ),
+                encoded_length,
+            );
+            let outcome =
+                validator.validate_stateful(TransactionOrigin::External, transaction, &provider);
+            if valid {
+                assert!(outcome.is_valid());
+            } else {
+                assert!(matches!(
+                    outcome,
+                    TransactionValidationOutcome::Invalid(
+                        _,
+                        InvalidPoolTransactionError::Consensus(
+                            InvalidTransactionError::NonceNotConsistent { tx: 0, state: 1 }
+                        )
+                    )
+                ));
+            }
+        }
     }
 
     #[test]

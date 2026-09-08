@@ -4,7 +4,7 @@ use crate::utils::eth_payload_attributes_amsterdam;
 use alloy_consensus::{BlockHeader, TxEip8141};
 use alloy_eips::eip8141::{
     Frame, FrameLimits, FrameMode, FrameSignature, SignatureScheme, TransactionFees,
-    ATOMIC_BATCH_FLAG, EXPIRY_VERIFIER,
+    ATOMIC_BATCH_FLAG, EXPIRY_VERIFIER, EXPIRY_VERIFIER_RUNTIME,
 };
 use alloy_primitives::{Address, Bytes, U256};
 use alloy_signer::SignerSync;
@@ -24,10 +24,14 @@ const fn recipient() -> Address {
 }
 
 fn chain_spec() -> Arc<reth_chainspec::ChainSpec> {
+    let mut genesis: alloy_genesis::Genesis =
+        serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
+    genesis.alloc.entry(EXPIRY_VERIFIER).or_default().code =
+        Some(Bytes::copy_from_slice(&EXPIRY_VERIFIER_RUNTIME));
     Arc::new(
         ChainSpecBuilder::default()
             .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .genesis(genesis)
             // The Frames devnet aliases Bogotá to Amsterdam. The E2E chain enables both so the
             // pool gate and the V6 payload path exercise the same configuration.
             .bogota_activated()

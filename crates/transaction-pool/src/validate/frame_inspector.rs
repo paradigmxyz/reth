@@ -24,6 +24,7 @@ pub struct FrameValidationInspector {
     policy: FrameValidationPolicy,
     depth: usize,
     error: Option<&'static str>,
+    accounts: BTreeSet<Address>,
     code: BTreeSet<Address>,
     storage: BTreeSet<(Address, U256)>,
     expiry: Option<u64>,
@@ -37,6 +38,7 @@ impl FrameValidationInspector {
             policy,
             depth: 0,
             error: None,
+            accounts: BTreeSet::new(),
             code: BTreeSet::new(),
             storage: BTreeSet::new(),
             expiry: None,
@@ -56,7 +58,7 @@ impl FrameValidationInspector {
     /// Returns the state dependencies observed during prefix execution.
     pub fn dependencies(&self) -> FrameDependencies {
         FrameDependencies {
-            accounts: vec![self.sender],
+            accounts: self.accounts.iter().copied().chain([self.sender]).collect(),
             code: self.code.iter().copied().collect(),
             storage: self.storage.iter().copied().collect(),
         }
@@ -159,38 +161,26 @@ where
 
         match opcode {
             // Environment-dependent opcodes, arbitrary balance reads and state destruction.
-            0x31 |
-            0x3a |
-            0x40 |
-            0x41 |
-            0x43..=0x45 |
-            0x47 |
-            0x48 |
-            0x4a |
-            0x4b |
-            0x5d |
-            0xfe |
-            0xff => self.reject("banned opcode in validation prefix"),
+            0x31 | 0x3a | 0x40 | 0x41 | 0x43..=0x45 | 0x47 | 0x48 | 0x4a | 0x4b | 0xfe | 0xff => {
+                self.reject("banned opcode in validation prefix")
+            }
             0x42 if !expiry_timestamp => self.reject("TIMESTAMP outside canonical expiry verifier"),
-            0x5a => {
-                if !matches!(
-                    interp.bytecode.bytecode_slice().get(interp.bytecode.pc() + 1),
-                    Some(0xf1 | 0xf2 | 0xf4 | 0xfa)
-                ) {
-                    self.reject("GAS must immediately precede a call")
-                }
+            0x5a if !matches!(
+                interp.bytecode.bytecode_slice().get(interp.bytecode.pc() + 1),
+                Some(0xf1 | 0xf2 | 0xf4 | 0xfa)
+            ) =>
+            {
+                self.reject("GAS must immediately precede a call")
             }
             0xf0 | 0xf5 | 0xf6 if !deploying => {
                 self.reject("code installation outside deploy frame")
             }
-            0x54 | 0x55 | 0x5c => {
+            0x54 | 0x55 => {
                 if address != self.sender {
                     self.reject("validation accessed storage outside sender")
                 } else if opcode == 0x55 && !deploying {
                     self.reject("storage write outside deploy frame")
-                } else if opcode != 0x5c &&
-                    let Some(slot) = interp.stack.data().last()
-                {
+                } else if let Some(slot) = interp.stack.data().last() {
                     self.storage.insert((address, *slot));
                 }
             }
@@ -263,6 +253,9 @@ where
 
     fn create(&mut self, ctx: &mut CTX, inputs: &mut CreateInputs) -> Option<CreateOutcome> {
         self.depth += 1;
+        // CREATE derives the sender address from the factory nonce. A nonce change must
+        // invalidate the prefix even when the factory's code and storage are unchanged.
+        self.accounts.insert(inputs.caller());
         if !self.deploying(ctx) {
             self.reject("creation outside deploy frame");
         }
@@ -309,10 +302,9 @@ mod tests {
 
     #[test]
     fn rejects_environment_reads_and_requires_immediate_call_after_gas() {
-        for opcode in [
-            0x31, 0x3a, 0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x47, 0x48, 0x4a, 0x4b, 0x5d, 0xfe,
-            0xff,
-        ] {
+        for opcode in
+            [0x31, 0x3a, 0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x47, 0x48, 0x4a, 0x4b, 0xfe, 0xff]
+        {
             let mut inspector = FrameValidationInspector::new(Address::ZERO, policy());
             let mut ctx = Context::mainnet();
             let mut interp = Interpreter {
@@ -331,6 +323,49 @@ mod tests {
             };
             inspector.step(&mut interp, &mut ctx);
             assert_eq!(inspector.error().is_none(), matches!(next, 0xf1 | 0xf2 | 0xf4 | 0xfa));
+        }
+    }
+
+    #[test]
+    fn factory_nonce_is_a_validation_dependency() {
+        let factory = Address::repeat_byte(2);
+        let sender = factory.create(0);
+        let mut policy = policy();
+        policy.deploy_index = Some(0);
+        let mut inspector = FrameValidationInspector::new(sender, policy);
+        let mut ctx = Context::mainnet();
+        ctx.local_mut().set_frame_transaction(Some(FrameTransactionRuntime::new(sender)));
+        let mut inputs = CreateInputs::new(
+            factory,
+            revm::context_interface::CreateScheme::Create,
+            U256::ZERO,
+            Bytes::new(),
+            10_000,
+            0,
+        );
+        assert!(inspector.create(&mut ctx, &mut inputs).is_none());
+        assert!(inspector.error().is_none());
+        assert!(inspector.dependencies().accounts.contains(&factory));
+        assert!(ctx.journal().evm_state().is_empty());
+    }
+
+    #[test]
+    fn transient_storage_is_not_a_persistent_state_dependency() {
+        let sender = Address::repeat_byte(1);
+        for address in [sender, Address::repeat_byte(2)] {
+            for opcode in [0x5c, 0x5d] {
+                let mut inspector = FrameValidationInspector::new(sender, policy());
+                let mut ctx = Context::mainnet();
+                let mut interp = Interpreter::default();
+                interp.input.target_address = address;
+                interp.bytecode = ExtBytecode::new(Bytecode::new_legacy(vec![opcode].into()));
+                assert!(interp.stack.push(U256::from(7)));
+                inspector.step(&mut interp, &mut ctx);
+                // The EVM still enforces the static-context restriction on TSTORE.
+                assert!(inspector.error().is_none());
+                assert!(inspector.dependencies().storage.is_empty());
+                assert!(ctx.journal().evm_state().is_empty());
+            }
         }
     }
 
@@ -444,6 +479,9 @@ mod tests {
 
         // APPROVE(3) validates the sender and payer. The suffix is INVALID and must not run.
         run(&[0x60, 0x03, 0x5f, 0x5f, 0xaa, 0x00], true);
+        // TLOAD is valid in VERIFY; TSTORE still fails under EVM static-call rules.
+        run(&[0x5f, 0x5c, 0x50, 0x60, 0x03, 0x5f, 0x5f, 0xaa, 0x00], true);
+        run(&[0x5f, 0x5f, 0x5d, 0x60, 0x03, 0x5f, 0x5f, 0xaa, 0x00], false);
         // A rejected opcode remains sticky even though APPROVE would otherwise succeed.
         run(&[0x42, 0x60, 0x03, 0x5f, 0x5f, 0xaa, 0x00], false);
     }

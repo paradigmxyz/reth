@@ -343,6 +343,27 @@ mod tests {
         assert!(r.affected(&changed, u64::MAX).is_empty());
     }
     #[test]
+    fn removal_preserves_exclusive_admission_invariants() {
+        let mut r = FrameReservations::default();
+        put(&mut r, 1, m(1, 0, 1, 1)).unwrap();
+        put(&mut r, 2, m(2, 0, 1, 1)).unwrap();
+        let mut exclusive = m(3, 0, 1, 1);
+        exclusive.exclusive_payer = true;
+        assert_eq!(put(&mut r, 3, exclusive.clone()), Err("exclusive payer capacity exceeded"));
+        r.remove(&B256::repeat_byte(1));
+        assert_eq!(r.payer_usage(&exclusive.payer).frame_count, 1);
+        assert!(!r.payer_usage(&exclusive.payer).exclusive);
+        assert_eq!(put(&mut r, 3, exclusive.clone()), Err("exclusive payer capacity exceeded"));
+        r.remove(&B256::repeat_byte(2));
+        put(&mut r, 3, exclusive.clone()).unwrap();
+        assert!(r.payer_usage(&exclusive.payer).exclusive);
+        assert_eq!(put(&mut r, 4, m(4, 0, 1, 1)), Err("exclusive payer capacity exceeded"));
+        r.remove(&B256::repeat_byte(3));
+        assert_eq!(r.payer_usage(&exclusive.payer), PayerUsage::default());
+        put(&mut r, 4, m(4, 0, 1, 1)).unwrap();
+    }
+
+    #[test]
     fn exclusive_cap_and_nonce_rules() {
         let mut r = FrameReservations::default();
         let mut x = m(1, 0, 1, 1);
