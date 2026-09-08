@@ -69,6 +69,10 @@ jobs:
       - run: cargo clippy --workspace --lib --examples --tests --benches --all-features --locked
         env:
           RUSTFLAGS: -D warnings
+      # Keep the default Ethereum build free of revm's optional account payload.
+      - run: cargo clippy --workspace --lib --examples --tests --benches --locked
+        env:
+          RUSTFLAGS: -D warnings
 
   wasm:
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}

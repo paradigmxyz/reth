@@ -42,7 +42,7 @@ pub struct Proof<T, H, K = AddedRemovedKeys> {
     added_removed_keys: Option<K>,
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "account-ext"))]
 mod account_extension_tests {
     use super::*;
     use crate::{

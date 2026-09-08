@@ -367,8 +367,7 @@ mod tests {
                 nonce: 1,
                 code_hash: keccak256(BEACON_ROOTS_CODE.clone()),
                 code: Some(Bytecode::new_raw(BEACON_ROOTS_CODE.clone())),
-                account_id: None,
-                extension: Default::default(),
+                ..Default::default()
             },
         );
         db.insert_account_info(
@@ -378,8 +377,7 @@ mod tests {
                 nonce: 1,
                 code_hash: keccak256(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone()),
                 code: Some(Bytecode::new_raw(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone())),
-                account_id: None,
-                extension: Default::default(),
+                ..Default::default()
             },
         );
         db.insert_account_info(
@@ -389,8 +387,7 @@ mod tests {
                 nonce: 1,
                 code_hash: keccak256(HISTORY_STORAGE_CODE.clone()),
                 code: Some(Bytecode::new_raw(HISTORY_STORAGE_CODE.clone())),
-                account_id: None,
-                extension: Default::default(),
+                ..Default::default()
             },
         );
         db
@@ -580,8 +577,7 @@ mod tests {
                 balance,
                 code_hash: B256::ZERO,
                 code: None,
-                account_id: None,
-                extension: Default::default(),
+                ..Default::default()
             },
         );
     }
@@ -696,8 +692,7 @@ mod tests {
                         balance: sender_balance,
                         code_hash: B256::ZERO,
                         code: None,
-                        account_id: None,
-                        extension: Default::default(),
+                        ..Default::default()
                     },
                 );
                 db.insert_account_info(
@@ -707,8 +702,7 @@ mod tests {
                         balance: sender_balance,
                         code_hash: B256::ZERO,
                         code: None,
-                        account_id: None,
-                        extension: Default::default(),
+                        ..Default::default()
                     },
                 );
                 db
@@ -1016,8 +1010,7 @@ mod tests {
                 balance: U256::ZERO,
                 code_hash,
                 code: Some(Bytecode::new_raw(revert_code)),
-                account_id: None,
-                extension: Default::default(),
+                ..Default::default()
             },
         );
 
@@ -1074,8 +1067,7 @@ mod tests {
                 balance: U256::ZERO,
                 code_hash,
                 code: Some(Bytecode::new_raw(sstore_code)),
-                account_id: None,
-                extension: Default::default(),
+                ..Default::default()
             },
         );
 

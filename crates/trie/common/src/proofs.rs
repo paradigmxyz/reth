@@ -834,6 +834,13 @@ impl TryFrom<StorageMultiProof> for DecodedStorageMultiProof {
 #[derive(Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "serde"), serde(rename_all = "camelCase"))]
+#[cfg_attr(
+    any(test, feature = "serde"),
+    serde(bound(
+        serialize = "E: serde::Serialize + Default + PartialEq",
+        deserialize = "E: serde::Deserialize<'de> + Default"
+    ))
+)]
 pub struct AccountProof<E = EmptyAccountExtension> {
     /// The address associated with the account.
     pub address: Address,

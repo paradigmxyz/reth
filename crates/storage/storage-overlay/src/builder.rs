@@ -993,14 +993,14 @@ mod tests {
         let value = U256::from(3);
         let code = Bytecode::new_raw(vec![0x60, 0x00].into());
         let code_hash = code.hash_slow();
-        let account = AccountInfo {
+        let mut account = AccountInfo {
             nonce: 4,
             balance: U256::from(5),
             code_hash,
             code: Some(code.clone()),
-            account_id: AccountId::new(6),
-            extension: Default::default(),
+            ..Default::default()
         };
+        account.account_id = AccountId::new(6);
         let state = BundleState::builder(0..=0)
             .state_present_account_info(address, account.clone())
             .state_storage(address, HashMap::from_iter([(slot, (U256::ZERO, value))]))

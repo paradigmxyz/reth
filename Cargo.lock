@@ -952,7 +952,7 @@ dependencies = [
 [[package]]
 name = "alloy-trie"
 version = "0.9.5"
-source = "git+https://github.com/alloy-rs/trie?rev=b7185a1#b7185a1c4d44e2b0eb52cc548461b85c22b552c4"
+source = "git+https://github.com/alloy-rs/trie?rev=7193a8bc1ed2c0855025ef5b04337af2fc6589f5#7193a8bc1ed2c0855025ef5b04337af2fc6589f5"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -7961,7 +7961,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=ca36e6f#ca36e6fb935569b7c48b6a4ac41bc91966ac00f1"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=1790a07ec59b693f8f2dd9560a0d16235c8a5f0d#1790a07ec59b693f8f2dd9560a0d16235c8a5f0d"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -7973,7 +7973,7 @@ dependencies = [
  "modular-bitfield",
  "parity-scale-codec",
  "reth-codecs-derive",
- "reth-zstd-compressors 0.7.0 (git+https://github.com/paradigmxyz/reth-core?rev=ca36e6f)",
+ "reth-zstd-compressors 0.7.0 (git+https://github.com/paradigmxyz/reth-core?rev=1790a07ec59b693f8f2dd9560a0d16235c8a5f0d)",
  "serde",
  "visibility",
 ]
@@ -7981,7 +7981,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs-derive"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=ca36e6f#ca36e6fb935569b7c48b6a4ac41bc91966ac00f1"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=1790a07ec59b693f8f2dd9560a0d16235c8a5f0d#1790a07ec59b693f8f2dd9560a0d16235c8a5f0d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9703,7 +9703,7 @@ dependencies = [
 [[package]]
 name = "reth-primitives-traits"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=ca36e6f#ca36e6fb935569b7c48b6a4ac41bc91966ac00f1"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=1790a07ec59b693f8f2dd9560a0d16235c8a5f0d#1790a07ec59b693f8f2dd9560a0d16235c8a5f0d"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -10797,7 +10797,7 @@ dependencies = [
 [[package]]
 name = "reth-zstd-compressors"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=ca36e6f#ca36e6fb935569b7c48b6a4ac41bc91966ac00f1"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=1790a07ec59b693f8f2dd9560a0d16235c8a5f0d#1790a07ec59b693f8f2dd9560a0d16235c8a5f0d"
 dependencies = [
  "zstd",
 ]
@@ -10824,7 +10824,7 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "43.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=0df358cfe2ae5bada5d7edfbbb47d38815790930#0df358cfe2ae5bada5d7edfbbb47d38815790930"
+source = "git+https://github.com/bluealloy/revm?rev=d20b1f9545d4beef505f7cdba861b6cbe813ed54#d20b1f9545d4beef505f7cdba861b6cbe813ed54"
 dependencies = [
  "bitvec",
  "paste",
@@ -10996,7 +10996,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "43.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=0df358cfe2ae5bada5d7edfbbb47d38815790930#0df358cfe2ae5bada5d7edfbbb47d38815790930"
+source = "git+https://github.com/bluealloy/revm?rev=d20b1f9545d4beef505f7cdba861b6cbe813ed54#d20b1f9545d4beef505f7cdba861b6cbe813ed54"
 dependencies = [
  "alloy-primitives",
  "once_cell",
@@ -11006,7 +11006,7 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "43.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=0df358cfe2ae5bada5d7edfbbb47d38815790930#0df358cfe2ae5bada5d7edfbbb47d38815790930"
+source = "git+https://github.com/bluealloy/revm?rev=d20b1f9545d4beef505f7cdba861b6cbe813ed54#d20b1f9545d4beef505f7cdba861b6cbe813ed54"
 dependencies = [
  "alloy-eip7928",
  "bitflags 2.13.0",
@@ -11014,6 +11014,7 @@ dependencies = [
  "revm-bytecode",
  "revm-primitives",
  "serde",
+ "triomphe",
 ]
 
 [[package]]
@@ -13096,6 +13097,15 @@ checksum = "a1631b201eb031b563d2e85ca18ec8092508e262a3196ce9bd10a67ec87b9f5c"
 dependencies = [
  "hash-db",
  "rlp",
+]
+
+[[package]]
+name = "triomphe"
+version = "0.1.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b40688ea6389c8171614b25491f71d4a27946e0c7ce2da1c6de27e25abf1a0ae"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

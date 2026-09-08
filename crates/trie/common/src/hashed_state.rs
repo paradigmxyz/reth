@@ -23,6 +23,13 @@ use revm::database::BundleAccount;
 /// hash maps.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(bound(
+        serialize = "E: serde::Serialize + Default + PartialEq",
+        deserialize = "E: serde::Deserialize<'de> + Default"
+    ))
+)]
 pub struct HashedPostState<E = EmptyAccountExtension> {
     /// Mapping of hashed address to account info, `None` if destroyed.
     pub accounts: B256Map<Option<Account<E>>>,
@@ -425,6 +432,13 @@ impl HashedStorage {
 /// Sorted hashed post state optimized for iterating during state trie calculation.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(bound(
+        serialize = "E: serde::Serialize + Default + PartialEq",
+        deserialize = "E: serde::Deserialize<'de> + Default"
+    ))
+)]
 pub struct HashedPostStateSorted<E = EmptyAccountExtension> {
     /// Sorted collection of account updates. `None` indicates a destroyed account.
     pub accounts: Vec<(B256, Option<Account<E>>)>,
@@ -856,8 +870,7 @@ mod tests {
             nonce: 42,
             code_hash: B256::random(),
             code: Some(Bytecode::new_raw(Bytes::from(vec![1, 2]))),
-            account_id: None,
-            extension: Bytes::new(),
+            ..Default::default()
         };
 
         let mut storage = StorageWithOriginalValues::default();
@@ -964,8 +977,7 @@ mod tests {
             nonce: 1,
             code_hash: B256::random(),
             code: None,
-            account_id: None,
-            extension: Bytes::new(),
+            ..Default::default()
         };
 
         // Create hashed accounts with addresses.

@@ -1392,8 +1392,7 @@ mod tests {
                     nonce: rng.random::<u64>(),
                     code_hash: KECCAK_EMPTY,
                     code: Some(Default::default()),
-                    account_id: None,
-                    extension: Default::default(),
+                    ..Default::default()
                 };
                 account.storage = storage;
                 account.status = AccountStatus::Touched;

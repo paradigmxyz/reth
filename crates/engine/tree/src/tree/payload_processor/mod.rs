@@ -823,8 +823,7 @@ mod tests {
                     nonce: 7,
                     code_hash: KECCAK_EMPTY,
                     code: None,
-                    account_id: None,
-                    extension: Default::default(),
+                    ..Default::default()
                 },
             )
             .build();

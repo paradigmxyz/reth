@@ -314,8 +314,7 @@ mod tests {
             balance: U256::from(42),
             code_hash: KECCAK_EMPTY,
             code: None,
-            account_id: None,
-            extension: Default::default(),
+            ..Default::default()
         };
         let db = CountingDatabaseRef::new(address, Some(account), Bytecode::default());
         let provider = DatabaseStateProvider::new(db);
@@ -341,8 +340,7 @@ mod tests {
             balance: U256::from(42),
             code_hash,
             code: Some(bytecode.clone()),
-            account_id: None,
-            extension: Default::default(),
+            ..Default::default()
         };
         let db = CountingDatabaseRef::new(address, Some(account), bytecode.clone());
         let provider = DatabaseStateProvider::new(db);
@@ -406,8 +404,7 @@ mod tests {
             balance: U256::from(42),
             code_hash,
             code: Some(bytecode.clone()),
-            account_id: None,
-            extension: Default::default(),
+            ..Default::default()
         };
         let db = CountingDatabaseRef::new(address, Some(account), bytecode.clone());
         let account_reads = db.account_reads.clone();
