@@ -65,8 +65,12 @@ where
     T: MetadataProvider + MetadataWriter,
 {
     fn start_snap_attempt(&self, generation: SnapGeneration) -> Result<SnapWrite, SnapSyncError> {
-        let attempt =
-            SnapAttempt::start(self.snap_attempt()?, generation.target(), generation.state_root());
+        // An unreadable record still owns state on disk that this attempt would inherit.
+        self.snap_attempt()?;
+
+        let id = self.snap_attempt_next_id()?;
+        let attempt = SnapAttempt::start(id, generation.target(), generation.state_root());
+        self.write_snap_attempt_next_id(id.next())?;
         self.write_snap_attempt(&attempt)?;
         Ok(SnapWrite::of(&attempt))
     }
@@ -152,6 +156,23 @@ mod tests {
             Err(SnapSyncError::StaleWrite { .. })
         ));
         provider.authorize_snap_write(second).unwrap();
+    }
+
+    #[test]
+    fn clearing_an_attempt_does_not_free_its_identity() {
+        let factory = create_test_provider_factory();
+        let provider = factory.database_provider_rw().unwrap();
+
+        let cleared = provider.start_snap_attempt(generation(1)).unwrap();
+        provider.clear_snap_attempt().unwrap();
+        let started = provider.start_snap_attempt(generation(2)).unwrap();
+
+        assert_ne!(cleared.attempt(), started.attempt());
+        // The cleared attempt's outstanding downloads cannot pass as the new attempt's work.
+        assert!(matches!(
+            provider.authorize_snap_write(cleared),
+            Err(SnapSyncError::StaleWrite { .. })
+        ));
     }
 
     #[test]

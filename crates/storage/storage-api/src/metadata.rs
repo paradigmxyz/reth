@@ -2,7 +2,7 @@
 
 use alloc::vec::Vec;
 use core::fmt;
-use reth_db_api::models::{SnapAttempt, StorageSettings, SNAP_ATTEMPT_VERSION};
+use reth_db_api::models::{SnapAttempt, SnapAttemptId, StorageSettings, SNAP_ATTEMPT_VERSION};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 
 /// Metadata keys.
@@ -12,6 +12,12 @@ pub mod keys {
 
     /// The snap synchronization attempt that owns downloaded state.
     pub const SNAP_ATTEMPT: &str = "snap_attempt";
+
+    /// Identity the next snap attempt takes.
+    ///
+    /// Kept apart from the record so clearing an attempt cannot hand its identity to a later one
+    /// while the cleared attempt's downloads are still outstanding.
+    pub const SNAP_ATTEMPT_NEXT_ID: &str = "snap_attempt_next_id";
 }
 
 /// Client trait for reading node metadata from the database.
@@ -51,6 +57,14 @@ pub trait MetadataProvider: Send {
         }
 
         serde_json::from_slice(&bytes).map(Some).map_err(ProviderError::other)
+    }
+
+    /// Returns the identity the next snap attempt takes, which only ever increases.
+    fn snap_attempt_next_id(&self) -> ProviderResult<SnapAttemptId> {
+        let Some(bytes) = self.get_metadata(keys::SNAP_ATTEMPT_NEXT_ID)? else {
+            return Ok(SnapAttemptId::FIRST)
+        };
+        serde_json::from_slice(&bytes).map_err(ProviderError::other)
     }
 }
 
@@ -104,7 +118,15 @@ pub trait MetadataWriter: Send {
         )
     }
 
-    /// Removes the snap attempt record, releasing its claim on the downloaded state.
+    /// Writes the identity the next snap attempt takes.
+    fn write_snap_attempt_next_id(&self, id: SnapAttemptId) -> ProviderResult<()> {
+        self.write_metadata(
+            keys::SNAP_ATTEMPT_NEXT_ID,
+            serde_json::to_vec(&id).map_err(ProviderError::other)?,
+        )
+    }
+
+    /// Removes the record, leaving the next identity untouched so it cannot be reused.
     fn clear_snap_attempt(&self) -> ProviderResult<()> {
         self.delete_metadata(keys::SNAP_ATTEMPT)
     }

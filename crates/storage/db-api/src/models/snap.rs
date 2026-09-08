@@ -29,12 +29,8 @@ pub struct SnapAttempt {
 }
 
 impl SnapAttempt {
-    /// Creates the record for an attempt superseding `previous`.
-    pub const fn start(previous: Option<Self>, pivot: BlockNumHash, state_root: B256) -> Self {
-        let id = match previous {
-            Some(previous) => previous.id.next(),
-            None => SnapAttemptId::FIRST,
-        };
+    /// Creates the record for an attempt taking identity `id`.
+    pub const fn start(id: SnapAttemptId, pivot: BlockNumHash, state_root: B256) -> Self {
         Self {
             version: SNAP_ATTEMPT_VERSION,
             id,
@@ -85,8 +81,8 @@ impl SnapAttempt {
 
 /// Identity of one snap synchronization attempt.
 ///
-/// A restart at the same pivot takes the next identity, so an abandoned attempt's leftover state
-/// is never mistaken for the current attempt's work.
+/// Only ever handed out once, so an abandoned attempt's leftover state is never mistaken for the
+/// current attempt's work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct SnapAttemptId(u64);
 
