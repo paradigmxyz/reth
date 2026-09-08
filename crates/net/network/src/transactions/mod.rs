@@ -348,8 +348,7 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     pool_imports: FuturesUnordered<PoolImportFuture>,
     /// One fetched response awaiting import capacity. While occupied, fetch responses are not
     /// drained and new requests are not dispatched, bounding the backlog by existing requests.
-    pending_fetch_response:
-        Option<(PeerId, PooledTransactions<N::PooledTransaction>, TransactionSource)>,
+    pending_fetch_response: Option<PendingFetchResponse<N::PooledTransaction>>,
     /// Stats on pending pool imports that help the node self-monitor.
     pending_pool_imports_info: PendingPoolImportsInfo,
     /// Bad imports.
@@ -481,6 +480,22 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         self.pending_pool_imports_info.max_pending_pool_imports.saturating_sub(
             self.pending_pool_imports_info.pending_pool_imports.load(Ordering::Relaxed),
         )
+    }
+
+    /// Returns import capacity available to broadcasts after reserving space for fetched hashes.
+    fn remaining_broadcast_import_capacity(&self) -> usize {
+        let capacity = self.remaining_pool_import_capacity();
+        if self.transaction_fetcher.num_hashes() == 0 {
+            return capacity
+        }
+        // Reserve one batch (or half a small import budget) for fetched transactions.
+        // Broadcasts are processed first and must not consume every newly freed slot.
+        let reserved = self
+            .pending_pool_imports_info
+            .max_pending_pool_imports
+            .div_ceil(2)
+            .min(SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST);
+        capacity.saturating_sub(reserved.max(self.transaction_fetcher.num_fetching_hashes()))
     }
 
     fn report_peer_bad_transactions(&self, peer_id: PeerId) {
@@ -1340,31 +1355,32 @@ where
 
         // Broadcasts may be discarded at capacity. Fetched transactions are already settled
         // by the fetcher, so keep their remainder until imports complete instead of losing them.
-        let mut capacity = self.remaining_pool_import_capacity();
-        if is_broadcast && self.transaction_fetcher.num_hashes() > 0 {
-            // Reserve one batch (or half a small import budget) for fetched transactions.
-            // Broadcasts are processed first and must not consume every newly freed slot.
-            let reserved = self
-                .pending_pool_imports_info
-                .max_pending_pool_imports
-                .div_ceil(2)
-                .min(SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST);
-            capacity = capacity
-                .saturating_sub(reserved.max(self.transaction_fetcher.num_fetching_hashes()));
-        }
+        let capacity = if is_broadcast {
+            self.remaining_broadcast_import_capacity()
+        } else {
+            self.remaining_pool_import_capacity()
+        };
         if transactions.len() > capacity {
-            if is_broadcast {
-                self.metrics
-                    .skipped_transactions_pending_pool_imports_at_capacity
-                    .increment((transactions.len() - capacity) as u64);
-                transactions.truncate(capacity);
-            } else {
-                debug_assert!(self.pending_fetch_response.is_none());
-                let remainder = transactions.split_off(capacity);
-                self.pending_fetch_response =
-                    Some((peer_id, PooledTransactions(remainder), source));
+            match source {
+                TransactionSource::Broadcast => {
+                    self.metrics
+                        .skipped_transactions_pending_pool_imports_at_capacity
+                        .increment((transactions.len() - capacity) as u64);
+                    transactions.truncate(capacity);
+                }
+                TransactionSource::Response { version, client_version } => {
+                    debug_assert!(self.pending_fetch_response.is_none());
+                    let remainder = transactions.split_off(capacity);
+                    self.pending_fetch_response = Some(PendingFetchResponse {
+                        transactions: PooledTransactions(remainder),
+                        peer_id,
+                        version,
+                        client_version,
+                    });
+                }
             }
         }
+
         if transactions.is_empty() {
             return
         }
@@ -1595,9 +1611,16 @@ where
 
         // Admit buffered responses before broadcasts can consume newly available capacity.
         if this.has_capacity_for_pending_pool_imports() &&
-            let Some((peer_id, transactions, source)) = this.pending_fetch_response.take()
+            let Some(response) = this.pending_fetch_response.take()
         {
-            this.import_transactions(peer_id, transactions, source);
+            this.import_transactions(
+                response.peer_id,
+                response.transactions,
+                TransactionSource::Response {
+                    version: response.version,
+                    client_version: response.client_version,
+                },
+            );
         }
 
         // Advance incoming transaction events (stream new txns/announcements from
@@ -2159,6 +2182,15 @@ impl PooledTransactionsHashesBuilder {
             }
         }
     }
+}
+
+/// A fetched response waiting for pool import capacity, retaining its originating session metadata.
+#[derive(Debug)]
+struct PendingFetchResponse<T> {
+    transactions: PooledTransactions<T>,
+    peer_id: PeerId,
+    version: EthVersion,
+    client_version: Arc<str>,
 }
 
 /// How we received the transactions.

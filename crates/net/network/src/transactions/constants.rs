@@ -112,12 +112,14 @@ pub mod tx_fetcher {
     pub const DEFAULT_MAX_COUNT_ANNOUNCED_HASHES_PER_PEER: u32 =
         SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE as u32;
 
-    /// Maximum number of peers remembered as candidates for a single hash, in the order they
-    /// announced it. Announcements from further peers are ignored. This also bounds the number of
-    /// peers a hash is requested from before it is given up on.
+    /// Maximum number of peers remembered as candidates for a single hash. The first eager
+    /// sources are retained while later announcements replace the oldest fallback sources.
     ///
     /// Default is 16 peers.
     pub const MAX_COUNT_CANDIDATE_PEERS_PER_HASH: usize = 16;
+
+    /// Maximum fetch attempts for a single hash, independent of candidate storage capacity.
+    pub const MAX_FETCH_ATTEMPTS_PER_HASH: usize = 16;
 
     /// Number of candidates a hash is queued for right away. The remaining candidates only get
     /// the hash queued once one of these failed to deliver it, which keeps late announcements

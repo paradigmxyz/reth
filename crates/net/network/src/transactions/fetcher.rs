@@ -23,12 +23,12 @@
 //! When a request resolves, delivered hashes are dropped from tracking. Undelivered hashes go back
 //! to pending and are queued for their remaining candidates, most recent announcers first, or are
 //! dropped if none remain. The responding peer is dropped as a candidate for every undelivered
-//! hash that precedes the last delivered hash of the request, since the peer skipped it on
-//! purpose, and for all requested hashes if the response was empty or the request failed.
-//! Undelivered hashes after the last delivered hash keep the peer as a candidate, since the
-//! response was most likely truncated because it hit the response size limit, provided the peer
-//! delivered at least half of the request. A smaller response did not hit any limit, so the peer
-//! is dropped for all of its undelivered hashes.
+//! hash that precedes the last delivered hash of the request, treating it as skipped, and for
+//! all requested hashes if the response was empty or the request failed.
+//! Undelivered hashes after the last delivered hash keep the peer as a candidate only if it
+//! delivered at least half of the request, treating that tail as potentially truncated. This is
+//! a retry heuristic: transaction counts do not establish whether the response reached a byte
+//! limit. Requiring half the request limits repeated low-progress retries.
 //!
 //! Request timeouts are enforced by the peer's session, which resolves the request with
 //! [`RequestError::Timeout`], so the fetcher does not run any timers. A first timeout is retried
@@ -51,7 +51,7 @@ use super::{
     constants::{
         tx_fetcher::{
             AVERAGE_BYTE_SIZE_TX_ENCODED, MAX_COUNT_CANDIDATE_PEERS_PER_HASH,
-            MAX_COUNT_EAGER_CANDIDATE_PEERS_PER_HASH,
+            MAX_COUNT_EAGER_CANDIDATE_PEERS_PER_HASH, MAX_FETCH_ATTEMPTS_PER_HASH,
         },
         SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
         SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST,
@@ -215,7 +215,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         let mut eviction_peers = None;
         // Gossip commonly replaces the same fallback peer for every hash in a batch. Apply
         // that peer's accounting once, flushing before eviction needs up-to-date counts.
-        let mut retired_candidate: Option<(PeerKey, usize)> = None;
+        let mut retired_candidates = DeferredCandidateRemovals::default();
 
         for (hash, metadata) in announcement {
             let size = announced_size(metadata);
@@ -246,19 +246,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                             })
                             .expect("only one candidate can be fetching");
                         let removed = entry.candidates.remove(replace);
-                        if let Some((key, count)) = &mut retired_candidate &&
-                            *key == removed.peer
-                        {
-                            *count += 1;
-                        } else {
-                            if let Some((key, count)) = retired_candidate.take() {
-                                self.peers
-                                    .get_mut(&key)
-                                    .expect("candidate peer is connected")
-                                    .tracked -= count;
-                            }
-                            retired_candidate = Some((removed.peer, 1));
-                        }
+                        retired_candidates.record_removed(removed.peer, &mut self.peers);
                     }
                     // The first announcers get the hash queued right away, later ones are only
                     // remembered and asked once the earlier ones failed to deliver.
@@ -281,12 +269,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                         continue
                     }
                     if at_capacity {
-                        if let Some((key, count)) = retired_candidate.take() {
-                            self.peers
-                                .get_mut(&key)
-                                .expect("candidate peer is connected")
-                                .tracked -= count;
-                        }
+                        retired_candidates.flush(&mut self.peers);
                         // the evicted hash may be one of this peer's, so its count is synced
                         if let Some(peer) = self.peers.get_mut(&key) {
                             peer.tracked = tracked;
@@ -313,14 +296,18 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             }
         }
 
-        if let Some((key, count)) = retired_candidate {
-            self.peers.get_mut(&key).expect("candidate peer is connected").tracked -= count;
-        }
+        retired_candidates.flush(&mut self.peers);
         let queued = queue.len() - queue_start;
         if let Some(peer) = self.peers.get_mut(&key) {
             peer.tracked = tracked;
             for &(hash, generation) in &queue[queue_start..] {
-                peer.push_queue(&self.hashes, key, (hash, generation), false, max_per_peer);
+                peer.push_queue(
+                    &self.hashes,
+                    key,
+                    (hash, generation),
+                    QueuePosition::Back,
+                    max_per_peer,
+                );
             }
         }
         queue.clear();
@@ -345,7 +332,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 dropped_at_capacity,
                 "queued announced hashes"
             );
-            self.mark_ready(key, false);
+            self.mark_ready(key, QueuePosition::Back);
         }
     }
 
@@ -419,13 +406,15 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                     });
                     sent += 1;
                     // the peer may be allowed more than one inflight request
-                    self.mark_ready(key, false);
+                    self.mark_ready(key, QueuePosition::Back);
                 }
                 Err(err) => {
-                    self.metrics.egress_peer_channel_full.increment(1);
                     self.unpack_request(key, request_id, hashes);
                     match err {
-                        TrySendError::Full(_) => retry.push(key),
+                        TrySendError::Full(_) => {
+                            self.metrics.egress_peer_channel_full.increment(1);
+                            retry.push(key);
+                        }
                         TrySendError::Closed(_) => self.on_peer_disconnected(&peer_id),
                     }
                 }
@@ -433,7 +422,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         }
 
         for key in retry {
-            self.mark_ready(key, false);
+            self.mark_ready(key, QueuePosition::Back);
         }
 
         sent
@@ -495,7 +484,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         }
         // retried hashes go to the most recent announcers first
         for key in requeued {
-            self.mark_ready(key, true);
+            self.mark_ready(key, QueuePosition::Front);
         }
     }
 
@@ -518,24 +507,23 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
 
     /// Marks the peer as ready for a request if it is idle and has hashes queued, either behind
     /// the other ready peers or ahead of them.
-    fn mark_ready(&mut self, key: PeerKey, first: bool) {
+    fn mark_ready(&mut self, key: PeerKey, position: QueuePosition) {
         if let Some(peer) = self.peers.get_mut(&key) &&
             !peer.ready &&
             !peer.queue.is_empty() &&
             peer.inflight < self.config.max_inflight_requests_per_peer
         {
             peer.ready = true;
-            if first {
-                self.ready.push_front(key);
-            } else {
-                self.ready.push_back(key);
+            match position {
+                QueuePosition::Front => self.ready.push_front(key),
+                QueuePosition::Back => self.ready.push_back(key),
             }
         }
     }
 
     /// Queues the hash for the peer, at the back or the front of its queue, and marks it as
     /// queued in the hash's candidate entry.
-    fn enqueue(&mut self, key: PeerKey, hash: TxHash, front: bool) {
+    fn enqueue(&mut self, key: PeerKey, hash: TxHash, position: QueuePosition) {
         let max_per_peer = self.config.max_announced_hashes_per_peer as usize;
         let Some(peer) = self.peers.get_mut(&key) else { return };
         let Some(entry) = self.hashes.get_mut(&hash) else { return };
@@ -543,7 +531,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         if let Some(candidate) = entry.candidate_mut(key) {
             candidate.set_queued(true);
         }
-        peer.push_queue(&self.hashes, key, (hash, generation), front, max_per_peer);
+        peer.push_queue(&self.hashes, key, (hash, generation), position, max_per_peer);
     }
 
     /// Records a newly tracked hash in the eviction order.
@@ -621,7 +609,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                     return true
                 }
                 // Preserve shared entries skipped by the cursor in this announcement.
-                self.enqueue(key, hash, false);
+                self.enqueue(key, hash, QueuePosition::Back);
             }
         }
         self.evict_oldest_pending()
@@ -757,7 +745,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 entry.fetching_by = None;
                 entry.attempts -= 1;
                 self.num_fetching -= 1;
-                self.enqueue(key, hash, true);
+                self.enqueue(key, hash, QueuePosition::Front);
             }
         }
     }
@@ -771,7 +759,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         requeued: &mut SmallVec<[PeerKey; MAX_COUNT_CANDIDATE_PEERS_PER_HASH]>,
     ) {
         for key in targets {
-            self.enqueue(key, hash, true);
+            self.enqueue(key, hash, QueuePosition::Front);
             if !requeued.contains(&key) {
                 requeued.push(key);
             }
@@ -831,7 +819,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         let timed_out = matches!(&outcome, Err(RequestError::Timeout));
         self.on_delivery(key, request_id, &requested, &delivered, timed_out);
         self.scratch_delivered = delivered;
-        self.mark_ready(key, false);
+        self.mark_ready(key, QueuePosition::Back);
 
         match outcome {
             Ok((transactions, unsolicited)) => {
@@ -878,12 +866,11 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         delivered: &B256Set,
         timed_out: bool,
     ) {
-        // Position right after the last delivered hash. Undelivered hashes before it were skipped
-        // by the peer on purpose, so the peer is dropped as a candidate for them. Undelivered
-        // hashes after it were most likely truncated because the response hit the size limit, so
-        // the peer stays a candidate, but only if it delivered at least half of the request. A
-        // smaller response did not hit any limit, so the peer is dropped for all of them, which
-        // stops a peer from serving the same tail one transaction at a time.
+        // Position right after the last delivered hash. Drop the responder as a candidate for
+        // missing hashes before it. Keep it for the undelivered tail only if at least half of
+        // the requested hashes were delivered, treating that tail as potentially truncated.
+        // This is a retry heuristic: transaction counts do not establish whether the response
+        // reached a byte limit. Requiring half the request limits repeated low-progress retries.
         let cutoff = if 2 * delivered.len() >= requested.len() {
             requested
                 .iter()
@@ -926,7 +913,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 true
             });
 
-            if entry.candidates.is_empty() || entry.attempts >= MAX_COUNT_CANDIDATE_PEERS_PER_HASH {
+            if entry.candidates.is_empty() || entry.attempts >= MAX_FETCH_ATTEMPTS_PER_HASH {
                 // Rotating fallback candidates must not allow unlimited retries for one hash.
                 self.remove_hash(hash);
                 dropped += 1;
@@ -939,12 +926,12 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
 
         if dropped > 0 {
             self.metrics.hashes_dropped_no_candidate_peers.increment(dropped);
-            trace!(target: "net::tx", dropped, "dropped hashes that no peer is left to fetch from");
+            trace!(target: "net::tx", dropped, "dropped hashes with no candidates or exhausted fetch attempts");
         }
 
         // retried hashes go to the most recent announcers first
         for key in requeued {
-            self.mark_ready(key, true);
+            self.mark_ready(key, QueuePosition::Front);
         }
     }
 }
@@ -1027,7 +1014,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                     "fetching hash has no matching request"
                 );
             }
-            assert!(entry.attempts <= MAX_COUNT_CANDIDATE_PEERS_PER_HASH);
+            assert!(entry.attempts <= MAX_FETCH_ATTEMPTS_PER_HASH);
         }
 
         // a hash flagged as queued is in the peer's queue, and a pending hash is queued for at
@@ -1190,6 +1177,39 @@ pub enum FetchEvent<T = PooledTransaction> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct PeerKey(u32);
 
+/// Position for newly queued hashes or ready peers.
+#[derive(Debug, Clone, Copy)]
+enum QueuePosition {
+    Front,
+    Back,
+}
+
+/// Batches consecutive removals from the same candidate peer during an announcement.
+#[derive(Debug, Default)]
+struct DeferredCandidateRemovals {
+    pending: Option<(PeerKey, usize)>,
+}
+
+impl DeferredCandidateRemovals {
+    fn record_removed(&mut self, key: PeerKey, peers: &mut HashMap<PeerKey, PeerState>) {
+        if let Some((pending_key, count)) = &mut self.pending &&
+            *pending_key == key
+        {
+            *count += 1;
+        } else {
+            self.flush(peers);
+            self.pending = Some((key, 1));
+        }
+    }
+
+    /// Synchronizes tracked counts before capacity eviction or the end of an announcement.
+    fn flush(&mut self, peers: &mut HashMap<PeerKey, PeerState>) {
+        if let Some((key, count)) = self.pending.take() {
+            peers.get_mut(&key).expect("candidate peer is connected").tracked -= count;
+        }
+    }
+}
+
 /// State of a tracked hash.
 #[derive(Debug)]
 struct TxEntry {
@@ -1310,7 +1330,7 @@ impl PeerState {
         hashes: &B256Map<TxEntry>,
         key: PeerKey,
         queued: (TxHash, u64),
-        front: bool,
+        position: QueuePosition,
         max_tracked: usize,
     ) {
         if self.queue.len() >= 2 * max_tracked {
@@ -1321,10 +1341,9 @@ impl PeerState {
                 }) && seen.insert(*hash)
             });
         }
-        if front {
-            self.queue.push_front(queued);
-        } else {
-            self.queue.push_back(queued);
+        match position {
+            QueuePosition::Front => self.queue.push_front(queued),
+            QueuePosition::Back => self.queue.push_back(queued),
         }
     }
 }
@@ -2347,7 +2366,7 @@ mod tests {
             rig.add_peer(peer(n));
             rig.announce(peer(n), &[h]);
         }
-        for n in 0..MAX_COUNT_CANDIDATE_PEERS_PER_HASH {
+        for n in 0..MAX_FETCH_ATTEMPTS_PER_HASH {
             let newcomer = peer((n + MAX_COUNT_CANDIDATE_PEERS_PER_HASH + 1) as u8);
             rig.add_peer(newcomer);
             rig.announce(newcomer, &[h]);

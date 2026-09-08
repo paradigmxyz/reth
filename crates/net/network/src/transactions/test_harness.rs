@@ -432,7 +432,7 @@ mod tests {
                 2,
             );
             assert_eq!(
-                harness.manager.pending_fetch_response.as_ref().unwrap().1 .0.len(),
+                harness.manager.pending_fetch_response.as_ref().unwrap().transactions.0.len(),
                 broadcast_count,
             );
 
