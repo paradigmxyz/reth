@@ -547,7 +547,6 @@ pub enum PayloadServiceCommand<T: PayloadTypes> {
     ///
     /// Carries the caller's [`Span`] so the service can parent payload-building work under the
     /// originating Engine API trace.
-    #[expect(clippy::type_complexity)]
     BuildNewPayload(
         Box<BuildNewPayload<T::PayloadAttributes, AccountExtensionTy<T::Primitives>>>,
         Span,

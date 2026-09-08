@@ -118,7 +118,6 @@ pub trait PayloadJobGenerator {
     ///
     /// This is expected to initially build a new (empty) payload without transactions, so it can be
     /// returned directly.
-    #[expect(clippy::type_complexity)]
     fn new_payload_job(
         &self,
         input: BuildNewPayload<

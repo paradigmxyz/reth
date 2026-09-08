@@ -314,7 +314,7 @@ dependencies = [
 [[package]]
 name = "alloy-genesis"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=41103fe8#41103fe8dd8387e6cf362db8ffb0abe5df220a43"
+source = "git+https://github.com/alloy-rs/alloy?rev=75ce453d#75ce453d22974639d5bc936a979f44ab4af95066"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -7967,7 +7967,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=c00c67d#c00c67d398fcc68ab2b04c2df8e05b3ce64c3eba"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=242ddef#242ddef4518181e00f0681cbabbe31c02fa35611"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -7979,7 +7979,7 @@ dependencies = [
  "modular-bitfield",
  "parity-scale-codec",
  "reth-codecs-derive",
- "reth-zstd-compressors 0.7.0 (git+https://github.com/paradigmxyz/reth-core?rev=c00c67d)",
+ "reth-zstd-compressors 0.7.0 (git+https://github.com/paradigmxyz/reth-core?rev=242ddef)",
  "serde",
  "visibility",
 ]
@@ -7987,7 +7987,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs-derive"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=c00c67d#c00c67d398fcc68ab2b04c2df8e05b3ce64c3eba"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=242ddef#242ddef4518181e00f0681cbabbe31c02fa35611"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9717,7 +9717,7 @@ dependencies = [
 [[package]]
 name = "reth-primitives-traits"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=c00c67d#c00c67d398fcc68ab2b04c2df8e05b3ce64c3eba"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=242ddef#242ddef4518181e00f0681cbabbe31c02fa35611"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -10829,7 +10829,7 @@ dependencies = [
 [[package]]
 name = "reth-zstd-compressors"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=c00c67d#c00c67d398fcc68ab2b04c2df8e05b3ce64c3eba"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=242ddef#242ddef4518181e00f0681cbabbe31c02fa35611"
 dependencies = [
  "zstd",
 ]
