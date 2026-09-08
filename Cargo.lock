@@ -11010,8 +11010,7 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "43.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7cd02082cf1baca01e8bc17456c45136bdc66632395a98db1c1a2afe4c6ea87f"
+source = "git+https://github.com/mattsse/revm?rev=640ac94ef706ecfa32a0fc0c0118d1fc888f2731#640ac94ef706ecfa32a0fc0c0118d1fc888f2731"
 dependencies = [
  "alloy-eip7928",
  "bitflags 2.13.0",
