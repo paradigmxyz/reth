@@ -407,11 +407,11 @@ where
     ) {
         let mut cells_response = Cells { cell_mask: request.cell_mask, ..Default::default() };
         let mut total_bytes = 0;
+        // ETH/72 bitvectors index the first byte first; the blob store accepts a numeric mask.
+        let cell_mask = alloy_primitives::B128::from(u128::from_le_bytes(request.cell_mask.into()));
 
         for hash in request.hashes.into_iter().take(MAX_CELLS_SERVE) {
-            let Some(cells) =
-                self.blob_store.get_cells(hash, request.cell_mask).unwrap_or_default()
-            else {
+            let Some(cells) = self.blob_store.get_cells(hash, cell_mask).unwrap_or_default() else {
                 continue;
             };
 
@@ -879,6 +879,7 @@ mod tests {
     #[derive(Debug, Default)]
     struct CountingBlobStore {
         get_cells_calls: Arc<AtomicUsize>,
+        expected_cell_mask: Option<B128>,
     }
 
     impl BlobStore for CountingBlobStore {
@@ -970,9 +971,13 @@ mod tests {
         fn get_cells(
             &self,
             _tx_hash: TxHash,
-            _indices_bitarray: B128,
+            indices_bitarray: B128,
         ) -> Result<Option<Vec<Cell>>, BlobStoreError> {
             self.get_cells_calls.fetch_add(1, Ordering::Relaxed);
+            if let Some(expected) = self.expected_cell_mask {
+                assert_eq!(indices_bitarray, expected);
+                return Ok(Some(vec![Cell::default()]))
+            }
             Ok(None)
         }
 
@@ -990,7 +995,10 @@ mod tests {
         let (peers_tx, _) = mpsc::unbounded_channel();
         let (_incoming_tx, incoming_rx) = mpsc::channel(1);
         let get_cells_calls = Arc::new(AtomicUsize::new(0));
-        let blob_store = CountingBlobStore { get_cells_calls: Arc::clone(&get_cells_calls) };
+        let blob_store = CountingBlobStore {
+            get_cells_calls: Arc::clone(&get_cells_calls),
+            ..Default::default()
+        };
         let handler = EthRequestHandler::<NoopProvider>::new(
             NoopProvider::default(),
             PeersHandle::new(peers_tx),
@@ -1006,6 +1014,47 @@ mod tests {
         let cells = rx.await.unwrap().unwrap();
         assert!(cells.hashes.is_empty());
         assert_eq!(get_cells_calls.load(Ordering::Relaxed), MAX_CELLS_SERVE);
+    }
+
+    #[test_case(0)]
+    #[test_case(7)]
+    #[test_case(8)]
+    #[test_case(63)]
+    #[test_case(64)]
+    #[test_case(127)]
+    #[tokio::test]
+    async fn get_cells_request_uses_little_endian_wire_mask(index: u32) {
+        use alloy_rlp::{Decodable, Encodable};
+
+        let (peers_tx, _) = mpsc::unbounded_channel();
+        let (_incoming_tx, incoming_rx) = mpsc::channel(1);
+        let numeric_mask = 1u128 << index;
+        let blob_store = CountingBlobStore {
+            expected_cell_mask: Some(B128::from(numeric_mask)),
+            ..Default::default()
+        };
+        let handler = EthRequestHandler::<NoopProvider>::new(
+            NoopProvider::default(),
+            PeersHandle::new(peers_tx),
+            incoming_rx,
+        )
+        .with_blob_store(Box::new(blob_store));
+        let wire_mask = B128::from(numeric_mask.to_le_bytes());
+        let request = GetCells { hashes: vec![B256::ZERO], cell_mask: wire_mask };
+        let mut encoded = Vec::new();
+        request.encode(&mut encoded);
+        let request = GetCells::decode(&mut encoded.as_slice()).unwrap();
+        let (response, rx) = oneshot::channel();
+
+        handler.on_cells_request(PeerId::default(), request, response);
+
+        let cells = rx.await.unwrap().unwrap();
+        assert_eq!(cells.hashes, vec![B256::ZERO]);
+        assert_eq!(cells.cells, vec![vec![Cell::default()]]);
+        assert_eq!(cells.cell_mask, wire_mask);
+        encoded.clear();
+        cells.encode(&mut encoded);
+        assert_eq!(Cells::decode(&mut encoded.as_slice()).unwrap(), cells);
     }
 
     #[tokio::test]
