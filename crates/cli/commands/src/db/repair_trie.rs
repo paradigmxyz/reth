@@ -30,7 +30,7 @@ use reth_trie::{
     Nibbles,
 };
 use reth_trie_db::{
-    DatabaseHashedCursorFactoryFor, DatabaseStateRoot, DatabaseStateRootFor,
+    DatabaseHashedCursorFactoryTy, DatabaseStateRoot, DatabaseStateRootTy,
     DatabaseTrieCursorFactory, StorageTrieEntryLike, TrieTableAdapter,
 };
 use std::{
@@ -128,7 +128,7 @@ fn do_verify_only<TX: DbTx, A: TrieTableAdapter, N: ProviderNodeTypes>(
     tx: &TX,
 ) -> eyre::Result<()> {
     // Create the verifier
-    let hashed_cursor_factory = DatabaseHashedCursorFactoryFor::<_, N::Primitives>::new(tx);
+    let hashed_cursor_factory = DatabaseHashedCursorFactoryTy::<_, N::Primitives>::new(tx);
     let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
     let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory)?;
 
@@ -250,7 +250,7 @@ where
     // Create the cursor factories. These cannot accept the `&mut` tx above because they
     // require it to be AsRef.
     let tx = provider_rw.tx_ref();
-    let hashed_cursor_factory = DatabaseHashedCursorFactoryFor::<_, N::Primitives>::new(tx);
+    let hashed_cursor_factory = DatabaseHashedCursorFactoryTy::<_, N::Primitives>::new(tx);
     let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
 
     // Create the verifier
@@ -363,7 +363,7 @@ where
         .state_root();
 
     let computed_state_root =
-        DatabaseStateRootFor::<_, A, N::Primitives>::from_tx(provider_rw.tx_ref()).root()?;
+        DatabaseStateRootTy::<_, A, N::Primitives>::from_tx(provider_rw.tx_ref()).root()?;
 
     if computed_state_root != expected_state_root {
         return Err(eyre::eyre!(

@@ -25,19 +25,19 @@ pub use trie_cursor::{
 };
 
 /// Database hashed cursor factory using the account extension selected by node primitives.
-pub type DatabaseHashedCursorFactoryFor<T, N> =
+pub type DatabaseHashedCursorFactoryTy<T, N> =
     DatabaseHashedCursorFactory<T, reth_primitives_traits::AccountExtensionTy<N>>;
 
 /// Database-backed state-root calculator using the account extension selected by node primitives.
-pub type DatabaseStateRootFor<'a, TX, A, N> = reth_trie::StateRoot<
+pub type DatabaseStateRootTy<'a, TX, A, N> = reth_trie::StateRoot<
     DatabaseTrieCursorFactory<&'a TX, A>,
-    DatabaseHashedCursorFactoryFor<&'a TX, N>,
+    DatabaseHashedCursorFactoryTy<&'a TX, N>,
 >;
 
 /// Database-backed proof calculator using the account extension selected by node primitives.
-pub type DatabaseProofFor<'a, TX, A, N> = reth_trie::proof::Proof<
+pub type DatabaseProofTy<'a, TX, A, N> = reth_trie::proof::Proof<
     DatabaseTrieCursorFactory<&'a TX, A>,
-    DatabaseHashedCursorFactoryFor<&'a TX, N>,
+    DatabaseHashedCursorFactoryTy<&'a TX, N>,
 >;
 
 /// Dispatches a trie operation using the correct [`TrieKeyAdapter`] based on storage settings.
