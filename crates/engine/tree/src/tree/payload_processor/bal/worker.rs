@@ -52,6 +52,7 @@ type WorkerResultSender<Cfg> =
 #[expect(clippy::too_many_arguments)]
 pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
     scope: &rayon::Scope<'scope>,
+    broadcast: bool,
     tx_rx: Receiver<(usize, Result<Tx, Err>)>,
     abort_rx: Receiver<()>,
     result_tx: WorkerResultSender<Evm>,
@@ -67,7 +68,7 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
     DB: Database + Send + 'scope,
     MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync + 'scope,
 {
-    scope.spawn(move |_| {
+    let run = move |received_bal_revm, evm_env, ctx| {
         let worker_result = (|| -> Result<(), BalWorkerError> {
             // Create a database with fill_on_miss=true ensuring misses
             // are inserted for the other workers.
@@ -78,7 +79,7 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
                 .with_bundle_update()
                 .build();
             let evm = evm_config.evm_with_env(&mut worker_state, evm_env);
-            let mut executor = evm_config.create_executor_with_state(evm, ctx.clone());
+            let mut executor = evm_config.create_executor_with_state(evm, ctx);
 
             loop {
                 let (index, tx) = crossbeam_channel::select_biased! {
@@ -111,5 +112,15 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
         if let Err(err) = worker_result {
             let _ = result_tx.send(Err(err));
         }
-    });
+    };
+    if broadcast {
+        // Execution contexts are Send but need not be Sync. Only cloning holds the lock.
+        let ctx = std::sync::Mutex::new(ctx);
+        scope.spawn_broadcast(move |_, _| {
+            let ctx = ctx.lock().expect("execution context lock poisoned").clone();
+            run(Arc::clone(&received_bal_revm), evm_env.clone(), ctx);
+        });
+    } else {
+        scope.spawn(move |_| run(received_bal_revm, evm_env, ctx));
+    }
 }
