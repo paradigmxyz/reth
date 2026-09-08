@@ -1,4 +1,4 @@
-use crate::OverlayManager;
+use crate::{manager::OverlayCacheConfig, OverlayManager};
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{
     map::{AddressMap, AddressSet, B256Map, U256Map},
@@ -225,6 +225,8 @@ pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
     reused_sparse_trie_anchor_hash: Option<B256>,
     /// Whether building the overlay may query revert changesets.
     no_reverts: bool,
+    /// Cache behavior for the overlays this builder resolves.
+    overlay_cache_config: OverlayCacheConfig,
     /// Metrics for overlay construction.
     metrics: OverlayBuilderMetrics,
 }
@@ -242,6 +244,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             parent_state,
             reused_sparse_trie_anchor_hash: None,
             no_reverts: false,
+            overlay_cache_config: OverlayCacheConfig::default(),
             metrics: OverlayBuilderMetrics::default(),
         }
     }
@@ -259,6 +262,17 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     /// Returns an error instead of querying revert changesets when reverts are required.
     pub(crate) const fn with_no_reverts(mut self) -> Self {
         self.no_reverts = true;
+        self
+    }
+
+    /// Appends an executed block to this builder's in-memory parent state.
+    pub fn with_appended_block(mut self, block: ExecutedBlock<N>) -> Self {
+        debug_assert_eq!(block.recovered_block().parent_hash(), self.parent_hash);
+        self.parent_hash = block.recovered_block().hash();
+        self.parent_state =
+            Some(BlockState::with_parent(block, self.parent_state.take().map(Arc::new)));
+        self.reused_sparse_trie_anchor_hash = None;
+        self.overlay_cache_config.write_to_cache = false;
         self
     }
 
@@ -350,6 +364,12 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         // and therefore can be used without reverts.
         if finish_seen {
             return Ok(AnchorForParent::NoReverts { anchor })
+        }
+
+        // Reverts reconstruct canonical state by block number, so they cannot recover an anchor
+        // from another fork even if its number is covered by the available changesets.
+        if provider.block_hash(anchor.number)? != Some(anchor.hash) {
+            return Err(ProviderError::BlockHashNotFound(anchor.hash))
         }
 
         // Otherwise reverts are required; we check the changesets to make sure they are actually
@@ -633,7 +653,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 ))
             })?;
             self.overlay_manager
-                .overlay_for_parent(parent_state, anchor_hash)
+                .overlay_for_parent(parent_state, anchor_hash, self.overlay_cache_config)
                 .map_err(ProviderError::other)
         }
     }
@@ -650,7 +670,11 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 ProviderError::other(std::io::Error::other("missing in-memory parent state"))
             })?;
             self.overlay_manager
-                .execution_overlay_for_block_state(parent_state, anchor_hash)
+                .execution_overlay_for_block_state(
+                    parent_state,
+                    anchor_hash,
+                    self.overlay_cache_config,
+                )
                 .map_err(ProviderError::other)
         }
     }
@@ -1060,6 +1084,27 @@ mod tests {
         let error = builder.build_state_trie_overlay(&provider, true).unwrap_err();
 
         assert!(error.to_string().contains("reverts are disabled"));
+    }
+
+    #[test]
+    fn appended_overlay_rejects_noncanonical_anchor_when_reverts_are_required() {
+        let (factory, blocks) = setup_frontiers(1, 3);
+        let provider = factory.provider().unwrap();
+        let parent_hash = B256::with_last_byte(100);
+        assert_ne!(parent_hash, blocks[1].recovered_block().hash());
+        let block = TestBlockBuilder::eth()
+            .get_executed_block_with_number(blocks[2].block_number(), parent_hash);
+        let builder =
+            OverlayManager::default().overlay_builder(parent_hash).with_appended_block(block);
+
+        assert!(matches!(
+            builder.execution_overlay(&provider),
+            Err(ProviderError::BlockHashNotFound(hash)) if hash == parent_hash
+        ));
+        assert!(matches!(
+            builder.build_state_trie_overlay(&provider, true),
+            Err(ProviderError::BlockHashNotFound(hash)) if hash == parent_hash
+        ));
     }
 
     #[test]
