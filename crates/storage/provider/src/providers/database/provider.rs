@@ -1353,6 +1353,18 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     }
 }
 
+impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
+    // Refuses to mark state complete while a snap attempt still owns state it has not verified.
+    fn ensure_snap_state_verified(&self) -> ProviderResult<()> {
+        if self.snap_attempt()?.is_some_and(|attempt| attempt.is_unfinished()) {
+            return Err(ProviderError::other(std::io::Error::other(
+                "snap synchronization has not verified the downloaded state",
+            )))
+        }
+        Ok(())
+    }
+}
+
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Insert history index to the database.
     ///
@@ -2230,13 +2242,16 @@ impl<TX: DbTx, N: NodeTypes> StageCheckpointReader for DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: DbTxMut, N: NodeTypes> StageCheckpointWriter for DatabaseProvider<TX, N> {
+impl<TX: DbTxMut + DbTx, N: NodeTypes> StageCheckpointWriter for DatabaseProvider<TX, N> {
     /// Save stage checkpoint.
     fn save_stage_checkpoint(
         &self,
         id: StageId,
         checkpoint: StageCheckpoint,
     ) -> ProviderResult<()> {
+        if id == StageId::Finish {
+            self.ensure_snap_state_verified()?;
+        }
         Ok(self.tx.put::<tables::StageCheckpoints>(id.to_string(), checkpoint)?)
     }
 
@@ -2255,6 +2270,8 @@ impl<TX: DbTxMut, N: NodeTypes> StageCheckpointWriter for DatabaseProvider<TX, N
         block_number: BlockNumber,
         drop_stage_checkpoint: bool,
     ) -> ProviderResult<()> {
+        self.ensure_snap_state_verified()?;
+
         // iterate over all existing stages in the table and update its progress.
         let mut cursor = self.tx.cursor_write::<tables::StageCheckpoints>()?;
         for stage_id in StageId::ALL {

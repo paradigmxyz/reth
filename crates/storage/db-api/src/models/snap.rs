@@ -67,14 +67,14 @@ impl SnapAttempt {
     }
 
     /// Re-anchors this attempt, superseding writes proved against the previous root.
-    pub fn re_anchor(&mut self, pivot: BlockNumHash, state_root: B256) {
+    pub const fn re_anchor(&mut self, pivot: BlockNumHash, state_root: B256) {
         self.pivot = pivot;
         self.state_root = state_root;
         self.state_version = self.state_version.saturating_add(1);
     }
 
     /// Marks the downloaded state verified.
-    pub fn verify(&mut self) {
+    pub const fn verify(&mut self) {
         self.status = SnapBootstrapStatus::Verified;
     }
 }
