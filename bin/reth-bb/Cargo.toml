@@ -64,8 +64,6 @@ metrics.workspace = true
 eyre.workspace = true
 
 [features]
-# Enables custom account types and revm's chain-specific account payload.
-account-ext = ["reth-primitives-traits/account-ext"]
 default = [
     "jemalloc",
     "reth-cli-util/jemalloc",
