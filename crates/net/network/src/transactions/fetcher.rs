@@ -696,7 +696,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         &mut self,
         hashes_to_request: &mut RequestTxHashes,
         seen_hashes: &LruCache<TxHash, FbBuildHasher<32>>,
-        mut budget_fill_request: Option<usize>, // check max `budget` lru pending hashes
+        budget_fill_request: Option<usize>, // check max `budget` lru pending hashes
     ) {
         let Some(hash) = hashes_to_request.iter().next() else { return };
 
@@ -715,7 +715,8 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
 
         // try to fill request by checking if any other hashes pending fetch (in lru order) are
         // also seen by peer
-        for hash in self.hashes_pending_fetch.iter() {
+        for hash in self.hashes_pending_fetch.iter().take(budget_fill_request.unwrap_or(usize::MAX))
+        {
             // 1. Check if a hash pending fetch is seen by peer.
             if !seen_hashes.contains(hash) {
                 continue
@@ -742,13 +743,6 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                     DEFAULT_SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST_ON_FETCH_PENDING_HASHES
             {
                 break
-            }
-
-            if let Some(ref mut bud) = budget_fill_request {
-                *bud -= 1;
-                if *bud == 0 {
-                    break
-                }
             }
         }
 
@@ -1314,6 +1308,36 @@ mod test {
     use reth_eth_wire_types::EthVersion;
     use reth_ethereum_primitives::TransactionSigned;
     use std::str::FromStr;
+
+    #[test]
+    fn fill_pending_request_budget_counts_unseen_hashes() {
+        for (budget, includes_seen_hash) in
+            [(Some(1), false), (Some(0), false), (Some(2), true), (None, true)]
+        {
+            let mut fetcher = TransactionFetcher::<EthNetworkPrimitives>::default();
+            fetcher.hashes_pending_fetch.insert(B256::repeat_byte(1));
+            fetcher.hashes_pending_fetch.insert(B256::repeat_byte(2));
+            let pending = fetcher.hashes_pending_fetch.iter().copied().collect::<Vec<_>>();
+
+            // The peer has seen only the second candidate in pending-cache order.
+            let mut seen = LruCache::with_hasher(2, FbBuildHasher::<32>::default());
+            seen.insert(pending[1]);
+            let initial = B256::repeat_byte(3);
+            let mut request = RequestTxHashes::new([initial].into_iter().collect());
+
+            fetcher.fill_request_from_hashes_pending_fetch(&mut request, &seen, budget);
+
+            assert!(request.contains(&initial));
+            assert!(!request.contains(&pending[0]));
+            assert_eq!(request.contains(&pending[1]), includes_seen_hash, "budget {budget:?}");
+            assert!(fetcher.hashes_pending_fetch.contains(&pending[0]));
+            assert_eq!(
+                fetcher.hashes_pending_fetch.contains(&pending[1]),
+                !includes_seen_hash,
+                "budget {budget:?}",
+            );
+        }
+    }
 
     #[derive(IntoIterator)]
     struct TestValidAnnouncementData(Vec<(TxHash, Option<(u8, usize)>)>);
