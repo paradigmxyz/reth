@@ -109,7 +109,10 @@ impl<R: RngCore> TransactionGenerator<R> {
     pub fn gen_eip4844_pooled(&mut self) -> EthPooledTransaction {
         let tx = self.gen_eip4844().try_into_recovered().unwrap();
         let encoded_length = tx.encode_2718_len();
-        EthPooledTransaction::new(tx, encoded_length)
+        let mut tx = EthPooledTransaction::new(tx, encoded_length);
+        // This propagation fixture models a transaction whose sidecar is already in the store.
+        tx.blob_cell_availability = Some(crate::blobstore::BlobCellAvailability::full());
+        tx
     }
 }
 

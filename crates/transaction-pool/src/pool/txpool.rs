@@ -21,9 +21,12 @@ use crate::{
     PoolConfig, PoolResult, PoolTransaction, PoolUpdateKind, PriceBumpConfig, TransactionOrdering,
     ValidPoolTransaction, U256,
 };
-use alloy_consensus::constants::{
-    EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID, KECCAK_EMPTY,
-    LEGACY_TX_TYPE_ID,
+use alloy_consensus::{
+    constants::{
+        EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
+        KECCAK_EMPTY, LEGACY_TX_TYPE_ID,
+    },
+    Transaction, Typed2718,
 };
 use alloy_eips::{
     eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, MIN_PROTOCOL_BASE_FEE},
@@ -35,6 +38,7 @@ use alloy_primitives::{
     map::{AddressSet, B256Map, B256Set},
     TxHash, B256,
 };
+use reth_primitives_traits::InMemorySize;
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 #[cfg(test)]
@@ -1222,7 +1226,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     ///
     /// This returns all transactions that were removed from the entire pool.
     pub(crate) fn discard_worst(&mut self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let mut removed = Vec::new();
+        let mut removed = self.discard_blob_storage_overflow();
 
         // Helper macro that discards the worst transactions for the pools
         macro_rules! discard_worst {
@@ -1280,6 +1284,77 @@ impl<T: TransactionOrdering> TxPool<T> {
             ]
         );
 
+        removed
+    }
+
+    /// Bounds cell storage independently of transaction metadata and parked-blob limits.
+    fn discard_blob_storage_overflow(&mut self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        if self.all_transactions.tx_type_counts.eip4844 == 0 {
+            return Vec::new()
+        }
+        type StorageEntry = (TransactionId, usize, bool, i64, u128);
+        let mut accounts: Vec<Vec<StorageEntry>> = Vec::new();
+        let mut sender = None;
+        let mut blocked = false;
+        let mut total_bytes = 0usize;
+        let mut blocked_bytes = 0usize;
+        for (id, entry) in &self.all_transactions.txs {
+            let tx = &entry.transaction.transaction;
+            if !tx.is_eip4844() {
+                continue
+            }
+            if sender != Some(id.sender) {
+                sender = Some(id.sender);
+                blocked = false;
+                accounts.push(Vec::new());
+            }
+            let columns = tx.blob_cell_availability().map_or(128, |a| a.get().count());
+            blocked |= columns < 64;
+            let bytes = tx.blob_versioned_hashes().map_or(0, |hashes| hashes.len()) *
+                (48 + 128 * 48 + columns * 2048) +
+                tx.size();
+            total_bytes = total_bytes.saturating_add(bytes);
+            if blocked {
+                blocked_bytes = blocked_bytes.saturating_add(bytes);
+            }
+            let priority = super::blob::blob_tx_priority(
+                tx.max_fee_per_blob_gas().unwrap_or_default(),
+                self.all_transactions.pending_fees.blob_fee,
+                tx.max_fee_per_gas(),
+                self.all_transactions.pending_fees.base_fee as u128,
+            );
+            accounts.last_mut().unwrap().push((
+                *id,
+                bytes,
+                blocked,
+                priority,
+                tx.max_priority_fee_per_gas().unwrap_or_default(),
+            ));
+        }
+        let blocked_cap = self
+            .config
+            .max_blob_storage_size
+            .saturating_mul(self.config.max_blocked_blob_storage_percent.min(100) as usize) /
+            100;
+        let mut removed = Vec::new();
+        while total_bytes > self.config.max_blob_storage_size || blocked_bytes > blocked_cap {
+            let prefer_blocked = blocked_bytes > blocked_cap;
+            let candidate = accounts
+                .iter()
+                .enumerate()
+                .filter(|(_, txs)| !txs.is_empty() && (!prefer_blocked || txs.last().unwrap().2))
+                .min_by_key(|(_, txs)| txs.iter().map(|tx| (tx.3, tx.4)).min().unwrap())
+                .map(|(index, _)| index);
+            let Some(index) = candidate else { break };
+            let (id, bytes, was_blocked, _, _) = accounts[index].pop().unwrap();
+            total_bytes = total_bytes.saturating_sub(bytes);
+            if was_blocked {
+                blocked_bytes = blocked_bytes.saturating_sub(bytes);
+            }
+            if let Some(tx) = self.remove_transaction(&id) {
+                removed.push(tx);
+            }
+        }
         removed
     }
 
@@ -2427,6 +2502,85 @@ impl SenderInfo {
 
 #[cfg(test)]
 mod tests {
+    fn sparse_transaction(
+        sender: u64,
+        nonce: u64,
+        mask: u128,
+    ) -> crate::ValidPoolTransaction<crate::EthPooledTransaction> {
+        use alloy_consensus::SignableTransaction;
+        use alloy_eips::eip2718::Encodable2718;
+        let signed: reth_ethereum_primitives::TransactionSigned = alloy_consensus::TxEip4844 {
+            chain_id: sender + 1,
+            nonce,
+            gas_limit: 21000,
+            max_fee_per_gas: 100,
+            max_priority_fee_per_gas: 10,
+            max_fee_per_blob_gas: 100,
+            blob_versioned_hashes: vec![alloy_primitives::B256::ZERO],
+            ..Default::default()
+        }
+        .into_signed(alloy_primitives::Signature::test_signature())
+        .into();
+        let length = signed.encode_2718_len();
+        let mut transaction = crate::EthPooledTransaction::new(
+            reth_primitives_traits::Recovered::new_unchecked(
+                signed,
+                alloy_primitives::Address::repeat_byte(sender as u8),
+            ),
+            length,
+        );
+        transaction.blob_cell_availability = Some(crate::blobstore::BlobCellAvailability::new(
+            alloy_eips::eip7594::BlobCellMask::from_bits(mask),
+        ));
+        crate::ValidPoolTransaction {
+            transaction,
+            transaction_id: crate::identifier::TransactionId::new(sender.into(), nonce),
+            propagate: true,
+            timestamp: std::time::Instant::now(),
+            origin: crate::TransactionOrigin::External,
+            authority_ids: None,
+        }
+    }
+
+    #[test]
+    fn missing_cells_gate_nonce_descendants_but_allow_other_accounts() {
+        let mut pool =
+            crate::pool::pending::PendingPool::new(crate::CoinbaseTipOrdering::default());
+        for (sender, nonce, mask) in
+            [(0, 0, u128::MAX), (0, 1, 1), (0, 2, u128::MAX), (1, 0, u64::MAX as u128)]
+        {
+            pool.add_transaction(std::sync::Arc::new(sparse_transaction(sender, nonce, mask)), 0);
+        }
+        let ids: Vec<_> = pool.best().map(|tx| *tx.id()).collect();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&crate::identifier::TransactionId::new(0.into(), 0)));
+        assert!(ids.contains(&crate::identifier::TransactionId::new(1.into(), 0)));
+    }
+
+    #[test]
+    fn blocked_storage_cap_counts_full_descendants_and_evicts_the_tail() {
+        let config = crate::PoolConfig {
+            max_blob_storage_size: 600_000,
+            max_blocked_blob_storage_percent: 25,
+            ..Default::default()
+        };
+        let mut pool = super::TxPool::new(crate::CoinbaseTipOrdering::default(), config);
+        for (sender, nonce, mask) in [(0, 0, 1), (0, 1, u128::MAX), (1, 0, u128::MAX)] {
+            pool.add_transaction(
+                sparse_transaction(sender, nonce, mask),
+                alloy_primitives::U256::MAX,
+                0,
+                None,
+            )
+            .unwrap();
+        }
+        let removed = pool.discard_worst();
+        assert_eq!(removed.len(), 1);
+        assert_eq!(*removed[0].id(), crate::identifier::TransactionId::new(0.into(), 1));
+        assert_eq!(pool.len(), 2);
+        pool.assert_invariants();
+    }
+
     use super::*;
     use crate::{
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory, MockTransactionSet},

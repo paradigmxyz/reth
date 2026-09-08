@@ -103,7 +103,9 @@ pub struct EthRequestHandler<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The client type that can interact with the chain.
     client: C,
     /// Blob store used for serving blob cell requests.
-    blob_store: Box<dyn BlobStore>,
+    blob_store: std::sync::Arc<dyn BlobStore>,
+    /// Limits concurrent cell reads and legacy sidecar conversions.
+    cell_responses: std::sync::Arc<tokio::sync::Semaphore>,
     /// Used for reporting peers.
     // TODO use to report spammers
     #[expect(dead_code)]
@@ -120,7 +122,8 @@ impl<C, N: NetworkPrimitives> EthRequestHandler<C, N> {
     pub fn new(client: C, peers: PeersHandle, incoming: Receiver<IncomingEthRequest<N>>) -> Self {
         Self {
             client,
-            blob_store: Box::<NoopBlobStore>::default(),
+            blob_store: std::sync::Arc::<NoopBlobStore>::default(),
+            cell_responses: std::sync::Arc::new(tokio::sync::Semaphore::new(16)),
             peers,
             incoming_requests: ReceiverStream::new(incoming),
             metrics: Default::default(),
@@ -129,7 +132,7 @@ impl<C, N: NetworkPrimitives> EthRequestHandler<C, N> {
 
     /// Set blob store for the request handler
     pub fn with_blob_store(mut self, blob_store: Box<dyn BlobStore>) -> Self {
-        self.blob_store = blob_store;
+        self.blob_store = blob_store.into();
         self
     }
 }
@@ -405,25 +408,36 @@ where
         request: GetCells,
         response: oneshot::Sender<RequestResult<Cells>>,
     ) {
-        let mut cells_response = Cells { cell_mask: request.cell_mask, ..Default::default() };
-        let mut total_bytes = 0;
-        let cell_mask = request.cell_mask();
-
-        for hash in request.hashes.into_iter().take(MAX_CELLS_SERVE) {
-            let Some(cells) = self.blob_store.get_cells(hash, cell_mask).unwrap_or_default() else {
-                continue;
-            };
-
-            total_bytes += hash.length() + cells.length();
-            cells_response.hashes.push(hash);
-            cells_response.cells.push(cells);
-
-            if total_bytes > SOFT_RESPONSE_LIMIT {
-                break
+        let Ok(permit) = self.cell_responses.clone().try_acquire_owned() else {
+            let _ = response.send(Ok(Cells { cell_mask: request.cell_mask, ..Default::default() }));
+            return
+        };
+        let blob_store = self.blob_store.clone();
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            if response.is_closed() {
+                return
             }
-        }
+            let mut cells_response = Cells { cell_mask: request.cell_mask, ..Default::default() };
+            let mut total_bytes = 0;
+            let cell_mask = request.cell_mask();
 
-        let _ = response.send(Ok(cells_response));
+            for hash in request.hashes.into_iter().take(MAX_CELLS_SERVE) {
+                let Some(cells) = blob_store.get_cells(hash, cell_mask).unwrap_or_default() else {
+                    continue;
+                };
+
+                total_bytes += hash.length() + cells.length();
+                cells_response.hashes.push(hash);
+                cells_response.cells.push(cells);
+
+                if total_bytes > SOFT_RESPONSE_LIMIT {
+                    break
+                }
+            }
+
+            let _ = response.send(Ok(cells_response));
+        });
     }
 }
 

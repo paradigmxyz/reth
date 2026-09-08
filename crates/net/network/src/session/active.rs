@@ -150,6 +150,7 @@ impl BroadcastItemCounter {
 ///    - responses for handled ETH requests received from the remote peer.
 #[expect(dead_code)]
 pub(crate) struct ActiveSession<N: NetworkPrimitives> {
+    pub(crate) pooled_rlp_cache: super::PooledRlpCache,
     /// Keeps track of request ids.
     pub(crate) next_id: u64,
     /// The underlying connection.
@@ -244,6 +245,20 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             progress = true;
             let res = match msg {
                 OutgoingMessage::Snap(msg) => self.conn.start_send_snap(msg),
+                OutgoingMessage::Eth(EthMessage::PooledTransactions(response)) => {
+                    self.conn.start_send_raw(self.pooled_rlp_cache.response(
+                        response.request_id,
+                        &response.message.0,
+                        false,
+                    ))
+                }
+                OutgoingMessage::Eth(EthMessage::PooledTransactionsEth72(response)) => {
+                    self.conn.start_send_raw(self.pooled_rlp_cache.response(
+                        response.request_id,
+                        &response.message.0,
+                        true,
+                    ))
+                }
                 OutgoingMessage::Eth(msg) => self.conn.start_send_unpin(msg),
                 OutgoingMessage::Broadcast(msg) => self.conn.start_send_broadcast(msg),
                 OutgoingMessage::Raw(msg) => self.conn.start_send_raw(msg),
@@ -1457,6 +1472,7 @@ mod tests {
                     self.to_sessions.push(commands_to_session);
 
                     ActiveSession {
+                        pooled_rlp_cache: Default::default(),
                         next_id: 0,
                         remote_peer_id: peer_id,
                         remote_addr,
@@ -2176,7 +2192,7 @@ mod tests {
 
         let fut = builder.with_client_stream(local_addr, async move |mut client_stream| {
             client_stream
-                .send(EthMessage::NewPooledTransactionHashes68(Default::default()))
+                .send(EthMessage::NewPooledTransactionHashes72(Default::default()))
                 .await
                 .unwrap();
             let _ = tokio::time::timeout(Duration::from_secs(100), client_stream.next()).await;

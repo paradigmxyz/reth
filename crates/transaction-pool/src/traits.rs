@@ -75,6 +75,7 @@ use alloy_primitives::{
     map::{AddressSet, B256Map},
     Address, Bytes, TxHash, TxKind, B256, U256,
 };
+use alloy_rlp::Encodable;
 use futures_util::{ready, Stream};
 use reth_eth_wire_types::{EncodableEth72PooledTransaction, HandleMempoolData};
 use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
@@ -1340,6 +1341,21 @@ impl BestTransactionsAttributes {
 pub trait PoolTransaction:
     alloy_consensus::Transaction + InMemorySize + Debug + Send + Sync + Clone
 {
+    /// Returns the shared blob cell availability, if this is a blob transaction.
+    fn blob_cell_availability(&self) -> Option<&BlobCellAvailability> {
+        None
+    }
+
+    /// Returns the attached blob sidecar, when supported by this transaction type.
+    fn blob_sidecar(&self) -> Option<&PooledBlobSidecar> {
+        None
+    }
+
+    /// Attaches sparse or full blob data, updating its shared availability.
+    fn set_blob_sidecar(&mut self, _sidecar: PooledBlobSidecar) -> bool {
+        false
+    }
+
     /// Associated error type for the `try_from_consensus` method.
     type TryFromConsensusError: fmt::Display;
 
@@ -1514,11 +1530,6 @@ pub trait EthPoolTransaction: PoolTransaction {
     /// Extracts the blob sidecar from the transaction.
     fn take_blob(&mut self) -> EthBlobTransactionSidecar;
 
-    /// Returns the shared blob cell availability, if this is a blob transaction.
-    fn blob_cell_availability(&self) -> Option<&BlobCellAvailability> {
-        None
-    }
-
     /// A specialization for the EIP-4844 transaction type.
     /// Tries to reattach the blob sidecar to the transaction.
     ///
@@ -1615,8 +1626,8 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
             // because the blob sidecar is not included in this transaction variant, mark it as
             // missing
             blob_sidecar = EthBlobTransactionSidecar::Missing;
-            // TODO: Initialize this with the actual mask once sparse sidecars are supported.
-            blob_cell_availability = Some(BlobCellAvailability::full());
+            blob_cell_availability =
+                Some(BlobCellAvailability::new(alloy_eips::eip7594::BlobCellMask::from_bits(0)));
         }
 
         let in_memory_size = transaction.size();
@@ -1643,6 +1654,49 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
 }
 
 impl PoolTransaction for EthPooledTransaction {
+    fn blob_cell_availability(&self) -> Option<&BlobCellAvailability> {
+        Self::blob_cell_availability(self)
+    }
+
+    fn blob_sidecar(&self) -> Option<&PooledBlobSidecar> {
+        match &self.blob_sidecar {
+            EthBlobTransactionSidecar::Present(sidecar) => Some(sidecar),
+            _ => None,
+        }
+    }
+
+    fn set_blob_sidecar(&mut self, sidecar: PooledBlobSidecar) -> bool {
+        if !self.is_eip4844() {
+            return false
+        }
+        if let Some(v1) = sidecar.as_eip7594() {
+            let metadata_length = 1 + v1.commitments.length() + v1.cell_proofs.length();
+            let signed_length = self.transaction.encode_2718_len() - 1;
+            let elided_length = 1 + alloy_rlp::Header {
+                list: true,
+                payload_length: signed_length + metadata_length + 1,
+            }
+            .length_with_payload();
+            self.eth72_encoded_length =
+                alloy_rlp::Header { list: false, payload_length: elided_length }
+                    .length_with_payload();
+            let blob_length = alloy_eips::eip4844::BYTES_PER_BLOB;
+            let blobs_payload_length =
+                v1.commitments.len() * (blob_length + alloy_rlp::length_of_length(blob_length));
+            let blobs_length =
+                alloy_rlp::Header { list: true, payload_length: blobs_payload_length }
+                    .length_with_payload();
+            self.encoded_length = 1 + alloy_rlp::Header {
+                list: true,
+                payload_length: signed_length + metadata_length + blobs_length,
+            }
+            .length_with_payload();
+        }
+        self.blob_cell_availability = Some(sidecar.availability().clone());
+        self.blob_sidecar = EthBlobTransactionSidecar::Present(sidecar);
+        true
+    }
+
     type TryFromConsensusError = ValueError<TransactionSigned>;
 
     type Consensus = TransactionSigned;
@@ -1661,6 +1715,17 @@ impl PoolTransaction for EthPooledTransaction {
         self.transaction
     }
 
+    fn try_from_consensus(
+        tx: Recovered<Self::Consensus>,
+    ) -> Result<Self, Self::TryFromConsensusError> {
+        if tx.is_eip4844() {
+            let length = tx.encode_2718_len();
+            return Ok(Self::new(tx, length))
+        }
+        let (tx, signer) = tx.into_parts();
+        Ok(Self::from_pooled(Recovered::new_unchecked(tx.try_into()?, signer)))
+    }
+
     fn from_pooled(tx: Recovered<Self::Pooled>) -> Self {
         let encoded_length = tx.encode_2718_len();
         let eth72_encoded_length = tx.eth72_length();
@@ -1675,11 +1740,14 @@ impl PoolTransaction for EthPooledTransaction {
                 let tx = Recovered::new_unchecked(tx, signer);
                 let mut pooled = Self::new(tx, encoded_length);
                 pooled.eth72_encoded_length = eth72_encoded_length;
-                if let Some(availability) = pooled.blob_cell_availability.clone() {
-                    pooled.blob_sidecar = EthBlobTransactionSidecar::Present(
-                        PooledBlobSidecar::new(blob, availability),
-                    );
-                }
+                let availability = if blob.as_eip7594().is_some_and(|s| s.blobs.is_empty()) {
+                    BlobCellAvailability::new(alloy_eips::eip7594::BlobCellMask::from_bits(0))
+                } else {
+                    BlobCellAvailability::full()
+                };
+                pooled.blob_cell_availability = Some(availability.clone());
+                pooled.blob_sidecar =
+                    EthBlobTransactionSidecar::Present(PooledBlobSidecar::new(blob, availability));
                 pooled
             }
             tx => {
@@ -1817,10 +1885,6 @@ impl EthPoolTransaction for EthPooledTransaction {
         } else {
             EthBlobTransactionSidecar::None
         }
-    }
-
-    fn blob_cell_availability(&self) -> Option<&BlobCellAvailability> {
-        Self::blob_cell_availability(self)
     }
 
     fn try_into_pooled_eip4844(
@@ -2189,7 +2253,7 @@ mod tests {
         assert!(pooled_tx.blob_cell_availability.is_some());
         assert_eq!(
             pooled_tx.blob_cell_availability().map(BlobCellAvailability::get),
-            Some(BlobCellMask::from_bits(u128::MAX))
+            Some(BlobCellMask::from_bits(0))
         );
         let expected_cost =
             U256::from(100) + U256::from(10 * 1000) + U256::from(5 * DATA_GAS_PER_BLOB);

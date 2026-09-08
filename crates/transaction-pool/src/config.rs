@@ -47,6 +47,10 @@ pub struct PoolConfig {
     pub blob_limit: SubPoolLimit,
     /// Blob cache size
     pub blob_cache_size: Option<u32>,
+    /// Soft cap for cell sidecars across all subpools, in bytes.
+    pub max_blob_storage_size: usize,
+    /// Maximum percentage of blob storage occupied by nonce suffixes blocked on missing cells.
+    pub max_blocked_blob_storage_percent: u8,
     /// Max number of executable transaction slots guaranteed per account
     pub max_account_slots: usize,
     /// Price bump (in %) for the transaction pool underpriced check.
@@ -118,6 +122,8 @@ impl Default for PoolConfig {
             queued_limit: Default::default(),
             blob_limit: Default::default(),
             blob_cache_size: None,
+            max_blob_storage_size: 2560 * 1024 * 1024,
+            max_blocked_blob_storage_percent: 50,
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             price_bumps: Default::default(),
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,

@@ -325,6 +325,14 @@ pub struct TxPoolArgs {
     #[arg(long = "txpool.blob-cache-size", alias = "txpool.blob_cache_size", default_value = Resettable::from(DefaultTxPoolValues::get_global().blob_cache_size.map(|v| v.to_string().into())))]
     pub blob_cache_size: Option<u32>,
 
+    /// Soft cap for stored blob cells across all subpools, in MiB.
+    #[arg(long = "txpool.blob-storage-size", default_value_t = 2560)]
+    pub blob_storage_size: usize,
+
+    /// Maximum percentage of blob storage occupied by nonce suffixes blocked on missing cells.
+    #[arg(long = "txpool.blocked-blob-storage-percent", default_value_t = 50, value_parser = clap::value_parser!(u8).range(0..=100))]
+    pub blocked_blob_storage_percent: u8,
+
     /// Disable EIP-4844 blob transaction support
     #[arg(long = "txpool.disable-blobs-support", alias = "txpool.disable_blobs_support", default_value_t = DefaultTxPoolValues::get_global().disable_blobs_support, conflicts_with_all = ["blobpool_max_count", "blobpool_max_size", "blob_cache_size", "blob_transaction_price_bump"])]
     pub disable_blobs_support: bool,
@@ -469,6 +477,8 @@ impl Default for TxPoolArgs {
             max_batch_size,
         } = DefaultTxPoolValues::get_global().clone();
         Self {
+            blob_storage_size: 2560,
+            blocked_blob_storage_percent: 50,
             pending_max_count,
             pending_max_size,
             basefee_max_count,
@@ -530,6 +540,8 @@ impl RethTransactionPoolConfig for TxPoolArgs {
                 max_size: self.blobpool_max_size.saturating_mul(1024 * 1024),
             },
             blob_cache_size: self.blob_cache_size,
+            max_blob_storage_size: self.blob_storage_size.saturating_mul(1024 * 1024),
+            max_blocked_blob_storage_percent: self.blocked_blob_storage_percent,
             max_account_slots: self.max_account_slots,
             price_bumps: PriceBumpConfig {
                 default_price_bump: self.price_bump,
@@ -615,6 +627,8 @@ mod tests {
             blobpool_max_count: 4000,
             blobpool_max_size: 500,
             blob_cache_size: Some(100),
+            blob_storage_size: 2560,
+            blocked_blob_storage_percent: 50,
             disable_blobs_support: false,
             max_account_slots: 20,
             price_bump: 15,

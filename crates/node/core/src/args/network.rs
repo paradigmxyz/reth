@@ -339,6 +339,10 @@ pub struct NetworkArgs {
     /// Max number of transactions to import concurrently.
     pub max_pending_pool_imports: usize,
 
+    /// Percentage of blob transactions fetched in full. Use 100 to disable sparse sampling.
+    #[arg(long = "blob-fetch-probability", default_value_t = 15, value_parser = clap::value_parser!(u8).range(15..=100))]
+    pub blob_fetch_probability: u8,
+
     /// Experimental, for usage in research. Sets the max accumulated byte size of transactions
     /// to pack in one response.
     /// Spec'd at 2MiB.
@@ -531,6 +535,7 @@ impl NetworkArgs {
             ),
             max_transactions_seen_by_peer_history: self.max_seen_tx_history,
             max_pending_pool_imports: self.max_pending_pool_imports,
+            blob_fetch_probability: self.blob_fetch_probability,
             propagation_mode: self.propagation_mode,
             ingress_policy: self.tx_ingress_policy,
             tx_channel_memory_limit_bytes: self.tx_channel_memory_limit_bytes,
@@ -725,6 +730,7 @@ impl Default for NetworkArgs {
             enforce_enr_fork_id,
         } = DefaultNetworkArgs::get_global().clone();
         Self {
+            blob_fetch_probability: 15,
             discovery: DiscoveryArgs::default(),
             trusted_peers: vec![],
             trusted_only: false,

@@ -5,6 +5,8 @@ use alloy_eips::{
     eip7594::{BlobCellMask, BlobTransactionSidecarVariant, Cell},
 };
 use alloy_primitives::{TxHash, B256};
+use alloy_rlp::{Decodable, Encodable};
+pub use cells::BlobTxCellSidecar;
 pub use converter::BlobSidecarConverter;
 pub use disk::{DiskFileBlobStore, DiskFileBlobStoreConfig, OpenDiskFileBlobStore};
 pub use mem::InMemoryBlobStore;
@@ -19,6 +21,7 @@ use std::{
 };
 pub use tracker::{BlobStoreCanonTracker, BlobStoreUpdates};
 
+mod cells;
 mod converter;
 pub mod disk;
 mod mem;
@@ -35,6 +38,19 @@ pub struct BlobCellAvailability(Arc<[AtomicU64; 2]>);
 impl BlobCellAvailability {
     const LOW_WORD: usize = 0;
     const HIGH_WORD: usize = 1;
+
+    /// Creates availability for the supplied numeric cell mask.
+    pub fn new(mask: BlobCellMask) -> Self {
+        Self(Arc::new([
+            AtomicU64::new(mask.bits() as u64),
+            AtomicU64::new((mask.bits() >> 64) as u64),
+        ]))
+    }
+
+    /// Returns whether the stored cells suffice to reconstruct every blob.
+    pub fn is_recoverable(&self) -> bool {
+        self.get().count() >= 64
+    }
 
     /// Returns full availability for all blob cells.
     pub fn full() -> Self {
@@ -66,19 +82,199 @@ impl PartialEq for BlobCellAvailability {
 impl Eq for BlobCellAvailability {}
 
 /// A blob sidecar paired with its shared cell availability.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct PooledBlobSidecar {
     sidecar: BlobTransactionSidecarVariant,
     availability: BlobCellAvailability,
+    cells: Option<Arc<BlobTxCellSidecar>>,
+    transaction: Option<alloy_primitives::Bytes>,
+    origin: crate::TransactionOrigin,
+    recovered: Arc<parking_lot::Mutex<Option<Arc<BlobTransactionSidecarVariant>>>>,
 }
 
 impl PooledBlobSidecar {
     /// Creates a sidecar with the given shared cell availability.
-    pub const fn new(
-        sidecar: BlobTransactionSidecarVariant,
-        availability: BlobCellAvailability,
-    ) -> Self {
-        Self { sidecar, availability }
+    pub fn new(sidecar: BlobTransactionSidecarVariant, availability: BlobCellAvailability) -> Self {
+        Self {
+            sidecar,
+            availability,
+            cells: None,
+            transaction: None,
+            origin: crate::TransactionOrigin::External,
+            recovered: Arc::new(parking_lot::Mutex::new(None)),
+        }
+    }
+
+    /// Creates a cell-backed sidecar without reconstructing its blob payloads.
+    pub fn from_cells(cells: BlobTxCellSidecar) -> Self {
+        Self {
+            sidecar: cells.elided().into(),
+            availability: BlobCellAvailability::new(cells.mask()),
+            cells: Some(Arc::new(cells)),
+            transaction: None,
+            origin: crate::TransactionOrigin::External,
+            recovered: Arc::new(parking_lot::Mutex::new(None)),
+        }
+    }
+
+    /// Returns the stored cells, when this sidecar uses sparse storage.
+    pub fn cells(&self) -> Option<&BlobTxCellSidecar> {
+        self.cells.as_deref()
+    }
+
+    /// Returns a full sidecar when it is locally recoverable, memoizing reconstruction.
+    pub fn full_sidecar(
+        &self,
+    ) -> Result<Option<Arc<BlobTransactionSidecarVariant>>, BlobStoreError> {
+        let mut cached = self.recovered.lock();
+        if let Some(cached) = cached.as_ref() {
+            return Ok(Some(cached.clone()))
+        }
+        let full = if let Some(cells) = &self.cells {
+            if !cells.is_recoverable() {
+                return Ok(None)
+            }
+            cells.recover(alloy_eips::eip4844::env_settings::EnvKzgSettings::Default.get())?.into()
+        } else {
+            self.sidecar.clone()
+        };
+        let full = Arc::new(full);
+        *cached = Some(full.clone());
+        Ok(Some(full))
+    }
+
+    /// Returns an elided v1 wrapper, preserving legacy sidecars unchanged.
+    pub fn elided_sidecar(&self) -> BlobTransactionSidecarVariant {
+        let mut sidecar = self.sidecar.clone();
+        if let BlobTransactionSidecarVariant::Eip7594(v1) = &mut sidecar {
+            v1.blobs.clear();
+        }
+        sidecar
+    }
+
+    /// Returns all requested cells or no result if any requested column is unavailable.
+    pub fn get_cells(&self, mask: BlobCellMask) -> Result<Option<Vec<Cell>>, BlobStoreError> {
+        if let Some(cells) = &self.cells {
+            return Ok(cells.get_cells(mask))
+        }
+        self.sidecar
+            .as_eip7594()
+            .map(|s| s.compute_matching_cells(mask).map_err(|e| BlobStoreError::Other(Box::new(e))))
+            .transpose()
+    }
+
+    /// Returns requested cells by versioned blob hash, retaining individual missing cells.
+    pub fn matching_cells(
+        &self,
+        hashes: &[B256],
+        mask: BlobCellMask,
+    ) -> Result<Vec<(usize, BlobCellsAndProofsV1)>, BlobStoreError> {
+        if let Some(cells) = &self.cells {
+            let mut result = Vec::new();
+            for (blob, hash) in cells.versioned_hashes().enumerate() {
+                for (index, requested) in hashes.iter().enumerate() {
+                    if *requested == hash &&
+                        let Some(value) = cells.blob_cells(blob, mask)
+                    {
+                        result.push((index, value));
+                    }
+                }
+            }
+            return Ok(result)
+        }
+        self.sidecar
+            .as_eip7594()
+            .map(|s| {
+                s.match_versioned_hashes_cells(hashes, mask)
+                    .map(Iterator::collect)
+                    .map_err(|e| BlobStoreError::Other(Box::new(e)))
+            })
+            .transpose()
+            .map(Option::unwrap_or_default)
+    }
+
+    /// Returns the byte size of the stored representation, excluding reconstructed cache data.
+    pub fn size(&self) -> usize {
+        self.cells.as_ref().map_or_else(|| self.sidecar.size(), |c| c.size()) +
+            self.transaction.as_ref().map_or(0, |tx| tx.len())
+    }
+
+    /// Persists the signed transaction body alongside its sidecar for restart recovery.
+    pub fn with_transaction(mut self, transaction: alloy_primitives::Bytes) -> Self {
+        self.transaction = Some(transaction);
+        self
+    }
+
+    /// Records the admission origin, preserving privacy and local treatment across restarts.
+    pub const fn with_origin(mut self, origin: crate::TransactionOrigin) -> Self {
+        self.origin = origin;
+        self
+    }
+
+    /// Returns the original admission source.
+    pub const fn origin(&self) -> crate::TransactionOrigin {
+        self.origin
+    }
+
+    /// Returns the persisted EIP-2718 transaction body.
+    pub const fn transaction(&self) -> Option<&alloy_primitives::Bytes> {
+        self.transaction.as_ref()
+    }
+
+    /// Encodes the disk representation. Tag 2 distinguishes cells from legacy sidecar fields.
+    pub(crate) fn encode_stored(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        if let Some(transaction) = &self.transaction {
+            out.push(3);
+            transaction.encode(&mut out);
+            let origin: u8 = match self.origin {
+                crate::TransactionOrigin::External => 0,
+                crate::TransactionOrigin::Local => 1,
+                crate::TransactionOrigin::Private => 2,
+            };
+            origin.encode(&mut out);
+        }
+        if let Some(cells) = &self.cells {
+            out.push(2);
+            cells.encode(&mut out);
+        } else {
+            self.sidecar.rlp_encode_fields(&mut out);
+        }
+        out
+    }
+
+    /// Decodes cell storage or the legacy full-sidecar disk representation.
+    pub(crate) fn decode_stored(mut input: &[u8]) -> alloy_rlp::Result<Self> {
+        let mut origin = crate::TransactionOrigin::External;
+        let transaction = if input.first() == Some(&3) {
+            input = &input[1..];
+            let body = alloy_primitives::Bytes::decode(&mut input)?;
+            origin = match u8::decode(&mut input)? {
+                0 => crate::TransactionOrigin::External,
+                1 => crate::TransactionOrigin::Local,
+                2 => crate::TransactionOrigin::Private,
+                _ => return Err(alloy_rlp::Error::Custom("invalid stored transaction origin")),
+            };
+            Some(body)
+        } else {
+            None
+        };
+        let mut sidecar = if input.first() == Some(&2) {
+            input = &input[1..];
+            let cells = BlobTxCellSidecar::decode(&mut input)?;
+            if !cells.has_valid_shape() {
+                return Err(alloy_rlp::Error::Custom("invalid stored blob cells"))
+            }
+            Self::from_cells(cells)
+        } else {
+            BlobTransactionSidecarVariant::rlp_decode_fields(&mut input)?.into()
+        };
+        if !input.is_empty() {
+            return Err(alloy_rlp::Error::Custom("trailing stored blob data"))
+        }
+        sidecar.transaction = transaction;
+        sidecar.origin = origin;
+        Ok(sidecar)
     }
 
     /// Returns the wrapped sidecar.
@@ -102,6 +298,18 @@ impl PooledBlobSidecar {
     }
 }
 
+impl PartialEq for PooledBlobSidecar {
+    fn eq(&self, other: &Self) -> bool {
+        self.sidecar == other.sidecar &&
+            self.cells == other.cells &&
+            self.availability == other.availability &&
+            self.transaction == other.transaction &&
+            self.origin == other.origin
+    }
+}
+
+impl Eq for PooledBlobSidecar {}
+
 impl Deref for PooledBlobSidecar {
     type Target = BlobTransactionSidecarVariant;
 
@@ -112,8 +320,23 @@ impl Deref for PooledBlobSidecar {
 
 impl From<BlobTransactionSidecarVariant> for PooledBlobSidecar {
     fn from(sidecar: BlobTransactionSidecarVariant) -> Self {
-        // TODO: Initialize this with the actual mask once sparse sidecars are supported.
         Self::new(sidecar, BlobCellAvailability::full())
+    }
+}
+
+/// Merges independently retained copies of a blob without overwriting available columns with nulls.
+fn merge_cell_response(target: &mut Option<BlobCellsAndProofsV1>, incoming: BlobCellsAndProofsV1) {
+    if let Some(current) = target {
+        for (index, (cell, proof)) in
+            incoming.blob_cells.into_iter().zip(incoming.proofs).enumerate()
+        {
+            if current.blob_cells[index].is_none() {
+                current.blob_cells[index] = cell;
+                current.proofs[index] = proof;
+            }
+        }
+    } else {
+        *target = Some(incoming);
     }
 }
 
@@ -124,6 +347,31 @@ impl From<BlobTransactionSidecarVariant> for PooledBlobSidecar {
 ///
 /// Note: this is Clone because it is expected to be wrapped in an Arc.
 pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
+    /// Prefer warming cells once the consensus client supports `engine_getBlobsV4`.
+    fn set_cell_mode(&self) {}
+
+    /// Preloads likely block-building candidates without fetching any missing network data.
+    fn warm_transactions(&self, hashes: &[B256]) {
+        for hash in hashes {
+            if let Ok(Some(sidecar)) = self.get_pooled_sidecar(*hash) {
+                let _ = sidecar.full_sidecar();
+            }
+        }
+    }
+
+    /// Preloads and briefly pins data the consensus client has indicated it may request.
+    fn warm_versioned_hashes(&self, _hashes: &[B256]) {}
+
+    /// Hashes of retained sidecars, including recently mined transactions.
+    fn transaction_hashes(&self) -> Vec<B256> {
+        self.transactions().into_iter().map(|(hash, _)| hash).collect()
+    }
+
+    /// Signed bodies retained for restoring both local and remote blob transactions on restart.
+    fn transactions(&self) -> Vec<(B256, alloy_primitives::Bytes)> {
+        Vec::new()
+    }
+
     /// Inserts the blob sidecar into the store
     fn insert(&self, tx: B256, data: PooledBlobSidecar) -> Result<(), BlobStoreError>;
 
@@ -145,6 +393,14 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
 
     /// Retrieves the decoded blob data for the given transaction hash.
     fn get(&self, tx: B256) -> Result<Option<Arc<BlobTransactionSidecarVariant>>, BlobStoreError>;
+
+    /// Returns stored sidecar metadata and cells without requiring blob reconstruction.
+    fn get_pooled_sidecar(
+        &self,
+        tx: B256,
+    ) -> Result<Option<Arc<PooledBlobSidecar>>, BlobStoreError> {
+        Ok(self.get(tx)?.map(|s| Arc::new(s.as_ref().clone().into())))
+    }
 
     /// Checks if the given transaction hash is in the blob store.
     fn contains(&self, tx: B256) -> Result<bool, BlobStoreError>;

@@ -114,6 +114,7 @@ where
             payload_store,
             task_spawner,
             metrics: EngineApiMetrics::default(),
+            blob_prefetch: Arc::new(tokio::sync::Semaphore::new(1)),
             client,
             capabilities,
             tx_pool,
@@ -1109,10 +1110,24 @@ where
             return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() })
         }
 
-        self.inner
+        let available = self
+            .inner
             .tx_pool
             .has_blobs_for_versioned_hashes(&versioned_hashes)
-            .map_err(|err| EngineApiError::Internal(Box::new(err)))
+            .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
+        if let Ok(permit) = self.inner.blob_prefetch.clone().try_acquire_owned() {
+            let pool = self.inner.tx_pool.clone();
+            let hashes: Vec<_> = versioned_hashes
+                .into_iter()
+                .zip(&available)
+                .filter_map(|(hash, available)| available.then_some(hash))
+                .collect();
+            self.inner.task_spawner.spawn_blocking_task(async move {
+                let _permit = permit;
+                pool.blob_store().warm_versioned_hashes(&hashes);
+            });
+        }
+        Ok(available)
     }
 
     /// Metered version of `has_blobs`.
@@ -1723,6 +1738,9 @@ where
 
         let el_caps = self.capabilities();
         el_caps.log_capability_mismatches(&capabilities);
+        if capabilities.iter().any(|cap| cap == "engine_getBlobsV4") {
+            self.inner.tx_pool.blob_store().set_cell_mode();
+        }
 
         Ok(el_caps.list())
     }
@@ -1745,7 +1763,12 @@ where
         versioned_hashes: Vec<B256>,
     ) -> RpcResult<Option<Vec<BlobAndProofV2>>> {
         trace!(target: "rpc::engine", "Serving engine_getBlobsV2");
-        Ok(self.get_blobs_v2_metered(versioned_hashes)?)
+        let (tx, rx) = oneshot::channel();
+        let this = self.clone();
+        self.inner.task_spawner.spawn_blocking_task(async move {
+            let _ = tx.send(this.get_blobs_v2_metered(versioned_hashes));
+        });
+        Ok(rx.await.map_err(|err| EngineApiError::Internal(Box::new(err)))??)
     }
 
     async fn get_blobs_v3(
@@ -1753,7 +1776,12 @@ where
         versioned_hashes: Vec<B256>,
     ) -> RpcResult<Option<Vec<Option<BlobAndProofV2>>>> {
         trace!(target: "rpc::engine", "Serving engine_getBlobsV3");
-        Ok(self.get_blobs_v3_metered(versioned_hashes)?)
+        let (tx, rx) = oneshot::channel();
+        let this = self.clone();
+        self.inner.task_spawner.spawn_blocking_task(async move {
+            let _ = tx.send(this.get_blobs_v3_metered(versioned_hashes));
+        });
+        Ok(rx.await.map_err(|err| EngineApiError::Internal(Box::new(err)))??)
     }
 
     async fn get_blobs_v4(
@@ -1762,7 +1790,12 @@ where
         indices_bitarray: B128,
     ) -> RpcResult<Option<Vec<Option<BlobCellsAndProofsV1>>>> {
         trace!(target: "rpc::engine", "Serving engine_getBlobsV4");
-        Ok(self.get_blobs_v4_metered(versioned_hashes, indices_bitarray)?)
+        let (tx, rx) = oneshot::channel();
+        let this = self.clone();
+        self.inner.task_spawner.spawn_blocking_task(async move {
+            let _ = tx.send(this.get_blobs_v4_metered(versioned_hashes, indices_bitarray));
+        });
+        Ok(rx.await.map_err(|err| EngineApiError::Internal(Box::new(err)))??)
     }
 }
 
@@ -1811,6 +1844,8 @@ struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSp
     task_spawner: Runtime,
     /// The latency and response type metrics for engine api calls
     metrics: EngineApiMetrics,
+    /// At most one speculative blob-cache fill may run at a time.
+    blob_prefetch: Arc<tokio::sync::Semaphore>,
     /// Identification of the execution client used by the consensus client
     client: ClientVersionV1,
     /// The list of all supported Engine capabilities available over the engine endpoint.
