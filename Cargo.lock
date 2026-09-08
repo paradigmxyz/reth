@@ -9171,6 +9171,7 @@ dependencies = [
  "alloy-trie",
  "aquamarine",
  "auto_impl",
+ "codspeed-criterion-compat",
  "derive_more",
  "discv5",
  "enr",
