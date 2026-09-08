@@ -43,6 +43,15 @@ pub enum ECIESState {
 }
 
 impl ECIESCodec {
+    #[cfg(feature = "test-utils")]
+    pub(crate) fn new_seeded(
+        secret_key: SecretKey,
+        remote_id: Option<PeerId>,
+        seed: u64,
+    ) -> Result<Self, ECIESError> {
+        Ok(Self { ecies: ECIES::new_seeded(secret_key, remote_id, seed)?, state: ECIESState::Auth })
+    }
+
     /// Create a new server codec using the given secret key
     pub(crate) fn new_server(secret_key: SecretKey) -> Result<Self, ECIESError> {
         Ok(Self { ecies: ECIES::new_server(secret_key)?, state: ECIESState::Auth })

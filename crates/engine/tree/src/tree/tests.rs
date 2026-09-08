@@ -44,6 +44,12 @@ use std::{
 };
 use tokio::sync::oneshot;
 
+mod deterministic;
+mod native_validation;
+mod node;
+mod node_storage;
+mod node_wire;
+
 /// Wraps blocks as if they had been downloaded without any access list data.
 fn downloaded_blocks<B: reth_primitives_traits::Block>(
     blocks: Vec<reth_primitives_traits::SealedBlock<B>>,
@@ -206,6 +212,22 @@ impl TestHarness {
         action_rx: Receiver<PersistenceAction>,
         tree_config: TreeConfig,
     ) -> Self {
+        Self::with_runtime(
+            chain_spec,
+            action_tx,
+            action_rx,
+            tree_config,
+            reth_tasks::Runtime::test(),
+        )
+    }
+
+    fn with_runtime(
+        chain_spec: Arc<ChainSpec>,
+        action_tx: Sender<PersistenceAction>,
+        action_rx: Receiver<PersistenceAction>,
+        tree_config: TreeConfig,
+        runtime: reth_tasks::Runtime,
+    ) -> Self {
         let persistence_handle = PersistenceHandle::new(action_tx);
 
         let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
@@ -215,7 +237,6 @@ impl TestHarness {
         let payload_validator = MockEngineValidator;
 
         let (from_tree_tx, from_tree_rx) = unbounded_channel();
-        let runtime = reth_tasks::Runtime::test();
         let overlay_manager = OverlayManager::new(runtime.state_trie_overlay_worker_pool());
 
         let header = chain_spec.genesis_header().clone();

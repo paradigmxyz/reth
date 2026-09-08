@@ -1,6 +1,5 @@
 use alloy_primitives::{keccak256, map::HashSet, B256};
 use eyre::Context;
-use rayon::slice::ParallelSliceMut;
 use reth_db::tables;
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
@@ -160,7 +159,7 @@ pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
     }
 
     // Pre-sort entries by hash key for optimal MDBX insert performance.
-    preimage_entries.par_sort_unstable_by_key(|(hash, _)| *hash);
+    reth_rayon::sort_unstable_by_key(&mut preimage_entries, |(hash, _)| *hash);
 
     // Lazily open the preimage store and insert entries.
     let preimages = SlotPreimages::open(slot_preimages_path).map_err(fatal)?;

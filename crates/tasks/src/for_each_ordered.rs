@@ -113,6 +113,10 @@ where
 {
     use std::panic::{catch_unwind, AssertUnwindSafe};
 
+    if reth_rayon::is_inline() {
+        return reth_rayon::for_each_indexed(iter, f);
+    }
+
     let n = iter.len();
     if n == 0 {
         return;
@@ -169,6 +173,22 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
         Barrier,
     };
+
+    #[test]
+    fn inline_indexed_producer_and_consumer_stay_on_caller() {
+        let caller = std::thread::current().id();
+        let output = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        reth_rayon::inline(|| {
+            (0..128)
+                .into_par_iter()
+                .map(|i| {
+                    assert_eq!(std::thread::current().id(), caller);
+                    i * 2
+                })
+                .for_each_ordered(|item| output.borrow_mut().push(item))
+        });
+        assert_eq!(*output.borrow(), (0..128).map(|i| i * 2).collect::<Vec<_>>());
+    }
 
     #[test]
     fn preserves_order() {

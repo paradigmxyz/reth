@@ -1,5 +1,5 @@
 //! Execution cache implementation for block processing.
-use crate::TxPoolPrewarmCacheSnapshot;
+use crate::{hasher::CacheHashBuilder, TxPoolPrewarmCacheSnapshot};
 use alloy_primitives::{
     map::{DefaultHashBuilder, FbBuildHasher},
     Address, StorageKey, StorageValue, B256,
@@ -14,7 +14,7 @@ use reth_provider::{
     AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
     StateProvider, StateRootProvider, StorageRootProvider,
 };
-use reth_revm::db::BundleState;
+use reth_revm::db::{BundleAccount, BundleState};
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
@@ -83,7 +83,8 @@ impl CacheConfig for EpochCacheConfig {
 }
 
 /// Type alias for the fixed-cache used for accounts and storage.
-type FixedCache<K, V, H = DefaultHashBuilder> = fixed_cache::Cache<K, V, H, EpochCacheConfig>;
+type FixedCache<K, V, H = DefaultHashBuilder> =
+    fixed_cache::Cache<K, V, CacheHashBuilder<H>, EpochCacheConfig>;
 
 /// A wrapper of a state provider and a shared cache.
 ///
@@ -1083,6 +1084,9 @@ pub struct ExecutionCache(Arc<ExecutionCacheInner>);
 /// Inner state of the [`ExecutionCache`], wrapped in a single [`Arc`].
 #[derive(Debug)]
 struct ExecutionCacheInner {
+    /// Whether bundle insertion order and hash collisions must be repeatable.
+    deterministic: bool,
+
     /// Cache for contract bytecode, keyed by code hash.
     code_cache: FixedCache<B256, Option<Bytecode>, FbBuildHasher<32>>,
 
@@ -1128,6 +1132,20 @@ impl ExecutionCache {
 
     /// Build an [`ExecutionCache`] struct, so that execution caches can be easily cloned.
     pub fn new(total_cache_size: usize) -> Self {
+        Self::new_inner(total_cache_size, false)
+    }
+
+    /// Creates a cache with fixed hash seeds and sorted bundle insertion for simulation replay.
+    ///
+    /// Uses the same bounded caches, collision eviction, and epoch invalidation as [`Self::new`].
+    /// Callers must schedule concurrent cache users deterministically. Individual cache operations
+    /// remain synchronous; this does not simulate races inside the cache's atomic instructions.
+    /// Fixed hash seeds are intended for controlled testing rather than untrusted workloads.
+    pub fn new_deterministic(total_cache_size: usize) -> Self {
+        Self::new_inner(total_cache_size, true)
+    }
+
+    fn new_inner(total_cache_size: usize, deterministic: bool) -> Self {
         let code_cache_size = (total_cache_size * 556) / 10000; // 5.56% of total
         let storage_cache_size = (total_cache_size * 8888) / 10000; // 88.88% of total
         let account_cache_size = (total_cache_size * 556) / 10000; // 5.56% of total
@@ -1141,11 +1159,12 @@ impl ExecutionCache {
         let account_stats = Arc::new(CacheStatsHandler::new(account_capacity));
 
         Self(Arc::new(ExecutionCacheInner {
-            code_cache: FixedCache::new(code_capacity, FbBuildHasher::<32>::default())
+            deterministic,
+            code_cache: FixedCache::new(code_capacity, CacheHashBuilder::new(deterministic))
                 .with_stats(Some(Stats::new(code_stats.clone()))),
-            storage_cache: FixedCache::new(storage_capacity, DefaultHashBuilder::default())
+            storage_cache: FixedCache::new(storage_capacity, CacheHashBuilder::new(deterministic))
                 .with_stats(Some(Stats::new(storage_stats.clone()))),
-            account_cache: FixedCache::new(account_capacity, FbBuildHasher::<20>::default())
+            account_cache: FixedCache::new(account_capacity, CacheHashBuilder::new(deterministic))
                 .with_stats(Some(Stats::new(account_stats.clone()))),
             code_stats,
             storage_stats,
@@ -1256,9 +1275,15 @@ impl ExecutionCache {
         let _enter =
             debug_span!(target: "engine::tree", "contracts", len = state_updates.contracts.len())
                 .entered();
-        // Insert bytecodes
-        for (code_hash, bytecode) in &state_updates.contracts {
+        let insert_code = |(code_hash, bytecode): (&B256, &reth_revm::revm::bytecode::Bytecode)| {
             self.insert_code(*code_hash, Some(Bytecode(bytecode.clone())));
+        };
+        if self.0.deterministic {
+            let mut contracts: Vec<_> = state_updates.contracts.iter().collect();
+            contracts.sort_unstable_by_key(|(hash, _)| **hash);
+            contracts.into_iter().for_each(insert_code);
+        } else {
+            state_updates.contracts.iter().for_each(insert_code);
         }
         drop(_enter);
 
@@ -1270,7 +1295,20 @@ impl ExecutionCache {
                 state_updates.state.values().map(|account| account.storage.len()).sum::<usize>()
         )
         .entered();
-        for (addr, account) in &state_updates.state {
+        if self.0.deterministic {
+            let mut accounts: Vec<_> = state_updates.state.iter().collect();
+            accounts.sort_unstable_by_key(|(address, _)| **address);
+            self.insert_accounts(accounts)
+        } else {
+            self.insert_accounts(&state_updates.state)
+        }
+    }
+
+    fn insert_accounts<'a>(
+        &self,
+        accounts: impl IntoIterator<Item = (&'a Address, &'a BundleAccount)>,
+    ) -> Result<(), ()> {
+        for (addr, account) in accounts {
             // If the account was not modified, as in not changed and not destroyed, then we have
             // nothing to do w.r.t. this particular account and can move on
             if account.status.is_not_modified() {
@@ -1313,8 +1351,16 @@ impl ExecutionCache {
             };
 
             // Now we iterate over all storage and make updates to the cached storage values
-            for (key, slot) in &account.storage {
-                self.insert_storage(*addr, (*key).into(), Some(slot.present_value));
+            if self.0.deterministic {
+                let mut storage: Vec<_> = account.storage.iter().collect();
+                storage.sort_unstable_by_key(|(key, _)| **key);
+                for (key, slot) in storage {
+                    self.insert_storage(*addr, (*key).into(), Some(slot.present_value));
+                }
+            } else {
+                for (key, slot) in &account.storage {
+                    self.insert_storage(*addr, (*key).into(), Some(slot.present_value));
+                }
             }
 
             // Insert will update if present, so we just use the new account info as the new value
@@ -1416,6 +1462,9 @@ impl SavedCache {
         self.caches.clone()
     }
 }
+
+#[cfg(test)]
+mod deterministic;
 
 #[cfg(test)]
 mod tests {

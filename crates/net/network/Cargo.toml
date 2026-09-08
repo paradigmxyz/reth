@@ -12,6 +12,7 @@ description = "Ethereum network support"
 workspace = true
 
 [dependencies]
+reth-rayon.workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-evm-ethereum = { workspace = true, optional = true }
@@ -69,7 +70,6 @@ tracing.workspace = true
 rustc-hash.workspace = true
 thiserror.workspace = true
 parking_lot.workspace = true
-rayon.workspace = true
 rand.workspace = true
 rand_08.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
@@ -152,4 +152,6 @@ test-utils = [
     "reth-stages-types/test-utils",
     "reth-trie/test-utils",
     "reth-evm/test-utils",
+    "reth-ecies/test-utils",
+    "reth-eth-wire/test-utils",
 ]

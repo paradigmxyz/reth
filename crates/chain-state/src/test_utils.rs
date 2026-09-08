@@ -222,10 +222,20 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
     fn get_executed_block(
         &mut self,
         block_number: BlockNumber,
-        mut receipts: Vec<Vec<Receipt>>,
+        receipts: Vec<Vec<Receipt>>,
         parent_hash: B256,
     ) -> ExecutedBlock {
         let block = self.generate_random_block(block_number, parent_hash);
+        self.get_executed_sealed_block(block, receipts)
+    }
+
+    fn get_executed_sealed_block(
+        &mut self,
+        block: SealedBlock<Block>,
+        mut receipts: Vec<Vec<Receipt>>,
+    ) -> ExecutedBlock {
+        let block_number = block.number;
+        let parent_hash = block.parent_hash;
         let senders = vec![self.signer; block.body().transactions.len()];
         let recovered = RecoveredBlock::new_sealed(block, senders);
 
@@ -265,11 +275,10 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         let post_info =
             AccountInfo { nonce: final_nonce, balance: final_balance, ..Default::default() };
 
-        let account_revert = if pre_info.balance == initial_info.balance && pre_info.nonce == 0 {
-            Some(None)
-        } else {
-            Some(Some(pre_info))
-        };
+        // Even an empty generated parent establishes the funded fixture account. Its unchanged
+        // balance and zero nonce do not mean the account was absent before this block.
+        let account_revert =
+            Some(self.post_block_state.contains_key(&parent_hash).then_some(pre_info));
 
         let new_slot_value = U256::from(block_number).wrapping_add(U256::from(1));
 
@@ -456,5 +465,71 @@ impl CanonStateSubscriptions for TestCanonStateSubscriptions {
         self.canon_notif_tx.lock().as_mut().unwrap().push(canon_notif_tx);
 
         canon_notif_rx
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use revm::database::states::reverts::AccountInfoRevert;
+
+    #[test]
+    fn empty_parent_preserves_account_in_child_revert() {
+        let initial_info = AccountInfo::from_balance(U256::from(10).pow(U256::from(18)));
+        let signer_pk = PrivateKeySigner::from_bytes(&B256::repeat_byte(1)).unwrap();
+        let mut builder = TestBlockBuilder::<EthPrimitives> {
+            signer: signer_pk.address(),
+            signer_pk,
+            signer_execute_account_info: initial_info.clone(),
+            signer_build_account_info: initial_info.clone(),
+            chain_spec: ChainSpec::default(),
+            post_block_state: B256HashMap::default(),
+            with_state: true,
+            _prims: PhantomData,
+        };
+        let parent: SealedBlock<Block> = SealedBlock::from_sealed_parts(
+            SealedHeader::seal_slow(Header { number: 1, ..Default::default() }),
+            BlockBody::default(),
+        );
+        let parent_hash = parent.hash();
+        let parent = builder.get_executed_sealed_block(parent, Vec::new());
+        assert!(parent.recovered_block().body().transactions.is_empty());
+        assert_eq!(
+            parent.execution_outcome().state.state[&builder.signer].info,
+            Some(initial_info.clone())
+        );
+        let parent_revert = &parent.execution_outcome().state.reverts[0]
+            .iter()
+            .find(|(address, _)| *address == builder.signer)
+            .unwrap()
+            .1
+            .account;
+        assert_eq!(parent_revert, &AccountInfoRevert::DeleteIt);
+
+        let transaction = Transaction::Eip1559(TxEip1559 {
+            chain_id: builder.chain_spec.chain.id(),
+            gas_limit: MIN_TRANSACTION_GAS,
+            max_fee_per_gas: INITIAL_BASE_FEE as u128,
+            max_priority_fee_per_gas: 1,
+            to: Address::repeat_byte(0x42).into(),
+            ..Default::default()
+        });
+        let signature = builder.signer_pk.sign_hash_sync(&transaction.signature_hash()).unwrap();
+        let child: SealedBlock<Block> = SealedBlock::from_sealed_parts(
+            SealedHeader::seal_slow(Header { number: 2, parent_hash, ..Default::default() }),
+            BlockBody {
+                transactions: vec![TransactionSigned::new_unhashed(transaction, signature)],
+                ..Default::default()
+            },
+        );
+        let child = builder.get_executed_sealed_block(child, Vec::new());
+        assert_eq!(child.recovered_block().body().transactions.len(), 1);
+        let child_revert = &child.execution_outcome().state.reverts[0]
+            .iter()
+            .find(|(address, _)| *address == builder.signer)
+            .unwrap()
+            .1
+            .account;
+        assert_eq!(child_revert, &AccountInfoRevert::RevertTo(initial_info));
     }
 }

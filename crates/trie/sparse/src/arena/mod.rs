@@ -604,9 +604,19 @@ pub struct ArenaParallelSparseTrie {
     buffers: ArenaTrieBuffers,
     /// Thresholds controlling when parallelism is enabled for different operations.
     parallelism_thresholds: ArenaParallelismThresholds,
+    /// Whether independent subtries may run on Rayon workers.
+    parallelism_enabled: bool,
 }
 
 impl ArenaParallelSparseTrie {
+    /// Enables or disables parallel dispatch without changing subtrie partitioning.
+    ///
+    /// Disabled dispatch executes each partition on the calling thread. The setting survives
+    /// clearing the trie and reusing its allocations.
+    pub const fn set_parallelism_enabled(&mut self, enabled: bool) {
+        self.parallelism_enabled = enabled;
+    }
+
     /// Sets the thresholds that control when parallelism is used during operations.
     pub const fn with_parallelism_thresholds(
         mut self,
@@ -2075,6 +2085,7 @@ impl Default for ArenaParallelSparseTrie {
             root,
             buffers: ArenaTrieBuffers::default(),
             parallelism_thresholds: ArenaParallelismThresholds::default(),
+            parallelism_enabled: true,
         }
     }
 }
@@ -2259,20 +2270,26 @@ impl SparseTrie for ArenaParallelSparseTrie {
         }
 
         // Reveal taken subtries, in parallel if more than one.
-        if taken.len() == 1 {
+        if taken.len() == 1 && self.parallelism_enabled {
             let (_, subtrie, node_vec) = &mut taken[0];
             subtrie.reveal_nodes(node_vec)?;
         } else {
             use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 
             let parent_span = tracing::Span::current();
-            let results: Vec<SparseTrieResult<()>> = taken
-                .par_iter_mut()
-                .map(|(_, subtrie, node_vec)| {
-                    let _guard = parent_span.enter();
-                    subtrie.reveal_nodes(node_vec)
-                })
-                .collect();
+            let reveal = |(_, subtrie, node_vec): &mut (
+                Index,
+                Box<ArenaSparseSubtrie>,
+                Vec<ProofTrieNodeV2>,
+            )| {
+                let _guard = parent_span.enter();
+                subtrie.reveal_nodes(node_vec)
+            };
+            let results: Vec<SparseTrieResult<()>> = if self.parallelism_enabled {
+                taken.par_iter_mut().map(reveal).collect()
+            } else {
+                taken.iter_mut().map(reveal).collect()
+            };
 
             if let Some(err) = results.into_iter().find(|r| r.is_err()) {
                 // Restore before returning so we don't leave TakenSubtrie holes.
@@ -2349,7 +2366,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
         // Hash taken subtries in parallel if total dirty leaves meet the threshold.
         if !taken.is_empty() {
-            if taken.len() == 1 || total_dirty_leaves < self.parallelism_thresholds.min_dirty_leaves
+            if !self.parallelism_enabled ||
+                taken.len() == 1 ||
+                total_dirty_leaves < self.parallelism_thresholds.min_dirty_leaves
             {
                 for (_, subtrie) in &mut taken {
                     subtrie.update_cached_rlp(new_epoch);
@@ -2563,9 +2582,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
         if !taken.is_empty() {
             // Prune taken subtries, in parallel if more than one.
-            if taken.len() == 1 {
-                let (_, ref mut subtrie) = taken[0];
-                pruned += subtrie.prune(prune_before);
+            if taken.len() == 1 || !self.parallelism_enabled {
+                for (_, subtrie) in &mut taken {
+                    pruned += subtrie.prune(prune_before);
+                }
             } else {
                 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 
@@ -2818,9 +2838,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
         }
 
         // Apply updates to taken subtries, in parallel if more than one.
-        if taken.len() == 1 {
-            let (_, ref mut subtrie, ref range) = taken[0];
-            subtrie.update_leaves(&sorted[range.clone()]);
+        if taken.len() == 1 || !self.parallelism_enabled {
+            for (_, subtrie, range) in &mut taken {
+                subtrie.update_leaves(&sorted[range.clone()]);
+            }
         } else {
             use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 
@@ -3030,6 +3051,66 @@ mod tests {
 
     use proptest::prelude::*;
     use proptest_arbitrary_interop::arb;
+
+    #[test]
+    fn sequential_dispatch_matches_parallel_after_pruning() {
+        let key = |value: u64| alloy_primitives::keccak256(value.to_be_bytes());
+        let initial: BTreeMap<_, _> =
+            (0..256).map(|value| (key(value), U256::from(value + 1))).collect();
+        let mut harness = ArenaTrieTestHarness::new(initial);
+        let root = harness.root_node();
+        let mut parallel = ArenaParallelSparseTrie::default().with_parallelism_thresholds(
+            ArenaParallelismThresholds {
+                min_dirty_leaves: 1,
+                min_revealed_nodes: 1,
+                min_updates: 1,
+                min_leaves_for_prune: 1,
+            },
+        );
+        parallel.set_root(root.node, root.masks, true).unwrap();
+        let mut sequential = parallel.clone();
+        sequential.set_parallelism_enabled(false);
+
+        for round in 1..=2 {
+            let changes: BTreeMap<_, _> = (0..384)
+                .map(|value| {
+                    (
+                        key(value),
+                        if value % 5 == round { U256::ZERO } else { U256::from(value + round + 1) },
+                    )
+                })
+                .collect();
+            let mut results = Vec::new();
+            for trie in [&mut parallel, &mut sequential] {
+                let mut leaves = changes
+                    .iter()
+                    .map(|(&key, &value)| {
+                        let value =
+                            if value.is_zero() { Vec::new() } else { alloy_rlp::encode(value) };
+                        (key, LeafUpdate::Changed(value))
+                    })
+                    .collect();
+                loop {
+                    let mut targets = Vec::new();
+                    trie.update_leaves(&mut leaves, |key, parent| {
+                        targets.push(ProofV2Target::new(key).with_parent(parent));
+                    })
+                    .unwrap();
+                    if targets.is_empty() {
+                        break;
+                    }
+                    let (mut nodes, _) = harness.proof_v2(&mut targets);
+                    trie.reveal_nodes(&mut nodes).unwrap();
+                }
+                assert!(leaves.is_empty());
+                results.push((trie.root(epoch(round)), trie.take_updates()));
+            }
+            assert_eq!(results[0], results[1], "root and complete trie updates must match");
+            assert_eq!(results[0].0, harness.get_root_with_updates(&changes).0);
+            harness.apply_changeset(changes);
+            assert_eq!(parallel.prune(epoch(round + 1)), sequential.prune(epoch(round + 1)));
+        }
+    }
 
     /// Builds a changeset by mixing `new_keys` (fresh insertions) with a fraction of
     /// existing keys from `base` (updates/deletions).

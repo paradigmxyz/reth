@@ -38,6 +38,9 @@ const WORKER_CHUNK_SIZE: usize = 100;
 /// Type alias for a sender that transmits the result of sender recovery.
 type RecoveryResultSender = mpsc::SyncSender<Result<(u64, Address), Box<SenderRecoveryStageError>>>;
 
+/// Ranges and their full-chunk result channels for one recovery batch.
+type RecoveryChunks = Vec<(Range<u64>, RecoveryResultSender)>;
+
 /// The sender recovery stage iterates over existing transactions,
 /// recovers the transaction signer and stores them
 /// in [`TransactionSenders`][reth_db_api::tables::TransactionSenders] table.
@@ -160,7 +163,7 @@ where
             .map(|start| start..std::cmp::min(start + BATCH_SIZE as u64, range_output.tx_range.end))
             .collect::<Vec<Range<u64>>>();
 
-        let tx_batch_sender = setup_range_recovery(provider);
+        let tx_batch_sender = (!reth_rayon::is_inline()).then(|| setup_range_recovery(provider));
 
         let start = Instant::now();
         let block_body_indices =
@@ -226,11 +229,14 @@ fn recover_range<Provider, CURSOR>(
     tx_range: Range<TxNumber>,
     block_numbers: Vec<BlockNumber>,
     provider: &Provider,
-    tx_batch_sender: mpsc::Sender<Vec<(Range<u64>, RecoveryResultSender)>>,
+    tx_batch_sender: Option<mpsc::Sender<RecoveryChunks>>,
     writer: &mut EitherWriter<'_, CURSOR, Provider::Primitives>,
 ) -> Result<(), StageError>
 where
-    Provider: DBProvider + HeaderProvider + TransactionsProvider + StaticFileProviderFactory,
+    Provider: DBProvider
+        + HeaderProvider
+        + TransactionsProvider
+        + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value + SignedTransaction>>,
     CURSOR: DbCursorRW<tables::TransactionSenders>,
 {
     debug_assert_eq!(
@@ -253,8 +259,12 @@ where
         })
         .unzip();
 
-    if let Some(err) = tx_batch_sender.send(chunks).err() {
-        return Err(StageError::Fatal(err.into()));
+    if let Some(sender) = tx_batch_sender {
+        sender.send(chunks).map_err(|err| StageError::Fatal(err.into()))?;
+    } else {
+        // Each result channel can hold its entire chunk, so inline recovery cannot wait
+        // for the receiver below. Keep fetching and decoding shared with the native worker.
+        recover_chunks(&provider.static_file_provider(), chunks);
     }
 
     debug!(target: "sync::stages::sender_recovery", ?tx_range, "Appending recovered senders to the database");
@@ -326,15 +336,13 @@ where
 /// Spawns a thread to handle the recovery of transaction senders for
 /// specified chunks of a given batch. It processes incoming ranges, fetching and recovering
 /// transactions in parallel using global rayon pool
-fn setup_range_recovery<Provider>(
-    provider: &Provider,
-) -> mpsc::Sender<Vec<(Range<u64>, RecoveryResultSender)>>
+fn setup_range_recovery<Provider>(provider: &Provider) -> mpsc::Sender<RecoveryChunks>
 where
     Provider: DBProvider
         + HeaderProvider
         + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value + SignedTransaction>>,
 {
-    let (tx_sender, tx_receiver) = mpsc::channel::<Vec<(Range<u64>, RecoveryResultSender)>>();
+    let (tx_sender, tx_receiver) = mpsc::channel::<RecoveryChunks>();
     let static_file_provider = provider.static_file_provider();
 
     // We do not use `tokio::task::spawn_blocking` because, during a shutdown,
@@ -346,56 +354,62 @@ where
     // period to complete some work without throwing errors during the shutdown.
     reth_tasks::spawn_os_thread("sender-recovery", move || {
         while let Ok(chunks) = tx_receiver.recv() {
-            for (chunk_range, recovered_senders_tx) in chunks {
-                // Read the raw value, and let the rayon worker to decompress & decode.
-                let chunk = match static_file_provider.fetch_range_with_predicate(
-                    StaticFileSegment::Transactions,
-                    chunk_range,
-                    |cursor, number| {
-                        Ok(cursor
-                            .get_one::<TransactionMask<
-                                RawValue<<Provider::Primitives as NodePrimitives>::SignedTx>,
-                            >>(number.into())?
-                            .map(|tx| (number, tx)))
-                    },
-                    |_| true,
-                ) {
-                    Ok(chunk) => chunk,
-                    Err(err) => {
-                        // We exit early since we could not process this chunk.
-                        let _ = recovered_senders_tx
-                            .send(Err(Box::new(SenderRecoveryStageError::StageError(err.into()))));
-                        break
-                    }
-                };
-
-                // Spawn the task onto the global rayon pool
-                // This task will send the results through the channel after it has read the
-                // transaction and calculated the sender.
-                rayon::spawn(move || {
-                    let mut rlp_buf = Vec::with_capacity(128);
-                    for (number, tx) in chunk {
-                        let res = tx
-                            .value()
-                            .map_err(|err| {
-                                Box::new(SenderRecoveryStageError::StageError(err.into()))
-                            })
-                            .and_then(|tx| recover_sender((number, tx), &mut rlp_buf));
-
-                        let is_err = res.is_err();
-
-                        let _ = recovered_senders_tx.send(res);
-
-                        // Finish early
-                        if is_err {
-                            break
-                        }
-                    }
-                });
-            }
+            recover_chunks(&static_file_provider, chunks);
         }
     });
     tx_sender
+}
+
+/// Reads and recovers independent chunks; result channels must hold each complete chunk.
+fn recover_chunks<N>(
+    static_file_provider: &reth_provider::providers::StaticFileProvider<N>,
+    chunks: RecoveryChunks,
+) where
+    N: NodePrimitives<SignedTx: Value + SignedTransaction>,
+{
+    for (chunk_range, recovered_senders_tx) in chunks {
+        // Read the raw value, and let the rayon worker to decompress & decode.
+        let chunk = match static_file_provider.fetch_range_with_predicate(
+            StaticFileSegment::Transactions,
+            chunk_range,
+            |cursor, number| {
+                Ok(cursor
+                    .get_one::<TransactionMask<RawValue<N::SignedTx>>>(number.into())?
+                    .map(|tx| (number, tx)))
+            },
+            |_| true,
+        ) {
+            Ok(chunk) => chunk,
+            Err(err) => {
+                // We exit early since we could not process this chunk.
+                let _ = recovered_senders_tx
+                    .send(Err(Box::new(SenderRecoveryStageError::StageError(err.into()))));
+                break
+            }
+        };
+
+        // Spawn the task onto the global rayon pool
+        // This task will send the results through the channel after it has read the
+        // transaction and calculated the sender.
+        reth_rayon::spawn(move || {
+            let mut rlp_buf = Vec::with_capacity(128);
+            for (number, tx) in chunk {
+                let res = tx
+                    .value()
+                    .map_err(|err| Box::new(SenderRecoveryStageError::StageError(err.into())))
+                    .and_then(|tx| recover_sender((number, tx), &mut rlp_buf));
+
+                let is_err = res.is_err();
+
+                let _ = recovered_senders_tx.send(res);
+
+                // Finish early
+                if is_err {
+                    break
+                }
+            }
+        });
+    }
 }
 
 #[inline]
@@ -487,6 +501,15 @@ mod tests {
     /// Execute a block range with a single transaction
     #[tokio::test]
     async fn execute_single_transaction() {
+        execute_transactions_case(1).await;
+    }
+
+    #[tokio::test]
+    async fn inline_execute_multiple_recovery_chunks() {
+        reth_rayon::deterministic(execute_transactions_case(205)).await;
+    }
+
+    async fn execute_transactions_case(tx_count: u8) {
         let (previous_stage, stage_progress) = (500, 100);
         let mut rng = generators::rng();
 
@@ -497,7 +520,7 @@ mod tests {
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
 
-        // Insert blocks with a single transaction at block `stage_progress + 10`
+        // Place all transactions in one block, with empty blocks on either side.
         let non_empty_block_number = stage_progress + 10;
         let blocks = (stage_progress..=input.target())
             .map(|number| {
@@ -505,7 +528,7 @@ mod tests {
                     &mut rng,
                     number,
                     BlockParams {
-                        tx_count: Some((number == non_empty_block_number) as u8),
+                        tx_count: Some(if number == non_empty_block_number { tx_count } else { 0 }),
                         ..Default::default()
                     },
                 )
@@ -516,19 +539,20 @@ mod tests {
             .insert_blocks(blocks.iter(), StorageKind::Static)
             .expect("failed to insert blocks");
 
-        let rx = runner.execute(input);
-
-        // Assert the successful result
-        let result = rx.await.unwrap();
+        let result = if reth_rayon::is_inline() {
+            runner.execute_inline(input).await
+        } else {
+            runner.execute(input).await.unwrap()
+        };
         assert_matches!(
             result,
             Ok(ExecOutput { checkpoint: StageCheckpoint {
                 block_number,
                 stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
-                    processed: 1,
-                    total: 1
+                    processed,
+                    total
                 }))
-            }, done: true }) if block_number == previous_stage
+            }, done: true }) if block_number == previous_stage && processed == u64::from(tx_count) && total == processed
         );
 
         // Validate the stage execution

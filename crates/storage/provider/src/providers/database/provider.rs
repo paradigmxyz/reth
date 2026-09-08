@@ -33,7 +33,6 @@ use alloy_primitives::{
 };
 use itertools::Itertools;
 use parking_lot::RwLock;
-use rayon::slice::ParallelSliceMut;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec};
 use reth_db_api::{
@@ -617,10 +616,10 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // Propagate tracing context into rayon-spawned threads so that static file
         // and RocksDB write spans appear as children of save_blocks in traces.
         let span = tracing::Span::current();
-        runtime.storage_pool().in_place_scope(|s| {
+        reth_rayon::in_place_scope(runtime.storage_pool(), |s| {
             // SF writes
             if sf_ctx.is_some() {
-                s.spawn(|_| {
+                s.spawn(|| {
                     let _guard = span.enter();
                     let start = Instant::now();
                     let sf_ctx =
@@ -635,7 +634,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
             // RocksDB writes
             if rocksdb_enabled {
-                s.spawn(|_| {
+                s.spawn(|| {
                     let _guard = span.enter();
                     let start = Instant::now();
                     let rocksdb_ctx =
@@ -2560,7 +2559,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
                 tracing::trace!(block_number, "Writing block change");
                 // sort changes by address.
-                storage_changes.par_sort_unstable_by_key(|a| a.address);
+                reth_rayon::sort_unstable_by_key(&mut storage_changes, |a| a.address);
                 let total_changes =
                     storage_changes.iter().map(|change| change.storage_revert.len()).sum();
                 let mut changeset = Vec::with_capacity(total_changes);
@@ -2570,7 +2569,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                         .map(|(k, v)| (B256::from(k.to_be_bytes()), v))
                         .collect::<Vec<_>>();
                     // sort storage slots by key.
-                    storage.par_sort_unstable_by_key(|a| a.0);
+                    reth_rayon::sort_unstable_by_key(&mut storage, |a| a.0);
 
                     // If we are writing the primary storage wipe transition, the pre-existing
                     // storage state has to be taken from the database and written to storage
@@ -2626,9 +2625,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     fn write_state_changes(&self, mut changes: StateChangeset) -> ProviderResult<()> {
         // sort all entries so they can be written to database in more performant way.
         // and take smaller memory footprint.
-        changes.accounts.par_sort_by_key(|a| a.0);
-        changes.storage.par_sort_by_key(|a| a.address);
-        changes.contracts.par_sort_by_key(|a| a.0);
+        reth_rayon::sort_by_key(&mut changes.accounts, |a| a.0);
+        reth_rayon::sort_by_key(&mut changes.storage, |a| a.address);
+        reth_rayon::sort_by_key(&mut changes.contracts, |a| a.0);
 
         if !self.cached_storage_settings().use_hashed_state() {
             // Write new account state
@@ -2660,7 +2659,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     .map(|(k, value)| StorageEntry { key: k.into(), value })
                     .collect::<Vec<_>>();
                 // sort storage slots by key.
-                storage.par_sort_unstable_by_key(|a| a.key);
+                reth_rayon::sort_unstable_by_key(&mut storage, |a| a.key);
 
                 for entry in storage {
                     tracing::trace!(?address, ?entry.key, "Updating plain state storage");
@@ -3892,17 +3891,23 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
 
             let start = Instant::now();
             self.static_file_provider.finalize()?;
+            #[cfg(test)]
+            tests::crash_cut::after_commit_step("static_files");
             timings.sf = start.elapsed();
 
             let start = Instant::now();
             let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
             for batch in batches {
                 self.rocksdb_provider.commit_batch(batch)?;
+                #[cfg(test)]
+                tests::crash_cut::after_commit_step("rocksdb");
             }
             timings.rocksdb = start.elapsed();
 
             let start = Instant::now();
             self.tx.commit()?;
+            #[cfg(test)]
+            tests::crash_cut::after_commit_step("mdbx");
             timings.mdbx = start.elapsed();
 
             self.metrics.record_commit(&timings);
@@ -3947,6 +3952,8 @@ impl<TX: Send, N: NodeTypes> StoragePath for DatabaseProvider<TX, N> {
 
 #[cfg(test)]
 mod tests {
+    pub(super) mod crash_cut;
+
     use super::*;
     use crate::{
         test_utils::{blocks::BlockchainTestData, create_test_provider_factory},
@@ -4757,6 +4764,11 @@ mod tests {
 
         let genesis = test_block_builder.get_executed_blocks(0..1).next().unwrap();
         let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..5).collect();
+        // The engine retains deferred blocks in the overlay until their trie state is persisted.
+        // Unwind needs this suffix to reconstruct trie reverts from the partial frontier.
+        for block in &blocks[2..] {
+            factory.overlay_manager().insert_block(block.clone());
+        }
 
         let provider_rw = factory.provider_rw().unwrap();
         save_genesis(&provider_rw, &genesis).unwrap();

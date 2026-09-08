@@ -11,9 +11,9 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+reth-rayon = { workspace = true }
 tempfile.workspace = true
 reth-db-api.workspace = true
-rayon.workspace = true
 
 [dev-dependencies]
 alloy-primitives = { workspace = true, features = ["getrandom"] }

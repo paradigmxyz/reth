@@ -4,6 +4,7 @@
 //!
 //! - `serde` (default): Enable serde support
 //! - `arbitrary`: Adds `proptest` and `arbitrary` support for wire types.
+//! - `test-utils`: Provides a simulated transport for the production ETH protocol streams.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -14,6 +15,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod capability;
+mod clock;
 mod disconnect;
 pub mod errors;
 pub mod eth_snap;
@@ -23,6 +25,9 @@ pub mod multiplex;
 mod p2pstream;
 mod pinger;
 pub mod protocol;
+
+#[cfg(any(test, feature = "test-utils"))]
+pub mod simulation;
 
 /// Handshake logic
 pub mod handshake;

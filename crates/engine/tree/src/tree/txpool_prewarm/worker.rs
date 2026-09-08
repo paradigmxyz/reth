@@ -15,6 +15,7 @@ use reth_provider::{
 };
 use reth_revm::{cached::CachedReads, db::State};
 use reth_storage_overlay::OverlayStateProviderFactory;
+use reth_tasks::TaskRuntime;
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -115,16 +116,7 @@ where
                 continue
             }
 
-            if self.cache_parent != Some(parent_hash) {
-                self.cache = CachedReads::default();
-                self.cache_parent = Some(parent_hash);
-                self.published_entries = (0, 0, 0);
-                debug!(
-                    target: "engine::tree::txpool_prewarm",
-                    ?parent_hash,
-                    "started txpool prewarming"
-                );
-            }
+            self.reset_cache(parent_hash);
 
             let batch = self.warm_one_batch();
 
@@ -153,7 +145,7 @@ where
             }
 
             let command = self.commands.recv().map_err(|_| ChannelDisconnected)?;
-            self.apply(command);
+            self.apply(command)?;
         }
     }
 
@@ -178,6 +170,19 @@ where
     /// never consumed here: a pending command merely ends the batch and is applied by the main
     /// loop after the EVM and state provider built here are dropped.
     fn warm_one_batch(&mut self) -> BatchEnd {
+        self.warm_batch(|| {
+            let deadline = Instant::now() + REFRESH_INTERVAL;
+            move || Instant::now() < deadline
+        })
+    }
+
+    /// Shared execution body. The budget starts after provider/EVM construction, preserving the
+    /// native wall-clock batch while letting cooperative callers limit it to one transaction.
+    fn warm_batch<F, Budget>(&mut self, make_budget: F) -> BatchEnd
+    where
+        F: FnOnce() -> Budget,
+        Budget: FnMut() -> bool,
+    {
         let (_, job) = self.job.as_ref().expect("wait_until_runnable installed a job");
         let (parent_hash, transactions) =
             self.transactions.as_mut().expect("open_transactions installed an iterator");
@@ -212,8 +217,8 @@ where
         evm_env.cfg_env.disable_base_fee = true;
         let mut evm = self.evm_config.evm_with_env(&mut state, evm_env);
 
-        let deadline = Instant::now() + REFRESH_INTERVAL;
-        while self.commands.is_empty() && Instant::now() < deadline {
+        let mut budget = make_budget();
+        while self.commands.is_empty() && budget() {
             let Some(transaction) = transactions.next() else { return BatchEnd::Rest };
             if let Err(err) = evm.transact(transaction.transaction) {
                 trace!(
@@ -226,6 +231,17 @@ where
             }
         }
         BatchEnd::GoAgain
+    }
+
+    fn reset_cache(&mut self, parent_hash: B256) -> bool {
+        if self.cache_parent == Some(parent_hash) {
+            return false;
+        }
+        self.cache = CachedReads::default();
+        self.cache_parent = Some(parent_hash);
+        self.published_entries = (0, 0, 0);
+        debug!(target: "engine::tree::txpool_prewarm", ?parent_hash, "started txpool prewarming");
+        true
     }
 
     /// Publishes a fresh snapshot if the cache gained reads since the last publication.
@@ -253,7 +269,7 @@ where
     fn idle(&mut self, timeout: Duration) -> Result<(), ChannelDisconnected> {
         match self.commands.recv_timeout(timeout) {
             Ok(command) => {
-                self.apply(command);
+                self.apply(command)?;
                 Ok(())
             }
             Err(RecvTimeoutError::Timeout) => Ok(()),
@@ -265,7 +281,7 @@ where
     fn apply_pending_commands(&mut self) -> Result<(), ChannelDisconnected> {
         loop {
             match self.commands.try_recv() {
-                Ok(command) => self.apply(command),
+                Ok(command) => self.apply(command)?,
                 Err(TryRecvError::Empty) => return Ok(()),
                 Err(TryRecvError::Disconnected) => return Err(ChannelDisconnected),
             }
@@ -276,7 +292,7 @@ where
     ///
     /// Only called while no EVM or state provider is alive, so a paused worker holds no
     /// execution resources.
-    fn apply(&mut self, command: Command<Job<N, P, Evm>>) {
+    fn apply(&mut self, command: Command<Job<N, P, Evm>>) -> Result<(), ChannelDisconnected> {
         match command {
             Command::Start { parent_hash, job } => self.job = Some((parent_hash, job)),
             Command::Pause => {
@@ -289,6 +305,99 @@ where
                     .checked_sub(1)
                     .expect("txpool prewarm resumed without a matching pause");
             }
+            Command::Shutdown => return Err(ChannelDisconnected),
+        }
+        Ok(())
+    }
+}
+
+impl<N, P, Evm> Worker<N, P, Evm>
+where
+    N: NodePrimitives,
+    P: DatabaseProviderFactory + 'static,
+    P::Provider: BlockNumReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + 'static,
+    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: StateProvider> + Send,
+    Evm: ConfigureEvm<Primitives = N> + 'static,
+{
+    /// Keeps factories and caches across polls; a provider and EVM exist only inside a CPU job.
+    pub(super) async fn run_cooperative(self, runtime: TaskRuntime) {
+        let _ = self.run_cooperative_until_disconnected(&runtime).await;
+    }
+
+    async fn run_cooperative_until_disconnected(
+        mut self,
+        runtime: &TaskRuntime,
+    ) -> Result<(), ChannelDisconnected> {
+        let mut publish_at = runtime.now() + REFRESH_INTERVAL;
+        loop {
+            self.apply_pending_commands()?;
+            let Some(parent_hash) =
+                self.job.as_ref().map(|(hash, _)| *hash).filter(|_| self.pauses == 0)
+            else {
+                self.idle_cooperative(runtime, REFRESH_INTERVAL).await?;
+                continue;
+            };
+            if !self.open_transactions(parent_hash) {
+                self.idle_cooperative(runtime, HEAD_POLL_INTERVAL).await?;
+                continue;
+            }
+            if self.reset_cache(parent_hash) {
+                publish_at = runtime.now() + REFRESH_INTERVAL;
+            }
+            let (worker, batch) = runtime
+                .spawn_cpu("txpool_prewarm_transaction", move || {
+                    let batch = self.warm_batch(|| {
+                        let mut remaining = 1;
+                        move || {
+                            if remaining == 0 {
+                                return false
+                            }
+                            remaining -= 1;
+                            true
+                        }
+                    });
+                    (self, batch)
+                })
+                .await
+                .expect("txpool prewarming transaction task failed");
+            self = worker;
+            if !self.commands.is_empty() {
+                continue;
+            }
+            if batch == BatchEnd::Rest || runtime.now() >= publish_at {
+                self.publish_snapshot_if_dirty();
+                publish_at = runtime.now() + REFRESH_INTERVAL;
+            }
+            if batch == BatchEnd::Rest {
+                self.idle_cooperative(runtime, REFRESH_INTERVAL).await?;
+            } else {
+                runtime.yield_now().await;
+            }
+        }
+    }
+
+    async fn idle_cooperative(
+        &mut self,
+        runtime: &TaskRuntime,
+        timeout: Duration,
+    ) -> Result<(), ChannelDisconnected> {
+        let deadline = runtime.now() + timeout;
+        loop {
+            match self.commands.try_recv() {
+                Ok(command) => return self.apply(command),
+                Err(TryRecvError::Disconnected) => return Err(ChannelDisconnected),
+                Err(TryRecvError::Empty) => {}
+            }
+            if runtime.now() >= deadline {
+                return Ok(())
+            }
+            runtime.sleep(Duration::from_millis(1)).await;
         }
     }
 }
@@ -333,6 +442,8 @@ mod tests {
         sync::atomic::{AtomicUsize, Ordering},
         thread::{self, JoinHandle},
     };
+
+    mod deterministic;
 
     /// Upper bound on any single wait; failures surface as panics well before CI timeouts.
     const WAIT_LIMIT: Duration = Duration::from_secs(5);

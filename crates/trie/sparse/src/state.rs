@@ -36,6 +36,8 @@ pub struct SparseStateTrie<
     storage: StorageTries<S>,
     /// Flag indicating whether trie updates should be retained.
     retain_updates: bool,
+    /// Whether independent account/storage trie operations may run on Rayon workers.
+    parallelism_enabled: bool,
     /// Holds data that should be dropped after final state root is calculated.
     deferred_drops: DeferredDrops,
     /// Metrics for the sparse state trie.
@@ -53,6 +55,7 @@ where
             state: Default::default(),
             storage: Default::default(),
             retain_updates: false,
+            parallelism_enabled: true,
             deferred_drops: DeferredDrops::default(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
@@ -117,6 +120,28 @@ impl SparseStateTrie {
     /// Create new [`SparseStateTrie`] with the default trie implementation.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Enables or disables Rayon dispatch in this trie and its account/storage arenas.
+    ///
+    /// Disabling parallelism keeps the same trie algorithms and executes their partitions on the
+    /// calling thread. Existing, cleared, and future storage tries retain this setting across
+    /// pruning and reuse. Apply it after installing replacement account or storage tries.
+    pub fn set_parallelism_enabled(&mut self, enabled: bool) {
+        fn configure(trie: &mut RevealableSparseTrie, enabled: bool) {
+            let arena = match trie {
+                RevealableSparseTrie::Blind(arena) => arena.get_or_insert_with(Default::default),
+                RevealableSparseTrie::Revealed(arena) => arena,
+            };
+            arena.set_parallelism_enabled(enabled);
+        }
+
+        self.parallelism_enabled = enabled;
+        configure(&mut self.state, enabled);
+        configure(&mut self.storage.default_trie, enabled);
+        for trie in self.storage.tries.values_mut().chain(self.storage.cleared_tries.iter_mut()) {
+            configure(trie, enabled);
+        }
     }
 }
 
@@ -250,8 +275,16 @@ where
         }
 
         // Ensure a storage trie exists for every address whose proofs we're about to reveal
-        for &account in storage_proofs.keys() {
-            let _ = self.storage.get_or_create_trie_mut(account);
+        if self.parallelism_enabled {
+            for &account in storage_proofs.keys() {
+                let _ = self.storage.get_or_create_trie_mut(account);
+            }
+        } else {
+            let mut accounts: Vec<_> = storage_proofs.keys().copied().collect();
+            accounts.sort_unstable();
+            for account in accounts {
+                let _ = self.storage.get_or_create_trie_mut(account);
+            }
         }
 
         for (account, trie) in &mut self.storage.tries {
@@ -263,6 +296,10 @@ where
         }
 
         let retain_updates = self.retain_updates;
+
+        if !self.parallelism_enabled {
+            targets.sort_unstable_by_key(|(account, _, _)| *account);
+        }
 
         #[cfg(not(feature = "std"))]
         let results: Vec<_> = targets
@@ -282,29 +319,30 @@ where
             use reth_primitives_traits::ParallelBridgeBuffered;
 
             let parent_span = tracing::Span::current();
-            targets
-                .into_iter()
-                .par_bridge_buffered()
-                .map(|(hashed_address, target, mut nodes)| {
-                    let _span = tracing::trace_span!(
-                        target: "trie::sparse",
-                        parent: &parent_span,
-                        "reveal_v2_proof_nodes",
-                        ?hashed_address,
-                    )
-                    .entered();
+            let reveal = |(hashed_address, target, mut nodes): (
+                _,
+                Either<&mut RevealableSparseTrie<A>, &mut RevealableSparseTrie<S>>,
+                Vec<ProofTrieNodeV2>,
+            )| {
+                let _span = tracing::trace_span!(
+                    target: "trie::sparse",
+                    parent: &parent_span,
+                    "reveal_v2_proof_nodes",
+                    ?hashed_address,
+                )
+                .entered();
 
-                    let result = match target {
-                        Either::Left(trie) => {
-                            trie.reveal_v2_proof_nodes(&mut nodes, retain_updates)
-                        }
-                        Either::Right(trie) => {
-                            trie.reveal_v2_proof_nodes(&mut nodes, retain_updates)
-                        }
-                    };
-                    (result, nodes)
-                })
-                .collect()
+                let result = match target {
+                    Either::Left(trie) => trie.reveal_v2_proof_nodes(&mut nodes, retain_updates),
+                    Either::Right(trie) => trie.reveal_v2_proof_nodes(&mut nodes, retain_updates),
+                };
+                (result, nodes)
+            };
+            if self.parallelism_enabled {
+                targets.into_iter().par_bridge_buffered().map(reveal).collect()
+            } else {
+                targets.into_iter().map(reveal).collect()
+            }
         };
 
         // Accumulate the first error and defer dropping the proof node buffers.
@@ -419,7 +457,7 @@ where
     /// which can significantly reduce allocation overhead when the trie is reused.
     pub fn clear(&mut self) {
         self.state.clear();
-        self.storage.clear();
+        self.storage.clear(self.parallelism_enabled);
     }
 
     /// Returns the number of storage tries currently retained (active + cleared).
@@ -450,21 +488,27 @@ where
         let account_parent_span = parent_span.clone();
 
         // Prune account and storage tries in parallel using the same epoch cutoff.
-        let (account_nodes_pruned, storage_tries_evicted) = rayon::join(
-            || {
-                let hashed_address = Option::<B256>::None;
-                let _span = tracing::trace_span!(
-                    target: "trie::sparse",
-                    parent: &account_parent_span,
-                    "prune_trie",
-                    ?hashed_address,
-                )
-                .entered();
+        let prune_accounts = || {
+            let hashed_address = Option::<B256>::None;
+            let _span = tracing::trace_span!(
+                target: "trie::sparse",
+                parent: &account_parent_span,
+                "prune_trie",
+                ?hashed_address,
+            )
+            .entered();
 
-                self.state.as_revealed_mut().map(|trie| trie.prune(prune_before)).unwrap_or(0)
-            },
-            || self.storage.prune(prune_before, &parent_span),
-        );
+            self.state.as_revealed_mut().map(|trie| trie.prune(prune_before)).unwrap_or(0)
+        };
+        let prune_storage =
+            || self.storage.prune(prune_before, &parent_span, self.parallelism_enabled);
+        let (account_nodes_pruned, storage_tries_evicted) = if self.parallelism_enabled {
+            rayon::join(prune_accounts, prune_storage)
+        } else {
+            let mut prune_accounts = prune_accounts;
+            let mut prune_storage = prune_storage;
+            (prune_accounts(), prune_storage())
+        };
 
         debug!(
             target: "trie::sparse",
@@ -492,38 +536,46 @@ struct StorageTries<S = ArenaParallelSparseTrie> {
 #[cfg(feature = "std")]
 impl<S: SparseTrieTrait> StorageTries<S> {
     /// Prunes storage tries by epoch, returning fully old tries to the reuse pool.
-    fn prune(&mut self, prune_before: TrieNodeEpoch, parent_span: &tracing::Span) -> usize {
+    fn prune(
+        &mut self,
+        prune_before: TrieNodeEpoch,
+        parent_span: &tracing::Span,
+        parallelism_enabled: bool,
+    ) -> usize {
         use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 
-        let addresses_to_evict: Vec<B256> = self
-            .tries
-            .par_iter_mut()
-            .filter_map(|(address, trie)| {
-                let hashed_address = Some(*address);
-                let _span = tracing::trace_span!(
-                    target: "trie::sparse",
-                    parent: parent_span,
-                    "prune_trie",
-                    ?hashed_address,
-                )
-                .entered();
+        let prune_trie = |(address, trie): (&B256, &mut RevealableSparseTrie<S>)| {
+            let hashed_address = Some(*address);
+            let _span = tracing::trace_span!(
+                target: "trie::sparse",
+                parent: parent_span,
+                "prune_trie",
+                ?hashed_address,
+            )
+            .entered();
 
-                let evict = trie.as_revealed_mut().is_none_or(|revealed| {
-                    // Avoid traversing and compacting a trie that will be immediately evicted.
-                    let root_epoch =
-                        revealed.root_epoch().expect("storage trie root must not be dirty");
-                    if !root_epoch.should_prune(prune_before) {
-                        revealed.prune(prune_before);
-                    }
-                    root_epoch.should_prune(prune_before)
-                });
+            let evict = trie.as_revealed_mut().is_none_or(|revealed| {
+                // Avoid traversing and compacting a trie that will be immediately evicted.
+                let root_epoch =
+                    revealed.root_epoch().expect("storage trie root must not be dirty");
+                if !root_epoch.should_prune(prune_before) {
+                    revealed.prune(prune_before);
+                }
+                root_epoch.should_prune(prune_before)
+            });
 
-                evict.then(|| {
-                    trie.clear();
-                    *address
-                })
+            evict.then(|| {
+                trie.clear();
+                *address
             })
-            .collect();
+        };
+        let addresses_to_evict: Vec<B256> = if parallelism_enabled {
+            self.tries.par_iter_mut().filter_map(prune_trie).collect()
+        } else {
+            let mut tries: Vec<_> = self.tries.iter_mut().collect();
+            tries.sort_unstable_by_key(|(address, _)| **address);
+            tries.into_iter().filter_map(prune_trie).collect()
+        };
 
         let evicted = addresses_to_evict.len();
         self.cleared_tries.reserve(evicted);
@@ -540,11 +592,18 @@ impl<S: SparseTrieTrait> StorageTries<S> {
 impl<S: SparseTrieTrait> StorageTries<S> {
     /// Returns all fields to a cleared state, equivalent to the default state, keeping cleared
     /// collections for re-use later when possible.
-    fn clear(&mut self) {
-        self.cleared_tries.extend(self.tries.drain().map(|(_, mut trie)| {
+    fn clear(&mut self, parallelism_enabled: bool) {
+        let clear = |(_, mut trie): (_, RevealableSparseTrie<S>)| {
             trie.clear();
             trie
-        }));
+        };
+        if parallelism_enabled {
+            self.cleared_tries.extend(self.tries.drain().map(clear));
+        } else {
+            let mut tries: Vec<_> = self.tries.drain().collect();
+            tries.sort_unstable_by_key(|(address, _)| *address);
+            self.cleared_tries.extend(tries.into_iter().map(clear));
+        }
     }
 }
 

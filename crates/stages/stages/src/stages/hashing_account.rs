@@ -195,7 +195,7 @@ where
                 let (tx, rx) = mpsc::sync_channel(chunk.len());
                 channels.push(rx);
                 // Spawn the hashing task onto the global rayon pool
-                rayon::spawn(move || {
+                reth_rayon::spawn(move || {
                     for (address, account) in chunk {
                         let address = address.key().unwrap();
                         let _ = tx.send((RawKey::new(keccak256(address)), account));
@@ -370,6 +370,15 @@ mod tests {
 
     #[tokio::test]
     async fn execute_clean_account_hashing() {
+        execute_clean_account_hashing_case().await;
+    }
+
+    #[tokio::test]
+    async fn inline_execute_clean_account_hashing() {
+        reth_rayon::deterministic(execute_clean_account_hashing_case()).await;
+    }
+
+    async fn execute_clean_account_hashing_case() {
         let (previous_stage, stage_progress) = (20, 10);
         // Set up the runner
         let mut runner = AccountHashingTestRunner::default();
@@ -382,8 +391,11 @@ mod tests {
 
         runner.seed_execution(input).expect("failed to seed execution");
 
-        let rx = runner.execute(input);
-        let result = rx.await.unwrap();
+        let result = if reth_rayon::is_inline() {
+            runner.execute_inline(input).await
+        } else {
+            runner.execute(input).await.unwrap()
+        };
 
         assert_matches!(
             result,

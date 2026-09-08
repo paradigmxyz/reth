@@ -15,7 +15,6 @@ use crate::{
     StaticFileProviderFactory,
 };
 use alloy_primitives::{map::HashMap, Address, BlockNumber, TxHash, TxNumber, B256};
-use rayon::slice::ParallelSliceMut;
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRW},
     models::{AccountBeforeTx, StorageBeforeTx},
@@ -619,7 +618,7 @@ where
         mut changeset: Vec<AccountBeforeTx>,
     ) -> ProviderResult<()> {
         // First sort the changesets
-        changeset.par_sort_by_key(|a| a.address);
+        reth_rayon::sort_by_key(&mut changeset, |a| a.address);
         match self {
             Self::Database(cursor) => {
                 for change in changeset {
@@ -648,7 +647,7 @@ where
         block_number: BlockNumber,
         mut changeset: Vec<StorageBeforeTx>,
     ) -> ProviderResult<()> {
-        changeset.par_sort_by_key(|change| (change.address, change.key));
+        reth_rayon::sort_by_key(&mut changeset, |change| (change.address, change.key));
 
         match self {
             Self::Database(cursor) => {

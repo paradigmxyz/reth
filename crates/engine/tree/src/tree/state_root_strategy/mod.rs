@@ -13,12 +13,14 @@
 //! 1. [`StateRootStrategy::prepare`] runs before block execution. The job can spawn background work
 //!    here and can expose hooks that observe execution.
 //! 2. Execution runs. Jobs that observe execution receive updates through their hooks.
-//! 3. [`StateRootJob::finish`] runs after execution and returns the [`StateRootJobOutcome`]. It
-//!    must produce a result even if no execution updates were observed, since the full
-//!    [`BlockExecutionOutput`] is passed to it.
+//! 3. [`StateRootJob::finish`] (native) or [`StateRootJob::finish_async`] (cooperative) runs after
+//!    execution and returns the [`StateRootJobOutcome`]. It must produce a result even if no
+//!    execution updates were observed, since the full [`BlockExecutionOutput`] is passed to it.
 //!
-//! Dropping a prepared job without calling `finish` aborts it. Implementations must treat
+//! Dropping a prepared job without finishing it aborts it. Implementations must treat
 //! channel disconnects from dropped hooks as cancellation and must not leak background work.
+//! The default asynchronous finish delegates to the synchronous method. A cooperative strategy
+//! must override it and drain its background tasks through [`StateRootStrategy::wait_for_tasks`].
 //!
 //! # Stream delivery contract
 //!
@@ -59,6 +61,7 @@ use self::sparse_trie::{SparseTrieCacheTask, SparseTrieTaskMetrics};
 use crate::tree::{metrics::BlockValidationMetrics, EngineApiTreeState, ExecutionEnv, TreeConfig};
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
+use futures::future::BoxFuture;
 use reth_chain_state::{ExecutedBlock, PreservedSparseTrie};
 use reth_errors::ProviderResult;
 use reth_evm::{ConfigureEvm, OnStateHook};
@@ -71,7 +74,7 @@ use reth_provider::{
     StageCheckpointReader, StateRootProvider, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
-use reth_tasks::utils::increase_thread_priority;
+use reth_tasks::{utils::increase_thread_priority, TaskHandle, TaskRuntime};
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
     HashedPostState,
@@ -92,7 +95,7 @@ use std::{
     fmt,
     sync::{
         mpsc::{self, RecvTimeoutError},
-        Arc,
+        Arc, Mutex,
     },
     time::Duration,
 };
@@ -127,6 +130,11 @@ where
         _ctx: PayloadStateRootJobContext<'_, N, P>,
     ) -> ProviderResult<Option<PayloadStateRootHandle>> {
         Ok(None)
+    }
+
+    /// Drains cooperatively scheduled tasks, including canceled jobs, before node shutdown.
+    fn wait_for_tasks(&self) -> BoxFuture<'_, ()> {
+        Box::pin(async {})
     }
 }
 
@@ -410,6 +418,16 @@ impl<N: NodePrimitives> PreparedStateRootJob<N> {
     ) -> ProviderResult<StateRootJobOutcome> {
         self.job.finish(block, output, hashed_state)
     }
+
+    /// Completes the job without blocking other cooperative tasks while its result is pending.
+    pub fn finish_async<'a>(
+        &'a mut self,
+        block: &'a RecoveredBlock<N::Block>,
+        output: Arc<BlockExecutionOutput<N::Receipt>>,
+        hashed_state: &'a LazyHashedPostState,
+    ) -> BoxFuture<'a, ProviderResult<StateRootJobOutcome>> {
+        self.job.finish_async(block, output, hashed_state)
+    }
 }
 
 /// Per-block state-root job prepared before execution and finished after execution.
@@ -426,6 +444,16 @@ pub trait StateRootJob<N: NodePrimitives>: Send {
         output: Arc<BlockExecutionOutput<N::Receipt>>,
         hashed_state: &LazyHashedPostState,
     ) -> ProviderResult<StateRootJobOutcome>;
+
+    /// Completes a job asynchronously. Native jobs retain their synchronous wait by default.
+    fn finish_async<'a>(
+        &'a mut self,
+        block: &'a RecoveredBlock<N::Block>,
+        output: Arc<BlockExecutionOutput<N::Receipt>>,
+        hashed_state: &'a LazyHashedPostState,
+    ) -> BoxFuture<'a, ProviderResult<StateRootJobOutcome>> {
+        Box::pin(async move { self.finish(block, output, hashed_state) })
+    }
 }
 
 /// Outcome of a per-block state-root job.
@@ -469,6 +497,10 @@ type SerialFallbackRx = mpsc::Receiver<ProviderResult<(B256, TrieUpdates, Arc<Ha
 #[derive(Default)]
 pub struct DefaultStateRootStrategy {
     metrics: SparseTrieTaskMetrics,
+    /// Explicit runtime for cooperative sparse-trie execution; native behavior is the default.
+    task_runtime: Option<TaskRuntime>,
+    /// Retain completion handles so canceled pipelines are drained before database shutdown.
+    tasks: Mutex<Vec<TaskHandle<()>>>,
 }
 
 impl fmt::Debug for DefaultStateRootStrategy {
@@ -478,6 +510,14 @@ impl fmt::Debug for DefaultStateRootStrategy {
 }
 
 impl DefaultStateRootStrategy {
+    /// Schedules sparse-trie hashing and proof work on the supplied runtime.
+    ///
+    /// Cooperative jobs require asynchronous validation. Payload builders retain their own
+    /// synchronous root calculation because their execution interface cannot await this pipeline.
+    pub fn with_task_runtime(runtime: TaskRuntime) -> Self {
+        Self { task_runtime: Some(runtime), ..Self::default() }
+    }
+
     /// Transaction count threshold below which proof workers are halved, since fewer transactions
     /// produce fewer state changes and most workers would be idle overhead.
     const SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD: usize = 30;
@@ -520,8 +560,14 @@ impl DefaultStateRootStrategy {
         let task_ctx = task_ctx.with_proof_jitter(config.proof_jitter());
         let halve_workers = transaction_count
             .is_some_and(|count| count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD);
-        let proof_handle =
-            ProofWorkerHandle::new(executor, task_ctx, halve_workers, proof_result_tx.clone());
+        let proof_handle = match &self.task_runtime {
+            Some(runtime) => {
+                ProofWorkerHandle::new_cooperative(runtime, task_ctx, proof_result_tx.clone())
+            }
+            None => {
+                ProofWorkerHandle::new(executor, task_ctx, halve_workers, proof_result_tx.clone())
+            }
+        };
 
         let (state_root_tx, state_root_rx) = mpsc::channel();
         let (hashed_state_tx, hashed_state_rx) = mpsc::channel();
@@ -573,6 +619,21 @@ impl DefaultStateRootStrategy {
         cancel_rx: CrossbeamReceiver<()>,
         options: SparseTrieTaskOptions<N>,
     ) {
+        if let Some(runtime) = &self.task_runtime {
+            self.spawn_cooperative_sparse_trie_task(
+                runtime.clone(),
+                overlay_manager.clone(),
+                proof_worker_handle,
+                proof_result_tx,
+                proof_result_rx,
+                state_root_tx,
+                hashed_state_tx,
+                from_multi_proof,
+                cancel_rx,
+                options,
+            );
+            return;
+        }
         let SparseTrieTaskOptions {
             parent_header,
             preserved_sparse_trie,
@@ -732,6 +793,111 @@ impl DefaultStateRootStrategy {
             executor.spawn_drop(deferred);
         });
     }
+
+    #[expect(clippy::too_many_arguments)]
+    fn spawn_cooperative_sparse_trie_task<N: NodePrimitives>(
+        &self,
+        runtime: TaskRuntime,
+        overlay_manager: OverlayManager<N>,
+        proof_worker_handle: ProofWorkerHandle,
+        proof_result_tx: CrossbeamSender<ProofResultMessage>,
+        proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
+        state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, StateRootTaskError>>,
+        hashed_state_tx: mpsc::Sender<Arc<HashedPostState>>,
+        updates: CrossbeamReceiver<StateRootMessage>,
+        cancel_rx: CrossbeamReceiver<()>,
+        options: SparseTrieTaskOptions<N>,
+    ) {
+        let SparseTrieTaskOptions {
+            parent_header,
+            preserved_sparse_trie,
+            chunk_size,
+            pending_sparse_trie_prune_blocks,
+        } = options;
+        let metrics = self.metrics.clone();
+        let worker_runtime = runtime.clone();
+        let task = runtime.spawn_named_task("sparse-trie", async move {
+            let parent_hash = parent_header.hash();
+            let parent_state_root = parent_header.state_root();
+            let new_epoch = TrieNodeEpoch::new(parent_header.number().saturating_add(1));
+            let prune_before =
+                sparse_trie_prune_before(pending_sparse_trie_prune_blocks.as_deref(), new_epoch);
+            let mut anchor_hash = parent_hash;
+            let mut reused = false;
+            let preserved = match preserved_sparse_trie {
+                Some(preserved) => {
+                    let previous_anchor = preserved.anchor_hash();
+                    // Cooperative workers publish only finalized tries. The named lane also
+                    // finishes its previous job before this one starts, so this cannot wait.
+                    match preserved.into_trie_for(parent_state_root) {
+                        Ok(Some(trie)) => {
+                            anchor_hash = previous_anchor;
+                            reused = true;
+                            Some(trie)
+                        }
+                        Ok(None) => None,
+                        Err(error) => {
+                            proof_worker_handle.shutdown().await;
+                            let _ = state_root_tx
+                                .send(Err(StateRootTaskError::Other(error.to_string())));
+                            return;
+                        }
+                    }
+                }
+                None => None,
+            };
+            let mut trie = preserved.unwrap_or_else(|| {
+                let default_trie =
+                    RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+                SparseStateTrie::default()
+                    .with_accounts_trie(default_trie.clone())
+                    .with_default_storage_trie(default_trie)
+                    .with_updates(true)
+            });
+            trie.set_parallelism_enabled(false);
+            let mut task = SparseTrieCacheTask::new_with_trie_cooperative(
+                &worker_runtime,
+                updates,
+                cancel_rx,
+                hashed_state_tx,
+                proof_worker_handle,
+                proof_result_tx,
+                proof_result_rx,
+                metrics,
+                trie,
+                parent_state_root,
+                new_epoch,
+                chunk_size,
+            );
+            let result = task.run_cooperative(&worker_runtime).await;
+            if let Ok(outcome) = &result {
+                let (mut trie, deferred) = task.into_trie_for_reuse();
+                if let Some(prune_before) = prune_before {
+                    trie.prune(prune_before);
+                }
+                let anchor_hash = published_sparse_trie_anchor_hash(
+                    anchor_hash,
+                    reused,
+                    pending_sparse_trie_prune_blocks.as_deref(),
+                );
+                // Publish after finalization: a synchronous preserved-trie receiver must never
+                // wait on another actor on the simulator's only execution thread.
+                overlay_manager.store_sparse_trie(PreservedSparseTrie::anchored(
+                    trie,
+                    outcome.state_root,
+                    anchor_hash,
+                ));
+                drop(deferred);
+            } else {
+                overlay_manager.clear_sparse_trie();
+                drop(task.into_cleared_trie());
+            }
+            if state_root_tx.send(result).is_err() {
+                overlay_manager.clear_sparse_trie();
+            }
+        });
+        self.tasks.lock().expect("sparse task registry poisoned").push(task);
+    }
 }
 
 struct SparseTrieTaskOptions<N: NodePrimitives> {
@@ -818,7 +984,7 @@ where
             return Ok(PreparedStateRootJob::new(Box::new(SkippedStateRootJob {}), None))
         }
 
-        if !ctx.config.use_state_root_task() {
+        if self.task_runtime.is_none() && !ctx.config.use_state_root_task() {
             return Ok(PreparedStateRootJob::new(
                 Box::new(SynchronousStateRootJob {
                     state_provider_factory: ctx.state_provider_factory,
@@ -877,7 +1043,13 @@ where
 
         let hashed_state_rx = Some(handle.take_hashed_state_rx());
 
-        let mut prepared = PreparedStateRootJob::new(
+        let job: Box<dyn StateRootJob<N>> = if let Some(runtime) = &self.task_runtime {
+            Box::new(CooperativeSparseTrieStateRootJob {
+                handle,
+                runtime: runtime.clone(),
+                timeout: config.state_root_task_timeout(),
+            })
+        } else {
             Box::new(SparseTrieStateRootJob {
                 handle,
                 state_provider_factory,
@@ -885,10 +1057,10 @@ where
                 timeout: config.state_root_task_timeout(),
                 compare_trie_updates: config.always_compare_trie_updates(),
                 metrics: BlockValidationMetrics::default(),
-            }),
-            hashed_state_rx,
-        )
-        .with_hint_stream(hint_stream);
+            })
+        };
+        let mut prepared =
+            PreparedStateRootJob::new(job, hashed_state_rx).with_hint_stream(hint_stream);
         if let Some(hook) = execution_hook {
             prepared = prepared.with_execution_hook(hook);
         }
@@ -898,13 +1070,23 @@ where
         Ok(prepared)
     }
 
+    fn wait_for_tasks(&self) -> BoxFuture<'_, ()> {
+        let tasks = std::mem::take(&mut *self.tasks.lock().expect("sparse task registry poisoned"));
+        Box::pin(async move {
+            for task in tasks {
+                task.await.expect("cooperative sparse-trie worker failed");
+            }
+        })
+    }
+
     fn prepare_payload_builder(
         &self,
         mut ctx: PayloadStateRootJobContext<'_, N, P>,
     ) -> ProviderResult<Option<PayloadStateRootHandle>> {
         // Sharing the engine state-root task with the payload builder is opt-in, and needs a
         // host that can run the task pipeline at all.
-        if !ctx.config.share_sparse_trie_with_payload_builder() ||
+        if self.task_runtime.is_some() ||
+            !ctx.config.share_sparse_trie_with_payload_builder() ||
             ctx.config.skip_state_root() ||
             !ctx.config.has_enough_parallelism()
         {
@@ -993,6 +1175,67 @@ where
         let (state_root, trie_updates) =
             provider.state_root_with_updates(hashed_state.get().as_ref().clone())?;
         Ok(StateRootJobOutcome::new(state_root, Arc::new(trie_updates)))
+    }
+}
+
+#[derive(Debug)]
+struct CooperativeSparseTrieStateRootJob {
+    handle: StateRootHandle,
+    runtime: TaskRuntime,
+    timeout: Option<Duration>,
+}
+
+impl<N: NodePrimitives> StateRootJob<N> for CooperativeSparseTrieStateRootJob {
+    fn name(&self) -> &'static str {
+        "sparse-trie-cooperative"
+    }
+
+    fn finish(
+        &mut self,
+        _block: &RecoveredBlock<N::Block>,
+        _output: Arc<BlockExecutionOutput<N::Receipt>>,
+        _hashed_state: &LazyHashedPostState,
+    ) -> ProviderResult<StateRootJobOutcome> {
+        Err(ProviderError::other(std::io::Error::other(
+            "cooperative sparse-trie jobs require asynchronous completion",
+        )))
+    }
+
+    fn finish_async<'a>(
+        &'a mut self,
+        _block: &'a RecoveredBlock<N::Block>,
+        _output: Arc<BlockExecutionOutput<N::Receipt>>,
+        _hashed_state: &'a LazyHashedPostState,
+    ) -> BoxFuture<'a, ProviderResult<StateRootJobOutcome>> {
+        let receiver = self.handle.take_state_root_rx();
+        let deadline = self.timeout.map(|timeout| self.runtime.now() + timeout);
+        Box::pin(async move {
+            loop {
+                match receiver.try_recv() {
+                    Ok(result) => {
+                        // A simulation must expose sparse-trie bugs, not mask them with a serial
+                        // fallback. Header validation checks the actual computed root.
+                        let outcome = result.map_err(ProviderError::other)?;
+                        return Ok(StateRootJobOutcome::new(
+                            outcome.state_root,
+                            outcome.trie_updates,
+                        ));
+                    }
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        return Err(ProviderError::other(StateRootTaskError::Other(
+                            "cooperative sparse-trie task dropped".into(),
+                        )))
+                    }
+                    Err(mpsc::TryRecvError::Empty) => {}
+                }
+                if deadline.is_some_and(|deadline| self.runtime.now() >= deadline) {
+                    return Err(ProviderError::other(StateRootTaskError::Other(
+                        "cooperative sparse-trie task timed out".into(),
+                    )))
+                }
+                self.runtime.sleep(Duration::from_millis(1)).await;
+            }
+        })
     }
 }
 

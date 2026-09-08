@@ -51,9 +51,11 @@ reth-primitives-traits.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-storage-overlay.workspace = true
 reth-trie = { workspace = true, features = ["test-utils"] }
+reth-tasks = { workspace = true, features = ["deterministic"] }
 
 # misc
 rand.workspace = true
+commonware-runtime.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros"] }
 
 [features]
@@ -69,4 +71,5 @@ test-utils = [
     "reth-tasks/test-utils",
     "reth-chainspec/test-utils",
     "reth-ethereum-primitives/test-utils",
+    "commonware-runtime/test-utils",
 ]
