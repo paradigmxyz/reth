@@ -64,7 +64,7 @@ where
     ReceiptTy<Evm::Primitives>: Clone,
 {
     let worker_pool = runtime.bal_streaming_pool();
-    let worker_count = worker_pool.current_num_threads().max(1).min(transaction_count);
+    let worker_pool_size = worker_pool.current_num_threads().max(1);
 
     worker_pool.in_place_scope(|scope| {
         execute_block_inner(
@@ -77,7 +77,7 @@ where
             transaction_count,
             txs,
             receipt_tx,
-            worker_count,
+            worker_pool_size,
         )
     })
 }
@@ -93,7 +93,7 @@ fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
     transaction_count: usize,
     txs: Receiver<(usize, Result<Tx, Err>)>,
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
-    worker_count: usize,
+    worker_pool_size: usize,
 ) -> Result<
     (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList),
     BalExecutionError,
@@ -122,10 +122,16 @@ where
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
         let (abort_guard, abort_rx) = AbortGuard::new();
 
+        let worker_count = worker_pool_size.min(transaction_count);
+        // Broadcast jobs enter each thread's queue before it steals more streaming work.
+        // Small blocks remain stealable so any idle thread can execute their workers.
+        let broadcast = worker_count == worker_pool_size;
+        let jobs = if broadcast { 1 } else { worker_count };
         tracing::trace!(target: "engine::tree::bal", "bal spawning workers");
-        for _ in 0..worker_count {
+        for _ in 0..jobs {
             worker::spawn_worker(
                 scope,
+                broadcast,
                 txs.clone(),
                 abort_rx.clone(),
                 result_tx.clone(),
