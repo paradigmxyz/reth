@@ -11,12 +11,10 @@ use crate::{
         BuiltPayloadOsaka, BuiltPayloadParis, BuiltPayloadPrague, BuiltPayloadShanghai,
         ExecutionPayloadBodyAmsterdam, ExecutionPayloadBodyParis, ExecutionPayloadBodyShanghai,
         ExecutionPayloadEnvelopeAmsterdam, ExecutionPayloadEnvelopeCancun,
-        ExecutionPayloadEnvelopeOsaka, ExecutionPayloadEnvelopeParis,
-        ExecutionPayloadEnvelopePrague, ExecutionPayloadEnvelopeShanghai,
-        ForkchoiceUpdateAmsterdam, ForkchoiceUpdateCancun, ForkchoiceUpdateOsaka,
-        ForkchoiceUpdateParis, ForkchoiceUpdatePrague, ForkchoiceUpdateResponse,
-        ForkchoiceUpdateShanghai, Optional, PayloadStatus as EngineSszPayloadStatus,
-        PayloadStatusWithWitness,
+        ExecutionPayloadEnvelopeParis, ExecutionPayloadEnvelopePrague,
+        ExecutionPayloadEnvelopeShanghai, ForkchoiceUpdateAmsterdam, ForkchoiceUpdateCancun,
+        ForkchoiceUpdateParis, ForkchoiceUpdateResponse, ForkchoiceUpdateShanghai, Optional,
+        PayloadStatus as EngineSszPayloadStatus, PayloadStatusKind, PayloadStatusWithWitness,
     },
     engine_ssz_witness::{EngineSszWitness, EngineSszWitnessError},
 };
@@ -26,7 +24,7 @@ use alloy_primitives::{Bytes, B128, B256};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadBodyV1,
     ExecutionPayloadFieldV2, ExecutionPayloadSidecar, ForkchoiceState, PayloadAttributes,
-    PayloadId, PayloadStatusEnum, PraguePayloadFields,
+    PayloadId, PraguePayloadFields,
 };
 use futures::future::{BoxFuture, Either};
 use http_body_util::{BodyExt, LengthLimitError, Limited};
@@ -407,7 +405,7 @@ where
             Err(response) => return response,
         };
         let witness = match status.status {
-            PayloadStatusEnum::Valid => match witness_handler.generate_witness(payload).await {
+            PayloadStatusKind::Valid => match witness_handler.generate_witness(payload).await {
                 Ok(witness) => Some(witness),
                 // The block is valid but its parent is only known to the engine tree. The
                 // status stays authoritative; resubmitting once forkchoice has made the parent
@@ -935,7 +933,8 @@ where
                 .map(|(_, body)| body)
         })
         .collect();
-    Ok(BodiesResponse::from_optional_bodies(bodies, convert))
+    BodiesResponse::from_optional_bodies(bodies, convert)
+        .map_err(|err| EngineApiError::Internal(Box::new(err)))
 }
 
 fn payload_bodies_http_response<LegacyBody, ForkBody>(
@@ -1048,15 +1047,6 @@ impl PayloadDecodeError {
     }
 }
 
-fn check_ssz_bound(actual: usize, max: usize, field: &str) -> Result<(), ssz::DecodeError> {
-    if actual > max {
-        return Err(ssz::DecodeError::BytesInvalid(format!(
-            "{field} exceeds SSZ bound: {actual} > {max}"
-        )))
-    }
-    Ok(())
-}
-
 fn decode_new_payload_request(
     fork: EngineSszFork,
     body: &[u8],
@@ -1074,16 +1064,8 @@ fn decode_new_payload_request(
             let envelope = ExecutionPayloadEnvelopeCancun::from_ssz_bytes(body)?;
             (envelope.payload.into(), Some(envelope.parent_beacon_block_root), None)
         }
-        EngineSszFork::Prague => {
+        EngineSszFork::Prague | EngineSszFork::Osaka => {
             let envelope = ExecutionPayloadEnvelopePrague::from_ssz_bytes(body)?;
-            (
-                envelope.payload.into(),
-                Some(envelope.parent_beacon_block_root),
-                Some(envelope.execution_requests),
-            )
-        }
-        EngineSszFork::Osaka => {
-            let envelope = ExecutionPayloadEnvelopeOsaka::from_ssz_bytes(body)?;
             (
                 envelope.payload.into(),
                 Some(envelope.parent_beacon_block_root),
@@ -1100,28 +1082,7 @@ fn decode_new_payload_request(
         }
     };
 
-    // Alloy's codecs reproduce the wire layout but do not enforce the SSZ list bounds.
-    // Check those independently of the smaller, advertised total HTTP request limit.
-    let inner = payload.as_v1();
-    check_ssz_bound(inner.extra_data.len(), 32, "extra_data")?;
-    check_ssz_bound(inner.transactions.len(), 1 << 20, "transactions")?;
-    for transaction in &inner.transactions {
-        check_ssz_bound(transaction.len(), 1 << 30, "transaction")?;
-    }
-    if let Some(withdrawals) = payload.withdrawals() {
-        check_ssz_bound(withdrawals.len(), 16, "withdrawals")?;
-    }
-    if let Some(bal) = payload.block_access_list() {
-        check_ssz_bound(bal.len(), 1 << 30, "block_access_list")?;
-    }
-    if let Some(requests) = &requests {
-        check_ssz_bound(requests.len(), 256, "execution_requests")?;
-        for request in requests.iter() {
-            check_ssz_bound(request.len(), 1 << 30, "execution_request")?;
-        }
-    }
-
-    let versioned_hashes = calculate_versioned_hashes(&inner.transactions)?;
+    let versioned_hashes = calculate_versioned_hashes(&payload.as_v1().transactions)?;
     let sidecar = match parent_root {
         Some(parent_beacon_block_root) => {
             let cancun = CancunPayloadFields { parent_beacon_block_root, versioned_hashes };
@@ -1164,19 +1125,9 @@ fn decode_forkchoice_request(
                 ForkchoiceUpdateShanghai::from_ssz_bytes(body)?;
             (forkchoice_state, optional_attrs(payload_attributes), None)
         }
-        EngineSszFork::Cancun => {
+        EngineSszFork::Cancun | EngineSszFork::Prague | EngineSszFork::Osaka => {
             let ForkchoiceUpdateCancun { forkchoice_state, payload_attributes } =
                 ForkchoiceUpdateCancun::from_ssz_bytes(body)?;
-            (forkchoice_state, optional_attrs(payload_attributes), None)
-        }
-        EngineSszFork::Prague => {
-            let ForkchoiceUpdatePrague { forkchoice_state, payload_attributes } =
-                ForkchoiceUpdatePrague::from_ssz_bytes(body)?;
-            (forkchoice_state, optional_attrs(payload_attributes), None)
-        }
-        EngineSszFork::Osaka => {
-            let ForkchoiceUpdateOsaka { forkchoice_state, payload_attributes } =
-                ForkchoiceUpdateOsaka::from_ssz_bytes(body)?;
             (forkchoice_state, optional_attrs(payload_attributes), None)
         }
         EngineSszFork::Amsterdam => {
@@ -1185,11 +1136,6 @@ fn decode_forkchoice_request(
             (forkchoice_state, optional_attrs(payload_attributes), custody_columns.into_option())
         }
     };
-    if let Some(withdrawals) =
-        attrs.as_ref().and_then(|attrs: &PayloadAttributes| attrs.withdrawals.as_ref())
-    {
-        check_ssz_bound(withdrawals.len(), 16, "withdrawals")?;
-    }
     Ok((state, attrs, custody))
 }
 
