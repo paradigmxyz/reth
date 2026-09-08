@@ -106,7 +106,12 @@ where
     /// let mut hashed_state = HashedPostState::default();
     /// hashed_state.accounts.insert(
     ///     [0x11; 32].into(),
-    ///     Some(Account { nonce: 1, balance: U256::from(10), bytecode_hash: None }),
+    ///     Some(Account {
+    ///         nonce: 1,
+    ///         balance: U256::from(10),
+    ///         bytecode_hash: None,
+    ///         ..Default::default()
+    ///     }),
     /// );
     ///
     /// // Calculate the state root
