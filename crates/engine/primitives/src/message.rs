@@ -1,5 +1,6 @@
 use crate::{
-    error::BeaconForkChoiceUpdateError, BeaconOnNewPayloadError, ExecutionPayload, ForkchoiceStatus,
+    error::BeaconForkChoiceUpdateError, BeaconOnNewPayloadError, ExecutionPayload,
+    ForkchoiceStatus, PayloadWitnessRequests,
 };
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::{Bytes, B256};
@@ -325,6 +326,7 @@ where
     Payload: PayloadTypes,
 {
     to_engine: UnboundedSender<BeaconEngineMessage<Payload>>,
+    witness_requests: Option<PayloadWitnessRequests>,
 }
 
 impl<Payload> ConsensusEngineHandle<Payload>
@@ -333,7 +335,18 @@ where
 {
     /// Creates a new beacon consensus engine handle.
     pub const fn new(to_engine: UnboundedSender<BeaconEngineMessage<Payload>>) -> Self {
-        Self { to_engine }
+        Self { to_engine, witness_requests: None }
+    }
+
+    /// Connects optional witness capture to the node's engine validator.
+    pub fn with_witness_requests(mut self, requests: PayloadWitnessRequests) -> Self {
+        self.witness_requests = Some(requests);
+        self
+    }
+
+    /// Returns the node's optional witness capture registry.
+    pub const fn witness_requests(&self) -> Option<&PayloadWitnessRequests> {
+        self.witness_requests.as_ref()
     }
 
     /// Sends a new payload message to the beacon consensus engine and waits for a response.
