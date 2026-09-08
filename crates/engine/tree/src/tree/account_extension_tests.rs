@@ -269,6 +269,7 @@ fn table_dispatch_selects_custom_account_type() {
     struct ValueType;
     impl reth_db::TableViewer<&'static str> for ValueType {
         type Error = std::convert::Infallible;
+        type AccountExtension = TestExtension;
         fn view<T: reth_db::table::Table>(&self) -> Result<&'static str, Self::Error> {
             Ok(std::any::type_name::<T::Value>())
         }
@@ -278,7 +279,7 @@ fn table_dispatch_selects_custom_account_type() {
         reth_db::tables::Tables::HashedAccounts,
         reth_db::tables::Tables::AccountChangeSets,
     ] {
-        let value = table.view_with_account_extension::<TestExtension, _, _>(&ValueType).unwrap();
+        let value = table.view(&ValueType).unwrap();
         assert!(value.contains("TestExtension"), "wrong table value type: {value}");
     }
 }

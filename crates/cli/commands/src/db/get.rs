@@ -133,9 +133,7 @@ impl Command {
     pub fn execute<N: ProviderNodeTypes>(self, tool: &DbTool<N>) -> eyre::Result<()> {
         match self.subcommand {
             Subcommand::Mdbx { table, key, subkey, end_key, end_subkey, raw } => {
-                table.view_with_account_extension::<AccountExtensionTy<N::Primitives>, _, _>(
-                    &GetValueViewer { tool, key, subkey, end_key, end_subkey, raw },
-                )?
+                table.view(&GetValueViewer { tool, key, subkey, end_key, end_subkey, raw })?
             }
             Subcommand::Rocksdb { table, key, block, storage_key, all_shards, raw } => {
                 get_rocksdb(tool, table, &key, block, storage_key.as_deref(), all_shards, raw)?;
@@ -528,6 +526,7 @@ struct GetValueViewer<'a, N: NodeTypesWithDB> {
 
 impl<N: ProviderNodeTypes> TableViewer<()> for GetValueViewer<'_, N> {
     type Error = eyre::Report;
+    type AccountExtension = AccountExtensionTy<N::Primitives>;
 
     fn view<T: Table>(&self) -> Result<(), Self::Error> {
         let key = table_key::<T>(&self.key)?;

@@ -93,9 +93,7 @@ impl Command {
 
         match self.subcommand {
             Subcommand::Mdbx { table, start_key, end_key, limit } => {
-                table.view_with_account_extension::<
-                    reth_primitives_traits::AccountExtensionTy<N::Primitives>, _, _,
-                >(&ChecksumViewer { tool, start_key, end_key, limit })?;
+                table.view(&ChecksumViewer { tool, start_key, end_key, limit })?;
             }
             Subcommand::StaticFile { segment, start_block, end_block, limit } => {
                 checksum_static_file(tool, segment, start_block, end_block, limit)?;
@@ -228,6 +226,7 @@ impl<N: NodeTypesWithDB> ChecksumViewer<'_, N> {
 
 impl<N: ProviderNodeTypes> TableViewer<(u64, Duration)> for ChecksumViewer<'_, N> {
     type Error = eyre::Report;
+    type AccountExtension = reth_primitives_traits::AccountExtensionTy<N::Primitives>;
 
     fn view<T: Table>(&self) -> Result<(u64, Duration), Self::Error> {
         let provider =

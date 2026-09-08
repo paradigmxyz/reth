@@ -55,6 +55,7 @@ struct ClearViewer<'a, DB: Database> {
 
 impl<DB: Database> TableViewer<()> for ClearViewer<'_, DB> {
     type Error = eyre::Report;
+    type AccountExtension = reth_primitives_traits::EmptyAccountExtension;
 
     fn view<T: Table>(&self) -> Result<(), Self::Error> {
         let tx = self.db.tx_mut()?;

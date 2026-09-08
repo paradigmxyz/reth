@@ -31,7 +31,7 @@ use alloy_consensus::Header;
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_primitives_traits::{
-    Account, AccountExtensionTy, Bytecode, EmptyAccountExtension, StorageEntry,
+    Account, AccountExtension, AccountExtensionTy, Bytecode, EmptyAccountExtension, StorageEntry,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
@@ -61,11 +61,13 @@ pub enum TableType {
 ///     table::{DupSort, Table},
 ///     TableViewer, Tables,
 /// };
+/// use reth_primitives_traits::EmptyAccountExtension;
 ///
 /// struct MyTableViewer;
 ///
 /// impl TableViewer<()> for MyTableViewer {
 ///     type Error = &'static str;
+///     type AccountExtension = EmptyAccountExtension;
 ///
 ///     fn view<T: Table>(&self) -> Result<(), Self::Error> {
 ///         // operate on table in a generic way
@@ -86,6 +88,9 @@ pub enum TableType {
 pub trait TableViewer<R> {
     /// The error type returned by the viewer.
     type Error;
+
+    /// Account extension used when viewing an account table.
+    type AccountExtension: AccountExtension;
 
     /// Calls `view` with the correct table type.
     fn view_rt(&self, table: Tables) -> Result<R, Self::Error> {
@@ -119,8 +124,17 @@ macro_rules! tables {
     (@bool) => { false };
     (@bool $($t:tt)+) => { true };
 
-    (@view $name:ident $v:ident) => { $v.view::<$name>() };
-    (@view $name:ident $v:ident $_subkey:ty) => { $v.view_dupsort::<$name>() };
+    (@view PlainAccountState $v:ident $viewer:ident $result:ident) => {
+        $v.view::<PlainAccountState<<$viewer as $crate::TableViewer<$result>>::AccountExtension>>()
+    };
+    (@view HashedAccounts $v:ident $viewer:ident $result:ident) => {
+        $v.view::<HashedAccounts<<$viewer as $crate::TableViewer<$result>>::AccountExtension>>()
+    };
+    (@view AccountChangeSets $v:ident $viewer:ident $result:ident $_subkey:ty) => {
+        $v.view_dupsort::<AccountChangeSets<<$viewer as $crate::TableViewer<$result>>::AccountExtension>>()
+    };
+    (@view $name:ident $v:ident $viewer:ident $result:ident) => { $v.view::<$name>() };
+    (@view $name:ident $v:ident $viewer:ident $result:ident $_subkey:ty) => { $v.view_dupsort::<$name>() };
 
     (@value_doc $key:ty, $value:ty) => {
         concat!("[`", stringify!($value), "`]")
@@ -225,7 +239,7 @@ macro_rules! tables {
             {
                 match self {
                     $(
-                        Self::$name => tables!(@view $name visitor $($subkey)?),
+                        Self::$name => tables!(@view $name visitor T R $($subkey)?),
                     )*
                 }
             }
@@ -611,24 +625,6 @@ impl Decode for ChainStateKey {
             [0] => Ok(Self::LastFinalizedBlock),
             [1] => Ok(Self::LastSafeBlock),
             _ => Err(crate::DatabaseError::Decode),
-        }
-    }
-}
-
-impl Tables {
-    /// Visits account tables using the node-selected extension instead of the Ethereum default.
-    pub fn view_with_account_extension<E: reth_primitives_traits::AccountExtension, T, R>(
-        &self,
-        visitor: &T,
-    ) -> Result<R, T::Error>
-    where
-        T: ?Sized + TableViewer<R>,
-    {
-        match self {
-            Self::PlainAccountState => visitor.view::<PlainAccountState<E>>(),
-            Self::HashedAccounts => visitor.view::<HashedAccounts<E>>(),
-            Self::AccountChangeSets => visitor.view_dupsort::<AccountChangeSets<E>>(),
-            _ => self.view(visitor),
         }
     }
 }
