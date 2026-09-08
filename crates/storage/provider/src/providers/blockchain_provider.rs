@@ -269,9 +269,9 @@ impl<N: ProviderNodeTypes> StateRangeProvider for HistoricalStateRangeView<N> {
         // right past `limit`, provable as an empty range rather than a skipped one.
         let mut entry = cursor.seek(start).map_err(ProviderError::Database)?;
         while let Some((hash, account)) = entry {
+            // The range-view factory rejects custom account types: snap uses Ethereum account
+            // tuples.
             total_bytes += 32 + 4 * 32; // hash + rough upper bound of the RLP account body
-                                        // The range-view factory rejects custom account types: snap uses Ethereum account
-                                        // tuples.
             accounts.push((
                 hash,
                 Account {
