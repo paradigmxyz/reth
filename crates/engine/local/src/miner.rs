@@ -140,7 +140,7 @@ pub struct LocalMiner<T: PayloadTypes, B, Pool: TransactionPool + Unpin> {
     /// The payload builder for the engine
     payload_builder: PayloadBuilderHandle<T>,
     /// Latest block in the chain so far.
-    last_header: SealedHeaderFor<<T::BuiltPayload as BuiltPayload>::Primitives>,
+    last_header: SealedHeaderFor<T::Primitives>,
     /// Stores latest mined blocks.
     last_block_hashes: VecDeque<B256>,
     /// Number of confirmations required before a block is finalized.
@@ -155,15 +155,12 @@ pub struct LocalMiner<T: PayloadTypes, B, Pool: TransactionPool + Unpin> {
 impl<T, B, Pool> LocalMiner<T, B, Pool>
 where
     T: PayloadTypes,
-    B: PayloadAttributesBuilder<
-        T::PayloadAttributes,
-        HeaderTy<<T::BuiltPayload as BuiltPayload>::Primitives>,
-    >,
+    B: PayloadAttributesBuilder<T::PayloadAttributes, HeaderTy<T::Primitives>>,
     Pool: TransactionPool + Unpin,
 {
     /// Spawns a new [`LocalMiner`] with the given parameters.
     pub fn new(
-        provider: impl BlockReader<Header = HeaderTy<<T::BuiltPayload as BuiltPayload>::Primitives>>,
+        provider: impl BlockReader<Header = HeaderTy<T::Primitives>>,
         payload_attributes_builder: B,
         to_engine: ConsensusEngineHandle<T>,
         mode: MiningMode<Pool>,

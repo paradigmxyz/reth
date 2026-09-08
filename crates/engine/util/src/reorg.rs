@@ -15,7 +15,7 @@ use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm,
 };
-use reth_payload_primitives::{BuiltPayload, PayloadTypes};
+use reth_payload_primitives::PayloadTypes;
 use reth_primitives_traits::{
     block::Block as _, AccountExtensionTy, BlockBody as _, BlockTy, HeaderTy, SealedBlock,
     SignedTransaction,
@@ -100,7 +100,7 @@ impl<S, T: PayloadTypes, Provider, Evm, Validator> EngineReorg<S, T, Provider, E
 impl<S, T, Provider, Evm, Validator> Stream for EngineReorg<S, T, Provider, Evm, Validator>
 where
     S: Stream<Item = BeaconEngineMessage<T>>,
-    T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = Evm::Primitives>>,
+    T: PayloadTypes<Primitives = Evm::Primitives>,
     Provider: BlockReader<Header = HeaderTy<Evm::Primitives>, Block = BlockTy<Evm::Primitives>>
         + StateProviderFactory<AccountExtension = AccountExtensionTy<Evm::Primitives>>
         + ChainSpecProvider,
@@ -237,7 +237,7 @@ where
         + StateProviderFactory<AccountExtension = AccountExtensionTy<Evm::Primitives>>
         + ChainSpecProvider<ChainSpec: EthChainSpec>,
     Evm: ConfigureEvm,
-    T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = Evm::Primitives>>,
+    T: PayloadTypes<Primitives = Evm::Primitives>,
     Validator: EngineValidator<T, Evm::Primitives>,
 {
     // Ensure next payload is valid.

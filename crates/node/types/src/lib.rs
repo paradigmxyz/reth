@@ -17,7 +17,7 @@ pub use reth_primitives_traits::{
 use reth_chainspec::EthChainSpec;
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_primitives::EngineTypes;
-use reth_payload_primitives::{BuiltPayload, PayloadTypes};
+use reth_payload_primitives::PayloadTypes;
 
 /// The type that configures the essential types of an Ethereum-like node.
 ///
@@ -32,7 +32,7 @@ pub trait NodeTypes: Clone + Debug + Send + Sync + Unpin + 'static {
     /// The type responsible for writing chain primitives to storage.
     type Storage: Default + Send + Sync + Unpin + Debug + 'static;
     /// The node's engine types, defining the interaction with the consensus engine.
-    type Payload: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = Self::Primitives>>;
+    type Payload: PayloadTypes<Primitives = Self::Primitives>;
 }
 
 /// A helper trait that is downstream of the [`NodeTypes`] trait and adds database to the
@@ -118,7 +118,7 @@ where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
     C: EthChainSpec<Header = P::BlockHeader> + Clone + 'static,
     S: Default + Clone + Send + Sync + Unpin + Debug + 'static,
-    PL: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = P>> + Send + Sync + Unpin + 'static,
+    PL: PayloadTypes<Primitives = P> + Send + Sync + Unpin + 'static,
 {
     type Primitives = P;
     type ChainSpec = C;
@@ -173,7 +173,7 @@ where
     E: EngineTypes + Send + Sync + Unpin,
     C: EthChainSpec<Header = P::BlockHeader> + Clone + 'static,
     S: Default + Clone + Send + Sync + Unpin + Debug + 'static,
-    PL: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = P>> + Send + Sync + Unpin + 'static,
+    PL: PayloadTypes<Primitives = P> + Send + Sync + Unpin + 'static,
 {
     type Primitives = P;
     type ChainSpec = C;

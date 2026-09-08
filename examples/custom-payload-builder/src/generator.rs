@@ -4,12 +4,14 @@ use reth_basic_payload_builder::{
     BasicPayloadJobGeneratorConfig, HeaderForPayload, PayloadBuilder, PayloadConfig,
 };
 use reth_ethereum::{
-    node::api::{Block, BuiltPayload},
+    node::api::Block,
     primitives::SealedHeader,
     provider::{BlockReaderIdExt, BlockSource, StateProviderFactory},
     tasks::Runtime,
 };
-use reth_payload_builder::{BuildNewPayload, PayloadBuilderError, PayloadId, PayloadJobGenerator};
+use reth_payload_builder::{
+    BuildNewPayload, PayloadBuilderError, PayloadId, PayloadJob, PayloadJobGenerator,
+};
 use std::sync::Arc;
 
 /// The generator type that creates new jobs that builds empty blocks.
@@ -61,9 +63,7 @@ where
         &self,
         input: BuildNewPayload<
             Builder::Attributes,
-            reth_ethereum::primitives::AccountExtensionTy<
-                <Builder::BuiltPayload as BuiltPayload>::Primitives,
-            >,
+            reth_ethereum::primitives::AccountExtensionTy<<Self::Job as PayloadJob>::Primitives>,
         >,
         id: PayloadId,
     ) -> Result<Self::Job, PayloadBuilderError> {

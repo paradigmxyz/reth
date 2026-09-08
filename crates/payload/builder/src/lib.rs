@@ -57,6 +57,7 @@
 //! }
 //!
 //! impl PayloadJob for EmptyBlockPayloadJob {
+//!    type Primitives = reth_ethereum_primitives::EthPrimitives;
 //!    type PayloadAttributes = PayloadAttributes;
 //!    type ResolvePayloadFuture = futures_util::future::Ready<Result<EthBuiltPayload, PayloadBuilderError>>;
 //!    type BuiltPayload = EthBuiltPayload;

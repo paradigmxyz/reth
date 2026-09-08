@@ -11,7 +11,7 @@ use alloy_rpc_types::engine::PayloadId;
 use reth_chain_state::CanonStateNotification;
 use reth_ethereum_engine_primitives::EthPayloadAttributes;
 use reth_payload_builder_primitives::PayloadBuilderError;
-use reth_payload_primitives::{PayloadKind, PayloadTypes};
+use reth_payload_primitives::{BuiltPayload, PayloadKind, PayloadTypes};
 use reth_primitives_traits::{Block as _, RecoveredBlock};
 use std::{
     future::Future,
@@ -30,8 +30,11 @@ pub fn test_payload_service<T>() -> (
     PayloadBuilderHandle<T>,
 )
 where
-    T: PayloadTypes<PayloadAttributes = EthPayloadAttributes, BuiltPayload = EthBuiltPayload>
-        + 'static,
+    T: PayloadTypes<
+            PayloadAttributes = EthPayloadAttributes,
+            BuiltPayload = EthBuiltPayload,
+            Primitives = <EthBuiltPayload as BuiltPayload>::Primitives,
+        > + 'static,
 {
     PayloadBuilderService::new(Default::default(), futures_util::stream::empty())
 }
@@ -39,8 +42,11 @@ where
 /// Creates a new [`PayloadBuilderService`] for testing purposes and spawns it in the background.
 pub fn spawn_test_payload_service<T>() -> PayloadBuilderHandle<T>
 where
-    T: PayloadTypes<PayloadAttributes = EthPayloadAttributes, BuiltPayload = EthBuiltPayload>
-        + 'static,
+    T: PayloadTypes<
+            PayloadAttributes = EthPayloadAttributes,
+            BuiltPayload = EthBuiltPayload,
+            Primitives = <EthBuiltPayload as BuiltPayload>::Primitives,
+        > + 'static,
 {
     let (service, handle) = test_payload_service();
     tokio::spawn(service);
@@ -79,6 +85,7 @@ impl Future for TestPayloadJob {
 }
 
 impl PayloadJob for TestPayloadJob {
+    type Primitives = <EthBuiltPayload as BuiltPayload>::Primitives;
     type PayloadAttributes = EthPayloadAttributes;
     type ResolvePayloadFuture =
         futures_util::future::Ready<Result<EthBuiltPayload, PayloadBuilderError>>;

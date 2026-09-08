@@ -26,7 +26,7 @@ use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
 use reth_network_p2p::full_block::SealedBlockWithAccessList;
 use reth_payload_builder::{BuildNewPayload, PayloadBuilderHandle, PayloadBuilderLease};
-use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadAttributes, PayloadTypes};
+use reth_payload_primitives::{NewPayloadError, PayloadAttributes, PayloadTypes};
 use reth_primitives_traits::{
     FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
@@ -381,7 +381,7 @@ where
         + StorageSettingsCache
         + 'static,
     C: ConfigureEvm<Primitives = N> + 'static,
-    T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
+    T: PayloadTypes<Primitives = N>,
     V: EngineValidator<T> + WaitForCaches,
 {
     /// Creates a new [`EngineApiTreeHandler`].

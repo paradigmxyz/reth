@@ -32,6 +32,7 @@ where
     Builder::Attributes: Unpin + Clone,
     Builder::BuiltPayload: Unpin + Clone,
 {
+    type Primitives = <Builder::BuiltPayload as reth_ethereum::node::api::BuiltPayload>::Primitives;
     type PayloadAttributes = Builder::Attributes;
     type ResolvePayloadFuture =
         futures_util::future::Ready<Result<Self::BuiltPayload, PayloadBuilderError>>;

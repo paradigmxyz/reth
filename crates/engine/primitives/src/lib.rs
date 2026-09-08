@@ -226,19 +226,11 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
     /// built if the implementation needs it (the L1 default does not).
     fn validate_block_post_execution_with_hashed_state<'a>(
         &self,
-        _state_updates: impl FnOnce() -> &'a HashedPostState<
-            AccountExtensionTy<
-                <Types::BuiltPayload as reth_payload_primitives::BuiltPayload>::Primitives,
-            >,
-        >,
+        _state_updates: impl FnOnce() -> &'a HashedPostState<AccountExtensionTy<Types::Primitives>>,
         _block: &RecoveredBlock<Self::Block>,
         _parent_header: &SealedHeader<<Self::Block as Block>::Header>,
         _parent_state: impl FnOnce() -> ProviderResult<
-            StateProviderBox<
-                AccountExtensionTy<
-                    <Types::BuiltPayload as reth_payload_primitives::BuiltPayload>::Primitives,
-                >,
-            >,
+            StateProviderBox<AccountExtensionTy<Types::Primitives>>,
         >,
     ) -> Result<(), InsertBlockErrorKind>
     where

@@ -128,10 +128,7 @@ impl<T: PayloadTypes> PayloadBuilderHandle<T> {
     /// Returns a receiver that will receive the payload id.
     pub fn send_new_payload(
         &self,
-        input: BuildNewPayload<
-            T::PayloadAttributes,
-            AccountExtensionTy<<T::BuiltPayload as BuiltPayload>::Primitives>,
-        >,
+        input: BuildNewPayload<T::PayloadAttributes, AccountExtensionTy<T::Primitives>>,
     ) -> Receiver<Result<PayloadId, PayloadBuilderError>> {
         let (tx, rx) = oneshot::channel();
         let span = debug_span!(parent: Span::current(), "payload_job");
@@ -254,15 +251,11 @@ impl<Gen, St, T> PayloadBuilderService<Gen, St, T>
 where
     T: PayloadTypes,
     Gen: PayloadJobGenerator,
-    Gen::Job: PayloadJob<PayloadAttributes = T::PayloadAttributes>,
-    <Gen::Job as PayloadJob>::BuiltPayload: Into<T::BuiltPayload>
-        + BuiltPayload<
-            Primitives: NodePrimitives<
-                AccountExtension = AccountExtensionTy<
-                    <T::BuiltPayload as BuiltPayload>::Primitives,
-                >,
-            >,
-        >,
+    Gen::Job: PayloadJob<
+        PayloadAttributes = T::PayloadAttributes,
+        Primitives: NodePrimitives<AccountExtension = AccountExtensionTy<T::Primitives>>,
+    >,
+    <Gen::Job as PayloadJob>::BuiltPayload: Into<T::BuiltPayload>,
 {
     /// Creates a new payload builder service and returns the [`PayloadBuilderHandle`] to interact
     /// with it.
@@ -411,15 +404,11 @@ where
     Gen: PayloadJobGenerator + Unpin + 'static,
     <Gen as PayloadJobGenerator>::Job: Unpin + 'static,
     St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
-    Gen::Job: PayloadJob<PayloadAttributes = T::PayloadAttributes>,
-    <Gen::Job as PayloadJob>::BuiltPayload: Into<T::BuiltPayload>
-        + BuiltPayload<
-            Primitives: NodePrimitives<
-                AccountExtension = AccountExtensionTy<
-                    <T::BuiltPayload as BuiltPayload>::Primitives,
-                >,
-            >,
-        >,
+    Gen::Job: PayloadJob<
+        PayloadAttributes = T::PayloadAttributes,
+        Primitives: NodePrimitives<AccountExtension = AccountExtensionTy<T::Primitives>>,
+    >,
+    <Gen::Job as PayloadJob>::BuiltPayload: Into<T::BuiltPayload>,
 {
     type Output = ();
 
@@ -560,12 +549,7 @@ pub enum PayloadServiceCommand<T: PayloadTypes> {
     /// originating Engine API trace.
     #[expect(clippy::type_complexity)]
     BuildNewPayload(
-        Box<
-            BuildNewPayload<
-                T::PayloadAttributes,
-                AccountExtensionTy<<T::BuiltPayload as BuiltPayload>::Primitives>,
-            >,
-        >,
+        Box<BuildNewPayload<T::PayloadAttributes, AccountExtensionTy<T::Primitives>>>,
         Span,
         oneshot::Sender<Result<PayloadId, PayloadBuilderError>>,
     ),

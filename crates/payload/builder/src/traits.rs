@@ -21,6 +21,8 @@ use crate::service::BuildNewPayload;
 ///
 /// Note: A `PayloadJob` need to be cancel safe because it might be dropped after the CL has requested the payload via `engine_getPayloadV1` (see also [engine API docs](https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_getpayloadv1))
 pub trait PayloadJob: Future<Output = Result<(), PayloadBuilderError>> {
+    /// The node primitive types used by the payload job.
+    type Primitives: NodePrimitives;
     /// Represents the payload attributes type that is used to spawn this payload job.
     type PayloadAttributes: PayloadAttributes + std::fmt::Debug;
     /// Represents the future that resolves the block that's returned to the CL.
@@ -28,7 +30,7 @@ pub trait PayloadJob: Future<Output = Result<(), PayloadBuilderError>> {
         + Send
         + 'static;
     /// Represents the built payload type that is returned to the CL.
-    type BuiltPayload: BuiltPayload + Clone + std::fmt::Debug;
+    type BuiltPayload: BuiltPayload<Primitives = Self::Primitives> + Clone + std::fmt::Debug;
 
     /// Returns the best payload that has been built so far.
     ///
@@ -121,9 +123,7 @@ pub trait PayloadJobGenerator {
         &self,
         input: BuildNewPayload<
             <Self::Job as PayloadJob>::PayloadAttributes,
-            AccountExtensionTy<
-                <<Self::Job as PayloadJob>::BuiltPayload as BuiltPayload>::Primitives,
-            >,
+            AccountExtensionTy<<Self::Job as PayloadJob>::Primitives>,
         >,
         id: PayloadId,
     ) -> Result<Self::Job, PayloadBuilderError>;

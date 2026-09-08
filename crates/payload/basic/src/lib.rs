@@ -164,7 +164,7 @@ where
         &self,
         input: BuildNewPayload<
             Builder::Attributes,
-            AccountExtensionTy<<Builder::BuiltPayload as BuiltPayload>::Primitives>,
+            AccountExtensionTy<<Self::Job as PayloadJob>::Primitives>,
         >,
         id: PayloadId,
     ) -> Result<Self::Job, PayloadBuilderError> {
@@ -534,6 +534,7 @@ where
     Builder::Attributes: Unpin + Clone,
     Builder::BuiltPayload: Unpin + Clone,
 {
+    type Primitives = <Builder::BuiltPayload as BuiltPayload>::Primitives;
     type PayloadAttributes = Builder::Attributes;
     type ResolvePayloadFuture = ResolveBestPayload<Self::BuiltPayload>;
     type BuiltPayload = Builder::BuiltPayload;

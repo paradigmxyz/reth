@@ -145,8 +145,7 @@ use reth_execution_cache::{CacheFillMode, CacheStats};
 use reth_network_p2p::full_block::SealedBlockWithAccessList;
 use reth_payload_builder::{PayloadBuilderLease, PayloadBuilderResources};
 use reth_payload_primitives::{
-    BuiltPayload, BuiltPayloadExecutedBlock, InvalidPayloadAttributesError, NewPayloadError,
-    PayloadTypes,
+    BuiltPayloadExecutedBlock, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
 };
 use reth_primitives_traits::{
     AlloyBlockHeader, BlockBody, BlockTy, FastInstant as Instant, GotExpected, NodePrimitives,
@@ -399,7 +398,7 @@ where
 
     /// Converts a [`BlockOrPayload`] to a recovered block.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
-    pub fn convert_to_block<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
+    pub fn convert_to_block<T: PayloadTypes<Primitives = N>>(
         &self,
         input: BlockOrPayload<T>,
     ) -> Result<SealedBlock<N::Block>, NewPayloadError>
@@ -413,7 +412,7 @@ where
     }
 
     /// Returns EVM environment for the given payload or block.
-    pub fn evm_env_for<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
+    pub fn evm_env_for<T: PayloadTypes<Primitives = N>>(
         &self,
         input: &BlockOrPayload<T>,
     ) -> Result<EvmEnvFor<Evm>, Evm::Error>
@@ -428,7 +427,7 @@ where
     }
 
     /// Returns [`ExecutableTxIterator`] for the given payload or block.
-    pub fn tx_iterator_for<'a, T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
+    pub fn tx_iterator_for<'a, T: PayloadTypes<Primitives = N>>(
         &'a self,
         input: &'a BlockOrPayload<T>,
     ) -> Result<impl ExecutableTxIterator<Evm>, NewPayloadError>
@@ -453,7 +452,7 @@ where
     }
 
     /// Returns a [`ExecutionCtxFor`] for the given payload or block.
-    pub fn execution_ctx_for<'a, T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
+    pub fn execution_ctx_for<'a, T: PayloadTypes<Primitives = N>>(
         &self,
         input: &'a BlockOrPayload<T>,
     ) -> Result<ExecutionCtxFor<'a, Evm>, Evm::Error>
@@ -483,7 +482,7 @@ where
             type_name = ?input.type_name(),
         )
     )]
-    pub fn validate_block_with_state<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
+    pub fn validate_block_with_state<T: PayloadTypes<Primitives = N>>(
         &mut self,
         input: BlockOrPayload<T>,
         mut ctx: TreeCtx<'_, N>,
@@ -931,7 +930,7 @@ where
         parent: SealedHeader<N::BlockHeader>,
     ) -> LazyHandle<Result<SealedBlock<N::Block>, InsertPayloadError<N::Block>>>
     where
-        T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
+        T: PayloadTypes<Primitives = N>,
         V: PayloadValidator<T, Block = N::Block> + Clone,
     {
         let input = input.clone();
@@ -1022,7 +1021,7 @@ where
         S: StateProvider + Send,
         Err: core::error::Error + Send + Sync + 'static,
         V: PayloadValidator<T, Block = N::Block>,
-        T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
+        T: PayloadTypes<Primitives = N>,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         debug!(target: "engine::tree::payload_validator", "Executing block");
@@ -1164,7 +1163,7 @@ where
         Err: core::error::Error + Send + Sync + 'static,
         MakeStateProvider: Fn(bool) -> ProviderResult<StateProviderBox<N::AccountExtension>> + Sync,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
-        T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
+        T: PayloadTypes<Primitives = N>,
         V: PayloadValidator<T, Block = N::Block>,
     {
         debug!(target: "engine::tree::payload_validator", "Executing block via BAL path");
@@ -1328,7 +1327,7 @@ where
     ///
     /// The `hashed_state` handle wraps the background hashed post state computation.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
-    fn validate_post_execution<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
+    fn validate_post_execution<T: PayloadTypes<Primitives = N>>(
         &mut self,
         block: &RecoveredBlock<N::Block>,
         parent_block: &SealedHeader<N::BlockHeader>,
@@ -1729,7 +1728,7 @@ where
 /// This provides the necessary functions for validating/executing payloads/blocks.
 pub trait EngineValidator<
     Types: PayloadTypes,
-    N: NodePrimitives = <<Types as PayloadTypes>::BuiltPayload as BuiltPayload>::Primitives,
+    N: NodePrimitives = <Types as PayloadTypes>::Primitives,
 >: Send + Sync + 'static
 {
     /// Validates the payload attributes with respect to the header.
@@ -1830,7 +1829,7 @@ where
     N: NodePrimitives,
     V: PayloadValidator<Types, Block = N::Block> + Clone,
     Evm: ConfigureEngineEvm<Types::ExecutionData, Primitives = N> + 'static,
-    Types: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
+    Types: PayloadTypes<Primitives = N>,
 {
     fn validate_payload_attributes_against_header(
         &self,
@@ -1997,7 +1996,7 @@ pub enum BlockOrPayload<T: PayloadTypes> {
     /// Payload.
     Payload(T::ExecutionData),
     /// Block with optional access list data, e.g. downloaded from the network.
-    Block(SealedBlockWithAccessList<BlockTy<<T::BuiltPayload as BuiltPayload>::Primitives>>),
+    Block(SealedBlockWithAccessList<BlockTy<T::Primitives>>),
 }
 
 impl<T: PayloadTypes> BlockOrPayload<T> {

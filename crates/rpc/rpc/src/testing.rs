@@ -102,10 +102,7 @@ impl<Eth, Evm, Payload: PayloadTypes> TestingApi<Eth, Evm, Payload> {
 
 impl<Eth, Evm, Payload> TestingApi<Eth, Evm, Payload>
 where
-    Payload: PayloadTypes<
-        ExecutionData = ExecutionData,
-        BuiltPayload: BuiltPayload<Primitives = Evm::Primitives>,
-    >,
+    Payload: PayloadTypes<ExecutionData = ExecutionData, Primitives = Evm::Primitives>,
     Eth: Call<
         Primitives = Evm::Primitives,
         Provider: BlockReader<Header = HeaderTy<Evm::Primitives>>
@@ -408,10 +405,7 @@ where
 #[async_trait]
 impl<Eth, Evm, Payload> TestingApiServer for TestingApi<Eth, Evm, Payload>
 where
-    Payload: PayloadTypes<
-        ExecutionData = ExecutionData,
-        BuiltPayload: BuiltPayload<Primitives = Evm::Primitives>,
-    >,
+    Payload: PayloadTypes<ExecutionData = ExecutionData, Primitives = Evm::Primitives>,
     Eth: Call<
         Primitives = Evm::Primitives,
         Provider: BlockReader<Header = HeaderTy<Evm::Primitives>>

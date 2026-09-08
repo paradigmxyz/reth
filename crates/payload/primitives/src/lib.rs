@@ -34,13 +34,15 @@ pub use payload::{ExecutionPayload, PayloadOrAttributes};
 
 /// Core trait that defines the associated types for working with execution payloads.
 pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static {
+    /// The node primitive types used by built payloads.
+    type Primitives: NodePrimitives;
     /// The format for execution payload data that can be processed and validated.
     ///
     /// This type represents the canonical format for block data that includes
     /// all necessary information for execution and validation.
     type ExecutionData: ExecutionPayload + From<Self::BuiltPayload>;
     /// The type representing a successfully built payload/block.
-    type BuiltPayload: BuiltPayload + Clone + Unpin;
+    type BuiltPayload: BuiltPayload<Primitives = Self::Primitives> + Clone + Unpin;
 
     /// Attributes that specify how a payload should be constructed.
     ///
@@ -50,9 +52,7 @@ pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static
 
     /// Converts a sealed block into the execution payload format.
     fn block_to_payload(
-        block: SealedBlock<
-            <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
-        >,
+        block: SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
         bal: Option<Bytes>,
     ) -> Self::ExecutionData;
 }
