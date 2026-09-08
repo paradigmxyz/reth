@@ -290,12 +290,13 @@ where
             self.executor.spawn_blocking_named("tx-iterator", move || {
                 let (transactions, convert) = transactions.into_parts();
                 if parallel_bal_execution {
-                    // With BALs, we don't care about the order of transactions in execution and
-                    // prewarming, so we don't have to use `for_each_ordered_in`.
+                    // Workers can execute out of order, but canonical commit needs the earliest
+                    // transactions first. Recover growing prefixes before scheduling the tail.
                     executor.cpu_pool().install(|| {
                         transactions
                             .into_par_iter()
                             .enumerate()
+                            .by_exponential_blocks()
                             .map(|(i, tx)| {
                                 let tx = convert.convert(tx);
                                 (i, tx)
