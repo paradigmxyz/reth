@@ -14,13 +14,18 @@
 //! validation. This module only logs the first divergence between the received BAL and the BAL
 //! rebuilt from canonical execution.
 
-use super::{ordered_outputs::ordered_worker_outputs, worker, BalExecutionError};
+use super::{
+    canonical_state::CanonicalState, ordered_outputs::ordered_worker_outputs, worker,
+    BalExecutionError,
+};
 use alloy_eip7928::{
     bal::{Bal as AlloyBal, DecodedBal},
     compute_block_access_list_hash, BlockAccessList,
 };
 use alloy_evm::{
-    block::{BlockExecutionError, BlockExecutor, BlockValidationError, TxResult},
+    block::{
+        BlockExecutionError, BlockExecutor, BlockExecutorFactory, BlockValidationError, TxResult,
+    },
     Evm,
 };
 use alloy_primitives::Address;
@@ -112,11 +117,7 @@ where
     let block_gas_limit = evm_env.block_env.gas_limit();
     let enable_amsterdam_eip8037 = evm_env.cfg_env.enable_amsterdam_eip8037;
     let tx_gas_limit_cap = evm_env.cfg_env.tx_gas_limit_cap;
-    let mut canonical_state = State::builder()
-        .with_database(make_db(false)?)
-        .with_bundle_update()
-        .with_bal_builder()
-        .build();
+    let mut canonical_state = CanonicalState::new(make_db(false)?);
 
     let (block_result, senders) = {
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
@@ -140,7 +141,8 @@ where
         let mut gas_tracker =
             BlockGasTracker::new(block_gas_limit, enable_amsterdam_eip8037, tx_gas_limit_cap);
         let evm = evm_config.evm_with_env(&mut canonical_state, evm_env);
-        let mut canonical_executor = evm_config.create_executor_with_state(evm, ctx.clone());
+        let mut canonical_executor =
+            evm_config.block_executor_factory().create_executor(evm, ctx.clone());
 
         canonical_executor.apply_pre_execution_changes()?;
         let mut senders = Vec::with_capacity(transaction_count);

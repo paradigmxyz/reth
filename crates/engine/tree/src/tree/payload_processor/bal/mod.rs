@@ -8,6 +8,7 @@
 //! the rebuilt block-level BAL hash after post-execution. It does not yet run per-transaction
 //! fragment checks. It does not yet report rich undeclared-access diagnostics.
 
+mod canonical_state;
 mod ordered_outputs;
 mod worker;
 
