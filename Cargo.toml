@@ -442,7 +442,7 @@ alloy-sol-types = { version = "1.6.1", default-features = false }
 
 alloy-chains = { version = "0.2.33", default-features = false }
 alloy-eip2124 = { version = "0.2.0", default-features = false }
-alloy-eip7928 = { version = "0.4.8", default-features = false, features = ["rlp"] }
+alloy-eip7928 = { version = "0.4.9", default-features = false, features = ["rlp"] }
 alloy-evm = { version = "0.39.0", default-features = false }
 alloy-rlp = { version = "0.3.16", default-features = false, features = ["core-net"] }
 alloy-trie = { version = "0.9.4", default-features = false }
@@ -694,6 +694,3 @@ vergen-git2 = "10.0.1"
 
 # networking
 ipnet = "2.11"
-
-[patch.crates-io]
-alloy-eip7928 = { git = "https://github.com/lean-apple/alloy-eips", rev = "b05480a7bb8dd4581184f32c69ee112e2f7b42f0" }

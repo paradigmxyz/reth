@@ -252,8 +252,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-eip7928"
-version = "0.4.8"
-source = "git+https://github.com/lean-apple/alloy-eips?rev=b05480a7bb8dd4581184f32c69ee112e2f7b42f0#b05480a7bb8dd4581184f32c69ee112e2f7b42f0"
+version = "0.4.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fdd59d7221d384c46771ffbf6f18f70aa7753326351277857016bed5127b888f"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
