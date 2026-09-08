@@ -75,13 +75,14 @@ macro_rules! delegate_provider_impls {
 
 pub use delegate_provider_impls;
 
-// Explicit forwarding preserves the inherited account-type equality; auto_impl's
-// additional supertrait bounds can hide it from associated-type normalization.
-macro_rules! impl_provider_refs {
+// `auto_impl` does not correctly preserve associated-type equality inherited from a supertrait.
+// Generate the `&`, `Box`, and `Arc` forwarding impls explicitly so wrappers retain the
+// underlying provider's `AccountExtension`.
+macro_rules! auto_impl_provider_refs {
     ($ty:ident: $trait:ident $(, shared_bounds = [$($bound:path),*])? { $($body:tt)* }) => {
         impl<$ty: $trait + ?Sized $($(+ $bound)*)?> $trait for &$ty { $($body)* }
         impl<$ty: $trait + ?Sized> $trait for alloc::boxed::Box<$ty> { $($body)* }
         impl<$ty: $trait + ?Sized $($(+ $bound)*)?> $trait for alloc::sync::Arc<$ty> { $($body)* }
     };
 }
-pub(crate) use impl_provider_refs;
+pub(crate) use auto_impl_provider_refs;

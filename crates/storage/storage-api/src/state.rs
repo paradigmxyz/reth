@@ -108,7 +108,7 @@ pub trait HashedPostStateProvider: crate::AccountExtensionProvider {
     ) -> ProviderResult<HashedPostState<Self::AccountExtension>>;
 }
 
-crate::macros::impl_provider_refs!(T: HashedPostStateProvider {
+crate::macros::auto_impl_provider_refs!(T: HashedPostStateProvider {
     fn hashed_post_state(
         &self,
         bundle_state: &BundleState,
@@ -220,7 +220,7 @@ pub trait StateProviderFactory: BlockIdReader + crate::AccountExtensionProvider 
     fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox<Self::AccountExtension>>>;
 }
 
-crate::macros::impl_provider_refs!(T: StateProviderFactory {
+crate::macros::auto_impl_provider_refs!(T: StateProviderFactory {
     fn latest(&self) -> ProviderResult<StateProviderBox<Self::AccountExtension>> {
         T::latest(&**self)
     }

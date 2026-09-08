@@ -114,7 +114,7 @@ pub trait BlockWriter: crate::AccountExtensionProvider {
     ) -> ProviderResult<()>;
 }
 
-crate::macros::impl_provider_refs!(T: BlockWriter {
+crate::macros::auto_impl_provider_refs!(T: BlockWriter {
     type Block = T::Block;
     type Receipt = T::Receipt;
     fn insert_block(

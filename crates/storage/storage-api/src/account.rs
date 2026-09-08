@@ -55,7 +55,7 @@ pub trait AccountExtReader: AccountReader {
     ) -> ProviderResult<BTreeMap<Address, Vec<BlockNumber>>>;
 }
 
-crate::macros::impl_provider_refs!(T: AccountExtReader {
+crate::macros::auto_impl_provider_refs!(T: AccountExtReader {
     fn changed_accounts_with_range(
         &self,
         _range: RangeInclusive<BlockNumber>,
@@ -109,7 +109,7 @@ pub trait ChangeSetReader: AccountExtensionProvider {
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx<Self::AccountExtension>)>>;
 }
 
-crate::macros::impl_provider_refs!(T: ChangeSetReader {
+crate::macros::auto_impl_provider_refs!(T: ChangeSetReader {
     fn account_block_changeset(
         &self,
         block_number: BlockNumber,
@@ -131,7 +131,7 @@ crate::macros::impl_provider_refs!(T: ChangeSetReader {
     }
 });
 
-crate::macros::impl_provider_refs!(T: AccountReader {
+crate::macros::auto_impl_provider_refs!(T: AccountReader {
     fn basic_account(
         &self,
         address: &Address,

@@ -45,7 +45,7 @@ pub trait StateRootProvider: crate::AccountExtensionProvider {
     ) -> ProviderResult<(B256, TrieUpdates)>;
 }
 
-crate::macros::impl_provider_refs!(T: StateRootProvider {
+crate::macros::auto_impl_provider_refs!(T: StateRootProvider {
     fn state_root(
         &self,
         hashed_state: HashedPostState<Self::AccountExtension>,
@@ -209,7 +209,7 @@ pub trait StateProofProvider: crate::AccountExtensionProvider {
     ) -> ProviderResult<Vec<Bytes>>;
 }
 
-crate::macros::impl_provider_refs!(T: StateProofProvider {
+crate::macros::auto_impl_provider_refs!(T: StateProofProvider {
     fn proof(
         &self,
         input: TrieInput<Self::AccountExtension>,

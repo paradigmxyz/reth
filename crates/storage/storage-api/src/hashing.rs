@@ -69,7 +69,7 @@ pub trait HashingWriter: crate::AccountExtensionProvider + Send {
     ) -> ProviderResult<B256Map<BTreeSet<B256>>>;
 }
 
-crate::macros::impl_provider_refs!(T: HashingWriter, shared_bounds = [Sync] {
+crate::macros::auto_impl_provider_refs!(T: HashingWriter, shared_bounds = [Sync] {
     fn unwind_account_hashing<'a>(
         &self,
         changesets: impl Iterator<Item = &'a (BlockNumber, AccountBeforeTx<Self::AccountExtension>)>,
