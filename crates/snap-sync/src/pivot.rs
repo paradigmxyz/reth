@@ -10,7 +10,7 @@
 //! is available, and re-anchoring starts once a pivot lags by 96 blocks rather than at the edge of
 //! the window peers still serve state for.
 
-use crate::{error::db_error, SnapGeneration, SnapPhase, SnapSyncError};
+use crate::{SnapGeneration, SnapPhase, SnapSyncError};
 use alloy_eip7928::BAL_RETENTION_PERIOD_SLOTS;
 use reth_primitives_traits::AlloyBlockHeader;
 use reth_storage_api::HeaderProvider;
@@ -111,15 +111,9 @@ impl SnapPivotPolicy {
         let fallback =
             head.checked_sub(self.head_distance).filter(|block| Some(*block) != preferred);
         for block_number in preferred.into_iter().chain(fallback) {
-            let Some(header) = provider.sealed_header(block_number).map_err(db_error)? else {
-                continue
-            };
+            let Some(header) = provider.sealed_header(block_number)? else { continue };
             if header.block_access_list_hash().is_some() {
-                return Ok(Some(SnapGeneration::new(
-                    block_number,
-                    header.hash(),
-                    header.state_root(),
-                )))
+                return Ok(Some(SnapGeneration::new(header.num_hash(), header.state_root())))
             }
         }
         Ok(None)
@@ -137,6 +131,7 @@ impl SnapPivotPolicy {
 mod tests {
     use super::*;
     use crate::test_utils::{chain, policy, provider_with};
+    use alloy_eips::BlockNumHash;
     use alloy_primitives::B256;
 
     #[test]
@@ -147,11 +142,10 @@ mod tests {
 
         let generation = policy().select(&provider, 3, None).unwrap().unwrap();
 
-        assert_eq!(generation.target_block(), 2);
-        assert_eq!(generation.target_hash(), expected.hash_slow());
+        assert_eq!(generation.target().number, 2);
+        assert_eq!(generation.target().hash, expected.hash_slow());
         assert_eq!(generation.state_root(), expected.state_root);
         assert_eq!(generation.phase(), SnapPhase::Accounts);
-        assert_eq!(generation.next_block(), 3);
     }
 
     #[test]
@@ -162,8 +156,8 @@ mod tests {
 
         let generation = policy().select(&provider, 3, Some(1)).unwrap().unwrap();
 
-        assert_eq!(generation.target_block(), 1);
-        assert_eq!(generation.target_hash(), expected.hash_slow());
+        assert_eq!(generation.target().number, 1);
+        assert_eq!(generation.target().hash, expected.hash_slow());
     }
 
     #[test]
@@ -177,8 +171,8 @@ mod tests {
         let generation = policy.select(&provider, 3, Some(1)).unwrap().unwrap();
 
         // HEAD-1, not the stale finalized block 1.
-        assert_eq!(generation.target_block(), 2);
-        assert_eq!(generation.target_hash(), fallback.hash_slow());
+        assert_eq!(generation.target().number, 2);
+        assert_eq!(generation.target().hash, fallback.hash_slow());
     }
 
     #[test]
@@ -191,8 +185,8 @@ mod tests {
         let generation = policy().select(&provider, 3, Some(1)).unwrap().unwrap();
 
         // HEAD-1, rather than waiting for finality to reach activation.
-        assert_eq!(generation.target_block(), 2);
-        assert_eq!(generation.target_hash(), fallback.hash_slow());
+        assert_eq!(generation.target().number, 2);
+        assert_eq!(generation.target().hash, fallback.hash_slow());
     }
 
     #[test]
@@ -221,7 +215,7 @@ mod tests {
     #[test]
     fn a_pivot_lagging_past_the_advance_window_is_re_anchored() {
         let policy = policy();
-        let generation = SnapGeneration::new(0, B256::ZERO, B256::ZERO);
+        let generation = SnapGeneration::new(BlockNumHash::new(0, B256::ZERO), B256::ZERO);
 
         assert!(!policy.needs_advance(generation, 4));
         assert!(policy.needs_advance(generation, 5));
@@ -232,7 +226,8 @@ mod tests {
         let headers = chain(Some(0));
         let anchor = headers[1].clone();
         let provider = provider_with(headers);
-        let generation = SnapGeneration::new(1, anchor.hash_slow(), anchor.state_root);
+        let generation =
+            SnapGeneration::new(BlockNumHash::new(1, anchor.hash_slow()), anchor.state_root);
         let policy = policy();
 
         assert!(generation.is_canonical(&provider).unwrap());
@@ -243,8 +238,9 @@ mod tests {
     #[test]
     fn downloaded_state_finishes_outside_the_bal_window() {
         let anchor = chain(Some(0))[1].clone();
-        let generation = SnapGeneration::new(1, anchor.hash_slow(), anchor.state_root)
-            .with_phase(SnapPhase::Trie);
+        let generation =
+            SnapGeneration::new(BlockNumHash::new(1, anchor.hash_slow()), anchor.state_root)
+                .with_phase(SnapPhase::Trie);
 
         assert!(policy().is_finishable(generation, 1_000));
     }
@@ -252,7 +248,8 @@ mod tests {
     #[test]
     fn reorged_anchor_is_not_canonical() {
         let provider = provider_with(chain(Some(0)));
-        let generation = SnapGeneration::new(1, B256::repeat_byte(0xff), B256::ZERO);
+        let generation =
+            SnapGeneration::new(BlockNumHash::new(1, B256::repeat_byte(0xff)), B256::ZERO);
 
         assert!(!generation.is_canonical(&provider).unwrap());
     }

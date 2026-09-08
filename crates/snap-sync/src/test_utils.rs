@@ -3,12 +3,7 @@
 use crate::SnapPivotPolicy;
 use alloy_consensus::Header;
 use alloy_primitives::B256;
-use reth_provider::{
-    test_utils::create_test_provider_factory, DatabaseProviderFactory, StaticFileProviderFactory,
-    StaticFileWriter,
-};
-use reth_static_file_types::StaticFileSegment;
-use reth_storage_api::HeaderProvider;
+use reth_provider::test_utils::MockEthProvider;
 
 /// Small bounds keep header fixtures short without changing the policy's decisions.
 pub(crate) fn policy() -> SnapPivotPolicy {
@@ -44,18 +39,8 @@ pub(crate) fn chain(bal_from: Option<u64>) -> Vec<Header> {
     headers
 }
 
-pub(crate) fn provider_with(
-    headers: impl IntoIterator<Item = Header>,
-) -> impl HeaderProvider<Header = Header> {
-    let factory = create_test_provider_factory();
-    let static_files = factory.static_file_provider();
-    let mut writer = static_files.latest_writer(StaticFileSegment::Headers).unwrap();
-    for header in headers {
-        let hash = header.hash_slow();
-        writer.append_header(&header, &hash).unwrap();
-    }
-    writer.commit().unwrap();
-    drop(writer);
-    drop(static_files);
-    factory.database_provider_ro().unwrap()
+pub(crate) fn provider_with(headers: impl IntoIterator<Item = Header>) -> MockEthProvider {
+    let provider = MockEthProvider::default();
+    provider.extend_headers(headers.into_iter().map(|header| (header.hash_slow(), header)));
+    provider
 }

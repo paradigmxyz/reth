@@ -10264,11 +10264,12 @@ version = "2.5.2"
 dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
+ "alloy-eips",
  "alloy-primitives",
  "reth-primitives-traits",
  "reth-provider",
- "reth-static-file-types",
  "reth-storage-api",
+ "reth-storage-errors",
  "thiserror 2.0.18",
  "tokio-util",
 ]

@@ -135,8 +135,8 @@ mod tests {
         session.select(&provider, 3, None).unwrap();
 
         let target = session.target().unwrap();
-        assert_eq!(target.target_block(), 2);
-        assert_eq!(target.target_hash(), expected.hash_slow());
+        assert_eq!(target.target().number, 2);
+        assert_eq!(target.target().hash, expected.hash_slow());
     }
 
     #[test]
@@ -145,10 +145,10 @@ mod tests {
         let mut session = session();
 
         session.select(&provider, 2, None).unwrap();
-        assert_eq!(session.target().unwrap().target_block(), 1);
+        assert_eq!(session.target().unwrap().target().number, 1);
 
         session.select(&provider, 3, None).unwrap();
-        assert_eq!(session.target().unwrap().target_block(), 2);
+        assert_eq!(session.target().unwrap().target().number, 2);
     }
 
     #[test]
