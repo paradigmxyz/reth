@@ -1197,6 +1197,10 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
                 EthMessage::NewPooledTransactionHashes72(existing),
                 NewPooledTransactionHashes::Eth72(inc),
             ) => {
+                // One mask describes every blob transaction in the message.
+                if existing.cell_mask != inc.cell_mask {
+                    return Some(inc.into())
+                }
                 existing.hashes.extend(inc.hashes);
                 existing.sizes.extend(inc.sizes);
                 existing.types.extend(inc.types);
@@ -1288,7 +1292,7 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
     }
 
     /// Pushes a pooled transaction hash announcement, merging into the last queued message if
-    /// it is the same variant (eth66, eth68, or eth72).
+    /// it is the same variant (eth66, eth68, or eth72) and has a compatible cell mask.
     pub(crate) fn push_pooled_hashes(&mut self, msg: NewPooledTransactionHashes) {
         let msg = if let Some(last) = self.messages.back_mut() {
             match last.try_merge_hashes(msg) {
@@ -2061,6 +2065,46 @@ mod tests {
                 ..
             }))
         ));
+    }
+
+    #[test]
+    fn eth72_coalescing_preserves_cell_masks() {
+        use alloy_primitives::B128;
+
+        let masks =
+            [None, Some(B128::repeat_byte(0xff)), Some(B128::from(1u128)), Some(B128::from(2u128))];
+        for existing_mask in masks {
+            for incoming_mask in masks {
+                let announcement = |mask: Option<B128>, byte| NewPooledTransactionHashes72 {
+                    types: vec![if mask.is_some() { 3 } else { 2 }],
+                    sizes: vec![100],
+                    hashes: vec![B256::repeat_byte(byte)],
+                    cell_mask: mask,
+                };
+                let existing = announcement(existing_mask, 1);
+                let incoming = announcement(incoming_mask, 2);
+                let mut message: OutgoingMessage<EthNetworkPrimitives> =
+                    EthMessage::NewPooledTransactionHashes72(existing.clone()).into();
+
+                let remainder = message.try_merge_hashes(incoming.clone().into());
+
+                let OutgoingMessage::Eth(EthMessage::NewPooledTransactionHashes72(merged)) =
+                    message
+                else {
+                    panic!("expected eth72 announcement");
+                };
+                if existing_mask == incoming_mask {
+                    assert!(remainder.is_none());
+                    assert_eq!(merged.cell_mask, existing_mask);
+                    assert_eq!(merged.hashes, vec![B256::repeat_byte(1), B256::repeat_byte(2)]);
+                    assert_eq!(merged.types, [existing.types, incoming.types].concat());
+                    assert_eq!(merged.sizes, vec![100, 100]);
+                } else {
+                    assert_eq!(remainder, Some(incoming.into()));
+                    assert_eq!(merged, existing);
+                }
+            }
+        }
     }
 
     #[test]
