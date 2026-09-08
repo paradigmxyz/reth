@@ -472,10 +472,12 @@ where
                 None
             }
             SparseTrieTaskMessage::HashedState(hashed_state) => {
+                tracing::trace!(target: "engine::tree::critical", phase = "trie_state_update_received");
                 self.on_hashed_state_update(hashed_state);
                 None
             }
             SparseTrieTaskMessage::FinishedStateUpdates => {
+                tracing::trace!(target: "engine::tree::critical", phase = "trie_state_stream_finished");
                 let hashed_state = Arc::new(core::mem::take(&mut self.final_hashed_state));
                 let _ = self.final_hashed_state_tx.take().unwrap().send(Arc::clone(&hashed_state));
                 self.finished_state_updates = true;
@@ -901,6 +903,7 @@ where
         }
 
         let _span = trace_span!("dispatch_pending_targets").entered();
+        tracing::trace!(target: "engine::tree::critical", phase = "trie_proof_targets_ready", targets = self.pending_targets.len());
         let (targets, chunking_length) = self.pending_targets.take();
         let mut dispatch_error = None;
         dispatch_with_chunking(
