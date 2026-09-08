@@ -78,7 +78,7 @@ use std::{
     sync::Arc,
     task::{ready, Context, Poll},
 };
-use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError};
+use tokio::sync::{mpsc::error::TrySendError, oneshot};
 use tracing::trace;
 
 /// Maximum live entries inspected in each eviction search at capacity.
@@ -802,7 +802,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         delivered.clear();
 
         let outcome = match result {
-            Ok(Ok(mut transactions)) => {
+            Ok(mut transactions) => {
                 let mut requested_set = std::mem::take(&mut self.scratch_requested);
                 requested_set.clear();
                 requested_set.extend(requested.iter().copied());
@@ -811,9 +811,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 self.scratch_requested = requested_set;
                 Ok((transactions, unsolicited))
             }
-            Ok(Err(error)) => Err(error),
-            // the session dropped the request
-            Err(_) => Err(RequestError::ChannelClosed),
+            Err(error) => Err(error),
         };
 
         let timed_out = matches!(&outcome, Err(RequestError::Timeout));
@@ -1366,7 +1364,8 @@ impl<T> Future for InflightRequest<T> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
-        let result = ready!(this.response.poll_unpin(cx));
+        let result =
+            ready!(this.response.poll_unpin(cx)).unwrap_or(Err(RequestError::ChannelClosed));
         Poll::Ready(ResolvedRequest {
             peer: this.peer,
             request_id: this.request_id,
@@ -1388,11 +1387,11 @@ struct ResolvedRequest<T> {
     version: EthVersion,
     client_version: Arc<str>,
     hashes: Vec<TxHash>,
-    result: Result<RequestResult<PooledTransactions<T>>, RecvError>,
+    result: RequestResult<PooledTransactions<T>>,
 }
 
-/// Returns the announced size of a transaction, capped at the response soft limit since a peer
-/// can't serve anything bigger, or 0 if the announcement carried no size.
+/// Returns the announced transaction size used for request packing, capped at the response soft
+/// limit, or 0 if the announcement carried no size.
 fn announced_size(metadata: Eth68TxMetadata) -> u32 {
     metadata
         .map_or(0, |(_, size)| size.min(SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE) as u32)

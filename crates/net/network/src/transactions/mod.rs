@@ -1628,13 +1628,8 @@ where
         // Announcements are queued in the transaction fetcher, requests for them are sent
         // further below.
         //
-        // The smallest decodable transaction is an empty legacy transaction, 10 bytes
-        // (128 KiB / 10 bytes > 13k transactions).
-        //
-        // If this is an event with `Transactions` message, since transactions aren't
-        // validated until they are inserted into the pool, this can potentially queue
-        // >13k transactions for insertion to pool. More if the message size is bigger
-        // than the soft limit on a `Transactions` broadcast message, which is 128 KiB.
+        // Decoded broadcasts may exceed the available import capacity. Admission truncates
+        // them before filtering and sender recovery, reserving capacity for fetched transactions.
         let maybe_more_tx_events = metered_poll_nested_stream_with_budget!(
             poll_durations.acc_tx_events,
             "net::tx",
@@ -1647,13 +1642,8 @@ where
         // Advance inflight fetch requests (flush transaction fetcher and queue for
         // import to pool).
         //
-        // The smallest decodable transaction is an empty legacy transaction, 10 bytes
-        // (2 MiB / 10 bytes > 200k transactions).
-        //
-        // Since transactions aren't validated until they are inserted into the pool,
-        // this can potentially queue >200k transactions for insertion to pool. More
-        // if the message size is bigger than the soft limit on a `PooledTransactions`
-        // response which is 2 MiB.
+        // A fetched response may exceed the available import capacity. Admission keeps its
+        // remainder in `pending_fetch_response`; while occupied, stop draining fetch events.
         let mut maybe_more_tx_fetch_events = metered_poll_nested_stream_with_budget!(
             poll_durations.acc_fetch_events,
             "net::tx",
@@ -1667,20 +1657,9 @@ where
             |event| this.on_fetch_event(event),
         );
 
-        // Advance pool imports (flush txns to pool).
-        //
-        // Note, this is done in batches. A batch is filled from one `Transactions`
-        // broadcast messages or one `PooledTransactions` response at a time. The
-        // minimum batch size is 1 transaction (and might often be the case with blob
-        // transactions).
-        //
-        // The smallest decodable transaction is an empty legacy transaction, 10 bytes
-        // (2 MiB / 10 bytes > 200k transactions).
-        //
-        // Since transactions aren't validated until they are inserted into the pool,
-        // this can potentially validate >200k transactions. More if the message size
-        // is bigger than the soft limit on a `PooledTransactions` response which is
-        // 2 MiB (`Transactions` broadcast messages is smaller, 128 KiB).
+        // Advance batches admitted to the pool within the concurrent import limit. Each batch
+        // contains admitted transactions from one broadcast or fetched response; a buffered
+        // response may be admitted over several polls as import capacity becomes available.
         let maybe_more_pool_imports = metered_poll_nested_stream_with_budget!(
             poll_durations.acc_pending_imports,
             "net::tx",
