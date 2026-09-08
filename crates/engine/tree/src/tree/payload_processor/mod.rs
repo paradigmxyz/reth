@@ -291,12 +291,12 @@ where
                 let (transactions, convert) = transactions.into_parts();
                 if parallel_bal_execution {
                     // Workers can execute out of order, but canonical commit needs the earliest
-                    // transactions first. Recover growing prefixes before scheduling the tail.
+                    // transactions first. Recover fixed-size prefixes before scheduling the tail.
                     executor.cpu_pool().install(|| {
                         transactions
                             .into_par_iter()
                             .enumerate()
-                            .by_exponential_blocks()
+                            .by_uniform_blocks(256)
                             .map(|(i, tx)| {
                                 let tx = convert.convert(tx);
                                 (i, tx)
