@@ -32,7 +32,6 @@ proptest-arbitrary-interop.workspace = true
 rand.workspace = true
 alloy-rlp.workspace = true
 reth-codecs = { workspace = true, features = ["test-utils"] }
-reth-zstd-compressors.workspace = true
 alloy-consensus = { workspace = true, features = ["serde", "arbitrary"] }
 serde_json.workspace = true
 serde_with.workspace = true
@@ -52,7 +51,6 @@ std = [
     "alloy-eips/std",
     "alloy-rpc-types-eth?/std",
     "alloy-rlp/std",
-    "reth-zstd-compressors/std",
     "serde_json/std",
     "serde_with/std",
     "reth-codecs?/std",
