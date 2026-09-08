@@ -65,12 +65,12 @@ pub struct ProofCalculator<TC, HC, VE: LeafValueEncoder> {
     /// and so on. When a branch is removed from `branch_stack` its children are removed from this
     /// one, and the branch is pushed onto this stack in their place (see [`Self::pop_branch`].
     ///
-    /// Children on the `child_stack` are converted to [`ProofTrieBranchChild::RlpNode`]s via the
-    /// [`Self::commit_child`] method. Committing a child indicates that no further changes are
-    /// expected to happen to it (e.g. splitting its short key when inserting a new branch). Given
-    /// that keys are consumed in lexicographical order, only the last child on the stack can
-    /// ever be modified, and therefore all children besides the last are expected to be
-    /// [`ProofTrieBranchChild::RlpNode`]s.
+    /// Given that keys are consumed in lexicographical order, only the last child on the stack
+    /// can still require structural changes (e.g. splitting its short key when inserting a new
+    /// branch). Once a child is finalized, [`Self::commit_last_child`] converts it to a
+    /// [`ProofTrieBranchChild::RlpNode`] if retained for the proof. Unretained children can remain
+    /// unencoded anywhere on the stack until [`Self::pop_branch`], giving deferred encoders more
+    /// time for async work.
     child_stack: Vec<ProofTrieBranchChild<VE::DeferredEncoder>>,
     /// Cached branch data pulled from the `trie_cursor`. The calculator will use the cached
     /// [`BranchNodeCompact::hashes`] to skip over the calculation of sub-tries in the overall
@@ -322,8 +322,9 @@ where
             .then(|| self.child_path_at(Self::highest_set_nibble(branch.state_mask)))
     }
 
-    /// Calls [`Self::commit_child`] on the last child of `child_stack`, replacing it with a
-    /// [`ProofTrieBranchChild::RlpNode`].
+    /// If the last child of `child_stack` is retained for the proof, calls [`Self::commit_child`]
+    /// to replace it with a [`ProofTrieBranchChild::RlpNode`]. Otherwise, leaves it unencoded until
+    /// [`Self::pop_branch`].
     ///
     /// If `child_stack` is empty then this is a no-op.
     ///
@@ -434,14 +435,15 @@ where
             // Store the child key relative to its new parent branch.
             child.trim_short_key_prefix(path.len() - short_key.len());
 
-            // Commit the preceding child before pushing this one, so only the final child on the
-            // stack can remain uncommitted.
+            // The preceding child is structurally final. Commit it if retained for the proof;
+            // otherwise its encoding can wait until pop_branch.
             self.commit_last_child(targets)?;
 
             let branch = self.branch_stack.last_mut().expect("branch_stack cannot be empty");
             debug_assert!(!branch.state_mask.is_bit_set(nibble));
 
-            // Mark the nibble occupied now that the preceding child has been committed.
+            // Set the new child's bit after commit_last_child, which uses the mask to find the
+            // preceding child's path.
             branch.state_mask.set_bit(nibble);
 
             // The parent now contains this child at `nibble`.
@@ -534,8 +536,8 @@ where
             "called",
         );
 
-        // Ensure the final child on the child stack has been committed, as this method expects all
-        // children of the branch to have been committed.
+        // Retain the final child if needed before draining the branch's children. Unretained
+        // children are encoded below.
         self.commit_last_child(targets)?;
 
         let mut rlp_nodes_buf = self.take_rlp_nodes_buf();
