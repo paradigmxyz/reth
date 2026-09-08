@@ -106,8 +106,14 @@ where
     MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync + 'scope,
     ReceiptTy<Evm::Primitives>: Clone,
 {
+    let _body =
+        tracing::trace_span!(target: "engine::tree::critical", "bal_canonical_body").entered();
     let bal = input_bal.as_bal();
-    let input_bal_revm = convert_alloy_to_revm_bal(bal)?;
+    let input_bal_revm =
+        tracing::trace_span!(target: "engine::tree::critical", "bal_convert_input")
+            .in_scope(|| convert_alloy_to_revm_bal(bal))?;
+    let setup =
+        tracing::trace_span!(target: "engine::tree::critical", "bal_canonical_setup").entered();
 
     let block_gas_limit = evm_env.block_env.gas_limit();
     let enable_amsterdam_eip8037 = evm_env.cfg_env.enable_amsterdam_eip8037;
@@ -144,7 +150,9 @@ where
         let evm = evm_config.evm_with_env(&mut canonical_state, evm_env);
         let mut canonical_executor = evm_config.create_executor_with_state(evm, ctx.clone());
 
-        canonical_executor.apply_pre_execution_changes()?;
+        drop(setup);
+        tracing::trace_span!(target: "engine::tree::critical", "bal_canonical_pre")
+            .in_scope(|| canonical_executor.apply_pre_execution_changes())?;
         let mut senders = Vec::with_capacity(transaction_count);
         let mut last_sent_len = 0usize;
         for output in ordered_worker_outputs(&result_rx, transaction_count) {
@@ -175,13 +183,16 @@ where
         drop(abort_guard);
 
         canonical_executor.evm_mut().db_mut().bump_bal_index();
-        let block_result = canonical_executor.apply_post_execution_changes()?;
+        let block_result =
+            tracing::trace_span!(target: "engine::tree::critical", "bal_canonical_post")
+                .in_scope(|| canonical_executor.apply_post_execution_changes())?;
         (block_result, senders)
     };
 
     let built_bal = take_built_bal_and_log_divergence(&mut canonical_state, bal);
 
-    canonical_state.merge_transitions(BundleRetention::Reverts);
+    tracing::trace_span!(target: "engine::tree::critical", "bal_merge_transitions")
+        .in_scope(|| canonical_state.merge_transitions(BundleRetention::Reverts));
     Ok((
         BlockExecutionOutput { state: canonical_state.take_bundle(), result: block_result },
         senders,
@@ -214,7 +225,10 @@ fn take_built_bal_and_log_divergence<DB>(
 where
     DB: Database,
 {
-    let built_bal = canonical_state.take_built_alloy_bal().expect("with_bal_builder set");
+    let built_bal = tracing::trace_span!(target: "engine::tree::critical", "bal_rebuild")
+        .in_scope(|| canonical_state.take_built_alloy_bal().expect("with_bal_builder set"));
+    let _compare =
+        tracing::trace_span!(target: "engine::tree::critical", "bal_debug_compare").entered();
     if tracing::enabled!(target: "engine::tree::payload_processor::bal", tracing::Level::DEBUG) &&
         built_bal.as_slice() != received_bal.as_slice()
     {

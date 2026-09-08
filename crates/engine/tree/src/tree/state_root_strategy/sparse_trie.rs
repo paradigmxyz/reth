@@ -271,8 +271,11 @@ where
         // marker means they died without finishing the stream.
         while !self.finished_state_updates {
             let mut t = Instant::now();
+            let wait = tracing::trace_span!(target: "engine::tree::critical", "trie_wait_stream")
+                .entered();
             crossbeam_channel::select_biased! {
                 recv(self.updates) -> message => {
+                    drop(wait);
                     let wake = Instant::now();
                     total_idle_time += wake.duration_since(idle_start);
                     self.metrics
@@ -288,6 +291,7 @@ where
                     self.pending_updates += 1;
                 }
                 recv(self.proof_result_rx) -> message => {
+                    drop(wait);
                     let wake = Instant::now();
                     total_idle_time += wake.duration_since(idle_start);
                     self.metrics
@@ -313,8 +317,11 @@ where
         // are ignored: with all updates known, prefetching has nothing left to help.
         while !done {
             let mut t = Instant::now();
+            let wait = tracing::trace_span!(target: "engine::tree::critical", "trie_wait_proofs")
+                .entered();
             crossbeam_channel::select_biased! {
                 recv(self.proof_result_rx) -> message => {
+                    drop(wait);
                     let wake = Instant::now();
                     total_idle_time += wake.duration_since(idle_start);
                     self.metrics

@@ -88,17 +88,20 @@ impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
                 return Some(Ok(output));
             }
 
-            let output = match self.result_rx.recv() {
-                Ok(Ok(output)) => output,
-                Ok(Err(err)) => {
-                    self.failed = true;
-                    return Some(Err(err.into()));
-                }
-                Err(_) => {
-                    self.failed = true;
-                    return Some(Err(OrderedWorkerOutputError::ResultChannelClosed));
-                }
-            };
+            let output =
+                match tracing::trace_span!(target: "engine::tree::critical", "bal_result_recv")
+                    .in_scope(|| self.result_rx.recv())
+                {
+                    Ok(Ok(output)) => output,
+                    Ok(Err(err)) => {
+                        self.failed = true;
+                        return Some(Err(err.into()));
+                    }
+                    Err(_) => {
+                        self.failed = true;
+                        return Some(Err(OrderedWorkerOutputError::ResultChannelClosed));
+                    }
+                };
 
             let index = output.index;
             tracing::trace!(target: "engine::tree::bal", index, next = self.next, "bal output received");

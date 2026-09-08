@@ -491,6 +491,7 @@ where
         V: PayloadValidator<T, Block = N::Block> + Clone,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
+        let setup = tracing::trace_span!(target: "engine::tree::critical", "np_setup").entered();
         let parent_hash = input.parent_hash();
         let _txpool_pause = self.txpool_prewarm.as_ref().map(txpool_prewarm::Handle::pause);
         let txpool_snapshot =
@@ -552,7 +553,9 @@ where
             parent_block.gas_limit().saturating_mul(MAX_EXPECTED_GAS_LIMIT_MULTIPLIER)
         {
             // Call `.get()` to await the pre-execution checks and exit early if they fail.
-            if validated_block.get().is_err() {
+            if tracing::trace_span!(target: "engine::tree::critical", "np_gas_guard_wait")
+                .in_scope(|| validated_block.get().is_err())
+            {
                 return Err(validated_block
                     .try_into_inner()
                     .expect("sole handle")
@@ -582,8 +585,11 @@ where
         // Extract the decoded BAL, if present. Undecodable block access list bytes invalidate the
         // payload.
         let decoded_bal =
-            ensure_ok!(input.try_decoded_access_list().map_err(BlockAccessListDecodeError::new))
-                .map(Arc::new);
+            ensure_ok!(tracing::trace_span!(target: "engine::tree::critical", "np_decode_bal")
+                .in_scope(|| input
+                    .try_decoded_access_list()
+                    .map_err(BlockAccessListDecodeError::new)))
+            .map(Arc::new);
 
         if let Some(decoded_bal) = decoded_bal.as_deref() {
             // Reject oversized BAL sidecars before executing the block.
@@ -719,6 +725,7 @@ where
         // Execute the block and handle any execution errors.
         // The receipt root task is spawned before execution and receives receipts incrementally
         // as transactions complete, allowing parallel computation during execution.
+        drop(setup);
         let execute_block_start = Instant::now();
         let execution_result = if parallel_bal_execution {
             self.execute_block_bal(env, &input, &handle, &make_state_provider)
@@ -774,7 +781,9 @@ where
                 }
             });
 
-        let block = validated_block.try_into_inner().expect("sole handle")?;
+        let block =
+            tracing::trace_span!(target: "engine::tree::critical", "np_wait_payload_conversion")
+                .in_scope(|| validated_block.try_into_inner().expect("sole handle"))?;
         let block = block.with_senders(senders);
 
         // Wait for the receipt root computation to complete.
@@ -827,7 +836,8 @@ where
 
         let root_start = Instant::now();
         let root_outcome = ensure_ok_post_block!(
-            state_root_job.finish(&block, output.clone(), &hashed_state),
+            tracing::trace_span!(target: "engine::tree::critical", "np_finish_root")
+                .in_scope(|| state_root_job.finish(&block, output.clone(), &hashed_state)),
             block
         );
         let root_elapsed = root_start.elapsed();

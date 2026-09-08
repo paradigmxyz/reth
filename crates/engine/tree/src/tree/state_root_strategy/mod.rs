@@ -1138,7 +1138,7 @@ where
         _hashed_state: &LazyHashedPostState,
     ) -> ProviderResult<StateRootJobOutcome> {
         if self.timeout.is_none() {
-            return match self.handle.state_root() {
+            return match tracing::trace_span!(target: "engine::tree::critical", "np_wait_sparse_root").in_scope(|| self.handle.state_root()) {
                 Ok(outcome) => self.verified_sparse_outcome(block, &output, outcome),
                 Err(err) => {
                     debug!(target: "engine::tree::state_root_strategy", %err, "State root task failed, falling back to serial root");
@@ -1149,34 +1149,37 @@ where
 
         let timeout = self.timeout.expect("checked above");
         let task_rx = self.handle.take_state_root_rx();
-        let fallback_rx = match task_rx.recv_timeout(timeout) {
-            Ok(Ok(outcome)) => return self.verified_sparse_outcome(block, &output, outcome),
-            Ok(Err(err)) => {
-                debug!(target: "engine::tree::state_root_strategy", %err, "State root task failed, falling back to serial root");
-                Self::serial_fallback(
-                    &self.executor,
-                    self.state_provider_factory.clone(),
-                    output.clone(),
-                )?
-            }
-            Err(RecvTimeoutError::Timeout) => {
-                warn!(target: "engine::tree::state_root_strategy", ?timeout, "State root task timed out, racing serial fallback");
-                self.metrics.state_root_task_timeout_total.increment(1);
-                Self::serial_fallback(
-                    &self.executor,
-                    self.state_provider_factory.clone(),
-                    output.clone(),
-                )?
-            }
-            Err(RecvTimeoutError::Disconnected) => {
-                debug!(target: "engine::tree::state_root_strategy", "State root task dropped, falling back to serial root");
-                Self::serial_fallback(
-                    &self.executor,
-                    self.state_provider_factory.clone(),
-                    output.clone(),
-                )?
-            }
-        };
+        let fallback_rx =
+            match tracing::trace_span!(target: "engine::tree::critical", "np_wait_sparse_root")
+                .in_scope(|| task_rx.recv_timeout(timeout))
+            {
+                Ok(Ok(outcome)) => return self.verified_sparse_outcome(block, &output, outcome),
+                Ok(Err(err)) => {
+                    debug!(target: "engine::tree::state_root_strategy", %err, "State root task failed, falling back to serial root");
+                    Self::serial_fallback(
+                        &self.executor,
+                        self.state_provider_factory.clone(),
+                        output.clone(),
+                    )?
+                }
+                Err(RecvTimeoutError::Timeout) => {
+                    warn!(target: "engine::tree::state_root_strategy", ?timeout, "State root task timed out, racing serial fallback");
+                    self.metrics.state_root_task_timeout_total.increment(1);
+                    Self::serial_fallback(
+                        &self.executor,
+                        self.state_provider_factory.clone(),
+                        output.clone(),
+                    )?
+                }
+                Err(RecvTimeoutError::Disconnected) => {
+                    debug!(target: "engine::tree::state_root_strategy", "State root task dropped, falling back to serial root");
+                    Self::serial_fallback(
+                        &self.executor,
+                        self.state_provider_factory.clone(),
+                        output.clone(),
+                    )?
+                }
+            };
 
         loop {
             if let Ok(Ok(outcome)) = task_rx.try_recv() {
