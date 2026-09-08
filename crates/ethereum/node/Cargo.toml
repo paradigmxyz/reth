@@ -97,7 +97,6 @@ reqwest.workspace = true
 reth-rpc-layer.workspace = true
 
 [features]
-# Enables custom account types and revm's chain-specific account payload.
 account-ext = ["reth-primitives-traits/account-ext"]
 default = []
 jit = ["reth-evm-ethereum/jit"]

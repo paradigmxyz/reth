@@ -52,7 +52,6 @@ alloy-rpc-types-eth = { workspace = true, optional = true }
 alloy-rpc-types-engine = { workspace = true, optional = true }
 
 [features]
-# Enables custom account types and revm's chain-specific account payload.
 account-ext = ["reth-primitives-traits/account-ext"]
 default = ["std"]
 std = [

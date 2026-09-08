@@ -67,7 +67,6 @@ rand.workspace = true
 serde.workspace = true
 
 [features]
-# Enables custom account types and revm's chain-specific account payload.
 account-ext = ["reth-primitives-traits/account-ext"]
 metrics = ["reth-metrics", "dep:metrics"]
 serde = [

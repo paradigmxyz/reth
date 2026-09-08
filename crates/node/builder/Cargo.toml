@@ -94,7 +94,6 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 reth-evm-ethereum = { workspace = true, features = ["test-utils"] }
 
 [features]
-# Enables custom account types and revm's chain-specific account payload.
 account-ext = ["reth-primitives-traits/account-ext"]
 default = []
 js-tracer = [

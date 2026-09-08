@@ -19,7 +19,6 @@ reth-primitives-traits.workspace = true
 reth-payload-primitives.workspace = true
 
 [features]
-# Enables custom account types and revm's chain-specific account payload.
 account-ext = ["reth-primitives-traits/account-ext"]
 default = ["std"]
 std = [

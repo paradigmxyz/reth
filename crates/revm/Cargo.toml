@@ -32,7 +32,6 @@ reth-ethereum-forks.workspace = true
 alloy-consensus.workspace = true
 
 [features]
-# Enables custom account types and revm's chain-specific account payload.
 account-ext = ["reth-primitives-traits/account-ext"]
 default = ["std"]
 std = [
