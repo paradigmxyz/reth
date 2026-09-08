@@ -856,6 +856,14 @@ impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
 
         if self.should_fill_on_miss() {
             match self.caches.get_or_try_insert_account_with(*address, || {
+                let _span = tracing::trace_span!(
+                    target: "engine::tree::bal_reads",
+                    "cache_miss_account",
+                    cache = ?Arc::as_ptr(&self.caches.0),
+                    address = %address,
+                    fill_on_miss = true,
+                )
+                .entered();
                 self.state_provider.basic_account(address)
             })? {
                 CachedStatus::NotCached(value) => {
@@ -872,6 +880,14 @@ impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
             Ok(account)
         } else {
             self.record_account_miss();
+            let _span = tracing::trace_span!(
+                target: "engine::tree::bal_reads",
+                "cache_miss_account",
+                cache = ?Arc::as_ptr(&self.caches.0),
+                address = %address,
+                fill_on_miss = false,
+            )
+            .entered();
             self.state_provider.basic_account(address)
         }
     }
@@ -902,6 +918,14 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
 
         if self.should_fill_on_miss() {
             match self.caches.get_or_try_insert_storage_with(account, storage_key, || {
+                let _span = tracing::trace_span!(
+                    target: "engine::tree::bal_reads",
+                    "cache_miss_storage",
+                    cache = ?Arc::as_ptr(&self.caches.0),
+                    %account, %storage_key,
+                    fill_on_miss = true,
+                )
+                .entered();
                 self.state_provider.storage(account, storage_key).map(Option::unwrap_or_default)
             })? {
                 CachedStatus::NotCached(value) => {
@@ -918,6 +942,14 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
             Ok(nonzero_storage_value(value))
         } else {
             self.record_storage_miss();
+            let _span = tracing::trace_span!(
+                target: "engine::tree::bal_reads",
+                "cache_miss_storage",
+                cache = ?Arc::as_ptr(&self.caches.0),
+                %account, %storage_key,
+                fill_on_miss = false,
+            )
+            .entered();
             self.state_provider.storage(account, storage_key)
         }
     }
@@ -935,6 +967,14 @@ impl<S: BytecodeReader> BytecodeReader for CachedStateProvider<S> {
 
         if self.should_fill_on_miss() {
             match self.caches.get_or_try_insert_code_with(*code_hash, || {
+                let _span = tracing::trace_span!(
+                    target: "engine::tree::bal_reads",
+                    "cache_miss_code",
+                    cache = ?Arc::as_ptr(&self.caches.0),
+                    %code_hash,
+                    fill_on_miss = true,
+                )
+                .entered();
                 self.state_provider.bytecode_by_hash(code_hash)
             })? {
                 CachedStatus::NotCached(code) => {
@@ -951,6 +991,14 @@ impl<S: BytecodeReader> BytecodeReader for CachedStateProvider<S> {
             Ok(code)
         } else {
             self.record_code_miss();
+            let _span = tracing::trace_span!(
+                target: "engine::tree::bal_reads",
+                "cache_miss_code",
+                cache = ?Arc::as_ptr(&self.caches.0),
+                %code_hash,
+                fill_on_miss = false,
+            )
+            .entered();
             self.state_provider.bytecode_by_hash(code_hash)
         }
     }
