@@ -2,8 +2,8 @@ use alloy_primitives::{hex, Address, BlockHash, B256};
 use clap::Parser;
 use reth_db::{
     static_file::{
-        AccountChangesetMask, ColumnSelectorOne, ColumnSelectorTwo, HeaderWithHashMask,
-        ReceiptMask, TransactionMask, TransactionSenderMask,
+        ColumnSelectorOne, ColumnSelectorTwo, HeaderWithHashMask, ReceiptMask, TransactionMask,
+        TransactionSenderMask,
     },
     RawDupSort,
 };
@@ -174,49 +174,11 @@ impl Command {
                     return Ok(());
                 }
 
-                let (key, subkey, mask): (u64, _, _) = match segment {
-                    StaticFileSegment::Headers => (
-                        table_key::<tables::Headers>(&key)?,
-                        None,
-                        <HeaderWithHashMask<HeaderTy<N>>>::MASK,
-                    ),
-                    StaticFileSegment::Transactions => (
-                        table_key::<tables::Transactions>(&key)?,
-                        None,
-                        <TransactionMask<TxTy<N>>>::MASK,
-                    ),
-                    StaticFileSegment::Receipts => (
-                        table_key::<tables::Receipts>(&key)?,
-                        None,
-                        <ReceiptMask<ReceiptTy<N>>>::MASK,
-                    ),
-                    StaticFileSegment::TransactionSenders => (
-                        table_key::<tables::TransactionSenders>(&key)?,
-                        None,
-                        TransactionSenderMask::MASK,
-                    ),
-                    StaticFileSegment::AccountChangeSets => {
-                        let subkey =
-                            table_subkey::<tables::AccountChangeSets>(subkey.as_deref()).ok();
-                        (
-                            table_key::<tables::AccountChangeSets>(&key)?,
-                            subkey,
-                            AccountChangesetMask::<
-                                reth_db_api::models::AccountBeforeTx<
-                                    AccountExtensionTy<N::Primitives>,
-                                >,
-                            >::MASK,
-                        )
-                    }
-                    StaticFileSegment::StorageChangeSets => {
-                        unreachable!("storage changesets handled above");
-                    }
-                };
-
-                // handle account changesets differently if a subkey is provided.
                 if let StaticFileSegment::AccountChangeSets = segment {
+                    let subkey = table_subkey::<tables::AccountChangeSets>(subkey.as_deref()).ok();
+                    let key = table_key::<tables::AccountChangeSets>(&key)?;
+
                     let Some(subkey) = subkey else {
-                        // get all changesets for the block
                         let changesets = tool
                             .provider_factory
                             .static_file_provider()
@@ -239,6 +201,27 @@ impl Command {
 
                     return Ok(())
                 }
+
+                let (key, mask): (u64, _) = match segment {
+                    StaticFileSegment::Headers => (
+                        table_key::<tables::Headers>(&key)?,
+                        <HeaderWithHashMask<HeaderTy<N>>>::MASK,
+                    ),
+                    StaticFileSegment::Transactions => {
+                        (table_key::<tables::Transactions>(&key)?, <TransactionMask<TxTy<N>>>::MASK)
+                    }
+                    StaticFileSegment::Receipts => {
+                        (table_key::<tables::Receipts>(&key)?, <ReceiptMask<ReceiptTy<N>>>::MASK)
+                    }
+                    StaticFileSegment::TransactionSenders => (
+                        table_key::<tables::TransactionSenders>(&key)?,
+                        TransactionSenderMask::MASK,
+                    ),
+                    StaticFileSegment::AccountChangeSets => unreachable!(),
+                    StaticFileSegment::StorageChangeSets => {
+                        unreachable!("storage changesets handled above");
+                    }
+                };
 
                 let content = tool.provider_factory.static_file_provider().find_static_file(
                     segment,
