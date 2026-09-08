@@ -7967,7 +7967,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=1cfb60c#1cfb60c68ba60be44923ff6aad4f38bdb049c4dd"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=c00c67d#c00c67d398fcc68ab2b04c2df8e05b3ce64c3eba"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -7979,7 +7979,7 @@ dependencies = [
  "modular-bitfield",
  "parity-scale-codec",
  "reth-codecs-derive",
- "reth-zstd-compressors 0.7.0 (git+https://github.com/paradigmxyz/reth-core?rev=1cfb60c)",
+ "reth-zstd-compressors 0.7.0 (git+https://github.com/paradigmxyz/reth-core?rev=c00c67d)",
  "serde",
  "visibility",
 ]
@@ -7987,7 +7987,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs-derive"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=1cfb60c#1cfb60c68ba60be44923ff6aad4f38bdb049c4dd"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=c00c67d#c00c67d398fcc68ab2b04c2df8e05b3ce64c3eba"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -8437,6 +8437,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-engine",
+ "alloy-trie",
  "assert_matches",
  "crossbeam-channel",
  "derive_more",
@@ -8453,6 +8454,7 @@ dependencies = [
  "rayon",
  "reth-chain-state",
  "reth-chainspec",
+ "reth-codecs",
  "reth-consensus",
  "reth-db",
  "reth-db-common",
@@ -8470,6 +8472,7 @@ dependencies = [
  "reth-metrics",
  "reth-network-p2p",
  "reth-node-ethereum",
+ "reth-node-types",
  "reth-payload-builder",
  "reth-payload-primitives",
  "reth-primitives-traits",
@@ -8490,6 +8493,7 @@ dependencies = [
  "reth-trie-sparse",
  "revm",
  "schnellru",
+ "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
@@ -9713,7 +9717,7 @@ dependencies = [
 [[package]]
 name = "reth-primitives-traits"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=1cfb60c#1cfb60c68ba60be44923ff6aad4f38bdb049c4dd"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=c00c67d#c00c67d398fcc68ab2b04c2df8e05b3ce64c3eba"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -9967,6 +9971,7 @@ dependencies = [
  "reth-chain-state",
  "reth-engine-primitives",
  "reth-network-peers",
+ "reth-primitives-traits",
  "reth-rpc-eth-api",
  "reth-trie-common",
  "serde",
@@ -10380,6 +10385,7 @@ dependencies = [
  "proptest-arbitrary-interop",
  "rand 0.9.4",
  "reth-codecs",
+ "reth-primitives-traits",
  "reth-trie-common",
  "serde",
 ]
@@ -10823,7 +10829,7 @@ dependencies = [
 [[package]]
 name = "reth-zstd-compressors"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=1cfb60c#1cfb60c68ba60be44923ff6aad4f38bdb049c4dd"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=c00c67d#c00c67d398fcc68ab2b04c2df8e05b3ce64c3eba"
 dependencies = [
  "zstd",
 ]

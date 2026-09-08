@@ -125,6 +125,13 @@ macro_rules! tables {
     (@value_doc $key:ty, $value:ty) => {
         concat!("[`", stringify!($value), "`]")
     };
+    (@dupsort $name:ident $(<$($generic:ident),*>)?, $value:ty;) => {};
+    (@dupsort $name:ident $(<$($generic:ident),*>)?, $value:ty; $subkey:ty) => {
+        impl$(<$($generic),*>)? DupSort for $name$(<$($generic),*>)?
+        where $value: $crate::table::Value + 'static $($(, $generic: Send + Sync)*)? {
+            type SubKey = $subkey;
+        }
+    };
     // Don't generate links if we have generics
     (@value_doc $key:ty, $value:ty, $($generic:ident),*) => {
         concat!("`", stringify!($value), "`")
@@ -163,11 +170,7 @@ macro_rules! tables {
                 type Value = $value;
             }
 
-            $(
-                impl DupSort for $name {
-                    type SubKey = $subkey;
-                }
-            )?
+            tables!(@dupsort $name$(<$($generic),*>)?, $value; $($subkey)?);
         )*
 
         // Tables enum.
@@ -457,9 +460,9 @@ tables! {
     /// Stores the state of an account before a certain transaction changed it.
     /// Change on state can be: account is created, selfdestructed, touched while empty
     /// or changed balance,nonce.
-    table AccountChangeSets {
+    table AccountChangeSets<E = EmptyAccountExtension> {
         type Key = BlockNumber;
-        type Value = AccountBeforeTx;
+        type Value = AccountBeforeTx<E>;
         type SubKey = Address;
     }
 
@@ -608,6 +611,24 @@ impl Decode for ChainStateKey {
             [0] => Ok(Self::LastFinalizedBlock),
             [1] => Ok(Self::LastSafeBlock),
             _ => Err(crate::DatabaseError::Decode),
+        }
+    }
+}
+
+impl Tables {
+    /// Visits account tables using the node-selected extension instead of the Ethereum default.
+    pub fn view_with_account_extension<E: reth_primitives_traits::AccountExtension, T, R>(
+        &self,
+        visitor: &T,
+    ) -> Result<R, T::Error>
+    where
+        T: ?Sized + TableViewer<R>,
+    {
+        match self {
+            Self::PlainAccountState => visitor.view::<PlainAccountState<E>>(),
+            Self::HashedAccounts => visitor.view::<HashedAccounts<E>>(),
+            Self::AccountChangeSets => visitor.view_dupsort::<AccountChangeSets<E>>(),
+            _ => self.view(visitor),
         }
     }
 }

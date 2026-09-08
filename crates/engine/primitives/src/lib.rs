@@ -16,7 +16,9 @@ use reth_payload_primitives::{
     EngineApiMessageVersion, EngineObjectValidationError, InvalidPayloadAttributesError,
     NewPayloadError, PayloadAttributes, PayloadOrAttributes, PayloadTypes,
 };
-use reth_primitives_traits::{Block, RecoveredBlock, SealedBlock, SealedHeader};
+use reth_primitives_traits::{
+    AccountExtensionTy, Block, RecoveredBlock, SealedBlock, SealedHeader,
+};
 use reth_storage_api::{errors::ProviderResult, StateProviderBox};
 use reth_trie_common::HashedPostState;
 use serde::{de::DeserializeOwned, Serialize};
@@ -224,10 +226,20 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
     /// built if the implementation needs it (the L1 default does not).
     fn validate_block_post_execution_with_hashed_state<'a>(
         &self,
-        _state_updates: impl FnOnce() -> &'a HashedPostState,
+        _state_updates: impl FnOnce() -> &'a HashedPostState<
+            AccountExtensionTy<
+                <Types::BuiltPayload as reth_payload_primitives::BuiltPayload>::Primitives,
+            >,
+        >,
         _block: &RecoveredBlock<Self::Block>,
         _parent_header: &SealedHeader<<Self::Block as Block>::Header>,
-        _parent_state: impl FnOnce() -> ProviderResult<StateProviderBox>,
+        _parent_state: impl FnOnce() -> ProviderResult<
+            StateProviderBox<
+                AccountExtensionTy<
+                    <Types::BuiltPayload as reth_payload_primitives::BuiltPayload>::Primitives,
+                >,
+            >,
+        >,
     ) -> Result<(), InsertBlockErrorKind>
     where
         Self: Sized,

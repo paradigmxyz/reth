@@ -57,7 +57,9 @@ impl Command {
         self,
         tool: &DbTool<NodeTypesWithDBAdapter<N, DatabaseEnv>>,
     ) -> eyre::Result<()> {
-        self.table.view(&ListTableViewer { tool, args: &self })
+        self.table.view_with_account_extension::<
+            reth_primitives_traits::AccountExtensionTy<N::Primitives>, _, _,
+        >(&ListTableViewer { tool, args: &self })
     }
 
     /// Generate [`ListFilter`] from command.

@@ -5,6 +5,7 @@ use alloy_primitives::Bytes;
 use alloy_rpc_types_eth::BlockId;
 use reth_errors::RethError;
 use reth_evm::{block::BlockExecutor, ConfigureEvm, Evm};
+use reth_primitives_traits::AccountExtensionTy;
 use reth_revm::{database::StateProviderDatabase, State};
 use reth_rpc_eth_types::{error::FromEthApiError, EthApiError};
 use reth_storage_api::StateProviderFactory;
@@ -22,6 +23,10 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
         block_id: BlockId,
     ) -> impl Future<Output = Result<Option<BlockAccessList>, Self::Error>> + Send {
         async move {
+            reth_storage_api::ensure_no_account_extensions::<AccountExtensionTy<Self::Primitives>>(
+                "BAL",
+            )
+            .map_err(Self::Error::from_eth_err)?;
             if block_id.is_pending() {
                 return Ok(None)
             }
@@ -85,6 +90,10 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
         block_id: BlockId,
     ) -> impl Future<Output = Result<Option<Bytes>, Self::Error>> + Send {
         async move {
+            reth_storage_api::ensure_no_account_extensions::<AccountExtensionTy<Self::Primitives>>(
+                "BAL",
+            )
+            .map_err(Self::Error::from_eth_err)?;
             let block = self
                 .recovered_block(block_id)
                 .await?

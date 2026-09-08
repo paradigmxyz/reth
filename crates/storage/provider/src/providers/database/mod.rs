@@ -24,7 +24,7 @@ use reth_errors::{RethError, RethResult};
 use reth_node_types::{
     BlockTy, HeaderTy, NodeTypesWithDB, NodeTypesWithDBAdapter, ReceiptTy, TxTy,
 };
-use reth_primitives_traits::{RecoveredBlock, SealedHeader};
+use reth_primitives_traits::{AccountExtensionTy, RecoveredBlock, SealedHeader};
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment, MINIMUM_UNWIND_SAFE_DISTANCE};
 use reth_stages_types::{PipelineTarget, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
@@ -458,7 +458,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
 
     /// State provider for latest block
     #[track_caller]
-    pub fn latest(&self) -> ProviderResult<StateProviderBox> {
+    pub fn latest(&self) -> ProviderResult<StateProviderBox<AccountExtensionTy<N::Primitives>>> {
         trace!(target: "providers::db", "Returning latest state provider");
         Ok(Box::new(LatestStateProvider::new(self.database_provider_ro()?)))
     }

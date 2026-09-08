@@ -46,9 +46,9 @@ pub trait HistoryWriter: Send {
     /// Unwind and clear account history indices.
     ///
     /// Returns number of changesets walked.
-    fn unwind_account_history_indices<'a>(
+    fn unwind_account_history_indices<'a, E: reth_primitives_traits::AccountExtension>(
         &self,
-        changesets: impl Iterator<Item = &'a (BlockNumber, AccountBeforeTx)>,
+        changesets: impl Iterator<Item = &'a (BlockNumber, AccountBeforeTx<E>)>,
     ) -> ProviderResult<usize>;
 
     /// Unwind and clear account history indices in a given block range.

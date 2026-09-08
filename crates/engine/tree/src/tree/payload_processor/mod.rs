@@ -16,7 +16,7 @@ use reth_evm::{
     execute::{ExecutableTxFor, WithTxEnv},
     ConfigureEvm, ConvertTx, ExecutableTxIterator, ExecutableTxTuple, SpecFor, TxEnvFor,
 };
-use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
+use reth_primitives_traits::{AccountExtensionTy, FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory, HistoryReader,
     PruneCheckpointReader, StageCheckpointReader, StorageChangeSetReader, StorageSettingsCache,
@@ -57,6 +57,7 @@ type IteratorPayloadHandle<Evm, I> = PayloadHandle<
     IteratorTx<Evm, I>,
     <I as ExecutableTxTuple>::Error,
     <<Evm as ConfigureEvm>::Primitives as NodePrimitives>::Receipt,
+    AccountExtensionTy<<Evm as ConfigureEvm>::Primitives>,
 >;
 
 type IteratorPrewarmTxReceiver<Evm, I> =
@@ -86,7 +87,7 @@ where
     /// The executor used by to spawn tasks.
     executor: Runtime,
     /// The most recent cache used for execution.
-    execution_cache: PayloadExecutionCache,
+    execution_cache: PayloadExecutionCache<AccountExtensionTy<Evm::Primitives>>,
     /// Metrics for the execution cache.
     cache_metrics: Option<CachedStateMetrics>,
     /// Metrics for shared execution cache state.
@@ -110,7 +111,8 @@ where
     disable_bal_batch_io: bool,
     /// Dedicated blocking pool for warming the BAL read-set, created lazily on the first BAL block
     /// (see [`Self::bal_prewarm_pool`]). Its threads exit when the processor is dropped.
-    bal_prewarm_pool: OnceLock<Arc<bal_prewarm_pool::BalPrewarmPool>>,
+    bal_prewarm_pool:
+        OnceLock<Arc<bal_prewarm_pool::BalPrewarmPool<AccountExtensionTy<Evm::Primitives>>>>,
 }
 
 impl<Evm> PayloadProcessor<Evm>
@@ -145,7 +147,9 @@ where
 
     /// Returns the dedicated BAL read-set prewarm pool, spawning its blocking worker threads on
     /// first use (only the BAL parallel execution path calls this).
-    fn bal_prewarm_pool(&self) -> Arc<bal_prewarm_pool::BalPrewarmPool> {
+    fn bal_prewarm_pool(
+        &self,
+    ) -> Arc<bal_prewarm_pool::BalPrewarmPool<AccountExtensionTy<Evm::Primitives>>> {
         self.bal_prewarm_pool
             .get_or_init(|| {
                 bal_prewarm_pool::BalPrewarmPool::new(bal_prewarm_pool::DEFAULT_BAL_PREWARM_THREADS)
@@ -154,7 +158,9 @@ where
     }
 
     /// Returns the shared execution cache handle used for engine backpressure.
-    pub(crate) fn execution_cache(&self) -> PayloadExecutionCache {
+    pub(crate) fn execution_cache(
+        &self,
+    ) -> PayloadExecutionCache<AccountExtensionTy<Evm::Primitives>> {
         self.execution_cache.clone()
     }
 }
@@ -171,8 +177,8 @@ where
         env: ExecutionEnv<Evm>,
         transactions: I,
         state_provider_factory: OverlayStateProviderFactory<P, Evm::Primitives>,
-        hint_stream: Option<StateRootHintStream>,
-        hashed_update_stream: Option<StateRootUpdateStream>,
+        hint_stream: Option<StateRootHintStream<AccountExtensionTy<Evm::Primitives>>>,
+        hashed_update_stream: Option<StateRootUpdateStream<AccountExtensionTy<Evm::Primitives>>>,
         parallel_bal_execution: bool,
     ) -> IteratorPayloadHandle<Evm, I>
     where
@@ -180,7 +186,7 @@ where
         P::Provider: BlockNumReader
             + PruneCheckpointReader
             + StageCheckpointReader
-            + ChangeSetReader
+            + ChangeSetReader<AccountExtension = AccountExtensionTy<Evm::Primitives>>
             + StorageChangeSetReader
             + StorageSettingsCache
             + HistoryReader
@@ -384,16 +390,19 @@ where
             mpsc::Receiver<(usize, impl ExecutableTxFor<Evm> + Clone + Send + 'static)>,
         >,
         state_provider_factory: OverlayStateProviderFactory<P, Evm::Primitives>,
-        hint_stream: Option<StateRootHintStream>,
-        hashed_update_stream: Option<StateRootUpdateStream>,
+        hint_stream: Option<StateRootHintStream<AccountExtensionTy<Evm::Primitives>>>,
+        hashed_update_stream: Option<StateRootUpdateStream<AccountExtensionTy<Evm::Primitives>>>,
         parallel_bal_execution: bool,
-    ) -> CacheTaskHandle<<Evm::Primitives as NodePrimitives>::Receipt>
+    ) -> CacheTaskHandle<
+        <Evm::Primitives as NodePrimitives>::Receipt,
+        AccountExtensionTy<Evm::Primitives>,
+    >
     where
         P: DatabaseProviderFactory + Clone + 'static,
         P::Provider: BlockNumReader
             + PruneCheckpointReader
             + StageCheckpointReader
-            + ChangeSetReader
+            + ChangeSetReader<AccountExtension = AccountExtensionTy<Evm::Primitives>>
             + StorageChangeSetReader
             + StorageSettingsCache
             + HistoryReader
@@ -454,7 +463,7 @@ where
     /// If the given hash is different then what is recently cached, then this will create a new
     /// instance.
     #[instrument(level = "debug", target = "engine::caching", skip(self))]
-    pub fn cache_for(&self, parent_hash: B256) -> SavedCache {
+    pub fn cache_for(&self, parent_hash: B256) -> SavedCache<AccountExtensionTy<Evm::Primitives>> {
         if let Some(cache) = self.execution_cache.get_cache_for(parent_hash) {
             debug!("reusing execution cache");
             cache
@@ -552,17 +561,24 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
 /// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the
 /// caching task without cloning the expensive `BundleState`.
 #[derive(Debug)]
-pub struct PayloadHandle<Tx, Err, R> {
-    prewarm_handle: CacheTaskHandle<R>,
+pub struct PayloadHandle<
+    Tx,
+    Err,
+    R,
+    Ext: reth_primitives_traits::AccountExtension = reth_primitives_traits::EmptyAccountExtension,
+> {
+    prewarm_handle: CacheTaskHandle<R, Ext>,
     /// Stream of block transactions and their indices in the block.
     transactions: IndexedTxReceiver<Tx, Err>,
     /// Span for tracing
     _span: Span,
 }
 
-impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
+impl<Tx, Err, R: Send + Sync + 'static, Ext: reth_primitives_traits::AccountExtension>
+    PayloadHandle<Tx, Err, R, Ext>
+{
     /// Returns a clone of the caches used by prewarming
-    pub fn caches(&self) -> Option<ExecutionCache> {
+    pub fn caches(&self) -> Option<ExecutionCache<Ext>> {
         self.prewarm_handle.saved_cache.as_ref().map(|cache| cache.cache().clone())
     }
 
@@ -616,9 +632,12 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
 /// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the
 /// prewarm task without cloning the expensive `BundleState`.
 #[derive(Debug)]
-pub struct CacheTaskHandle<R> {
+pub struct CacheTaskHandle<
+    R,
+    Ext: reth_primitives_traits::AccountExtension = reth_primitives_traits::EmptyAccountExtension,
+> {
     /// The shared cache the task operates with.
-    saved_cache: Option<SavedCache>,
+    saved_cache: Option<SavedCache<Ext>>,
     /// Channel to the spawned prewarm task if any
     to_prewarm_task: Option<std::sync::mpsc::Sender<PrewarmTaskEvent<R>>>,
     /// Shared counter tracking the next transaction index to be executed by the main execution
@@ -628,7 +647,9 @@ pub struct CacheTaskHandle<R> {
     cache_metrics: Option<CachedStateMetrics>,
 }
 
-impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
+impl<R: Send + Sync + 'static, Ext: reth_primitives_traits::AccountExtension>
+    CacheTaskHandle<R, Ext>
+{
     /// Terminates the pre-warming transaction processing.
     ///
     /// Note: This does not terminate the task yet.
@@ -659,7 +680,7 @@ impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
     }
 }
 
-impl<R> Drop for CacheTaskHandle<R> {
+impl<R, Ext: reth_primitives_traits::AccountExtension> Drop for CacheTaskHandle<R, Ext> {
     fn drop(&mut self) {
         // Ensure we always terminate on drop - send None without needing Send + Sync bounds
         if let Some(tx) = self.to_prewarm_task.take() {

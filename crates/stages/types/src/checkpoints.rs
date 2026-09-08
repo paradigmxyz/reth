@@ -8,7 +8,7 @@ use reth_trie_common::{hash_builder::HashBuilderState, StoredSubNode};
 
 /// Saves the progress of Merkle stage.
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
-pub struct MerkleCheckpoint {
+pub struct MerkleCheckpoint<E = reth_primitives_traits::EmptyAccountExtension> {
     /// The target block number.
     pub target_block: BlockNumber,
     /// The last hashed account key processed.
@@ -18,10 +18,10 @@ pub struct MerkleCheckpoint {
     /// The hash builder state.
     pub state: HashBuilderState,
     /// Optional storage root checkpoint for the last processed account.
-    pub storage_root_checkpoint: Option<StorageRootMerkleCheckpoint>,
+    pub storage_root_checkpoint: Option<StorageRootMerkleCheckpoint<E>>,
 }
 
-impl MerkleCheckpoint {
+impl<E> MerkleCheckpoint<E> {
     /// Creates a new Merkle checkpoint.
     pub const fn new(
         target_block: BlockNumber,
@@ -34,7 +34,7 @@ impl MerkleCheckpoint {
 }
 
 #[cfg(any(test, feature = "reth-codec"))]
-impl reth_codecs::Compact for MerkleCheckpoint {
+impl<E: reth_codecs::Compact> reth_codecs::Compact for MerkleCheckpoint<E> {
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
@@ -111,7 +111,7 @@ impl reth_codecs::Compact for MerkleCheckpoint {
 ///
 /// This contains the walker stack, hash builder state, and the last storage key processed.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StorageRootMerkleCheckpoint {
+pub struct StorageRootMerkleCheckpoint<E = reth_primitives_traits::EmptyAccountExtension> {
     /// The last storage key processed.
     pub last_storage_key: B256,
     /// Previously recorded walker stack.
@@ -124,9 +124,11 @@ pub struct StorageRootMerkleCheckpoint {
     pub account_balance: U256,
     /// The account bytecode hash.
     pub account_bytecode_hash: B256,
+    /// Chain-specific payload of the account whose storage root is in progress.
+    pub account_extension: E,
 }
 
-impl StorageRootMerkleCheckpoint {
+impl<E> StorageRootMerkleCheckpoint<E> {
     /// Creates a new storage root merkle checkpoint.
     pub const fn new(
         last_storage_key: B256,
@@ -135,6 +137,7 @@ impl StorageRootMerkleCheckpoint {
         account_nonce: u64,
         account_balance: U256,
         account_bytecode_hash: B256,
+        account_extension: E,
     ) -> Self {
         Self {
             last_storage_key,
@@ -143,12 +146,13 @@ impl StorageRootMerkleCheckpoint {
             account_nonce,
             account_balance,
             account_bytecode_hash,
+            account_extension,
         }
     }
 }
 
 #[cfg(any(test, feature = "reth-codec"))]
-impl reth_codecs::Compact for StorageRootMerkleCheckpoint {
+impl<E: reth_codecs::Compact> reth_codecs::Compact for StorageRootMerkleCheckpoint<E> {
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
@@ -177,6 +181,7 @@ impl reth_codecs::Compact for StorageRootMerkleCheckpoint {
 
         buf.put_slice(self.account_bytecode_hash.as_slice());
         len += 32;
+        len += self.account_extension.to_compact(buf);
 
         len
     }
@@ -203,6 +208,7 @@ impl reth_codecs::Compact for StorageRootMerkleCheckpoint {
         let (account_balance, mut buf) = U256::from_compact(buf, balance_len);
         let account_bytecode_hash = B256::from_slice(&buf[..32]);
         buf.advance(32);
+        let (account_extension, buf) = E::from_compact(buf, buf.len());
 
         (
             Self {
@@ -212,6 +218,7 @@ impl reth_codecs::Compact for StorageRootMerkleCheckpoint {
                 account_nonce,
                 account_balance,
                 account_bytecode_hash,
+                account_extension,
             },
             buf,
         )
@@ -608,6 +615,9 @@ stage_unit_checkpoints!(
 #[cfg(test)]
 mod tests {
     use super::*;
+    type MerkleCheckpoint = super::MerkleCheckpoint<reth_primitives_traits::EmptyAccountExtension>;
+    type StorageRootMerkleCheckpoint =
+        super::StorageRootMerkleCheckpoint<reth_primitives_traits::EmptyAccountExtension>;
     use alloy_primitives::b256;
     use rand::Rng;
     use reth_codecs::Compact;
@@ -647,6 +657,7 @@ mod tests {
             account_nonce: 0,
             account_balance: U256::ZERO,
             account_bytecode_hash: B256::ZERO,
+            account_extension: reth_primitives_traits::EmptyAccountExtension,
         };
 
         let mut buf = Vec::new();
@@ -661,6 +672,7 @@ mod tests {
 
         // Create a storage root checkpoint
         let storage_checkpoint = StorageRootMerkleCheckpoint {
+            account_extension: reth_primitives_traits::EmptyAccountExtension,
             last_storage_key: rng.random(),
             walker_stack: vec![StoredSubNode {
                 key: B256::random_with(&mut rng).to_vec(),

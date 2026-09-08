@@ -324,7 +324,9 @@ pub struct CustomPayloadBuilder<Pool, Client, Evm> {
 
 impl<Pool, Client, Evm> PayloadBuilder for CustomPayloadBuilder<Pool, Client, Evm>
 where
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> + Clone,
+    Client: StateProviderFactory<AccountExtension = reth_ethereum::primitives::EmptyAccountExtension>
+        + ChainSpecProvider<ChainSpec = ChainSpec>
+        + Clone,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     Evm: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
 {

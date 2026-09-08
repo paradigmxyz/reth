@@ -314,7 +314,7 @@ use reth_eth_wire_types::HandleMempoolData;
 use reth_evm::ConfigureEvm;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_execution_types::ChangedAccount;
-use reth_primitives_traits::{HeaderTy, Recovered};
+use reth_primitives_traits::{AccountExtensionTy, HeaderTy, Recovered};
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
@@ -413,7 +413,7 @@ where
 impl<Client, S, Evm> EthTransactionPool<Client, S, Evm>
 where
     Client: ChainSpecProvider<ChainSpec: EthereumHardforks>
-        + StateProviderFactory
+        + StateProviderFactory<AccountExtension = AccountExtensionTy<Evm::Primitives>>
         + Clone
         + BlockReaderIdExt<Header = HeaderTy<Evm::Primitives>>
         + 'static,

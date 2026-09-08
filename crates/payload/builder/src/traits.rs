@@ -4,7 +4,7 @@ use alloy_rpc_types::engine::PayloadId;
 use reth_chain_state::CanonStateNotification;
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind};
-use reth_primitives_traits::NodePrimitives;
+use reth_primitives_traits::{AccountExtensionTy, NodePrimitives};
 use std::future::Future;
 
 use crate::service::BuildNewPayload;
@@ -116,9 +116,15 @@ pub trait PayloadJobGenerator {
     ///
     /// This is expected to initially build a new (empty) payload without transactions, so it can be
     /// returned directly.
+    #[expect(clippy::type_complexity)]
     fn new_payload_job(
         &self,
-        input: BuildNewPayload<<Self::Job as PayloadJob>::PayloadAttributes>,
+        input: BuildNewPayload<
+            <Self::Job as PayloadJob>::PayloadAttributes,
+            AccountExtensionTy<
+                <<Self::Job as PayloadJob>::BuiltPayload as BuiltPayload>::Primitives,
+            >,
+        >,
         id: PayloadId,
     ) -> Result<Self::Job, PayloadBuilderError>;
 

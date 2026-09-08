@@ -14,6 +14,7 @@ workspace = true
 [dependencies]
 reth-codecs = { workspace = true, optional = true }
 reth-trie-common.workspace = true
+reth-primitives-traits.workspace = true
 alloy-primitives.workspace = true
 
 serde = { workspace = true, optional = true }
@@ -39,6 +40,7 @@ std = [
     "alloy-primitives/std",
     "bytes?/std",
     "reth-trie-common/std",
+    "reth-primitives-traits/std",
     "serde?/std",
     "reth-codecs?/std",
 ]
@@ -47,11 +49,13 @@ reth-codec = [
     "dep:bytes",
     "dep:modular-bitfield",
     "reth-trie-common/reth-codec",
+    "reth-primitives-traits/reth-codec",
 ]
 test-utils = [
     "arbitrary",
     "reth-codecs?/test-utils",
     "reth-trie-common/test-utils",
+    "reth-primitives-traits/test-utils",
 ]
 arbitrary = [
     "std",
@@ -59,6 +63,7 @@ arbitrary = [
     "alloy-primitives/arbitrary",
     "reth-codecs?/arbitrary",
     "reth-trie-common/arbitrary",
+    "reth-primitives-traits/arbitrary",
 ]
 serde = [
     "dep:serde",
@@ -67,4 +72,5 @@ serde = [
     "rand/serde",
     "reth-codecs?/serde",
     "reth-trie-common/serde",
+    "reth-primitives-traits/serde",
 ]

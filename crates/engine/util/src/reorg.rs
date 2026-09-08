@@ -17,7 +17,8 @@ use reth_evm::{
 };
 use reth_payload_primitives::{BuiltPayload, PayloadTypes};
 use reth_primitives_traits::{
-    block::Block as _, BlockBody as _, BlockTy, HeaderTy, SealedBlock, SignedTransaction,
+    block::Block as _, AccountExtensionTy, BlockBody as _, BlockTy, HeaderTy, SealedBlock,
+    SignedTransaction,
 };
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_storage_api::{errors::ProviderError, BlockReader, StateProviderFactory};
@@ -101,7 +102,7 @@ where
     S: Stream<Item = BeaconEngineMessage<T>>,
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = Evm::Primitives>>,
     Provider: BlockReader<Header = HeaderTy<Evm::Primitives>, Block = BlockTy<Evm::Primitives>>
-        + StateProviderFactory
+        + StateProviderFactory<AccountExtension = AccountExtensionTy<Evm::Primitives>>
         + ChainSpecProvider,
     Evm: ConfigureEvm,
     Validator: EngineValidator<T, Evm::Primitives>,
@@ -233,7 +234,7 @@ fn create_reorg_head<Provider, Evm, T, Validator>(
 ) -> RethResult<(SealedBlock<BlockTy<Evm::Primitives>>, Option<Bytes>)>
 where
     Provider: BlockReader<Header = HeaderTy<Evm::Primitives>, Block = BlockTy<Evm::Primitives>>
-        + StateProviderFactory
+        + StateProviderFactory<AccountExtension = AccountExtensionTy<Evm::Primitives>>
         + ChainSpecProvider<ChainSpec: EthChainSpec>,
     Evm: ConfigureEvm,
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = Evm::Primitives>>,
@@ -268,6 +269,11 @@ where
 
     // Configure state
     let has_bal = reorg_target.header().block_access_list_hash().is_some();
+    if has_bal {
+        reth_storage_api::ensure_no_account_extensions::<
+            reth_primitives_traits::AccountExtensionTy<Evm::Primitives>,
+        >("BAL")?;
+    }
     let state_provider = provider.state_by_block_hash(reorg_target.header().parent_hash())?;
     let mut state = State::builder()
         .with_database_ref(StateProviderDatabase::new(&state_provider))

@@ -57,8 +57,9 @@ where
     Ok(storage)
 }
 
-impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStorageRoot<'a, TX>
-    for StorageRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>
+impl<'a, TX: DbTx, A: TrieTableAdapter, E: reth_primitives_traits::AccountExtension>
+    DatabaseStorageRoot<'a, TX>
+    for StorageRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX, E>>
 {
     fn from_tx(tx: &'a TX, address: Address) -> Self {
         Self::new(

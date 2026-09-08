@@ -20,9 +20,9 @@ use reth_trie_db::DatabaseStateRoot;
 
 use std::fmt::Debug;
 
-type DbStateRoot<'a, TX, A> = StateRoot<
+type DbStateRoot<'a, TX, A, E = reth_primitives_traits::EmptyAccountExtension> = StateRoot<
     reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
-    reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
+    reth_trie_db::DatabaseHashedCursorFactory<&'a TX, E>,
 >;
 use tracing::*;
 
@@ -132,10 +132,12 @@ impl MerkleStage {
     }
 
     /// Gets the hashing progress
-    pub fn get_execution_checkpoint(
+    pub fn get_execution_checkpoint<
+        Provider: StageCheckpointReader + reth_provider::AccountExtensionProvider,
+    >(
         &self,
-        provider: &impl StageCheckpointReader,
-    ) -> Result<Option<MerkleCheckpoint>, StageError> {
+        provider: &Provider,
+    ) -> Result<Option<MerkleCheckpoint<Provider::AccountExtension>>, StageError> {
         let buf =
             provider.get_stage_checkpoint_progress(StageId::MerkleExecute)?.unwrap_or_default();
 
@@ -148,10 +150,12 @@ impl MerkleStage {
     }
 
     /// Saves the hashing progress
-    pub fn save_execution_checkpoint(
+    pub fn save_execution_checkpoint<
+        Provider: StageCheckpointWriter + reth_provider::AccountExtensionProvider,
+    >(
         &self,
-        provider: &impl StageCheckpointWriter,
-        checkpoint: Option<MerkleCheckpoint>,
+        provider: &Provider,
+        checkpoint: Option<MerkleCheckpoint<Provider::AccountExtension>>,
     ) -> Result<(), StageError> {
         let mut buf = vec![];
         if let Some(checkpoint) = checkpoint {
@@ -249,14 +253,15 @@ where
             }
             .unwrap_or(EntitiesCheckpoint {
                 processed: 0,
-                total: (provider.count_entries::<tables::HashedAccounts>()? +
+                total: (provider
+                    .count_entries::<tables::HashedAccounts<Provider::AccountExtension>>()? +
                     provider.count_entries::<tables::HashedStorages>()?)
                     as u64,
             });
 
             let tx = provider.tx_ref();
             let progress = reth_trie_db::with_adapter!(provider, |A| {
-                DbStateRoot::<_, A>::from_tx(tx)
+                DbStateRoot::<_, A, Provider::AccountExtension>::from_tx(tx)
                     .with_intermediate_state(checkpoint.map(IntermediateStateRootState::from))
                     .root_with_progress()
             })
@@ -295,6 +300,7 @@ where
                                 storage_state.account.nonce,
                                 storage_state.account.balance,
                                 storage_state.account.bytecode_hash.unwrap_or(KECCAK_EMPTY),
+                                storage_state.account.extension,
                             ));
                     }
                     self.save_execution_checkpoint(provider, Some(checkpoint))?;
@@ -331,7 +337,7 @@ where
                     "Processing chunk"
                 );
                 let (root, updates) = reth_trie_db::with_adapter!(provider, |A| {
-                    DbStateRoot::<_, A>::incremental_root_with_updates(provider, chunk_range)
+                    DbStateRoot::<_, A, Provider::AccountExtension>::incremental_root_with_updates(provider, chunk_range)
                 })
                 .map_err(|e| {
                     error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "Incremental state root failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
@@ -346,9 +352,9 @@ where
                 "Incremental merkle hashing did not produce a final root".into(),
             ))?;
 
-            let total_hashed_entries = (provider.count_entries::<tables::HashedAccounts>()? +
-                provider.count_entries::<tables::HashedStorages>()?)
-                as u64;
+            let total_hashed_entries =
+                (provider.count_entries::<tables::HashedAccounts<Provider::AccountExtension>>()? +
+                    provider.count_entries::<tables::HashedStorages>()?) as u64;
 
             let entities_checkpoint = EntitiesCheckpoint {
                 // This is fine because `range` doesn't have an upper bound, so in this `else`
@@ -395,7 +401,7 @@ where
         let mut entities_checkpoint =
             input.checkpoint.entities_stage_checkpoint().unwrap_or(EntitiesCheckpoint {
                 processed: 0,
-                total: (tx.entries::<tables::HashedAccounts>()? +
+                total: (tx.entries::<tables::HashedAccounts<Provider::AccountExtension>>()? +
                     tx.entries::<tables::HashedStorages>()?) as u64,
             });
 
@@ -416,13 +422,14 @@ where
             info!(target: "sync::stages::merkle::unwind", "Nothing to unwind");
         } else {
             let (block_root, updates) = reth_trie_db::with_adapter!(provider, |A| {
-                DbStateRoot::<_, A>::incremental_root_calculator(provider, range).and_then(
-                    |calculator| {
-                        calculator
-                            .with_walk_all_changed_branch_children(walk_all_changed_branch_children)
-                            .root_with_updates()
-                    },
+                DbStateRoot::<_, A, Provider::AccountExtension>::incremental_root_calculator(
+                    provider, range,
                 )
+                .and_then(|calculator| {
+                    calculator
+                        .with_walk_all_changed_branch_children(walk_all_changed_branch_children)
+                        .root_with_updates()
+                })
             })
             .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
@@ -438,7 +445,7 @@ where
 
             // Update entities checkpoint to reflect the unwind operation
             // Since we're unwinding, we need to recalculate the total entities at the target block
-            let accounts = tx.entries::<tables::HashedAccounts>()?;
+            let accounts = tx.entries::<tables::HashedAccounts<Provider::AccountExtension>>()?;
             let storages = tx.entries::<tables::HashedStorages>()?;
             let total = (accounts + storages) as u64;
             entities_checkpoint.total = total;

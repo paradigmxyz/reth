@@ -4,7 +4,7 @@ use reth_basic_payload_builder::{
     BasicPayloadJobGeneratorConfig, HeaderForPayload, PayloadBuilder, PayloadConfig,
 };
 use reth_ethereum::{
-    node::api::Block,
+    node::api::{Block, BuiltPayload},
     primitives::SealedHeader,
     provider::{BlockReaderIdExt, BlockSource, StateProviderFactory},
     tasks::Runtime,
@@ -59,7 +59,12 @@ where
     /// `engine_forkchoiceUpdatedV1`
     fn new_payload_job(
         &self,
-        input: BuildNewPayload<Builder::Attributes>,
+        input: BuildNewPayload<
+            Builder::Attributes,
+            reth_ethereum::primitives::AccountExtensionTy<
+                <Builder::BuiltPayload as BuiltPayload>::Primitives,
+            >,
+        >,
         id: PayloadId,
     ) -> Result<Self::Job, PayloadBuilderError> {
         let parent_block = if input.parent_hash.is_zero() {

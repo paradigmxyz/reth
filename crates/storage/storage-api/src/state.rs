@@ -27,7 +27,8 @@ pub trait StateReader: Send {
 }
 
 /// Type alias of boxed [`StateProvider`].
-pub type StateProviderBox = Box<dyn StateProvider + Send + 'static>;
+pub type StateProviderBox<E = reth_primitives_traits::EmptyAccountExtension> =
+    Box<dyn StateProvider<AccountExtension = E> + Send + 'static>;
 
 /// An abstraction for a type that provides state data.
 #[auto_impl(&, Arc, Box)]
@@ -95,15 +96,26 @@ pub trait AccountInfoReader: AccountReader + BytecodeReader {}
 impl<T: AccountReader + BytecodeReader> AccountInfoReader for T {}
 
 /// Trait that provides the hashed state from various sources.
-#[auto_impl(&, Arc, Box)]
-pub trait HashedPostStateProvider {
+pub trait HashedPostStateProvider: crate::AccountExtensionProvider {
     /// Returns the [`HashedPostState`] of the provided [`BundleState`], materializing zero-valued
     /// updates for parent storage of accounts that were destroyed but remain in the post-state.
     ///
     /// Providers backed by an exact parent-state view also materialize terminally destroyed
     /// accounts with explicit zero-valued storage updates.
-    fn hashed_post_state(&self, bundle_state: &BundleState) -> ProviderResult<HashedPostState>;
+    fn hashed_post_state(
+        &self,
+        bundle_state: &BundleState,
+    ) -> ProviderResult<HashedPostState<Self::AccountExtension>>;
 }
+
+crate::macros::impl_provider_refs!(T: HashedPostStateProvider {
+    fn hashed_post_state(
+        &self,
+        bundle_state: &BundleState,
+    ) -> ProviderResult<HashedPostState<Self::AccountExtension>> {
+        T::hashed_post_state(&**self, bundle_state)
+    }
+});
 
 /// Trait for reading bytecode associated with a given code hash.
 #[auto_impl(&, Arc, Box)]
@@ -135,16 +147,18 @@ pub trait BytecodeReader {
 /// This affects tracing, or replaying blocks, which will need to be executed on top of the state of
 /// the parent block. For example, in order to trace block `n`, the state after block `n - 1` needs
 /// to be used, since block `n` was executed on its parent block's state.
-#[auto_impl(&, Box, Arc)]
-pub trait StateProviderFactory: BlockIdReader + Send {
+pub trait StateProviderFactory: BlockIdReader + crate::AccountExtensionProvider + Send {
     /// Storage provider for latest block.
-    fn latest(&self) -> ProviderResult<StateProviderBox>;
+    fn latest(&self) -> ProviderResult<StateProviderBox<Self::AccountExtension>>;
 
     /// Returns a [`StateProvider`] indexed by the given [`BlockId`].
     ///
     /// Note: if a number or hash is provided this will __only__ look at historical(canonical)
     /// state.
-    fn state_by_block_id(&self, block_id: BlockId) -> ProviderResult<StateProviderBox> {
+    fn state_by_block_id(
+        &self,
+        block_id: BlockId,
+    ) -> ProviderResult<StateProviderBox<Self::AccountExtension>> {
         match block_id {
             BlockId::Number(block_number) => self.state_by_block_number_or_tag(block_number),
             BlockId::Hash(block_hash) => self.history_by_block_hash(block_hash.into()),
@@ -157,39 +171,99 @@ pub trait StateProviderFactory: BlockIdReader + Send {
     fn state_by_block_number_or_tag(
         &self,
         number_or_tag: BlockNumberOrTag,
-    ) -> ProviderResult<StateProviderBox>;
+    ) -> ProviderResult<StateProviderBox<Self::AccountExtension>>;
 
     /// Returns a historical [`StateProvider`] indexed by the given historic block number.
     ///
     ///
     /// Note: this only looks at historical blocks, not pending blocks.
-    fn history_by_block_number(&self, block: BlockNumber) -> ProviderResult<StateProviderBox>;
+    fn history_by_block_number(
+        &self,
+        block: BlockNumber,
+    ) -> ProviderResult<StateProviderBox<Self::AccountExtension>>;
 
     /// Returns a historical [`StateProvider`] indexed by the given block hash.
     ///
     /// Note: this only looks at historical blocks, not pending blocks.
-    fn history_by_block_hash(&self, block: BlockHash) -> ProviderResult<StateProviderBox>;
+    fn history_by_block_hash(
+        &self,
+        block: BlockHash,
+    ) -> ProviderResult<StateProviderBox<Self::AccountExtension>>;
 
-    /// Returns _any_ [StateProvider] with matching block hash.
+    /// Returns _any_ [`StateProvider`] with matching block hash.
     ///
-    /// This will return a [StateProvider] for either a historical or pending block.
-    fn state_by_block_hash(&self, block: BlockHash) -> ProviderResult<StateProviderBox>;
+    /// This will return a [`StateProvider`] for either a historical or pending block.
+    fn state_by_block_hash(
+        &self,
+        block: BlockHash,
+    ) -> ProviderResult<StateProviderBox<Self::AccountExtension>>;
 
     /// Storage provider for pending state.
     ///
     /// Represents the state at the block that extends the canonical chain by one.
     /// If there's no `pending` block, then this is equal to [`StateProviderFactory::latest`]
-    fn pending(&self) -> ProviderResult<StateProviderBox>;
+    fn pending(&self) -> ProviderResult<StateProviderBox<Self::AccountExtension>>;
 
     /// Storage provider for pending state for the given block hash.
     ///
     /// Represents the state at the block that extends the canonical chain.
     ///
     /// If the block couldn't be found, returns `None`.
-    fn pending_state_by_hash(&self, block_hash: B256) -> ProviderResult<Option<StateProviderBox>>;
+    fn pending_state_by_hash(
+        &self,
+        block_hash: B256,
+    ) -> ProviderResult<Option<StateProviderBox<Self::AccountExtension>>>;
 
     /// Returns a pending [`StateProvider`] if it exists.
     ///
     /// This will return `None` if there's no pending state.
-    fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox>>;
+    fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox<Self::AccountExtension>>>;
 }
+
+crate::macros::impl_provider_refs!(T: StateProviderFactory {
+    fn latest(&self) -> ProviderResult<StateProviderBox<Self::AccountExtension>> {
+        T::latest(&**self)
+    }
+    fn state_by_block_id(
+        &self,
+        block_id: BlockId,
+    ) -> ProviderResult<StateProviderBox<Self::AccountExtension>> {
+        T::state_by_block_id(&**self, block_id)
+    }
+    fn state_by_block_number_or_tag(
+        &self,
+        number_or_tag: BlockNumberOrTag,
+    ) -> ProviderResult<StateProviderBox<Self::AccountExtension>> {
+        T::state_by_block_number_or_tag(&**self, number_or_tag)
+    }
+    fn history_by_block_number(
+        &self,
+        block: BlockNumber,
+    ) -> ProviderResult<StateProviderBox<Self::AccountExtension>> {
+        T::history_by_block_number(&**self, block)
+    }
+    fn history_by_block_hash(
+        &self,
+        block: BlockHash,
+    ) -> ProviderResult<StateProviderBox<Self::AccountExtension>> {
+        T::history_by_block_hash(&**self, block)
+    }
+    fn state_by_block_hash(
+        &self,
+        block: BlockHash,
+    ) -> ProviderResult<StateProviderBox<Self::AccountExtension>> {
+        T::state_by_block_hash(&**self, block)
+    }
+    fn pending(&self) -> ProviderResult<StateProviderBox<Self::AccountExtension>> {
+        T::pending(&**self)
+    }
+    fn pending_state_by_hash(
+        &self,
+        block_hash: B256,
+    ) -> ProviderResult<Option<StateProviderBox<Self::AccountExtension>>> {
+        T::pending_state_by_hash(&**self, block_hash)
+    }
+    fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox<Self::AccountExtension>>> {
+        T::maybe_pending(&**self)
+    }
+});

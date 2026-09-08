@@ -42,7 +42,7 @@ use tracing::{debug, trace};
 #[derive(Clone)]
 pub struct OverlayManager<N: NodePrimitives = EthPrimitives> {
     blocks: Arc<DashMap<B256, ExecutedBlock<N>>>,
-    state_trie_overlays: OverlayCache<TrieInputSorted>,
+    state_trie_overlays: OverlayCache<TrieInputSorted<N::AccountExtension>>,
     execution_overlays: OverlayCache<ExecutionOverlay>,
     changeset_cache: ChangesetCache,
     preserved_sparse_trie: Arc<Mutex<Option<PreservedSparseTrie>>>,
@@ -119,7 +119,8 @@ impl<N: NodePrimitives> OverlayManager<N> {
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
-        P: DBProvider
+        P: DBProvider<AccountExtension = N::AccountExtension>
+            + reth_storage_api::HistoryReader
             + ChangeSetReader
             + StorageChangeSetReader
             + StageCheckpointReader
@@ -144,7 +145,8 @@ impl<N: NodePrimitives> OverlayManager<N> {
         finish: BlockNumHash,
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
-        P: DBProvider
+        P: DBProvider<AccountExtension = N::AccountExtension>
+            + reth_storage_api::HistoryReader
             + ChangeSetReader
             + StorageChangeSetReader
             + StageCheckpointReader
@@ -167,7 +169,8 @@ impl<N: NodePrimitives> OverlayManager<N> {
         block_number: BlockNumber,
     ) -> ProviderResult<TrieUpdatesSorted>
     where
-        P: DBProvider
+        P: DBProvider<AccountExtension = N::AccountExtension>
+            + reth_storage_api::HistoryReader
             + ChangeSetReader
             + StorageChangeSetReader
             + PruneCheckpointReader
@@ -351,12 +354,16 @@ impl<N: NodePrimitives> OverlayManager<N> {
         skip_all,
         fields(tip_hash = %parent_state.hash(), anchor_hash = %anchor_hash)
     )]
+    #[expect(clippy::type_complexity)]
     pub(crate) fn overlay_for_parent(
         &self,
         parent_state: &BlockState<N>,
         anchor_hash: B256,
         cache_config: OverlayCacheConfig,
-    ) -> Result<(Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>), StateTrieOverlayError> {
+    ) -> Result<
+        (Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted<N::AccountExtension>>),
+        StateTrieOverlayError,
+    > {
         let parent_hash = parent_state.hash();
         if parent_hash == anchor_hash {
             return Ok((
@@ -615,10 +622,10 @@ impl<N: NodePrimitives> OverlayManager<N> {
 
     fn compute_state_trie_overlay(
         &self,
-        compute_input: ComputeOverlayInput<N, TrieInputSorted>,
+        compute_input: ComputeOverlayInput<N, TrieInputSorted<N::AccountExtension>>,
         anchor_hash: B256,
         _span: tracing::Span,
-    ) -> TrieInputSorted {
+    ) -> TrieInputSorted<N::AccountExtension> {
         #[cfg(feature = "rayon")]
         {
             if let Some(worker_pool) = &self.worker_pool {
@@ -792,10 +799,10 @@ enum ComputeOverlayInput<N: NodePrimitives, T> {
     )
 )]
 fn compute_overlay<N: NodePrimitives>(
-    input: ComputeOverlayInput<N, TrieInputSorted>,
+    input: ComputeOverlayInput<N, TrieInputSorted<N::AccountExtension>>,
     anchor_hash: B256,
     metrics: &StateTrieOverlayMetrics,
-) -> TrieInputSorted {
+) -> TrieInputSorted<N::AccountExtension> {
     let started_at = Instant::now();
     let block_count = match &input {
         ComputeOverlayInput::ExtendCached { .. } => 1,
@@ -842,7 +849,9 @@ fn compute_overlay<N: NodePrimitives>(
     overlay
 }
 
-fn merge_blocks<N: NodePrimitives>(blocks: Vec<ExecutedBlock<N>>) -> TrieInputSorted {
+fn merge_blocks<N: NodePrimitives>(
+    blocks: Vec<ExecutedBlock<N>>,
+) -> TrieInputSorted<N::AccountExtension> {
     let trie_data = blocks.iter().map(ExecutedBlock::trie_data).collect::<Vec<_>>();
 
     #[cfg(feature = "rayon")]
@@ -872,9 +881,9 @@ fn merge_blocks<N: NodePrimitives>(blocks: Vec<ExecutedBlock<N>>) -> TrieInputSo
     TrieInputSorted::new(nodes, state, Default::default())
 }
 
-fn extend_overlay(
-    overlay: &mut TrieInputSorted,
-    hashed_state: &HashedPostStateSorted,
+fn extend_overlay<E: reth_primitives_traits::AccountExtension>(
+    overlay: &mut TrieInputSorted<E>,
+    hashed_state: &HashedPostStateSorted<E>,
     trie_updates: &TrieUpdatesSorted,
 ) {
     #[cfg(feature = "rayon")]

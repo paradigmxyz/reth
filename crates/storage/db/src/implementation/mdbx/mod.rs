@@ -1382,7 +1382,7 @@ mod tests {
         DatabaseError::Write(err) if *err == DatabaseWriteError {
             info: Error::KeyMismatch.into(),
             operation: DatabaseWriteOperation::CursorAppendDup,
-            table_name: AccountChangeSets::NAME,
+            table_name: AccountChangeSets::<reth_primitives_traits::EmptyAccountExtension>::NAME,
             key: transition_id.encode().into(),
         }));
         assert!(matches!(
@@ -1398,7 +1398,7 @@ mod tests {
             DatabaseError::Write(err) if *err == DatabaseWriteError {
                 info: Error::KeyMismatch.into(),
                 operation: DatabaseWriteOperation::CursorAppend,
-                table_name: AccountChangeSets::NAME,
+                table_name: AccountChangeSets::<reth_primitives_traits::EmptyAccountExtension>::NAME,
                 key: (transition_id - 1).encode().into(),
             }
         ));

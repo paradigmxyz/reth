@@ -38,8 +38,8 @@ pub struct IntermediateStorageRootState<E = EmptyAccountExtension> {
     pub account: Account<E>,
 }
 
-impl From<MerkleCheckpoint> for IntermediateStateRootState {
-    fn from(value: MerkleCheckpoint) -> Self {
+impl<E> From<MerkleCheckpoint<E>> for IntermediateStateRootState<E> {
+    fn from(value: MerkleCheckpoint<E>) -> Self {
         Self {
             account_root_state: IntermediateRootState {
                 hash_builder: HashBuilder::from(value.state),
@@ -61,7 +61,7 @@ impl From<MerkleCheckpoint> for IntermediateStateRootState {
                         nonce: checkpoint.account_nonce,
                         balance: checkpoint.account_balance,
                         bytecode_hash: Some(checkpoint.account_bytecode_hash),
-                        ..Default::default()
+                        extension: checkpoint.account_extension,
                     },
                 }
             }),

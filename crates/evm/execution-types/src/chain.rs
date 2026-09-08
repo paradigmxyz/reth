@@ -40,7 +40,7 @@ pub struct Chain<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
     /// Lazy trie data for each block in the chain, keyed by block number.
     ///
     /// Contains handles to lazily-initialized sorted trie updates and hashed state.
-    trie_data: BTreeMap<BlockNumber, LazyTrieData>,
+    trie_data: BTreeMap<BlockNumber, LazyTrieData<N::AccountExtension>>,
 }
 
 type ChainTxReceiptMeta<'a, N> = (
@@ -69,7 +69,7 @@ impl<N: NodePrimitives> Chain<N> {
     pub fn new(
         blocks: impl IntoIterator<Item: Into<Arc<RecoveredBlock<N::Block>>>>,
         execution_outcome: ExecutionOutcome<N::Receipt>,
-        trie_data: BTreeMap<BlockNumber, LazyTrieData>,
+        trie_data: BTreeMap<BlockNumber, LazyTrieData<N::AccountExtension>>,
     ) -> Self {
         let blocks = blocks
             .into_iter()
@@ -87,7 +87,7 @@ impl<N: NodePrimitives> Chain<N> {
     pub fn from_block(
         block: impl Into<Arc<RecoveredBlock<N::Block>>>,
         execution_outcome: ExecutionOutcome<N::Receipt>,
-        trie_data: LazyTrieData,
+        trie_data: LazyTrieData<N::AccountExtension>,
     ) -> Self {
         let block = block.into();
         let block_number = block.header().number();
@@ -110,12 +110,15 @@ impl<N: NodePrimitives> Chain<N> {
     }
 
     /// Get all trie data for this chain.
-    pub const fn trie_data(&self) -> &BTreeMap<BlockNumber, LazyTrieData> {
+    pub const fn trie_data(&self) -> &BTreeMap<BlockNumber, LazyTrieData<N::AccountExtension>> {
         &self.trie_data
     }
 
     /// Get trie data for a specific block number.
-    pub fn trie_data_at(&self, block_number: BlockNumber) -> Option<&LazyTrieData> {
+    pub fn trie_data_at(
+        &self,
+        block_number: BlockNumber,
+    ) -> Option<&LazyTrieData<N::AccountExtension>> {
         self.trie_data.get(&block_number)
     }
 
@@ -178,7 +181,7 @@ impl<N: NodePrimitives> Chain<N> {
     ) -> (
         ChainBlocks<'static, N::Block>,
         ExecutionOutcome<N::Receipt>,
-        BTreeMap<BlockNumber, LazyTrieData>,
+        BTreeMap<BlockNumber, LazyTrieData<N::AccountExtension>>,
     ) {
         (ChainBlocks { blocks: Cow::Owned(self.blocks) }, self.execution_outcome, self.trie_data)
     }
@@ -337,7 +340,7 @@ impl<N: NodePrimitives> Chain<N> {
         &mut self,
         block: impl Into<Arc<RecoveredBlock<N::Block>>>,
         execution_outcome: ExecutionOutcome<N::Receipt>,
-        trie_data: LazyTrieData,
+        trie_data: LazyTrieData<N::AccountExtension>,
     ) {
         let block = block.into();
         let block_number = block.header().number();
@@ -550,7 +553,10 @@ pub(super) mod serde_bincode_compat {
         #[serde(default)]
         hashed_state: BTreeMap<
             BlockNumber,
-            reth_trie_common::serde_bincode_compat::hashed_state::HashedPostStateSorted<'a>,
+            reth_trie_common::serde_bincode_compat::hashed_state::HashedPostStateSorted<
+                'a,
+                N::AccountExtension,
+            >,
         >,
     }
 
@@ -602,7 +608,7 @@ pub(super) mod serde_bincode_compat {
             let hashed_state_map: BTreeMap<_, _> =
                 value.hashed_state.into_iter().map(|(k, v)| (k, Arc::new(v.into()))).collect();
 
-            let trie_data: BTreeMap<BlockNumber, LazyTrieData> = value
+            let trie_data: BTreeMap<BlockNumber, LazyTrieData<N::AccountExtension>> = value
                 .trie_updates
                 .into_iter()
                 .map(|(k, v)| {

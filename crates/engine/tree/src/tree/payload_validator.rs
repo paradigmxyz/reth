@@ -118,6 +118,7 @@ use alloy_primitives::{
     map::{AddressMap, B256Set},
     B256,
 };
+use reth_primitives_traits::AccountExtensionTy;
 use reth_tasks::LazyHandle;
 
 use crate::tree::{
@@ -314,21 +315,21 @@ where
                           + BlockHashReader
                           + StageCheckpointReader
                           + PruneCheckpointReader
-                          + ChangeSetReader
+                          + ChangeSetReader<AccountExtension = N::AccountExtension>
                           + StorageChangeSetReader
                           + StorageSettingsCache
                           + HistoryReader
                           + 'static,
         > + BlockReader<Header = N::BlockHeader>
-        + ChangeSetReader
-        + StateProviderFactory
+        + ChangeSetReader<AccountExtension = N::AccountExtension>
+        + StateProviderFactory<AccountExtension = N::AccountExtension>
         + StateReader
         + Clone
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
             Provider: TrieCursorFactory
                           + HashedCursorFactory
-                          + HashedPostStateProvider
+                          + HashedPostStateProvider<AccountExtension = N::AccountExtension>
                           + StateRootProvider
                           + StateProvider
                           + Send,
@@ -677,44 +678,45 @@ where
         //
         // The second parameter `instrument_state_provider` controls whether we should
         // instrument the state provider with metrics.
-        let make_state_provider = |fill_on_miss: bool| -> ProviderResult<StateProviderBox> {
-            let provider = state_provider_factory.database_provider_ro()?;
-            let mut provider = if let Some((caches, cache_metrics)) = &execution_cache {
-                let fill_mode = if fill_on_miss {
-                    CacheFillMode::FillOnMiss
+        let make_state_provider =
+            |fill_on_miss: bool| -> ProviderResult<StateProviderBox<N::AccountExtension>> {
+                let provider = state_provider_factory.database_provider_ro()?;
+                let mut provider = if let Some((caches, cache_metrics)) = &execution_cache {
+                    let fill_mode = if fill_on_miss {
+                        CacheFillMode::FillOnMiss
+                    } else {
+                        CacheFillMode::LookupOnly
+                    };
+                    Box::new(
+                        CachedStateProvider::new_with_mode(
+                            provider,
+                            caches.clone(),
+                            fill_mode,
+                            cache_metrics.clone(),
+                            cache_stats.clone(),
+                        )
+                        .with_txpool_snapshot(txpool_snapshot.clone()),
+                    ) as StateProviderBox<N::AccountExtension>
                 } else {
-                    CacheFillMode::LookupOnly
+                    Box::new(provider) as StateProviderBox<N::AccountExtension>
                 };
-                Box::new(
-                    CachedStateProvider::new_with_mode(
+
+                if instrument_state_provider {
+                    let stats = state_provider_stats
+                        .as_ref()
+                        .expect("instrumented state provider requires shared stats");
+                    let metrics = state_provider_metrics
+                        .as_ref()
+                        .expect("instrumented state provider requires metrics");
+                    provider = Box::new(InstrumentedStateProvider::with_stats(
                         provider,
-                        caches.clone(),
-                        fill_mode,
-                        cache_metrics.clone(),
-                        cache_stats.clone(),
-                    )
-                    .with_txpool_snapshot(txpool_snapshot.clone()),
-                ) as StateProviderBox
-            } else {
-                Box::new(provider) as StateProviderBox
+                        metrics.clone(),
+                        Arc::clone(stats),
+                    ));
+                }
+
+                Ok(provider)
             };
-
-            if instrument_state_provider {
-                let stats = state_provider_stats
-                    .as_ref()
-                    .expect("instrumented state provider requires shared stats");
-                let metrics = state_provider_metrics
-                    .as_ref()
-                    .expect("instrumented state provider requires metrics");
-                provider = Box::new(InstrumentedStateProvider::with_stats(
-                    provider,
-                    metrics.clone(),
-                    Arc::clone(stats),
-                ));
-            }
-
-            Ok(provider)
-        };
 
         // Execute the block and handle any execution errors.
         // The receipt root task is spawned before execution and receives receipts incrementally
@@ -758,7 +760,7 @@ where
         // (keccak256 hashing of all changed addresses and storage slots).
         let hashed_state_output = output.clone();
         let mut hashed_state_rx = state_root_job.take_hashed_state_rx();
-        let mut hashed_state: LazyHashedPostState =
+        let mut hashed_state: LazyHashedPostState<N::AccountExtension> =
             self.runtime.spawn_blocking_named("hash-post-state", move || {
                 let _span = debug_span!(
                     target: "engine::tree::payload_validator",
@@ -1005,7 +1007,7 @@ where
         state_provider: S,
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
-        handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
+        handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt, N::AccountExtension>,
         state_hook: Option<Box<dyn OnStateHook + 'static>>,
     ) -> Result<
         (
@@ -1115,6 +1117,11 @@ where
     //     empirically once workers are parallel; meaningless while the commit loop is sequential.
     fn bal_path_eligible(&self, bal: Option<&DecodedBal>) -> Result<bool, InsertBlockErrorKind> {
         let has_bal = bal.is_some();
+        if has_bal {
+            reth_provider::ensure_no_account_extensions::<AccountExtensionTy<Evm::Primitives>>(
+                "BAL",
+            )?;
+        }
         let parallel_execution = has_bal && !self.config.disable_bal_parallel_execution();
         if parallel_execution && self.config.disable_bal_parallel_state_root() {
             return Err(InsertBlockErrorKind::Other(
@@ -1141,7 +1148,7 @@ where
         &self,
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
-        handle: &PayloadHandle<Tx, Err, N::Receipt>,
+        handle: &PayloadHandle<Tx, Err, N::Receipt, N::AccountExtension>,
         make_state_provider: &MakeStateProvider,
     ) -> Result<
         (
@@ -1155,7 +1162,7 @@ where
     where
         Tx: ExecutableTxFor<Evm> + Send,
         Err: core::error::Error + Send + Sync + 'static,
-        MakeStateProvider: Fn(bool) -> ProviderResult<StateProviderBox> + Sync,
+        MakeStateProvider: Fn(bool) -> ProviderResult<StateProviderBox<N::AccountExtension>> + Sync,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
         T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
         V: PayloadValidator<T, Block = N::Block>,
@@ -1393,14 +1400,15 @@ where
         env: ExecutionEnv<Evm>,
         txs: T,
         state_provider_factory: OverlayStateProviderFactory<P, N>,
-        hint_stream: Option<StateRootHintStream>,
-        hashed_update_stream: Option<StateRootUpdateStream>,
+        hint_stream: Option<StateRootHintStream<N::AccountExtension>>,
+        hashed_update_stream: Option<StateRootUpdateStream<N::AccountExtension>>,
         parallel_bal_execution: bool,
     ) -> Result<
         PayloadHandle<
             impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
             impl core::error::Error + Send + Sync + 'static + use<N, P, Evm, V, T>,
             N::Receipt,
+            N::AccountExtension,
         >,
         InsertBlockErrorKind,
     > {
@@ -1462,7 +1470,7 @@ where
         parent_header: &N::BlockHeader,
         timestamp: u64,
         state: &mut EngineApiTreeState<N>,
-    ) -> Option<PayloadStateRootHandle> {
+    ) -> Option<PayloadStateRootHandle<N::AccountExtension>> {
         let state_provider_factory = match self.overlay_state_provider_factory(parent_hash, state) {
             Ok(Some(state_provider_factory)) => state_provider_factory,
             Ok(None) => return None,
@@ -1515,7 +1523,7 @@ where
         &self,
         block: Arc<RecoveredBlock<N::Block>>,
         execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
-        hashed_state: LazyHashedPostState,
+        hashed_state: LazyHashedPostState<N::AccountExtension>,
         trie_output: Arc<TrieUpdates>,
     ) -> ExecutedBlock<N> {
         // Create deferred handle and task that owns the unsorted inputs.
@@ -1789,7 +1797,7 @@ pub trait EngineValidator<
         parent_header: &N::BlockHeader,
         timestamp: u64,
         state: &mut EngineApiTreeState<N>,
-    ) -> PayloadBuilderResources;
+    ) -> PayloadBuilderResources<N::AccountExtension>;
 }
 
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
@@ -1799,21 +1807,21 @@ where
                           + BlockHashReader
                           + StageCheckpointReader
                           + PruneCheckpointReader
-                          + ChangeSetReader
+                          + ChangeSetReader<AccountExtension = N::AccountExtension>
                           + StorageChangeSetReader
                           + StorageSettingsCache
                           + HistoryReader
                           + 'static,
         > + BlockReader<Header = N::BlockHeader>
-        + StateProviderFactory
+        + StateProviderFactory<AccountExtension = N::AccountExtension>
         + StateReader
-        + ChangeSetReader
+        + ChangeSetReader<AccountExtension = N::AccountExtension>
         + Clone
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
             Provider: TrieCursorFactory
                           + HashedCursorFactory
-                          + HashedPostStateProvider
+                          + HashedPostStateProvider<AccountExtension = N::AccountExtension>
                           + StateRootProvider
                           + StateProvider
                           + Send,
@@ -1930,7 +1938,7 @@ where
         parent_header: &N::BlockHeader,
         timestamp: u64,
         state: &mut EngineApiTreeState<N>,
-    ) -> PayloadBuilderResources {
+    ) -> PayloadBuilderResources<N::AccountExtension> {
         let execution_cache = self
             .config
             .share_execution_cache_with_payload_builder()

@@ -22,7 +22,7 @@ use reth_engine_primitives::ConsensusEngineEvent;
 use reth_errors::RethError;
 use reth_evm::{block::BlockExecutor, execute::Executor, ConfigureEvm, EvmEnvFor};
 use reth_primitives_traits::{
-    Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
+    AccountExtensionTy, Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
 };
 use reth_revm::{db::State, witness::ExecutionWitnessRecord};
 use reth_rpc_api::DebugApiServer;
@@ -682,7 +682,9 @@ where
         f: F,
     ) -> Result<Option<R>, Eth::Error>
     where
-        F: FnOnce(&mut StateCacheDb) -> Result<R, Eth::Error> + Send + 'static,
+        F: FnOnce(&mut StateCacheDb<AccountExtensionTy<Eth::Primitives>>) -> Result<R, Eth::Error>
+            + Send
+            + 'static,
         R: Send + 'static,
     {
         let block = self
@@ -720,7 +722,10 @@ where
     }
 
     /// Retrieves the account's balance, nonce, code hash, and storage root from the given state.
-    fn account(db: &mut StateCacheDb, address: Address) -> Result<Option<Account>, Eth::Error> {
+    fn account(
+        db: &mut StateCacheDb<AccountExtensionTy<Eth::Primitives>>,
+        address: Address,
+    ) -> Result<Option<Account>, Eth::Error> {
         let account = db.basic(address).map_err(Eth::Error::from_eth_err)?;
         let Some(account) = account else { return Ok(None) };
 
@@ -788,7 +793,7 @@ where
     /// trie updates.
     async fn debug_state_root_with_updates(
         &self,
-        hashed_state: HashedPostState,
+        hashed_state: HashedPostState<AccountExtensionTy<Eth::Primitives>>,
         block_id: Option<BlockId>,
     ) -> Result<(B256, TrieUpdates), Eth::Error> {
         self.inner
@@ -847,7 +852,8 @@ where
 }
 
 #[async_trait]
-impl<Eth> DebugApiServer<RpcTxReq<Eth::NetworkTypes>> for DebugApi<Eth>
+impl<Eth> DebugApiServer<RpcTxReq<Eth::NetworkTypes>, AccountExtensionTy<Eth::Primitives>>
+    for DebugApi<Eth>
 where
     Eth: EthTransactions + TraceExt,
 {
@@ -1379,7 +1385,7 @@ where
 
     async fn debug_state_root_with_updates(
         &self,
-        hashed_state: HashedPostState,
+        hashed_state: HashedPostState<AccountExtensionTy<Eth::Primitives>>,
         block_id: Option<BlockId>,
     ) -> RpcResult<(B256, TrieUpdates)> {
         Self::debug_state_root_with_updates(self, hashed_state, block_id).await.map_err(Into::into)

@@ -85,12 +85,10 @@ pub trait HashedStorageCursor: HashedCursor {
 /// Accounts absent from the bundle pre-state are skipped because they cannot have parent storage.
 /// Final bundle values take precedence so that destroy-then-recreate transitions retain storage
 /// written by the recreated account.
-pub fn zero_destroyed_account_storage<'a>(
-    cursor_factory: &impl HashedCursorFactory<
-        AccountExtension = reth_primitives_traits::EmptyAccountExtension,
-    >,
+pub fn zero_destroyed_account_storage<'a, E>(
+    cursor_factory: &impl HashedCursorFactory,
     accounts: impl IntoIterator<Item = (&'a Address, &'a BundleAccount)>,
-    hashed_state: &mut HashedPostState,
+    hashed_state: &mut HashedPostState<E>,
 ) -> Result<(), DatabaseError> {
     let mut destroyed_accounts = accounts
         .into_iter()
@@ -125,7 +123,8 @@ mod tests {
     fn zero_destroyed_storage_skips_new_accounts() {
         let address = Address::with_last_byte(1);
         let account = BundleAccount::new(None, None, Default::default(), AccountStatus::Destroyed);
-        let mut hashed_state = HashedPostState::default();
+        let mut hashed_state =
+            HashedPostState::<reth_primitives_traits::EmptyAccountExtension>::default();
 
         zero_destroyed_account_storage(
             &mock::MockHashedCursorFactory::<

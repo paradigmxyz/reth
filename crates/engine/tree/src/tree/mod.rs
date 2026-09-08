@@ -60,6 +60,8 @@ use tokio::sync::{
 };
 use tracing::*;
 
+#[cfg(all(test, feature = "account-ext"))]
+mod account_extension_tests;
 mod block_buffer;
 pub mod error;
 pub mod instrumented_state;
@@ -368,7 +370,7 @@ where
     N: NodePrimitives,
     P: DatabaseProviderFactory
         + BlockReader<Block = N::Block, Header = N::BlockHeader>
-        + StateProviderFactory
+        + StateProviderFactory<AccountExtension = N::AccountExtension>
         + StateReader<Receipt = N::Receipt>
         + BalProvider
         + Clone
@@ -376,7 +378,8 @@ where
     P::Provider: BlockReader<Block = N::Block, Header = N::BlockHeader>
         + PruneCheckpointReader
         + StageCheckpointReader
-        + ChangeSetReader
+        + ChangeSetReader<AccountExtension = N::AccountExtension>
+        + reth_provider::HistoryReader
         + StorageChangeSetReader
         + StorageSettingsCache
         + 'static,

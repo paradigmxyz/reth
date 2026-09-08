@@ -5,7 +5,7 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardfor
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_node_api::{FullNodeComponents, NodePrimitives, PrimitivesTy};
-use reth_primitives_traits::{BlockTy, HeaderTy, ReceiptTy, TxTy};
+use reth_primitives_traits::{AccountExtensionTy, BlockTy, HeaderTy, ReceiptTy, TxTy};
 use reth_rpc_eth_types::EthStateCache;
 use reth_storage_api::{
     BalProvider, BlockReader, BlockReaderIdExt, PruneCheckpointReader, StageCheckpointReader,
@@ -35,7 +35,7 @@ pub trait RpcNodeCore: Clone + Send + Sync + Unpin + 'static {
             ChainSpec: EthChainSpec<Header = HeaderTy<Self::Primitives>>
                            + Hardforks
                            + EthereumHardforks,
-        > + StateProviderFactory
+        > + StateProviderFactory<AccountExtension = AccountExtensionTy<Self::Primitives>>
         + CanonStateSubscriptions<Primitives = Self::Primitives>
         + StageCheckpointReader
         + PruneCheckpointReader
@@ -130,7 +130,7 @@ where
             ChainSpec: EthChainSpec<Header = HeaderTy<Evm::Primitives>>
                            + Hardforks
                            + EthereumHardforks,
-        > + StateProviderFactory
+        > + StateProviderFactory<AccountExtension = AccountExtensionTy<Evm::Primitives>>
         + CanonStateSubscriptions<Primitives = Evm::Primitives>
         + StageCheckpointReader
         + PruneCheckpointReader

@@ -1605,7 +1605,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     highest_block,
                 ),
             StaticFileSegment::AccountChangeSets => self
-                .ensure_invariants::<_, tables::AccountChangeSets>(
+                .ensure_invariants::<_, tables::AccountChangeSets<N::AccountExtension>>(
                     provider,
                     segment,
                     highest_tx,
@@ -2352,11 +2352,15 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
     }
 }
 
+impl<N: NodePrimitives> reth_storage_api::AccountExtensionProvider for StaticFileProvider<N> {
+    type AccountExtension = N::AccountExtension;
+}
+
 impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
     fn account_block_changeset(
         &self,
         block_number: BlockNumber,
-    ) -> ProviderResult<Vec<reth_db::models::AccountBeforeTx>> {
+    ) -> ProviderResult<Vec<reth_db::models::AccountBeforeTx<N::AccountExtension>>> {
         let provider = match self.get_segment_provider_for_block(
             StaticFileSegment::AccountChangeSets,
             block_number,
@@ -2372,8 +2376,9 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
             let mut changeset = Vec::with_capacity(offset.num_changes() as usize);
 
             for i in offset.changeset_range() {
-                if let Some(change) =
-                    cursor.get_one::<reth_db::static_file::AccountChangesetMask>(i.into())?
+                if let Some(change) = cursor.get_one::<reth_db::static_file::AccountChangesetMask<
+                    reth_db::models::AccountBeforeTx<N::AccountExtension>,
+                >>(i.into())?
                 {
                     changeset.push(change)
                 }
@@ -2388,7 +2393,7 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
         &self,
         block_number: BlockNumber,
         address: Address,
-    ) -> ProviderResult<Option<reth_db::models::AccountBeforeTx>> {
+    ) -> ProviderResult<Option<reth_db::models::AccountBeforeTx<N::AccountExtension>>> {
         let provider = match self.get_segment_provider_for_block(
             StaticFileSegment::AccountChangeSets,
             block_number,
@@ -2410,8 +2415,9 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
 
         while low < high {
             let mid = low + (high - low) / 2;
-            if let Some(change) =
-                cursor.get_one::<reth_db::static_file::AccountChangesetMask>(mid.into())?
+            if let Some(change) = cursor.get_one::<reth_db::static_file::AccountChangesetMask<
+                reth_db::models::AccountBeforeTx<N::AccountExtension>,
+            >>(mid.into())?
             {
                 if change.address < address {
                     low = mid + 1;
@@ -2438,7 +2444,9 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
 
         if low < range.end &&
             let Some(change) = cursor
-                .get_one::<reth_db::static_file::AccountChangesetMask>(low.into())?
+                .get_one::<reth_db::static_file::AccountChangesetMask<
+                    reth_db::models::AccountBeforeTx<N::AccountExtension>,
+                >>(low.into())?
                 .filter(|change| change.address == address)
         {
             return Ok(Some(change));
@@ -2450,7 +2458,8 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
     fn account_changesets_range(
         &self,
         range: impl core::ops::RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<(BlockNumber, reth_db::models::AccountBeforeTx)>> {
+    ) -> ProviderResult<Vec<(BlockNumber, reth_db::models::AccountBeforeTx<N::AccountExtension>)>>
+    {
         let range = self.bound_range(range, StaticFileSegment::AccountChangeSets);
         self.walk_account_changeset_range(range).collect()
     }

@@ -10,10 +10,16 @@ use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
 ///
 /// This serves as the data layer for [`Database`].
 pub trait EvmStateProvider {
+    /// Chain-specific account data passed through to the EVM.
+    type AccountExtension: reth_primitives_traits::AccountExtension;
+
     /// Get basic account information.
     ///
     /// Returns [`None`] if the account doesn't exist.
-    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>>;
+    fn basic_account(
+        &self,
+        address: &Address,
+    ) -> ProviderResult<Option<Account<Self::AccountExtension>>>;
 
     /// Get the hash of the block with the given number. Returns [`None`] if no block with this
     /// number exists.
@@ -35,7 +41,12 @@ pub trait EvmStateProvider {
 
 // Blanket implementation of EvmStateProvider for any type that implements StateProvider.
 impl<T: StateProvider> EvmStateProvider for T {
-    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
+    type AccountExtension = T::AccountExtension;
+
+    fn basic_account(
+        &self,
+        address: &Address,
+    ) -> ProviderResult<Option<Account<Self::AccountExtension>>> {
         <T as AccountReader>::basic_account(self, address)
     }
 
@@ -180,12 +191,15 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
 /// distinguish missing bytecode from the database's default bytecode and wraps whatever the
 /// database returns in `Some`.
 #[derive(Clone)]
-pub struct DatabaseStateProvider<DB>(pub DB);
+pub struct DatabaseStateProvider<DB, E = reth_primitives_traits::EmptyAccountExtension>(
+    pub DB,
+    core::marker::PhantomData<E>,
+);
 
-impl<DB> DatabaseStateProvider<DB> {
+impl<DB, E> DatabaseStateProvider<DB, E> {
     /// Create a new database-backed state reader.
     pub const fn new(db: DB) -> Self {
-        Self(db)
+        Self(db, core::marker::PhantomData)
     }
 
     /// Consume self and return the inner database.
@@ -199,22 +213,30 @@ impl<DB> DatabaseStateProvider<DB> {
     }
 }
 
-impl<DB> core::fmt::Debug for DatabaseStateProvider<DB> {
+impl<DB, E> core::fmt::Debug for DatabaseStateProvider<DB, E> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("DatabaseStateProvider").finish_non_exhaustive()
     }
 }
 
-impl<DB> AccountReader for DatabaseStateProvider<DB>
+impl<DB, E: reth_primitives_traits::AccountExtension> reth_storage_api::AccountExtensionProvider
+    for DatabaseStateProvider<DB, E>
 where
     DB: DatabaseRef<Error = ProviderError>,
 {
-    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
+    type AccountExtension = E;
+}
+
+impl<DB, E: reth_primitives_traits::AccountExtension> AccountReader for DatabaseStateProvider<DB, E>
+where
+    DB: DatabaseRef<Error = ProviderError>,
+{
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account<E>>> {
         Ok(self.0.basic_ref(*address)?.map(Into::into))
     }
 }
 
-impl<DB> BytecodeReader for DatabaseStateProvider<DB>
+impl<DB, E> BytecodeReader for DatabaseStateProvider<DB, E>
 where
     DB: DatabaseRef<Error = ProviderError>,
 {
@@ -229,6 +251,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    type DatabaseStateProvider<DB> =
+        super::DatabaseStateProvider<DB, reth_primitives_traits::EmptyAccountExtension>;
     use crate::cached::CachedReads;
     use alloy_consensus::constants::KECCAK_EMPTY;
     use alloy_primitives::Bytes;

@@ -182,9 +182,10 @@ where
             let tx = provider.tx_ref();
 
             // clear table, load all accounts and hash them
-            tx.clear::<tables::HashedAccounts>()?;
+            tx.clear::<tables::HashedAccounts<Provider::AccountExtension>>()?;
 
-            let mut accounts_cursor = tx.cursor_read::<RawTable<tables::PlainAccountState>>()?;
+            let mut accounts_cursor = tx
+                .cursor_read::<RawTable<tables::PlainAccountState<Provider::AccountExtension>>>()?;
             let mut collector =
                 Collector::new(self.etl_config.file_size, self.etl_config.dir.clone());
             let mut channels = Vec::with_capacity(MAXIMUM_CHANNELS);
@@ -212,7 +213,7 @@ where
             collect(&mut channels, &mut collector)?;
 
             let mut hashed_account_cursor =
-                tx.cursor_write::<RawTable<tables::HashedAccounts>>()?;
+                tx.cursor_write::<RawTable<tables::HashedAccounts<Provider::AccountExtension>>>()?;
 
             let total_hashes = collector.len();
             let interval = (total_hashes / 10).max(1);
@@ -226,8 +227,10 @@ where
                 }
 
                 let (key, value) = item?;
-                hashed_account_cursor
-                    .append(RawKey::<B256>::from_vec(key), &RawValue::<Account>::from_vec(value))?;
+                hashed_account_cursor.append(
+                    RawKey::<B256>::from_vec(key),
+                    &RawValue::<Account<Provider::AccountExtension>>::from_vec(value),
+                )?;
             }
 
             let checkpoint = StageCheckpoint::new(input.target())
@@ -245,7 +248,8 @@ where
             let (from_block, to_block) = block_range.into_inner();
 
             let tx = provider.tx_ref();
-            let mut changeset_cursor = tx.cursor_read::<tables::AccountChangeSets>()?;
+            let mut changeset_cursor =
+                tx.cursor_read::<tables::AccountChangeSets<Provider::AccountExtension>>()?;
             let mut changed = BTreeSet::new();
             let mut total_entries = 0u64;
             let mut last_block = from_block;
@@ -311,9 +315,10 @@ where
 }
 
 /// Flushes channels hashes to ETL collector.
-fn collect(
-    channels: &mut Vec<Receiver<(RawKey<B256>, RawValue<Account>)>>,
-    collector: &mut Collector<RawKey<B256>, RawValue<Account>>,
+#[expect(clippy::type_complexity)]
+fn collect<E: reth_primitives_traits::AccountExtension>(
+    channels: &mut Vec<Receiver<(RawKey<B256>, RawValue<Account<E>>)>>,
+    collector: &mut Collector<RawKey<B256>, RawValue<Account<E>>>,
 ) -> Result<(), StageError> {
     for channel in channels.iter_mut() {
         while let Ok((key, v)) = channel.recv() {

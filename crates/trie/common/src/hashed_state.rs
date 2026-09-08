@@ -1631,7 +1631,7 @@ pub mod serde_bincode_compat {
     };
     use serde_with::{DeserializeAs, SerializeAs};
 
-    /// Bincode-compatible [`super::HashedPostState`] serde implementation.
+    /// Bincode-compatible [`super::HashedPostState<E>`] serde implementation.
     ///
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
     /// ```rust
@@ -1647,13 +1647,19 @@ pub mod serde_bincode_compat {
     /// }
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
-    pub struct HashedPostState<'a> {
-        accounts: Cow<'a, B256Map<Option<Account>>>,
+    #[serde(bound = "")]
+    pub struct HashedPostState<
+        'a,
+        E: reth_primitives_traits::AccountExtension = reth_primitives_traits::EmptyAccountExtension,
+    > {
+        accounts: Cow<'a, B256Map<Option<Account<E>>>>,
         storages: B256Map<HashedStorage<'a>>,
     }
 
-    impl<'a> From<&'a super::HashedPostState> for HashedPostState<'a> {
-        fn from(value: &'a super::HashedPostState) -> Self {
+    impl<'a, E: reth_primitives_traits::AccountExtension> From<&'a super::HashedPostState<E>>
+        for HashedPostState<'a, E>
+    {
+        fn from(value: &'a super::HashedPostState<E>) -> Self {
             Self {
                 accounts: Cow::Borrowed(&value.accounts),
                 storages: value.storages.iter().map(|(k, v)| (*k, v.into())).collect(),
@@ -1661,8 +1667,10 @@ pub mod serde_bincode_compat {
         }
     }
 
-    impl<'a> From<HashedPostState<'a>> for super::HashedPostState {
-        fn from(value: HashedPostState<'a>) -> Self {
+    impl<'a, E: reth_primitives_traits::AccountExtension> From<HashedPostState<'a, E>>
+        for super::HashedPostState<E>
+    {
+        fn from(value: HashedPostState<'a, E>) -> Self {
             Self {
                 accounts: value.accounts.into_owned(),
                 storages: value.storages.into_iter().map(|(k, v)| (k, v.into())).collect(),
@@ -1670,9 +1678,11 @@ pub mod serde_bincode_compat {
         }
     }
 
-    impl SerializeAs<super::HashedPostState> for HashedPostState<'_> {
+    impl<E: reth_primitives_traits::AccountExtension> SerializeAs<super::HashedPostState<E>>
+        for HashedPostState<'_, E>
+    {
         fn serialize_as<S>(
-            source: &super::HashedPostState,
+            source: &super::HashedPostState<E>,
             serializer: S,
         ) -> Result<S::Ok, S::Error>
         where
@@ -1682,8 +1692,10 @@ pub mod serde_bincode_compat {
         }
     }
 
-    impl<'de> DeserializeAs<'de, super::HashedPostState> for HashedPostState<'de> {
-        fn deserialize_as<D>(deserializer: D) -> Result<super::HashedPostState, D::Error>
+    impl<'de, E: reth_primitives_traits::AccountExtension>
+        DeserializeAs<'de, super::HashedPostState<E>> for HashedPostState<'de, E>
+    {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::HashedPostState<E>, D::Error>
         where
             D: Deserializer<'de>,
         {
@@ -1741,7 +1753,7 @@ pub mod serde_bincode_compat {
         }
     }
 
-    /// Bincode-compatible [`super::HashedPostStateSorted`] serde implementation.
+    /// Bincode-compatible [`super::HashedPostStateSorted<E>`] serde implementation.
     ///
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
     /// ```rust
@@ -1757,13 +1769,19 @@ pub mod serde_bincode_compat {
     /// }
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
-    pub struct HashedPostStateSorted<'a> {
-        accounts: Cow<'a, [(B256, Option<Account>)]>,
+    #[serde(bound = "")]
+    pub struct HashedPostStateSorted<
+        'a,
+        E: reth_primitives_traits::AccountExtension = reth_primitives_traits::EmptyAccountExtension,
+    > {
+        accounts: Cow<'a, [(B256, Option<Account<E>>)]>,
         storages: B256Map<HashedStorageSorted<'a>>,
     }
 
-    impl<'a> From<&'a super::HashedPostStateSorted> for HashedPostStateSorted<'a> {
-        fn from(value: &'a super::HashedPostStateSorted) -> Self {
+    impl<'a, E: reth_primitives_traits::AccountExtension> From<&'a super::HashedPostStateSorted<E>>
+        for HashedPostStateSorted<'a, E>
+    {
+        fn from(value: &'a super::HashedPostStateSorted<E>) -> Self {
             Self {
                 accounts: Cow::Borrowed(&value.accounts),
                 storages: value.storages.iter().map(|(k, v)| (*k, v.into())).collect(),
@@ -1771,8 +1789,10 @@ pub mod serde_bincode_compat {
         }
     }
 
-    impl<'a> From<HashedPostStateSorted<'a>> for super::HashedPostStateSorted {
-        fn from(value: HashedPostStateSorted<'a>) -> Self {
+    impl<'a, E: reth_primitives_traits::AccountExtension> From<HashedPostStateSorted<'a, E>>
+        for super::HashedPostStateSorted<E>
+    {
+        fn from(value: HashedPostStateSorted<'a, E>) -> Self {
             Self {
                 accounts: value.accounts.into_owned(),
                 storages: value.storages.into_iter().map(|(k, v)| (k, v.into())).collect(),
@@ -1780,9 +1800,11 @@ pub mod serde_bincode_compat {
         }
     }
 
-    impl SerializeAs<super::HashedPostStateSorted> for HashedPostStateSorted<'_> {
+    impl<E: reth_primitives_traits::AccountExtension> SerializeAs<super::HashedPostStateSorted<E>>
+        for HashedPostStateSorted<'_, E>
+    {
         fn serialize_as<S>(
-            source: &super::HashedPostStateSorted,
+            source: &super::HashedPostStateSorted<E>,
             serializer: S,
         ) -> Result<S::Ok, S::Error>
         where
@@ -1792,8 +1814,10 @@ pub mod serde_bincode_compat {
         }
     }
 
-    impl<'de> DeserializeAs<'de, super::HashedPostStateSorted> for HashedPostStateSorted<'de> {
-        fn deserialize_as<D>(deserializer: D) -> Result<super::HashedPostStateSorted, D::Error>
+    impl<'de, E: reth_primitives_traits::AccountExtension>
+        DeserializeAs<'de, super::HashedPostStateSorted<E>> for HashedPostStateSorted<'de, E>
+    {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::HashedPostStateSorted<E>, D::Error>
         where
             D: Deserializer<'de>,
         {

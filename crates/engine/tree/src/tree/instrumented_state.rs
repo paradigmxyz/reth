@@ -155,8 +155,17 @@ impl StateProviderMetrics {
     }
 }
 
+impl<S: reth_provider::AccountExtensionProvider> reth_provider::AccountExtensionProvider
+    for InstrumentedStateProvider<S>
+{
+    type AccountExtension = S::AccountExtension;
+}
+
 impl<S: AccountReader> AccountReader for InstrumentedStateProvider<S> {
-    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
+    fn basic_account(
+        &self,
+        address: &Address,
+    ) -> ProviderResult<Option<Account<S::AccountExtension>>> {
         let start = Instant::now();
         let res = self.state_provider.basic_account(address);
         let elapsed = start.elapsed();
@@ -203,24 +212,27 @@ impl<S: BytecodeReader> BytecodeReader for InstrumentedStateProvider<S> {
 }
 
 impl<S: StateRootProvider> StateRootProvider for InstrumentedStateProvider<S> {
-    fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
+    fn state_root(
+        &self,
+        hashed_state: HashedPostState<S::AccountExtension>,
+    ) -> ProviderResult<B256> {
         self.state_provider.state_root(hashed_state)
     }
 
-    fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256> {
+    fn state_root_from_nodes(&self, input: TrieInput<S::AccountExtension>) -> ProviderResult<B256> {
         self.state_provider.state_root_from_nodes(input)
     }
 
     fn state_root_with_updates(
         &self,
-        hashed_state: HashedPostState,
+        hashed_state: HashedPostState<S::AccountExtension>,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         self.state_provider.state_root_with_updates(hashed_state)
     }
 
     fn state_root_from_nodes_with_updates(
         &self,
-        input: TrieInput,
+        input: TrieInput<S::AccountExtension>,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         self.state_provider.state_root_from_nodes_with_updates(input)
     }
@@ -229,16 +241,16 @@ impl<S: StateRootProvider> StateRootProvider for InstrumentedStateProvider<S> {
 impl<S: StateProofProvider> StateProofProvider for InstrumentedStateProvider<S> {
     fn proof(
         &self,
-        input: TrieInput,
+        input: TrieInput<S::AccountExtension>,
         address: Address,
         slots: &[B256],
-    ) -> ProviderResult<AccountProof> {
+    ) -> ProviderResult<AccountProof<S::AccountExtension>> {
         self.state_provider.proof(input, address, slots)
     }
 
     fn multiproof(
         &self,
-        input: TrieInput,
+        input: TrieInput<S::AccountExtension>,
         targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
         self.state_provider.multiproof(input, targets)
@@ -246,7 +258,7 @@ impl<S: StateProofProvider> StateProofProvider for InstrumentedStateProvider<S> 
 
     fn multiproof_v2(
         &self,
-        input: TrieInput,
+        input: TrieInput<S::AccountExtension>,
         targets: reth_trie::MultiProofTargetsV2,
     ) -> ProviderResult<reth_trie::DecodedMultiProofV2> {
         self.state_provider.multiproof_v2(input, targets)
@@ -254,8 +266,8 @@ impl<S: StateProofProvider> StateProofProvider for InstrumentedStateProvider<S> 
 
     fn witness(
         &self,
-        input: TrieInput,
-        target: HashedPostState,
+        input: TrieInput<S::AccountExtension>,
+        target: HashedPostState<S::AccountExtension>,
         mode: reth_trie::ExecutionWitnessMode,
     ) -> ProviderResult<Vec<alloy_primitives::Bytes>> {
         self.state_provider.witness(input, target, mode)
@@ -308,7 +320,7 @@ impl<S: HashedPostStateProvider> HashedPostStateProvider for InstrumentedStatePr
     fn hashed_post_state(
         &self,
         bundle_state: &reth_revm::db::BundleState,
-    ) -> ProviderResult<HashedPostState> {
+    ) -> ProviderResult<HashedPostState<S::AccountExtension>> {
         self.state_provider.hashed_post_state(bundle_state)
     }
 }

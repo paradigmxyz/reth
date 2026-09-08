@@ -5,7 +5,8 @@ use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B2
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
-    BytecodeReader, DBProvider, StateProofProvider, StorageRootProvider, StorageSettingsCache,
+    AccountExtensionProvider, BytecodeReader, DBProvider, StateProofProvider, StorageRootProvider,
+    StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
@@ -20,22 +21,22 @@ use reth_trie::{
 };
 use reth_trie_db::{DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot};
 
-type DbStateRoot<'a, TX, A> = StateRoot<
+type DbStateRoot<'a, TX, A, E> = StateRoot<
     reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
-    reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
+    reth_trie_db::DatabaseHashedCursorFactory<&'a TX, E>,
 >;
-type DbStorageRoot<'a, TX, A> = StorageRoot<
+type DbStorageRoot<'a, TX, A, E> = StorageRoot<
     reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
-    reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
+    reth_trie_db::DatabaseHashedCursorFactory<&'a TX, E>,
 >;
-type DbStorageProof<'a, TX, A> = StorageProof<
+type DbStorageProof<'a, TX, A, E> = StorageProof<
     'static,
     reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
-    reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
+    reth_trie_db::DatabaseHashedCursorFactory<&'a TX, E>,
 >;
-type DbProof<'a, TX, A> = Proof<
+type DbProof<'a, TX, A, E> = Proof<
     reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
-    reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
+    reth_trie_db::DatabaseHashedCursorFactory<&'a TX, E>,
 >;
 /// State provider over latest state that takes tx reference.
 ///
@@ -66,18 +67,31 @@ impl<'b, Provider: DBProvider> LatestStateProviderRef<'b, Provider> {
     }
 }
 
+impl<Provider: DBProvider> AccountExtensionProvider for LatestStateProviderRef<'_, Provider> {
+    type AccountExtension = Provider::AccountExtension;
+}
+
 impl<Provider: DBProvider + StorageSettingsCache> AccountReader
     for LatestStateProviderRef<'_, Provider>
 {
     /// Get basic account information.
-    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
+    fn basic_account(
+        &self,
+        address: &Address,
+    ) -> ProviderResult<Option<Account<Provider::AccountExtension>>> {
         if self.0.cached_storage_settings().use_hashed_state() {
             let hashed_address = alloy_primitives::keccak256(address);
             self.tx()
-                .get_by_encoded_key::<tables::HashedAccounts>(&hashed_address)
+                .get_by_encoded_key::<tables::HashedAccounts<Provider::AccountExtension>>(
+                    &hashed_address,
+                )
                 .map_err(Into::into)
         } else {
-            self.tx().get_by_encoded_key::<tables::PlainAccountState>(address).map_err(Into::into)
+            self.tx()
+                .get_by_encoded_key::<tables::PlainAccountState<Provider::AccountExtension>>(
+                    address,
+                )
+                .map_err(Into::into)
         }
     }
 }
@@ -100,46 +114,58 @@ impl<Provider: BlockHashReader> BlockHashReader for LatestStateProviderRef<'_, P
 impl<Provider: DBProvider + StorageSettingsCache> StateRootProvider
     for LatestStateProviderRef<'_, Provider>
 {
-    fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
+    fn state_root(
+        &self,
+        hashed_state: HashedPostState<Provider::AccountExtension>,
+    ) -> ProviderResult<B256> {
         reth_trie_db::with_adapter!(self.0, |A| {
             let sorted = hashed_state.into_sorted();
-            Ok(<DbStateRoot<'_, _, A> as DatabaseStateRoot<_>>::overlay_root(self.tx(), &sorted)?)
+            Ok(<DbStateRoot<'_, _, A, Provider::AccountExtension> as DatabaseStateRoot<
+                _,
+                Provider::AccountExtension,
+            >>::overlay_root(self.tx(), &sorted)?)
         })
     }
 
-    fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256> {
+    fn state_root_from_nodes(
+        &self,
+        input: TrieInput<Provider::AccountExtension>,
+    ) -> ProviderResult<B256> {
         reth_trie_db::with_adapter!(self.0, |A| {
-            Ok(<DbStateRoot<'_, _, A> as DatabaseStateRoot<_>>::overlay_root_from_nodes(
-                self.tx(),
-                TrieInputSorted::from_unsorted(input),
+            Ok(<DbStateRoot<'_, _, A, Provider::AccountExtension> as DatabaseStateRoot<
+                _,
+                Provider::AccountExtension,
+            >>::overlay_root_from_nodes(
+                self.tx(), TrieInputSorted::from_unsorted(input)
             )?)
         })
     }
 
     fn state_root_with_updates(
         &self,
-        hashed_state: HashedPostState,
+        hashed_state: HashedPostState<Provider::AccountExtension>,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         reth_trie_db::with_adapter!(self.0, |A| {
             let sorted = hashed_state.into_sorted();
-            Ok(<DbStateRoot<'_, _, A> as DatabaseStateRoot<_>>::overlay_root_with_updates(
-                self.tx(),
-                &sorted,
-            )?)
+            Ok(<DbStateRoot<'_, _, A, Provider::AccountExtension> as DatabaseStateRoot<
+                _,
+                Provider::AccountExtension,
+            >>::overlay_root_with_updates(self.tx(), &sorted)?)
         })
     }
 
     fn state_root_from_nodes_with_updates(
         &self,
-        input: TrieInput,
+        input: TrieInput<Provider::AccountExtension>,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         reth_trie_db::with_adapter!(self.0, |A| {
-            Ok(
-                <DbStateRoot<'_, _, A> as DatabaseStateRoot<_>>::overlay_root_from_nodes_with_updates(
-                    self.tx(),
-                    TrieInputSorted::from_unsorted(input),
-                )?,
-            )
+            Ok(<DbStateRoot<'_, _, A, Provider::AccountExtension> as DatabaseStateRoot<
+                _,
+                Provider::AccountExtension,
+            >>::overlay_root_from_nodes_with_updates(
+                self.tx(),
+                TrieInputSorted::from_unsorted(input),
+            )?)
         })
     }
 }
@@ -153,8 +179,12 @@ impl<Provider: DBProvider + StorageSettingsCache> StorageRootProvider
         hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
         reth_trie_db::with_adapter!(self.0, |A| {
-            <DbStorageRoot<'_, _, A>>::overlay_root(self.tx(), address, hashed_storage)
-                .map_err(|err| ProviderError::Database(err.into()))
+            <DbStorageRoot<'_, _, A, Provider::AccountExtension>>::overlay_root(
+                self.tx(),
+                address,
+                hashed_storage,
+            )
+            .map_err(|err| ProviderError::Database(err.into()))
         })
     }
 
@@ -165,7 +195,7 @@ impl<Provider: DBProvider + StorageSettingsCache> StorageRootProvider
         hashed_storage: HashedStorage,
     ) -> ProviderResult<reth_trie::StorageProof> {
         reth_trie_db::with_adapter!(self.0, |A| {
-            <DbStorageProof<'_, _, A>>::overlay_storage_proof(
+            <DbStorageProof<'_, _, A, Provider::AccountExtension>>::overlay_storage_proof(
                 self.tx(),
                 address,
                 slot,
@@ -182,7 +212,7 @@ impl<Provider: DBProvider + StorageSettingsCache> StorageRootProvider
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof> {
         reth_trie_db::with_adapter!(self.0, |A| {
-            <DbStorageProof<'_, _, A>>::overlay_storage_multiproof(
+            <DbStorageProof<'_, _, A, Provider::AccountExtension>>::overlay_storage_multiproof(
                 self.tx(),
                 address,
                 slots,
@@ -198,42 +228,51 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
 {
     fn proof(
         &self,
-        input: TrieInput,
+        input: TrieInput<Provider::AccountExtension>,
         address: Address,
         slots: &[B256],
-    ) -> ProviderResult<AccountProof> {
+    ) -> ProviderResult<AccountProof<Provider::AccountExtension>> {
         reth_trie_db::with_adapter!(self.0, |A| {
-            let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.tx());
+            let proof = <DbProof<'_, _, A, Provider::AccountExtension> as DatabaseProof<
+                '_,
+                Provider::AccountExtension,
+            >>::from_tx(self.tx());
             proof.overlay_account_proof(input, address, slots).map_err(ProviderError::from)
         })
     }
 
     fn multiproof(
         &self,
-        input: TrieInput,
+        input: TrieInput<Provider::AccountExtension>,
         targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
         reth_trie_db::with_adapter!(self.0, |A| {
-            let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.tx());
+            let proof = <DbProof<'_, _, A, Provider::AccountExtension> as DatabaseProof<
+                '_,
+                Provider::AccountExtension,
+            >>::from_tx(self.tx());
             proof.overlay_multiproof(input, targets).map_err(ProviderError::from)
         })
     }
 
     fn multiproof_v2(
         &self,
-        input: TrieInput,
+        input: TrieInput<Provider::AccountExtension>,
         targets: MultiProofTargetsV2,
     ) -> ProviderResult<DecodedMultiProofV2> {
         reth_trie_db::with_adapter!(self.0, |A| {
-            let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.tx());
+            let proof = <DbProof<'_, _, A, Provider::AccountExtension> as DatabaseProof<
+                '_,
+                Provider::AccountExtension,
+            >>::from_tx(self.tx());
             proof.overlay_multiproof_v2(input, targets).map_err(ProviderError::from)
         })
     }
 
     fn witness(
         &self,
-        input: TrieInput,
-        target: HashedPostState,
+        input: TrieInput<Provider::AccountExtension>,
+        target: HashedPostState<Provider::AccountExtension>,
         mode: ExecutionWitnessMode,
     ) -> ProviderResult<Vec<Bytes>> {
         reth_trie_db::with_adapter!(self.0, |A| {
@@ -245,7 +284,9 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
                     &nodes_sorted,
                 ),
                 HashedPostStateCursorFactory::new(
-                    reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
+                    reth_trie_db::DatabaseHashedCursorFactory::<_, Provider::AccountExtension>::new(
+                        self.tx(),
+                    ),
                     &state_sorted,
                 ),
             )
@@ -266,11 +307,13 @@ impl<Provider: DBProvider> HashedPostStateProvider for LatestStateProviderRef<'_
     fn hashed_post_state(
         &self,
         bundle_state: &revm::database::BundleState,
-    ) -> ProviderResult<HashedPostState> {
+    ) -> ProviderResult<HashedPostState<Provider::AccountExtension>> {
         let mut hashed_state =
             HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state());
         zero_destroyed_account_storage(
-            &reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
+            &reth_trie_db::DatabaseHashedCursorFactory::<_, Provider::AccountExtension>::new(
+                self.tx(),
+            ),
             bundle_state.state(),
             &mut hashed_state,
         )?;
@@ -331,7 +374,7 @@ impl<Provider: DBProvider> LatestStateProvider<Provider> {
 }
 
 // Delegates all provider impls to [LatestStateProviderRef]
-reth_storage_api::macros::delegate_provider_impls!(LatestStateProvider<Provider> where [Provider: DBProvider + BlockHashReader + StorageSettingsCache]);
+reth_storage_api::macros::delegate_provider_impls!(LatestStateProvider<Provider>, Provider::AccountExtension where [Provider: DBProvider + BlockHashReader + StorageSettingsCache]);
 
 #[cfg(test)]
 mod tests {

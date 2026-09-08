@@ -148,6 +148,18 @@ where
     converter: Arc<DynRpcConverter<Node, N>>,
 }
 
+impl<P, Node: NodeTypes, N: Network> reth_provider::AccountExtensionProvider
+    for RpcBlockchainProvider<P, Node, N>
+{
+    type AccountExtension = reth_primitives_traits::EmptyAccountExtension;
+}
+
+impl<P, Node: NodeTypes, N> reth_provider::AccountExtensionProvider
+    for RpcBlockchainStateProvider<P, Node, N>
+{
+    type AccountExtension = reth_primitives_traits::EmptyAccountExtension;
+}
+
 impl<P, Node: NodeTypes, N: Network> std::fmt::Debug for RpcBlockchainProvider<P, Node, N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RpcBlockchainProvider").field("config", &self.config).finish()
@@ -1022,6 +1034,10 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
         P: Provider<N> + Clone + 'static,
         N: Network,
     {
+        // Ethereum account RPC responses have no chain-specific payload to decode.
+        reth_storage_api::ensure_no_account_extensions::<
+            reth_primitives_traits::AccountExtensionTy<Node::Primitives>,
+        >("Ethereum account RPC")?;
         let account_info = self.block_on_async(async {
             // Get account info in a single RPC call using `eth_getAccountInfo`
             if self.reth_rpc_support {

@@ -154,7 +154,9 @@ impl<V> TransactionValidationTaskExecutor<V> {
     }
 }
 
-impl<Client, Tx, Evm> TransactionValidationTaskExecutor<EthTransactionValidator<Client, Tx, Evm>> {
+impl<Client, Tx, Evm: ConfigureEvm>
+    TransactionValidationTaskExecutor<EthTransactionValidator<Client, Tx, Evm>>
+{
     /// Creates a new instance for the given client
     ///
     /// This will spawn a single validation tasks that performs the actual validation.

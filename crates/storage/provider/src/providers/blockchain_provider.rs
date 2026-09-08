@@ -24,7 +24,7 @@ use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIn
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::{BlockTy, HeaderTy, NodeTypes, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives_traits::{
-    Account, RecoveredBlock, SealedHeader, SealedOrRecoveredBlock, StorageEntry,
+    Account, AccountExtensionTy, RecoveredBlock, SealedHeader, SealedOrRecoveredBlock, StorageEntry,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -150,7 +150,10 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     }
 
     /// Returns a state provider for the post-state of `block_hash`.
-    fn state_provider_at_block_hash(&self, block_hash: B256) -> ProviderResult<StateProviderBox> {
+    fn state_provider_at_block_hash(
+        &self,
+        block_hash: B256,
+    ) -> ProviderResult<StateProviderBox<AccountExtensionTy<N::Primitives>>> {
         let state_provider_factory = OverlayStateProviderFactory::new(
             self.database.clone(),
             self.database.overlay_manager().overlay_builder(block_hash),
@@ -163,7 +166,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         &self,
         provider: StateRangeDbProvider<N>,
         block_hash: B256,
-    ) -> StateProviderBox {
+    ) -> StateProviderBox<AccountExtensionTy<N::Primitives>> {
         Box::new(OverlayStateProvider::new(
             provider,
             self.database.overlay_manager().overlay_builder(block_hash),
@@ -237,6 +240,9 @@ impl<N: ProviderNodeTypes> StateRangeProviderFactory for BlockchainProvider<N> {
     /// Resolves a retained canonical state root into a pinned range view, preferring a still
     /// in-memory block over the persisted-history fallback.
     fn state_range_provider(&self, state_root: B256) -> ProviderResult<Option<StateRangeView>> {
+        reth_storage_api::ensure_no_account_extensions::<AccountExtensionTy<N::Primitives>>(
+            "snap",
+        )?;
         let provider = match self.block_state_range_provider(state_root)? {
             Some(provider) => Some(provider),
             None => self.historical_state_range_provider(state_root)?,
@@ -264,7 +270,17 @@ impl<N: ProviderNodeTypes> StateRangeProvider for HistoricalStateRangeView<N> {
         let mut entry = cursor.seek(start).map_err(ProviderError::Database)?;
         while let Some((hash, account)) = entry {
             total_bytes += 32 + 4 * 32; // hash + rough upper bound of the RLP account body
-            accounts.push((hash, account));
+                                        // The range-view factory rejects custom account types: snap uses Ethereum account
+                                        // tuples.
+            accounts.push((
+                hash,
+                Account {
+                    nonce: account.nonce,
+                    balance: account.balance,
+                    bytecode_hash: account.bytecode_hash,
+                    ..Default::default()
+                },
+            ));
             if hash >= limit {
                 end = RangeEnd::HashLimit;
                 break
@@ -722,9 +738,13 @@ impl<N: NodeTypesWithDB> ChainSpecProvider for BlockchainProvider<N> {
     }
 }
 
+impl<N: ProviderNodeTypes> reth_storage_api::AccountExtensionProvider for BlockchainProvider<N> {
+    type AccountExtension = AccountExtensionTy<N::Primitives>;
+}
+
 impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
     /// Storage provider for latest block
-    fn latest(&self) -> ProviderResult<StateProviderBox> {
+    fn latest(&self) -> ProviderResult<StateProviderBox<AccountExtensionTy<N::Primitives>>> {
         trace!(target: "providers::blockchain", "Getting latest block state provider");
         // use latest state provider if the head state exists
         if let Some(state) = self.canonical_in_memory_state.head_state() {
@@ -740,7 +760,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
     fn state_by_block_number_or_tag(
         &self,
         number_or_tag: BlockNumberOrTag,
-    ) -> ProviderResult<StateProviderBox> {
+    ) -> ProviderResult<StateProviderBox<AccountExtensionTy<N::Primitives>>> {
         match number_or_tag {
             BlockNumberOrTag::Latest => self.latest(),
             BlockNumberOrTag::Finalized => {
@@ -770,7 +790,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
     fn history_by_block_number(
         &self,
         block_number: BlockNumber,
-    ) -> ProviderResult<StateProviderBox> {
+    ) -> ProviderResult<StateProviderBox<AccountExtensionTy<N::Primitives>>> {
         trace!(target: "providers::blockchain", ?block_number, "Getting history by block number");
         let provider = self.consistent_provider()?;
         let hash = provider
@@ -779,14 +799,20 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         Ok(self.state_provider_from_database(provider.into_database_provider(), hash))
     }
 
-    fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
+    fn history_by_block_hash(
+        &self,
+        block_hash: BlockHash,
+    ) -> ProviderResult<StateProviderBox<AccountExtensionTy<N::Primitives>>> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
         let provider = self.consistent_provider()?;
         provider.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
         Ok(self.state_provider_from_database(provider.into_database_provider(), block_hash))
     }
 
-    fn state_by_block_hash(&self, hash: BlockHash) -> ProviderResult<StateProviderBox> {
+    fn state_by_block_hash(
+        &self,
+        hash: BlockHash,
+    ) -> ProviderResult<StateProviderBox<AccountExtensionTy<N::Primitives>>> {
         trace!(target: "providers::blockchain", ?hash, "Getting state by block hash");
         if let Some(state) = self.canonical_in_memory_state.state_by_hash(hash) {
             self.state_provider_at_block_hash(state.hash())
@@ -806,7 +832,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
     ///
     /// If there's no pending block available then the latest state provider is returned:
     /// [`Self::latest`]
-    fn pending(&self) -> ProviderResult<StateProviderBox> {
+    fn pending(&self) -> ProviderResult<StateProviderBox<AccountExtensionTy<N::Primitives>>> {
         trace!(target: "providers::blockchain", "Getting provider for pending state");
 
         if let Some(pending) = self.canonical_in_memory_state.pending_state() {
@@ -818,7 +844,10 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         self.latest()
     }
 
-    fn pending_state_by_hash(&self, block_hash: B256) -> ProviderResult<Option<StateProviderBox>> {
+    fn pending_state_by_hash(
+        &self,
+        block_hash: B256,
+    ) -> ProviderResult<Option<StateProviderBox<AccountExtensionTy<N::Primitives>>>> {
         if let Some(pending) = self.canonical_in_memory_state.pending_state() &&
             pending.hash() == block_hash
         {
@@ -827,7 +856,9 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         Ok(None)
     }
 
-    fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox>> {
+    fn maybe_pending(
+        &self,
+    ) -> ProviderResult<Option<StateProviderBox<AccountExtensionTy<N::Primitives>>>> {
         if let Some(pending) = self.canonical_in_memory_state.pending_state() {
             return self.state_provider_at_block_hash(pending.hash()).map(Some)
         }
@@ -951,7 +982,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider<N> {
     fn account_block_changeset(
         &self,
         block_number: BlockNumber,
-    ) -> ProviderResult<Vec<AccountBeforeTx>> {
+    ) -> ProviderResult<Vec<AccountBeforeTx<AccountExtensionTy<N::Primitives>>>> {
         self.consistent_provider()?.account_block_changeset(block_number)
     }
 
@@ -959,14 +990,15 @@ impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider<N> {
         &self,
         block_number: BlockNumber,
         address: Address,
-    ) -> ProviderResult<Option<AccountBeforeTx>> {
+    ) -> ProviderResult<Option<AccountBeforeTx<AccountExtensionTy<N::Primitives>>>> {
         self.consistent_provider()?.get_account_before_block(block_number, address)
     }
 
     fn account_changesets_range(
         &self,
         range: impl core::ops::RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
+    ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx<AccountExtensionTy<N::Primitives>>)>>
+    {
         self.consistent_provider()?.account_changesets_range(range)
     }
 }

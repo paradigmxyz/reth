@@ -63,6 +63,9 @@ where
     MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync + 'a,
     ReceiptTy<Evm::Primitives>: Clone,
 {
+    reth_provider::ensure_no_account_extensions::<
+        reth_primitives_traits::AccountExtensionTy<Evm::Primitives>,
+    >("BAL")?;
     let worker_pool = runtime.bal_streaming_pool();
     let worker_count = worker_pool.current_num_threads().max(1).min(transaction_count);
 

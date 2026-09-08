@@ -19,7 +19,7 @@ use reth_db_api::{
 use reth_db_common::DbTool;
 use reth_node_api::{HeaderTy, ReceiptTy, TxTy};
 use reth_node_builder::NodeTypesWithDB;
-use reth_primitives_traits::ValueWithSubKey;
+use reth_primitives_traits::{AccountExtensionTy, ValueWithSubKey};
 use reth_provider::{
     providers::ProviderNodeTypes, ChangeSetReader, RocksDBProviderFactory,
     StaticFileProviderFactory,
@@ -133,7 +133,9 @@ impl Command {
     pub fn execute<N: ProviderNodeTypes>(self, tool: &DbTool<N>) -> eyre::Result<()> {
         match self.subcommand {
             Subcommand::Mdbx { table, key, subkey, end_key, end_subkey, raw } => {
-                table.view(&GetValueViewer { tool, key, subkey, end_key, end_subkey, raw })?
+                table.view_with_account_extension::<AccountExtensionTy<N::Primitives>, _, _>(
+                    &GetValueViewer { tool, key, subkey, end_key, end_subkey, raw },
+                )?
             }
             Subcommand::Rocksdb { table, key, block, storage_key, all_shards, raw } => {
                 get_rocksdb(tool, table, &key, block, storage_key.as_deref(), all_shards, raw)?;
@@ -201,7 +203,11 @@ impl Command {
                         (
                             table_key::<tables::AccountChangeSets>(&key)?,
                             subkey,
-                            AccountChangesetMask::MASK,
+                            AccountChangesetMask::<
+                                reth_db_api::models::AccountBeforeTx<
+                                    AccountExtensionTy<N::Primitives>,
+                                >,
+                            >::MASK,
                         )
                     }
                     StaticFileSegment::StorageChangeSets => {

@@ -1020,6 +1020,12 @@ where
     }
 }
 
+impl<T: NodePrimitives, ChainSpec> reth_storage_api::AccountExtensionProvider
+    for MockEthProvider<T, ChainSpec>
+{
+    type AccountExtension = reth_primitives_traits::EmptyAccountExtension;
+}
+
 impl<T: NodePrimitives, ChainSpec: Send + Sync> AccountReader for MockEthProvider<T, ChainSpec> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         Ok(self.accounts.lock().get(address).cloned().map(|a| a.account))

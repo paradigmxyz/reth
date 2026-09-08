@@ -14,13 +14,16 @@ use revm::{
 };
 
 /// Type used to initialize revms bundle state.
-pub type BundleStateInit = AddressMap<(Option<Account>, Option<Account>, B256Map<(U256, U256)>)>;
+pub type BundleStateInit<E = reth_primitives_traits::EmptyAccountExtension> =
+    AddressMap<(Option<Account<E>>, Option<Account<E>>, B256Map<(U256, U256)>)>;
 
 /// Types used inside `RevertsInit` to initialize revms reverts.
-pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
+pub type AccountRevertInit<E = reth_primitives_traits::EmptyAccountExtension> =
+    (Option<Option<Account<E>>>, Vec<StorageEntry>);
 
 /// Type used to initialize revms reverts.
-pub type RevertsInit = HashMap<BlockNumber, AddressMap<AccountRevertInit>>;
+pub type RevertsInit<E = reth_primitives_traits::EmptyAccountExtension> =
+    HashMap<BlockNumber, AddressMap<AccountRevertInit<E>>>;
 
 /// Represents a changed account
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -93,9 +96,9 @@ impl<T> ExecutionOutcome<T> {
     ///
     /// This constructor initializes a new `ExecutionOutcome` instance using detailed
     /// initialization parameters.
-    pub fn new_init(
-        state_init: BundleStateInit,
-        revert_init: RevertsInit,
+    pub fn new_init<E: reth_primitives_traits::AccountExtension>(
+        state_init: BundleStateInit<E>,
+        revert_init: RevertsInit<E>,
         contracts_init: impl IntoIterator<Item = (B256, Bytecode)>,
         receipts: Vec<Vec<T>>,
         first_block: BlockNumber,
@@ -186,7 +189,10 @@ impl<T> ExecutionOutcome<T> {
     }
 
     /// Get account if account is known.
-    pub fn account(&self, address: &Address) -> Option<Option<Account>> {
+    pub fn account<E: reth_primitives_traits::AccountExtension>(
+        &self,
+        address: &Address,
+    ) -> Option<Option<Account<E>>> {
         self.bundle.account(address).map(|a| a.info.as_ref().map(Into::into))
     }
 
@@ -209,7 +215,9 @@ impl<T> ExecutionOutcome<T> {
 
     /// Returns [`HashedPostState`] for this execution outcome.
     /// See [`HashedPostState::from_bundle_state`] for more info.
-    pub fn hash_state_slow<KH: KeyHasher>(&self) -> HashedPostState {
+    pub fn hash_state_slow<KH: KeyHasher, E: reth_primitives_traits::AccountExtension>(
+        &self,
+    ) -> HashedPostState<E> {
         HashedPostState::from_bundle_state::<KH>(&self.bundle.state)
     }
 

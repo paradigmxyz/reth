@@ -99,7 +99,8 @@ use std::{
 use tracing::{debug, debug_span, instrument, warn, Span};
 
 /// Handle to a [`HashedPostState`] computed on a background thread.
-pub type LazyHashedPostState = reth_tasks::LazyHandle<Arc<HashedPostState>>;
+pub type LazyHashedPostState<E = reth_primitives_traits::EmptyAccountExtension> =
+    reth_tasks::LazyHandle<Arc<HashedPostState<E>>>;
 
 /// Strategy used by engine-tree validation to prepare per-block state-root work.
 pub trait StateRootStrategy<N, P, Evm>: Send + Sync
@@ -125,7 +126,7 @@ where
     fn prepare_payload_builder(
         &self,
         _ctx: PayloadStateRootJobContext<'_, N, P>,
-    ) -> ProviderResult<Option<PayloadStateRootHandle>> {
+    ) -> ProviderResult<Option<PayloadStateRootHandle<N::AccountExtension>>> {
         Ok(None)
     }
 }
@@ -321,10 +322,10 @@ where
 /// and is not retained here, so the task's update channel closes when the producers are done.
 pub struct PreparedStateRootJob<N: NodePrimitives> {
     job: Box<dyn StateRootJob<N>>,
-    execution_hook: Option<StateRootUpdateHook>,
-    hint_stream: Option<StateRootHintStream>,
-    hashed_update_stream: Option<StateRootUpdateStream>,
-    hashed_state_rx: Option<mpsc::Receiver<Arc<HashedPostState>>>,
+    execution_hook: Option<StateRootUpdateHook<N::AccountExtension>>,
+    hint_stream: Option<StateRootHintStream<N::AccountExtension>>,
+    hashed_update_stream: Option<StateRootUpdateStream<N::AccountExtension>>,
+    hashed_state_rx: Option<mpsc::Receiver<Arc<HashedPostState<N::AccountExtension>>>>,
 }
 
 impl<N: NodePrimitives> fmt::Debug for PreparedStateRootJob<N> {
@@ -343,7 +344,7 @@ impl<N: NodePrimitives> PreparedStateRootJob<N> {
     /// Creates a prepared state-root job without update-stream capabilities.
     pub const fn new(
         job: Box<dyn StateRootJob<N>>,
-        hashed_state_rx: Option<mpsc::Receiver<Arc<HashedPostState>>>,
+        hashed_state_rx: Option<mpsc::Receiver<Arc<HashedPostState<N::AccountExtension>>>>,
     ) -> Self {
         Self {
             job,
@@ -355,19 +356,25 @@ impl<N: NodePrimitives> PreparedStateRootJob<N> {
     }
 
     /// Attaches the execution hook capability (serial execution path).
-    pub fn with_execution_hook(mut self, hook: StateRootUpdateHook) -> Self {
+    pub fn with_execution_hook(mut self, hook: StateRootUpdateHook<N::AccountExtension>) -> Self {
         self.execution_hook = Some(hook);
         self
     }
 
     /// Attaches the hint stream capability.
-    pub fn with_hint_stream(mut self, hint_stream: StateRootHintStream) -> Self {
+    pub fn with_hint_stream(
+        mut self,
+        hint_stream: StateRootHintStream<N::AccountExtension>,
+    ) -> Self {
         self.hint_stream = Some(hint_stream);
         self
     }
 
     /// Attaches the hashed update stream capability (parallel BAL path).
-    pub fn with_hashed_update_stream(mut self, stream: StateRootUpdateStream) -> Self {
+    pub fn with_hashed_update_stream(
+        mut self,
+        stream: StateRootUpdateStream<N::AccountExtension>,
+    ) -> Self {
         self.hashed_update_stream = Some(stream);
         self
     }
@@ -383,12 +390,14 @@ impl<N: NodePrimitives> PreparedStateRootJob<N> {
     }
 
     /// Takes the hint stream for transaction prewarming.
-    pub const fn take_hint_stream(&mut self) -> Option<StateRootHintStream> {
+    pub const fn take_hint_stream(&mut self) -> Option<StateRootHintStream<N::AccountExtension>> {
         self.hint_stream.take()
     }
 
     /// Takes the hashed update stream, present only on the parallel BAL path.
-    pub const fn take_hashed_update_stream(&mut self) -> Option<StateRootUpdateStream> {
+    pub const fn take_hashed_update_stream(
+        &mut self,
+    ) -> Option<StateRootUpdateStream<N::AccountExtension>> {
         self.hashed_update_stream.take()
     }
 
@@ -397,7 +406,9 @@ impl<N: NodePrimitives> PreparedStateRootJob<N> {
     /// The sender behind a returned receiver must either deliver one value or be dropped;
     /// validation blocks on it while hashing the post state, so a job that keeps the sender
     /// alive without sending stalls block validation.
-    pub const fn take_hashed_state_rx(&mut self) -> Option<mpsc::Receiver<Arc<HashedPostState>>> {
+    pub const fn take_hashed_state_rx(
+        &mut self,
+    ) -> Option<mpsc::Receiver<Arc<HashedPostState<N::AccountExtension>>>> {
         self.hashed_state_rx.take()
     }
 
@@ -406,8 +417,8 @@ impl<N: NodePrimitives> PreparedStateRootJob<N> {
         &mut self,
         block: &RecoveredBlock<N::Block>,
         output: Arc<BlockExecutionOutput<N::Receipt>>,
-        hashed_state: &LazyHashedPostState,
-    ) -> ProviderResult<StateRootJobOutcome> {
+        hashed_state: &LazyHashedPostState<N::AccountExtension>,
+    ) -> ProviderResult<StateRootJobOutcome<N::AccountExtension>> {
         self.job.finish(block, output, hashed_state)
     }
 }
@@ -424,13 +435,13 @@ pub trait StateRootJob<N: NodePrimitives>: Send {
         &mut self,
         block: &RecoveredBlock<N::Block>,
         output: Arc<BlockExecutionOutput<N::Receipt>>,
-        hashed_state: &LazyHashedPostState,
-    ) -> ProviderResult<StateRootJobOutcome>;
+        hashed_state: &LazyHashedPostState<N::AccountExtension>,
+    ) -> ProviderResult<StateRootJobOutcome<N::AccountExtension>>;
 }
 
 /// Outcome of a per-block state-root job.
 #[derive(Debug)]
-pub struct StateRootJobOutcome {
+pub struct StateRootJobOutcome<E = reth_primitives_traits::EmptyAccountExtension> {
     /// Computed state root.
     pub state_root: B256,
     /// Trie updates associated with the computed state root.
@@ -439,17 +450,17 @@ pub struct StateRootJobOutcome {
     ///
     /// When set, the root was not derived from the streamed updates, so validation replaces its
     /// streaming-derived hashed post state with this one and re-runs hashed-state checks.
-    pub hashed_state: Option<Arc<HashedPostState>>,
+    pub hashed_state: Option<Arc<HashedPostState<E>>>,
 }
 
-impl StateRootJobOutcome {
+impl<E> StateRootJobOutcome<E> {
     /// Creates a state-root job outcome.
     pub const fn new(state_root: B256, trie_updates: Arc<TrieUpdates>) -> Self {
         Self { state_root, trie_updates, hashed_state: None }
     }
 
     /// Sets the hashed post state recomputed by a fallback path.
-    pub fn with_hashed_state(mut self, hashed_state: Option<Arc<HashedPostState>>) -> Self {
+    pub fn with_hashed_state(mut self, hashed_state: Option<Arc<HashedPostState<E>>>) -> Self {
         self.hashed_state = hashed_state;
         self
     }
@@ -457,7 +468,8 @@ impl StateRootJobOutcome {
 
 /// Receiver for the raced serial state-root fallback: root, trie updates, and the hashed
 /// post state the fallback recomputed.
-type SerialFallbackRx = mpsc::Receiver<ProviderResult<(B256, TrieUpdates, Arc<HashedPostState>)>>;
+type SerialFallbackRx<E> =
+    mpsc::Receiver<ProviderResult<(B256, TrieUpdates, Arc<HashedPostState<E>>)>>;
 
 /// Default state-root strategy used by engine-tree validation.
 ///
@@ -494,7 +506,7 @@ impl DefaultStateRootStrategy {
         overlay_manager: &OverlayManager<N>,
         multiproof_provider_factory: F,
         options: StateRootTaskOptions<'_, N>,
-    ) -> StateRootHandle
+    ) -> StateRootHandle<N::AccountExtension>
     where
         N: NodePrimitives,
         F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -567,9 +579,11 @@ impl DefaultStateRootStrategy {
         proof_worker_handle: ProofWorkerHandle,
         proof_result_tx: CrossbeamSender<ProofResultMessage>,
         proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
-        state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, StateRootTaskError>>,
-        hashed_state_tx: mpsc::Sender<Arc<HashedPostState>>,
-        from_multi_proof: CrossbeamReceiver<StateRootMessage>,
+        state_root_tx: mpsc::Sender<
+            Result<StateRootComputeOutcome<N::AccountExtension>, StateRootTaskError>,
+        >,
+        hashed_state_tx: mpsc::Sender<Arc<HashedPostState<N::AccountExtension>>>,
+        from_multi_proof: CrossbeamReceiver<StateRootMessage<N::AccountExtension>>,
         cancel_rx: CrossbeamReceiver<()>,
         options: SparseTrieTaskOptions<N>,
     ) {
@@ -796,15 +810,15 @@ where
     P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
-        + ChangeSetReader
+        + ChangeSetReader<AccountExtension = N::AccountExtension>
         + StorageChangeSetReader
         + StorageSettingsCache
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
             Provider: TrieCursorFactory
                           + HashedCursorFactory
-                          + HashedPostStateProvider
-                          + StateRootProvider
+                          + HashedPostStateProvider<AccountExtension = N::AccountExtension>
+                          + StateRootProvider<AccountExtension = N::AccountExtension>
                           + Send,
         > + Clone
         + 'static,
@@ -866,9 +880,10 @@ where
         // The execution mode decides who finishes the update stream: the execution hook on
         // the serial path, the BAL streamer on the parallel path. Both come from one slot in
         // the handle, so only one of them can exist.
+        #[expect(clippy::type_complexity)]
         let (hashed_update_stream, execution_hook): (
-            Option<StateRootUpdateStream>,
-            Option<StateRootUpdateHook>,
+            Option<StateRootUpdateStream<N::AccountExtension>>,
+            Option<StateRootUpdateHook<N::AccountExtension>>,
         ) = match parallel_bal_execution {
             true => (Some(handle.take_hashed_update_stream()), None),
             false => (None, Some(handle.take_execution_hook())),
@@ -901,7 +916,7 @@ where
     fn prepare_payload_builder(
         &self,
         mut ctx: PayloadStateRootJobContext<'_, N, P>,
-    ) -> ProviderResult<Option<PayloadStateRootHandle>> {
+    ) -> ProviderResult<Option<PayloadStateRootHandle<N::AccountExtension>>> {
         // Sharing the engine state-root task with the payload builder is opt-in, and needs a
         // host that can run the task pipeline at all.
         if !ctx.config.share_sparse_trie_with_payload_builder() ||
@@ -955,8 +970,8 @@ impl<N: NodePrimitives> StateRootJob<N> for SkippedStateRootJob {
         &mut self,
         block: &RecoveredBlock<N::Block>,
         _output: Arc<BlockExecutionOutput<N::Receipt>>,
-        _hashed_state: &LazyHashedPostState,
-    ) -> ProviderResult<StateRootJobOutcome> {
+        _hashed_state: &LazyHashedPostState<N::AccountExtension>,
+    ) -> ProviderResult<StateRootJobOutcome<N::AccountExtension>> {
         Ok(StateRootJobOutcome::new(block.header().state_root(), Arc::new(TrieUpdates::default())))
     }
 }
@@ -973,11 +988,13 @@ where
     P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
-        + ChangeSetReader
+        + ChangeSetReader<AccountExtension = N::AccountExtension>
         + StorageChangeSetReader
         + StorageSettingsCache
         + 'static,
-    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: StateRootProvider>,
+    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
+        Provider: StateRootProvider<AccountExtension = N::AccountExtension>,
+    >,
 {
     fn name(&self) -> &'static str {
         "synchronous"
@@ -987,8 +1004,8 @@ where
         &mut self,
         _block: &RecoveredBlock<N::Block>,
         _output: Arc<BlockExecutionOutput<N::Receipt>>,
-        hashed_state: &LazyHashedPostState,
-    ) -> ProviderResult<StateRootJobOutcome> {
+        hashed_state: &LazyHashedPostState<N::AccountExtension>,
+    ) -> ProviderResult<StateRootJobOutcome<N::AccountExtension>> {
         let provider = self.state_provider_factory.database_provider_ro()?;
         let (state_root, trie_updates) =
             provider.state_root_with_updates(hashed_state.get().as_ref().clone())?;
@@ -998,7 +1015,7 @@ where
 
 #[derive(Debug)]
 struct SparseTrieStateRootJob<N: NodePrimitives, P> {
-    handle: StateRootHandle,
+    handle: StateRootHandle<N::AccountExtension>,
     state_provider_factory: OverlayStateProviderFactory<P, N>,
     executor: reth_tasks::Runtime,
     timeout: Option<Duration>,
@@ -1013,15 +1030,15 @@ where
     P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
-        + ChangeSetReader
+        + ChangeSetReader<AccountExtension = N::AccountExtension>
         + StorageChangeSetReader
         + StorageSettingsCache
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
             Provider: TrieCursorFactory
                           + HashedCursorFactory
-                          + HashedPostStateProvider
-                          + StateRootProvider
+                          + HashedPostStateProvider<AccountExtension = N::AccountExtension>
+                          + StateRootProvider<AccountExtension = N::AccountExtension>
                           + Send,
         > + Clone
         + 'static,
@@ -1030,7 +1047,7 @@ where
         executor: &reth_tasks::Runtime,
         state_provider_factory: OverlayStateProviderFactory<P, N>,
         output: Arc<BlockExecutionOutput<N::Receipt>>,
-    ) -> ProviderResult<SerialFallbackRx> {
+    ) -> ProviderResult<SerialFallbackRx<N::AccountExtension>> {
         let provider = state_provider_factory.database_provider_ro()?;
         let (fallback_tx, fallback_rx) = mpsc::channel();
         executor.spawn_blocking_named("serial-root", move || {
@@ -1053,7 +1070,7 @@ where
     fn compute_serial(
         &self,
         output: &BlockExecutionOutput<N::Receipt>,
-    ) -> ProviderResult<StateRootJobOutcome> {
+    ) -> ProviderResult<StateRootJobOutcome<N::AccountExtension>> {
         let provider = self.state_provider_factory.database_provider_ro()?;
         let hashed_state = Arc::new(provider.hashed_post_state(&output.state)?);
         let (state_root, trie_updates) =
@@ -1071,8 +1088,8 @@ where
         &self,
         block: &RecoveredBlock<N::Block>,
         output: &BlockExecutionOutput<N::Receipt>,
-        outcome: StateRootComputeOutcome,
-    ) -> ProviderResult<StateRootJobOutcome> {
+        outcome: StateRootComputeOutcome<N::AccountExtension>,
+    ) -> ProviderResult<StateRootJobOutcome<N::AccountExtension>> {
         let outcome = self.sparse_outcome(block, output, outcome);
         if outcome.state_root == block.header().state_root() {
             return Ok(outcome)
@@ -1090,8 +1107,8 @@ where
         &self,
         _block: &RecoveredBlock<N::Block>,
         output: &BlockExecutionOutput<N::Receipt>,
-        outcome: StateRootComputeOutcome,
-    ) -> StateRootJobOutcome {
+        outcome: StateRootComputeOutcome<N::AccountExtension>,
+    ) -> StateRootJobOutcome<N::AccountExtension> {
         let StateRootComputeOutcome { state_root, trie_updates, hashed_state: _hashed_state } =
             outcome;
 
@@ -1114,15 +1131,15 @@ where
     P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
-        + ChangeSetReader
+        + ChangeSetReader<AccountExtension = N::AccountExtension>
         + StorageChangeSetReader
         + StorageSettingsCache
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
             Provider: TrieCursorFactory
                           + HashedCursorFactory
-                          + HashedPostStateProvider
-                          + StateRootProvider
+                          + HashedPostStateProvider<AccountExtension = N::AccountExtension>
+                          + StateRootProvider<AccountExtension = N::AccountExtension>
                           + Send,
         > + Clone
         + 'static,
@@ -1135,8 +1152,8 @@ where
         &mut self,
         block: &RecoveredBlock<N::Block>,
         output: Arc<BlockExecutionOutput<N::Receipt>>,
-        _hashed_state: &LazyHashedPostState,
-    ) -> ProviderResult<StateRootJobOutcome> {
+        _hashed_state: &LazyHashedPostState<N::AccountExtension>,
+    ) -> ProviderResult<StateRootJobOutcome<N::AccountExtension>> {
         if self.timeout.is_none() {
             return match self.handle.state_root() {
                 Ok(outcome) => self.verified_sparse_outcome(block, &output, outcome),
@@ -1224,14 +1241,14 @@ where
     P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
-        + ChangeSetReader
+        + ChangeSetReader<AccountExtension = N::AccountExtension>
         + StorageChangeSetReader
         + StorageSettingsCache
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
         Provider: TrieCursorFactory
                       + HashedCursorFactory
-                      + HashedPostStateProvider
+                      + HashedPostStateProvider<AccountExtension = N::AccountExtension>
                       + StateRootProvider,
     >,
 {

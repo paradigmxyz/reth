@@ -20,7 +20,7 @@ use reth_ethereum::{
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     // This block provider implementation is used for testing purposes.
-    let client = NoopProvider::default();
+    let client = NoopProvider::<reth_ethereum::chainspec::ChainSpec>::default();
 
     // The key that's used for encrypting sessions and to identify our node.
     let local_key = rng_secret_key();

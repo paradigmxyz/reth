@@ -12,6 +12,7 @@ use crate::{
     Address, EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig,
     TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
+use reth_primitives_traits::AccountExtensionTy;
 
 use alloy_consensus::{
     constants::{
@@ -59,8 +60,12 @@ pub type StatelessValidationFn<T> =
 ///
 /// Receives the transaction origin, a reference to the transaction, and an account state reader.
 /// Returns `Ok(())` if the transaction passes or `Err` to reject it.
-pub type StatefulValidationFn<T> = Arc<
-    dyn Fn(TransactionOrigin, &T, &dyn AccountInfoReader) -> Result<(), InvalidPoolTransactionError>
+pub type StatefulValidationFn<T, E = reth_primitives_traits::EmptyAccountExtension> = Arc<
+    dyn Fn(
+            TransactionOrigin,
+            &T,
+            &dyn AccountInfoReader<AccountExtension = E>,
+        ) -> Result<(), InvalidPoolTransactionError>
         + Send
         + Sync,
 >;
@@ -79,7 +84,7 @@ pub type StatefulValidationFn<T> = Arc<
 /// - Maximum gas limit
 ///
 /// And adheres to the configured [`LocalTransactionConfig`].
-pub struct EthTransactionValidator<Client, T, Evm> {
+pub struct EthTransactionValidator<Client, T, Evm: ConfigureEvm> {
     /// This type fetches account info from the db
     client: Client,
     /// The chain ID transactions must use.
@@ -129,10 +134,11 @@ pub struct EthTransactionValidator<Client, T, Evm> {
     additional_stateless_validation: Option<StatelessValidationFn<T>>,
     /// Optional additional stateful validation check applied at the end of
     /// [`validate_stateful`](Self::validate_stateful).
-    additional_stateful_validation: Option<StatefulValidationFn<T>>,
+    additional_stateful_validation:
+        Option<StatefulValidationFn<T, AccountExtensionTy<Evm::Primitives>>>,
 }
 
-impl<Client, Tx, Evm> fmt::Debug for EthTransactionValidator<Client, Tx, Evm> {
+impl<Client, Tx, Evm: ConfigureEvm> fmt::Debug for EthTransactionValidator<Client, Tx, Evm> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("EthTransactionValidator")
             .field("fork_tracker", &self.fork_tracker)
@@ -159,7 +165,7 @@ impl<Client, Tx, Evm> fmt::Debug for EthTransactionValidator<Client, Tx, Evm> {
     }
 }
 
-impl<Client, Tx, Evm> EthTransactionValidator<Client, Tx, Evm> {
+impl<Client, Tx, Evm: ConfigureEvm> EthTransactionValidator<Client, Tx, Evm> {
     /// Returns the configured chain spec
     pub fn chain_spec(&self) -> Arc<Client::ChainSpec>
     where
@@ -323,7 +329,7 @@ impl<Client, Tx, Evm> EthTransactionValidator<Client, Tx, Evm> {
         F: Fn(
                 TransactionOrigin,
                 &Tx,
-                &dyn AccountInfoReader,
+                &dyn AccountInfoReader<AccountExtension = AccountExtensionTy<Evm::Primitives>>,
             ) -> Result<(), InvalidPoolTransactionError>
             + Send
             + Sync
@@ -338,7 +344,10 @@ impl<Client, Tx, Evm> EthTransactionValidator<Client, Tx, Evm> {
     /// This is useful when the same hook is shared across multiple validators, avoiding an extra
     /// allocation compared to
     /// [`set_additional_stateful_validation`](Self::set_additional_stateful_validation).
-    pub fn set_additional_stateful_validation_fn(&mut self, f: StatefulValidationFn<Tx>) {
+    pub fn set_additional_stateful_validation_fn(
+        &mut self,
+        f: StatefulValidationFn<Tx, AccountExtensionTy<Evm::Primitives>>,
+    ) {
         self.additional_stateful_validation = Some(f);
     }
 
@@ -348,7 +357,7 @@ impl<Client, Tx, Evm> EthTransactionValidator<Client, Tx, Evm> {
     /// Passing `None` removes any previously configured check.
     pub fn set_additional_stateful_validation_fn_opt(
         &mut self,
-        f: Option<StatefulValidationFn<Tx>>,
+        f: Option<StatefulValidationFn<Tx, AccountExtensionTy<Evm::Primitives>>>,
     ) {
         self.additional_stateful_validation = f;
     }
@@ -356,7 +365,8 @@ impl<Client, Tx, Evm> EthTransactionValidator<Client, Tx, Evm> {
 
 impl<Client, Tx, Evm> EthTransactionValidator<Client, Tx, Evm>
 where
-    Client: ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks> + StateProviderFactory,
+    Client: ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
+        + StateProviderFactory<AccountExtension = AccountExtensionTy<Evm::Primitives>>,
     Tx: EthPoolTransaction,
     Evm: ConfigureEvm,
 {
@@ -373,7 +383,7 @@ where
         origin: TransactionOrigin,
         transaction: Tx,
     ) -> TransactionValidationOutcome<Tx> {
-        let mut state: Option<StateProviderBox> = None;
+        let mut state: Option<StateProviderBox<AccountExtensionTy<Evm::Primitives>>> = None;
         self.validate_one_with_provider(origin, transaction, &mut state, || self.client.latest())
     }
 
@@ -387,10 +397,22 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
-        state: &mut Option<Box<dyn AccountInfoReader + Send>>,
+        state: &mut Option<
+            Box<
+                dyn AccountInfoReader<AccountExtension = AccountExtensionTy<Evm::Primitives>>
+                    + Send,
+            >,
+        >,
     ) -> TransactionValidationOutcome<Tx> {
         self.validate_one_with_provider(origin, transaction, state, || {
-            self.client.latest().map(|state| Box::new(state) as Box<dyn AccountInfoReader + Send>)
+            self.client.latest().map(|state| {
+                Box::new(state)
+                    as Box<
+                        dyn AccountInfoReader<
+                                AccountExtension = AccountExtensionTy<Evm::Primitives>,
+                            > + Send,
+                    >
+            })
         })
     }
 
@@ -405,7 +427,7 @@ where
         state_provider: F,
     ) -> TransactionValidationOutcome<Tx>
     where
-        P: AccountInfoReader,
+        P: AccountInfoReader<AccountExtension = AccountExtensionTy<Evm::Primitives>>,
         F: FnOnce() -> Result<P, ProviderError>,
     {
         match self.validate_stateless(origin, &transaction) {
@@ -440,7 +462,7 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
-        state: impl AccountInfoReader,
+        state: impl AccountInfoReader<AccountExtension = AccountExtensionTy<Evm::Primitives>>,
     ) -> TransactionValidationOutcome<Tx> {
         if let Err(err) = self.validate_stateless(origin, &transaction) {
             return TransactionValidationOutcome::Invalid(transaction, err);
@@ -657,7 +679,7 @@ where
         state: P,
     ) -> TransactionValidationOutcome<Tx>
     where
-        P: AccountInfoReader,
+        P: AccountInfoReader<AccountExtension = AccountExtensionTy<Evm::Primitives>>,
     {
         // Use provider to get account info
         let account = match state.basic_account(transaction.sender_ref()) {
@@ -722,7 +744,7 @@ where
     pub fn validate_sender_bytecode(
         &self,
         transaction: &Tx,
-        sender: &Account,
+        sender: &Account<impl reth_primitives_traits::AccountExtension>,
         state: impl BytecodeReader,
     ) -> Result<Result<(), InvalidPoolTransactionError>, TransactionValidationOutcome<Tx>> {
         // Unless Prague is active, the signer account shouldn't have bytecode.
@@ -759,7 +781,7 @@ where
     pub fn validate_sender_nonce(
         &self,
         transaction: &Tx,
-        sender: &Account,
+        sender: &Account<impl reth_primitives_traits::AccountExtension>,
     ) -> Result<(), InvalidPoolTransactionError> {
         let tx_nonce = transaction.nonce();
 
@@ -777,7 +799,7 @@ where
     pub fn validate_sender_balance(
         &self,
         transaction: &Tx,
-        sender: &Account,
+        sender: &Account<impl reth_primitives_traits::AccountExtension>,
     ) -> Result<(), InvalidPoolTransactionError> {
         let cost = transaction.cost();
 
@@ -873,7 +895,7 @@ where
         &self,
         transactions: impl IntoIterator<Item = (TransactionOrigin, Tx)>,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
-        let mut provider: Option<StateProviderBox> = None;
+        let mut provider: Option<StateProviderBox<AccountExtensionTy<Evm::Primitives>>> = None;
         transactions
             .into_iter()
             .map(|(origin, tx)| {
@@ -888,7 +910,7 @@ where
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = Tx> + Send,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
-        let mut provider: Option<StateProviderBox> = None;
+        let mut provider: Option<StateProviderBox<AccountExtensionTy<Evm::Primitives>>> = None;
         transactions
             .into_iter()
             .map(|tx| {
@@ -980,7 +1002,8 @@ where
 
 impl<Client, Tx, Evm> TransactionValidator for EthTransactionValidator<Client, Tx, Evm>
 where
-    Client: ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks> + StateProviderFactory,
+    Client: ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
+        + StateProviderFactory<AccountExtension = AccountExtensionTy<Evm::Primitives>>,
     Tx: EthPoolTransaction,
     Evm: ConfigureEvm,
 {
@@ -1079,7 +1102,7 @@ pub struct EthTransactionValidatorBuilder<Client, Evm> {
     eip7594: bool,
 }
 
-impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
+impl<Client, Evm: ConfigureEvm> EthTransactionValidatorBuilder<Client, Evm> {
     /// Creates a new builder for the given client and EVM config
     ///
     /// By default this assumes the network is on the `Prague` hardfork and the following

@@ -209,6 +209,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// A type that knows how to build a block.
     type BlockAssembler: BlockAssembler<
         Self::BlockExecutorFactory,
+        <Self::Primitives as NodePrimitives>::AccountExtension,
         Block = BlockTy<Self::Primitives>,
     >;
 

@@ -23,7 +23,7 @@ pub struct BuiltPayloadExecutedBlock<N: NodePrimitives> {
     /// Block's execution outcome.
     pub execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
     /// Block's hashed state (unsorted).
-    pub hashed_state: Arc<HashedPostState>,
+    pub hashed_state: Arc<HashedPostState<N::AccountExtension>>,
     /// Trie updates that result from calculating the state root for the block (unsorted).
     pub trie_updates: Arc<TrieUpdates>,
 }

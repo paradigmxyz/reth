@@ -24,8 +24,8 @@ use revm::{
 use serde::Serialize;
 use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
 
-type CollectionResult =
-    (BTreeMap<B256, Bytes>, BTreeMap<B256, Bytes>, reth_trie::HashedPostState, BundleState);
+type CollectionResult<E> =
+    (BTreeMap<B256, Bytes>, BTreeMap<B256, Bytes>, reth_trie::HashedPostState<E>, BundleState);
 
 /// Serializable version of `BundleState` for deterministic comparison
 #[derive(Debug, PartialEq, Eq)]
@@ -115,9 +115,9 @@ fn sort_bundle_state_for_comparison(bundle_state: &BundleState) -> BundleStateSo
 }
 
 /// Extracts execution data including codes, preimages, and hashed state from database
-fn collect_execution_data(
-    mut db: State<StateProviderDatabase<StateProviderBox>>,
-) -> eyre::Result<CollectionResult> {
+fn collect_execution_data<E: reth_primitives_traits::AccountExtension>(
+    mut db: State<StateProviderDatabase<StateProviderBox<E>>>,
+) -> eyre::Result<CollectionResult<E>> {
     let bundle_state = db.take_bundle();
     let mut codes = BTreeMap::new();
     let mut preimages = BTreeMap::new();
@@ -153,11 +153,11 @@ fn collect_execution_data(
 }
 
 /// Generates execution witness from collected codes, preimages, and hashed state
-fn generate(
+fn generate<E: reth_primitives_traits::AccountExtension>(
     codes: BTreeMap<B256, Bytes>,
     preimages: BTreeMap<B256, Bytes>,
-    hashed_state: reth_trie::HashedPostState,
-    state_provider: Box<dyn StateProvider>,
+    hashed_state: reth_trie::HashedPostState<E>,
+    state_provider: Box<dyn StateProvider<AccountExtension = E>>,
 ) -> eyre::Result<ExecutionWitness> {
     let state = state_provider.witness(
         Default::default(),
@@ -239,7 +239,7 @@ where
 
         if let Some(healthy_node_client) = &self.healthy_node_client {
             let healthy_node_witness = futures::executor::block_on(async move {
-                DebugApiClient::<()>::debug_execution_witness(
+                DebugApiClient::<(), P::AccountExtension>::debug_execution_witness(
                     healthy_node_client,
                     block_number.into(),
                     None,
@@ -674,7 +674,9 @@ mod tests {
     fn test_proof_generator_generate() {
         // Use existing MockEthProvider
         let mock_provider = MockEthProvider::default();
-        let state_provider: Box<dyn StateProvider> = Box::new(mock_provider);
+        let state_provider: Box<
+            dyn StateProvider<AccountExtension = reth_primitives_traits::EmptyAccountExtension>,
+        > = Box::new(mock_provider);
 
         // Mock Data
         let mut codes = BTreeMap::new();

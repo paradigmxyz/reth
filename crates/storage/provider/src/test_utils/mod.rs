@@ -150,8 +150,17 @@ pub fn insert_genesis<N: ProviderNodeTypes<ChainSpec = ChainSpec>>(
 
     // Hash accounts and insert them into hashing table.
     let genesis = chain_spec.genesis();
-    let alloc_accounts =
-        genesis.alloc.iter().map(|(addr, account)| (*addr, Some(Account::from(account))));
+    let alloc_accounts = genesis.alloc.iter().map(|(addr, account)| {
+        (
+            *addr,
+            Some(Account {
+                nonce: account.nonce.unwrap_or_default(),
+                balance: account.balance,
+                bytecode_hash: account.code.as_ref().map(alloy_primitives::keccak256),
+                extension: Default::default(),
+            }),
+        )
+    });
     provider.insert_account_for_hashing(alloc_accounts).unwrap();
 
     let alloc_storage = genesis.alloc.clone().into_iter().filter_map(|(addr, account)| {

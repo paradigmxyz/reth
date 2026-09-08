@@ -25,7 +25,7 @@ async fn main() -> eyre::Result<()> {
     // NOTE: This also means that we don't have access to the blockchain and are not able to serve
     // any requests for headers or bodies which can result in dropped connections initiated by
     // remote or able to validate transaction against the latest state.
-    let client = NoopProvider::default();
+    let client = NoopProvider::<reth_ethereum::chainspec::ChainSpec>::default();
 
     let pool: Pool<
         OkValidator<EthPooledTransaction>,

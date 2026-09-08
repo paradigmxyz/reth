@@ -17,7 +17,8 @@ use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_node_types::{BlockTy, HeaderTy, ReceiptTy, TxTy};
 use reth_primitives_traits::{
-    BlockBody, RecoveredBlock, SealedHeader, SealedOrRecoveredBlock, StorageEntry,
+    AccountExtensionTy, BlockBody, RecoveredBlock, SealedHeader, SealedOrRecoveredBlock,
+    StorageEntry,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -1262,11 +1263,15 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
     }
 }
 
+impl<N: ProviderNodeTypes> reth_storage_api::AccountExtensionProvider for ConsistentProvider<N> {
+    type AccountExtension = AccountExtensionTy<N::Primitives>;
+}
+
 impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
     fn account_block_changeset(
         &self,
         block_number: BlockNumber,
-    ) -> ProviderResult<Vec<AccountBeforeTx>> {
+    ) -> ProviderResult<Vec<AccountBeforeTx<AccountExtensionTy<N::Primitives>>>> {
         if let Some(state) =
             self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
         {
@@ -1310,7 +1315,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
         &self,
         block_number: BlockNumber,
         address: Address,
-    ) -> ProviderResult<Option<AccountBeforeTx>> {
+    ) -> ProviderResult<Option<AccountBeforeTx<AccountExtensionTy<N::Primitives>>>> {
         if let Some(state) =
             self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
         {
@@ -1354,7 +1359,8 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
     fn account_changesets_range(
         &self,
         range: impl core::ops::RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
+    ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx<AccountExtensionTy<N::Primitives>>)>>
+    {
         let range = to_range(range);
         let mut changesets = Vec::new();
         let database_start = range.start;

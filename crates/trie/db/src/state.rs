@@ -149,13 +149,13 @@ where
 
 /// Extends [`HashedPostStateSorted`] with operations specific for working with a database
 /// transaction.
-pub trait DatabaseHashedPostState: Sized {
+pub trait DatabaseHashedPostState<E: AccountExtension = EmptyAccountExtension>: Sized {
     /// Initializes [`HashedPostStateSorted`] from reverts. Iterates over state reverts in the
     /// specified range and aggregates them into sorted hashed state.
     fn from_reverts(
-        provider: &(impl ChangeSetReader + StorageChangeSetReader),
+        provider: &(impl ChangeSetReader<AccountExtension = E> + StorageChangeSetReader),
         range: impl RangeBounds<BlockNumber>,
-    ) -> Result<HashedPostStateSorted, ProviderError>;
+    ) -> Result<Self, ProviderError>;
 }
 
 impl<'a, TX: DbTx, A: crate::TrieTableAdapter, E: AccountExtension> DatabaseStateRoot<'a, TX, E>
@@ -273,7 +273,7 @@ impl<'a, TX: DbTx, A: crate::TrieTableAdapter, E: AccountExtension> DatabaseStat
     }
 }
 
-impl DatabaseHashedPostState for HashedPostStateSorted {
+impl<E: AccountExtension> DatabaseHashedPostState<E> for HashedPostStateSorted<E> {
     /// Builds a sorted hashed post-state from reverts.
     ///
     /// Reads MDBX data directly into Vecs, using `HashSet`s only to track seen keys.
@@ -285,7 +285,7 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
     /// - Returns keys already ordered for trie iteration.
     #[instrument(target = "trie::db", skip(provider), fields(range))]
     fn from_reverts(
-        provider: &(impl ChangeSetReader + StorageChangeSetReader),
+        provider: &(impl ChangeSetReader<AccountExtension = E> + StorageChangeSetReader),
         range: impl RangeBounds<BlockNumber>,
     ) -> Result<Self, ProviderError> {
         // Extract concrete start/end values to use for both account and storage changesets.

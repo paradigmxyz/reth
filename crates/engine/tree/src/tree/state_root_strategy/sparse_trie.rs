@@ -34,19 +34,23 @@ use reth_trie_sparse::{
 use tracing::{debug, debug_span, error, instrument, trace_span};
 
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
-pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaParallelSparseTrie> {
+pub(super) struct SparseTrieCacheTask<
+    A = ArenaParallelSparseTrie,
+    S = ArenaParallelSparseTrie,
+    E: reth_primitives_traits::AccountExtension = reth_primitives_traits::EmptyAccountExtension,
+> {
     /// Sender for proof results.
     proof_result_tx: ProofResultSender,
     /// Receiver for proof results directly from workers.
     proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
     /// Receives updates from execution and prewarming.
-    updates: CrossbeamReceiver<SparseTrieTaskMessage>,
+    updates: CrossbeamReceiver<SparseTrieTaskMessage<E>>,
     /// Fires (by disconnecting) when the consumer drops its cancel guard, meaning nobody is
     /// waiting for the result anymore. This is the teardown path for a task whose pending
     /// work never drains, since the updates channel closing is a normal end of stream.
     cancel_rx: CrossbeamReceiver<()>,
     /// Sender half for the channel to send final hashed state to.
-    final_hashed_state_tx: Option<std::sync::mpsc::Sender<Arc<HashedPostState>>>,
+    final_hashed_state_tx: Option<std::sync::mpsc::Sender<Arc<HashedPostState<E>>>>,
     /// `SparseStateTrie` used for computing the state root.
     trie: SparseStateTrie<A, S>,
     /// The parent block's state root.
@@ -86,7 +90,7 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     ///     account node reveal to complete.
     ///   - Some(_): account was changed/destroyed and is awaiting storage root calculation/reveal
     ///     to complete.
-    pending_account_updates: B256Map<Option<Option<Account>>>,
+    pending_account_updates: B256Map<Option<Option<Account<E>>>>,
     /// Cache of account proof targets that were already fetched/requested from the proof workers.
     /// Account to the broadest requested parent context (an unknown parent sorts before every
     /// known parent).
@@ -118,13 +122,13 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// Sparse trie task observes and hashes all state updates, allowing it to cheaply construct a
     /// final [`HashedPostState`] and share it with main engine thread without requiring any extra
     /// hashing work.
-    final_hashed_state: HashedPostState,
+    final_hashed_state: HashedPostState<E>,
 
     /// Metrics for the sparse trie.
     metrics: SparseTrieTaskMetrics,
 }
 
-impl<A, S> SparseTrieCacheTask<A, S>
+impl<A, S, E: reth_primitives_traits::AccountExtension> SparseTrieCacheTask<A, S, E>
 where
     A: SparseTrie + Default,
     S: SparseTrie + Default + Clone,
@@ -133,9 +137,9 @@ where
     #[expect(clippy::too_many_arguments)]
     pub(super) fn new_with_trie(
         executor: &Runtime,
-        updates: CrossbeamReceiver<StateRootMessage>,
+        updates: CrossbeamReceiver<StateRootMessage<E>>,
         cancel_rx: CrossbeamReceiver<()>,
-        final_hashed_state_tx: std::sync::mpsc::Sender<Arc<HashedPostState>>,
+        final_hashed_state_tx: std::sync::mpsc::Sender<Arc<HashedPostState<E>>>,
         proof_worker_handle: ProofWorkerHandle,
         proof_result_tx: ProofResultSender,
         proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
@@ -190,8 +194,8 @@ where
     /// Runs the hashing task that drains updates from the channel and converts them to
     /// `HashedPostState` in parallel.
     fn run_hashing_task(
-        updates: CrossbeamReceiver<StateRootMessage>,
-        hashed_state_tx: CrossbeamSender<SparseTrieTaskMessage>,
+        updates: CrossbeamReceiver<StateRootMessage<E>>,
+        hashed_state_tx: CrossbeamSender<SparseTrieTaskMessage<E>>,
         metrics: SparseTrieTaskMetrics,
     ) {
         let mut total_idle_time = std::time::Duration::ZERO;
@@ -258,7 +262,7 @@ where
         target = "engine::tree::payload_processor::sparse_trie",
         skip_all
     )]
-    pub(super) fn run(&mut self) -> Result<StateRootComputeOutcome, StateRootTaskError> {
+    pub(super) fn run(&mut self) -> Result<StateRootComputeOutcome<E>, StateRootTaskError> {
         let now = Instant::now();
 
         let mut total_idle_time = std::time::Duration::ZERO;
@@ -446,7 +450,7 @@ where
     }
 
     /// Processes a [`SparseTrieTaskMessage`] from the hashing task.
-    fn on_message(&mut self, message: SparseTrieTaskMessage) -> Option<Arc<HashedPostState>> {
+    fn on_message(&mut self, message: SparseTrieTaskMessage<E>) -> Option<Arc<HashedPostState<E>>> {
         match message {
             SparseTrieTaskMessage::PrefetchProofs(targets) => {
                 self.on_prewarm_targets(targets);
@@ -498,7 +502,7 @@ where
         target = "engine::tree::payload_processor::sparse_trie",
         skip_all
     )]
-    fn on_hashed_state_update(&mut self, hashed_state_update: HashedPostState) {
+    fn on_hashed_state_update(&mut self, hashed_state_update: HashedPostState<E>) {
         for (&address, storage) in &hashed_state_update.storages {
             if !storage.storage.is_empty() {
                 // Look up outer maps once per address instead of once per slot.
@@ -529,7 +533,7 @@ where
             self.pending_account_updates.entry(address).or_insert(None);
         }
 
-        for (&address, &account) in &hashed_state_update.accounts {
+        for (&address, account) in &hashed_state_update.accounts {
             // Track account as touched.
             //
             // This might overwrite an existing update, which is fine, because storage root from it
@@ -538,7 +542,7 @@ where
 
             // Track account in `pending_account_updates` so that once storage root is computed,
             // it will be updated in the accounts trie.
-            self.pending_account_updates.insert(address, Some(account));
+            self.pending_account_updates.insert(address, Some(account.clone()));
         }
 
         self.final_hashed_state.extend(hashed_state_update);
@@ -811,7 +815,7 @@ where
                     None => self.trie.get_account_value(addr),
                 };
 
-                let trie_account = trie_account.map(|value| TrieAccount::decode(&mut &value[..]).expect("invalid account RLP"));
+                let trie_account = trie_account.map(|value| TrieAccount::<E>::decode(&mut &value[..]).expect("invalid account RLP"));
 
                 let (account, storage_root) = if let Some(account) = account.take() {
                     // If account is Some(_) here it means it didn't have any storage updates
@@ -871,7 +875,6 @@ where
                     targets: proof_targets,
                     proof_result_sender: ProofResultContext::new(
                         self.proof_result_tx.clone(),
-                        HashedPostState::default(),
                         Instant::now(),
                     ),
                 }) {
@@ -1043,12 +1046,13 @@ fn dispatch_with_chunking<T, I>(
 /// for post-Merge state because EIP-7523 (<https://eips.ethereum.org/EIPS/eip-7523>) prohibits
 /// empty accounts. Do not use this encoding rule when replaying historical pre-Merge state, where
 /// an empty account and a missing account can have different trie representations.
-fn encode_account_leaf_value(
-    account: Option<Account>,
+fn encode_account_leaf_value<E: reth_primitives_traits::AccountExtension>(
+    account: Option<Account<E>>,
     storage_root: B256,
     account_rlp_buf: &mut Vec<u8>,
 ) -> Vec<u8> {
-    if account.is_none_or(|account| account.is_empty()) && storage_root == EMPTY_ROOT_HASH {
+    if account.as_ref().is_none_or(|account| account.is_empty()) && storage_root == EMPTY_ROOT_HASH
+    {
         return Vec::new();
     }
 
@@ -1096,9 +1100,9 @@ impl PendingTargets {
 }
 
 /// Message type for the sparse trie task.
-enum SparseTrieTaskMessage {
+enum SparseTrieTaskMessage<E> {
     /// A hashed state update ready to be processed.
-    HashedState(HashedPostState),
+    HashedState(HashedPostState<E>),
     /// Prefetch proof targets (passed through directly).
     PrefetchProofs(MultiProofTargetsV2),
     /// Signals that all state updates have been received.
@@ -1179,18 +1183,135 @@ mod tests {
     #[test]
     fn test_encode_account_leaf_value_deletion_and_empty_root_is_empty() {
         let mut account_rlp_buf = vec![0xAB];
-        let encoded = encode_account_leaf_value(None, EMPTY_ROOT_HASH, &mut account_rlp_buf);
+        let encoded = encode_account_leaf_value::<reth_primitives_traits::EmptyAccountExtension>(
+            None,
+            EMPTY_ROOT_HASH,
+            &mut account_rlp_buf,
+        );
 
         assert!(encoded.is_empty());
         // Early return should not touch the caller's buffer.
         assert_eq!(account_rlp_buf, vec![0xAB]);
     }
 
+    #[cfg(feature = "account-ext")]
+    #[test]
+    fn extension_only_account_is_not_deleted_and_survives_storage_root_change() {
+        use crate::tree::account_extension_tests::TestExtension;
+
+        let account = Account {
+            extension: TestExtension { value: B256::repeat_byte(42) },
+            ..Default::default()
+        };
+        let mut buf = Vec::new();
+        let encoded = encode_account_leaf_value(Some(account), EMPTY_ROOT_HASH, &mut buf);
+        assert!(!encoded.is_empty());
+        let mut leaf = TrieAccount::<TestExtension>::decode(&mut encoded.as_slice()).unwrap();
+        assert_eq!(leaf.extension.value, B256::repeat_byte(42));
+
+        leaf.storage_root = B256::repeat_byte(3);
+        let encoded = alloy_rlp::encode(&leaf);
+        let decoded = TrieAccount::<TestExtension>::decode(&mut encoded.as_slice()).unwrap();
+        assert_eq!(decoded, leaf);
+    }
+
+    #[cfg(feature = "account-ext")]
+    #[test]
+    fn storage_only_streamed_update_preserves_account_extension() {
+        use crate::tree::account_extension_tests::TestExtension;
+        use reth_trie::{LeafNode, Nibbles, ProofTrieNodeV2, TrieNodeV2};
+
+        let runtime = Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor_hash = init_genesis(&provider_factory).unwrap();
+        let factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayManager::<reth_chain_state::EthPrimitives>::default()
+                .overlay_builder(anchor_hash),
+        );
+        let (proof_tx, proof_rx) = crossbeam_channel::unbounded();
+        let worker =
+            ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(factory), false, proof_tx.clone());
+        let address = B256::repeat_byte(1);
+        let slot = B256::repeat_byte(2);
+        let account = Account {
+            nonce: 1,
+            extension: TestExtension { value: B256::repeat_byte(42) },
+            ..Default::default()
+        };
+        let account_leaf = TrieNodeV2::Leaf(LeafNode::new(
+            Nibbles::unpack(address),
+            alloy_rlp::encode(account.clone().into_trie_account(EMPTY_ROOT_HASH)),
+        ));
+        let parent_root = keccak256(alloy_rlp::encode(&account_leaf));
+        let mut trie = SparseStateTrie::<ArenaParallelSparseTrie>::default().with_updates(true);
+        // Seed the reused sparse trie with an extended account and its empty storage trie.
+        trie.reveal_decoded_multiproof_v2(DecodedMultiProofV2 {
+            account_proofs: vec![ProofTrieNodeV2 {
+                path: Nibbles::default(),
+                node: account_leaf,
+                masks: None,
+            }],
+            storage_proofs: std::iter::once((
+                address,
+                vec![ProofTrieNodeV2 {
+                    path: Nibbles::default(),
+                    node: TrieNodeV2::EmptyRoot,
+                    masks: None,
+                }],
+            ))
+            .collect(),
+        })
+        .unwrap();
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (_cancel_guard, cancel_rx) = crossbeam_channel::bounded(0);
+        let mut task = SparseTrieCacheTask::<_, _, TestExtension>::new_with_trie(
+            &runtime,
+            updates_rx,
+            cancel_rx,
+            std::sync::mpsc::channel().0,
+            worker,
+            proof_tx,
+            proof_rx,
+            SparseTrieTaskMetrics::default(),
+            trie,
+            parent_root,
+            TrieNodeEpoch::UNMODIFIED,
+            1,
+        );
+        let mut update = HashedPostState::<TestExtension>::default();
+        update
+            .storages
+            .insert(address, reth_trie::HashedStorage::from_iter([(slot, U256::from(7))]));
+        updates_tx.send(StateRootMessage::HashedStateUpdate(update)).unwrap();
+        updates_tx.send(StateRootMessage::FinishedStateUpdates).unwrap();
+        drop(updates_tx);
+        let outcome = task.run().unwrap();
+
+        let storage_root = keccak256(alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
+            Nibbles::unpack(slot),
+            alloy_rlp::encode(U256::from(7)),
+        ))));
+        let expected_leaf = account.into_trie_account(storage_root);
+        let expected_root = keccak256(alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
+            Nibbles::unpack(address),
+            alloy_rlp::encode(&expected_leaf),
+        ))));
+        assert_eq!(outcome.state_root, expected_root);
+        let encoded = task.trie.get_account_value(&address).unwrap();
+        assert_eq!(
+            TrieAccount::<TestExtension>::decode(&mut encoded.as_slice()).unwrap(),
+            expected_leaf
+        );
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
+    }
+
     #[test]
     fn test_encode_account_leaf_value_empty_account_and_empty_root_is_empty() {
         let mut account_rlp_buf = vec![0xAB];
         let encoded = encode_account_leaf_value(
-            Some(Account::default()),
+            Some(Account::<reth_primitives_traits::EmptyAccountExtension>::default()),
             EMPTY_ROOT_HASH,
             &mut account_rlp_buf,
         );
@@ -1203,7 +1324,7 @@ mod tests {
     #[test]
     fn test_encode_account_leaf_value_non_empty_account_is_rlp() {
         let storage_root = B256::from([0x99; 32]);
-        let account = Some(Account {
+        let account: Option<Account> = Some(Account {
             nonce: 7,
             balance: U256::from(42),
             bytecode_hash: Some(B256::from([0xAA; 32])),
@@ -1249,7 +1370,7 @@ mod tests {
         let parent_state_root = B256::from([0x55; 32]);
         let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
         let (_cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
-        let mut task = SparseTrieCacheTask::new_with_trie(
+        let mut task = SparseTrieCacheTask::<_, _, reth_primitives_traits::EmptyAccountExtension>::new_with_trie(
             &runtime,
             updates_rx,
             cancel_rx,
@@ -1303,7 +1424,7 @@ mod tests {
 
         let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
         let (_cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
-        let mut task = SparseTrieCacheTask::new_with_trie(
+        let mut task = SparseTrieCacheTask::<_, _, reth_primitives_traits::EmptyAccountExtension>::new_with_trie(
             &runtime,
             updates_rx,
             cancel_rx,
@@ -1341,7 +1462,6 @@ mod tests {
         let result = ProofResultMessage {
             result: Ok(DecodedMultiProofV2::default()),
             elapsed: std::time::Duration::ZERO,
-            state: HashedPostState::default(),
         };
         task.on_proof_result_message(result).expect("proof result should be ok");
 
@@ -1391,7 +1511,7 @@ mod tests {
 
         let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
         let (cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
-        let mut task = SparseTrieCacheTask::new_with_trie(
+        let mut task = SparseTrieCacheTask::<_, _, reth_primitives_traits::EmptyAccountExtension>::new_with_trie(
             &runtime,
             updates_rx,
             cancel_rx,
@@ -1444,7 +1564,7 @@ mod tests {
 
         let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
         let (cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
-        let mut task = SparseTrieCacheTask::new_with_trie(
+        let mut task = SparseTrieCacheTask::<_, _, reth_primitives_traits::EmptyAccountExtension>::new_with_trie(
             &runtime,
             updates_rx,
             cancel_rx,

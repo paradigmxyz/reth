@@ -21,7 +21,7 @@ use reth_payload_builder::{
 };
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind};
-use reth_primitives_traits::{HeaderTy, NodePrimitives, SealedHeader};
+use reth_primitives_traits::{AccountExtensionTy, HeaderTy, NodePrimitives, SealedHeader};
 use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop};
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::Runtime;
@@ -162,7 +162,10 @@ where
 
     fn new_payload_job(
         &self,
-        input: BuildNewPayload<Builder::Attributes>,
+        input: BuildNewPayload<
+            Builder::Attributes,
+            AccountExtensionTy<<Builder::BuiltPayload as BuiltPayload>::Primitives>,
+        >,
         id: PayloadId,
     ) -> Result<Self::Job, PayloadBuilderError> {
         let BuildNewPayload { attributes, parent_hash, mut resources } = input;
@@ -389,9 +392,14 @@ where
     /// triggered, because during the building process we'll repeatedly execute the transactions.
     cached_reads: Option<CachedReads>,
     /// Optional execution cache shared with the engine.
-    execution_cache: Option<SavedCache>,
+    execution_cache:
+        Option<SavedCache<AccountExtensionTy<<Builder::BuiltPayload as BuiltPayload>::Primitives>>>,
     /// Optional state-root task handle, shared with the engine.
-    state_root_handle: Option<PayloadStateRootHandle>,
+    state_root_handle: Option<
+        PayloadStateRootHandle<
+            AccountExtensionTy<<Builder::BuiltPayload as BuiltPayload>::Primitives>,
+        >,
+    >,
     /// Lifecycle leases shared with the payload-builder service.
     ///
     /// Every detached build task clones these so that the loaned resources remain available until
@@ -929,14 +937,14 @@ pub struct BuildArguments<Attributes, Payload: BuiltPayload> {
     /// Previously cached disk reads
     pub cached_reads: CachedReads,
     /// Optional execution cache shared with the engine.
-    pub execution_cache: Option<SavedCache>,
+    pub execution_cache: Option<SavedCache<AccountExtensionTy<Payload::Primitives>>>,
     /// Optional state-root task handle, shared with the engine.
     ///
     /// The preserved trie is shared with the engine, so a concurrent `newPayload` will
     /// block until this task completes. The trie is anchored at the built block's state
     /// root, so if the next `newPayload` is not on top of that block, the trie cache is
     /// invalidated and cleared.
-    pub state_root_handle: Option<PayloadStateRootHandle>,
+    pub state_root_handle: Option<PayloadStateRootHandle<AccountExtensionTy<Payload::Primitives>>>,
     /// How to configure the payload.
     pub config: PayloadConfig<Attributes, HeaderTy<Payload::Primitives>>,
     /// A marker that can be used to cancel the job.
@@ -949,8 +957,8 @@ impl<Attributes, Payload: BuiltPayload> BuildArguments<Attributes, Payload> {
     /// Create new build arguments.
     pub const fn new(
         cached_reads: CachedReads,
-        execution_cache: Option<SavedCache>,
-        state_root_handle: Option<PayloadStateRootHandle>,
+        execution_cache: Option<SavedCache<AccountExtensionTy<Payload::Primitives>>>,
+        state_root_handle: Option<PayloadStateRootHandle<AccountExtensionTy<Payload::Primitives>>>,
         config: PayloadConfig<Attributes, HeaderTy<Payload::Primitives>>,
         cancel: CancelOnDrop,
         best_payload: Option<Payload>,

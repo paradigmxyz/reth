@@ -5,14 +5,14 @@ use revm::database::State;
 
 /// Borrows finalized execution state for witness generation.
 #[derive(Debug, Clone)]
-pub struct ExecutionWitnessRecord<'a, DB> {
+pub struct ExecutionWitnessRecord<'a, DB, E = reth_primitives_traits::EmptyAccountExtension> {
     /// State after execution.
     state: &'a State<DB>,
     /// Additional hashed state to include in the witness.
-    additional_state: Option<HashedPostState>,
+    additional_state: Option<HashedPostState<E>>,
 }
 
-impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
+impl<'a, DB, E: reth_primitives_traits::AccountExtension> ExecutionWitnessRecord<'a, DB, E> {
     /// Creates a new record from the state after execution.
     pub const fn new(state: &'a State<DB>) -> Self {
         Self { state, additional_state: None }
@@ -22,7 +22,7 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
     ///
     /// State recorded during execution takes precedence over additional state for overlapping
     /// accounts and storage slots.
-    pub fn with_additional_state(mut self, additional_state: HashedPostState) -> Self {
+    pub fn with_additional_state(mut self, additional_state: HashedPostState<E>) -> Self {
         self.additional_state.get_or_insert_default().extend(additional_state);
         self
     }
@@ -42,7 +42,7 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
         mode: ExecutionWitnessMode,
     ) -> reth_storage_errors::provider::ProviderResult<alloy_rpc_types_debug::ExecutionWitness>
     where
-        SP: reth_storage_api::HashedPostStateProvider
+        SP: reth_storage_api::HashedPostStateProvider<AccountExtension = E>
             + reth_storage_api::StateProofProvider
             + ?Sized,
         HP: reth_storage_api::HeaderProvider + ?Sized,
@@ -77,7 +77,7 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
         mode: ExecutionWitnessMode,
     ) -> reth_storage_errors::provider::ProviderResult<alloy_rpc_types_debug::ExecutionWitness>
     where
-        SP: reth_storage_api::HashedPostStateProvider
+        SP: reth_storage_api::HashedPostStateProvider<AccountExtension = E>
             + reth_storage_api::StateProofProvider
             + ?Sized,
     {
@@ -120,9 +120,9 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
     fn hashed_post_state<SP>(
         self,
         state_provider: &SP,
-    ) -> reth_storage_errors::provider::ProviderResult<(HashedPostState, Vec<Bytes>)>
+    ) -> reth_storage_errors::provider::ProviderResult<(HashedPostState<E>, Vec<Bytes>)>
     where
-        SP: reth_storage_api::HashedPostStateProvider + ?Sized,
+        SP: reth_storage_api::HashedPostStateProvider<AccountExtension = E> + ?Sized,
     {
         let mut hashed_state = self.additional_state.unwrap_or_default();
         let mut keys = Vec::new();
@@ -167,6 +167,10 @@ mod tests {
         state::AccountInfo,
     };
 
+    impl reth_storage_api::AccountExtensionProvider for ExpandedStateProvider {
+        type AccountExtension = reth_primitives_traits::EmptyAccountExtension;
+    }
+
     #[derive(Debug)]
     struct ExpandedStateProvider(HashedPostState);
 
@@ -178,6 +182,10 @@ mod tests {
             assert!(bundle_state.state.values().any(BundleAccount::was_destroyed));
             Ok(self.0.clone())
         }
+    }
+
+    impl reth_storage_api::AccountExtensionProvider for StaticStateProvider {
+        type AccountExtension = reth_primitives_traits::EmptyAccountExtension;
     }
 
     #[derive(Debug)]

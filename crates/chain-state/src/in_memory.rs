@@ -550,7 +550,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     pub fn state_provider(
         &self,
         hash: B256,
-        historical: StateProviderBox,
+        historical: StateProviderBox<N::AccountExtension>,
     ) -> MemoryOverlayStateProvider<N> {
         let in_memory = if let Some(state) = self.state_by_hash(hash) {
             state.chain().map(|block_state| block_state.block()).collect()
@@ -719,7 +719,10 @@ impl<N: NodePrimitives> BlockState<N> {
     ///
     /// This merges the state of all blocks that are part of the chain that the this block is
     /// the head of. This includes all blocks that connect back to the canonical block on disk.
-    pub fn state_provider(&self, historical: StateProviderBox) -> MemoryOverlayStateProvider<N> {
+    pub fn state_provider(
+        &self,
+        historical: StateProviderBox<N::AccountExtension>,
+    ) -> MemoryOverlayStateProvider<N> {
         let in_memory = self.chain().map(|block_state| block_state.block()).collect();
 
         MemoryOverlayStateProvider::new(historical, in_memory)
@@ -767,7 +770,7 @@ pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
     ///
     /// This allows deferring the computation of the trie data which can be expensive.
     /// The data can be populated asynchronously after the block was validated.
-    pub trie_data: LazyTrieData,
+    pub trie_data: LazyTrieData<N::AccountExtension>,
 }
 
 impl<N: NodePrimitives> Default for ExecutedBlock<N> {
@@ -804,7 +807,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     pub fn new(
         recovered_block: Arc<RecoveredBlock<N::Block>>,
         execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
-        trie_data: ComputedTrieData,
+        trie_data: ComputedTrieData<N::AccountExtension>,
     ) -> Self {
         Self { recovered_block, execution_output, trie_data: LazyTrieData::ready(trie_data) }
     }
@@ -825,7 +828,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     pub const fn with_deferred_trie_data(
         recovered_block: Arc<RecoveredBlock<N::Block>>,
         execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
-        trie_data: LazyTrieData,
+        trie_data: LazyTrieData<N::AccountExtension>,
     ) -> Self {
         Self { recovered_block, execution_output, trie_data }
     }
@@ -855,7 +858,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     /// - If not computed: first caller waits for the publishing task, others wait for that result
     #[inline]
     #[tracing::instrument(level = "debug", target = "engine::tree", name = "trie_data", skip_all)]
-    pub fn trie_data(&self) -> ComputedTrieData {
+    pub fn trie_data(&self) -> ComputedTrieData<N::AccountExtension> {
         self.trie_data.get().clone()
     }
 
@@ -864,7 +867,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     /// A handle is a lightweight reference that can be passed to descendants without
     /// forcing trie data to be observed immediately. The actual work runs in the background task.
     #[inline]
-    pub fn trie_data_handle(&self) -> LazyTrieData {
+    pub fn trie_data_handle(&self) -> LazyTrieData<N::AccountExtension> {
         self.trie_data.clone()
     }
 
@@ -872,7 +875,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     ///
     /// May wait for trie data if the deferred task hasn't completed.
     #[inline]
-    pub fn hashed_state(&self) -> Arc<HashedPostStateSorted> {
+    pub fn hashed_state(&self) -> Arc<HashedPostStateSorted<N::AccountExtension>> {
         self.trie_data().sorted.hashed_state
     }
 
@@ -880,14 +883,14 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     ///
     /// May wait for trie data if the deferred task hasn't completed.
     #[inline]
-    pub fn hashed_state_ref(&self) -> &HashedPostStateSorted {
+    pub fn hashed_state_ref(&self) -> &HashedPostStateSorted<N::AccountExtension> {
         &self.trie_data.get().sorted.hashed_state
     }
 
     /// Returns references to the hashed state results of the executed blocks.
     ///
     /// May wait for trie data if any deferred task hasn't completed.
-    pub fn hashed_state_refs(blocks: &[Self]) -> Vec<&HashedPostStateSorted> {
+    pub fn hashed_state_refs(blocks: &[Self]) -> Vec<&HashedPostStateSorted<N::AccountExtension>> {
         blocks.iter().map(Self::hashed_state_ref).collect()
     }
 
@@ -1060,6 +1063,10 @@ mod tests {
     }
 
     struct MockStateProvider;
+
+    impl reth_storage_api::AccountExtensionProvider for MockStateProvider {
+        type AccountExtension = reth_primitives_traits::EmptyAccountExtension;
+    }
 
     impl StateProvider for MockStateProvider {
         fn storage(

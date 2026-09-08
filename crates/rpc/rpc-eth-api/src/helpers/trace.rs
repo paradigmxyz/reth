@@ -12,7 +12,7 @@ use reth_evm::{
     block::BlockExecutor, evm::EvmFactoryExt, tracing::TracingCtx, ConfigureEvm, Evm, EvmEnvFor,
     EvmFor, HaltReasonFor, InspectorFor, IntoTxEnv, TxEnvFor,
 };
-use reth_primitives_traits::{BlockBody, BlockTy, Recovered, RecoveredBlock};
+use reth_primitives_traits::{AccountExtensionTy, BlockBody, BlockTy, Recovered, RecoveredBlock};
 use reth_rpc_eth_types::cache::db::{attach_bal_before_tx, StateCacheDb};
 use reth_storage_api::{ProviderBlock, ProviderTx};
 use revm::{context::Block, context_interface::result::ResultAndState, state::bal::Bal as RevmBal};
@@ -25,10 +25,13 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     /// without committing state changes.
     fn inspect<'a>(
         &self,
-        db: &'a mut StateCacheDb,
+        db: &'a mut StateCacheDb<AccountExtensionTy<Self::Primitives>>,
         evm_env: EvmEnvFor<Self::Evm>,
         tx_env: impl IntoTxEnv<TxEnvFor<Self::Evm>>,
-        inspector: impl InspectorFor<Self::Evm, &'a mut StateCacheDb>,
+        inspector: impl InspectorFor<
+            Self::Evm,
+            &'a mut StateCacheDb<AccountExtensionTy<Self::Primitives>>,
+        >,
     ) -> Result<ResultAndState<HaltReasonFor<Self::Evm>>, Self::Error> {
         self.evm_config()
             .evm_with_env_and_inspector(db, evm_env, inspector)
@@ -60,7 +63,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                 TransactionInfo,
                 TracingInspector,
                 ResultAndState<HaltReasonFor<Self::Evm>>,
-                StateCacheDb,
+                StateCacheDb<AccountExtensionTy<Self::Primitives>>,
             ) -> Result<R, Self::Error>
             + Send
             + 'static,
@@ -93,11 +96,15 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                 TransactionInfo,
                 Insp,
                 ResultAndState<HaltReasonFor<Self::Evm>>,
-                StateCacheDb,
+                StateCacheDb<AccountExtensionTy<Self::Primitives>>,
             ) -> Result<R, Self::Error>
             + Send
             + 'static,
-        Insp: for<'a> InspectorFor<Self::Evm, &'a mut StateCacheDb> + Send + 'static,
+        Insp: for<'a> InspectorFor<
+                Self::Evm,
+                &'a mut StateCacheDb<AccountExtensionTy<Self::Primitives>>,
+            > + Send
+            + 'static,
         R: Send + 'static,
     {
         async move {
@@ -142,7 +149,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     /// transactions are replayed.
     fn replay_block_until(
         &self,
-        db: &mut StateCacheDb,
+        db: &mut StateCacheDb<AccountExtensionTy<Self::Primitives>>,
         block: &RecoveredBlock<BlockTy<Self::Primitives>>,
         target_tx_index: usize,
         bal: Option<&DecodedBal<Arc<RevmBal>>>,
@@ -173,8 +180,11 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     fn inspect_transaction_in_block<'a>(
         &self,
         block: &RecoveredBlock<BlockTy<Self::Primitives>>,
-        db: &'a mut StateCacheDb,
-        inspector: impl InspectorFor<Self::Evm, &'a mut StateCacheDb>,
+        db: &'a mut StateCacheDb<AccountExtensionTy<Self::Primitives>>,
+        inspector: impl InspectorFor<
+            Self::Evm,
+            &'a mut StateCacheDb<AccountExtensionTy<Self::Primitives>>,
+        >,
         target_tx_index: usize,
         target_tx_env: impl IntoTxEnv<TxEnvFor<Self::Evm>>,
         bal: Option<&DecodedBal<Arc<RevmBal>>>,
@@ -227,7 +237,11 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                 TracingCtx<
                     '_,
                     Recovered<&ProviderTx<Self::Provider>>,
-                    EvmFor<Self::Evm, &mut StateCacheDb, TracingInspector>,
+                    EvmFor<
+                        Self::Evm,
+                        &mut StateCacheDb<AccountExtensionTy<Self::Primitives>>,
+                        TracingInspector,
+                    >,
                 >,
             ) -> Result<R, Self::Error>
             + Send
@@ -268,13 +282,21 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                 TracingCtx<
                     '_,
                     Recovered<&ProviderTx<Self::Provider>>,
-                    EvmFor<Self::Evm, &mut StateCacheDb, Insp>,
+                    EvmFor<
+                        Self::Evm,
+                        &mut StateCacheDb<AccountExtensionTy<Self::Primitives>>,
+                        Insp,
+                    >,
                 >,
             ) -> Result<R, Self::Error>
             + Send
             + 'static,
         Setup: FnMut() -> Insp + Send + 'static,
-        Insp: Clone + for<'a> InspectorFor<Self::Evm, &'a mut StateCacheDb>,
+        Insp: Clone
+            + for<'a> InspectorFor<
+                Self::Evm,
+                &'a mut StateCacheDb<AccountExtensionTy<Self::Primitives>>,
+            >,
         R: Send + 'static,
     {
         async move {
@@ -364,7 +386,11 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                 TracingCtx<
                     '_,
                     Recovered<&ProviderTx<Self::Provider>>,
-                    EvmFor<Self::Evm, &mut StateCacheDb, TracingInspector>,
+                    EvmFor<
+                        Self::Evm,
+                        &mut StateCacheDb<AccountExtensionTy<Self::Primitives>>,
+                        TracingInspector,
+                    >,
                 >,
             ) -> Result<R, Self::Error>
             + Send
@@ -404,13 +430,21 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                 TracingCtx<
                     '_,
                     Recovered<&ProviderTx<Self::Provider>>,
-                    EvmFor<Self::Evm, &mut StateCacheDb, Insp>,
+                    EvmFor<
+                        Self::Evm,
+                        &mut StateCacheDb<AccountExtensionTy<Self::Primitives>>,
+                        Insp,
+                    >,
                 >,
             ) -> Result<R, Self::Error>
             + Send
             + 'static,
         Setup: FnMut() -> Insp + Send + 'static,
-        Insp: Clone + for<'a> InspectorFor<Self::Evm, &'a mut StateCacheDb>,
+        Insp: Clone
+            + for<'a> InspectorFor<
+                Self::Evm,
+                &'a mut StateCacheDb<AccountExtensionTy<Self::Primitives>>,
+            >,
         R: Send + 'static,
     {
         self.trace_block_until_with_inspector(block_id, block, None, insp_setup, f)
@@ -424,7 +458,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     fn apply_pre_execution_changes(
         &self,
         block: &RecoveredBlock<ProviderBlock<Self::Provider>>,
-        db: &mut StateCacheDb,
+        db: &mut StateCacheDb<AccountExtensionTy<Self::Primitives>>,
     ) -> Result<(), Self::Error> {
         self.evm_config()
             .executor_for_block(db, block.sealed_block())

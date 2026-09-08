@@ -182,7 +182,7 @@ where
 impl<C, Pool> Testnet<C, Pool>
 where
     C: ChainSpecProvider<ChainSpec: EthereumHardforks>
-        + StateProviderFactory
+        + StateProviderFactory<AccountExtension = reth_primitives_traits::EmptyAccountExtension>
         + BlockReaderIdExt
         + HeaderProvider<Header = alloy_consensus::Header>
         + Clone
@@ -249,7 +249,7 @@ where
             Header = alloy_consensus::Header,
         > + HeaderProvider
         + BalProvider
-        + StateProviderFactory
+        + StateProviderFactory<AccountExtension = reth_primitives_traits::EmptyAccountExtension>
         + StateRangeProviderFactory
         + Clone
         + Unpin
@@ -324,7 +324,7 @@ where
             Header = alloy_consensus::Header,
         > + HeaderProvider
         + BalProvider
-        + StateProviderFactory
+        + StateProviderFactory<AccountExtension = reth_primitives_traits::EmptyAccountExtension>
         + StateRangeProviderFactory
         + Unpin
         + 'static,
@@ -592,7 +592,7 @@ where
             Header = alloy_consensus::Header,
         > + HeaderProvider
         + BalProvider
-        + StateProviderFactory
+        + StateProviderFactory<AccountExtension = reth_primitives_traits::EmptyAccountExtension>
         + StateRangeProviderFactory
         + Unpin
         + 'static,

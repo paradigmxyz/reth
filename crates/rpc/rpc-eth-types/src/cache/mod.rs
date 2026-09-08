@@ -253,9 +253,13 @@ impl<N: NodePrimitives> EthStateCache<N> {
     ) -> ProviderResult<Option<Arc<DecodedBal<Arc<RevmBal>>>>> {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetBal { block_hash, response_tx });
-        rx.await
-            .map_err(|_| CacheServiceUnavailable)?
-            .map(|maybe_bal| maybe_bal.map(|cached| cached.0))
+        let maybe_bal = rx.await.map_err(|_| CacheServiceUnavailable)??;
+        if maybe_bal.is_some() {
+            reth_storage_api::ensure_no_account_extensions::<
+                reth_primitives_traits::AccountExtensionTy<N>,
+            >("BAL")?;
+        }
+        Ok(maybe_bal.map(|cached| cached.0))
     }
 }
 /// Thrown when the cache service task dropped.

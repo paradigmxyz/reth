@@ -25,7 +25,7 @@ use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
 use reth_metrics::Metrics;
-use reth_primitives_traits::{Account, FastInstant as Instant, NodePrimitives};
+use reth_primitives_traits::{Account, AccountExtensionTy, FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     AccountReader, BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory,
     DatabaseProviderROFactory, HistoryReader, PruneCheckpointReader, StageCheckpointReader,
@@ -48,20 +48,23 @@ use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 /// Each variant carries the state-root capability its producers use, so the capability dies
 /// with the workers instead of outliving them.
 #[derive(Debug)]
-pub enum PrewarmMode<Tx> {
+pub enum PrewarmMode<
+    Tx,
+    Ext: reth_primitives_traits::AccountExtension = reth_primitives_traits::EmptyAccountExtension,
+> {
     /// Prewarm by executing transactions from a stream, each paired with its block index.
     Transactions {
         /// Stream of transactions pending prewarm execution.
         pending: Receiver<(usize, Tx)>,
         /// Best-effort access hints emitted by the prewarm workers.
-        hints: Option<StateRootHintStream>,
+        hints: Option<StateRootHintStream<Ext>>,
     },
     /// Prewarm by prefetching slots from a Block Access List.
     BlockAccessList {
         /// The decoded block access list.
         bal: Arc<DecodedBal>,
         /// Authoritative pre-hashed updates derived from the BAL.
-        updates: Option<StateRootUpdateStream>,
+        updates: Option<StateRootUpdateStream<Ext>>,
     },
     /// Transaction prewarming is skipped (e.g. small blocks where the overhead exceeds the
     /// benefit). No workers are spawned.
@@ -81,7 +84,7 @@ where
     /// The executor used to spawn execution tasks.
     executor: Runtime,
     /// Shared execution cache.
-    execution_cache: PayloadExecutionCache,
+    execution_cache: PayloadExecutionCache<N::AccountExtension>,
     /// Context provided to execution tasks
     ctx: PrewarmContext<N, P, Evm>,
     /// Receiver for events produced by tx execution
@@ -97,7 +100,7 @@ where
     P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
-        + ChangeSetReader
+        + ChangeSetReader<AccountExtension = N::AccountExtension>
         + StorageChangeSetReader
         + StorageSettingsCache
         + HistoryReader
@@ -107,7 +110,7 @@ where
     /// Initializes the task with the given transactions pending execution
     pub fn new(
         executor: Runtime,
-        execution_cache: PayloadExecutionCache,
+        execution_cache: PayloadExecutionCache<N::AccountExtension>,
         ctx: PrewarmContext<N, P, Evm>,
     ) -> (Self, Sender<PrewarmTaskEvent<N::Receipt>>) {
         let (actions_tx, actions_rx) = channel();
@@ -135,7 +138,7 @@ where
         &self,
         pending: mpsc::Receiver<(usize, Tx)>,
         actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
-        state_root_hint_stream: Option<StateRootHintStream>,
+        state_root_hint_stream: Option<StateRootHintStream<N::AccountExtension>>,
     ) where
         Tx: ExecutableTxFor<Evm> + Send + 'static,
     {
@@ -215,7 +218,7 @@ where
         ctx: &PrewarmContext<N, P, Evm>,
         index: usize,
         tx: Tx,
-        state_root_hint_stream: Option<&StateRootHintStream>,
+        state_root_hint_stream: Option<&StateRootHintStream<N::AccountExtension>>,
     ) where
         Tx: ExecutableTxFor<Evm>,
     {
@@ -346,7 +349,7 @@ where
         &self,
         decoded_bal: Arc<DecodedBal>,
         actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
-        hashed_update_stream: Option<StateRootUpdateStream>,
+        hashed_update_stream: Option<StateRootUpdateStream<N::AccountExtension>>,
     ) {
         let bal = decoded_bal.as_bal();
         if bal.is_empty() {
@@ -386,8 +389,9 @@ where
 
                 stream_bal.as_bal().par_iter().for_each(|account_changes| {
                     WorkerPool::with_worker_mut(|worker| {
-                        let provider =
-                            worker.get_or_init::<Option<Box<dyn AccountReader>>>(|| None);
+                        let provider = worker.get_or_init::<Option<
+                            Box<dyn AccountReader<AccountExtension = N::AccountExtension>>,
+                        >>(|| None);
                         ctx.send_bal_hashed_state(
                             &parent_span,
                             provider,
@@ -458,8 +462,11 @@ where
         name = "prewarm and caching",
         skip_all
     )]
-    pub fn run<Tx>(self, mode: PrewarmMode<Tx>, actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>)
-    where
+    pub fn run<Tx>(
+        self,
+        mode: PrewarmMode<Tx, N::AccountExtension>,
+        actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
+    ) where
         Tx: ExecutableTxFor<Evm> + Send + 'static,
     {
         // Spawn execution tasks based on mode. The state-root capabilities arrive inside the
@@ -536,12 +543,12 @@ where
     /// The EVM configuration.
     pub evm_config: Evm,
     /// The saved cache.
-    pub saved_cache: Option<SavedCache>,
+    pub saved_cache: Option<SavedCache<N::AccountExtension>>,
     /// Provider to obtain the state
     pub provider: OverlayStateProviderFactory<P, N>,
     /// Dedicated blocking pool for warming the BAL read-set. `Some` only on the BAL parallel
     /// execution path; the pool is owned by the [`PayloadProcessor`](super::PayloadProcessor).
-    pub(crate) bal_prewarm_pool: Option<Arc<BalPrewarmPool>>,
+    pub(crate) bal_prewarm_pool: Option<Arc<BalPrewarmPool<N::AccountExtension>>>,
     /// The metrics for the prewarm task.
     pub metrics: PrewarmMetrics,
     /// Metrics for the execution cache.
@@ -568,8 +575,14 @@ where
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
 /// [`WorkerPool`] workers via [`Worker::get_or_init`](reth_tasks::pool::Worker::get_or_init).
-type PrewarmEvmState<Evm> =
-    Option<EvmFor<Evm, StateProviderDatabase<reth_provider::StateProviderBox>>>;
+type PrewarmEvmState<Evm> = Option<
+    EvmFor<
+        Evm,
+        StateProviderDatabase<
+            reth_provider::StateProviderBox<AccountExtensionTy<<Evm as ConfigureEvm>::Primitives>>,
+        >,
+    >,
+>;
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
@@ -578,7 +591,7 @@ where
     P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
-        + ChangeSetReader
+        + ChangeSetReader<AccountExtension = N::AccountExtension>
         + StorageChangeSetReader
         + StorageSettingsCache
         + HistoryReader
@@ -588,17 +601,18 @@ where
     /// Creates a per-thread EVM for prewarming.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn evm_for_ctx(&self) -> PrewarmEvmState<Evm> {
-        let mut state_provider: StateProviderBox = match self.provider.database_provider_ro() {
-            Ok(provider) => Box::new(provider),
-            Err(err) => {
-                trace!(
-                    target: "engine::tree::payload_processor::prewarm",
-                    %err,
-                    "Failed to build state provider in prewarm thread"
-                );
-                return None
-            }
-        };
+        let mut state_provider: StateProviderBox<N::AccountExtension> =
+            match self.provider.database_provider_ro() {
+                Ok(provider) => Box::new(provider),
+                Err(err) => {
+                    trace!(
+                        target: "engine::tree::payload_processor::prewarm",
+                        %err,
+                        "Failed to build state provider in prewarm thread"
+                    );
+                    return None
+                }
+            };
 
         // Use the caches to create a new provider with caching
         if let Some(saved_cache) = &self.saved_cache {
@@ -664,9 +678,9 @@ where
     fn send_bal_hashed_state(
         &self,
         parent_span: &Span,
-        provider: &mut Option<Box<dyn AccountReader>>,
+        provider: &mut Option<Box<dyn AccountReader<AccountExtension = N::AccountExtension>>>,
         account_changes: &alloy_eip7928::AccountChanges,
-        hashed_update_stream: &StateRootUpdateStream,
+        hashed_update_stream: &StateRootUpdateStream<N::AccountExtension>,
     ) {
         if self.disable_bal_parallel_state_root {
             return;
@@ -716,7 +730,7 @@ where
                         return;
                     }
                 };
-                let boxed: Box<dyn AccountReader> =
+                let boxed: Box<dyn AccountReader<AccountExtension = N::AccountExtension>> =
                     match (self.disable_bal_batch_io, &self.saved_cache) {
                         (false, Some(saved)) => {
                             let caches = saved.cache().clone();
@@ -787,7 +801,10 @@ impl BalAccountStateFields {
         self.balance.is_none() || self.nonce.is_none() || self.code_hash.is_none()
     }
 
-    fn into_account(self, existing_account: Option<Account>) -> Account {
+    fn into_account<E: reth_primitives_traits::AccountExtension>(
+        self,
+        existing_account: Option<Account<E>>,
+    ) -> Account<E> {
         let existing_account = existing_account.as_ref();
         Account {
             balance: self.balance.unwrap_or_else(|| {
@@ -803,7 +820,9 @@ impl BalAccountStateFields {
                     .and_then(|account| account.bytecode_hash)
                     .or(Some(alloy_consensus::constants::KECCAK_EMPTY))
             }),
-            extension: existing_account.map(|account| account.extension).unwrap_or_default(),
+            extension: existing_account
+                .map(|account| account.extension.clone())
+                .unwrap_or_default(),
         }
     }
 }
@@ -921,7 +940,7 @@ mod tests {
         let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
             .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::from(10)));
         let fields = BalAccountStateFields::from_changes(&changes);
-        let account = fields.into_account(Some(Account {
+        let account: Account = fields.into_account(Some(Account {
             balance: U256::from(1),
             nonce: 3,
             bytecode_hash: Some(B256::repeat_byte(0xaa)),

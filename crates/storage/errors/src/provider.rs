@@ -128,6 +128,10 @@ pub enum ProviderError {
     /// Provider does not support this particular request.
     #[error("this provider does not support this request")]
     UnsupportedProvider,
+
+    /// The requested operation does not support chain-specific account extensions.
+    #[error("{0} does not support account extensions")]
+    AccountExtensionsUnsupported(&'static str),
     /// Static File is not found at specified path.
     #[cfg(feature = "std")]
     #[error("not able to find {_0} static file at {_1:?}")]

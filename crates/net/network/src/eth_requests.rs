@@ -480,6 +480,14 @@ where
     ) {
         self.metrics.snap_requests_received_total.increment(1);
 
+        if let Err(error) =
+            reth_storage_api::ensure_no_account_extensions::<C::AccountExtension>("snap")
+        {
+            tracing::warn!(target: "net::snap", %error, "rejecting snap request");
+            let _ = response.send(Err(RequestError::UnsupportedCapability));
+            return;
+        }
+
         let result = match request {
             SnapProtocolMessage::GetAccountRange(req) => {
                 let request_id = req.request_id;

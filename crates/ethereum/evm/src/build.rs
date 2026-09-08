@@ -29,9 +29,9 @@ impl<ChainSpec> EthBlockAssembler<ChainSpec> {
 impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBlockAssembler<ChainSpec> {
     /// Assembles a block. Accepts optional precomputed transaction root, receipt root, and logs
     /// bloom.
-    pub fn assemble_block<F>(
+    pub fn assemble_block<F, E: reth_primitives_traits::AccountExtension>(
         &self,
-        input: BlockAssemblerInput<'_, '_, F>,
+        input: BlockAssemblerInput<'_, '_, F, Header, E>,
         transactions_root: Option<B256>,
         receipts_root: Option<B256>,
         logs_bloom: Option<Bloom>,
@@ -144,7 +144,8 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBlockAssembler<ChainSpec> {
     }
 }
 
-impl<F, ChainSpec> BlockAssembler<F> for EthBlockAssembler<ChainSpec>
+impl<F, ChainSpec, E: reth_primitives_traits::AccountExtension> BlockAssembler<F, E>
+    for EthBlockAssembler<ChainSpec>
 where
     F: for<'a> BlockExecutorFactory<
         ExecutionCtx<'a> = EthBlockExecutionCtx<'a>,
@@ -157,7 +158,7 @@ where
 
     fn assemble_block(
         &self,
-        input: BlockAssemblerInput<'_, '_, F>,
+        input: BlockAssemblerInput<'_, '_, F, Header, E>,
     ) -> Result<Self::Block, BlockExecutionError> {
         self.assemble_block(input, None, None, None)
     }

@@ -67,7 +67,7 @@ trait SnapTestProvider:
         Header = alloy_consensus::Header,
     > + HeaderProvider
     + BalProvider
-    + StateProviderFactory
+    + StateProviderFactory<AccountExtension = reth_primitives_traits::EmptyAccountExtension>
     + StateRangeProviderFactory
     + ChainSpecProvider<ChainSpec: Hardforks>
     + Clone
@@ -83,7 +83,7 @@ impl<T> SnapTestProvider for T where
             Header = alloy_consensus::Header,
         > + HeaderProvider
         + BalProvider
-        + StateProviderFactory
+        + StateProviderFactory<AccountExtension = reth_primitives_traits::EmptyAccountExtension>
         + StateRangeProviderFactory
         + ChainSpecProvider<ChainSpec: Hardforks>
         + Clone

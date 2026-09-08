@@ -22,7 +22,7 @@ pub trait DbTxProvider {
 }
 
 /// Database provider.
-pub trait DBProvider: DbTxProvider + Sized {
+pub trait DBProvider: DbTxProvider + crate::AccountExtensionProvider + Sized {
     /// Returns a reference to the underlying transaction.
     fn tx_ref(&self) -> &Self::Tx {
         self.tx()

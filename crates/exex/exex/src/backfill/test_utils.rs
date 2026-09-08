@@ -78,7 +78,7 @@ where
     let execution_outcome = to_execution_outcome(block.number(), &block_execution_output);
 
     // Commit the block's execution outcome to the database
-    let hashed_state = execution_outcome.hash_state_slow::<KeccakKeyHasher>().into_sorted();
+    let hashed_state = execution_outcome.hash_state_slow::<KeccakKeyHasher, _>().into_sorted();
     let provider_rw = provider_factory.provider_rw()?;
     provider_rw.append_blocks_with_state(vec![block.clone()], &execution_outcome, hashed_state)?;
     provider_rw.commit()?;
@@ -208,7 +208,7 @@ where
     execution_outcome.state_mut().reverts.sort();
 
     // Commit the block's execution outcome to the database
-    let hashed_state = execution_outcome.hash_state_slow::<KeccakKeyHasher>().into_sorted();
+    let hashed_state = execution_outcome.hash_state_slow::<KeccakKeyHasher, _>().into_sorted();
     let provider_rw = provider_factory.provider_rw()?;
     provider_rw.append_blocks_with_state(
         vec![block1.clone(), block2.clone()],

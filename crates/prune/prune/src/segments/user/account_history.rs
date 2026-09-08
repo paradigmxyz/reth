@@ -204,8 +204,9 @@ impl AccountHistory {
         // `max_reorg_depth`, so no OOM is expected here.
         let mut last_changeset_pruned_block = None;
         let mut highest_deleted_accounts = FxHashMap::default();
-        let (pruned_changesets, done) =
-            provider.tx_ref().prune_table_with_range::<tables::AccountChangeSets>(
+        let (pruned_changesets, done) = provider
+            .tx_ref()
+            .prune_table_with_range::<tables::AccountChangeSets<Provider::AccountExtension>>(
                 range,
                 &mut limiter,
                 |_| false,
