@@ -632,10 +632,13 @@ impl Decode for ChainStateKey {
 // Alias types.
 
 /// Plain account state table configured for a node's account extension.
-pub type PlainAccountStateFor<N> = PlainAccountState<AccountExtensionTy<N>>;
+pub type PlainAccountStateTy<N> = PlainAccountState<AccountExtensionTy<N>>;
 
 /// Hashed account state table configured for a node's account extension.
-pub type HashedAccountsFor<N> = HashedAccounts<AccountExtensionTy<N>>;
+pub type HashedAccountsTy<N> = HashedAccounts<AccountExtensionTy<N>>;
+
+/// Account changesets table configured for a node's account extension.
+pub type AccountChangeSetsTy<N> = AccountChangeSets<AccountExtensionTy<N>>;
 
 /// List with transaction numbers.
 pub type BlockNumberList = IntegerList;
@@ -661,11 +664,11 @@ mod tests {
     #[test]
     fn node_account_table_views_reuse_canonical_tables() {
         assert_eq!(
-            <PlainAccountStateFor<EthPrimitives> as Table>::NAME,
+            <PlainAccountStateTy<EthPrimitives> as Table>::NAME,
             <PlainAccountState as Table>::NAME
         );
         assert_eq!(
-            <HashedAccountsFor<EthPrimitives> as Table>::NAME,
+            <HashedAccountsTy<EthPrimitives> as Table>::NAME,
             <HashedAccounts as Table>::NAME
         );
     }

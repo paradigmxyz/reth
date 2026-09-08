@@ -1319,9 +1319,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         &self,
         account_changeset: Vec<(u64, AccountBeforeTx<AccountExtensionTy<N::Primitives>>)>,
         storage_changeset: Vec<(BlockNumberAddress, StorageEntry)>,
-        plain_accounts_cursor: &mut impl DbCursorRO<
-            tables::PlainAccountState<AccountExtensionTy<N::Primitives>>,
-        >,
+        plain_accounts_cursor: &mut impl DbCursorRO<tables::PlainAccountStateTy<N::Primitives>>,
         plain_storage_cursor: &mut impl DbDupCursorRO<tables::PlainStorageState>,
     ) -> ProviderResult<BundleStateWithReverts<AccountExtensionTy<N::Primitives>>> {
         self.populate_bundle_state(
@@ -1345,9 +1343,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         &self,
         account_changeset: Vec<(u64, AccountBeforeTx<AccountExtensionTy<N::Primitives>>)>,
         storage_changeset: Vec<(BlockNumberAddress, StorageEntry)>,
-        hashed_accounts_cursor: &mut impl DbCursorRO<
-            tables::HashedAccounts<AccountExtensionTy<N::Primitives>>,
-        >,
+        hashed_accounts_cursor: &mut impl DbCursorRO<tables::HashedAccountsTy<N::Primitives>>,
         hashed_storage_cursor: &mut impl DbDupCursorRO<tables::HashedStorages>,
     ) -> ProviderResult<BundleStateWithReverts<AccountExtensionTy<N::Primitives>>> {
         self.populate_bundle_state(
@@ -1439,15 +1435,9 @@ impl<TX: DbTx, N: NodeTypes> AccountReader for DatabaseProvider<TX, N> {
             let hashed_address = keccak256(address);
             Ok(self
                 .tx
-                .get_by_encoded_key::<tables::HashedAccounts<AccountExtensionTy<N::Primitives>>>(
-                    &hashed_address,
-                )?)
+                .get_by_encoded_key::<tables::HashedAccountsTy<N::Primitives>>(&hashed_address)?)
         } else {
-            Ok(self
-                .tx
-                .get_by_encoded_key::<tables::PlainAccountState<AccountExtensionTy<N::Primitives>>>(
-                    address,
-                )?)
+            Ok(self.tx.get_by_encoded_key::<tables::PlainAccountStateTy<N::Primitives>>(address)?)
         }
     }
 }
@@ -1467,9 +1457,8 @@ impl<TX: DbTx + 'static, N: NodeTypes> AccountExtReader for DatabaseProvider<TX,
         iter: impl IntoIterator<Item = Address>,
     ) -> ProviderResult<Vec<(Address, Option<Account<AccountExtensionTy<N::Primitives>>>)>> {
         if self.cached_storage_settings().use_hashed_state() {
-            let mut hashed_accounts = self
-                .tx
-                .cursor_read::<tables::HashedAccounts<AccountExtensionTy<N::Primitives>>>()?;
+            let mut hashed_accounts =
+                self.tx.cursor_read::<tables::HashedAccountsTy<N::Primitives>>()?;
             Ok(iter
                 .into_iter()
                 .map(|address| {
@@ -1478,9 +1467,8 @@ impl<TX: DbTx + 'static, N: NodeTypes> AccountExtReader for DatabaseProvider<TX,
                 })
                 .collect::<Result<Vec<_>, _>>()?)
         } else {
-            let mut plain_accounts = self
-                .tx
-                .cursor_read::<tables::PlainAccountState<AccountExtensionTy<N::Primitives>>>()?;
+            let mut plain_accounts =
+                self.tx.cursor_read::<tables::PlainAccountStateTy<N::Primitives>>()?;
             Ok(iter
                 .into_iter()
                 .map(|address| {
@@ -1519,9 +1507,8 @@ impl<TX: DbTx + 'static, N: NodeTypes> AccountExtReader for DatabaseProvider<TX,
 
             Ok(changed_accounts_and_blocks)
         } else {
-            let mut changeset_cursor = self
-                .tx
-                .cursor_read::<tables::AccountChangeSets<AccountExtensionTy<N::Primitives>>>()?;
+            let mut changeset_cursor =
+                self.tx.cursor_read::<tables::AccountChangeSetsTy<N::Primitives>>()?;
 
             let account_transitions = changeset_cursor.walk_range(range)?.try_fold(
                 BTreeMap::new(),
@@ -1606,7 +1593,7 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
         } else {
             let range = block_number..=block_number;
             self.tx
-                .cursor_read::<tables::AccountChangeSets<AccountExtensionTy<N::Primitives>>>()?
+                .cursor_read::<tables::AccountChangeSetsTy<N::Primitives>>()?
                 .walk_range(range)?
                 .map(|result| -> ProviderResult<_> {
                     let (_, account_before) = result?;
@@ -1625,7 +1612,7 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
             Ok(self.static_file_provider.get_account_before_block(block_number, address)?)
         } else {
             self.tx
-                .cursor_dup_read::<tables::AccountChangeSets<AccountExtensionTy<N::Primitives>>>()?
+                .cursor_dup_read::<tables::AccountChangeSetsTy<N::Primitives>>()?
                 .seek_by_key_subkey(block_number, address)?
                 .filter(|acc| acc.address == address)
                 .map(Ok)
@@ -1642,7 +1629,7 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
             self.static_file_provider.account_changesets_range(range)
         } else {
             self.tx
-                .cursor_read::<tables::AccountChangeSets<AccountExtensionTy<N::Primitives>>>()?
+                .cursor_read::<tables::AccountChangeSetsTy<N::Primitives>>()?
                 .walk_range(to_range(range))?
                 .map(|r| r.map_err(Into::into))
                 .collect()
@@ -2669,9 +2656,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         if !self.cached_storage_settings().use_hashed_state() {
             // Write new account state
             tracing::trace!(len = changes.accounts.len(), "Writing new account state");
-            let mut accounts_cursor = self
-                .tx_ref()
-                .cursor_write::<tables::PlainAccountState<AccountExtensionTy<N::Primitives>>>()?;
+            let mut accounts_cursor =
+                self.tx_ref().cursor_write::<tables::PlainAccountStateTy<N::Primitives>>()?;
             // write account to database.
             for (address, account) in changes.accounts {
                 if let Some(account) = account {
@@ -2731,9 +2717,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         hashed_state: &HashedPostStateSorted<AccountExtensionTy<N::Primitives>>,
     ) -> ProviderResult<()> {
         // Write hashed account updates.
-        let mut hashed_accounts_cursor = self
-            .tx_ref()
-            .cursor_write::<tables::HashedAccounts<AccountExtensionTy<N::Primitives>>>()?;
+        let mut hashed_accounts_cursor =
+            self.tx_ref().cursor_write::<tables::HashedAccountsTy<N::Primitives>>()?;
         for (hashed_address, account) in hashed_state.accounts() {
             if let Some(account) = account {
                 hashed_accounts_cursor.upsert(*hashed_address, account)?;
@@ -2817,13 +2802,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             changeset_writer.prune_account_changesets(block)?;
             changesets
         } else {
-            self.take::<tables::AccountChangeSets<AccountExtensionTy<N::Primitives>>>(range)?
+            self.take::<tables::AccountChangeSetsTy<N::Primitives>>(range)?
         };
 
         if self.cached_storage_settings().use_hashed_state() {
-            let mut hashed_accounts_cursor = self
-                .tx
-                .cursor_write::<tables::HashedAccounts<AccountExtensionTy<N::Primitives>>>()?;
+            let mut hashed_accounts_cursor =
+                self.tx.cursor_write::<tables::HashedAccountsTy<N::Primitives>>()?;
             let mut hashed_storage_cursor = self.tx.cursor_dup_write::<tables::HashedStorages>()?;
 
             let (state, _) = self.populate_bundle_state_hashed(
@@ -2866,9 +2850,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             // state of end range. We should rename the functions or add support to access
             // History state. Accessing history state can be tricky but we are not gaining
             // anything.
-            let mut plain_accounts_cursor = self
-                .tx
-                .cursor_write::<tables::PlainAccountState<AccountExtensionTy<N::Primitives>>>()?;
+            let mut plain_accounts_cursor =
+                self.tx.cursor_write::<tables::PlainAccountStateTy<N::Primitives>>()?;
             let mut plain_storage_cursor =
                 self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
 
@@ -2984,13 +2967,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         } else {
             // Have to remove from static files if they exist, otherwise remove using `take` for the
             // changeset tables
-            self.take::<tables::AccountChangeSets<AccountExtensionTy<N::Primitives>>>(range)?
+            self.take::<tables::AccountChangeSetsTy<N::Primitives>>(range)?
         };
 
         let (state, reverts) = if self.cached_storage_settings().use_hashed_state() {
-            let mut hashed_accounts_cursor = self
-                .tx
-                .cursor_write::<tables::HashedAccounts<AccountExtensionTy<N::Primitives>>>()?;
+            let mut hashed_accounts_cursor =
+                self.tx.cursor_write::<tables::HashedAccountsTy<N::Primitives>>()?;
             let mut hashed_storage_cursor = self.tx.cursor_dup_write::<tables::HashedStorages>()?;
 
             let (state, reverts) = self.populate_bundle_state_hashed(
@@ -3035,9 +3017,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             // state of end range. We should rename the functions or add support to access
             // History state. Accessing history state can be tricky but we are not gaining
             // anything.
-            let mut plain_accounts_cursor = self
-                .tx
-                .cursor_write::<tables::PlainAccountState<AccountExtensionTy<N::Primitives>>>()?;
+            let mut plain_accounts_cursor =
+                self.tx.cursor_write::<tables::PlainAccountStateTy<N::Primitives>>()?;
             let mut plain_storage_cursor =
                 self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
 
@@ -3240,7 +3221,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
 
         // Apply values to HashedState, and remove the account if it's None.
         let mut hashed_accounts_cursor =
-            self.tx.cursor_write::<tables::HashedAccounts<AccountExtensionTy<N::Primitives>>>()?;
+            self.tx.cursor_write::<tables::HashedAccountsTy<N::Primitives>>()?;
         for (hashed_address, account) in &hashed_accounts {
             if let Some(account) = account {
                 hashed_accounts_cursor.upsert(*hashed_address, account)?;
@@ -3267,7 +3248,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         >,
     ) -> ProviderResult<BTreeMap<B256, Option<Account<AccountExtensionTy<N::Primitives>>>>> {
         let mut hashed_accounts_cursor =
-            self.tx.cursor_write::<tables::HashedAccounts<AccountExtensionTy<N::Primitives>>>()?;
+            self.tx.cursor_write::<tables::HashedAccountsTy<N::Primitives>>()?;
         let hashed_accounts =
             changesets.into_iter().map(|(ad, ac)| (keccak256(ad), ac)).collect::<BTreeMap<_, _>>();
         for (hashed_address, account) in &hashed_accounts {

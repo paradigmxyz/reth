@@ -9,7 +9,6 @@ use reth_db_api::{
 };
 use reth_db_common::DbTool;
 use reth_node_builder::NodeTypesWithDB;
-use reth_primitives_traits::AccountExtensionTy;
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
     StaticFileProviderFactory,
@@ -72,9 +71,7 @@ impl Command {
         let entries = tool.provider_factory.db_ref().view(|tx| {
             let (account, walker_entries) = if use_hashed_state {
                 let hashed_address = keccak256(address);
-                let account = tx.get::<tables::HashedAccounts<AccountExtensionTy<N::Primitives>>>(
-                    hashed_address,
-                )?;
+                let account = tx.get::<tables::HashedAccountsTy<N::Primitives>>(hashed_address)?;
                 let mut cursor = tx.cursor_dup_read::<tables::HashedStorages>()?;
                 let walker = cursor.walk_dup(Some(hashed_address), None)?;
                 let mut entries = Vec::new();
@@ -100,8 +97,7 @@ impl Command {
                 (account, entries)
             } else {
                 // Get account info
-                let account = tx
-                    .get::<tables::PlainAccountState<AccountExtensionTy<N::Primitives>>>(address)?;
+                let account = tx.get::<tables::PlainAccountStateTy<N::Primitives>>(address)?;
                 // Get storage entries
                 let mut cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
                 let walker = cursor.walk_dup(Some(address), None)?;
