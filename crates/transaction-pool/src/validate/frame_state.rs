@@ -373,7 +373,7 @@ mod tests {
         put(&mut r, 4, m(4, 0, 1, 1)).unwrap();
         let mut second_exclusive = m(5, 0, 1, 1);
         second_exclusive.exclusive_payer = true;
-        put(&mut r, 5, second_exclusive.clone()).unwrap();
+        put(&mut r, 5, second_exclusive).unwrap();
         r.remove(&B256::repeat_byte(5));
         assert_eq!(r.payer_usage(&exclusive.payer).exclusive_count, 0);
         assert_eq!(r.payer_usage(&exclusive.payer).frame_count, 1);
