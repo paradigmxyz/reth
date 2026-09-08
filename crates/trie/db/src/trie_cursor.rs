@@ -287,12 +287,15 @@ where
             num_entries += 1;
             let nibbles = A::StorageSubKey::from(*nibbles);
             // Delete the old entry if it exists.
-            if self
+            if let Some(existing) = self
                 .cursor
                 .seek_by_key_subkey(self.hashed_address, nibbles.clone())?
-                .as_ref()
-                .is_some_and(|e| *e.nibbles() == nibbles)
+                .filter(|entry| *entry.nibbles() == nibbles)
             {
+                // Reusing the lookup needed for replacement avoids rewriting unchanged nodes.
+                if maybe_updated.as_ref() == Some(existing.node()) {
+                    continue
+                }
                 self.cursor.delete_current()?;
             }
 
@@ -435,5 +438,71 @@ mod tests {
             let mut cursor = trie_factory.storage_trie_cursor(hashed_address).unwrap();
             assert_eq!(cursor.seek(key.into()).unwrap().unwrap().1, value);
         });
+    }
+
+    #[test]
+    fn storage_updates_preserve_unchanged_nodes_and_replace_exact_subkeys() {
+        check_storage_updates::<LegacyKeyAdapter>();
+        check_storage_updates::<PackedKeyAdapter>();
+    }
+
+    fn check_storage_updates<A: TrieTableAdapter>() {
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+        let cursor = provider.tx_ref().cursor_dup_write::<A::StorageTrieTable>().unwrap();
+        let address = B256::repeat_byte(1);
+        let other_address = B256::repeat_byte(2);
+        let node = BranchNodeCompact::new(1, 1, 1, vec![B256::repeat_byte(3)], None);
+        let changed = BranchNodeCompact::new(3, 1, 1, vec![B256::repeat_byte(4)], None);
+        let key = |n| Nibbles::from_nibbles([n]);
+        let mut cursor = DatabaseStorageTrieCursor::<_, A>::new(cursor, address);
+
+        for n in [2, 4, 6, 8] {
+            cursor
+                .cursor
+                .upsert(address, &A::StorageValue::new(key(n).into(), node.clone()))
+                .unwrap();
+        }
+        cursor
+            .cursor
+            .upsert(other_address, &A::StorageValue::new(key(2).into(), node.clone()))
+            .unwrap();
+
+        let updates = StorageTrieUpdatesSorted {
+            storage_nodes: vec![
+                (Nibbles::default(), Some(node.clone())),
+                (key(1), None),
+                (key(2), Some(node.clone())),
+                (key(3), Some(node.clone())),
+                (key(4), Some(changed.clone())),
+                (key(6), None),
+                (key(9), Some(changed.clone())),
+            ],
+        };
+        assert_eq!(cursor.write_storage_trie_updates_sorted(&updates).unwrap(), 6);
+        // Repeating the batch must preserve the same rows, including an absent deletion target.
+        assert_eq!(cursor.write_storage_trie_updates_sorted(&updates).unwrap(), 6);
+        let rows = cursor
+            .cursor
+            .walk_dup(Some(address), None)
+            .unwrap()
+            .map(|entry| {
+                let (_, entry) = entry.unwrap();
+                (A::subkey_to_nibbles(entry.nibbles()), entry.node().clone())
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            rows,
+            vec![
+                (key(2), node.clone()),
+                (key(3), node.clone()),
+                (key(4), changed.clone()),
+                (key(8), node.clone()),
+                (key(9), changed)
+            ]
+        );
+        let other =
+            cursor.cursor.seek_by_key_subkey(other_address, key(2).into()).unwrap().unwrap();
+        assert_eq!(other.node(), &node);
     }
 }
