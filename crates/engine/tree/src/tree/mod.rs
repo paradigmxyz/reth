@@ -60,8 +60,6 @@ use tokio::sync::{
 };
 use tracing::*;
 
-#[cfg(all(test, feature = "account-ext"))]
-mod account_extension_tests;
 mod block_buffer;
 pub mod error;
 pub mod instrumented_state;
