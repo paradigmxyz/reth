@@ -30,7 +30,7 @@ pub struct FrameValidation {
     pub dependencies: FrameDependencies,
     /// Optional expiration timestamp.
     pub expires_at: Option<u64>,
-    /// Whether this frame excludes all other frames for its payer.
+    /// Whether this frame consumes the payer's exclusive pending slot.
     pub exclusive_payer: bool,
 }
 
@@ -67,8 +67,8 @@ pub struct PayerUsage {
     pub frame_cost: U256,
     /// Number of frames using the payer.
     pub frame_count: usize,
-    /// Whether one of the payer's frames is exclusive.
-    pub exclusive: bool,
+    /// Number of exclusive payer frames using this payer.
+    pub exclusive_count: usize,
 }
 
 impl FrameReservations {
@@ -128,9 +128,16 @@ impl FrameReservations {
             .frame_count
             .checked_sub(usize::from(old.as_ref().is_some_and(|f| f.payer == metadata.payer)))
             .ok_or("reservation accounting error")?;
-        let other_exclusive = usage.exclusive &&
-            !old.as_ref().is_some_and(|f| f.payer == metadata.payer && f.exclusive_payer);
-        if metadata.exclusive_payer && other_count != 0 || other_exclusive {
+        let old_exclusive_count = usize::from(
+            old.as_ref().is_some_and(|f| f.payer == metadata.payer && f.exclusive_payer),
+        );
+        let other_exclusive_count = usage
+            .exclusive_count
+            .checked_sub(old_exclusive_count)
+            .ok_or("reservation accounting error")?;
+        // Non-exclusive self-paid reservations may coexist; only exclusive reservations consume
+        // the payer's one-pending slot.
+        if metadata.exclusive_payer && other_exclusive_count != 0 {
             return Err("exclusive payer capacity exceeded");
         }
         self.remove_inner(replaces);
@@ -140,7 +147,7 @@ impl FrameReservations {
         entry.balance = metadata.payer_balance;
         entry.frame_cost = frame_cost;
         entry.frame_count = other_count + 1;
-        entry.exclusive = other_exclusive || metadata.exclusive_payer;
+        entry.exclusive_count = other_exclusive_count + usize::from(metadata.exclusive_payer);
         for a in
             metadata.dependencies.accounts.iter().copied().chain([metadata.sender, metadata.payer])
         {
@@ -173,7 +180,9 @@ impl FrameReservations {
         if let Some(p) = self.payer.get_mut(&m.payer) {
             p.frame_cost = p.frame_cost.checked_sub(m.max_cost).unwrap_or(U256::ZERO);
             p.frame_count = p.frame_count.saturating_sub(1);
-            p.exclusive = p.frame_count != 0 && m.exclusive_payer;
+            if m.exclusive_payer {
+                p.exclusive_count = p.exclusive_count.saturating_sub(1);
+            }
             if p.frame_count == 0 {
                 self.payer.remove(&m.payer);
             }
@@ -346,21 +355,28 @@ mod tests {
     fn removal_preserves_exclusive_admission_invariants() {
         let mut r = FrameReservations::default();
         put(&mut r, 1, m(1, 0, 1, 1)).unwrap();
-        put(&mut r, 2, m(2, 0, 1, 1)).unwrap();
         let mut exclusive = m(3, 0, 1, 1);
         exclusive.exclusive_payer = true;
-        assert_eq!(put(&mut r, 3, exclusive.clone()), Err("exclusive payer capacity exceeded"));
+        put(&mut r, 2, exclusive.clone()).unwrap();
+        assert_eq!(r.payer_usage(&exclusive.payer).exclusive_count, 1);
+
         r.remove(&B256::repeat_byte(1));
         assert_eq!(r.payer_usage(&exclusive.payer).frame_count, 1);
-        assert!(!r.payer_usage(&exclusive.payer).exclusive);
-        assert_eq!(put(&mut r, 3, exclusive.clone()), Err("exclusive payer capacity exceeded"));
+        assert_eq!(r.payer_usage(&exclusive.payer).exclusive_count, 1);
+        let mut another_exclusive = m(4, 0, 1, 1);
+        another_exclusive.exclusive_payer = true;
+        assert_eq!(put(&mut r, 3, another_exclusive), Err("exclusive payer capacity exceeded"));
+
         r.remove(&B256::repeat_byte(2));
-        put(&mut r, 3, exclusive.clone()).unwrap();
-        assert!(r.payer_usage(&exclusive.payer).exclusive);
-        assert_eq!(put(&mut r, 4, m(4, 0, 1, 1)), Err("exclusive payer capacity exceeded"));
-        r.remove(&B256::repeat_byte(3));
         assert_eq!(r.payer_usage(&exclusive.payer), PayerUsage::default());
+
         put(&mut r, 4, m(4, 0, 1, 1)).unwrap();
+        let mut second_exclusive = m(5, 0, 1, 1);
+        second_exclusive.exclusive_payer = true;
+        put(&mut r, 5, second_exclusive.clone()).unwrap();
+        r.remove(&B256::repeat_byte(5));
+        assert_eq!(r.payer_usage(&exclusive.payer).exclusive_count, 0);
+        assert_eq!(r.payer_usage(&exclusive.payer).frame_count, 1);
     }
 
     #[test]
@@ -369,7 +385,10 @@ mod tests {
         let mut x = m(1, 0, 1, 1);
         x.exclusive_payer = true;
         put(&mut r, 1, x).unwrap();
-        assert_eq!(put(&mut r, 2, m(2, 0, 1, 1)), Err("exclusive payer capacity exceeded"));
+        assert!(put(&mut r, 2, m(2, 0, 1, 1)).is_ok());
+        let mut second_exclusive = m(3, 0, 1, 1);
+        second_exclusive.exclusive_payer = true;
+        assert_eq!(put(&mut r, 3, second_exclusive), Err("exclusive payer capacity exceeded"));
         assert_eq!(put(&mut r, 3, m(1, 0, 2, 1)), Err("sender nonce already reserved"));
     }
     #[test]
