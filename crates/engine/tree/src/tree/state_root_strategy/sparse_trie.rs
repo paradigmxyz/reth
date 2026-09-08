@@ -644,7 +644,10 @@ where
             if new { &mut self.new_storage_updates } else { &mut self.storage_updates };
 
         // Process all storage updates, skipping tries with no pending updates.
-        let span = trace_span!("process_storage_leaf_updates").entered();
+        let span = trace_span!(target: "engine::tree::critical", "process_storage_leaf_updates", new, attempted = tracing::field::Empty, applied = tracing::field::Empty, tries = tracing::field::Empty).entered();
+        let mut attempted = 0usize;
+        let mut applied = 0usize;
+        let mut tries = 0usize;
         for (address, updates) in storage_updates {
             if updates.is_empty() {
                 continue;
@@ -669,6 +672,9 @@ where
                 }
             })?;
             let updates_len_after = updates.len();
+            attempted += updates_len_before;
+            applied += updates_len_before - updates_len_after;
+            tries += 1;
             self.storage_cache_hits += (updates_len_before - updates_len_after) as u64;
             self.storage_cache_misses += updates_len_after as u64;
 
@@ -677,6 +683,9 @@ where
             }
         }
 
+        span.record("attempted", attempted);
+        span.record("applied", applied);
+        span.record("tries", tries);
         drop(span);
 
         // Process account trie updates and fill the account targets.
@@ -698,6 +707,7 @@ where
             if new { &mut self.new_account_updates } else { &mut self.account_updates };
 
         let updates_len_before = account_updates.len();
+        let span = trace_span!(target: "engine::tree::critical", "process_account_leaf_updates_batch", new, attempted = updates_len_before, applied = tracing::field::Empty).entered();
 
         self.trie.trie_mut().update_leaves(account_updates, |target, parent| {
             match self.fetched_account_targets.entry(target) {
@@ -717,6 +727,7 @@ where
         })?;
 
         let updates_len_after = account_updates.len();
+        span.record("applied", updates_len_before - updates_len_after);
         self.account_cache_hits += (updates_len_before - updates_len_after) as u64;
         self.account_cache_misses += updates_len_after as u64;
 
@@ -815,7 +826,7 @@ where
         self.compute_drained_storage_roots();
 
         loop {
-            let span = trace_span!("promote_updates", promoted = tracing::field::Empty).entered();
+            let span = trace_span!(target: "engine::tree::critical", "promote_updates", pending = self.pending_account_updates.len(), promoted = tracing::field::Empty).entered();
             // Now handle pending account updates that can be upgraded to a proper update.
             let account_rlp_buf = &mut self.account_rlp_buf;
             let mut num_promoted = 0;
