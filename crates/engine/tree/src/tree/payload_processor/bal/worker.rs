@@ -92,7 +92,10 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
                 let signer = *tx.signer();
                 let tx_gas_limit = tx.tx().gas_limit();
 
-                executor.evm_mut().db_mut().set_bal_index(BlockAccessIndex::new(index as u64 + 1));
+                executor
+                    .evm_mut()
+                    .db_mut()
+                    .set_bal_index(BlockAccessIndex::from_tx_index(index as u64));
                 let result = executor
                     .execute_transaction_without_commit(tx)
                     .map_err(BalWorkerError::Execution)?;
