@@ -694,3 +694,7 @@ vergen-git2 = "10.0.1"
 
 # networking
 ipnet = "2.11"
+
+# Benchmark-only: isolate BAL capacity sizing with registry-compatible state dependencies.
+[patch.crates-io]
+revm-state = { git = "https://github.com/mattsse/revm", rev = "4bdcfb52ec1332d15e20dc62afcf7dfa90a0b907" }
