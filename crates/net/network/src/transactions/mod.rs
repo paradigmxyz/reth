@@ -12,9 +12,8 @@ pub mod constants;
 pub mod fetcher;
 /// Defines the traits for transaction-related policies.
 pub mod policy;
-/// Test harness driving the transaction fetching pipeline with mock peer sessions.
-#[cfg(any(test, feature = "test-utils"))]
-pub mod test_harness;
+#[cfg(test)]
+mod test_harness;
 
 pub use self::constants::{
     tx_fetcher::DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,

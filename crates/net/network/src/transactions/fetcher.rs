@@ -936,10 +936,10 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     }
 }
 
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(test)]
 impl<N: NetworkPrimitives> TransactionFetcher<N> {
     /// Returns the connected peers that are candidates for the hash, in announcement order.
-    pub fn candidate_peers(&self, hash: &TxHash) -> Vec<PeerId> {
+    pub(super) fn candidate_peers(&self, hash: &TxHash) -> Vec<PeerId> {
         self.hashes
             .get(hash)
             .map(|entry| {
@@ -954,14 +954,14 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     }
 
     /// Returns the peer the hash is currently fetched from, if any.
-    pub fn fetching_peer(&self, hash: &TxHash) -> Option<PeerId> {
+    fn fetching_peer(&self, hash: &TxHash) -> Option<PeerId> {
         let (key, _) = self.hashes.get(hash)?.fetching_by?;
         self.peers.get(&key).map(|peer| peer.peer_id)
     }
 
     /// Returns the hashes queued for the peer, oldest first. May include hashes that are not
     /// tracked anymore or are being fetched elsewhere.
-    pub fn queued_hashes(&self, peer_id: &PeerId) -> Vec<TxHash> {
+    pub(super) fn queued_hashes(&self, peer_id: &PeerId) -> Vec<TxHash> {
         self.peer_keys
             .get(peer_id)
             .and_then(|key| self.peers.get(key))
@@ -970,12 +970,12 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     }
 
     /// Returns the number of peers the fetcher tracks.
-    pub fn num_peers(&self) -> usize {
+    fn num_peers(&self) -> usize {
         self.peers.len()
     }
 
     /// Panics if the internal bookkeeping is inconsistent.
-    pub fn assert_invariants(&self) {
+    fn assert_invariants(&self) {
         let fetching = self.hashes.values().filter(|entry| entry.fetching_by.is_some()).count();
         assert_eq!(fetching, self.num_fetching, "fetching counter out of sync");
 
