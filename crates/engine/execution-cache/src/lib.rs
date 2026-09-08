@@ -24,7 +24,7 @@ use alloy_primitives::B256;
 use metrics::{Counter, Histogram};
 use parking_lot::Mutex;
 use reth_metrics::Metrics;
-use reth_primitives_traits::FastInstant as Instant;
+use reth_primitives_traits::{AccountExtension, EmptyAccountExtension, FastInstant as Instant};
 use std::{sync::Arc, time::Duration};
 use tracing::{debug, instrument, warn};
 
@@ -42,16 +42,14 @@ use tracing::{debug, instrument, warn};
 /// (such as prewarming tasks) must be terminated before calling
 /// [`PayloadExecutionCache::update_with_guard`], otherwise the cache may be corrupted or cleared.
 #[derive(Clone, Debug, Default)]
-pub struct PayloadExecutionCache<
-    E: reth_primitives_traits::AccountExtension = reth_primitives_traits::EmptyAccountExtension,
-> {
+pub struct PayloadExecutionCache<E: AccountExtension = EmptyAccountExtension> {
     /// Guarded cloneable cache identified by a block hash.
     inner: Arc<Mutex<Option<SavedCache<E>>>>,
     /// Metrics for cache operations.
     metrics: PayloadExecutionCacheMetrics,
 }
 
-impl<E: reth_primitives_traits::AccountExtension> PayloadExecutionCache<E> {
+impl<E: AccountExtension> PayloadExecutionCache<E> {
     /// Returns the cache for `parent_hash` if it's available for use.
     ///
     /// A cache is considered available when:
@@ -166,8 +164,7 @@ mod tests {
 
     #[test]
     fn single_checkout_blocks_second() {
-        let cache =
-            PayloadExecutionCache::<reth_primitives_traits::EmptyAccountExtension>::default();
+        let cache = PayloadExecutionCache::<EmptyAccountExtension>::default();
         let hash = B256::from([1u8; 32]);
 
         cache.update_with_guard(|slot| {
@@ -183,8 +180,7 @@ mod tests {
 
     #[test]
     fn checkout_available_after_drop() {
-        let cache =
-            PayloadExecutionCache::<reth_primitives_traits::EmptyAccountExtension>::default();
+        let cache = PayloadExecutionCache::<EmptyAccountExtension>::default();
         let hash = B256::from([2u8; 32]);
 
         cache.update_with_guard(|slot| {
@@ -201,8 +197,7 @@ mod tests {
 
     #[test]
     fn raw_cache_handle_blocks_checkout_until_drop() {
-        let cache =
-            PayloadExecutionCache::<reth_primitives_traits::EmptyAccountExtension>::default();
+        let cache = PayloadExecutionCache::<EmptyAccountExtension>::default();
         let hash = B256::from([3u8; 32]);
 
         cache.update_with_guard(|slot| {
@@ -224,8 +219,7 @@ mod tests {
 
     #[test]
     fn hash_mismatch_clears_and_retags() {
-        let cache =
-            PayloadExecutionCache::<reth_primitives_traits::EmptyAccountExtension>::default();
+        let cache = PayloadExecutionCache::<EmptyAccountExtension>::default();
         let hash_a = B256::from([0xAA; 32]);
         let hash_b = B256::from([0xBB; 32]);
 
@@ -240,8 +234,7 @@ mod tests {
 
     #[test]
     fn empty_cache_returns_none() {
-        let cache =
-            PayloadExecutionCache::<reth_primitives_traits::EmptyAccountExtension>::default();
+        let cache = PayloadExecutionCache::<EmptyAccountExtension>::default();
         assert!(cache.get_cache_for(B256::ZERO).is_none());
     }
 }
