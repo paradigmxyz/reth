@@ -69,6 +69,8 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
 {
     scope.spawn(move |_| {
         let worker_result = (|| -> Result<(), BalWorkerError> {
+            let setup =
+                tracing::trace_span!(target: "engine::tree::bal", "bal_worker_setup").entered();
             // Create a database with fill_on_miss=true ensuring misses
             // are inserted for the other workers.
             let database = make_db(true).map_err(BalWorkerError::Setup)?;
@@ -79,6 +81,7 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
                 .build();
             let evm = evm_config.evm_with_env(&mut worker_state, evm_env);
             let mut executor = evm_config.create_executor_with_state(evm, ctx.clone());
+            drop(setup);
 
             loop {
                 let (index, tx) = crossbeam_channel::select_biased! {

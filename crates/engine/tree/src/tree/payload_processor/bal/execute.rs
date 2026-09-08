@@ -122,6 +122,7 @@ where
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
         let (abort_guard, abort_rx) = AbortGuard::new();
 
+        tracing::trace!(target: "engine::tree::bal", "bal spawning workers");
         for _ in 0..worker_count {
             worker::spawn_worker(
                 scope,
@@ -135,6 +136,7 @@ where
                 ctx.clone(),
             );
         }
+        tracing::trace!(target: "engine::tree::bal", "bal workers spawned");
         drop(result_tx);
 
         let mut gas_tracker =
