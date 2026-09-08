@@ -268,10 +268,24 @@ where
 
         // Streaming phase: updates are still arriving. Ends when the finish marker is
         // processed. Only producers hold update senders, so the channel closing before the
-        // marker means they died without finishing the stream.
+        // marker means they died without finishing the stream. Prefer ready proofs so a
+        // continuously populated update queue cannot defer their revelation until the stream ends.
         while !self.finished_state_updates {
             let mut t = Instant::now();
             crossbeam_channel::select_biased! {
+                recv(self.proof_result_rx) -> message => {
+                    let wake = Instant::now();
+                    total_idle_time += wake.duration_since(idle_start);
+                    self.metrics
+                        .sparse_trie_channel_wait_duration_histogram
+                        .record(wake.duration_since(t));
+                    t = wake;
+
+                    let Ok(result) = message else {
+                        unreachable!("we own the sender half")
+                    };
+                    self.on_proof_results(result, &mut t)?;
+                },
                 recv(self.updates) -> message => {
                     let wake = Instant::now();
                     total_idle_time += wake.duration_since(idle_start);
@@ -286,19 +300,6 @@ where
                         finalized_hashed_state = Some(hashed_state);
                     }
                     self.pending_updates += 1;
-                }
-                recv(self.proof_result_rx) -> message => {
-                    let wake = Instant::now();
-                    total_idle_time += wake.duration_since(idle_start);
-                    self.metrics
-                        .sparse_trie_channel_wait_duration_histogram
-                        .record(wake.duration_since(t));
-                    t = wake;
-
-                    let Ok(result) = message else {
-                        unreachable!("we own the sender half")
-                    };
-                    self.on_proof_results(result, &mut t)?;
                 },
                 recv(self.cancel_rx) -> _ => return Err(StateRootTaskError::Canceled),
             }
@@ -1218,6 +1219,84 @@ mod tests {
         assert_eq!(decoded.balance, U256::from(42));
         assert_eq!(decoded.storage_root, storage_root);
         assert_eq!(account_rlp_buf, encoded);
+    }
+
+    #[test]
+    fn ready_proof_precedes_queued_state_updates() {
+        let runtime = reth_tasks::Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayManager::<reth_chain_state::EthPrimitives>::default()
+                .overlay_builder(anchor_hash),
+        );
+        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
+        let proof_worker_handle = ProofWorkerHandle::new(
+            &runtime,
+            ProofTaskCtx::new(state_provider_factory),
+            false,
+            proof_result_tx.clone(),
+        );
+
+        let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+        let trie = SparseStateTrie::default()
+            .with_accounts_trie(default_trie.clone())
+            .with_default_storage_trie(default_trie)
+            .with_updates(true);
+
+        let parent_state_root = B256::from([0x55; 32]);
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (_cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
+        let mut task = SparseTrieCacheTask::new_with_trie(
+            &runtime,
+            updates_rx,
+            cancel_rx,
+            std::sync::mpsc::channel().0,
+            proof_worker_handle,
+            proof_result_tx.clone(),
+            proof_result_rx,
+            SparseTrieTaskMetrics::default(),
+            trie,
+            parent_state_root,
+            TrieNodeEpoch::UNMODIFIED,
+            1,
+        );
+
+        let address = B256::repeat_byte(0x11);
+        let mut state = HashedPostState::default();
+        state.accounts.insert(address, Some(Account { nonce: 1, ..Default::default() }));
+        let (queued_tx, queued_rx) = crossbeam_channel::unbounded();
+        queued_tx.send(SparseTrieTaskMessage::HashedState(state)).unwrap();
+        queued_tx.send(SparseTrieTaskMessage::FinishedStateUpdates).unwrap();
+        task.updates = queued_rx;
+        task.in_flight_proof_batches = 1;
+        proof_result_tx
+            .send(ProofResultMessage {
+                result: Ok(DecodedMultiProofV2 {
+                    account_proofs: vec![reth_trie_common::ProofTrieNodeV2::empty()],
+                    ..Default::default()
+                }),
+                elapsed: std::time::Duration::ZERO,
+                state: HashedPostState::default(),
+            })
+            .unwrap();
+
+        let result = task.run().unwrap();
+        assert!(task.fetched_account_targets.is_empty(), "queued proof must be revealed first");
+        assert_eq!(
+            result.state_root,
+            reth_trie::root::state_root([(
+                address,
+                TrieAccount { nonce: 1, ..Default::default() }
+            ),])
+        );
+        assert_eq!(result.hashed_state.accounts[&address].unwrap().nonce, 1);
+        drop(queued_tx);
+        drop(updates_tx);
+        drop(proof_result_tx);
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
     }
 
     #[test]
