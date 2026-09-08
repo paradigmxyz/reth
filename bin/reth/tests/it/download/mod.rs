@@ -205,9 +205,20 @@ async fn bad_output_checksum_prevents_finalization() {
         json!(blake3::hash(b"wrong").to_hex().to_string());
     let server = snapshot.serve(true).await;
     let dir = tempfile::tempdir().unwrap();
-    let output = download(&server, dir.path(), &["--with-txs-since", "20"]);
+    let output =
+        download(&server, dir.path(), &["--with-txs-since", "20", "--retry-backoff", "0ms"]);
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("Failed integrity validation"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("after 10 attempts"));
+    assert_eq!(
+        server
+            .requests()
+            .iter()
+            .filter(|(path, range)| { path == "/snapshot/state.tar.zst" && range.is_none() })
+            .count(),
+        10,
+        "each checksum failure must fetch a fresh archive"
+    );
     assert!(!dir.path().join("reth.toml").exists());
     assert!(!dir.path().join("db/mdbx.dat").exists());
 }

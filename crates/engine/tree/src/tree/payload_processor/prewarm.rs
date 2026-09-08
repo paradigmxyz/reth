@@ -431,14 +431,7 @@ where
             pool.begin_block(build, caches, ctx.env.txpool_snapshot.clone());
             let dispatch_start = Instant::now();
             for account in prefetch_bal.as_bal() {
-                pool.warm_account(
-                    account.address,
-                    account
-                        .storage_changes
-                        .iter()
-                        .map(|change| change.slot.into())
-                        .chain(account.storage_reads.iter().map(|&slot| slot.into())),
-                );
+                pool.warm_account(account.address, account.storage_slots().map(Into::into));
             }
             ctx.metrics.bal_slot_iteration_duration.record(dispatch_start.elapsed());
             pool.end_block();
@@ -692,14 +685,11 @@ where
         // changes to start processing them before potentially hitting the db in the next step.
         if !account_changes.storage_changes.is_empty() {
             let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
-            let mut storage_map = reth_trie::HashedStorage::default();
-
-            for slot_changes in &account_changes.storage_changes {
-                let hashed_slot = keccak256(slot_changes.slot.to_be_bytes::<32>());
-                if let Some(last_change) = slot_changes.changes.last() {
-                    storage_map.storage.insert(hashed_slot, last_change.new_value);
-                }
-            }
+            let storage_map = reth_trie::HashedStorage::from_iter(
+                account_changes
+                    .storage_post_states()
+                    .map(|(slot, value)| (keccak256(slot.to_be_bytes::<32>()), value)),
+            );
 
             let mut hashed_state = reth_trie::HashedPostState::default();
             hashed_state.storages.insert(hashed_address, storage_map);
@@ -778,13 +768,13 @@ struct BalAccountStateFields {
 impl BalAccountStateFields {
     fn from_changes(account_changes: &alloy_eip7928::AccountChanges) -> Self {
         Self {
-            balance: account_changes.balance_changes.last().map(|change| change.post_balance),
-            nonce: account_changes.nonce_changes.last().map(|change| change.new_nonce),
-            code_hash: account_changes.code_changes.last().map(|code_change| {
-                if code_change.new_code.is_empty() {
+            balance: account_changes.balance_post_state(),
+            nonce: account_changes.nonce_post_state(),
+            code_hash: account_changes.code_post_state().map(|code| {
+                if code.is_empty() {
                     alloy_consensus::constants::KECCAK_EMPTY
                 } else {
-                    keccak256(&code_change.new_code)
+                    keccak256(code)
                 }
             }),
         }

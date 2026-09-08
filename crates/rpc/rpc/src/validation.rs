@@ -445,13 +445,14 @@ where
 
         // Check block size as per EIP-7934 (only applies when Osaka hardfork is active)
         let chain_spec = self.provider.chain_spec();
-        if chain_spec.is_osaka_active_at_timestamp(block.timestamp()) &&
-            block.rlp_length() > MAX_RLP_BLOCK_SIZE
-        {
-            return Err(ValidationApiError::Consensus(ConsensusError::BlockTooLarge {
-                rlp_length: block.rlp_length(),
-                max_rlp_length: MAX_RLP_BLOCK_SIZE,
-            }));
+        if chain_spec.is_osaka_active_at_timestamp(block.timestamp()) {
+            let rlp_length = block.rlp_length();
+            if rlp_length > MAX_RLP_BLOCK_SIZE {
+                return Err(ValidationApiError::Consensus(ConsensusError::BlockTooLarge {
+                    rlp_length,
+                    max_rlp_length: MAX_RLP_BLOCK_SIZE,
+                }));
+            }
         }
 
         self.validate_message_against_block(
@@ -489,13 +490,14 @@ where
         })?;
 
         let chain_spec = self.provider.chain_spec();
-        if chain_spec.is_osaka_active_at_timestamp(block.timestamp()) &&
-            block.rlp_length() > MAX_RLP_BLOCK_SIZE
-        {
-            return Err(ValidationApiError::Consensus(ConsensusError::BlockTooLarge {
-                rlp_length: block.rlp_length(),
-                max_rlp_length: MAX_RLP_BLOCK_SIZE,
-            }));
+        if chain_spec.is_osaka_active_at_timestamp(block.timestamp()) {
+            let rlp_length = block.rlp_length();
+            if rlp_length > MAX_RLP_BLOCK_SIZE {
+                return Err(ValidationApiError::Consensus(ConsensusError::BlockTooLarge {
+                    rlp_length,
+                    max_rlp_length: MAX_RLP_BLOCK_SIZE,
+                }));
+            }
         }
 
         self.validate_message_against_block(
