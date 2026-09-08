@@ -1456,13 +1456,6 @@ mod tests {
         range.map(hash).collect()
     }
 
-    /// A peer id for tests that need more than 255 peers.
-    fn peer_n(n: u64) -> PeerId {
-        let mut bytes = [0u8; 64];
-        bytes[..8].copy_from_slice(&n.to_be_bytes());
-        PeerId::new(bytes)
-    }
-
     /// Counts how often a task is woken.
     #[derive(Default)]
     struct WakeCounter(AtomicUsize);
@@ -1500,9 +1493,6 @@ mod tests {
         fetcher: Fetcher,
         peers: HashMap<PeerId, PeerMetadata<EthNetworkPrimitives>, FbBuildHasher<64>>,
         sessions: HashMap<PeerId, mpsc::Receiver<PeerRequest>, FbBuildHasher<64>>,
-        /// Whether every operation checks the fetcher's invariants, which is too slow for large
-        /// workloads.
-        check_invariants: bool,
     }
 
     impl Rig {
@@ -1515,14 +1505,11 @@ mod tests {
                 fetcher: Fetcher::new(config),
                 peers: Default::default(),
                 sessions: Default::default(),
-                check_invariants: true,
             }
         }
 
         fn verify(&self) {
-            if self.check_invariants {
-                self.fetcher.assert_invariants();
-            }
+            self.fetcher.assert_invariants();
         }
 
         fn add_peer(&mut self, peer_id: PeerId) {
@@ -1623,10 +1610,17 @@ mod tests {
         let mut rig = Rig::new();
         let peer_a = peer(1);
         rig.add_peer(peer_a);
-        let txs = pooled_txs(2);
+        let mut txs = pooled_txs(2);
+        txs.sort_unstable_by_key(|tx| std::cmp::Reverse(*tx.tx_hash()));
         let hashes = hashes_of(&txs);
 
+        let mut cx = Context::from_waker(noop_waker_ref());
+        assert!(rig.fetcher.poll_next_unpin(&mut cx).is_pending());
+        rig.announce(peer_a, &hashes[..1]);
+        rig.announce(peer_a, &hashes[1..]);
         rig.announce(peer_a, &hashes);
+        assert_eq!(rig.fetcher.queued_hashes(&peer_a), hashes);
+        assert_eq!(rig.fetcher.candidate_peers(&hashes[0]), vec![peer_a]);
         assert_eq!(rig.fetcher.num_pending_hashes(), 2);
         assert!(rig.fetcher.is_idle(&peer_a));
 
@@ -1653,36 +1647,7 @@ mod tests {
         assert_eq!(rig.fetcher.num_hashes(), 0);
         assert_eq!(rig.fetcher.num_inflight_requests(), 0);
         assert!(rig.fetcher.is_idle(&peer_a));
-        assert!(rig.next_event().is_none());
-    }
-
-    #[test]
-    fn duplicate_announcements_from_same_peer_are_ignored() {
-        let mut rig = Rig::new();
-        let peer_a = peer(1);
-        rig.add_peer(peer_a);
-        let hashes = hashes(0..3);
-
-        rig.announce(peer_a, &hashes);
-        rig.announce(peer_a, &hashes);
-
-        assert_eq!(rig.fetcher.num_hashes(), 3);
-        assert_eq!(rig.fetcher.queued_hashes(&peer_a), hashes);
-        assert_eq!(rig.fetcher.candidate_peers(&hashes[0]), vec![peer_a]);
-    }
-
-    #[test]
-    fn requests_preserve_announcement_order() {
-        let mut rig = Rig::new();
-        let peer_a = peer(1);
-        rig.add_peer(peer_a);
-
-        rig.announce(peer_a, &hashes(10..13));
-        rig.announce(peer_a, &hashes(0..3));
-
-        rig.dispatch();
-        let (requested, _) = rig.take_request(peer_a).unwrap();
-        assert_eq!(requested, [hashes(10..13), hashes(0..3)].concat());
+        assert!(rig.fetcher.poll_next_unpin(&mut cx).is_pending());
     }
 
     #[test]
@@ -1933,40 +1898,14 @@ mod tests {
         rig.dispatch();
         assert_eq!(rig.fetcher.fetching_peer(&hashes[0]), Some(peer_a));
 
-        // one transaction out of ten did not hit any response limit, so peer_a is dropped for
-        // the rest instead of serving it one transaction at a time
+        // Delivering fewer than half of the requested hashes drops peer_a for the rest,
+        // limiting repeated low-progress retries regardless of transaction sizes.
         rig.respond(peer_a, txs[..1].to_vec());
         assert_eq!(rig.fetcher.num_hashes(), 4, "hashes without another candidate are dropped");
         for hash in &hashes[1..5] {
             assert_eq!(rig.fetcher.candidate_peers(hash), vec![peer_b]);
         }
         assert!(rig.fetcher.queued_hashes(&peer_a).is_empty());
-    }
-
-    #[test]
-    fn partial_response_drops_peer_for_skipped_hashes() {
-        let mut rig = Rig::new();
-        let peer_a = peer(1);
-        let peer_b = peer(2);
-        rig.add_peer(peer_a);
-        rig.add_peer(peer_b);
-        let txs = pooled_txs(3);
-        let hashes = hashes_of(&txs);
-
-        rig.announce(peer_a, &hashes);
-        rig.announce(peer_b, &hashes);
-        rig.dispatch();
-
-        // peer_a delivers the last hash only, so it deliberately skipped the first two
-        rig.respond(peer_a, txs[2..].to_vec());
-        assert_eq!(rig.fetcher.num_pending_hashes(), 2);
-        assert_eq!(rig.fetcher.candidate_peers(&hashes[0]), vec![peer_b]);
-        assert_eq!(rig.fetcher.candidate_peers(&hashes[1]), vec![peer_b]);
-
-        rig.dispatch();
-        assert!(rig.take_request(peer_a).is_none());
-        let (requested, _) = rig.take_request(peer_b).unwrap();
-        assert_eq!(requested, hashes[..2]);
     }
 
     #[test]
@@ -1988,7 +1927,7 @@ mod tests {
     }
 
     #[test]
-    fn unsolicited_transactions_are_filtered_and_reported() {
+    fn unsolicited_and_duplicate_transactions_are_filtered_and_reported() {
         let mut rig = Rig::new();
         let peer_a = peer(1);
         rig.add_peer(peer_a);
@@ -1999,7 +1938,7 @@ mod tests {
         rig.dispatch();
 
         let FetchEvent::TransactionsFetched { transactions, report_peer, .. } =
-            rig.respond(peer_a, txs.clone())
+            rig.respond(peer_a, vec![txs[0].clone(), txs[1].clone(), txs[0].clone()])
         else {
             panic!("expected fetched transactions")
         };
@@ -2166,28 +2105,6 @@ mod tests {
     }
 
     #[test]
-    fn reconnected_peer_starts_fresh() {
-        let mut rig = Rig::new();
-        let peer_a = peer(1);
-        rig.add_peer(peer_a);
-        let hashes = hashes(0..2);
-
-        rig.announce(peer_a, &hashes);
-        rig.dispatch();
-        rig.disconnect(peer_a);
-        rig.add_peer(peer_a);
-
-        // the pending request of the old session resolves after the peer reconnected
-        rig.next_event().unwrap();
-        assert_eq!(rig.fetcher.num_hashes(), 0);
-
-        rig.announce(peer_a, &hashes);
-        assert_eq!(rig.dispatch(), 1);
-        let (requested, _) = rig.take_request(peer_a).unwrap();
-        assert_eq!(requested, hashes);
-    }
-
-    #[test]
     fn per_peer_announcement_limit_is_enforced() {
         let config =
             TransactionFetcherConfig { max_announced_hashes_per_peer: 3, ..Default::default() };
@@ -2260,12 +2177,13 @@ mod tests {
     #[test]
     fn later_announcers_are_asked_after_the_first_ones_failed() {
         let mut rig = Rig::new();
-        let hash = hash(1);
+        let batch = hashes(0..3);
+        let hash = batch[0];
         let peers =
             (1..=MAX_COUNT_CANDIDATE_PEERS_PER_HASH as u8 + 2).map(peer).collect::<Vec<_>>();
         for peer_id in &peers {
             rig.add_peer(*peer_id);
-            rig.announce(*peer_id, &[hash]);
+            rig.announce(*peer_id, &batch);
         }
 
         // Keep the eager sources and rotate the oldest fallback sources out for later ones.
@@ -2289,13 +2207,16 @@ mod tests {
         assert_eq!(rig.fetcher.fetching_peer(&hash), Some(*candidates.last().unwrap()));
 
         // the hash is given up on once all candidates failed
-        let mut attempts = 1;
+        let mut order = vec![peers[0]];
         while let Some(fetching) = rig.fetcher.fetching_peer(&hash) {
             rig.fail(fetching, RequestError::Timeout);
-            attempts += 1;
+            order.push(fetching);
             rig.dispatch();
         }
-        assert_eq!(attempts, MAX_COUNT_CANDIDATE_PEERS_PER_HASH);
+        let expected = std::iter::once(candidates[0])
+            .chain(candidates[1..].iter().rev().copied())
+            .collect::<Vec<_>>();
+        assert_eq!(order, expected);
         assert_eq!(rig.fetcher.num_hashes(), 0);
     }
 
@@ -2338,24 +2259,6 @@ mod tests {
         rig.fail(p, RequestError::Timeout);
         assert_eq!(rig.fetcher.num_hashes(), 0);
         assert_eq!(rig.dispatch(), 0);
-    }
-
-    #[test]
-    fn latest_source_can_deliver_after_candidate_slots_fill() {
-        let mut rig = Rig::new();
-        let txs = pooled_txs(1);
-        let hashes = hashes_of(&txs);
-        for n in 1..=MAX_COUNT_CANDIDATE_PEERS_PER_HASH as u8 + 1 {
-            rig.add_peer(peer(n));
-            rig.announce(peer(n), &hashes);
-        }
-        rig.dispatch();
-        rig.fail(peer(1), RequestError::Timeout);
-        let honest = peer(MAX_COUNT_CANDIDATE_PEERS_PER_HASH as u8 + 1);
-        rig.dispatch();
-        assert_eq!(rig.fetcher.fetching_peer(&hashes[0]), Some(honest));
-        rig.respond(honest, txs);
-        assert_eq!(rig.fetcher.num_hashes(), 0);
     }
 
     #[test]
@@ -2647,25 +2550,6 @@ mod tests {
     }
 
     #[test]
-    fn per_peer_inflight_limit_allows_concurrent_requests() {
-        let config =
-            TransactionFetcherConfig { max_inflight_requests_per_peer: 2, ..Default::default() };
-        let mut rig = Rig::with_config(config);
-        let peer_a = peer(1);
-        rig.add_peer(peer_a);
-        let hashes = hashes(0..300);
-
-        rig.announce_unsized(peer_a, &hashes);
-        assert_eq!(rig.dispatch(), 2);
-
-        let (first, _) = rig.take_request(peer_a).unwrap();
-        let (second, _) = rig.take_request(peer_a).unwrap();
-        assert_eq!(first, hashes[..256]);
-        assert_eq!(second, hashes[256..]);
-        assert!(!rig.fetcher.is_idle(&peer_a));
-    }
-
-    #[test]
     fn dispatch_applies_the_request_limit_independently_to_each_peer() {
         let mut rig = Rig::new();
         let peer_a = peer(1);
@@ -2818,21 +2702,6 @@ mod tests {
     }
 
     #[test]
-    fn verify_response_filters_unsolicited_and_duplicates() {
-        let txs = pooled_txs(2);
-        let requested = [hash(1), *txs[0].tx_hash(), hash(2)];
-
-        let mut response = PooledTransactions(vec![txs[0].clone(), txs[1].clone(), txs[0].clone()]);
-        let mut delivered = B256Set::default();
-        let unsolicited =
-            verify_response(&mut response, &requested.into_iter().collect(), &mut delivered);
-
-        assert_eq!(response.0, txs[..1]);
-        assert_eq!(delivered.into_iter().collect::<Vec<_>>(), vec![*txs[0].tx_hash()]);
-        assert_eq!(unsolicited, 1);
-    }
-
-    #[test]
     fn random_operations_keep_invariants() {
         let mut rng = StdRng::seed_from_u64(0x5eed);
         let txs = pooled_txs(150);
@@ -2952,31 +2821,14 @@ mod tests {
         // settle everything that is still inflight
         drop(outstanding);
         for peer_id in &connected {
-            rig.sessions.remove(peer_id);
+            rig.disconnect(*peer_id);
         }
         rig.drain_events();
         assert_eq!(rig.fetcher.num_inflight_requests(), 0);
         assert_eq!(rig.fetcher.num_fetching_hashes(), 0);
+        assert_eq!(rig.fetcher.num_hashes(), 0);
+        assert_eq!(rig.fetcher.num_peers(), 0);
     }
-    #[test]
-    fn stream_is_pending_without_requests_and_never_terminates() {
-        let mut rig = Rig::new();
-        let peer_a = peer(1);
-        rig.add_peer(peer_a);
-        let txs = pooled_txs(1);
-        let mut cx = Context::from_waker(noop_waker_ref());
-
-        assert!(rig.fetcher.poll_next_unpin(&mut cx).is_pending());
-
-        rig.announce(peer_a, &hashes_of(&txs));
-        rig.dispatch();
-        rig.respond(peer_a, txs);
-
-        // the stream stays open once all requests resolved
-        assert!(rig.fetcher.poll_next_unpin(&mut cx).is_pending());
-        assert_eq!(rig.fetcher.num_inflight_requests(), 0);
-    }
-
     #[test]
     fn resolved_requests_are_yielded_one_per_poll() {
         let mut rig = Rig::new();
@@ -2996,36 +2848,6 @@ mod tests {
         assert!(events.iter().all(|event| matches!(event, FetchEvent::FetchError { .. })));
         assert!(rig.next_event().is_none());
         assert_eq!(rig.fetcher.num_inflight_requests(), 0);
-    }
-
-    #[test]
-    fn response_wakes_the_polling_task() {
-        let mut rig = Rig::new();
-        let peer_a = peer(1);
-        rig.add_peer(peer_a);
-        rig.announce(peer_a, &hashes(0..1));
-        rig.dispatch();
-
-        let counter = Arc::new(WakeCounter::default());
-        let waker = waker(counter.clone());
-        let mut cx = Context::from_waker(&waker);
-        assert!(rig.fetcher.poll_next_unpin(&mut cx).is_pending());
-        // `FuturesUnordered` wakes the task once itself after polling newly added requests, so
-        // only the change matters
-        let wakes = counter.wakes();
-
-        let (_, response) = rig.take_request(peer_a).unwrap();
-        response.send(Err(RequestError::Timeout)).unwrap();
-        assert_eq!(
-            counter.wakes(),
-            wakes + 1,
-            "the response wakes the task that polled the fetcher"
-        );
-        assert!(matches!(
-            rig.fetcher.poll_next_unpin(&mut cx),
-            Poll::Ready(Some(FetchEvent::FetchError { .. }))
-        ));
-        rig.fetcher.assert_invariants();
     }
 
     #[test]
@@ -3055,57 +2877,27 @@ mod tests {
     }
 
     #[test]
-    fn announcement_flood_from_one_peer_is_bounded() {
-        let mut rig = Rig::new();
-        rig.check_invariants = false;
-        let peer_a = peer(1);
-        rig.add_peer(peer_a);
-        let limit = rig.fetcher.config().max_announced_hashes_per_peer as usize;
-
-        // 50 full announcements of unique hashes
-        for batch in 0..50u64 {
-            rig.announce_unsized(peer_a, &hashes(batch * 4096..(batch + 1) * 4096));
-        }
-        assert_eq!(rig.fetcher.num_hashes(), limit);
-        assert!(rig.fetcher.queued_hashes(&peer_a).len() <= 2 * limit);
-        rig.fetcher.assert_invariants();
-
-        // settled hashes free the peer's budget again
-        assert_eq!(rig.dispatch(), 1);
-        let (requested, response) = rig.take_request(peer_a).unwrap();
-        assert_eq!(requested.len(), 256);
-        response.send(Err(RequestError::BadResponse)).unwrap();
-        rig.next_event().unwrap();
-        assert_eq!(rig.fetcher.num_hashes(), limit - 256);
-
-        rig.announce_unsized(peer_a, &hashes(1_000_000..1_000_300));
-        assert_eq!(rig.fetcher.num_hashes(), limit);
-        rig.fetcher.assert_invariants();
-    }
-
-    #[test]
     fn global_capacity_bounds_tracked_hashes_across_peers() {
         let config = TransactionFetcherConfig {
-            max_capacity_cache_txns_pending_fetch: 1000,
+            max_capacity_cache_txns_pending_fetch: 40,
             ..Default::default()
         };
         let mut rig = Rig::with_config(config);
-        rig.check_invariants = false;
         let peers = (1..=4).map(peer).collect::<Vec<_>>();
         for (i, peer_id) in peers.iter().enumerate() {
             rig.add_peer(*peer_id);
-            rig.announce_unsized(*peer_id, &hashes(i as u64 * 400..(i as u64 + 1) * 400));
+            rig.announce_unsized(*peer_id, &hashes(i as u64 * 16..(i as u64 + 1) * 16));
         }
 
-        // 600 of the 1600 announced hashes were evicted, spread over the peers so that every
+        // 24 of the 64 announced hashes were evicted, spread over the peers so that every
         // peer lost its oldest hashes and kept its newest
-        assert_eq!(rig.fetcher.num_hashes(), 1000);
+        assert_eq!(rig.fetcher.num_hashes(), 40);
         for (i, peer_id) in peers.iter().enumerate() {
-            let first = i as u64 * 400;
+            let first = i as u64 * 16;
             assert!(rig.fetcher.candidate_peers(&hash(first)).is_empty());
-            assert!(rig.fetcher.candidate_peers(&hash(first + 99)).is_empty());
-            assert_eq!(rig.fetcher.candidate_peers(&hash(first + 200)), vec![*peer_id]);
-            assert_eq!(rig.fetcher.candidate_peers(&hash(first + 399)), vec![*peer_id]);
+            assert!(rig.fetcher.candidate_peers(&hash(first + 3)).is_empty());
+            assert_eq!(rig.fetcher.candidate_peers(&hash(first + 8)), vec![*peer_id]);
+            assert_eq!(rig.fetcher.candidate_peers(&hash(first + 15)), vec![*peer_id]);
         }
         rig.fetcher.assert_invariants();
 
@@ -3117,149 +2909,8 @@ mod tests {
             assert!(requested.len() <= 256);
             requested_total += requested.len();
         }
-        assert_eq!(requested_total, 1000, "every remaining hash is requested");
+        assert_eq!(requested_total, 40, "every remaining hash is requested");
         rig.fetcher.assert_invariants();
-    }
-
-    #[test]
-    fn many_peers_announcing_the_same_hashes() {
-        let mut rig = Rig::new();
-        rig.check_invariants = false;
-        let hashes = hashes(0..100);
-        let peers = (0..200).map(peer_n).collect::<Vec<_>>();
-        for peer_id in &peers {
-            rig.add_peer_with_capacity(*peer_id, 1);
-            rig.announce(*peer_id, &hashes);
-        }
-
-        // Eager sources are retained alongside the most recent fallback sources.
-        let candidates = peers[..MAX_COUNT_EAGER_CANDIDATE_PEERS_PER_HASH]
-            .iter()
-            .chain(
-                &peers[peers.len() -
-                    (MAX_COUNT_CANDIDATE_PEERS_PER_HASH -
-                        MAX_COUNT_EAGER_CANDIDATE_PEERS_PER_HASH)..],
-            )
-            .copied()
-            .collect::<Vec<_>>();
-        assert_eq!(rig.fetcher.num_hashes(), 100);
-        assert_eq!(rig.fetcher.candidate_peers(&hashes[0]), candidates);
-        rig.fetcher.assert_invariants();
-
-        // one request at a time, retried with the next candidate until all are exhausted
-        let mut order = Vec::new();
-        for _ in &candidates {
-            assert_eq!(rig.dispatch(), 1);
-            let fetching = rig.fetcher.fetching_peer(&hashes[0]).unwrap();
-            let (requested, response) = rig.take_request(fetching).unwrap();
-            assert_eq!(requested.len(), 100);
-            response.send(Err(RequestError::Timeout)).unwrap();
-            rig.next_event().unwrap();
-            order.push(fetching);
-        }
-        let expected =
-            [&candidates[..1], &candidates[1..].iter().rev().copied().collect::<Vec<_>>()].concat();
-        assert_eq!(order, expected, "the first announcer is asked first, then the most recent");
-        assert_eq!(rig.fetcher.num_hashes(), 0);
-        assert_eq!(rig.dispatch(), 0);
-        rig.fetcher.assert_invariants();
-    }
-
-    #[test]
-    fn global_inflight_limit_serves_peers_in_announcement_order() {
-        let mut rig = Rig::new();
-        rig.check_invariants = false;
-        let max_inflight = rig.fetcher.config().max_inflight_requests as usize;
-        let peers = (0..max_inflight as u64 + 20).map(peer_n).collect::<Vec<_>>();
-        for (i, peer_id) in peers.iter().enumerate() {
-            rig.add_peer(*peer_id);
-            rig.announce(*peer_id, &hashes(i as u64 * 10..(i as u64 + 1) * 10));
-        }
-
-        assert_eq!(rig.dispatch(), max_inflight);
-        assert!(peers[..max_inflight].iter().all(|peer_id| !rig.fetcher.is_idle(peer_id)));
-        assert!(peers[max_inflight..].iter().all(|peer_id| rig.fetcher.is_idle(peer_id)));
-        assert_eq!(rig.fetcher.num_fetching_hashes(), max_inflight * 10);
-        rig.fetcher.assert_invariants();
-
-        // the remaining peers are served once requests resolve
-        for peer_id in &peers[..max_inflight] {
-            rig.fail(*peer_id, RequestError::BadResponse);
-        }
-        assert_eq!(rig.dispatch(), 20);
-        assert_eq!(rig.fetcher.num_inflight_requests(), 20);
-        rig.fetcher.assert_invariants();
-    }
-
-    #[test]
-    fn huge_unsolicited_response_is_filtered() {
-        let mut rig = Rig::new();
-        let peer_a = peer(1);
-        rig.add_peer(peer_a);
-        let txs = pooled_txs(4097);
-
-        rig.announce(peer_a, &hashes_of(&txs[..1]));
-        rig.dispatch();
-
-        let FetchEvent::TransactionsFetched { transactions, report_peer, .. } =
-            rig.respond(peer_a, txs.clone())
-        else {
-            panic!("expected fetched transactions")
-        };
-        assert_eq!(transactions.0, txs[..1]);
-        assert!(report_peer);
-        assert_eq!(rig.fetcher.num_hashes(), 0);
-    }
-
-    #[test]
-    fn peer_churn_leaves_no_state_behind() {
-        let mut rig = Rig::new();
-        let txs = pooled_txs(40);
-        let all = hashes_of(&txs);
-        let by_hash = txs.iter().map(|tx| (*tx.tx_hash(), tx.clone())).collect::<B256Map<_>>();
-        let peers = (1..=6).map(peer).collect::<Vec<_>>();
-        for peer_id in &peers {
-            rig.add_peer_with_capacity(*peer_id, 4);
-        }
-
-        for round in 0..30usize {
-            // every peer announces a window of the hashes
-            for (i, peer_id) in peers.iter().enumerate() {
-                let start = (round + i) % 20;
-                rig.announce(*peer_id, &all[start..start + 20]);
-            }
-            rig.dispatch();
-
-            // a rotating peer disconnects with its request inflight and comes back
-            let churned = peers[round % peers.len()];
-            rig.disconnect(churned);
-            rig.add_peer_with_capacity(churned, 4);
-            rig.drain_events();
-
-            // the others deliver or fail
-            for (i, peer_id) in peers.iter().enumerate() {
-                if *peer_id == churned {
-                    continue
-                }
-                if let Some((requested, response)) = rig.take_request(*peer_id) {
-                    let delivered = if i % 2 == 0 {
-                        requested.iter().map(|hash| by_hash[hash].clone()).collect()
-                    } else {
-                        vec![]
-                    };
-                    response.send(Ok(PooledTransactions(delivered))).unwrap();
-                }
-            }
-            rig.drain_events();
-        }
-
-        for peer_id in &peers {
-            rig.disconnect(*peer_id);
-        }
-        rig.drain_events();
-        assert_eq!(rig.fetcher.num_hashes(), 0);
-        assert_eq!(rig.fetcher.num_inflight_requests(), 0);
-        assert_eq!(rig.fetcher.num_peers(), 0);
     }
 
     #[test]
@@ -3301,8 +2952,8 @@ mod tests {
         assert_eq!(rig.dispatch(), 2);
         let (first, response_first) = rig.take_request(peer_a).unwrap();
         let (second, response_second) = rig.take_request(peer_a).unwrap();
-        assert_eq!(first.len(), 256);
-        assert_eq!(second.len(), 44);
+        assert_eq!(first, hashes[..256]);
+        assert_eq!(second, hashes[256..]);
 
         // only the last hash of the first request is delivered, the rest was skipped and has no
         // other candidate

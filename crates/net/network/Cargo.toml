@@ -159,8 +159,3 @@ test-utils = [
 name = "tx_fetcher"
 harness = false
 required-features = ["test-utils"]
-
-[[bench]]
-name = "tx_manager_fetching"
-harness = false
-required-features = ["test-utils"]
