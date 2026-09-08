@@ -321,23 +321,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "alloy-evm"
-version = "0.39.0"
-source = "git+https://github.com/Soubhik-10/evm?rev=bca84e02f28881efe18f4dfef5ec79eb29a85aad#bca84e02f28881efe18f4dfef5ec79eb29a85aad"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-hardforks 0.4.8",
- "alloy-primitives",
- "alloy-sol-types",
- "auto_impl",
- "derive_more",
- "revm",
- "thiserror 2.0.20",
- "tracing",
-]
-
-[[package]]
 name = "alloy-genesis"
 version = "2.4.1"
 source = "git+https://github.com/Rimeeeeee/alloy?rev=b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8#b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8"
@@ -3633,7 +3616,7 @@ name = "example-custom-beacon-withdrawals"
 version = "0.0.0"
 dependencies = [
  "alloy-eips",
- "alloy-evm 0.39.0 (git+https://github.com/Soubhik-10/evm?rev=5519a01e4507b980ad6d1ab5a8641a5b111206d1)",
+ "alloy-evm",
  "alloy-sol-types",
  "eyre",
  "reth-ethereum",
@@ -3674,7 +3657,7 @@ dependencies = [
 name = "example-custom-evm"
 version = "0.0.0"
 dependencies = [
- "alloy-evm 0.39.0 (git+https://github.com/Soubhik-10/evm?rev=5519a01e4507b980ad6d1ab5a8641a5b111206d1)",
+ "alloy-evm",
  "alloy-genesis",
  "alloy-primitives",
  "eyre",
@@ -3688,7 +3671,7 @@ name = "example-custom-inspector"
 version = "0.0.0"
 dependencies = [
  "alloy-eips",
- "alloy-evm 0.39.0 (git+https://github.com/Soubhik-10/evm?rev=5519a01e4507b980ad6d1ab5a8641a5b111206d1)",
+ "alloy-evm",
  "alloy-primitives",
  "alloy-rpc-types-eth",
  "clap",
@@ -7833,7 +7816,7 @@ version = "2.5.2"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
- "alloy-evm 0.39.0 (git+https://github.com/Soubhik-10/evm?rev=5519a01e4507b980ad6d1ab5a8641a5b111206d1)",
+ "alloy-evm",
  "alloy-hardforks 0.4.8",
  "alloy-primitives",
  "alloy-rlp",
@@ -7912,7 +7895,7 @@ dependencies = [
  "alloy-chains",
  "alloy-consensus",
  "alloy-eips",
- "alloy-evm 0.39.0 (git+https://github.com/Soubhik-10/evm?rev=5519a01e4507b980ad6d1ab5a8641a5b111206d1)",
+ "alloy-evm",
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
@@ -8527,7 +8510,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
  "alloy-eips",
- "alloy-evm 0.39.0 (git+https://github.com/Soubhik-10/evm?rev=5519a01e4507b980ad6d1ab5a8641a5b111206d1)",
+ "alloy-evm",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-engine",
@@ -8943,7 +8926,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
  "alloy-eips",
- "alloy-evm 0.39.0 (git+https://github.com/Soubhik-10/evm?rev=5519a01e4507b980ad6d1ab5a8641a5b111206d1)",
+ "alloy-evm",
  "alloy-primitives",
  "auto_impl",
  "derive_more",
@@ -8968,7 +8951,7 @@ version = "2.5.2"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
- "alloy-evm 0.39.0 (git+https://github.com/Soubhik-10/evm?rev=5519a01e4507b980ad6d1ab5a8641a5b111206d1)",
+ "alloy-evm",
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rpc-types-engine",
@@ -9010,7 +8993,7 @@ dependencies = [
 name = "reth-execution-errors"
 version = "2.5.2"
 dependencies = [
- "alloy-evm 0.39.0 (git+https://github.com/Soubhik-10/evm?rev=5519a01e4507b980ad6d1ab5a8641a5b111206d1)",
+ "alloy-evm",
  "alloy-primitives",
  "alloy-rlp",
  "nybbles",
@@ -9024,7 +9007,7 @@ version = "2.5.2"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
- "alloy-evm 0.39.0 (git+https://github.com/Soubhik-10/evm?rev=5519a01e4507b980ad6d1ab5a8641a5b111206d1)",
+ "alloy-evm",
  "alloy-primitives",
  "alloy-rlp",
  "arbitrary",
@@ -9967,7 +9950,7 @@ dependencies = [
  "alloy-dyn-abi",
  "alloy-eip7928",
  "alloy-eips",
- "alloy-evm 0.39.0 (git+https://github.com/Soubhik-10/evm?rev=5519a01e4507b980ad6d1ab5a8641a5b111206d1)",
+ "alloy-evm",
  "alloy-genesis",
  "alloy-network",
  "alloy-primitives",
@@ -10132,7 +10115,7 @@ name = "reth-rpc-convert"
 version = "2.5.2"
 dependencies = [
  "alloy-consensus",
- "alloy-evm 0.39.0 (git+https://github.com/Soubhik-10/evm?rev=5519a01e4507b980ad6d1ab5a8641a5b111206d1)",
+ "alloy-evm",
  "alloy-json-rpc",
  "alloy-network",
  "alloy-primitives",
@@ -10211,7 +10194,7 @@ dependencies = [
  "alloy-dyn-abi",
  "alloy-eip7928",
  "alloy-eips",
- "alloy-evm 0.39.0 (git+https://github.com/Soubhik-10/evm?rev=5519a01e4507b980ad6d1ab5a8641a5b111206d1)",
+ "alloy-evm",
  "alloy-json-rpc",
  "alloy-network",
  "alloy-primitives",
@@ -10257,7 +10240,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
  "alloy-eips",
- "alloy-evm 0.39.0 (git+https://github.com/Soubhik-10/evm?rev=5519a01e4507b980ad6d1ab5a8641a5b111206d1)",
+ "alloy-evm",
  "alloy-network",
  "alloy-primitives",
  "alloy-rpc-client",
@@ -10834,7 +10817,7 @@ dependencies = [
 name = "reth-trie-parallel"
 version = "2.5.2"
 dependencies = [
- "alloy-evm 0.39.0 (git+https://github.com/Soubhik-10/evm?rev=5519a01e4507b980ad6d1ab5a8641a5b111206d1)",
+ "alloy-evm",
  "alloy-primitives",
  "alloy-rlp",
  "crossbeam-channel",
@@ -11105,7 +11088,7 @@ dependencies = [
 [[package]]
 name = "revmc"
 version = "0.1.0"
-source = "git+https://github.com/Soubhik-10/revmc?rev=10511b73b45eb29a5834f4960331478b662a1890#10511b73b45eb29a5834f4960331478b662a1890"
+source = "git+https://github.com/Soubhik-10/revmc?rev=ddcfe8eec706864355ce1e2c6c1aaf2567953d60#ddcfe8eec706864355ce1e2c6c1aaf2567953d60"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -11125,7 +11108,7 @@ dependencies = [
 [[package]]
 name = "revmc-backend"
 version = "0.1.0"
-source = "git+https://github.com/Soubhik-10/revmc?rev=10511b73b45eb29a5834f4960331478b662a1890#10511b73b45eb29a5834f4960331478b662a1890"
+source = "git+https://github.com/Soubhik-10/revmc?rev=ddcfe8eec706864355ce1e2c6c1aaf2567953d60#ddcfe8eec706864355ce1e2c6c1aaf2567953d60"
 dependencies = [
  "eyre",
  "ruint",
@@ -11134,12 +11117,12 @@ dependencies = [
 [[package]]
 name = "revmc-build"
 version = "0.1.0"
-source = "git+https://github.com/Soubhik-10/revmc?rev=10511b73b45eb29a5834f4960331478b662a1890#10511b73b45eb29a5834f4960331478b662a1890"
+source = "git+https://github.com/Soubhik-10/revmc?rev=ddcfe8eec706864355ce1e2c6c1aaf2567953d60#ddcfe8eec706864355ce1e2c6c1aaf2567953d60"
 
 [[package]]
 name = "revmc-builtins"
 version = "0.1.0"
-source = "git+https://github.com/Soubhik-10/revmc?rev=10511b73b45eb29a5834f4960331478b662a1890#10511b73b45eb29a5834f4960331478b662a1890"
+source = "git+https://github.com/Soubhik-10/revmc?rev=ddcfe8eec706864355ce1e2c6c1aaf2567953d60#ddcfe8eec706864355ce1e2c6c1aaf2567953d60"
 dependencies = [
  "paste",
  "revm-bytecode",
@@ -11154,7 +11137,7 @@ dependencies = [
 [[package]]
 name = "revmc-codegen"
 version = "0.1.0"
-source = "git+https://github.com/Soubhik-10/revmc?rev=10511b73b45eb29a5834f4960331478b662a1890#10511b73b45eb29a5834f4960331478b662a1890"
+source = "git+https://github.com/Soubhik-10/revmc?rev=ddcfe8eec706864355ce1e2c6c1aaf2567953d60#ddcfe8eec706864355ce1e2c6c1aaf2567953d60"
 dependencies = [
  "alloy-primitives",
  "bitflags 2.13.1",
@@ -11185,7 +11168,7 @@ dependencies = [
 [[package]]
 name = "revmc-context"
 version = "0.1.0"
-source = "git+https://github.com/Soubhik-10/revmc?rev=10511b73b45eb29a5834f4960331478b662a1890#10511b73b45eb29a5834f4960331478b662a1890"
+source = "git+https://github.com/Soubhik-10/revmc?rev=ddcfe8eec706864355ce1e2c6c1aaf2567953d60#ddcfe8eec706864355ce1e2c6c1aaf2567953d60"
 dependencies = [
  "revm-context",
  "revm-context-interface",
@@ -11200,7 +11183,7 @@ dependencies = [
 [[package]]
 name = "revmc-llvm"
 version = "0.1.0"
-source = "git+https://github.com/Soubhik-10/revmc?rev=10511b73b45eb29a5834f4960331478b662a1890#10511b73b45eb29a5834f4960331478b662a1890"
+source = "git+https://github.com/Soubhik-10/revmc?rev=ddcfe8eec706864355ce1e2c6c1aaf2567953d60#ddcfe8eec706864355ce1e2c6c1aaf2567953d60"
 dependencies = [
  "alloy-primitives",
  "cc",
@@ -11213,9 +11196,9 @@ dependencies = [
 [[package]]
 name = "revmc-runtime"
 version = "0.1.0"
-source = "git+https://github.com/Soubhik-10/revmc?rev=10511b73b45eb29a5834f4960331478b662a1890#10511b73b45eb29a5834f4960331478b662a1890"
+source = "git+https://github.com/Soubhik-10/revmc?rev=ddcfe8eec706864355ce1e2c6c1aaf2567953d60#ddcfe8eec706864355ce1e2c6c1aaf2567953d60"
 dependencies = [
- "alloy-evm 0.39.0 (git+https://github.com/Soubhik-10/evm?rev=bca84e02f28881efe18f4dfef5ec79eb29a85aad)",
+ "alloy-evm",
  "alloy-primitives",
  "crossbeam-channel",
  "crossbeam-queue",
