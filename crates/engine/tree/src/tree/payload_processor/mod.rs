@@ -35,7 +35,7 @@ pub use reth_trie_parallel::{
 use std::{
     ops::Not,
     sync::{
-        atomic::{AtomicBool, AtomicUsize},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc, Arc, OnceLock,
     },
 };
@@ -188,11 +188,13 @@ where
     {
         let prewarm_transactions =
             self.prewarms_transactions(env.transaction_count, parallel_bal_execution);
+        let cancelled = Arc::new(AtomicBool::new(false));
         let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(
             transactions,
             env.transaction_count,
             parallel_bal_execution,
             prewarm_transactions,
+            cancelled.clone(),
         );
         let prewarm_handle = self.spawn_caching_with(
             env,
@@ -202,7 +204,12 @@ where
             hashed_update_stream,
             parallel_bal_execution,
         );
-        PayloadHandle { prewarm_handle, transactions: execution_rx, _span: Span::current() }
+        PayloadHandle {
+            prewarm_handle,
+            transactions: execution_rx,
+            cancelled,
+            _span: Span::current(),
+        }
     }
 
     /// Whether the prewarm task will consume converted transactions, i.e. whether
@@ -259,6 +266,7 @@ where
         transaction_count: usize,
         parallel_bal_execution: bool,
         prewarm_transactions: bool,
+        cancelled: Arc<AtomicBool>,
     ) -> (Option<IteratorPrewarmTxReceiver<Evm, I>>, IteratorExecuteTxReceiver<Evm, I>) {
         let (prewarm_tx, prewarm_rx) =
             prewarm_transactions.then(|| mpsc::sync_channel(transaction_count)).unzip();
@@ -281,6 +289,7 @@ where
                     &convert,
                     prewarm_tx.as_ref(),
                     &execute_tx,
+                    &cancelled,
                 );
             });
         } else {
@@ -293,23 +302,25 @@ where
                     // With BALs, we don't care about the order of transactions in execution and
                     // prewarming, so we don't have to use `for_each_ordered_in`.
                     executor.cpu_pool().install(|| {
-                        transactions
+                        let _ = transactions
                             .into_par_iter()
                             .enumerate()
-                            .map(|(i, tx)| {
-                                let tx = convert.convert(tx);
-                                (i, tx)
-                            })
-                            .for_each(|(idx, tx)| {
-                                let tx = tx.map(|tx| {
-                                    let tx = WithTxEnv::new(tx);
-                                    if let Some(prewarm_tx) = &prewarm_tx {
-                                        let _ = prewarm_tx.send((idx, tx.clone()));
-                                    }
-                                    tx
-                                });
-                                let _ = execute_tx.send((idx, tx));
+                            .try_for_each(|(idx, tx)| {
+                                if cancelled.load(Ordering::Relaxed) {
+                                    return Err(())
+                                }
+                                let tx = convert.convert(tx).map(WithTxEnv::new);
+                                let failed = tx.is_err();
+                                if let (Some(prewarm_tx), Ok(tx)) = (&prewarm_tx, &tx) {
+                                    let _ = prewarm_tx.send((idx, tx.clone()));
+                                }
+                                let disconnected = execute_tx.send((idx, tx)).is_err();
                                 trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
+                                if failed || disconnected {
+                                    Err(())
+                                } else {
+                                    Ok(())
+                                }
                             });
                     });
                 } else {
@@ -321,12 +332,15 @@ where
 
                     // Convert the first few transactions sequentially so execution can
                     // start immediately without waiting for rayon work-stealing.
-                    convert_serial(
+                    if !convert_serial(
                         iter.by_ref().take(prefetch),
                         &convert,
                         prewarm_tx.as_ref(),
                         &execute_tx,
-                    );
+                        &cancelled,
+                    ) {
+                        return
+                    }
 
                     let mut iter = iter.enumerate();
 
@@ -336,6 +350,9 @@ where
                     // Process exponentially increasing windows to make sure that first transactions are prioritized.
                     executor.cpu_pool().install(move || {
                         loop {
+                            if cancelled.load(Ordering::Relaxed) {
+                                break;
+                            }
                             let chunk = iter
                                 .by_ref()
                                 .take(batch_size)
@@ -350,16 +367,32 @@ where
                                 .into_par_iter()
                                 .map(|(i, tx)| {
                                     let idx = i + prefetch;
-                                    let tx = convert.convert(tx).map(WithTxEnv::new);
-                                    (idx, tx)
+                                    if cancelled.load(Ordering::Relaxed) {
+                                        return Err((idx, None))
+                                    }
+                                    convert.convert(tx)
+                                        .map(|tx| (idx, WithTxEnv::new(tx)))
+                                        .map_err(|err| (idx, Some(err)))
                                 })
-                                .collect::<Vec<_>>();
+                                .collect::<Result<Vec<_>, _>>();
+
+                            let chunk = match chunk {
+                                Ok(chunk) => chunk,
+                                Err((idx, error)) => {
+                                    if let Some(error) = error {
+                                        let _ = execute_tx.send((idx, Err(error)));
+                                    }
+                                    return
+                                }
+                            };
 
                             for (idx, tx) in chunk {
-                                if let (Some(prewarm_tx), Ok(tx)) = (&prewarm_tx, &tx) {
+                                if let Some(prewarm_tx) = &prewarm_tx {
                                     let _ = prewarm_tx.send((idx, tx.clone()));
                                 }
-                                let _ = execute_tx.send((idx, tx));
+                                if execute_tx.send((idx, Ok(tx))).is_err() {
+                                    return
+                                }
                                 trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
                             }
                         }
@@ -525,26 +558,35 @@ where
 }
 
 /// Converts transactions sequentially and sends them to the execute channel, and to the prewarm
-/// channel if there is one.
+/// channel if there is one. Returns false on cancellation, conversion failure, or disconnection.
 fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
     iter: impl Iterator<Item = RawTx>,
     convert: &C,
     prewarm_tx: Option<&mpsc::SyncSender<(usize, WithTxEnv<TxEnv, Recovered>)>>,
     execute_tx: &ExecuteTxSender<TxEnv, Recovered, Err>,
-) where
+    cancelled: &AtomicBool,
+) -> bool
+where
     Tx: ExecutableTxParts<TxEnv, InnerTx, Recovered = Recovered>,
     TxEnv: Clone,
     C: ConvertTx<RawTx, Tx = Tx, Error = Err>,
 {
     for (idx, raw_tx) in iter.enumerate() {
+        if cancelled.load(Ordering::Relaxed) {
+            return false
+        }
         let tx = convert.convert(raw_tx);
-        let tx = tx.map(|tx| WithTxEnv::new(tx));
+        let failed = tx.is_err();
+        let tx = tx.map(WithTxEnv::new);
         if let (Some(prewarm_tx), Ok(tx)) = (prewarm_tx, &tx) {
             let _ = prewarm_tx.send((idx, tx.clone()));
         }
-        let _ = execute_tx.send((idx, tx));
+        if execute_tx.send((idx, tx)).is_err() || failed {
+            return false
+        }
         trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
     }
+    true
 }
 
 /// Handle to all the spawned tasks.
@@ -556,8 +598,17 @@ pub struct PayloadHandle<Tx, Err, R> {
     prewarm_handle: CacheTaskHandle<R>,
     /// Stream of block transactions and their indices in the block.
     transactions: IndexedTxReceiver<Tx, Err>,
+    /// Stops detached transaction conversion when the engine finishes with this payload.
+    cancelled: Arc<AtomicBool>,
     /// Span for tracing
     _span: Span,
+}
+
+impl<Tx, Err, R> Drop for PayloadHandle<Tx, Err, R> {
+    fn drop(&mut self) {
+        // This only signals cancellation; no other memory is published to the workers.
+        self.cancelled.store(true, Ordering::Relaxed);
+    }
 }
 
 impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
@@ -686,6 +737,150 @@ mod tests {
     use reth_revm::db::BundleState;
     use revm::state::AccountInfo;
     use std::sync::Arc;
+
+    type TestTx = reth_evm::execute::WithTxEnv<
+        reth_evm::TxEnvFor<EthEvmConfig>,
+        reth_primitives_traits::Recovered<reth_ethereum_primitives::TransactionSigned>,
+    >;
+
+    fn converted_tx() -> TestTx {
+        TestTx {
+            tx_env: Default::default(),
+            tx: Arc::new(reth_primitives_traits::Recovered::new_unchecked(
+                reth_ethereum_primitives::TransactionSigned::Legacy(
+                    alloy_consensus::Signed::new_unchecked(
+                        alloy_consensus::TxLegacy::default(),
+                        alloy_primitives::Signature::test_signature(),
+                        B256::ZERO,
+                    ),
+                ),
+                Address::ZERO,
+            )),
+        }
+    }
+
+    fn test_processor() -> PayloadProcessor<EthEvmConfig> {
+        PayloadProcessor::new(
+            reth_tasks::Runtime::test(),
+            EthEvmConfig::new(Arc::new(ChainSpec::default())),
+            &TreeConfig::default(),
+            PrecompileCacheMap::default(),
+        )
+    }
+
+    #[test]
+    fn transaction_conversion_preserves_results() {
+        for (count, bal) in [(10, false), (200, false), (200, true)] {
+            let processor = test_processor();
+            let (prewarm, receiver) = processor.spawn_tx_iterator(
+                ((0..count).collect::<Vec<_>>(), |_| Ok::<_, std::io::Error>(converted_tx())),
+                count,
+                bal,
+                true,
+                Arc::new(super::AtomicBool::new(false)),
+            );
+            let mut indices = Vec::new();
+            for _ in 0..count {
+                let (idx, tx) = receiver.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+                assert!(tx.is_ok());
+                indices.push(idx);
+            }
+            if bal {
+                indices.sort_unstable();
+            }
+            assert_eq!(indices, (0..count).collect::<Vec<_>>());
+            assert_eq!(prewarm.unwrap().iter().count(), count);
+        }
+    }
+
+    #[test]
+    fn transaction_conversion_stops_on_error() {
+        for (count, bal, fail_at) in
+            [(10, false, 0), (200, false, 0), (200, false, 4), (200, true, 0)]
+        {
+            let processor = test_processor();
+            let (_, receiver) = processor.spawn_tx_iterator(
+                ((0..count).collect::<Vec<_>>(), move |idx| {
+                    if idx >= fail_at {
+                        Err(std::io::Error::other("invalid transaction"))
+                    } else {
+                        Ok(converted_tx())
+                    }
+                }),
+                count,
+                bal,
+                false,
+                Arc::new(super::AtomicBool::new(false)),
+            );
+            let mut results = Vec::new();
+            loop {
+                match receiver.recv_timeout(std::time::Duration::from_secs(10)) {
+                    Ok(tx) => results.push(tx),
+                    Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+                    Err(err) => panic!("conversion did not terminate: {err}"),
+                }
+            }
+            assert!(results.iter().any(|(_, tx)| tx.is_err()));
+            assert!(results.len() < count);
+            if !bal {
+                assert_eq!(results.len(), fail_at + 1);
+                assert!(results.last().unwrap().1.is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn dropping_payload_handle_stops_transaction_conversion() {
+        for (count, bal, pause_at) in
+            [(10, false, 0), (1000, false, 0), (1000, false, 4), (1000, true, 0)]
+        {
+            let processor = test_processor();
+            let cancelled = Arc::new(super::AtomicBool::new(false));
+            let calls = Arc::new(super::AtomicUsize::new(0));
+            let converted = calls.clone();
+            let (started_tx, started_rx) = crossbeam_channel::unbounded();
+            let (release_tx, release_rx) = crossbeam_channel::bounded::<()>(0);
+            let (_, receiver) = processor.spawn_tx_iterator(
+                ((0..count).collect::<Vec<_>>(), move |idx| {
+                    converted.fetch_add(1, super::Ordering::Relaxed);
+                    if idx >= pause_at {
+                        started_tx.send(()).unwrap();
+                        let _ = release_rx.recv_timeout(std::time::Duration::from_secs(10));
+                    }
+                    Ok::<_, std::io::Error>(converted_tx())
+                }),
+                count,
+                bal,
+                false,
+                cancelled.clone(),
+            );
+            let handle = super::PayloadHandle {
+                prewarm_handle: super::CacheTaskHandle::<()> {
+                    saved_cache: None,
+                    to_prewarm_task: None,
+                    executed_tx_index: Default::default(),
+                    cache_metrics: None,
+                },
+                transactions: receiver.clone(),
+                cancelled,
+                _span: tracing::Span::none(),
+            };
+            started_rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+            drop(handle);
+            drop(release_tx);
+
+            // Keep a receiver clone alive, as BAL execution does, so channel disconnection
+            // cannot be the reason conversion stops.
+            loop {
+                match receiver.recv_timeout(std::time::Duration::from_secs(10)) {
+                    Ok(_) => {}
+                    Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+                    Err(err) => panic!("conversion did not terminate: {err}"),
+                }
+            }
+            assert!(calls.load(super::Ordering::Relaxed) < count);
+        }
+    }
 
     fn make_saved_cache(hash: B256) -> SavedCache {
         let execution_cache = ExecutionCache::new(1_000);
