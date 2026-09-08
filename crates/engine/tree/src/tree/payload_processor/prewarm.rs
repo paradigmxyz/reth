@@ -28,8 +28,8 @@ use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     AccountReader, BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory,
-    DatabaseProviderROFactory, HistoryReader, PruneCheckpointReader, StageCheckpointReader,
-    StateProviderBox, StorageChangeSetReader, StorageSettingsCache,
+    DatabaseProviderROFactory, HistoryReader, ProviderResult, PruneCheckpointReader,
+    StageCheckpointReader, StateProviderBox, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_storage_overlay::OverlayStateProviderFactory;
@@ -384,7 +384,7 @@ where
                 let parent_span = branch_span.clone();
                 let _span = branch_span.entered();
 
-                stream_bal.as_bal().par_iter().for_each(|account_changes| {
+                let result = stream_bal.as_bal().par_iter().try_for_each(|account_changes| {
                     WorkerPool::with_worker_mut(|worker| {
                         let provider =
                             worker.get_or_init::<Option<Box<dyn AccountReader>>>(|| None);
@@ -393,11 +393,18 @@ where
                             provider,
                             account_changes,
                             &hashed_update_stream,
-                        );
-                    });
+                        )
+                    })
                 });
 
-                hashed_update_stream.finish();
+                match result {
+                    Ok(()) => hashed_update_stream.finish(),
+                    Err(err) => {
+                        // An unfinished stream forces recomputation from the execution output.
+                        warn!(target: "engine::tree::payload_processor::prewarm", %err,
+                            "Failed to stream BAL state updates");
+                    }
+                }
                 let _ = stream_tx.send(());
             });
         } else {
@@ -675,16 +682,16 @@ where
         provider: &mut Option<Box<dyn AccountReader>>,
         account_changes: &alloy_eip7928::AccountChanges,
         hashed_update_stream: &StateRootUpdateStream,
-    ) {
+    ) -> ProviderResult<()> {
         if self.disable_bal_parallel_state_root {
-            return;
+            return Ok(());
         }
         let address = account_changes.address;
         let mut hashed_address = None;
         let account_fields = BalAccountStateFields::from_changes(account_changes);
 
         if !bal_account_changes_state_root(account_changes, account_fields) {
-            return;
+            return Ok(());
         }
 
         // If there are any storage changes we can assume that the resulting account info will be
@@ -716,17 +723,7 @@ where
                 )
                 .entered();
 
-                let inner = match self.provider.database_provider_ro() {
-                    Ok(p) => p,
-                    Err(err) => {
-                        warn!(
-                            target: "engine::tree::payload_processor::prewarm",
-                            ?err,
-                            "Failed to build provider for BAL account reads"
-                        );
-                        return;
-                    }
-                };
+                let inner = self.provider.database_provider_ro()?;
                 let boxed: Box<dyn AccountReader> =
                     match (self.disable_bal_batch_io, &self.saved_cache) {
                         (false, Some(saved)) => {
@@ -741,7 +738,7 @@ where
                 *provider = Some(boxed);
             }
             let account_reader = provider.as_ref().expect("provider just initialized");
-            account_reader.basic_account(&address).ok().flatten()
+            account_reader.basic_account(&address)?
         } else {
             None
         };
@@ -765,6 +762,7 @@ where
         let mut hashed_state = reth_trie::HashedPostState::default();
         hashed_state.accounts.insert(hashed_address, account);
         hashed_update_stream.on_hashed_state_update(hashed_state);
+        Ok(())
     }
 }
 
@@ -889,6 +887,94 @@ mod tests {
         );
 
         assert!(terminate_execution.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn bal_account_read_error_leaves_stream_unfinished() {
+        struct AccountReaderWithError(bool);
+        impl AccountReader for AccountReaderWithError {
+            fn basic_account(
+                &self,
+                _address: &alloy_primitives::Address,
+            ) -> reth_provider::ProviderResult<Option<Account>> {
+                if self.0 {
+                    Err(reth_provider::ProviderError::HeaderNotFound(B256::ZERO.into()))
+                } else {
+                    Ok(None)
+                }
+            }
+        }
+
+        #[derive(Default)]
+        struct RecordingSink {
+            updates: std::sync::Mutex<Vec<reth_trie::HashedPostState>>,
+            finished: AtomicBool,
+        }
+        impl super::super::StateRootSink for RecordingSink {
+            fn on_state_update(&self, _state: revm::state::EvmState) {
+                unreachable!()
+            }
+
+            fn on_hashed_state_update(&self, state: reth_trie::HashedPostState) {
+                self.updates.lock().unwrap().push(state);
+            }
+
+            fn on_updates_finished(&self) {
+                self.finished.store(true, Ordering::Relaxed);
+            }
+        }
+
+        let ctx = PrewarmContext {
+            env: ExecutionEnv::test_default(),
+            evm_config: EthEvmConfig::new(Arc::new(ChainSpec::default())),
+            saved_cache: None,
+            provider: OverlayStateProviderFactory::new(
+                MockEthProvider::default(),
+                OverlayManager::default().overlay_builder(B256::ZERO),
+            ),
+            bal_prewarm_pool: None,
+            metrics: PrewarmMetrics::default(),
+            cache_metrics: None,
+            cache_state_metrics: None,
+            terminate_execution: Arc::new(AtomicBool::new(false)),
+            executed_tx_index: Arc::new(AtomicUsize::new(0)),
+            precompile_cache_disabled: false,
+            precompile_cache_map: PrecompileCacheMap::default(),
+            disable_bal_parallel_state_root: false,
+            disable_bal_batch_io: false,
+        };
+        let changes = AccountChanges::new(alloy_primitives::Address::ZERO)
+            .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::from(10)))
+            .with_storage_change(SlotChanges::new(
+                U256::from(1),
+                vec![StorageChange::new(BlockAccessIndex::new(1), U256::from(2))],
+            ));
+        let bal: alloy_eip7928::bal::Bal = vec![changes].into();
+        let raw = alloy_rlp::encode(&bal).into();
+        let decoded = Arc::new(DecodedBal::new(bal, raw));
+        let runtime = Runtime::test();
+
+        for fail_read in [true, false] {
+            runtime.bal_streaming_pool().init::<Option<Box<dyn AccountReader>>>(|_| {
+                Some(Box::new(AccountReaderWithError(fail_read)))
+            });
+            let sink = Arc::new(RecordingSink::default());
+            let stream = StateRootUpdateStream::new(sink.clone());
+            let (task, actions_tx) = PrewarmCacheTask::new(
+                runtime.clone(),
+                PayloadExecutionCache::default(),
+                ctx.clone(),
+            );
+
+            task.run_bal_prewarm(Arc::clone(&decoded), actions_tx, Some(stream));
+
+            let updates = sink.updates.lock().unwrap();
+            // Storage can stream before the parent read, but partial state must not be
+            // finalized if the read fails.
+            assert!(updates.iter().any(|state| !state.storages.is_empty()));
+            assert_eq!(sink.finished.load(Ordering::Relaxed), !fail_read);
+            assert_eq!(updates.iter().any(|state| !state.accounts.is_empty()), !fail_read);
+        }
     }
 
     #[test]
