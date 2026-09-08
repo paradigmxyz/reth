@@ -64,7 +64,8 @@ where
     ReceiptTy<Evm::Primitives>: Clone,
 {
     let worker_pool = runtime.bal_streaming_pool();
-    let worker_count = worker_pool.current_num_threads().max(1).min(transaction_count);
+    // Leave shared-pool capacity available for BAL state streaming.
+    let worker_count = worker_pool.current_num_threads().div_ceil(2).max(1).min(transaction_count);
 
     worker_pool.in_place_scope(|scope| {
         execute_block_inner(
