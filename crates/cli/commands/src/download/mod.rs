@@ -118,6 +118,7 @@ use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
     sync::{Arc, OnceLock},
+    time::Duration,
 };
 use tracing::info;
 use tui::{run_selector, SelectorOutput};
@@ -442,6 +443,14 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     #[arg(long, default_value_t = MAX_CONCURRENT_DOWNLOADS)]
     download_concurrency: usize,
 
+    /// Override the delay between retry attempts (for example, 500ms or 5s).
+    ///
+    /// Applies to requests, extraction, output verification, and segmented downloads.
+    /// By default, retries wait five seconds; segmented requests use adaptive backoff.
+    /// This does not change the number of attempts.
+    #[arg(long, value_name = "DURATION", value_parser = reth_cli_util::parse_duration_from_secs_or_ms)]
+    retry_backoff: Option<Duration>,
+
     /// List available snapshots and exit.
     ///
     /// Queries the snapshots API and prints all available snapshots for the selected chain,
@@ -491,6 +500,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                 self.resumable,
                 Some(request_limiter),
                 cancel_token.clone(),
+                self.retry_backoff,
             )
             .await?;
             info!(target: "reth::cli", "Snapshot downloaded and extracted successfully");
@@ -534,6 +544,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             target_dir,
             self.download_concurrency.max(1),
             cancel_token.clone(),
+            self.retry_backoff,
         )
         .await?;
 
@@ -1226,6 +1237,26 @@ mod tests {
         assert_eq!(defaults.default_base_url, "https://custom.example.com");
         assert_eq!(defaults.available_snapshots.len(), 4); // 2 defaults + 2 added
         assert_eq!(defaults.long_help, Some("Custom help for snapshots".to_string()));
+    }
+
+    #[test]
+    fn test_download_retry_backoff() {
+        let parse = |args: Vec<&str>| {
+            CommandParser::<DownloadCommand<EthereumChainSpecParser>>::try_parse_from(args)
+        };
+        assert_eq!(parse(vec!["reth"]).unwrap().args.retry_backoff, None);
+        for (value, expected) in [
+            ("0ms", Duration::ZERO),
+            ("250ms", Duration::from_millis(250)),
+            ("2s", Duration::from_secs(2)),
+        ] {
+            assert_eq!(
+                parse(vec!["reth", "--retry-backoff", value]).unwrap().args.retry_backoff,
+                Some(expected)
+            );
+        }
+        assert!(parse(vec!["reth", "--retry-backoff=-1s"]).is_err());
+        assert!(parse(vec!["reth", "--retry-backoff", "invalid"]).is_err());
     }
 
     #[test]

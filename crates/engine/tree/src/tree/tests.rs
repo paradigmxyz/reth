@@ -715,21 +715,209 @@ fn persistence_completion_does_not_wait_for_active_payload_jobs() {
 }
 
 #[test]
-fn backfill_action_skips_while_payload_build_is_active() {
-    let mut test_harness = TestHarness::new(MAINNET.clone());
+fn backfill_action_waits_while_payload_build_is_active() {
+    let (mut test_harness, _, action) = deferred_backfill_harness();
     let payload_build = test_harness.tree.payload_builds.acquire();
-    let action = BackfillAction::Start(B256::random().into());
 
-    test_harness.tree.emit_event(EngineApiEvent::BackfillAction(action));
-    assert!(test_harness.tree.backfill_sync_state.is_idle());
+    test_harness.tree.emit_event(EngineApiEvent::BackfillAction(action.clone()));
+    assert!(test_harness.tree.backfill_sync_state.is_pending_revalidation());
     assert!(test_harness.from_tree_rx.try_recv().is_err());
 
     drop(payload_build);
     assert!(matches!(test_harness.tree.wait_for_event(), super::LoopEvent::PayloadBuildFinished));
+    test_harness.tree.advance_persistence().unwrap();
 
-    // The skipped action is not queued for a later replay.
+    assert!(test_harness.tree.backfill_sync_state.is_pending());
+    let EngineApiEvent::BackfillAction(emitted_action) =
+        test_harness.from_tree_rx.try_recv().unwrap()
+    else {
+        panic!("expected backfill action")
+    };
+    assert_eq!(emitted_action, action);
+}
+
+fn deferred_backfill_harness() -> (TestHarness, Vec<ExecutedBlock>, BackfillAction) {
+    let all_blocks: Vec<_> =
+        TestBlockBuilder::eth().get_executed_blocks(1..MIN_BLOCKS_FOR_PIPELINE_RUN + 10).collect();
+    let canonical_blocks = all_blocks[..6].to_vec();
+    let target = all_blocks.last().unwrap().recovered_block().clone_sealed_block();
+    let target_hash = target.hash();
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(canonical_blocks.clone());
+    test_harness.tree.state.buffer.insert_block(target.into());
+    test_harness.tree.state.forkchoice_state_tracker.set_latest(
+        ForkchoiceState {
+            head_block_hash: target_hash,
+            safe_block_hash: target_hash,
+            finalized_block_hash: target_hash,
+        },
+        ForkchoiceStatus::Syncing,
+    );
+
+    (test_harness, canonical_blocks, BackfillAction::Start(target_hash.into()))
+}
+
+#[test]
+fn backfill_action_catches_up_state_trie_before_starting_pipeline() {
+    let (mut test_harness, blocks, action) = deferred_backfill_harness();
+    let state_trie_tip = blocks[2].recovered_block().num_hash();
+    let database_tip = blocks[4].recovered_block().num_hash();
+    test_harness.tree.persistence_state.last_state_trie_persisted_block = state_trie_tip;
+    test_harness.tree.persistence_state.last_persisted_block = database_tip;
+
+    test_harness.tree.emit_event(EngineApiEvent::BackfillAction(action.clone()));
+
+    assert!(test_harness.tree.backfill_sync_state.is_pending_revalidation());
+    assert!(test_harness.from_tree_rx.try_recv().is_err());
+
+    test_harness.tree.advance_persistence().unwrap();
+    let persistence_action = test_harness.action_rx.recv().unwrap();
+    let PersistenceAction::SaveBlocks(input, sender) = persistence_action else {
+        panic!("expected state/trie catch-up save, got {persistence_action:?}")
+    };
+    assert_eq!(input.prev_db_tip(), database_tip.number);
+    assert_eq!(input.new_db_tip(), database_tip.number);
+    assert_eq!(input.prev_partial_state_trie(), state_trie_tip.number);
+    assert_eq!(input.new_partial_state_trie(), database_tip.number);
+    assert!(input.persist_rest_blocks().is_empty());
+    assert_eq!(
+        input
+            .state_trie_blocks()
+            .iter()
+            .map(|block| block.recovered_block().number())
+            .collect::<Vec<_>>(),
+        (state_trie_tip.number + 1..=database_tip.number).collect::<Vec<_>>()
+    );
+    assert!(input.state_trie_masking_blocks().is_empty());
+
+    sender
+        .send(PersistenceResult {
+            last_block: database_tip,
+            last_state_trie_block: database_tip,
+            commit_duration: Some(Duration::ZERO),
+        })
+        .unwrap();
+    assert!(test_harness.tree.try_poll_persistence().unwrap());
+    assert!(test_harness.from_tree_rx.try_recv().is_err());
+
+    test_harness.tree.advance_persistence().unwrap();
+
+    assert!(test_harness.tree.backfill_sync_state.is_pending());
+    let emitted = test_harness.from_tree_rx.try_recv().unwrap();
+    let EngineApiEvent::BackfillAction(emitted_action) = emitted else {
+        panic!("expected backfill action, got {emitted:?}")
+    };
+    assert_eq!(emitted_action, action);
+}
+
+#[test]
+fn deferred_backfill_is_dropped_when_target_becomes_local() {
+    let (mut test_harness, blocks, action) = deferred_backfill_harness();
+    let state_trie_tip = blocks[2].recovered_block().num_hash();
+    let database_tip = blocks[4].recovered_block().num_hash();
+    test_harness.tree.persistence_state.last_state_trie_persisted_block = state_trie_tip;
+    test_harness.tree.persistence_state.last_persisted_block = database_tip;
+
+    test_harness.tree.emit_event(EngineApiEvent::BackfillAction(action));
+    assert!(test_harness.tree.backfill_sync_state.is_pending_revalidation());
+
+    // A newer FCU points at the local head while persistence is draining. Re-evaluation must use
+    // this current target instead of replaying the original backfill action.
+    let local_head = blocks.last().unwrap().recovered_block().num_hash();
+    test_harness.tree.state.forkchoice_state_tracker.set_latest(
+        ForkchoiceState {
+            head_block_hash: local_head.hash,
+            safe_block_hash: local_head.hash,
+            finalized_block_hash: local_head.hash,
+        },
+        ForkchoiceStatus::Syncing,
+    );
+    test_harness.tree.persistence_state.last_state_trie_persisted_block = database_tip;
+
+    test_harness.tree.advance_persistence().unwrap();
+
     assert!(test_harness.tree.backfill_sync_state.is_idle());
     assert!(test_harness.from_tree_rx.try_recv().is_err());
+}
+
+#[test]
+fn deferred_backfill_uses_latest_sync_target() {
+    let (mut test_harness, blocks, original_action) = deferred_backfill_harness();
+    let database_tip = blocks[4].recovered_block().num_hash();
+    test_harness.tree.persistence_state.last_state_trie_persisted_block =
+        blocks[2].recovered_block().num_hash();
+    test_harness.tree.persistence_state.last_persisted_block = database_tip;
+    test_harness.tree.emit_event(EngineApiEvent::BackfillAction(original_action.clone()));
+
+    let newer_chain = test_harness
+        .block_builder
+        .create_fork(blocks[0].recovered_block(), MIN_BLOCKS_FOR_PIPELINE_RUN + 20);
+    let newer_target = newer_chain.last().unwrap().clone_sealed_block();
+    let newer_target_hash = newer_target.hash();
+    test_harness.tree.state.buffer.insert_block(newer_target.into());
+    test_harness.tree.state.forkchoice_state_tracker.set_latest(
+        ForkchoiceState {
+            head_block_hash: newer_target_hash,
+            safe_block_hash: newer_target_hash,
+            finalized_block_hash: newer_target_hash,
+        },
+        ForkchoiceStatus::Syncing,
+    );
+    test_harness.tree.persistence_state.last_state_trie_persisted_block = database_tip;
+
+    test_harness.tree.advance_persistence().unwrap();
+
+    let emitted = test_harness.from_tree_rx.try_recv().unwrap();
+    let EngineApiEvent::BackfillAction(BackfillAction::Start(target)) = emitted else {
+        panic!("expected backfill action, got {emitted:?}")
+    };
+    assert_eq!(target.sync_target(), Some(newer_target_hash));
+    assert_ne!(BackfillAction::Start(target), original_action);
+}
+
+#[test]
+fn backfill_request_is_preserved_while_persistence_is_in_flight() {
+    let (mut test_harness, blocks, action) = deferred_backfill_harness();
+    let state_trie_tip = blocks[2].recovered_block().num_hash();
+    let database_tip = blocks[4].recovered_block().num_hash();
+    let (persistence_tx, persistence_rx) = crossbeam_channel::bounded(1);
+    test_harness.tree.persistence_state.start_save(database_tip, persistence_rx);
+
+    test_harness.tree.emit_event(EngineApiEvent::BackfillAction(action.clone()));
+
+    assert!(test_harness.tree.backfill_sync_state.is_pending_revalidation());
+    assert!(test_harness.from_tree_rx.try_recv().is_err());
+
+    persistence_tx
+        .send(PersistenceResult {
+            last_block: database_tip,
+            last_state_trie_block: state_trie_tip,
+            commit_duration: Some(Duration::ZERO),
+        })
+        .unwrap();
+    assert!(test_harness.tree.try_poll_persistence().unwrap());
+
+    test_harness.tree.advance_persistence().unwrap();
+    let persistence_action = test_harness.action_rx.recv().unwrap();
+    let PersistenceAction::SaveBlocks(_, sender) = persistence_action else {
+        panic!("expected state/trie catch-up save, got {persistence_action:?}")
+    };
+    sender
+        .send(PersistenceResult {
+            last_block: database_tip,
+            last_state_trie_block: database_tip,
+            commit_duration: Some(Duration::ZERO),
+        })
+        .unwrap();
+    assert!(test_harness.tree.try_poll_persistence().unwrap());
+
+    test_harness.tree.advance_persistence().unwrap();
+
+    assert!(test_harness.tree.backfill_sync_state.is_pending());
+    let emitted = test_harness.from_tree_rx.try_recv().unwrap();
+    let EngineApiEvent::BackfillAction(emitted_action) = emitted else {
+        panic!("expected backfill action, got {emitted:?}")
+    };
+    assert_eq!(emitted_action, action);
 }
 
 #[test]
