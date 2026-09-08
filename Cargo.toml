@@ -731,7 +731,7 @@ alloy-transport-ws = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a
 alloy-tx-macros = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
 
 # EIP-8141 execution adapter and VM.
-alloy-evm = { git = "https://github.com/Soubhik-10/evm", rev = "bca84e02f28881efe18f4dfef5ec79eb29a85aad" }
+alloy-evm = { git = "https://github.com/Soubhik-10/evm", rev = "5519a01e4507b980ad6d1ab5a8641a5b111206d1" }
 reth-codecs = { git = "https://github.com/Soubhik-10/reth-core", rev = "fb70257e5eb9807130fb65ccfcd955858a0fa644" }
 reth-codecs-derive = { git = "https://github.com/Soubhik-10/reth-core", rev = "fb70257e5eb9807130fb65ccfcd955858a0fa644" }
 reth-primitives-traits = { git = "https://github.com/Soubhik-10/reth-core", rev = "fb70257e5eb9807130fb65ccfcd955858a0fa644" }

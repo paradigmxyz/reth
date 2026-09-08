@@ -626,10 +626,6 @@ where
 
         let has_bal = block.header().block_access_list_hash().is_some();
 
-        // A batch shares the state database across blocks. BAL indices are local to one block,
-        // so start every block at the pre-execution index even when its BAL is not later taken.
-        executor.evm_mut().db_mut().reset_bal_index();
-
         if has_bal {
             executor.evm_mut().db_mut().bal_state.bal_builder = Some(Bal::new());
         } else {
@@ -664,12 +660,19 @@ where
     where
         H: OnStateHook + 'static,
     {
-        self.db.set_state_hook(Some(Box::new(state_hook)));
-        let result = self.execute_one(block);
+        let mut executor = self
+            .strategy_factory
+            .executor_for_block(&mut self.db, block)
+            .map_err(BlockExecutionError::other)?;
+
+        executor.evm_mut().db_mut().set_state_hook(Some(Box::new(state_hook)));
+
+        let result = executor.execute_block(block.transactions_recovered());
+
         self.db.set_state_hook(None);
-        if result.is_err() {
-            self.db.merge_transitions(BundleRetention::Reverts);
-        }
+
+        self.db.merge_transitions(BundleRetention::Reverts);
+
         result
     }
 
