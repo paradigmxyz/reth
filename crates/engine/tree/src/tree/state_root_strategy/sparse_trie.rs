@@ -66,6 +66,8 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
 
     /// Account trie updates.
     account_updates: B256Map<LeafUpdate>,
+    /// Whether proofs, new values, or applied leaves may unblock pending account updates.
+    retry_account_updates: bool,
     /// Storage trie updates. hashed address -> slot -> update.
     storage_updates: B256Map<B256Map<LeafUpdate>>,
 
@@ -170,6 +172,7 @@ where
             chunk_size,
             max_targets_for_chunking: DEFAULT_MAX_TARGETS_FOR_CHUNKING,
             account_updates: Default::default(),
+            retry_account_updates: false,
             storage_updates: Default::default(),
             retry_storage_updates: Default::default(),
             new_account_updates: Default::default(),
@@ -568,6 +571,7 @@ where
     }
 
     fn on_proof_result(&mut self, result: DecodedMultiProofV2) -> Result<(), StateRootTaskError> {
+        self.retry_account_updates |= !result.account_proofs.is_empty();
         self.retry_storage_updates.extend(result.storage_proofs.keys().copied());
         self.trie
             .reveal_decoded_multiproof_v2(result)
@@ -718,6 +722,10 @@ where
         skip_all
     )]
     fn process_account_leaf_updates(&mut self, new: bool) -> SparseTrieResult<bool> {
+        if !new && !core::mem::take(&mut self.retry_account_updates) {
+            return Ok(false);
+        }
+
         let account_updates =
             if new { &mut self.new_account_updates } else { &mut self.account_updates };
 
@@ -743,6 +751,10 @@ where
 
         let updates_len_after = account_updates.len();
         span.record("applied", updates_len_before - updates_len_after);
+        // Applied leaves can change paths for blocked updates, including deletion collapses.
+        // Keep the next retry eligible after new leaves or a partially successful retry.
+        self.retry_account_updates |=
+            updates_len_after < updates_len_before && (new || updates_len_after > 0);
         self.account_cache_hits += (updates_len_before - updates_len_after) as u64;
         self.account_cache_misses += updates_len_after as u64;
 
@@ -889,6 +901,7 @@ where
 
                 false
             });
+            self.retry_account_updates |= num_promoted > 0;
             span.record("promoted", num_promoted);
             drop(span);
 
@@ -1276,6 +1289,202 @@ mod tests {
         assert_eq!(decoded.balance, U256::from(42));
         assert_eq!(decoded.storage_root, storage_root);
         assert_eq!(account_rlp_buf, encoded);
+    }
+
+    #[test]
+    fn account_retries_follow_account_proofs_and_promoted_values() {
+        let runtime = reth_tasks::Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayManager::<reth_chain_state::EthPrimitives>::default()
+                .overlay_builder(anchor_hash),
+        );
+        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
+        let proof_worker_handle = ProofWorkerHandle::new(
+            &runtime,
+            ProofTaskCtx::new(state_provider_factory),
+            false,
+            proof_result_tx.clone(),
+        );
+
+        let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+        let trie = SparseStateTrie::default()
+            .with_accounts_trie(default_trie.clone())
+            .with_default_storage_trie(default_trie)
+            .with_updates(true);
+
+        let parent_state_root = B256::from([0x55; 32]);
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (_cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
+        let mut task = SparseTrieCacheTask::new_with_trie(
+            &runtime,
+            updates_rx,
+            cancel_rx,
+            std::sync::mpsc::channel().0,
+            proof_worker_handle,
+            proof_result_tx,
+            proof_result_rx,
+            SparseTrieTaskMetrics::default(),
+            trie,
+            parent_state_root,
+            TrieNodeEpoch::UNMODIFIED,
+            1,
+        );
+
+        let address = B256::repeat_byte(0x11);
+        let account = TrieAccount { nonce: 1, ..Default::default() };
+        task.new_account_updates.insert(address, LeafUpdate::Changed(alloy_rlp::encode(account)));
+        task.pending_updates = 1;
+        task.process_new_updates().unwrap();
+        let misses = task.account_cache_misses;
+        assert_eq!(misses, 1);
+        task.process_leaf_updates(false).unwrap();
+        assert_eq!(task.account_cache_misses, misses);
+
+        task.on_proof_result(DecodedMultiProofV2 {
+            storage_proofs: B256Map::from_iter([(
+                B256::repeat_byte(0x22),
+                vec![reth_trie_common::ProofTrieNodeV2::empty()],
+            )]),
+            ..Default::default()
+        })
+        .unwrap();
+        task.process_leaf_updates(false).unwrap();
+        assert_eq!(task.account_cache_misses, misses, "storage proofs do not reveal account paths");
+
+        task.on_proof_result(DecodedMultiProofV2 {
+            account_proofs: vec![reth_trie_common::ProofTrieNodeV2::empty()],
+            ..Default::default()
+        })
+        .unwrap();
+        task.process_leaf_updates(false).unwrap();
+        assert!(task.account_updates.is_empty());
+        assert_eq!(
+            task.trie.root(task.new_epoch).unwrap(),
+            reth_trie_common::root::state_root([(address, account)])
+        );
+
+        let updated = TrieAccount { nonce: 2, ..Default::default() };
+        let mut state = HashedPostState::default();
+        state.accounts.insert(address, Some(Account { nonce: 2, ..Default::default() }));
+        task.on_hashed_state_update(state);
+        task.pending_updates = 1;
+        task.process_new_updates().unwrap();
+        // Consume eligibility from the touch before promoting a new value without another proof.
+        task.process_leaf_updates(false).unwrap();
+        task.promote_pending_account_updates().unwrap();
+        assert!(task.account_updates.is_empty());
+        assert_eq!(
+            task.trie.root(task.new_epoch).unwrap(),
+            reth_trie_common::root::state_root([(address, updated)])
+        );
+        drop(updates_tx);
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
+    }
+
+    #[test]
+    fn applied_account_insertion_unblocks_pending_deletion() {
+        let runtime = reth_tasks::Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayManager::<reth_chain_state::EthPrimitives>::default()
+                .overlay_builder(anchor_hash),
+        );
+        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
+        let proof_worker_handle = ProofWorkerHandle::new(
+            &runtime,
+            ProofTaskCtx::new(state_provider_factory),
+            false,
+            proof_result_tx.clone(),
+        );
+
+        let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+        let trie = SparseStateTrie::default()
+            .with_accounts_trie(default_trie.clone())
+            .with_default_storage_trie(default_trie)
+            .with_updates(true);
+
+        let parent_state_root = B256::from([0x55; 32]);
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (_cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
+        let mut task = SparseTrieCacheTask::new_with_trie(
+            &runtime,
+            updates_rx,
+            cancel_rx,
+            std::sync::mpsc::channel().0,
+            proof_worker_handle,
+            proof_result_tx,
+            proof_result_rx,
+            SparseTrieTaskMetrics::default(),
+            trie,
+            parent_state_root,
+            TrieNodeEpoch::UNMODIFIED,
+            1,
+        );
+
+        use reth_trie_common::{
+            BranchNodeV2, LeafNode, Nibbles, ProofTrieNodeV2, RlpNode, TrieMask, TrieNodeV2,
+        };
+        let first = B256::repeat_byte(0x11);
+        let second = B256::repeat_byte(0x22);
+        let third = B256::repeat_byte(0x33);
+        let account = TrieAccount { nonce: 1, ..Default::default() };
+        let value = alloy_rlp::encode(account);
+        let first_leaf =
+            TrieNodeV2::Leaf(LeafNode::new(Nibbles::from_nibbles([1; 63]), value.clone()));
+        let second_leaf =
+            TrieNodeV2::Leaf(LeafNode::new(Nibbles::from_nibbles([2; 63]), value.clone()));
+        task.on_proof_result(DecodedMultiProofV2 {
+            account_proofs: vec![
+                ProofTrieNodeV2 {
+                    path: Nibbles::default(),
+                    node: TrieNodeV2::Branch(BranchNodeV2 {
+                        key: Nibbles::default(),
+                        stack: vec![
+                            RlpNode::from_rlp(&alloy_rlp::encode(&first_leaf)),
+                            RlpNode::from_rlp(&alloy_rlp::encode(&second_leaf)),
+                        ],
+                        state_mask: TrieMask::new(0b110),
+                        branch_rlp_node: None,
+                    }),
+                    masks: None,
+                },
+                ProofTrieNodeV2 { path: Nibbles::from_nibbles([1]), node: first_leaf, masks: None },
+            ],
+            ..Default::default()
+        })
+        .unwrap();
+        task.account_updates.insert(first, LeafUpdate::Changed(Vec::new()));
+        task.process_account_leaf_updates(false).unwrap();
+        assert_eq!(
+            task.account_updates.len(),
+            1,
+            "deletion needs the blinded sibling to collapse the branch"
+        );
+        assert!(!task.retry_account_updates);
+        let misses = task.account_cache_misses;
+        task.process_account_leaf_updates(false).unwrap();
+        assert_eq!(task.account_cache_misses, misses);
+
+        // A third branch child lets the pending deletion succeed without revealing the sibling.
+        task.new_account_updates.insert(third, LeafUpdate::Changed(value));
+        task.pending_updates = 1;
+        task.process_new_updates().unwrap();
+        assert!(task.retry_account_updates);
+        task.process_account_leaf_updates(false).unwrap();
+        assert!(task.account_updates.is_empty());
+        assert_eq!(
+            task.trie.root(task.new_epoch).unwrap(),
+            reth_trie_common::root::state_root([(second, account), (third, account)])
+        );
+        drop(updates_tx);
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
     }
 
     #[test]
