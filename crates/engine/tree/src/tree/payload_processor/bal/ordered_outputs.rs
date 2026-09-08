@@ -76,6 +76,12 @@ impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
             return None;
         }
 
+        let _span = tracing::trace_span!(
+            target: "engine::tree::bal",
+            "bal_next_output",
+            index = self.next,
+        )
+        .entered();
         loop {
             if let Some(output) = self.pending[self.next].take() {
                 self.next += 1;
@@ -95,6 +101,7 @@ impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
             };
 
             let index = output.index;
+            tracing::trace!(target: "engine::tree::bal", index, next = self.next, "bal output received");
             assert!(
                 index < self.total,
                 "BAL worker returned out-of-bounds transaction index {index}; total={}",

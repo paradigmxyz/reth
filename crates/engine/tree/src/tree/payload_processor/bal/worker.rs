@@ -92,6 +92,12 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
                 let signer = *tx.signer();
                 let tx_gas_limit = tx.tx().gas_limit();
 
+                let _span = tracing::trace_span!(
+                    target: "engine::tree::bal",
+                    "bal_execute_transaction",
+                    index,
+                )
+                .entered();
                 executor.evm_mut().db_mut().set_bal_index(BlockAccessIndex::new(index as u64 + 1));
                 let result = executor
                     .execute_transaction_without_commit(tx)

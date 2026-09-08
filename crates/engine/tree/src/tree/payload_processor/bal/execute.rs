@@ -148,6 +148,12 @@ where
         for output in ordered_worker_outputs(&result_rx, transaction_count) {
             let output = output?;
 
+            let _span = tracing::trace_span!(
+                target: "engine::tree::bal",
+                "bal_commit_transaction",
+                index = output.index,
+            )
+            .entered();
             gas_tracker.validate_tx_limit(output.tx_gas_limit)?;
             gas_tracker.record_result(output.result.result());
             canonical_executor.evm_mut().db_mut().bump_bal_index();

@@ -309,7 +309,7 @@ where
                                     tx
                                 });
                                 let _ = execute_tx.send((idx, tx));
-                                trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
+                                trace!(target: "engine::tree::bal", idx, "bal recovery ready");
                             });
                     });
                 } else {
