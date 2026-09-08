@@ -1102,7 +1102,6 @@ mod tests {
             Err(ProviderError::BlockHashNotFound(hash)) if hash == parent_hash
         ));
         assert!(matches!(
-<<<<<<< HEAD
             builder.build_state_trie_overlay(&provider, true),
             Err(ProviderError::BlockHashNotFound(hash)) if hash == parent_hash
         ));
