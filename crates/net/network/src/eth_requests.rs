@@ -407,8 +407,7 @@ where
     ) {
         let mut cells_response = Cells { cell_mask: request.cell_mask, ..Default::default() };
         let mut total_bytes = 0;
-        // ETH/72 bitvectors index the first byte first; the blob store accepts a numeric mask.
-        let cell_mask = alloy_primitives::B128::from(u128::from_le_bytes(request.cell_mask.into()));
+        let cell_mask = request.numeric_cell_mask();
 
         for hash in request.hashes.into_iter().take(MAX_CELLS_SERVE) {
             let Some(cells) = self.blob_store.get_cells(hash, cell_mask).unwrap_or_default() else {

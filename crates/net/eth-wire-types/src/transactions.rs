@@ -127,6 +127,16 @@ pub struct GetCells {
     pub cell_mask: B128,
 }
 
+impl GetCells {
+    /// Returns the requested cell indices as a numeric mask.
+    ///
+    /// The wire bitvector stores the lowest cell indices in the first byte, while numeric masks
+    /// represent the lowest bits in the last byte.
+    pub fn numeric_cell_mask(&self) -> B128 {
+        B128::from(u128::from_le_bytes(self.cell_mask.into()))
+    }
+}
+
 impl InMemorySize for GetCells {
     fn size(&self) -> usize {
         self.hashes.len() * core::mem::size_of::<B256>() + core::mem::size_of::<B128>()
