@@ -8251,6 +8251,7 @@ name = "reth-db-api"
 version = "2.5.2"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
  "arbitrary",
  "arrayvec",
@@ -10412,6 +10413,7 @@ dependencies = [
  "alloy-eip7928",
  "alloy-eips",
  "alloy-primitives",
+ "reth-db-api",
  "reth-primitives-traits",
  "reth-provider",
  "reth-storage-api",

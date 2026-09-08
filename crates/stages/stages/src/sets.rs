@@ -54,6 +54,7 @@ use reth_primitives_traits::{Block, NodePrimitives};
 use reth_provider::HeaderSyncGapProvider;
 use reth_prune_types::{PruneMode, PruneModes};
 use reth_stages_api::Stage;
+use reth_storage_api::MetadataProvider;
 use std::sync::Arc;
 use tokio::sync::watch;
 
@@ -151,6 +152,7 @@ where
         prune_modes: PruneModes,
     ) -> StageSetBuilder<Provider>
     where
+        Provider: MetadataProvider,
         OfflineStages<E>: StageSet<Provider>,
     {
         StageSetBuilder::default()
@@ -166,6 +168,7 @@ where
     H: HeaderDownloader + 'static,
     B: BodyDownloader + 'static,
     E: ConfigureEvm,
+    Provider: MetadataProvider,
     OnlineStages<P, H, B>: StageSet<Provider>,
     OfflineStages<E>: StageSet<Provider>,
 {
