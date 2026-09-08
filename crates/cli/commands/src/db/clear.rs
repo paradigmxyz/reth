@@ -8,6 +8,7 @@ use reth_db_api::{
 };
 use reth_db_common::DbTool;
 use reth_node_builder::NodeTypesWithDB;
+use reth_primitives_traits::AccountExtensionTy;
 use reth_provider::StaticFileProviderFactory;
 use reth_static_file_types::StaticFileSegment;
 
@@ -23,7 +24,7 @@ impl Command {
     pub fn execute<N: NodeTypesWithDB>(self, tool: &DbTool<N>) -> eyre::Result<()> {
         match self.subcommand {
             Subcommands::Mdbx { table } => {
-                table.view(&ClearViewer { db: tool.provider_factory.db_ref() })?
+                table.view(&ClearViewer::<N> { db: tool.provider_factory.db_ref() })?
             }
             Subcommands::StaticFile { segment } => {
                 let static_file_provider = tool.provider_factory.static_file_provider();
@@ -49,13 +50,13 @@ enum Subcommands {
     StaticFile { segment: StaticFileSegment },
 }
 
-struct ClearViewer<'a, DB: Database> {
-    db: &'a DB,
+struct ClearViewer<'a, N: NodeTypesWithDB> {
+    db: &'a N::DB,
 }
 
-impl<DB: Database> TableViewer<()> for ClearViewer<'_, DB> {
+impl<N: NodeTypesWithDB> TableViewer<()> for ClearViewer<'_, N> {
     type Error = eyre::Report;
-    type AccountExtension = reth_primitives_traits::EmptyAccountExtension;
+    type AccountExtension = AccountExtensionTy<N::Primitives>;
 
     fn view<T: Table>(&self) -> Result<(), Self::Error> {
         let tx = self.db.tx_mut()?;
