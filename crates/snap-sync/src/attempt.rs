@@ -5,27 +5,22 @@
 //! refused. Storage v1 is unsupported: its state is keyed by address, and snap has no preimages.
 
 use crate::{SnapGeneration, SnapSyncError};
-use reth_storage_api::{
-    MetadataProvider, MetadataWriter, SnapAttempt, SnapAttemptId, SnapBootstrapStatus,
-};
+use reth_storage_api::{MetadataProvider, MetadataWriter, SnapAttempt, SnapAttemptId};
 
 /// Persistence for the attempt that owns downloaded snap state.
 ///
-/// Blanket-implemented over node metadata access, so these writes join the transaction the caller
-/// already holds: state, bytecode and the attempt record commit together or not at all.
+/// Blanket-implemented over node metadata access, so these writes join the caller's transaction:
+/// state, bytecode and the attempt record commit together or not at all.
 pub trait SnapAttemptStore {
     /// Starts an attempt anchored to `generation`, superseding any already recorded.
-    ///
-    /// Fails on an unreadable record, since a distinct identity needs the one it supersedes.
     fn start_snap_attempt(&self, generation: SnapGeneration) -> Result<SnapWrite, SnapSyncError>;
 
     /// Returns what the attempt owning the persisted state accepts writes for.
     fn active_snap_write(&self) -> Result<Option<SnapWrite>, SnapSyncError>;
 
-    /// Returns the attempt when `write` still owns the persisted state, and rejects it otherwise.
+    /// Returns the attempt when `write` still owns the persisted state, rejecting it otherwise.
     ///
-    /// A verified attempt accepts nothing further: its state is complete, so anything still
-    /// arriving was scheduled before completion.
+    /// Run this in the transaction that writes the data it covers.
     fn authorize_snap_write(&self, write: SnapWrite) -> Result<SnapAttempt, SnapSyncError>;
 
     /// Re-anchors the attempt to `generation`, refusing writes proved against the previous root.
@@ -51,7 +46,7 @@ pub struct SnapWrite {
 impl SnapWrite {
     // What `attempt` currently accepts.
     const fn of(attempt: &SnapAttempt) -> Self {
-        Self { attempt: attempt.id, state_version: attempt.state_version }
+        Self { attempt: attempt.id(), state_version: attempt.state_version() }
     }
 
     /// Attempt this write belongs to.
@@ -97,16 +92,14 @@ where
         generation: SnapGeneration,
     ) -> Result<SnapWrite, SnapSyncError> {
         let mut attempt = self.authorize_snap_write(write)?;
-        attempt.pivot = generation.target();
-        attempt.state_root = generation.state_root();
-        attempt.state_version = attempt.state_version.saturating_add(1);
+        attempt.re_anchor(generation.target(), generation.state_root());
         self.write_snap_attempt(&attempt)?;
         Ok(SnapWrite::of(&attempt))
     }
 
     fn verify_snap_attempt(&self, write: SnapWrite) -> Result<(), SnapSyncError> {
         let mut attempt = self.authorize_snap_write(write)?;
-        attempt.status = SnapBootstrapStatus::Verified;
+        attempt.verify();
         self.write_snap_attempt(&attempt)?;
         Ok(())
     }
@@ -172,8 +165,8 @@ mod tests {
 
         assert_eq!(reopened.active_snap_write().unwrap(), Some(write));
         let attempt = reopened.snap_attempt().unwrap().unwrap();
-        assert_eq!(attempt.pivot, BlockNumHash::new(7, B256::repeat_byte(7)));
-        assert_eq!(attempt.state_root, B256::repeat_byte(0xaa));
+        assert_eq!(attempt.pivot(), BlockNumHash::new(7, B256::repeat_byte(7)));
+        assert_eq!(attempt.state_root(), B256::repeat_byte(0xaa));
         assert!(attempt.is_unfinished());
     }
 

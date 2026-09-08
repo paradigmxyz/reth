@@ -57,10 +57,10 @@ pub trait MetadataProvider: Send {
 /// A persisted [`SnapAttempt`] record this build cannot read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UnsupportedSnapAttemptVersion {
-    /// Version found on disk, absent when the record carries no numeric version.
-    pub found: Option<u64>,
-    /// Version this build writes.
-    pub supported: u32,
+    // Version found on disk, absent when the record carries no numeric version.
+    found: Option<u64>,
+    // Version this build writes.
+    supported: u32,
 }
 
 impl fmt::Display for UnsupportedSnapAttemptVersion {

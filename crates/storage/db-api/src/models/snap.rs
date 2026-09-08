@@ -14,18 +14,18 @@ pub const SNAP_ATTEMPT_VERSION: u32 = 1;
 /// live attempt is filling in from what an abandoned one left behind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SnapAttempt {
-    /// Encoding version of this record.
-    pub version: u32,
-    /// Identity of this attempt.
-    pub id: SnapAttemptId,
-    /// Pivot block the downloaded state is anchored to.
-    pub pivot: BlockNumHash,
-    /// State root downloaded ranges authenticate against.
-    pub state_root: B256,
-    /// Bumped whenever the pivot moves, so responses proved against a superseded root are refused.
-    pub state_version: u64,
-    /// Whether the downloaded state has been verified.
-    pub status: SnapBootstrapStatus,
+    // Encoding version of this record.
+    version: u32,
+    // Identity of this attempt.
+    id: SnapAttemptId,
+    // Pivot block the downloaded state is anchored to.
+    pivot: BlockNumHash,
+    // Root downloaded ranges authenticate against.
+    state_root: B256,
+    // Bumped whenever the pivot moves, so writes proved against a superseded root are refused.
+    state_version: u64,
+    // Whether the downloaded state has been verified.
+    status: SnapBootstrapStatus,
 }
 
 impl SnapAttempt {
@@ -45,9 +45,41 @@ impl SnapAttempt {
         }
     }
 
-    /// Returns whether this attempt's state is still incomplete.
+    /// Identity of this attempt.
+    pub const fn id(&self) -> SnapAttemptId {
+        self.id
+    }
+
+    /// Pivot block the downloaded state is anchored to.
+    pub const fn pivot(&self) -> BlockNumHash {
+        self.pivot
+    }
+
+    /// Root downloaded ranges authenticate against.
+    pub const fn state_root(&self) -> B256 {
+        self.state_root
+    }
+
+    /// Generation of the pivot this attempt is anchored to.
+    pub const fn state_version(&self) -> u64 {
+        self.state_version
+    }
+
+    /// Returns whether the downloaded state is still incomplete.
     pub const fn is_unfinished(&self) -> bool {
         matches!(self.status, SnapBootstrapStatus::Unfinished)
+    }
+
+    /// Re-anchors this attempt, superseding writes proved against the previous root.
+    pub fn re_anchor(&mut self, pivot: BlockNumHash, state_root: B256) {
+        self.pivot = pivot;
+        self.state_root = state_root;
+        self.state_version = self.state_version.saturating_add(1);
+    }
+
+    /// Marks the downloaded state verified.
+    pub fn verify(&mut self) {
+        self.status = SnapBootstrapStatus::Verified;
     }
 }
 
@@ -74,11 +106,11 @@ impl fmt::Display for SnapAttemptId {
     }
 }
 
-/// Whether a snap attempt's downloaded state has been verified.
+// Whether a snap attempt's downloaded state has been verified.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SnapBootstrapStatus {
-    /// Downloads are outstanding, so the state is incomplete and is not canonical yet.
+enum SnapBootstrapStatus {
+    // Downloads are outstanding, so the state is incomplete and is not canonical yet.
     Unfinished,
-    /// The reconstructed trie root matched the target header.
+    // The reconstructed trie root matched the target header.
     Verified,
 }
