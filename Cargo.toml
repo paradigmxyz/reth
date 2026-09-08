@@ -699,9 +699,9 @@ ipnet = "2.11"
 [patch.crates-io]
 alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "67b45175" }
 alloy-trie = { git = "https://github.com/alloy-rs/trie", rev = "7193a8bc1ed2c0855025ef5b04337af2fc6589f5" }
-reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "1790a07ec59b693f8f2dd9560a0d16235c8a5f0d" }
-reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "1790a07ec59b693f8f2dd9560a0d16235c8a5f0d" }
-reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "1790a07ec59b693f8f2dd9560a0d16235c8a5f0d" }
-revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "d20b1f9545d4beef505f7cdba861b6cbe813ed54" }
-revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "d20b1f9545d4beef505f7cdba861b6cbe813ed54" }
-revm-state = { git = "https://github.com/bluealloy/revm", rev = "d20b1f9545d4beef505f7cdba861b6cbe813ed54" }
+reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "fac5ebb41f5bc0ba6b147d6d90bb9650af6e073a" }
+reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "fac5ebb41f5bc0ba6b147d6d90bb9650af6e073a" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "fac5ebb41f5bc0ba6b147d6d90bb9650af6e073a" }
+revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "ec31682237dd9b6e4407e4d22eb7b9d965070e4f" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "ec31682237dd9b6e4407e4d22eb7b9d965070e4f" }
+revm-state = { git = "https://github.com/bluealloy/revm", rev = "ec31682237dd9b6e4407e4d22eb7b9d965070e4f" }

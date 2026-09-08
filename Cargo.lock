@@ -7961,7 +7961,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=1790a07ec59b693f8f2dd9560a0d16235c8a5f0d#1790a07ec59b693f8f2dd9560a0d16235c8a5f0d"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=fac5ebb41f5bc0ba6b147d6d90bb9650af6e073a#fac5ebb41f5bc0ba6b147d6d90bb9650af6e073a"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -7973,7 +7973,7 @@ dependencies = [
  "modular-bitfield",
  "parity-scale-codec",
  "reth-codecs-derive",
- "reth-zstd-compressors 0.7.0 (git+https://github.com/paradigmxyz/reth-core?rev=1790a07ec59b693f8f2dd9560a0d16235c8a5f0d)",
+ "reth-zstd-compressors 0.7.0 (git+https://github.com/paradigmxyz/reth-core?rev=fac5ebb41f5bc0ba6b147d6d90bb9650af6e073a)",
  "serde",
  "visibility",
 ]
@@ -7981,7 +7981,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs-derive"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=1790a07ec59b693f8f2dd9560a0d16235c8a5f0d#1790a07ec59b693f8f2dd9560a0d16235c8a5f0d"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=fac5ebb41f5bc0ba6b147d6d90bb9650af6e073a#fac5ebb41f5bc0ba6b147d6d90bb9650af6e073a"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9703,7 +9703,7 @@ dependencies = [
 [[package]]
 name = "reth-primitives-traits"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=1790a07ec59b693f8f2dd9560a0d16235c8a5f0d#1790a07ec59b693f8f2dd9560a0d16235c8a5f0d"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=fac5ebb41f5bc0ba6b147d6d90bb9650af6e073a#fac5ebb41f5bc0ba6b147d6d90bb9650af6e073a"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -10797,7 +10797,7 @@ dependencies = [
 [[package]]
 name = "reth-zstd-compressors"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=1790a07ec59b693f8f2dd9560a0d16235c8a5f0d#1790a07ec59b693f8f2dd9560a0d16235c8a5f0d"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=fac5ebb41f5bc0ba6b147d6d90bb9650af6e073a#fac5ebb41f5bc0ba6b147d6d90bb9650af6e073a"
 dependencies = [
  "zstd",
 ]
@@ -10824,7 +10824,7 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "43.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=d20b1f9545d4beef505f7cdba861b6cbe813ed54#d20b1f9545d4beef505f7cdba861b6cbe813ed54"
+source = "git+https://github.com/bluealloy/revm?rev=ec31682237dd9b6e4407e4d22eb7b9d965070e4f#ec31682237dd9b6e4407e4d22eb7b9d965070e4f"
 dependencies = [
  "bitvec",
  "paste",
@@ -10996,7 +10996,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "43.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=d20b1f9545d4beef505f7cdba861b6cbe813ed54#d20b1f9545d4beef505f7cdba861b6cbe813ed54"
+source = "git+https://github.com/bluealloy/revm?rev=ec31682237dd9b6e4407e4d22eb7b9d965070e4f#ec31682237dd9b6e4407e4d22eb7b9d965070e4f"
 dependencies = [
  "alloy-primitives",
  "once_cell",
@@ -11006,7 +11006,7 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "43.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=d20b1f9545d4beef505f7cdba861b6cbe813ed54#d20b1f9545d4beef505f7cdba861b6cbe813ed54"
+source = "git+https://github.com/bluealloy/revm?rev=ec31682237dd9b6e4407e4d22eb7b9d965070e4f#ec31682237dd9b6e4407e4d22eb7b9d965070e4f"
 dependencies = [
  "alloy-eip7928",
  "bitflags 2.13.0",
