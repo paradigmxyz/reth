@@ -207,7 +207,11 @@
 //! use alloy_consensus::Header;
 //! async fn t<C, Evm>(client: C, evm_config: Evm)
 //! where
-//!     C: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory + BlockReaderIdExt<Header = Header> + Clone + 'static,
+//!     C: ChainSpecProvider<ChainSpec: EthereumHardforks>
+//!         + StateProviderFactory<AccountExtension = reth_primitives_traits::AccountExtensionTy<Evm::Primitives>>
+//!         + BlockReaderIdExt<Header = Header>
+//!         + Clone
+//!         + 'static,
 //!     Evm: ConfigureEvm<Primitives: reth_primitives_traits::NodePrimitives<BlockHeader = Header>> + 'static,
 //! {
 //!     let blob_store = InMemoryBlobStore::default();
@@ -245,7 +249,11 @@
 //! use alloy_consensus::Header;
 //!
 //!  async fn t<C, St, Evm>(client: C, stream: St, evm_config: Evm)
-//!    where C: StateProviderFactory + BlockReaderIdExt<Header = Header> + ChainSpecProvider<ChainSpec = ChainSpec> + Clone + 'static,
+//!    where C: StateProviderFactory<AccountExtension = reth_primitives_traits::EmptyAccountExtension>
+//!        + BlockReaderIdExt<Header = Header>
+//!        + ChainSpecProvider<ChainSpec = ChainSpec>
+//!        + Clone
+//!        + 'static,
 //!     St: Stream<Item = CanonStateNotification<EthPrimitives>> + Send + Unpin + 'static,
 //!     Evm: ConfigureEvm<Primitives = EthPrimitives> + 'static,
 //!     {
@@ -438,7 +446,11 @@ where
     /// use alloy_consensus::Header;
     /// # fn t<C, Evm>(client: C, evm_config: Evm, runtime: Runtime)
     /// # where
-    /// #     C: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory + BlockReaderIdExt<Header = Header> + Clone + 'static,
+    /// #     C: ChainSpecProvider<ChainSpec: EthereumHardforks>
+    /// #         + StateProviderFactory<AccountExtension = reth_primitives_traits::AccountExtensionTy<Evm::Primitives>>
+    /// #         + BlockReaderIdExt<Header = Header>
+    /// #         + Clone
+    /// #         + 'static,
     /// #     Evm: ConfigureEvm<Primitives: reth_primitives_traits::NodePrimitives<BlockHeader = Header>> + 'static,
     /// # {
     /// let blob_store = InMemoryBlobStore::default();
