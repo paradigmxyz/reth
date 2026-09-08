@@ -1531,10 +1531,12 @@ where
         // Create deferred handle and task that owns the unsorted inputs.
         // Resolve the lazy handle into Arc<HashedPostState>. By this point the hashed state has
         // already been computed and used for state root verification, so .get() returns instantly.
-        let hashed_state = match hashed_state.try_into_inner() {
-            Ok(state) => state,
-            Err(handle) => handle.get().clone(),
-        };
+        let hashed_state =
+            tracing::trace_span!(target: "engine::tree::critical", "np_wait_hashed_state")
+                .in_scope(|| match hashed_state.try_into_inner() {
+                    Ok(state) => state,
+                    Err(handle) => handle.get().clone(),
+                });
         let (deferred_trie_data, deferred_trie_task) =
             LazyTrieData::pending(hashed_state, trie_output);
         let block_validation_metrics = self.metrics.block_validation.clone();

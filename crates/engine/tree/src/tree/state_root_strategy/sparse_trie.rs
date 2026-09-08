@@ -389,6 +389,12 @@ where
 
     /// Handles a received proof result: coalesces everything already queued, reveals the
     /// proof in the trie, and records timing metrics.
+    #[tracing::instrument(
+        level = "trace",
+        target = "engine::tree::critical",
+        skip_all,
+        name = "trie_on_proof_results"
+    )]
     fn on_proof_results(
         &mut self,
         message: ProofResultMessage,
@@ -415,6 +421,12 @@ where
     ///
     /// Messages queued after the finish marker are best-effort hints and are not actionable.
     /// Returns `true` once the finish marker was received and all pending trie work is done.
+    #[tracing::instrument(
+        level = "trace",
+        target = "engine::tree::critical",
+        skip_all,
+        name = "trie_make_progress"
+    )]
     fn make_progress(&mut self) -> Result<bool, StateRootTaskError> {
         let updates_queued = !self.finished_state_updates && !self.updates.is_empty();
 
@@ -719,6 +731,12 @@ where
     /// 3. but the storage root hasn't been updated yet,
     ///
     /// we trigger state root computation on a rayon pool.
+    #[tracing::instrument(
+        level = "trace",
+        target = "engine::tree::critical",
+        skip_all,
+        name = "trie_compute_drained_storage_roots"
+    )]
     fn compute_drained_storage_roots(&mut self) {
         let addresses_to_compute_roots: Vec<_> = self
             .storage_updates
@@ -781,10 +799,11 @@ where
     /// Iterates through all storage tries for which all updates were processed, computes their
     /// storage roots, and promotes corresponding pending account updates into proper leaf updates
     /// for accounts trie.
-    #[instrument(
+    #[tracing::instrument(
         level = "trace",
-        target = "engine::tree::payload_processor::sparse_trie",
-        skip_all
+        target = "engine::tree::critical",
+        skip_all,
+        name = "trie_promote_pending_account_updates"
     )]
     fn promote_pending_account_updates(&mut self) -> SparseTrieResult<()> {
         self.process_leaf_updates(false)?;
@@ -859,6 +878,12 @@ where
         Ok(())
     }
 
+    #[tracing::instrument(
+        level = "trace",
+        target = "engine::tree::critical",
+        skip_all,
+        name = "trie_dispatch_pending_targets"
+    )]
     fn dispatch_pending_targets(&mut self) -> Result<(), StateRootTaskError> {
         if self.pending_targets.is_empty() {
             return Ok(())

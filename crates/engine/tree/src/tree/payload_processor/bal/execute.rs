@@ -155,6 +155,8 @@ where
             .in_scope(|| canonical_executor.apply_pre_execution_changes())?;
         let mut senders = Vec::with_capacity(transaction_count);
         let mut last_sent_len = 0usize;
+        let loop_span =
+            tracing::trace_span!(target: "engine::tree::critical", "bal_commit_loop").entered();
         for output in ordered_worker_outputs(&result_rx, transaction_count) {
             let output = output?;
 
@@ -180,6 +182,7 @@ where
                 }
             }
         }
+        drop(loop_span);
         drop(abort_guard);
 
         canonical_executor.evm_mut().db_mut().bump_bal_index();
