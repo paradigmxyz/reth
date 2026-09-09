@@ -11,6 +11,7 @@ use alloy_primitives::{Bytes, B256, KECCAK256_EMPTY, U256};
 use alloy_rlp::{BufMut, Decodable, Encodable, RlpDecodable, RlpEncodable};
 use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
 use reth_codecs_derive::add_arbitrary_tests;
+use reth_primitives_traits::ensure_no_account_extensions;
 
 /// Supported SNAP protocol versions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
@@ -118,10 +119,7 @@ impl AccountData {
     /// Encodes `account` in snap/2's slim format.
     #[allow(clippy::assertions_on_constants)] // Refuse this protocol in account-ext builds.
     pub fn from_trie_account(hash: B256, account: &TrieAccount) -> Self {
-        assert!(
-            !reth_primitives_traits::Account::EXTENSIONS_ENABLED,
-            "snap does not support account extensions"
-        );
+        ensure_no_account_extensions().expect("snap does not support account extensions");
         let body = alloy_rlp::encode(SlimAccountBodyRef {
             nonce: account.nonce,
             balance: account.balance,
@@ -136,9 +134,8 @@ impl AccountData {
     /// Range proofs are verified against the full encoding, so the omitted storage root and code
     /// hash are restored to their defaults here.
     pub fn trie_account(&self) -> alloy_rlp::Result<TrieAccount> {
-        if reth_primitives_traits::Account::EXTENSIONS_ENABLED {
-            return Err(alloy_rlp::Error::Custom("snap does not support account extensions"));
-        }
+        ensure_no_account_extensions()
+            .map_err(|_| alloy_rlp::Error::Custom("snap does not support account extensions"))?;
         let slim = alloy_rlp::decode_exact::<SlimAccountBody>(&self.body)?;
 
         Ok(TrieAccount {

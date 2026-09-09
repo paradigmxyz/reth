@@ -25,7 +25,7 @@ use reth_network_p2p::{
     snap::client::SnapResponse,
 };
 use reth_network_peers::PeerId;
-use reth_primitives_traits::Block;
+use reth_primitives_traits::{ensure_no_account_extensions, Block};
 use reth_storage_api::{
     errors::provider::ProviderResult, BalProvider, BlockReader, BytecodeReader,
     GetBlockAccessListLimit, HeaderProvider, RangeEnd, RangeResponse, StateProviderFactory,
@@ -479,7 +479,7 @@ where
         response: oneshot::Sender<RequestResult<SnapResponse>>,
     ) {
         self.metrics.snap_requests_received_total.increment(1);
-        if reth_primitives_traits::Account::EXTENSIONS_ENABLED &&
+        if ensure_no_account_extensions().is_err() &&
             matches!(
                 &request,
                 SnapProtocolMessage::GetAccountRange(_) | SnapProtocolMessage::GetStorageRanges(_)

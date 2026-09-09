@@ -700,9 +700,9 @@ ipnet = "2.11"
 [patch.crates-io]
 alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "6e10b9ef" }
 alloy-trie = { git = "https://github.com/alloy-rs/trie", rev = "288294aa3fbe9e699bb2d8bd966bb7ff3ec59882" }
-reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "773d83e" }
-reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "773d83e" }
-reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "773d83e" }
+reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "5acdfd7" }
+reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "5acdfd7" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "5acdfd7" }
 revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "a4a7ac21e2d2ae6d319af0cf5cc05101ccc34ba6" }
 revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "a4a7ac21e2d2ae6d319af0cf5cc05101ccc34ba6" }
 revm-state = { git = "https://github.com/bluealloy/revm", rev = "a4a7ac21e2d2ae6d319af0cf5cc05101ccc34ba6" }

@@ -8112,7 +8112,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=773d83e#773d83e2780e99a815093cdf61d33cc44aadf9e4"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=5acdfd7#5acdfd7e0a6691439be732ab00bf689e995d455b"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -8132,7 +8132,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs-derive"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=773d83e#773d83e2780e99a815093cdf61d33cc44aadf9e4"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=5acdfd7#5acdfd7e0a6691439be732ab00bf689e995d455b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9861,7 +9861,7 @@ dependencies = [
 [[package]]
 name = "reth-primitives-traits"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=773d83e#773d83e2780e99a815093cdf61d33cc44aadf9e4"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=5acdfd7#5acdfd7e0a6691439be732ab00bf689e995d455b"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -10963,7 +10963,7 @@ dependencies = [
 [[package]]
 name = "reth-zstd-compressors"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=773d83e#773d83e2780e99a815093cdf61d33cc44aadf9e4"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=5acdfd7#5acdfd7e0a6691439be732ab00bf689e995d455b"
 dependencies = [
  "zstd",
 ]
