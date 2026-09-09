@@ -1080,6 +1080,173 @@ mod tests {
         sync::Arc,
     };
 
+    #[test]
+    fn historical_proofs_complete_masked_trie_rows() -> eyre::Result<()> {
+        use crate::{StaticFileProviderFactory, StaticFileSegment, StaticFileWriter};
+        use reth_storage_api::{StorageSettings, StorageSettingsCache, TrieWriter};
+        use reth_trie::{test_utils::TrieTestHarness, MultiProofTargets, MultiProofTargetsV2};
+        use revm::state::AccountInfo;
+
+        let address = Address::with_last_byte(1);
+        let other_address = Address::with_last_byte(2);
+        let hashed_address = keccak256(address);
+        let account = Account { balance: U256::from(1), ..Default::default() };
+        // Branches 00, 01 and 02 share the cached row at 0. The first two change
+        // in different blocks; the third keeps proof-v2's branch-collapse path inactive.
+        let slots: Vec<B256> = (0..=2u8)
+            .flat_map(|prefix| {
+                (0..u64::MAX)
+                    .map(|slot| B256::from(U256::from(slot)))
+                    .filter(move |slot| keccak256(slot)[0] == prefix)
+                    .take(2)
+            })
+            .collect();
+        let mut storage: BTreeMap<_, _> = slots.iter().map(|&slot| (slot, U256::from(1))).collect();
+        let mut trie = TrieTestHarness::new(
+            storage.iter().map(|(slot, value)| (keccak256(slot), *value)).collect(),
+        );
+        let mut blocks = Vec::<ExecutedBlock>::new();
+        let mut storage_roots = Vec::new();
+        for number in 0..=2 {
+            let mut output = (*ExecutedBlock::<reth_ethereum_primitives::EthPrimitives>::default()
+                .execution_output)
+                .clone();
+            let (state, storage_updates) = if number == 0 {
+                (
+                    HashedPostState::default()
+                        .with_accounts([
+                            (hashed_address, Some(account)),
+                            (keccak256(other_address), Some(account)),
+                        ])
+                        .with_storages([(
+                            hashed_address,
+                            HashedStorage::from_iter(trie.storage().iter().map(|(k, v)| (*k, *v))),
+                        )]),
+                    trie.storage_trie_updates().clone(),
+                )
+            } else {
+                let slot = slots[(number as usize - 1) * 2];
+                let value = U256::from(number + 1);
+                let changes = BTreeMap::from([(keccak256(slot), value)]);
+                let (_, updates) = trie.get_root_with_updates(&changes);
+                trie.apply_changeset(changes);
+                storage.insert(slot, value);
+                let info = AccountInfo::from_balance(account.balance);
+                output.state = BundleState::builder(number..=number)
+                    .state_original_account_info(address, info.clone())
+                    .state_present_account_info(address, info)
+                    .state_storage(
+                        address,
+                        std::iter::once((U256::from_be_bytes(slot.0), (U256::from(1), value)))
+                            .collect(),
+                    )
+                    .revert_storage(
+                        number,
+                        address,
+                        vec![(U256::from_be_bytes(slot.0), U256::from(1))],
+                    )
+                    .build();
+                (
+                    HashedPostState::from_hashed_storage(
+                        hashed_address,
+                        HashedStorage::from_iter([(keccak256(slot), value)]),
+                    ),
+                    updates,
+                )
+            };
+            let mut updates = TrieUpdates::default();
+            updates.storage_tries.insert(hashed_address, storage_updates);
+            let state_root = reth_trie::test_utils::state_root([
+                (address, (account, storage.clone())),
+                (other_address, (account, BTreeMap::new())),
+            ]);
+            storage_roots.push(reth_trie::test_utils::storage_root(storage.clone()));
+            let block = Block {
+                header: alloy_consensus::Header {
+                    number,
+                    parent_hash: blocks
+                        .last()
+                        .map(|b| b.recovered_block().hash())
+                        .unwrap_or_default(),
+                    state_root,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            blocks.push(ExecutedBlock::new(
+                Arc::new(RecoveredBlock::new_unhashed(block, vec![])),
+                Arc::new(output),
+                ComputedTrieData::new(
+                    Arc::new(state.into_sorted()),
+                    Arc::new(updates.into_sorted()),
+                ),
+            ));
+        }
+
+        for settings in [StorageSettings::v1(), StorageSettings::v2()] {
+            let factory = create_test_provider_factory();
+            factory.set_storage_settings_cache(settings);
+            let writer = factory.provider_rw()?;
+            writer.insert_block(blocks[0].recovered_block())?;
+            writer.write_hashed_state(blocks[0].hashed_state_ref())?;
+            writer.write_trie_updates_sorted(blocks[0].trie_updates_ref())?;
+            writer.commit()?;
+            let static_files = factory.static_file_provider();
+            static_files.get_writer(0, StaticFileSegment::Receipts)?.increment_block(0)?;
+            if settings.is_v2() {
+                static_files
+                    .get_writer(0, StaticFileSegment::AccountChangeSets)?
+                    .append_account_changeset(vec![], 0)?;
+                static_files
+                    .get_writer(0, StaticFileSegment::StorageChangeSets)?
+                    .append_storage_changeset(vec![], 0)?;
+            }
+            static_files.commit()?;
+            let writer = factory.provider_rw()?;
+            writer.save_blocks(&SaveBlocksInput::new(blocks[1..].to_vec(), 0, 0, 2, 1))?;
+            writer.commit()?;
+            factory.overlay_manager().insert_block(blocks[2].clone());
+            let provider = BlockchainProvider::new(factory)?;
+
+            for number in [1, 2] {
+                let state =
+                    provider.history_by_block_hash(blocks[number].recovered_block().hash())?;
+                let root = blocks[number].recovered_block().state_root;
+                state
+                    .multiproof_v2(
+                        Default::default(),
+                        MultiProofTargetsV2 {
+                            account_targets: vec![keccak256(other_address).into()],
+                            ..Default::default()
+                        },
+                    )?
+                    .account_proof(other_address, &[])?
+                    .verify(root)?;
+                assert_eq!(state.state_root(HashedPostState::default())?, root);
+                state.proof(Default::default(), other_address, &[])?.verify(root)?;
+                state
+                    .multiproof(
+                        Default::default(),
+                        MultiProofTargets::account(keccak256(other_address)),
+                    )?
+                    .account_proof(other_address, &[])?
+                    .verify(root)?;
+                assert_eq!(
+                    state.storage_root(address, HashedStorage::default())?,
+                    storage_roots[number]
+                );
+                state
+                    .storage_proof(address, slots[2], HashedStorage::default())?
+                    .verify(storage_roots[number])?;
+                let proof =
+                    state.storage_multiproof(address, &[slots[2]], HashedStorage::default())?;
+                assert_eq!(proof.root, storage_roots[number]);
+                proof.storage_proof(slots[2])?.verify(storage_roots[number])?;
+            }
+        }
+        Ok(())
+    }
+
     const TEST_BLOCKS_COUNT: usize = 5;
 
     const TEST_TRANSACTIONS_COUNT: u8 = 4;
