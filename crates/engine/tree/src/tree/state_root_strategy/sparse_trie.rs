@@ -1387,10 +1387,7 @@ mod tests {
         let state = |value| HashedPostState {
             storages: B256Map::from_iter([(
                 address,
-                HashedStorage {
-                    storage: B256Map::from_iter([(slot, value)]),
-                    ..Default::default()
-                },
+                HashedStorage { storage: B256Map::from_iter([(slot, value)]) },
             )]),
             ..Default::default()
         };
