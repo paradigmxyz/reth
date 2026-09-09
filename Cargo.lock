@@ -8251,6 +8251,7 @@ name = "reth-db-api"
 version = "2.5.2"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
  "arbitrary",
  "arrayvec",
@@ -10378,7 +10379,6 @@ dependencies = [
 name = "reth-rpc-server-types"
 version = "2.5.2"
 dependencies = [
- "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "jsonrpsee-core",
@@ -10412,10 +10412,13 @@ dependencies = [
  "alloy-eip7928",
  "alloy-eips",
  "alloy-primitives",
+ "reth-db-api",
  "reth-primitives-traits",
  "reth-provider",
  "reth-storage-api",
  "reth-storage-errors",
+ "reth-trie-common",
+ "revm",
  "thiserror 2.0.20",
  "tokio-util",
 ]
@@ -10968,9 +10971,9 @@ dependencies = [
 
 [[package]]
 name = "revm"
-version = "43.0.1"
+version = "43.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc210dfb3b45482a9f7c8806f737f7848fb7054b04235e6816480e515c1fe2d5"
+checksum = "55f2322f5ea197fac72c2cdc88cb501b2a7db0b0009911133fd3dda45bfceedd"
 dependencies = [
  "revm-bytecode",
  "revm-context",
@@ -11063,9 +11066,9 @@ dependencies = [
 
 [[package]]
 name = "revm-handler"
-version = "43.0.1"
+version = "43.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b8d988f896e22b19962658bc1afcd0989f727d48b2860a8bd7ceaecbf72ce34"
+checksum = "73a7409031d87ec281b74efff65d7a4dbea9d80727a55dbc7e4b3fd77b5e03fb"
 dependencies = [
  "auto_impl",
  "derive-where",
@@ -11082,9 +11085,9 @@ dependencies = [
 
 [[package]]
 name = "revm-inspector"
-version = "43.0.1"
+version = "43.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2584990403728b2e13fb5522510b61e4bb217c6a4c8f4d063447a6ddd7dd7cc"
+checksum = "7a56f37224afd628f7244aa6965609ada04b440ed8ab7a19f55e4291df5a0112"
 dependencies = [
  "auto_impl",
  "either",
