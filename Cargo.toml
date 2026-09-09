@@ -432,7 +432,7 @@ reth-zstd-compressors = { version = "0.7.0", default-features = false }
 
 # revm
 revm = { version = "43.0.0", default-features = false }
-revmc = { git = "https://github.com/Soubhik-10/revmc", rev = "b3ff1bf6e57f3a9f6b10774c22e8b160bd2a0bbb", default-features = false, features = ["llvm-prefer-static"] }
+revmc = { git = "https://github.com/Soubhik-10/revmc", rev = "c0d231c00b2be06a6a160f9fd8ef0a8dc255773f", default-features = false, features = ["llvm-prefer-static"] }
 revm-inspectors = "0.43.0"
 
 # eth
@@ -696,7 +696,7 @@ vergen-git2 = "10.0.1"
 ipnet = "2.11"
 
 [patch.crates-io]
-revm-inspectors = { git = "https://github.com/Soubhik-10/revm-inspectors", rev = "9672f97deb6d5197d436502629a6dd9bb5efcb2c" }
+revm-inspectors = { git = "https://github.com/Soubhik-10/revm-inspectors", rev = "9400fa5d4c14fbfeab1dd41c3abd652834b6d12d" }
 # EIP-8141 Alloy consensus, networking, RPC, signer, and transport stack.
 alloy-consensus = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
 alloy-consensus-any = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
@@ -731,12 +731,12 @@ alloy-transport-ws = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a
 alloy-tx-macros = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
 
 # EIP-8141 execution adapter and VM.
-alloy-evm = { git = "https://github.com/Soubhik-10/evm", rev = "5519a01e4507b980ad6d1ab5a8641a5b111206d1" }
-reth-codecs = { git = "https://github.com/Soubhik-10/reth-core", rev = "fb70257e5eb9807130fb65ccfcd955858a0fa644" }
-reth-codecs-derive = { git = "https://github.com/Soubhik-10/reth-core", rev = "fb70257e5eb9807130fb65ccfcd955858a0fa644" }
-reth-primitives-traits = { git = "https://github.com/Soubhik-10/reth-core", rev = "fb70257e5eb9807130fb65ccfcd955858a0fa644" }
-reth-rpc-traits = { git = "https://github.com/Soubhik-10/reth-core", rev = "fb70257e5eb9807130fb65ccfcd955858a0fa644" }
-reth-zstd-compressors = { git = "https://github.com/Soubhik-10/reth-core", rev = "fb70257e5eb9807130fb65ccfcd955858a0fa644" }
+alloy-evm = { git = "https://github.com/Soubhik-10/evm", rev = "01d7425ed63a09ccea0ea0eb203cc3f3f52bd575" }
+reth-codecs = { git = "https://github.com/Soubhik-10/reth-core", rev = "e301ad1f03083a95ac01a15d8506d15ffdd03350" }
+reth-codecs-derive = { git = "https://github.com/Soubhik-10/reth-core", rev = "e301ad1f03083a95ac01a15d8506d15ffdd03350" }
+reth-primitives-traits = { git = "https://github.com/Soubhik-10/reth-core", rev = "e301ad1f03083a95ac01a15d8506d15ffdd03350" }
+reth-rpc-traits = { git = "https://github.com/Soubhik-10/reth-core", rev = "e301ad1f03083a95ac01a15d8506d15ffdd03350" }
+reth-zstd-compressors = { git = "https://github.com/Soubhik-10/reth-core", rev = "e301ad1f03083a95ac01a15d8506d15ffdd03350" }
 revm = { git = "https://github.com/Soubhik-10/revm", rev = "2ae17b5e1bae054c46aa44c12873e3e7e9cd014e" }
 revm-bytecode = { git = "https://github.com/Soubhik-10/revm", rev = "2ae17b5e1bae054c46aa44c12873e3e7e9cd014e" }
 revm-context = { git = "https://github.com/Soubhik-10/revm", rev = "2ae17b5e1bae054c46aa44c12873e3e7e9cd014e" }
