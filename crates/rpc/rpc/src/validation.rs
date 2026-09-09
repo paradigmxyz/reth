@@ -2,7 +2,7 @@ use alloy_consensus::{
     BlobTransactionValidationError, BlockHeader, EnvKzgSettings, Transaction, TxReceipt,
 };
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash};
-use alloy_eips::eip7685::RequestsOrHash;
+use alloy_eips::{eip7594::BlobTransactionSidecarEip7594, eip7685::RequestsOrHash};
 use alloy_primitives::{map::AddressSet, Address, B256, U256};
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequest, BuilderBlockValidationRequestV2,
@@ -363,12 +363,9 @@ where
         &self,
         blobs_bundle: BlobsBundleV2,
     ) -> Result<Vec<B256>, ValidationApiError> {
-        let versioned_hashes = blobs_bundle.versioned_hashes();
-        let sidecar =
-            blobs_bundle.try_into_sidecar().map_err(|_| ValidationApiError::InvalidBlobsBundle)?;
-
-        sidecar.validate(&versioned_hashes, EnvKzgSettings::default().get())?;
-        Ok(versioned_hashes)
+        let prepared = prepare_blobs_bundle_v2(blobs_bundle)?;
+        verify_blobs_bundle_v2(&prepared)?;
+        Ok(prepared.versioned_hashes)
     }
 
     /// Core logic for validating the builder submission v3
@@ -639,6 +636,25 @@ pub struct ValidationApiInner<Provider, E: ConfigureEvm, T: PayloadTypes> {
     task_spawner: Runtime,
     /// Validation metrics
     metrics: ValidationMetrics,
+}
+
+struct PreparedBlobsBundleV2 {
+    versioned_hashes: Vec<B256>,
+    sidecar: BlobTransactionSidecarEip7594,
+}
+
+fn prepare_blobs_bundle_v2(
+    blobs_bundle: BlobsBundleV2,
+) -> Result<PreparedBlobsBundleV2, ValidationApiError> {
+    let versioned_hashes = blobs_bundle.versioned_hashes();
+    let sidecar =
+        blobs_bundle.try_into_sidecar().map_err(|_| ValidationApiError::InvalidBlobsBundle)?;
+    Ok(PreparedBlobsBundleV2 { versioned_hashes, sidecar })
+}
+
+fn verify_blobs_bundle_v2(prepared: &PreparedBlobsBundleV2) -> Result<(), ValidationApiError> {
+    prepared.sidecar.validate(&prepared.versioned_hashes, EnvKzgSettings::default().get())?;
+    Ok(())
 }
 
 /// Ensures that the raw execution payload fields match the corresponding [`BidTrace`] fields.
