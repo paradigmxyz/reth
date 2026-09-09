@@ -81,7 +81,7 @@ use std::{
 use tokio::sync::{mpsc::error::TrySendError, oneshot};
 use tracing::trace;
 
-/// Maximum live entries inspected in each eviction search at capacity.
+/// Maximum live entries inspected in a global fallback eviction search.
 const MAX_EVICTION_ATTEMPTS: usize = 8;
 
 /// Fetches transactions that peers announced but that are not in the pool yet.
@@ -208,7 +208,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         let mut tracked = peer.tracked;
         let mut queue = std::mem::take(&mut self.scratch_queue);
         queue.clear();
-        // hashes at the front of `queue` that were evicted again before being pushed
+        // Entries at the front of `queue` already evicted or moved into the peer queue.
         let mut queue_start = 0;
         // Other peers can only lose tracked hashes during this announcement. Refresh their
         // heap entries lazily instead of scanning every peer for each hash at capacity.
@@ -561,7 +561,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     /// the fallback prevents co-announcements from making the entire cache unevictable.
     ///
     /// `queued` are the hashes of the current announcement that are not in the announcer's queue
-    /// yet, `queued_start` marks how many of them were evicted again already.
+    /// yet; `queued_start` marks entries already evicted or moved into the peer queue.
     fn evict_pending(
         &mut self,
         announcer: PeerKey,
@@ -1178,8 +1178,8 @@ pub enum FetchEvent<T = PooledTransaction> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct PeerKey(u32);
 
-/// Cached eviction work for one announcement. Other peers can only lose candidates, and new
-/// hashes from this announcer are still in the scratch queue until the announcement finishes.
+/// Cached eviction work for one announcement. Other peers can only lose candidates; newly
+/// tracked hashes from this announcer are handled by the announcement's scratch cursor.
 #[derive(Debug)]
 struct EvictionState {
     peers: BinaryHeap<(usize, PeerKey)>,
