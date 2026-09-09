@@ -21,8 +21,19 @@ impl ActivityGuard {
         Self::start(phase, PARENT.with(Cell::get), 0, Duration::ZERO, true)
     }
 
+    /// Measures a fine-grained phase only when detailed activity is explicitly enabled.
+    pub fn detail(phase: &'static str) -> Self {
+        if !tracing::enabled!(target: "engine::tree::detail_activity", tracing::Level::TRACE) {
+            return Self { active: None };
+        }
+        Self::new(phase)
+    }
+
     /// Measures one worker job and records its relation to the submitting batch.
     pub fn job(phase: &'static str, parent: u64, units: usize, queued: Duration) -> Self {
+        if !tracing::enabled!(target: "engine::tree::detail_activity", tracing::Level::TRACE) {
+            return Self { active: None };
+        }
         Self::start(phase, parent, units, queued, false)
     }
 

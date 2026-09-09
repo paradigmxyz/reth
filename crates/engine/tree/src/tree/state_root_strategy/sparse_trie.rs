@@ -277,7 +277,8 @@ where
         // marker means they died without finishing the stream.
         while !self.finished_state_updates {
             let mut t = Instant::now();
-            let wait_activity = ActivityGuard::new("loop_receive");
+            let wait_activity = (self.updates.is_empty() && self.proof_result_rx.is_empty())
+                .then(|| ActivityGuard::new("loop_receive"));
             let wait = tracing::trace_span!(target: "engine::tree::critical", "trie_wait_stream")
                 .entered();
             crossbeam_channel::select_biased! {
@@ -326,7 +327,8 @@ where
         // are ignored: with all updates known, prefetching has nothing left to help.
         while !done {
             let mut t = Instant::now();
-            let wait_activity = ActivityGuard::new("loop_receive");
+            let wait_activity =
+                self.proof_result_rx.is_empty().then(|| ActivityGuard::new("loop_receive"));
             let wait = tracing::trace_span!(target: "engine::tree::critical", "trie_wait_proofs")
                 .entered();
             crossbeam_channel::select_biased! {
@@ -446,8 +448,6 @@ where
         name = "trie_make_progress"
     )]
     fn make_progress(&mut self) -> Result<bool, StateRootTaskError> {
-        let _activity = ActivityGuard::new("progress");
-
         let updates_queued = !self.finished_state_updates && !self.updates.is_empty();
 
         if !updates_queued && self.proof_result_rx.is_empty() {
