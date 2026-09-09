@@ -65,21 +65,36 @@ jobs:
             -E "!kind(test) and not binary(e2e_testsuite)"
 
   account-ext:
-    name: account extension regressions
+    name: test / account extensions
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
     permissions:
       contents: read
-    timeout-minutes: 30
+    env:
+      RUST_BACKTRACE: 1
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: rui314/setup-mold@7e4f20ad28a2e8ca6fd0892ccf72e2abb706b9c3 # v1
+      - run: .github/scripts/install_llvm.sh ubuntu
       - uses: dtolnay/rust-toolchain@stable
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - run: cargo test -p reth-trie-db --features account-ext --test proof --locked
-      - run: cargo test -p reth-stages-types --features account-ext --lib --locked
+        with:
+          prefix-key: v1-rust-unit-targets-account-ext
+          cache-bin: false
+          cache-on-failure: true
+      - uses: taiki-e/install-action@b6b84cf49ebfe0176417bdce007c624f0db37f20 # v2.86.2
+        with:
+          tool: nextest
+      - name: Run tests with account extensions
+        run: |
+          cargo nextest run \
+            --no-fail-fast \
+            --features "asm-keccak account-ext" --locked \
+            --workspace --exclude ef-tests --no-tests=warn \
+            -E "!kind(test) and not binary(e2e_testsuite)"
 
   state:
     name: Ethereum state tests
