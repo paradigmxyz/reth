@@ -1155,7 +1155,13 @@ where
 
         let timeout = self.timeout.expect("checked above");
         let task_rx = self.handle.take_state_root_rx();
-        let fallback_rx = match task_rx.recv_timeout(timeout) {
+        let outcome = {
+            let _wait = tracing::debug_span!(target: "engine::tree::critical",
+                "np_wait_sparse_root")
+            .entered();
+            task_rx.recv_timeout(timeout)
+        };
+        let fallback_rx = match outcome {
             Ok(Ok(outcome)) => return self.verified_sparse_outcome(block, &output, outcome),
             Ok(Err(err)) => {
                 debug!(target: "engine::tree::state_root_strategy", %err, "State root task failed, falling back to serial root");
