@@ -1059,6 +1059,7 @@ where
         *account_proofs_processed += 1;
 
         // Send result to SparseTrieCacheTask
+        trace!(target: "engine::tree::critical", phase = "trie_proof_result_ready");
         if result_tx.send(ProofResultMessage { result, elapsed: total_elapsed, state }).is_err() {
             trace!(
                 target: "trie::proof_task",

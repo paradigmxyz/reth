@@ -374,6 +374,7 @@ where
 
         if let Some(hashed_update_stream) = hashed_update_stream {
             let ctx = ctx.clone();
+            trace!(target: "engine::tree::critical", phase = "bal_stream_queued");
             executor.bal_streaming_pool().spawn(move || {
                 let branch_span = debug_span!(
                     target: "engine::tree::payload_processor::prewarm",
@@ -692,6 +693,7 @@ where
 
             let mut hashed_state = reth_trie::HashedPostState::default();
             hashed_state.storages.insert(hashed_address, storage_map);
+            trace!(target: "engine::tree::critical", phase = "bal_storage_update_ready");
             hashed_update_stream.on_hashed_state_update(hashed_state);
         }
 
@@ -753,6 +755,7 @@ where
 
         let mut hashed_state = reth_trie::HashedPostState::default();
         hashed_state.accounts.insert(hashed_address, account);
+        trace!(target: "engine::tree::critical", phase = "bal_account_update_ready");
         hashed_update_stream.on_hashed_state_update(hashed_state);
     }
 }
