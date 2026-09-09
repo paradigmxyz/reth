@@ -1309,6 +1309,13 @@ mod tests {
                 assert_eq!(parallel.storage_cache_misses, serial.storage_cache_misses);
                 assert_eq!(parallel.pending_targets.len, serial.pending_targets.len);
                 assert_eq!(targets(&parallel), targets(&serial));
+                assert_eq!(parallel.pending_targets.len, 512);
+                for address in addresses.iter().skip(1).step_by(2) {
+                    assert_eq!(
+                        parallel.fetched_storage_targets[address][&slots[0]],
+                        ProofV2TargetParent::NONE,
+                    );
+                }
 
                 if pass == 1 {
                     // Retry while still blind first, then reveal and supersede pending values.
@@ -1339,6 +1346,16 @@ mod tests {
             }
             assert!(parallel.new_storage_updates.values().all(|updates| updates.is_empty()));
             assert!(parallel.storage_updates.values().all(|updates| updates.is_empty()));
+            let expected_root = reth_trie_common::root::storage_root_unsorted(
+                slots.iter().enumerate().skip(1).map(|(index, slot)| {
+                    let value = match index {
+                        3 => 999,
+                        128 => 456,
+                        _ => 123,
+                    };
+                    (*slot, U256::from(value))
+                }),
+            );
             for address in &addresses {
                 let parallel = parallel
                     .trie
@@ -1348,7 +1365,7 @@ mod tests {
                     .trie
                     .get_or_create_storage_trie_mut(*address)
                     .root_with_updates(TrieNodeEpoch::new(1));
-                assert!(parallel.is_some());
+                assert_eq!(parallel.as_ref().map(|(root, _)| *root), Some(expected_root));
                 assert_eq!(parallel, serial);
             }
         }
