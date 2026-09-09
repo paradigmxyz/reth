@@ -2639,9 +2639,19 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 SeekResult::Blinded => {
                     let logical_len = cursor.head_logical_branch_path_len(&self.upper_arena);
                     let parent = ProofV2TargetParent::new(logical_len);
-                    trace!(target: TRACE_TARGET, ?key, ?parent, "Update hit blinded node, requesting proof");
-                    proof_required_fn(key, parent);
-                    updates.insert(key, update.clone());
+                    // The cursor stays on the parent branch. All consecutive keys under this
+                    // blinded child need proofs, without another seek through the same branch.
+                    let blocked_prefix = full_path.slice(..logical_len + 1);
+                    while update_idx < sorted.len() &&
+                        sorted[update_idx].1.starts_with(&blocked_prefix)
+                    {
+                        let (key, _, ref update) = sorted[update_idx];
+                        trace!(target: TRACE_TARGET, ?key, ?parent, "Update hit blinded node, requesting proof");
+                        proof_required_fn(key, parent);
+                        updates.insert(key, update.clone());
+                        update_idx += 1;
+                    }
+                    continue;
                 }
                 // Subtrie — forward all consecutive updates under this subtrie's prefix.
                 SeekResult::RevealedSubtrie => {
@@ -3058,6 +3068,67 @@ mod tests {
             changeset.entry(key).or_insert(value);
         }
         changeset
+    }
+
+    #[test]
+    fn grouped_blinded_children_preserve_targets_and_neighbor_updates() {
+        // The root has short key ab and blinded children 3 and 4.
+        let key = |suffix| {
+            let mut bytes = [0x11; 32];
+            bytes[0] = 0xab;
+            bytes[1] = suffix;
+            B256::from(bytes)
+        };
+        let initial = [0x30, 0x31, 0x3f, 0x40, 0x41, 0x4f]
+            .into_iter()
+            .map(|suffix| (key(suffix), U256::from(1)))
+            .collect();
+        let harness = ArenaTrieTestHarness::new(initial);
+        let root_node = harness.root_node();
+        let mut trie = ArenaParallelSparseTrie::default();
+        trie.set_root(root_node.node, root_node.masks, true).unwrap();
+
+        let changes = BTreeMap::from([
+            (key(0x30), U256::from(2)),
+            (key(0x31), U256::ZERO),
+            (key(0x3e), U256::from(3)),
+            (key(0x40), U256::ZERO),
+            (key(0x41), U256::from(4)),
+            (key(0x50), U256::from(5)),
+        ]);
+        let mut updates: B256Map<_> = changes
+            .iter()
+            .map(|(&key, &value)| {
+                let value = if value.is_zero() { Vec::new() } else { alloy_rlp::encode(value) };
+                (key, LeafUpdate::Changed(value))
+            })
+            .collect();
+        updates.insert(key(0x3f), LeafUpdate::Touched);
+        let mut expected_pending = updates.clone();
+        expected_pending.remove(&key(0x50));
+        let mut targets = Vec::new();
+        trie.update_leaves(&mut updates, |key, parent| {
+            targets.push(ProofV2Target::new(key).with_parent(parent));
+        })
+        .unwrap();
+
+        assert_eq!(updates, expected_pending);
+        let expected_targets: Vec<_> = [0x30, 0x31, 0x3e, 0x3f, 0x40, 0x41]
+            .into_iter()
+            .map(|suffix| {
+                ProofV2Target::new(key(suffix))
+                    .with_parent(reth_trie_common::ProofV2TargetParent::new(2))
+            })
+            .collect();
+        assert_eq!(targets.len(), expected_targets.len());
+        for (actual, expected) in targets.iter().zip(&expected_targets) {
+            assert_eq!(actual.key_nibbles, expected.key_nibbles);
+            assert_eq!(actual.parent, expected.parent);
+        }
+
+        let (mut nodes, _) = harness.proof_v2(&mut targets);
+        trie.reveal_nodes(&mut nodes).unwrap();
+        harness.assert_changes(&mut trie, changes);
     }
 
     proptest! {
