@@ -815,11 +815,91 @@ pub(crate) struct ValidationMetrics {
 #[cfg(test)]
 mod tests {
     use super::{
-        hash_disallow_list, validate_message_against_payload, AddressSet, ValidationApiError,
+        hash_disallow_list, prepare_blobs_bundle_v2, validate_message_against_payload,
+        verify_blobs_bundle_v2, AddressSet, ValidationApiError,
+    };
+    use alloy_consensus::BlobTransactionValidationError;
+    use alloy_eips::{
+        eip4844::{kzg_to_versioned_hash, Blob, Bytes48},
+        eip7594::{BlobTransactionSidecarEip7594, CELLS_PER_EXT_BLOB},
     };
     use alloy_primitives::{Address, B256};
     use alloy_rpc_types_beacon::relay::BidTrace;
-    use alloy_rpc_types_engine::{ExecutionPayload, ExecutionPayloadV1};
+    use alloy_rpc_types_engine::{BlobsBundleV2, ExecutionPayload, ExecutionPayloadV1};
+
+    fn test_blobs_bundle_v2() -> BlobsBundleV2 {
+        // Distinct field elements ensure that cell proofs are not interchangeable.
+        let mut blob = Blob::default();
+        blob[31] = 1;
+        blob[63] = 2;
+        blob[95] = 3;
+        let sidecar = BlobTransactionSidecarEip7594::try_from_blobs(vec![blob]).unwrap();
+        BlobsBundleV2::new([sidecar])
+    }
+
+    #[test]
+    fn test_prepare_blobs_bundle_v2_rejects_invalid_proof_count() {
+        let bundle = BlobsBundleV2 {
+            commitments: vec![Bytes48::default()],
+            proofs: Vec::new(),
+            blobs: vec![Blob::default()],
+        };
+
+        assert!(matches!(
+            prepare_blobs_bundle_v2(bundle),
+            Err(ValidationApiError::InvalidBlobsBundle)
+        ));
+    }
+
+    #[test]
+    fn test_prepare_blobs_bundle_v2_rejects_invalid_commitment_count() {
+        let bundle = BlobsBundleV2 {
+            commitments: vec![Bytes48::default()],
+            proofs: Vec::new(),
+            blobs: Vec::new(),
+        };
+
+        assert!(matches!(
+            prepare_blobs_bundle_v2(bundle),
+            Err(ValidationApiError::InvalidBlobsBundle)
+        ));
+    }
+
+    #[test]
+    fn test_prepare_blobs_bundle_v2_preserves_versioned_hash_order() {
+        let commitments = vec![Bytes48::repeat_byte(0x01), Bytes48::repeat_byte(0x02)];
+        let expected = commitments
+            .iter()
+            .map(|commitment| kzg_to_versioned_hash(commitment.as_slice()))
+            .collect::<Vec<_>>();
+        let bundle = BlobsBundleV2 {
+            commitments,
+            proofs: vec![Bytes48::default(); 2 * CELLS_PER_EXT_BLOB],
+            blobs: vec![Blob::default(), Blob::default()],
+        };
+
+        let prepared = prepare_blobs_bundle_v2(bundle).unwrap();
+        assert_eq!(prepared.versioned_hashes, expected);
+    }
+
+    #[test]
+    fn test_verify_blobs_bundle_v2_accepts_valid_bundle() {
+        let prepared = prepare_blobs_bundle_v2(test_blobs_bundle_v2()).unwrap();
+        verify_blobs_bundle_v2(&prepared).unwrap();
+    }
+
+    #[test]
+    fn test_verify_blobs_bundle_v2_rejects_corrupted_proof() {
+        let mut bundle = test_blobs_bundle_v2();
+        bundle.proofs.swap(0, 1);
+
+        let prepared = prepare_blobs_bundle_v2(bundle).unwrap();
+        let err = verify_blobs_bundle_v2(&prepared).unwrap_err();
+        assert!(matches!(
+            err,
+            ValidationApiError::Blob(BlobTransactionValidationError::InvalidProof)
+        ));
+    }
 
     fn test_execution_payload() -> ExecutionPayload {
         ExecutionPayload::V1(ExecutionPayloadV1 {
