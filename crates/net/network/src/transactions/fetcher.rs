@@ -343,7 +343,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     /// Stops when the global inflight request limit is reached. `max_hashes_per_request` caps
     /// each request independently of hashes inflight to other peers, so stalled peers cannot
     /// shrink requests to responsive peers. Zero sends nothing. The caller must enforce its
-    /// concurrent import limit when admitting responses; decoded responses remain bounded by
+    /// import backpressure when consuming responses; decoded responses remain bounded by
     /// the configured inflight request limit.
     ///
     /// Returns the number of requests sent. New requests are only polled by the next call to

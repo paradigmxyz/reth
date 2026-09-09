@@ -29,7 +29,8 @@ pub struct TransactionsManagerConfig {
     pub transaction_fetcher_config: TransactionFetcherConfig,
     /// Max number of seen transactions to store for each peer.
     pub max_transactions_seen_by_peer_history: u32,
-    /// Max number of transactions allowed to be imported concurrently.
+    /// Soft limit on concurrent transaction imports. A fetched response admitted while capacity
+    /// remains may exceed this limit by at most 255 transactions; broadcasts are truncated to fit.
     #[cfg_attr(feature = "serde", serde(default = "default_max_pending_pool_imports"))]
     pub max_pending_pool_imports: usize,
     /// How new pending transactions are propagated.

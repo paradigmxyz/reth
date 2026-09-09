@@ -345,9 +345,6 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     /// [`TransactionPool::pending_transactions_listener`] and arrive at the `pending_transactions`
     /// receiver.
     pool_imports: FuturesUnordered<PoolImportFuture>,
-    /// One fetched response awaiting import capacity. While occupied, fetch responses are not
-    /// drained and new requests are not dispatched, bounding the backlog by existing requests.
-    pending_fetch_response: Option<PendingFetchResponse<N::PooledTransaction>>,
     /// Stats on pending pool imports that help the node self-monitor.
     pending_pool_imports_info: PendingPoolImportsInfo,
     /// Bad imports.
@@ -443,7 +440,6 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             transaction_fetcher,
             transactions_by_peers: Default::default(),
             pool_imports: Default::default(),
-            pending_fetch_response: None,
             pending_pool_imports_info,
             bad_imports: LruCache::with_hasher(DEFAULT_MAX_COUNT_BAD_IMPORTS, Default::default()),
             peers: Default::default(),
@@ -469,12 +465,19 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         self
     }
 
-    /// Returns `true` if [`TransactionsManager`] has capacity for more pending pool imports.
+    /// Returns whether pending pool imports are below the soft limit.
+    ///
+    /// Fetch responses are admitted in full when capacity remains, so one response can exceed
+    /// the limit by at most 255 transactions (the 256-hash request cap minus one free slot).
+    /// Further responses and requests wait until imports fall below the limit again.
     fn has_capacity_for_pending_pool_imports(&self) -> bool {
         self.remaining_pool_import_capacity() > 0
     }
 
-    /// Returns the remaining capacity for pending pool imports.
+    /// Returns the remaining capacity below the soft limit for pending pool imports.
+    ///
+    /// Outstanding requests do not reserve capacity. A fetched response is admitted in full
+    /// if any capacity remains; while imports exceed the limit, this returns zero.
     fn remaining_pool_import_capacity(&self) -> usize {
         self.pending_pool_imports_info.max_pending_pool_imports.saturating_sub(
             self.pending_pool_imports_info.pending_pool_imports.load(Ordering::Relaxed),
@@ -1326,6 +1329,10 @@ where
     }
 
     /// Starts the import process for the given transactions.
+    ///
+    /// Callers must check import capacity before consuming a fetch response. Responses are
+    /// admitted in full and may overshoot the soft limit by one bounded response; broadcasts
+    /// are truncated to their available capacity.
     fn import_transactions(
         &mut self,
         peer_id: PeerId,
@@ -1352,31 +1359,15 @@ where
         let is_broadcast = source.is_broadcast();
         let mut transactions = transactions.0;
 
-        // Broadcasts may be discarded at capacity. Fetched transactions are already settled
-        // by the fetcher, so keep their remainder until imports complete instead of losing them.
-        let capacity = if is_broadcast {
-            self.remaining_broadcast_import_capacity()
-        } else {
-            self.remaining_pool_import_capacity()
-        };
-        if transactions.len() > capacity {
-            match source {
-                TransactionSource::Broadcast => {
-                    self.metrics
-                        .skipped_transactions_pending_pool_imports_at_capacity
-                        .increment((transactions.len() - capacity) as u64);
-                    transactions.truncate(capacity);
-                }
-                TransactionSource::Response { version, client_version } => {
-                    debug_assert!(self.pending_fetch_response.is_none());
-                    let remainder = transactions.split_off(capacity);
-                    self.pending_fetch_response = Some(PendingFetchResponse {
-                        transactions: PooledTransactions(remainder),
-                        peer_id,
-                        version,
-                        client_version,
-                    });
-                }
+        // Fetched batches may exceed the soft limit: their request size is bounded, and the
+        // caller stops consuming responses until capacity becomes available again.
+        if is_broadcast {
+            let capacity = self.remaining_broadcast_import_capacity();
+            if transactions.len() > capacity {
+                self.metrics
+                    .skipped_transactions_pending_pool_imports_at_capacity
+                    .increment((transactions.len() - capacity) as u64);
+                transactions.truncate(capacity);
             }
         }
 
@@ -1386,7 +1377,7 @@ where
 
         let start = Instant::now();
 
-        // A buffered response may have been announced again while it waited for admission.
+        // Stop fetching transactions received through either broadcasts or responses.
         self.transaction_fetcher
             .on_transactions_received(transactions.iter().map(|tx| tx.tx_hash()));
 
@@ -1608,20 +1599,6 @@ where
             |event| this.on_network_event(event)
         );
 
-        // Admit buffered responses before broadcasts can consume newly available capacity.
-        if this.has_capacity_for_pending_pool_imports() &&
-            let Some(response) = this.pending_fetch_response.take()
-        {
-            this.import_transactions(
-                response.peer_id,
-                response.transactions,
-                TransactionSource::Response {
-                    version: response.version,
-                    client_version: response.client_version,
-                },
-            );
-        }
-
         // Advance incoming transaction events (stream new txns/announcements from
         // network manager and queue for import to pool/fetch txns).
         //
@@ -1642,14 +1619,17 @@ where
         // Advance inflight fetch requests (flush transaction fetcher and queue for
         // import to pool).
         //
-        // A fetched response may exceed the available import capacity. Admission keeps its
-        // remainder in `pending_fetch_response`; while occupied, stop draining fetch events.
+        // Pace response consumption with the soft import limit. Dispatch checks capacity but
+        // does not reserve it for outstanding requests, so concurrent responses can exceed it.
+        // Admit one complete response while capacity remains (at most 256 transactions), then
+        // pause here if it fills or overshoots the limit. Existing requests continue in flight;
+        // completed responses wait in their channels until pool imports free capacity.
         let mut maybe_more_tx_fetch_events = metered_poll_nested_stream_with_budget!(
             poll_durations.acc_fetch_events,
             "net::tx",
             "Transaction fetch events stream",
             DEFAULT_BUDGET_TRY_DRAIN_STREAM,
-            if this.pending_fetch_response.is_none() {
+            if this.has_capacity_for_pending_pool_imports() {
                 this.transaction_fetcher.poll_next_unpin(cx)
             } else {
                 Poll::Pending
@@ -1657,9 +1637,11 @@ where
             |event| this.on_fetch_event(event),
         );
 
-        // Advance batches admitted to the pool within the concurrent import limit. Each batch
-        // contains admitted transactions from one broadcast or fetched response; a buffered
-        // response may be admitted over several polls as import capacity becomes available.
+        // Remember whether response polling stopped at capacity so imports completing below
+        // can trigger another poll even if the waiting response has not registered a waker yet.
+        let fetcher_paused_at_capacity = !this.has_capacity_for_pending_pool_imports();
+
+        // Advance admitted batches and free capacity for more responses.
         let maybe_more_pool_imports = metered_poll_nested_stream_with_budget!(
             poll_durations.acc_pending_imports,
             "net::tx",
@@ -1708,17 +1690,14 @@ where
             this.on_new_pending_transactions(new_txs);
         }
 
-        // Stop dispatching while a response awaits admission. Request sizes are independent
-        // of other inflight requests; response admission enforces the concurrent import limit.
+        // Dispatch only below the soft import limit. Each request is capped independently;
+        // outstanding requests do not reserve capacity against other peers.
         duration_metered_exec!(
             {
                 // Peers whose session channel was full are retried on the next poll, which any
                 // other event triggers.
                 let budget = this.remaining_pool_import_capacity();
-                if this.pending_fetch_response.is_none() &&
-                    budget > 0 &&
-                    this.transaction_fetcher.dispatch(&this.peers, budget) > 0
-                {
+                if budget > 0 && this.transaction_fetcher.dispatch(&this.peers, budget) > 0 {
                     // poll the fetcher again so the new inflight requests register their wakers
                     maybe_more_tx_fetch_events = true;
                 }
@@ -1745,8 +1724,7 @@ where
             maybe_more_tx_fetch_events ||
             maybe_more_pool_imports ||
             maybe_more_pending_txns ||
-            (this.pending_fetch_response.is_some() &&
-                this.has_capacity_for_pending_pool_imports())
+            (fetcher_paused_at_capacity && this.has_capacity_for_pending_pool_imports())
         {
             // make sure we're woken up again
             cx.waker().wake_by_ref();
@@ -2160,15 +2138,6 @@ impl PooledTransactionsHashesBuilder {
             }
         }
     }
-}
-
-/// A fetched response waiting for pool import capacity, retaining its originating session metadata.
-#[derive(Debug)]
-struct PendingFetchResponse<T> {
-    transactions: PooledTransactions<T>,
-    peer_id: PeerId,
-    version: EthVersion,
-    client_version: Arc<str>,
 }
 
 /// How we received the transactions.

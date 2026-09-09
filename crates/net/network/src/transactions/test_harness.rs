@@ -347,75 +347,67 @@ mod tests {
             request.response.send(Ok(PooledTransactions(vec![tx.clone()]))).unwrap();
         }
 
-        // Both responses resolve before either import future is polled.
-        for _ in 0..2 {
-            let event = harness.manager.transaction_fetcher.next().await.unwrap();
-            harness.manager.on_fetch_event(event);
-            assert_eq!(
-                harness
-                    .manager
-                    .pending_pool_imports_info
-                    .pending_pool_imports
-                    .load(Ordering::Relaxed),
-                1,
-            );
-        }
-        assert!(harness.manager.pending_fetch_response.is_some());
+        // Only one response can be consumed before imports are polled. The second remains
+        // inflight, and freeing capacity must wake the manager to consume it on the next poll.
+        harness.wake_flag.0.store(false, Ordering::Relaxed);
+        let mut cx = Context::from_waker(&harness.waker);
+        let _ = Pin::new(&mut harness.manager).poll(&mut cx);
+        assert_eq!(harness.manager.transaction_fetcher.num_inflight_requests(), 1);
+        assert!(harness.was_woken());
         harness.poll_until_idle();
-        assert!(harness.manager.pending_fetch_response.is_none());
         assert_eq!(harness.pool().get_all(hashes).len(), 2);
     }
 
     #[tokio::test]
-    async fn fetched_response_is_admitted_after_broadcasts_in_bounded_chunks() {
-        for broadcast_count in [1, 2] {
-            let txs = pooled_txs(2 + broadcast_count);
-            let hashes = txs.iter().map(|tx| *tx.tx_hash()).collect::<Vec<_>>();
-            let config =
-                TransactionsManagerConfig { max_pending_pool_imports: 2, ..Default::default() };
-            let mut harness = TxFetchHarness::with_config(config, [PEER_A, PEER_B]).await;
-            harness.announce(PEER_A, announcement(&hashes[..2]));
-            harness.poll_until_idle();
-            let mut requests = harness.take_requests();
-            assert_eq!(requests.len(), 1);
+    async fn fetched_response_can_overshoot_soft_import_limit() {
+        let txs = pooled_txs(257);
+        let hashes = txs.iter().map(|tx| *tx.tx_hash()).collect::<Vec<_>>();
+        let config =
+            TransactionsManagerConfig { max_pending_pool_imports: 256, ..Default::default() };
+        let mut harness = TxFetchHarness::with_config(config, [PEER_A, PEER_B]).await;
+        harness.announce(PEER_A, announcement(&hashes[..256]));
+        harness.poll_until_idle();
+        let request = harness.take_requests().pop().unwrap();
+        assert_eq!(request.request.0.len(), 256);
+        request.response.send(Ok(PooledTransactions(txs[..256].to_vec()))).unwrap();
+        let event = harness.manager.transaction_fetcher.next().await.unwrap();
 
-            requests
-                .pop()
-                .unwrap()
-                .response
-                .send(Ok(PooledTransactions(txs[..2].to_vec())))
-                .unwrap();
-            let event = harness.manager.transaction_fetcher.next().await.unwrap();
-            // Competing imports consume capacity before the fetched batch is admitted.
-            harness.manager.import_transactions(
-                PEER_B,
-                PooledTransactions(txs[2..].to_vec()),
-                crate::transactions::TransactionSource::Broadcast,
-            );
-            harness.manager.on_fetch_event(event);
-            assert_eq!(
-                harness
-                    .manager
-                    .pending_pool_imports_info
-                    .pending_pool_imports
-                    .load(Ordering::Relaxed),
-                2,
-            );
-            assert_eq!(
-                harness.manager.pending_fetch_response.as_ref().unwrap().transactions.0.len(),
-                broadcast_count,
-            );
+        // Competing imports leave one slot before the response is admitted. A full response
+        // is still imported, exercising the maximum overshoot of 255 transactions.
+        harness
+            .manager
+            .pending_pool_imports_info
+            .pending_pool_imports
+            .store(255, Ordering::Relaxed);
+        assert!(harness.manager.has_capacity_for_pending_pool_imports());
+        harness.manager.on_fetch_event(event);
+        assert_eq!(
+            harness.manager.pending_pool_imports_info.pending_pool_imports.load(Ordering::Relaxed),
+            511,
+        );
+        assert_eq!(harness.manager.remaining_pool_import_capacity(), 0);
+        assert!(!harness.manager.has_capacity_for_pending_pool_imports());
+        harness.manager.import_transactions(
+            PEER_B,
+            PooledTransactions(txs[256..].to_vec()),
+            crate::transactions::TransactionSource::Broadcast,
+        );
+        assert!(!harness.manager.transactions_by_peers.contains_key(&hashes[256]));
 
-            // A disconnect must not discard the buffered bodies, and re-announcements while
-            // buffered must not result in another download when dispatch resumes.
-            harness.manager.peers.remove(&PEER_A);
-            harness.manager.transaction_fetcher.on_peer_disconnected(&PEER_A);
-            harness.announce(PEER_B, announcement(&hashes[..2]));
-            harness.poll_until_idle();
-            assert!(harness.take_requests().is_empty());
-            assert!(harness.manager.pending_fetch_response.is_none());
-            assert_eq!(harness.pool().get_all(hashes).len(), txs.len());
-        }
+        // Completing the competing imports and disconnecting the responder must not lose any
+        // admitted bodies or cause them to be requested again.
+        harness
+            .manager
+            .pending_pool_imports_info
+            .pending_pool_imports
+            .fetch_sub(255, Ordering::Relaxed);
+        harness.manager.peers.remove(&PEER_A);
+        harness.manager.transaction_fetcher.on_peer_disconnected(&PEER_A);
+        harness.announce(PEER_B, announcement(&hashes[..256]));
+        harness.poll_until_idle();
+        assert!(harness.take_requests().is_empty());
+        assert_eq!(harness.pool().get_all(hashes[..256].to_vec()).len(), 256);
+        assert_eq!(harness.manager.remaining_pool_import_capacity(), 256);
     }
 
     #[tokio::test]
