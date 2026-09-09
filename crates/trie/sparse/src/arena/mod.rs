@@ -2330,6 +2330,15 @@ impl SparseTrie for ArenaParallelSparseTrie {
             return;
         }
 
+        // Mutation cursors propagate dirty state to the root before returning. Proof reveal
+        // preserves cached hashes, so a cached root cannot have dirty subtries to hash.
+        if self.upper_arena[self.root].is_cached() {
+            debug_assert!(self.upper_arena.iter().all(|(_, node)| {
+                !matches!(node, ArenaSparseNode::Subtrie(subtrie) if subtrie.num_dirty_leaves != 0)
+            }));
+            return;
+        }
+
         // Count total dirty leaves across all subtries to make one global parallelism decision.
         let mut total_dirty_leaves: u64 = 0;
         let mut taken: Vec<(Index, Box<ArenaSparseSubtrie>)> = Vec::new();
@@ -2367,12 +2376,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     })
                     .collect();
             }
-        }
-
-        // If the root branch is already cached and nothing was taken for parallel
-        // hashing, there are no dirty subtries to process.
-        if taken.is_empty() && self.upper_arena[self.root].is_cached() {
-            return;
         }
 
         // Walk the upper trie depth-first, restoring hashed subtries and inline-hashing
@@ -3058,6 +3061,45 @@ mod tests {
             changeset.entry(key).or_insert(value);
         }
         changeset
+    }
+
+    #[test]
+    fn cached_root_survives_reveal_and_invalidates_on_update() {
+        let storage: BTreeMap<_, _> = (0u64..64)
+            .map(|i| (alloy_primitives::keccak256(i.to_be_bytes()), U256::from(i + 1)))
+            .collect();
+        let keys: Vec<_> = storage.keys().copied().collect();
+        let mut harness = ArenaTrieTestHarness::new(storage);
+        let root = harness.root_node();
+        let mut trie = ArenaParallelSparseTrie::default();
+        trie.set_root(root.node, root.masks, true).unwrap();
+        let expected_root = harness.original_root();
+        assert_eq!(trie.root(epoch(1)), expected_root);
+        let root_epoch = trie.root_epoch();
+
+        let mut targets: Vec<_> = keys.iter().copied().map(ProofV2Target::new).collect();
+        let (mut proof, _) = harness.proof_v2(&mut targets);
+        trie.reveal_nodes(&mut proof).unwrap();
+        assert!(trie.is_root_cached());
+        assert_eq!(trie.root(epoch(2)), expected_root);
+        assert_eq!(trie.root_epoch(), root_epoch);
+        let updates = trie.take_updates();
+        assert!(updates.updated_nodes.is_empty());
+        assert!(updates.removed_nodes.is_empty());
+
+        let changes = BTreeMap::from([(keys[0], U256::ZERO), (keys[1], U256::from(100))]);
+        harness.assert_changes(&mut trie, changes.clone());
+        harness.apply_changeset(changes);
+        let updated_root = trie.root(epoch(3));
+        assert_ne!(updated_root, expected_root);
+        assert_eq!(trie.root(epoch(4)), updated_root);
+        let updates = trie.take_updates();
+        assert!(updates.updated_nodes.is_empty());
+        assert!(updates.removed_nodes.is_empty());
+
+        trie.prune(epoch(5));
+        assert_eq!(trie.root(epoch(6)), updated_root);
+        harness.assert_changes(&mut trie, BTreeMap::from([(keys[2], U256::from(101))]));
     }
 
     proptest! {
