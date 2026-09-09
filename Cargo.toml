@@ -698,7 +698,14 @@ vergen-git2 = "10.0.1"
 ipnet = "2.11"
 
 [patch.crates-io]
-alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "6e10b9ef" }
+alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "714b25a2" }
+alloy-consensus-any = { git = "https://github.com/alloy-rs/alloy", rev = "714b25a2" }
+alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "714b25a2" }
+alloy-network-primitives = { git = "https://github.com/alloy-rs/alloy", rev = "714b25a2" }
+alloy-serde = { git = "https://github.com/alloy-rs/alloy", rev = "714b25a2" }
+alloy-tx-macros = { git = "https://github.com/alloy-rs/alloy", rev = "714b25a2" }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "714b25a2" }
+alloy-rpc-types-eth = { git = "https://github.com/alloy-rs/alloy", rev = "714b25a2" }
 alloy-trie = { git = "https://github.com/alloy-rs/trie", rev = "288294aa3fbe9e699bb2d8bd966bb7ff3ec59882" }
 reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "5acdfd7" }
 reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "5acdfd7" }

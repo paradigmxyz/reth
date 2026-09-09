@@ -29,8 +29,9 @@ use alloy_eips::{BlockHashOrNumber, BlockNumberOrTag};
 use alloy_network::{primitives::HeaderResponse, BlockResponse};
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, TxHash, TxNumber, B256, U256};
 use alloy_provider::{ext::DebugApi, network::Network, Provider};
-use alloy_rpc_types::{AccountInfo, BlockId};
+use alloy_rpc_types::BlockId;
 use alloy_rpc_types_engine::ForkchoiceState;
+use alloy_rpc_types_eth::AccountInfo;
 use dashmap::DashMap;
 use reth_chainspec::{ChainInfo, ChainSpecProvider};
 use reth_db_api::{
@@ -1022,28 +1023,10 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
         P: Provider<N> + Clone + 'static,
         N: Network,
     {
-        if Account::EXTENSIONS_ENABLED {
-            // Balance/nonce/code RPCs cannot carry the payload or distinguish extension-only
-            // accounts.
-            return self.block_on_async(async {
-                let account: Option<alloy_consensus::TrieAccount> = self
-                    .provider
-                    .raw_request("eth_getAccount".into(), (address, self.block_id))
-                    .await
-                    .map_err(ProviderError::other)?;
-                if let Some(account) = &account &&
-                    account.code_hash != KECCAK_EMPTY
-                {
-                    let code = self
-                        .provider
-                        .get_code_at(address)
-                        .block_id(self.block_id)
-                        .await
-                        .map_err(ProviderError::other)?;
-                    self.code_store.insert(account.code_hash, Bytecode::new_raw(code));
-                }
-                Ok(account.map(Account::from))
-            });
+        if Account::EXTENSIONS_ENABLED && !self.reth_rpc_support {
+            return Err(ProviderError::other(std::io::Error::other(
+                "account extensions require reth_rpc_support and an extension-aware eth_getAccountInfo endpoint",
+            )));
         }
         let account_info = self.block_on_async(async {
             // Get account info in a single RPC call using `eth_getAccountInfo`
@@ -1066,6 +1049,8 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
                 balance: balance.map_err(ProviderError::other)?,
                 nonce: nonce.map_err(ProviderError::other)?,
                 code: code.map_err(ProviderError::other)?,
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
             };
 
             let code_hash = account_info.code_hash();
@@ -1077,9 +1062,7 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
             Ok(account_info)
         })?;
 
-        // Only return account if it exists (has balance, nonce, or code)
-        if account_info.balance.is_zero() && account_info.nonce == 0 && account_info.code.is_empty()
-        {
+        if account_info.is_empty() {
             Ok(None)
         } else {
             let bytecode_hash =
@@ -1090,7 +1073,7 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
                 nonce: account_info.nonce,
                 bytecode_hash,
                 #[cfg(feature = "account-ext")]
-                extension: Default::default(),
+                extension: account_info.extension,
             }))
         }
     }

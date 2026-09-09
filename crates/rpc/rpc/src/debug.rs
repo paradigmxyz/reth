@@ -762,7 +762,15 @@ where
             db.code_by_hash(account.code_hash).map_err(Eth::Error::from_eth_err)?.original_bytes()
         };
 
-        Ok(AccountInfo { balance: account.balance, nonce: account.nonce, code })
+        Ok(AccountInfo {
+            balance: account.balance,
+            nonce: account.nonce,
+            code,
+            #[cfg(feature = "account-ext")]
+            extension: reth_primitives_traits::AccountExtension::from_shared(
+                account.extension.into_shared(),
+            ),
+        })
     }
 
     /// Returns the code associated with a given hash at the specified block ID. If no code is
