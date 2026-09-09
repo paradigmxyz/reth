@@ -212,7 +212,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         let mut queue_start = 0;
         // Other peers can only lose tracked hashes during this announcement. Refresh their
         // heap entries lazily instead of scanning every peer for each hash at capacity.
-        let mut eviction_peers = None;
+        let mut eviction = None;
         // Gossip commonly replaces the same fallback peer for every hash in a batch. Apply
         // that peer's accounting once, flushing before eviction needs up-to-date counts.
         let mut retired_candidates = DeferredCandidateRemovals::default();
@@ -274,7 +274,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                         if let Some(peer) = self.peers.get_mut(&key) {
                             peer.tracked = tracked;
                         }
-                        if self.evict_pending(key, &queue, &mut queue_start, &mut eviction_peers) {
+                        if self.evict_pending(key, &queue, &mut queue_start, &mut eviction) {
                             evicted_at_capacity += 1;
                             tracked = self.peers.get(&key).map_or(tracked, |peer| peer.tracked);
                         } else {
@@ -332,6 +332,8 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 dropped_at_capacity,
                 "queued announced hashes"
             );
+        }
+        if queued > 0 || queue_start > 0 {
             self.mark_ready(key, QueuePosition::Back);
         }
     }
@@ -565,15 +567,18 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         announcer: PeerKey,
         queued: &[(TxHash, u64)],
         queued_start: &mut usize,
-        eviction_peers: &mut Option<BinaryHeap<(usize, PeerKey)>>,
+        eviction: &mut Option<EvictionState>,
     ) -> bool {
-        let heap = eviction_peers.get_or_insert_with(|| {
-            self.peers
+        let eviction = eviction.get_or_insert_with(|| EvictionState {
+            peers: self
+                .peers
                 .iter()
                 .filter(|(key, peer)| **key != announcer && peer.tracked > 0)
                 .map(|(key, peer)| (peer.tracked, *key))
-                .collect()
+                .collect(),
+            exclusive: Default::default(),
         });
+        let heap = &mut eviction.peers;
         let (mut tracked, mut key) = loop {
             let Some(&(previous, key)) = heap.peek() else { break (0, announcer) };
             let current = self.peers.get(&key).map_or(0, |peer| peer.tracked);
@@ -592,7 +597,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         if tracked == 0 {
             return self.evict_oldest_pending()
         }
-        if self.evict_oldest_pending_of(key) {
+        if self.evict_oldest_pending_of(key, &mut eviction.exclusive) {
             return true
         }
         if key == announcer {
@@ -617,44 +622,42 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
 
     /// Evicts the oldest pending hash announced only by this peer, if one exists.
     ///
-    /// Queue entries that are drained on the way are handled like when packing a request.
-    fn evict_oldest_pending_of(&mut self, key: PeerKey) -> bool {
-        let Some(peer) = self.peers.get_mut(&key) else { return false };
-        let mut evict = None;
-        // Stale entries are discarded without spending the live-entry search budget.
-        // Leave skipped shared entries in place to preserve announcement order.
-        let mut index = 0;
-        let mut attempts = 0;
-        while attempts < MAX_EVICTION_ATTEMPTS {
-            let Some(&(hash, generation)) = peer.queue.get(index) else { break };
-            let Some(entry) =
-                self.hashes.get_mut(&hash).filter(|entry| entry.generation == generation)
-            else {
-                peer.queue.remove(index);
-                continue
-            };
-            if !entry.has_candidate(key) {
-                peer.queue.remove(index);
-                continue
+    /// Scan each selected peer's queue once per announcement. A bounded prefix can hide
+    /// exclusive victims behind shared hashes; caching avoids rescanning that prefix for every
+    /// eviction. Newly tracked hashes from the current announcement are handled by its cursor.
+    fn evict_oldest_pending_of(
+        &mut self,
+        key: PeerKey,
+        exclusive: &mut HashMap<PeerKey, VecDeque<(TxHash, u64)>>,
+    ) -> bool {
+        let candidates = exclusive.entry(key).or_insert_with(|| {
+            self.peers
+                .get(&key)
+                .into_iter()
+                .flat_map(|peer| &peer.queue)
+                .filter(|(hash, generation)| {
+                    self.hashes.get(hash).is_some_and(|entry| {
+                        entry.generation == *generation &&
+                            entry.candidates.len() == 1 &&
+                            entry.has_candidate(key) &&
+                            entry.fetching_by.is_none()
+                    })
+                })
+                .copied()
+                .collect()
+        });
+        while let Some((hash, generation)) = candidates.pop_front() {
+            if self.hashes.get(&hash).is_some_and(|entry| {
+                entry.generation == generation &&
+                    entry.candidates.len() == 1 &&
+                    entry.has_candidate(key) &&
+                    entry.fetching_by.is_none()
+            }) {
+                self.remove_hash(&hash);
+                return true
             }
-            attempts += 1;
-            if entry.candidates.len() > 1 || entry.fetching_by.is_some() {
-                index += 1;
-                continue
-            }
-            peer.queue.remove(index);
-            evict = Some(hash);
-            break
         }
-        // a drained queue leaves the peer with nothing to be ready for
-        let unready = peer.ready && peer.queue.is_empty();
-        if unready {
-            peer.ready = false;
-            self.ready.retain(|ready| *ready != key);
-        }
-        let Some(hash) = evict else { return false };
-        self.remove_hash(&hash);
-        true
+        false
     }
 
     /// Evicts the oldest pending hash, including shared hashes, as a last resort.
@@ -1174,6 +1177,14 @@ pub enum FetchEvent<T = PooledTransaction> {
 /// Compact identifier of a peer within the fetcher.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct PeerKey(u32);
+
+/// Cached eviction work for one announcement. Other peers can only lose candidates, and new
+/// hashes from this announcer are still in the scratch queue until the announcement finishes.
+#[derive(Debug)]
+struct EvictionState {
+    peers: BinaryHeap<(usize, PeerKey)>,
+    exclusive: HashMap<PeerKey, VecDeque<(TxHash, u64)>>,
+}
 
 /// Position for newly queued hashes or ready peers.
 #[derive(Debug, Clone, Copy)]
@@ -2353,6 +2364,52 @@ mod tests {
     }
 
     #[test]
+    fn shared_queue_prefix_does_not_hide_exclusive_eviction_victim() {
+        let mut rig = Rig::with_config(TransactionFetcherConfig {
+            max_capacity_cache_txns_pending_fetch: 10,
+            ..Default::default()
+        });
+        let honest = peer(1);
+        let flooder = peer(2);
+        let newcomer = peer(3);
+        for p in [honest, flooder, newcomer] {
+            rig.add_peer(p);
+        }
+        rig.announce(honest, &hashes(0..9));
+        rig.announce(flooder, &hashes(0..8));
+        rig.announce(flooder, &[hash(9)]);
+        rig.announce(newcomer, &[hash(10)]);
+        for h in hashes(0..8) {
+            assert_eq!(rig.fetcher.candidate_peers(&h), vec![honest, flooder]);
+        }
+        assert!(rig.fetcher.candidate_peers(&hash(9)).is_empty());
+        assert_eq!(rig.fetcher.candidate_peers(&hash(10)), vec![newcomer]);
+    }
+
+    #[test]
+    fn capacity_fallback_keeps_the_announcer_ready() {
+        let mut rig = Rig::with_config(TransactionFetcherConfig {
+            max_capacity_cache_txns_pending_fetch: 9,
+            ..Default::default()
+        });
+        let stalled = peer(1);
+        let source = peer(2);
+        let announcer = peer(3);
+        for p in [stalled, source, announcer] {
+            rig.add_peer(p);
+        }
+        rig.announce(stalled, &hashes(0..8));
+        rig.dispatch();
+        rig.announce(source, &[hash(8)]);
+        // The global scan sees only fetching hashes. The last new hash is dropped after
+        // the shared scratch entries have been moved into the announcer's real queue.
+        rig.announce(announcer, &hashes(0..10));
+        rig.disconnect(source);
+        assert_eq!(rig.dispatch(), 1);
+        assert_eq!(rig.take_request(announcer).unwrap().0, vec![hash(8)]);
+    }
+
+    #[test]
     fn capacity_eviction_preserves_coannounced_hashes() {
         let config = TransactionFetcherConfig {
             max_capacity_cache_txns_pending_fetch: 4,
@@ -2373,9 +2430,9 @@ mod tests {
         assert_eq!(rig.fetcher.candidate_peers(&shared), vec![honest, flooder]);
         assert!(rig.fetcher.candidate_peers(&hash(1)).is_empty());
         assert_eq!(rig.fetcher.candidate_peers(&hash(4)), vec![newcomer]);
-        assert_eq!(rig.fetcher.queued_hashes(&flooder), vec![shared, hash(2), hash(3)]);
         rig.dispatch();
         assert_eq!(rig.fetcher.fetching_peer(&shared), Some(honest));
+        assert_eq!(rig.take_request(flooder).unwrap().0, vec![hash(2), hash(3)]);
     }
 
     #[test]

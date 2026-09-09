@@ -419,6 +419,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn stalled_fetches_cannot_starve_broadcasts() {
+        let txs = pooled_txs(1);
+        let tx_hash = *txs[0].tx_hash();
+        let config =
+            TransactionsManagerConfig { max_pending_pool_imports: 2, ..Default::default() };
+        let mut harness = TxFetchHarness::with_config(config, [PEER_A, PEER_B]).await;
+        harness.announce(PEER_A, announcement(&[hash(0), hash(1)]));
+        harness.poll_until_idle();
+        let requests = harness.take_requests();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(harness.manager.transaction_fetcher.num_fetching_hashes(), 2);
+        harness.manager.import_transactions(
+            PEER_B,
+            PooledTransactions(txs),
+            crate::transactions::TransactionSource::Broadcast,
+        );
+        harness.poll_until_idle();
+        assert!(
+            harness.pool().get(&tx_hash).is_some(),
+            "stalled requests must leave broadcast capacity"
+        );
+        drop(requests);
+    }
+
+    #[tokio::test]
     async fn broadcasts_cannot_starve_announced_transactions() {
         let txs = pooled_txs(3);
         let hashes = txs.iter().map(|tx| *tx.tx_hash()).collect::<Vec<_>>();

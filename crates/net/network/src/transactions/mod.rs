@@ -494,7 +494,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             .max_pending_pool_imports
             .div_ceil(2)
             .min(SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST);
-        capacity.saturating_sub(reserved.max(self.transaction_fetcher.num_fetching_hashes()))
+        capacity.saturating_sub(reserved)
     }
 
     fn report_peer_bad_transactions(&self, peer_id: PeerId) {
