@@ -1717,6 +1717,10 @@ where
 
         this.transaction_fetcher.update_metrics();
 
+        // Revisit the fetcher if imports freed capacity after response polling was paused.
+        let resume_fetcher =
+            fetcher_paused_at_capacity && this.has_capacity_for_pending_pool_imports();
+
         // all channels are fully drained and import futures pending
         if maybe_more_network_events ||
             maybe_more_commands ||
@@ -1724,7 +1728,7 @@ where
             maybe_more_tx_fetch_events ||
             maybe_more_pool_imports ||
             maybe_more_pending_txns ||
-            (fetcher_paused_at_capacity && this.has_capacity_for_pending_pool_imports())
+            resume_fetcher
         {
             // make sure we're woken up again
             cx.waker().wake_by_ref();
