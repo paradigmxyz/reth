@@ -3,6 +3,7 @@
 
 mod path;
 mod proof;
+mod proof_access;
 mod receipt_resolution;
 mod schema;
 #[cfg(test)]
@@ -15,6 +16,7 @@ pub use proof::{
     address_target_node, verify_branch, verify_receipt_log_address, EnvelopeError,
     InvalidAddressLength, ProofError,
 };
+pub use proof_access::{prove_receipt_log_address, ProofAccessError, ReceiptLogAddressProof};
 pub use receipt_resolution::{resolve_receipt_log_address, ReceiptResolutionError, ReceiptsSsz};
 pub use schema::{
     branch_positions, compose_gindices, container_field_gindex, progressive_chunk_gindex,
