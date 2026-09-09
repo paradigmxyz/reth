@@ -218,10 +218,10 @@ pub fn current_thread_runqueue_time() -> Option<Duration> {
         use std::{fs::File, os::unix::fs::FileExt};
         thread_local! {
             static SCHEDSTAT: Option<File> = (|| {
-                if std::fs::read_to_string("/proc/sys/kernel/sched_schedstats").ok()?.trim() != "1" {
-                    None
-                } else {
+                if std::fs::read_to_string("/proc/sys/kernel/sched_schedstats").ok()?.trim() == "1" {
                     File::open("/proc/thread-self/schedstat").ok()
+                } else {
+                    None
                 }
             })();
         }
