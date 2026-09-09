@@ -53,6 +53,7 @@ fn extension_only_genesis_account_proof() {
         reth_primitives_traits::AccountExtension::from(alloy_rlp::encode(B256::repeat_byte(0x42)));
     let mut spec = ChainSpec::default();
     spec.genesis.alloc.entry(target).or_default().extension = extension.clone();
+    spec.genesis.alloc.entry(Address::with_last_byte(3)).or_default().balance = U256::from(1);
     let expected_root =
         reth_chainspec::make_genesis_header(&spec.genesis, &spec.hardforks).state_root;
     let factory = create_test_provider_factory();
@@ -87,7 +88,24 @@ fn extension_only_genesis_account_proof() {
         let multiproof = multiproof.account_proof(target, &[]).unwrap();
         assert_eq!(multiproof.info, proof.info);
         assert_eq!(multiproof.verify(root), Ok(()));
-        assert!(proof.into_eip1186_response(Vec::new()).is_err());
+        for proof in [proof, multiproof] {
+            let response = proof.clone().into_eip1186_response(Vec::new());
+            assert_eq!(response.account_proof, proof.proof);
+            let restored = AccountProof::from_eip1186_proof(response);
+            assert_eq!(restored.info.as_ref().unwrap().extension, extension);
+            assert_eq!(restored.verify(root), Ok(()));
+
+            let mut tampered = proof.clone().into_eip1186_response(Vec::new());
+            tampered.balance = U256::from(1);
+            assert!(AccountProof::from_eip1186_proof(tampered).verify(root).is_err());
+        }
+        let absent = Address::with_last_byte(2);
+        let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(provider.tx_ref())
+            .account_proof(absent, &[])
+            .unwrap();
+        let restored = AccountProof::from_eip1186_proof(proof.into_eip1186_response(Vec::new()));
+        assert!(restored.info.is_none());
+        assert_eq!(restored.verify(root), Ok(()));
     });
 }
 

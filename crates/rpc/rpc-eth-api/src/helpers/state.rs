@@ -181,10 +181,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                 let proof = state
                     .proof(Default::default(), address, &storage_keys)
                     .map_err(Self::Error::from_eth_err)?;
-                proof
-                    .into_eip1186_response(keys)
-                    .map_err(RethError::other)
-                    .map_err(Self::Error::from_eth_err)
+                Ok(proof.into_eip1186_response(keys))
             })
             .await
         })
@@ -240,10 +237,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                             .map_err(Self::Error::from_eth_err)?;
                         let storage_keys =
                             slots.into_iter().map(JsonStorageKey::from).collect::<Vec<_>>();
-                        proof
-                            .into_eip1186_response(storage_keys)
-                            .map_err(RethError::other)
-                            .map_err(Self::Error::from_eth_err)
+                        Ok(proof.into_eip1186_response(storage_keys))
                     })
                     .collect::<Result<Vec<_>, Self::Error>>()
             })

@@ -827,7 +827,7 @@ impl AccountProof {
     pub fn into_eip1186_response(
         self,
         slots: Vec<alloy_serde::JsonStorageKey>,
-    ) -> Result<alloy_rpc_types_eth::EIP1186AccountProofResponse, alloy_rlp::Error> {
+    ) -> alloy_rpc_types_eth::EIP1186AccountProofResponse {
         self.into_eip1186_response_with(slots, false)
     }
 
@@ -845,10 +845,9 @@ impl AccountProof {
         self,
         slots: Vec<alloy_serde::JsonStorageKey>,
         zero_empty_account: bool,
-    ) -> Result<alloy_rpc_types_eth::EIP1186AccountProofResponse, alloy_rlp::Error> {
-        if self.info.as_ref().is_some_and(Account::has_extension) {
-            return Err(alloy_rlp::Error::Custom("EIP-1186 cannot represent account extensions"));
-        }
+    ) -> alloy_rpc_types_eth::EIP1186AccountProofResponse {
+        // The raw proof nodes include the complete account RLP, including any extension.
+        // Clients must understand the chain's account encoding to verify these proofs.
         let is_non_existent = self.info.is_none();
         let info = self.info.unwrap_or_default();
         let (code_hash, storage_hash) = if is_non_existent && zero_empty_account {
@@ -856,7 +855,7 @@ impl AccountProof {
         } else {
             (info.get_bytecode_hash(), self.storage_root)
         };
-        Ok(alloy_rpc_types_eth::EIP1186AccountProofResponse {
+        alloy_rpc_types_eth::EIP1186AccountProofResponse {
             address: self.address,
             balance: info.balance,
             code_hash,
@@ -871,7 +870,7 @@ impl AccountProof {
                     Some(proof.into_eip1186_proof(*input_slot))
                 })
                 .collect(),
-        })
+        }
     }
 
     /// Converts an
@@ -892,10 +891,37 @@ impl AccountProof {
         } = proof;
         let storage_proofs = storage_proof.into_iter().map(Into::into).collect();
 
+        // EIP-1186's summary fields omit the extension. Recover it from an inclusion proof,
+        // checking the full address path so exclusion proofs cannot supply another account's
+        // extension. This does not authenticate the root; callers must still call `verify`.
+        #[cfg(feature = "account-ext")]
+        let extension = (|| {
+            let root = keccak256(account_proof.first()?);
+            let TrieNode::Leaf(leaf) =
+                alloy_rlp::decode_exact::<TrieNode>(account_proof.last()?).ok()?
+            else {
+                return None;
+            };
+            verify_proof(
+                root,
+                Nibbles::unpack(keccak256(address)),
+                Some(leaf.value.clone()),
+                &account_proof,
+            )
+            .ok()?;
+            Some(alloy_rlp::decode_exact::<TrieAccount>(&leaf.value).ok()?.extension)
+        })()
+        .unwrap_or_default();
+        #[cfg(feature = "account-ext")]
+        let has_extension = !extension.is_empty();
+        #[cfg(not(feature = "account-ext"))]
+        let has_extension = false;
+
         let (storage_root, info) = if nonce == 0 &&
             balance.is_zero() &&
             (storage_hash.is_zero() || storage_hash == EMPTY_ROOT_HASH) &&
-            (code_hash == KECCAK_EMPTY || code_hash.is_zero())
+            (code_hash == KECCAK_EMPTY || code_hash.is_zero()) &&
+            !has_extension
         {
             // Account does not exist in state. Return `None` here to prevent proof
             // verification.
@@ -914,7 +940,7 @@ impl AccountProof {
                     balance,
                     bytecode_hash: code_hash.into(),
                     #[cfg(feature = "account-ext")]
-                    extension: Default::default(),
+                    extension,
                 }),
             )
         };
@@ -1437,13 +1463,13 @@ mod tests {
             storage_proofs: vec![],
         };
 
-        let rpc_proof = acc.clone().into_eip1186_response(Vec::new()).unwrap();
+        let rpc_proof = acc.clone().into_eip1186_response(Vec::new());
         let inverse: AccountProof = rpc_proof.into();
         assert_eq!(acc, inverse);
 
         // make account empty
         acc.info.as_mut().unwrap().nonce = 0;
-        let rpc_proof = acc.clone().into_eip1186_response(Vec::new()).unwrap();
+        let rpc_proof = acc.clone().into_eip1186_response(Vec::new());
         let inverse: AccountProof = rpc_proof.into();
         acc.info.take();
         acc.storage_root = EMPTY_ROOT_HASH;
@@ -1504,17 +1530,17 @@ mod tests {
         };
 
         // Default behavior: KECCAK_EMPTY / EMPTY_ROOT_HASH
-        let rpc_default = acc.clone().into_eip1186_response(Vec::new()).unwrap();
+        let rpc_default = acc.clone().into_eip1186_response(Vec::new());
         assert_eq!(rpc_default.code_hash, KECCAK_EMPTY);
         assert_eq!(rpc_default.storage_hash, EMPTY_ROOT_HASH);
 
         // zero_empty_account = false: same as default
-        let rpc_compat_off = acc.clone().into_eip1186_response_with(Vec::new(), false).unwrap();
+        let rpc_compat_off = acc.clone().into_eip1186_response_with(Vec::new(), false);
         assert_eq!(rpc_compat_off.code_hash, KECCAK_EMPTY);
         assert_eq!(rpc_compat_off.storage_hash, EMPTY_ROOT_HASH);
 
         // zero_empty_account = true: B256::ZERO (geth-compat)
-        let rpc_compat_on = acc.into_eip1186_response_with(Vec::new(), true).unwrap();
+        let rpc_compat_on = acc.into_eip1186_response_with(Vec::new(), true);
         assert_eq!(rpc_compat_on.code_hash, B256::ZERO);
         assert_eq!(rpc_compat_on.storage_hash, B256::ZERO);
 
@@ -1532,8 +1558,7 @@ mod tests {
             storage_root: B256::random(),
             storage_proofs: vec![],
         };
-        let rpc_existing =
-            existing_acc.clone().into_eip1186_response_with(Vec::new(), true).unwrap();
+        let rpc_existing = existing_acc.clone().into_eip1186_response_with(Vec::new(), true);
         assert_eq!(rpc_existing.code_hash, KECCAK_EMPTY);
         assert_eq!(rpc_existing.storage_hash, existing_acc.storage_root);
     }
@@ -1605,8 +1630,7 @@ mod tests {
             storage_proofs: vec![StorageProof::new(slot).with_proof(sentinel())],
         };
 
-        let resp =
-            account.into_eip1186_response(vec![alloy_serde::JsonStorageKey::from(slot)]).unwrap();
+        let resp = account.into_eip1186_response(vec![alloy_serde::JsonStorageKey::from(slot)]);
 
         assert!(
             resp.account_proof.is_empty(),
@@ -1639,9 +1663,9 @@ mod tests {
             ],
         };
 
-        let resp = account
-            .into_eip1186_response(vec![alloy_serde::JsonStorageKey::from(B256::with_last_byte(1))])
-            .unwrap();
+        let resp = account.into_eip1186_response(vec![alloy_serde::JsonStorageKey::from(
+            B256::with_last_byte(1),
+        )]);
 
         assert_eq!(resp.account_proof, multi);
         assert_eq!(resp.storage_proof[0].proof, single_non_sentinel);
