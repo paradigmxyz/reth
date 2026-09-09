@@ -64,7 +64,7 @@ mod tests {
         EthRpcConverter<ChainSpec>,
     > {
         let pool = testing_pool();
-        let mock_provider = MockEthProvider::default();
+        let mock_provider = MockEthProvider::default().with_genesis_block();
 
         let evm_config = EthEvmConfig::new(mock_provider.chain_spec());
         mock_provider.extend_accounts(accounts);
@@ -97,10 +97,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_account_missing() {
+    async fn test_get_account_missing_returns_default() {
         let eth_api = noop_eth_api();
         let address = Address::random();
         let account = eth_api.get_account(address, Default::default()).await.unwrap();
-        assert!(account.is_none());
+        assert_eq!(account, Default::default());
+    }
+
+    #[cfg(feature = "account-ext")]
+    #[tokio::test]
+    async fn test_get_account_preserves_extension() {
+        let address = Address::random();
+        let extension: reth_primitives_traits::AccountExtension =
+            vec![0xa0].into_iter().chain([0x42; 32]).collect::<Vec<_>>().into();
+        let accounts = AddressMap::from_iter([(
+            address,
+            ExtendedAccount::new(0, U256::ZERO).with_extension(extension.clone()),
+        )]);
+
+        let account =
+            mock_eth_api(accounts).get_account(address, Default::default()).await.unwrap();
+        assert_eq!(account.extension, extension);
     }
 }

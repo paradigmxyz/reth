@@ -1023,17 +1023,16 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
         N: Network,
     {
         if Account::EXTENSIONS_ENABLED {
-            // Balance/nonce/code RPCs cannot carry the payload or distinguish extension-only
-            // accounts.
+            // The standard balance/nonce/code calls cannot carry the payload or distinguish
+            // extension-only accounts.
             return self.block_on_async(async {
-                let account: Option<alloy_consensus::TrieAccount> = self
+                let account = self
                     .provider
-                    .raw_request("eth_getAccount".into(), (address, self.block_id))
+                    .get_account(address)
+                    .block_id(self.block_id)
                     .await
                     .map_err(ProviderError::other)?;
-                if let Some(account) = &account &&
-                    account.code_hash != KECCAK_EMPTY
-                {
+                if account.code_hash != KECCAK_EMPTY {
                     let code = self
                         .provider
                         .get_code_at(address)
@@ -1042,7 +1041,7 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
                         .map_err(ProviderError::other)?;
                     self.code_store.insert(account.code_hash, Bytecode::new_raw(code));
                 }
-                Ok(account.map(Account::from))
+                Ok((account != alloy_consensus::TrieAccount::default()).then(|| account.into()))
             });
         }
         let account_info = self.block_on_async(async {

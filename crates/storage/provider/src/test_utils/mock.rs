@@ -487,6 +487,13 @@ impl ExtendedAccount {
         self
     }
 
+    /// Set the chain-specific account payload.
+    #[cfg(feature = "account-ext")]
+    pub fn with_extension(mut self, extension: reth_primitives_traits::AccountExtension) -> Self {
+        self.account.extension = extension;
+        self
+    }
+
     /// Add storage to the extended account. If the storage key is already present,
     /// the value is updated.
     pub fn extend_storage(

@@ -250,7 +250,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         &self,
         address: Address,
         block_id: BlockId,
-    ) -> impl Future<Output = Result<Option<Account>, Self::Error>> + Send
+    ) -> impl Future<Output = Result<Account, Self::Error>> + Send
     where
         Self: EthApiSpec,
     {
@@ -259,8 +259,11 @@ pub trait EthState: LoadState + SpawnBlocking {
 
             self.spawn_blocking_io_fut(async move |this| {
                 let state = this.state_at_block_id(block_id).await?;
-                let account = state.basic_account(&address).map_err(Self::Error::from_eth_err)?;
-                let Some(account) = account else { return Ok(None) };
+                let Some(account) =
+                    state.basic_account(&address).map_err(Self::Error::from_eth_err)?
+                else {
+                    return Ok(Default::default())
+                };
 
                 // Provide a default `HashedStorage` value in order to
                 // get the storage root hash of the current state.
@@ -268,7 +271,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                     .storage_root(address, Default::default())
                     .map_err(Self::Error::from_eth_err)?;
 
-                Ok(Some(account.into_trie_account(storage_root)))
+                Ok(account.into_trie_account(storage_root))
             })
             .await
         }

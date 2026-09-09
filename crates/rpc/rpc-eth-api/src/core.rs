@@ -312,13 +312,15 @@ pub trait EthApi<
     #[method(name = "gasPrice")]
     async fn gas_price(&self) -> RpcResult<U256>;
 
-    /// Returns the account details by specifying an address and a block number/tag
+    /// Returns the account details by specifying an address and a block number/tag.
+    ///
+    /// Returns the default account when the address does not exist in the requested state.
     #[method(name = "getAccount")]
     async fn get_account(
         &self,
         address: Address,
         block: BlockId,
-    ) -> RpcResult<Option<alloy_rpc_types_eth::Account>>;
+    ) -> RpcResult<alloy_rpc_types_eth::Account>;
 
     /// Introduced in EIP-1559, returns suggestion for the priority for dynamic fee transactions.
     #[method(name = "maxPriorityFeePerGas")]
@@ -839,7 +841,7 @@ where
         &self,
         address: Address,
         block: BlockId,
-    ) -> RpcResult<Option<alloy_rpc_types_eth::Account>> {
+    ) -> RpcResult<alloy_rpc_types_eth::Account> {
         trace!(target: "rpc::eth", "Serving eth_getAccount");
         Ok(EthState::get_account(self, address, block).await?)
     }
