@@ -298,13 +298,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         overrides: EvmOverrides,
     ) -> impl Future<Output = Result<Bytes, Self::Error>> + Send {
         async move {
-            let permit = self
-                .acquire_owned_blocking_io()
-                .await
-                .map_err(|_| EthApiError::InternalEthError)?;
-            let res = self
-                .transact_call_at(request, block_number.unwrap_or_default(), overrides, permit)
-                .await?;
+            let res =
+                self.transact_call_at(request, block_number.unwrap_or_default(), overrides).await?;
 
             Self::Error::ensure_success(res.result)
         }
@@ -600,12 +595,15 @@ pub trait Call:
         request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
         at: BlockId,
         overrides: EvmOverrides,
-        permit: tokio::sync::OwnedSemaphorePermit,
     ) -> impl Future<Output = Result<ResultAndState<HaltReasonFor<Self::Evm>>, Self::Error>> + Send
     where
         Self: LoadPendingBlock,
     {
         async move {
+            let permit = self
+                .acquire_owned_blocking_io()
+                .await
+                .map_err(|_| EthApiError::InternalEthError)?;
             let guard = CancelOnDrop::default();
             let cancel = guard.clone();
             let this = self.clone();
