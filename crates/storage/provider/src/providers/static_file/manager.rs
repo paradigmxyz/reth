@@ -975,7 +975,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             let path = self.path.join(segment.filename(fixed_block_range));
             let jar = NippyJar::load(&path).map_err(ProviderError::other)?;
             let loaded = LoadedJar::new(jar)?;
-            // `update_index` may have published a newer snapshot while this jar was loading.
+            // The cache may have been populated since the initial miss, including by
+            // `update_index` publishing a newer snapshot while we loaded this jar without a lock.
+            // Preserve that entry instead of overwriting it with our potentially stale snapshot.
             self.map.entry(key).or_insert(loaded).downgrade().into()
         };
 
