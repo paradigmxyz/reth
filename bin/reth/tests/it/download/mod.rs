@@ -156,6 +156,11 @@ async fn check_manifest_selection_reuse_and_repair(custom_static_files: bool) {
     if custom_static_files {
         assert!(!dir.path().join("static_files").exists());
     }
+    fs::write(static_files.join("stale"), b"stale").unwrap();
+    args.push("--force");
+    success(download(&server, dir.path(), &args));
+    assert!(!static_files.join("stale").exists());
+    assert_eq!(fs::read(static_files.join("headers")).unwrap(), b"headers.tar.zst");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

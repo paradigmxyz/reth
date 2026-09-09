@@ -199,6 +199,12 @@ fn unpack_entry<R: Read>(
     target_dir: &Path,
     static_files_dir: Option<&Path>,
 ) -> Result<()> {
+    // A non-static entry could otherwise plant a symlink at a nested custom root before
+    // extraction or retry cleanup uses it.
+    eyre::ensure!(
+        static_files_dir.is_none() || !entry.header().entry_type().is_symlink(),
+        "Archive symlinks are unsupported with a custom static files directory"
+    );
     let path = entry.path()?.into_owned();
     if let Some(static_files_dir) = static_files_dir &&
         let Some(relative_path) = static_file_relative_path(&path)
@@ -616,6 +622,45 @@ pub(crate) async fn stream_and_extract(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_static_root_cannot_be_redirected_by_archive_symlinks() {
+        for custom_path in ["custom", "custom/nested"] {
+            let target = tempfile::tempdir().unwrap();
+            let outside = tempfile::tempdir().unwrap();
+            fs::create_dir_all(outside.path().join("nested")).unwrap();
+            for path in ["headers", "nested/headers"] {
+                fs::write(outside.path().join(path), b"keep").unwrap();
+            }
+            let custom = target.path().join(custom_path);
+            let mut archive = tar::Builder::new(Vec::new());
+            let mut link = tar::Header::new_gnu();
+            link.set_entry_type(tar::EntryType::Symlink);
+            link.set_size(0);
+            link.set_mode(0o777);
+            archive.append_link(&mut link, "custom", outside.path()).unwrap();
+            let mut file = tar::Header::new_gnu();
+            file.set_size(4);
+            file.set_mode(0o644);
+            file.set_cksum();
+            archive.append_data(&mut file, "static_files/headers", b"data".as_slice()).unwrap();
+            let tar = archive.into_inner().unwrap();
+            let err =
+                unpack_archive(Archive::new(tar.as_slice()), target.path(), Some(&custom), None)
+                    .unwrap_err();
+            assert!(format!("{err:#}").contains("Archive symlinks are unsupported"));
+            let outputs = [super::super::manifest::OutputFileChecksum {
+                path: "static_files/headers".into(),
+                size: 4,
+                blake3: String::new(),
+            }];
+            super::super::verify::OutputVerifier::new(target.path(), Some(&custom))
+                .cleanup(&outputs);
+            for path in ["headers", "nested/headers"] {
+                assert_eq!(fs::read(outside.path().join(path)).unwrap(), b"keep");
+            }
+        }
+    }
 
     #[test]
     fn remap_static_files_in_both_compression_formats() {

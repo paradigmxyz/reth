@@ -487,7 +487,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             let data_dir = self.env.datadir.clone().resolve_datadir(chain);
             let target_dir = data_dir.data_dir();
             if self.force {
-                clear_existing_datadir(target_dir)?;
+                clear_existing_datadir(target_dir, static_files_dir.as_deref())?;
             }
             fs::create_dir_all(target_dir)?;
 
@@ -527,7 +527,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         let cancel_token = CancellationToken::new();
         let _cancel_guard = cancel_token.drop_guard();
         if self.force {
-            clear_existing_datadir(target_dir)?;
+            clear_existing_datadir(target_dir, static_files_dir.as_deref())?;
         }
         fs::create_dir_all(target_dir)?;
         let startup_summary =
@@ -923,14 +923,14 @@ fn selection_from_prune_mode(mode: Option<PruneMode>, snapshot_block: u64) -> Co
 }
 
 /// Removes existing snapshot data that is managed by `reth download`.
-fn clear_existing_datadir(target_dir: &Path) -> Result<()> {
-    if !target_dir.try_exists()? {
-        return Ok(());
-    }
-
+fn clear_existing_datadir(target_dir: &Path, static_files_dir: Option<&Path>) -> Result<()> {
     info!(target: "reth::cli", dir = ?target_dir, "Clearing existing snapshot data");
     for entry in FORCE_REMOVED_DATADIR_PATHS {
-        let path = target_dir.join(entry);
+        let path = if *entry == "static_files" {
+            static_files_dir.map_or_else(|| target_dir.join(entry), Path::to_path_buf)
+        } else {
+            target_dir.join(entry)
+        };
         if !path.try_exists()? {
             continue;
         }
