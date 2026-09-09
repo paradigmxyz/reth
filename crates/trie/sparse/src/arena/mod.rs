@@ -2176,31 +2176,31 @@ impl SparseTrie for ArenaParallelSparseTrie {
         cursor.reset(&self.upper_arena, self.root, Nibbles::default());
 
         // Skip root node if present (set_root handles the root).
-        let mut node_idx = if nodes[0].path.is_empty() { 1 } else { 0 };
+        let mut nodes = if nodes[0].path.is_empty() { &mut nodes[1..] } else { nodes };
 
         // Walk the upper trie, revealing upper nodes inline and collecting subtrie work.
         // Subtries with enough nodes to reveal are taken for parallel processing; the rest
         // are revealed inline.
-        let mut taken: Vec<(Index, Box<ArenaSparseSubtrie>, Vec<ProofTrieNodeV2>)> = Vec::new();
+        let mut taken: Vec<(Index, Box<ArenaSparseSubtrie>, &mut [ProofTrieNodeV2])> = Vec::new();
 
-        while node_idx < nodes.len() {
-            let find_result = cursor.seek(&mut self.upper_arena, &nodes[node_idx].path);
+        while !nodes.is_empty() {
+            let find_result = cursor.seek(&mut self.upper_arena, &nodes[0].path);
 
             match find_result {
                 SeekResult::RevealedLeaf => {
-                    trace!(target: TRACE_TARGET, path = ?nodes[node_idx].path, "Skipping reveal: leaf head");
-                    node_idx += 1;
+                    trace!(target: TRACE_TARGET, path = ?nodes[0].path, "Skipping reveal: leaf head");
+                    nodes = &mut nodes[1..];
                 }
                 SeekResult::Blinded => {
                     // Save the proof node's path before reveal_node consumes it.
-                    let child_path = nodes[node_idx].path;
+                    let child_path = nodes[0].path;
                     let child_idx = Self::reveal_node(
                         &mut self.upper_arena,
                         &cursor,
-                        &mut nodes[node_idx],
+                        &mut nodes[0],
                         SeekResult::Blinded,
                     );
-                    node_idx += 1;
+                    nodes = &mut nodes[1..];
 
                     if let Some(child_idx) = child_idx {
                         self.maybe_wrap_in_subtrie(child_idx, &child_path);
@@ -2211,11 +2211,12 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     let child_idx = subtrie_entry.index;
                     let prefix = subtrie_entry.path;
 
-                    let subtrie_start = node_idx;
-                    while node_idx < nodes.len() && nodes[node_idx].path.starts_with(&prefix) {
-                        node_idx += 1;
-                    }
-                    let num_subtrie_nodes = node_idx - subtrie_start;
+                    let num_subtrie_nodes =
+                        nodes.iter().take_while(|node| node.path.starts_with(&prefix)).count();
+                    // Sorted paths make each subtrie's proof nodes contiguous. Split off a
+                    // disjoint slice so parallel jobs can borrow the original proof buffer.
+                    let (subtrie_nodes, remaining) = nodes.split_at_mut(num_subtrie_nodes);
+                    nodes = remaining;
 
                     if num_subtrie_nodes >= threshold {
                         // Take subtrie for parallel reveal.
@@ -2226,10 +2227,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         ) else {
                             unreachable!("RevealedSubtrie must point to a Subtrie node")
                         };
-                        let node_vec: Vec<ProofTrieNodeV2> = (subtrie_start..node_idx)
-                            .map(|i| mem::replace(&mut nodes[i], ProofTrieNodeV2::empty()))
-                            .collect();
-                        taken.push((child_idx, subtrie, node_vec));
+                        taken.push((child_idx, subtrie, subtrie_nodes));
                     } else {
                         // Reveal inline.
                         trace!(target: TRACE_TARGET, ?prefix, num_subtrie_nodes, "Revealing subtrie inline");
@@ -2237,15 +2235,12 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         else {
                             unreachable!("RevealedSubtrie must point to a Subtrie node")
                         };
-                        let mut subtrie_nodes: Vec<ProofTrieNodeV2> = (subtrie_start..node_idx)
-                            .map(|i| mem::replace(&mut nodes[i], ProofTrieNodeV2::empty()))
-                            .collect();
-                        subtrie.reveal_nodes(&mut subtrie_nodes)?;
+                        subtrie.reveal_nodes(subtrie_nodes)?;
                     }
                 }
                 _ => {
-                    trace!(target: TRACE_TARGET, path = ?nodes[node_idx].path, ?find_result, "Skipping reveal: no blinded child");
-                    node_idx += 1;
+                    trace!(target: TRACE_TARGET, path = ?nodes[0].path, ?find_result, "Skipping reveal: no blinded child");
+                    nodes = &mut nodes[1..];
                 }
             }
         }
@@ -2260,17 +2255,17 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
         // Reveal taken subtries, in parallel if more than one.
         if taken.len() == 1 {
-            let (_, subtrie, node_vec) = &mut taken[0];
-            subtrie.reveal_nodes(node_vec)?;
+            let (_, subtrie, subtrie_nodes) = &mut taken[0];
+            subtrie.reveal_nodes(subtrie_nodes)?;
         } else {
             use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 
             let parent_span = tracing::Span::current();
             let results: Vec<SparseTrieResult<()>> = taken
                 .par_iter_mut()
-                .map(|(_, subtrie, node_vec)| {
+                .map(|(_, subtrie, subtrie_nodes)| {
                     let _guard = parent_span.enter();
-                    subtrie.reveal_nodes(node_vec)
+                    subtrie.reveal_nodes(subtrie_nodes)
                 })
                 .collect();
 
@@ -3058,6 +3053,40 @@ mod tests {
             changeset.entry(key).or_insert(value);
         }
         changeset
+    }
+
+    #[test]
+    fn reveal_subtries_with_mixed_batch_sizes() {
+        let key = |prefix, suffix| {
+            let mut bytes = alloy_primitives::keccak256([prefix, suffix]).0;
+            bytes[0] = prefix;
+            B256::from(bytes)
+        };
+        let initial: BTreeMap<_, _> = [(0x10, 2), (0x20, 12), (0x30, 24)]
+            .into_iter()
+            .flat_map(|(prefix, count)| {
+                (0..count).map(move |suffix| (key(prefix, suffix), U256::from(1)))
+            })
+            .collect();
+        let mut changes: BTreeMap<_, _> = initial
+            .keys()
+            .enumerate()
+            .map(|(i, &key)| (key, if i % 2 == 0 { U256::ZERO } else { U256::from(2) }))
+            .collect();
+        for prefix in [0x10, 0x20, 0x30] {
+            changes.insert(key(prefix, 32), U256::from(3));
+        }
+        let harness = ArenaTrieTestHarness::new(initial);
+
+        // Exercise parallel, mixed, and entirely inline reveal using the same proofs and changes.
+        for min_revealed_nodes in [1, 8, usize::MAX] {
+            let root = harness.root_node();
+            let mut trie = ArenaParallelSparseTrie::default().with_parallelism_thresholds(
+                ArenaParallelismThresholds { min_revealed_nodes, ..Default::default() },
+            );
+            trie.set_root(root.node, root.masks, true).unwrap();
+            harness.assert_changes(&mut trie, changes.clone());
+        }
     }
 
     proptest! {
