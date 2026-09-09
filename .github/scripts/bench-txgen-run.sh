@@ -372,7 +372,7 @@ if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
   sudo systemd-run --quiet --scope --collect --unit="$RETH_SCOPE" \
     -p MemoryMax="$MEM_LIMIT" -p AllowedCPUs="$RETH_CPUS" \
     env "${SUDO_ENV[@]}" nice -n -20 \
-    "$SAMPLY" record --save-only --presymbolicate --rate 10000 \
+    "$SAMPLY" record --save-only --presymbolicate --rate 1000 \
     --output "$OUTPUT_DIR/samply-profile.json.gz" \
     -- "$BINARY" "${RETH_ARGS[@]}" \
     > "$LOG" 2>&1 &
