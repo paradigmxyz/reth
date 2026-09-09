@@ -16,3 +16,7 @@ alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-primitives-traits.workspace = true
+tree_hash.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

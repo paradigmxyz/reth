@@ -134,6 +134,15 @@ pub fn convert_receipts(
     Ok(ReceiptsSsz(converted))
 }
 
+mod snapshot;
+mod tree;
+
+#[cfg(test)]
+mod fixture_tests;
+
+pub use snapshot::ReceiptSnapshot;
+pub use tree::{RetainedNode, TreeConstructionError};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -435,5 +444,162 @@ mod tests {
                 receipt: TxType::Eip1559 as u8,
             }
         );
+    }
+
+    fn singleton_snapshot() -> ReceiptSnapshot {
+        let block = block(
+            vec![legacy_transaction(0, TxKind::Call(Address::repeat_byte(0x55)))],
+            vec![Address::repeat_byte(0x66)],
+        );
+
+        let receipts = [receipt(
+            TxType::Legacy,
+            true,
+            21_000,
+            vec![log(
+                Address::repeat_byte(0x11),
+                vec![B256::repeat_byte(0x22)],
+                &[0x01, 0x02, 0x03],
+            )],
+        )];
+
+        let converted = convert_receipts(&block, &receipts).unwrap();
+        ReceiptSnapshot::build(converted).unwrap()
+    }
+
+    fn ordered_snapshot(receipt_count: u8, log_count: u8, reverse: bool) -> ReceiptSnapshot {
+        let block = block(
+            (0..receipt_count)
+                .map(|i| legacy_transaction(u64::from(i), TxKind::Call(Address::repeat_byte(0x55))))
+                .collect(),
+            vec![Address::repeat_byte(0x66); usize::from(receipt_count)],
+        );
+        let receipts = (0..receipt_count)
+            .map(|i| {
+                let index = if reverse { receipt_count - 1 - i } else { i };
+                let logs = (0..log_count)
+                    .map(|j| {
+                        log(
+                            Address::repeat_byte(0x11 + index + j),
+                            vec![B256::repeat_byte(0x22)],
+                            &[1, 2, 3],
+                        )
+                    })
+                    .collect();
+                receipt(TxType::Legacy, true, 21_000 * (u64::from(i) + 1), logs)
+            })
+            .collect::<Vec<_>>();
+        ReceiptSnapshot::build(convert_receipts(&block, &receipts).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn converted_receipt_order_matches_independent_roots() {
+        for (reverse, expected) in [
+            (false, "b33c841ea25015f366845a29650e04c5e5bd8a2dc41a989f192c95be0f399905"),
+            (true, "37b5a6190bd4e51ca8ea1796746f26c46d5358e728fbf01aeadcdd5e6ed7e4eb"),
+        ] {
+            let snapshot = ordered_snapshot(2, 1, reverse);
+            assert_eq!(snapshot.root(), expected.parse::<B256>().unwrap());
+            let first = if reverse { 0x12 } else { 0x11 };
+            assert_eq!(
+                snapshot.receipts().get(0).unwrap().logs()[0].address(),
+                Address::repeat_byte(first)
+            );
+            assert_eq!(snapshot.receipts().get(1).unwrap().gas_used, 21_000);
+        }
+    }
+
+    #[test]
+    fn converted_collection_boundaries_match_independent_roots() {
+        for (receipts, logs, expected) in [
+            (1, 0, "6bf156004855da4cc9c2ace869675cbbc934bfa184580cfdfca9891b663daf13"),
+            (1, 5, "82a4571f4d13cebdc148f5c0ba5dec11c68de06f65fdb5143656056013186a73"),
+            (1, 6, "bc18433f59c58580ffe00c5e1df0003bfceec7067f03c9a89544b9b9d2c3c1c6"),
+            (5, 1, "9bad9b91173ee081c44ae69d8de1ccd545c00e5ded0bdf20bd3bd965d363e8ff"),
+            (6, 1, "a8d13e4ec4c2b516ebd5b536f94784667c0098c5e1d6017453313cea532c1830"),
+        ] {
+            let snapshot = ordered_snapshot(receipts, logs, false);
+            assert_eq!(snapshot.root(), expected.parse::<B256>().unwrap());
+            assert_eq!(snapshot.receipts().len(), usize::from(receipts));
+            for receipt in &snapshot.receipts().0 {
+                assert_eq!(receipt.logs().len(), usize::from(logs));
+            }
+        }
+    }
+
+    #[test]
+    fn empty_snapshot_matches_reference_root() {
+        let block = block(Vec::new(), Vec::new());
+        let converted = convert_receipts(&block, &[]).unwrap();
+        let snapshot = ReceiptSnapshot::build(converted).unwrap();
+
+        assert!(snapshot.receipts().is_empty());
+        assert_eq!(
+            snapshot.root(),
+            alloy_primitives::b256!(
+                "f5a5fd42d16a20302798ef6ed309979b43003d2320d9f0e8ea9831a92759fb4b"
+            ),
+        );
+    }
+
+    #[test]
+    fn singleton_snapshot_matches_reference_root() {
+        let snapshot = singleton_snapshot();
+
+        assert_eq!(
+            snapshot.root(),
+            alloy_primitives::b256!(
+                "5036e5a260a45255df46094662d27826bb1f417e3dccb4b3a4fc313876cd4e33"
+            ),
+        );
+    }
+
+    #[test]
+    fn singleton_snapshot_retains_address_path() {
+        let snapshot = singleton_snapshot();
+        let mut node = snapshot.tree();
+
+        for child_index in [0_usize, 0, 1, 0, 0, 0, 0, 0, 0] {
+            let children = node.children().expect("address path must retain children");
+            node = &children[child_index];
+        }
+
+        let mut expected = [0_u8; 32];
+        expected[..20].copy_from_slice(Address::repeat_byte(0x11).as_slice());
+
+        assert_eq!(node.root(), B256::from(expected));
+    }
+
+    #[test]
+    fn snapshot_exposes_matching_object_and_tree() {
+        let snapshot = singleton_snapshot();
+        let receipt = snapshot.receipts().get(0).unwrap();
+
+        assert_eq!(snapshot.receipts().len(), 1);
+        assert_eq!(receipt.logs().len(), 1);
+        assert_eq!(receipt.logs()[0].address(), Address::repeat_byte(0x11));
+        assert_eq!(snapshot.root(), snapshot.tree().root());
+    }
+
+    #[test]
+    fn snapshot_rejects_topics_above_capacity() {
+        let receipts = ReceiptsSsz(vec![ReceiptSsz {
+            tx_type: 0,
+            success: true,
+            gas_used: 21_000,
+            contract_address: None,
+            logs: vec![LogSsz {
+                address: Address::repeat_byte(0x11),
+                topics: vec![B256::ZERO; MAX_TOPICS + 1],
+                data: Bytes::new(),
+            }],
+        }]);
+
+        let result = ReceiptSnapshot::build(receipts);
+
+        assert!(matches!(
+            result,
+            Err(TreeConstructionError::WidthExceeded { actual: 5, width: 4 })
+        ));
     }
 }
