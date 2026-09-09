@@ -41,6 +41,7 @@ impl ActivityGuard {
             phase, id, parent_id = parent, units, queued_us = queued.as_secs_f64() * 1e6,
             cpu_start_ns = tracing::field::Empty, cpu_end_ns = tracing::field::Empty,
             wall_us = tracing::field::Empty, cpu_us = tracing::field::Empty,
+            queue_start_ns = tracing::field::Empty, queue_end_ns = tracing::field::Empty,
             runqueue_us = tracing::field::Empty, voluntary = tracing::field::Empty,
             involuntary = tracing::field::Empty, minor_faults = tracing::field::Empty,
             major_faults = tracing::field::Empty, input_ops = tracing::field::Empty,
@@ -53,9 +54,9 @@ impl ActivityGuard {
                 previous,
                 span,
                 start: Instant::now(),
+                cpu: current_thread_cpu_time(),
                 usage: ThreadResourceUsage::now(),
                 queue: scheduler.then(current_thread_runqueue_time).flatten(),
-                cpu: current_thread_cpu_time(),
             }),
         }
     }
@@ -69,9 +70,9 @@ impl ActivityGuard {
 impl Drop for ActivityGuard {
     fn drop(&mut self) {
         let Some(active) = &self.active else { return };
-        let cpu = current_thread_cpu_time();
         let queue = active.queue.and_then(|_| current_thread_runqueue_time());
         let usage = active.usage.elapsed();
+        let cpu = current_thread_cpu_time();
         active.span.record("wall_us", active.start.elapsed().as_secs_f64() * 1e6);
         if let (Some(start), Some(end)) = (active.cpu, cpu) {
             active.span.record("cpu_start_ns", start.as_nanos() as u64);
@@ -79,6 +80,8 @@ impl Drop for ActivityGuard {
             active.span.record("cpu_us", end.saturating_sub(start).as_secs_f64() * 1e6);
         }
         if let (Some(start), Some(end)) = (active.queue, queue) {
+            active.span.record("queue_start_ns", start.as_nanos() as u64);
+            active.span.record("queue_end_ns", end.as_nanos() as u64);
             active.span.record("runqueue_us", end.saturating_sub(start).as_secs_f64() * 1e6);
         }
         if let Some(usage) = usage {
