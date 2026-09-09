@@ -815,7 +815,7 @@ pub(super) fn test_update_leaves_multiple_keys_same_blinded_node<T: SparseTrie>(
     assert_eq!(leaf_updates.len(), 3, "all keys should remain in map after blinded hit");
 }
 
-/// Grouped blinded paths must preserve per-key proofs, pending values, and revealed siblings.
+/// Batched seeks through blinded paths preserve per-key proofs, pending values, and siblings.
 pub(super) fn test_update_leaves_blinded_groups_match_individual_updates<T: SparseTrie>(
     new_trie: fn() -> T,
 ) {

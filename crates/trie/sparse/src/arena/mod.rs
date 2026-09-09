@@ -344,8 +344,7 @@ impl ArenaSparseSubtrie {
 
         self.buffers.cursor.reset(&self.arena, self.root, self.path);
 
-        let mut updates = sorted_updates.iter().enumerate().peekable();
-        while let Some((idx, &(key, ref full_path, ref update))) = updates.next() {
+        for (idx, &(key, ref full_path, ref update)) in sorted_updates.iter().enumerate() {
             let find_result = self.buffers.cursor.seek(&mut self.arena, full_path);
 
             // If the path hits a blinded node, request a proof regardless of update type.
@@ -355,17 +354,6 @@ impl ArenaSparseSubtrie {
                     idx,
                     ArenaRequiredProof { key, parent: ProofV2TargetParent::new(logical_len) },
                 ));
-                // No update can change this blinded child until a proof is revealed. Sorted
-                // keys beneath it can share the seek, but each still needs its own proof target.
-                let prefix = full_path.slice(..logical_len + 1);
-                while let Some((idx, &(key, _, _))) =
-                    updates.next_if(|(_, (_, path, _))| path.starts_with(&prefix))
-                {
-                    self.required_proofs.push((
-                        idx,
-                        ArenaRequiredProof { key, parent: ProofV2TargetParent::new(logical_len) },
-                    ));
-                }
                 continue;
             }
 
@@ -2651,16 +2639,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 SeekResult::Blinded => {
                     let logical_len = cursor.head_logical_branch_path_len(&self.upper_arena);
                     let parent = ProofV2TargetParent::new(logical_len);
-                    // Include the child nibble, so a revealed sibling is still processed.
-                    let prefix = full_path.slice(..logical_len + 1);
-                    while update_idx < sorted.len() && sorted[update_idx].1.starts_with(&prefix) {
-                        let (key, _, ref update) = sorted[update_idx];
-                        trace!(target: TRACE_TARGET, ?key, ?parent, "Update hit blinded node, requesting proof");
-                        proof_required_fn(key, parent);
-                        updates.insert(key, update.clone());
-                        update_idx += 1;
-                    }
-                    continue;
+                    trace!(target: TRACE_TARGET, ?key, ?parent, "Update hit blinded node, requesting proof");
+                    proof_required_fn(key, parent);
+                    updates.insert(key, update.clone());
                 }
                 // Subtrie — forward all consecutive updates under this subtrie's prefix.
                 SeekResult::RevealedSubtrie => {
