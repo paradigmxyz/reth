@@ -68,6 +68,25 @@ fn extension_only_genesis_account_proof() {
         assert_eq!(account.extension, extension);
         assert!(!account.is_empty());
         assert_eq!(proof.verify(root), Ok(()));
+
+        let witness = proof.proof.iter().map(|node| (keccak256(node), node.clone())).collect();
+        let decoded = reth_trie::DecodedMultiProofV2::from_witness(root, &witness).unwrap();
+        let witness_proof = decoded.account_proof(target, &[]).unwrap();
+        assert_eq!(witness_proof.info, proof.info);
+        assert_eq!(witness_proof.verify(root), Ok(()));
+
+        let multiproof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(provider.tx_ref())
+            .overlay_multiproof_v2(
+                TrieInput::default(),
+                MultiProofTargetsV2 {
+                    account_targets: vec![ProofV2Target::new(keccak256(target))],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let multiproof = multiproof.account_proof(target, &[]).unwrap();
+        assert_eq!(multiproof.info, proof.info);
+        assert_eq!(multiproof.verify(root), Ok(()));
         assert!(proof.into_eip1186_response(Vec::new()).is_err());
     });
 }
