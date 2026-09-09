@@ -1413,10 +1413,15 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 }
 
 impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
-    // Refuses to mark state complete while a snap attempt still owns state it has not verified.
-    fn ensure_snap_state_verified(&self) -> ProviderResult<()> {
+    // Refuses to advance the Finish checkpoint to `block_number` over snap state that is not
+    // verified. Rewinds pass: they claim nothing about the downloaded state.
+    fn ensure_finish_may_advance(&self, block_number: BlockNumber) -> ProviderResult<()> {
+        let current = self.get_stage_checkpoint(StageId::Finish)?.map_or(0, |c| c.block_number);
+        if block_number <= current {
+            return Ok(())
+        }
         match self.snap_attempt()? {
-            Some(attempt) if attempt.is_unfinished() => {
+            Some(attempt) if !attempt.is_verified() => {
                 Err(ProviderError::UnverifiedSnapState { attempt: attempt.id().into() })
             }
             _ => Ok(()),
@@ -2250,7 +2255,7 @@ impl<TX: DbTxMut + DbTx, N: NodeTypes> StageCheckpointWriter for DatabaseProvide
         checkpoint: StageCheckpoint,
     ) -> ProviderResult<()> {
         if id == StageId::Finish {
-            self.ensure_snap_state_verified()?;
+            self.ensure_finish_may_advance(checkpoint.block_number)?;
         }
         Ok(self.tx.put::<tables::StageCheckpoints>(id.to_string(), checkpoint)?)
     }
@@ -2270,10 +2275,7 @@ impl<TX: DbTxMut + DbTx, N: NodeTypes> StageCheckpointWriter for DatabaseProvide
         block_number: BlockNumber,
         drop_stage_checkpoint: bool,
     ) -> ProviderResult<()> {
-        // Unwinding moves checkpoints back, which claims nothing about the downloaded state.
-        if !drop_stage_checkpoint {
-            self.ensure_snap_state_verified()?;
-        }
+        self.ensure_finish_may_advance(block_number)?;
 
         // iterate over all existing stages in the table and update its progress.
         let mut cursor = self.tx.cursor_write::<tables::StageCheckpoints>()?;
@@ -4036,12 +4038,19 @@ mod tests {
             assert_eq!(provider.get_stage_checkpoint(stage).unwrap().unwrap().block_number, 5);
         }
 
-        // Unwinding claims nothing about the downloaded state.
+        // Rewinding claims nothing about the downloaded state, through either writer.
         provider.update_pipeline_stages(4, true).unwrap();
+        provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(3)).unwrap();
         assert_eq!(
             provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap().block_number,
-            4
+            3
         );
+
+        // Abandoned leftovers are still not complete state.
+        attempt.abandon();
+        provider.write_snap_attempt(&attempt).unwrap();
+        let refused = provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(10));
+        assert!(matches!(refused, Err(ProviderError::UnverifiedSnapState { attempt: 0 })));
 
         // Header progress does not claim the downloaded state is complete.
         provider.save_stage_checkpoint(StageId::Headers, StageCheckpoint::new(10)).unwrap();
