@@ -4,7 +4,10 @@ use reth_metrics::thread::{
 };
 use std::{
     cell::Cell,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        LazyLock,
+    },
     time::{Duration, Instant},
 };
 use tracing::span::EnteredSpan;
@@ -47,9 +50,11 @@ impl ActivityGuard {
         if !tracing::enabled!(target: "engine::tree::activity", tracing::Level::TRACE) {
             return Self { active: None };
         }
+        let epoch = *EPOCH;
         let id = NEXT.fetch_add(1, Ordering::Relaxed);
         let span = tracing::trace_span!(target: "engine::tree::activity", "trie_activity",
             phase, id, parent_id = parent, units, queued_us = queued.as_secs_f64() * 1e6,
+            wall_start_ns = tracing::field::Empty, wall_end_ns = tracing::field::Empty,
             cpu_start_ns = tracing::field::Empty, cpu_end_ns = tracing::field::Empty,
             wall_us = tracing::field::Empty, cpu_us = tracing::field::Empty,
             queue_start_ns = tracing::field::Empty, queue_end_ns = tracing::field::Empty,
@@ -65,6 +70,7 @@ impl ActivityGuard {
                 previous,
                 span,
                 start: Instant::now(),
+                epoch,
                 cpu: current_thread_cpu_time(),
                 usage: ThreadResourceUsage::now(),
                 queue: scheduler.then(current_thread_runqueue_time).flatten(),
@@ -84,7 +90,12 @@ impl Drop for ActivityGuard {
         let queue = active.queue.and_then(|_| current_thread_runqueue_time());
         let usage = active.usage.elapsed();
         let cpu = current_thread_cpu_time();
-        active.span.record("wall_us", active.start.elapsed().as_secs_f64() * 1e6);
+        let end = Instant::now();
+        active.span.record("wall_us", end.duration_since(active.start).as_secs_f64() * 1e6);
+        active
+            .span
+            .record("wall_start_ns", active.start.duration_since(active.epoch).as_nanos() as u64);
+        active.span.record("wall_end_ns", end.duration_since(active.epoch).as_nanos() as u64);
         if let (Some(start), Some(end)) = (active.cpu, cpu) {
             active.span.record("cpu_start_ns", start.as_nanos() as u64);
             active.span.record("cpu_end_ns", end.as_nanos() as u64);
@@ -112,9 +123,11 @@ struct Active {
     previous: u64,
     span: EnteredSpan,
     start: Instant,
+    epoch: Instant,
     usage: ThreadResourceUsage,
     cpu: Option<Duration>,
     queue: Option<Duration>,
 }
+static EPOCH: LazyLock<Instant> = LazyLock::new(Instant::now);
 static NEXT: AtomicU64 = AtomicU64::new(1);
 thread_local! { static PARENT: Cell<u64> = const { Cell::new(0) }; }
