@@ -9881,6 +9881,8 @@ dependencies = [
  "alloy-primitives",
  "reth-ethereum-primitives",
  "reth-primitives-traits",
+ "serde_json",
+ "tree_hash",
 ]
 
 [[package]]
