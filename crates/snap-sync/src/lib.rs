@@ -9,6 +9,9 @@
 //! `reth-downloaders`, and verified state is handed back to node integration once its trie root
 //! matches the target header.
 //!
+//! Downloaded state goes into the hashed state tables, owned by an attempt record that commits
+//! with it. Scheduling, in-flight requests and cancellation stay in memory.
+//!
 //! ```
 //! use reth_snap_sync::SnapPivotPolicy;
 //!

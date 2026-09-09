@@ -1,7 +1,6 @@
 use reth_stages_api::{
     ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
-use reth_storage_api::MetadataProvider;
 
 /// The finish stage.
 ///
@@ -11,20 +10,16 @@ use reth_storage_api::MetadataProvider;
 #[non_exhaustive]
 pub struct FinishStage;
 
-impl<Provider: MetadataProvider> Stage<Provider> for FinishStage {
+impl<Provider> Stage<Provider> for FinishStage {
     fn id(&self) -> StageId {
         StageId::Finish
     }
 
-    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
-        // This checkpoint marks state complete for the rest of the node, including the range
-        // views snap serves from, so it cannot advance over unverified snap state.
-        if provider.snap_attempt()?.is_some_and(|attempt| attempt.is_unfinished()) {
-            return Err(StageError::Fatal(Box::new(std::io::Error::other(
-                "snap synchronization has not verified the downloaded state",
-            ))))
-        }
-
+    fn execute(
+        &mut self,
+        _provider: &Provider,
+        input: ExecInput,
+    ) -> Result<ExecOutput, StageError> {
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
     }
 

@@ -10418,6 +10418,8 @@ dependencies = [
  "reth-provider",
  "reth-storage-api",
  "reth-storage-errors",
+ "reth-trie-common",
+ "revm",
  "thiserror 2.0.20",
  "tokio-util",
 ]

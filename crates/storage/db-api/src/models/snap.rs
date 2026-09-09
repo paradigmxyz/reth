@@ -11,7 +11,8 @@ pub const SNAP_ATTEMPT_VERSION: u32 = 1;
 /// The snap synchronization attempt that owns the downloaded state.
 ///
 /// Snap writes land in the canonical hashed state tables, so this record is what separates state a
-/// live attempt is filling in from what an abandoned one left behind.
+/// live attempt is filling in from what an abandoned one left behind. It is never deleted: an
+/// abandoned attempt keeps its identity, so a later attempt can never take it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SnapAttempt {
     // Encoding version of this record.
@@ -29,8 +30,12 @@ pub struct SnapAttempt {
 }
 
 impl SnapAttempt {
-    /// Creates the record for an attempt taking identity `id`.
-    pub const fn start(id: SnapAttemptId, pivot: BlockNumHash, state_root: B256) -> Self {
+    /// Creates the record for an attempt superseding `previous`.
+    pub const fn start(previous: Option<Self>, pivot: BlockNumHash, state_root: B256) -> Self {
+        let id = match previous {
+            Some(previous) => previous.id.next(),
+            None => SnapAttemptId::FIRST,
+        };
         Self {
             version: SNAP_ATTEMPT_VERSION,
             id,
@@ -66,6 +71,11 @@ impl SnapAttempt {
         matches!(self.status, SnapBootstrapStatus::Unfinished)
     }
 
+    /// Returns whether the reconstructed trie root matched the target header.
+    pub const fn is_verified(&self) -> bool {
+        matches!(self.status, SnapBootstrapStatus::Verified)
+    }
+
     /// Re-anchors this attempt, superseding writes proved against the previous root.
     pub const fn re_anchor(&mut self, pivot: BlockNumHash, state_root: B256) {
         self.pivot = pivot;
@@ -76,6 +86,11 @@ impl SnapAttempt {
     /// Marks the downloaded state verified.
     pub const fn verify(&mut self) {
         self.status = SnapBootstrapStatus::Verified;
+    }
+
+    /// Gives up on the downloaded state, keeping this identity taken.
+    pub const fn abandon(&mut self) {
+        self.status = SnapBootstrapStatus::Abandoned;
     }
 }
 
@@ -96,6 +111,12 @@ impl SnapAttemptId {
     }
 }
 
+impl From<SnapAttemptId> for u64 {
+    fn from(id: SnapAttemptId) -> Self {
+        id.0
+    }
+}
+
 impl fmt::Display for SnapAttemptId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
@@ -109,4 +130,6 @@ enum SnapBootstrapStatus {
     Unfinished,
     // The reconstructed trie root matched the target header.
     Verified,
+    // Downloads were given up, leaving incomplete state behind for cleanup.
+    Abandoned,
 }

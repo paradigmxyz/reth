@@ -2,10 +2,12 @@
 //!
 //! Snap writes land in the canonical hashed state tables, so nothing in the data says which
 //! attempt produced it. Every write presents a [`SnapWrite`]; ones that no longer match are
-//! refused. Storage v1 is unsupported: its state is keyed by address, and snap has no preimages.
+//! refused.
 
 use crate::{SnapGeneration, SnapSyncError};
-use reth_storage_api::{MetadataProvider, MetadataWriter, SnapAttempt, SnapAttemptId};
+use reth_storage_api::{
+    MetadataProvider, MetadataWriter, SnapAttempt, SnapAttemptId, StorageSettings,
+};
 
 /// Persistence for the attempt that owns downloaded snap state.
 ///
@@ -15,12 +17,10 @@ pub trait SnapAttemptStore {
     /// Starts an attempt anchored to `generation`, superseding any already recorded.
     fn start_snap_attempt(&self, generation: SnapGeneration) -> Result<SnapWrite, SnapSyncError>;
 
-    /// Returns what the attempt owning the persisted state accepts writes for.
+    /// Returns the write an unfinished attempt accepts, if one owns the persisted state.
     fn active_snap_write(&self) -> Result<Option<SnapWrite>, SnapSyncError>;
 
     /// Returns the attempt when `write` still owns the persisted state, rejecting it otherwise.
-    ///
-    /// Run this in the transaction that writes the data it covers.
     fn authorize_snap_write(&self, write: SnapWrite) -> Result<SnapAttempt, SnapSyncError>;
 
     /// Re-anchors the attempt to `generation`, refusing writes proved against the previous root.
@@ -32,6 +32,9 @@ pub trait SnapAttemptStore {
 
     /// Marks the attempt's downloaded state verified.
     fn verify_snap_attempt(&self, write: SnapWrite) -> Result<(), SnapSyncError>;
+
+    /// Gives up on an unfinished attempt, refusing its outstanding writes.
+    fn abandon_snap_attempt(&self) -> Result<(), SnapSyncError>;
 }
 
 /// What a write presents to prove it belongs to the attempt owning the persisted state.
@@ -65,18 +68,19 @@ where
     T: MetadataProvider + MetadataWriter,
 {
     fn start_snap_attempt(&self, generation: SnapGeneration) -> Result<SnapWrite, SnapSyncError> {
-        // An unreadable record still owns state on disk that this attempt would inherit.
-        self.snap_attempt()?;
+        // Absent settings mean the legacy layout.
+        if !self.storage_settings()?.unwrap_or_else(StorageSettings::v1).use_hashed_state() {
+            return Err(SnapSyncError::UnsupportedStorage)
+        }
 
-        let id = self.snap_attempt_next_id()?;
-        let attempt = SnapAttempt::start(id, generation.target(), generation.state_root());
-        self.write_snap_attempt_next_id(id.next())?;
+        let attempt =
+            SnapAttempt::start(self.snap_attempt()?, generation.target(), generation.state_root());
         self.write_snap_attempt(&attempt)?;
         Ok(SnapWrite::of(&attempt))
     }
 
     fn active_snap_write(&self) -> Result<Option<SnapWrite>, SnapSyncError> {
-        Ok(self.snap_attempt()?.as_ref().map(SnapWrite::of))
+        Ok(self.snap_attempt()?.filter(SnapAttempt::is_unfinished).as_ref().map(SnapWrite::of))
     }
 
     fn authorize_snap_write(&self, write: SnapWrite) -> Result<SnapAttempt, SnapSyncError> {
@@ -107,22 +111,38 @@ where
         self.write_snap_attempt(&attempt)?;
         Ok(())
     }
+
+    fn abandon_snap_attempt(&self) -> Result<(), SnapSyncError> {
+        if let Some(mut attempt) = self.snap_attempt()? &&
+            attempt.is_unfinished()
+        {
+            attempt.abandon();
+            self.write_snap_attempt(&attempt)?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloy_eips::BlockNumHash;
-    use alloy_primitives::B256;
-    use reth_db_api::{
-        tables,
-        transaction::{DbTx, DbTxMut},
-    };
+    use alloy_primitives::{Bytes, B256};
+    use reth_db_api::{tables, transaction::DbTx};
     use reth_primitives_traits::Account;
     use reth_provider::{
-        test_utils::create_test_provider_factory, DBProvider, DatabaseProviderFactory,
+        test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
+        DBProvider, DatabaseProviderFactory, ProviderFactory,
     };
-    use reth_storage_api::metadata::keys;
+    use reth_storage_api::{metadata::keys, StateWriter};
+    use reth_trie_common::HashedPostState;
+    use revm::{bytecode::Bytecode, database::states::StateChangeset};
+
+    const HASHED_ADDRESS: B256 = B256::repeat_byte(0xbb);
+
+    fn code() -> Bytecode {
+        Bytecode::new_raw(Bytes::from_static(&[0x60, 0x00]))
+    }
 
     fn generation(block: u64) -> SnapGeneration {
         SnapGeneration::new(
@@ -131,9 +151,39 @@ mod tests {
         )
     }
 
+    // A database using the hashed state layout snap writes into.
+    fn factory() -> ProviderFactory<MockNodeTypesWithDB> {
+        let factory = create_test_provider_factory();
+        let provider = factory.database_provider_rw().unwrap();
+        provider.write_storage_settings(StorageSettings::v2()).unwrap();
+        provider.commit().unwrap();
+        factory
+    }
+
+    // Persists one account and its bytecode through the writers snap shares with execution.
+    fn download(provider: &impl StateWriter) {
+        let mut state = HashedPostState::default();
+        state.accounts.insert(HASHED_ADDRESS, Some(Account::default()));
+        provider.write_hashed_state(&state.into_sorted()).unwrap();
+        provider
+            .write_state_changes(StateChangeset {
+                contracts: vec![(code().hash_slow(), code())],
+                ..Default::default()
+            })
+            .unwrap();
+    }
+
+    fn downloaded(provider: &impl DBProvider) -> (bool, bool) {
+        let tx = provider.tx_ref();
+        (
+            tx.get::<tables::HashedAccounts>(HASHED_ADDRESS).unwrap().is_some(),
+            tx.get::<tables::Bytecodes>(code().hash_slow()).unwrap().is_some(),
+        )
+    }
+
     #[test]
     fn nothing_owns_the_state_before_an_attempt_starts() {
-        let factory = create_test_provider_factory();
+        let factory = factory();
         let provider = factory.database_provider_rw().unwrap();
 
         assert_eq!(provider.active_snap_write().unwrap(), None);
@@ -142,8 +192,26 @@ mod tests {
     }
 
     #[test]
-    fn restarting_at_the_same_pivot_takes_a_new_identity() {
+    fn address_keyed_state_cannot_host_an_attempt() {
         let factory = create_test_provider_factory();
+        let provider = factory.database_provider_rw().unwrap();
+
+        // Nothing recorded means the legacy layout.
+        assert!(matches!(
+            provider.start_snap_attempt(generation(1)),
+            Err(SnapSyncError::UnsupportedStorage)
+        ));
+        provider.write_storage_settings(StorageSettings::v1()).unwrap();
+        assert!(matches!(
+            provider.start_snap_attempt(generation(1)),
+            Err(SnapSyncError::UnsupportedStorage)
+        ));
+        assert_eq!(provider.snap_attempt().unwrap(), None);
+    }
+
+    #[test]
+    fn restarting_at_the_same_pivot_takes_a_new_identity() {
+        let factory = factory();
         let provider = factory.database_provider_rw().unwrap();
 
         let first = provider.start_snap_attempt(generation(1)).unwrap();
@@ -159,25 +227,26 @@ mod tests {
     }
 
     #[test]
-    fn clearing_an_attempt_does_not_free_its_identity() {
-        let factory = create_test_provider_factory();
+    fn abandoning_an_attempt_keeps_its_identity_taken() {
+        let factory = factory();
         let provider = factory.database_provider_rw().unwrap();
 
-        let cleared = provider.start_snap_attempt(generation(1)).unwrap();
-        provider.clear_snap_attempt().unwrap();
+        let abandoned = provider.start_snap_attempt(generation(1)).unwrap();
+        provider.abandon_snap_attempt().unwrap();
+        assert_eq!(provider.active_snap_write().unwrap(), None);
         let started = provider.start_snap_attempt(generation(2)).unwrap();
 
-        assert_ne!(cleared.attempt(), started.attempt());
-        // The cleared attempt's outstanding downloads cannot pass as the new attempt's work.
+        assert_ne!(abandoned.attempt(), started.attempt());
+        // The abandoned attempt's outstanding downloads cannot pass as the new attempt's work.
         assert!(matches!(
-            provider.authorize_snap_write(cleared),
+            provider.authorize_snap_write(abandoned),
             Err(SnapSyncError::StaleWrite { .. })
         ));
     }
 
     #[test]
     fn the_attempt_survives_reopening_the_database() {
-        let factory = create_test_provider_factory();
+        let factory = factory();
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(generation(7)).unwrap();
         provider.commit().unwrap();
@@ -192,27 +261,35 @@ mod tests {
     }
 
     #[test]
-    fn rolling_back_drops_downloaded_state_and_progress_together() {
-        let factory = create_test_provider_factory();
-        let hashed_address = B256::repeat_byte(0xbb);
+    fn committing_keeps_downloaded_state_and_progress_together() {
+        let factory = factory();
+        let provider = factory.database_provider_rw().unwrap();
+        let write = provider.start_snap_attempt(generation(1)).unwrap();
+        download(&provider);
+        provider.commit().unwrap();
 
         let provider = factory.database_provider_rw().unwrap();
+        assert_eq!(provider.active_snap_write().unwrap(), Some(write));
+        assert_eq!(downloaded(&provider), (true, true));
+    }
+
+    #[test]
+    fn rolling_back_drops_downloaded_state_and_progress_together() {
+        let factory = factory();
+        let provider = factory.database_provider_rw().unwrap();
         provider.start_snap_attempt(generation(1)).unwrap();
-        provider
-            .tx_ref()
-            .put::<tables::HashedAccounts>(hashed_address, Account::default())
-            .unwrap();
+        download(&provider);
         // Dropping without committing is the interrupted-commit case.
         drop(provider);
 
         let provider = factory.database_provider_rw().unwrap();
         assert_eq!(provider.active_snap_write().unwrap(), None);
-        assert_eq!(provider.tx_ref().get::<tables::HashedAccounts>(hashed_address).unwrap(), None);
+        assert_eq!(downloaded(&provider), (false, false));
     }
 
     #[test]
     fn advancing_the_pivot_rejects_writes_proved_against_the_old_root() {
-        let factory = create_test_provider_factory();
+        let factory = factory();
         let provider = factory.database_provider_rw().unwrap();
 
         let before = provider.start_snap_attempt(generation(1)).unwrap();
@@ -229,22 +306,26 @@ mod tests {
 
     #[test]
     fn a_verified_attempt_accepts_no_further_writes() {
-        let factory = create_test_provider_factory();
+        let factory = factory();
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(generation(1)).unwrap();
 
         provider.verify_snap_attempt(write).unwrap();
 
         assert!(!provider.snap_attempt().unwrap().unwrap().is_unfinished());
+        assert_eq!(provider.active_snap_write().unwrap(), None);
         assert!(matches!(
             provider.authorize_snap_write(write),
             Err(SnapSyncError::StaleWrite { .. })
         ));
+        // Verified state is complete, so abandoning cannot turn it into leftovers.
+        provider.abandon_snap_attempt().unwrap();
+        assert!(provider.snap_attempt().unwrap().unwrap().is_verified());
     }
 
     #[test]
     fn a_record_this_build_cannot_read_is_reported_rather_than_ignored() {
-        let factory = create_test_provider_factory();
+        let factory = factory();
 
         for record in [br#"{"version":999}"#.to_vec(), b"{}".to_vec(), b"not json".to_vec()] {
             let provider = factory.database_provider_rw().unwrap();

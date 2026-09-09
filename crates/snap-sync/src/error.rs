@@ -9,6 +9,9 @@ pub enum SnapSyncError {
     /// A header lookup failed.
     #[error(transparent)]
     Provider(#[from] ProviderError),
+    /// The storage layout keys state by address, which snap cannot fill in without preimages.
+    #[error("snap synchronization requires the hashed state layout")]
+    UnsupportedStorage,
     /// No attempt owns the persisted state.
     #[error("no snap attempt owns the persisted state")]
     NoAttempt,

@@ -1,8 +1,7 @@
 //! Metadata provider trait for reading and writing node metadata.
 
 use alloc::vec::Vec;
-use core::fmt;
-use reth_db_api::models::{SnapAttempt, SnapAttemptId, StorageSettings, SNAP_ATTEMPT_VERSION};
+use reth_db_api::models::{SnapAttempt, StorageSettings, SNAP_ATTEMPT_VERSION};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 
 /// Metadata keys.
@@ -12,12 +11,6 @@ pub mod keys {
 
     /// The snap synchronization attempt that owns downloaded state.
     pub const SNAP_ATTEMPT: &str = "snap_attempt";
-
-    /// Identity the next snap attempt takes.
-    ///
-    /// Kept apart from the record so clearing an attempt cannot hand its identity to a later one
-    /// while the cleared attempt's downloads are still outstanding.
-    pub const SNAP_ATTEMPT_NEXT_ID: &str = "snap_attempt_next_id";
 }
 
 /// Client trait for reading node metadata from the database.
@@ -50,44 +43,15 @@ pub trait MetadataProvider: Send {
             serde_json::from_slice(&bytes).map_err(ProviderError::other)?;
         let found = value.get("version").and_then(serde_json::Value::as_u64);
         if found != Some(SNAP_ATTEMPT_VERSION as u64) {
-            return Err(ProviderError::other(UnsupportedSnapAttemptVersion {
+            return Err(ProviderError::UnsupportedSnapAttemptVersion {
                 found,
                 supported: SNAP_ATTEMPT_VERSION,
-            }))
+            })
         }
 
         serde_json::from_slice(&bytes).map(Some).map_err(ProviderError::other)
     }
-
-    /// Returns the identity the next snap attempt takes, which only ever increases.
-    fn snap_attempt_next_id(&self) -> ProviderResult<SnapAttemptId> {
-        let Some(bytes) = self.get_metadata(keys::SNAP_ATTEMPT_NEXT_ID)? else {
-            return Ok(SnapAttemptId::FIRST)
-        };
-        serde_json::from_slice(&bytes).map_err(ProviderError::other)
-    }
 }
-
-/// A persisted [`SnapAttempt`] record this build cannot read.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct UnsupportedSnapAttemptVersion {
-    // Version found on disk, absent when the record carries no numeric version.
-    found: Option<u64>,
-    // Version this build writes.
-    supported: u32,
-}
-
-impl fmt::Display for UnsupportedSnapAttemptVersion {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { found, supported } = self;
-        match found {
-            Some(found) => write!(f, "snap attempt record version {found} is not supported (this build writes {supported})"),
-            None => write!(f, "snap attempt record has no version (this build writes {supported})"),
-        }
-    }
-}
-
-impl core::error::Error for UnsupportedSnapAttemptVersion {}
 
 /// Client trait for writing node metadata to the database.
 pub trait MetadataWriter: Send {
@@ -116,19 +80,6 @@ pub trait MetadataWriter: Send {
             keys::SNAP_ATTEMPT,
             serde_json::to_vec(attempt).map_err(ProviderError::other)?,
         )
-    }
-
-    /// Writes the identity the next snap attempt takes.
-    fn write_snap_attempt_next_id(&self, id: SnapAttemptId) -> ProviderResult<()> {
-        self.write_metadata(
-            keys::SNAP_ATTEMPT_NEXT_ID,
-            serde_json::to_vec(&id).map_err(ProviderError::other)?,
-        )
-    }
-
-    /// Removes the record, leaving the next identity untouched so it cannot be reused.
-    fn clear_snap_attempt(&self) -> ProviderResult<()> {
-        self.delete_metadata(keys::SNAP_ATTEMPT)
     }
 }
 

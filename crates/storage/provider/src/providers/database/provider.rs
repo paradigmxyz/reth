@@ -1353,18 +1353,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
-    // Refuses to mark state complete while a snap attempt still owns state it has not verified.
-    fn ensure_snap_state_verified(&self) -> ProviderResult<()> {
-        if self.snap_attempt()?.is_some_and(|attempt| attempt.is_unfinished()) {
-            return Err(ProviderError::other(std::io::Error::other(
-                "snap synchronization has not verified the downloaded state",
-            )))
-        }
-        Ok(())
-    }
-}
-
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Insert history index to the database.
     ///
@@ -1421,6 +1409,18 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         }
 
         Ok(())
+    }
+}
+
+impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
+    // Refuses to mark state complete while a snap attempt still owns state it has not verified.
+    fn ensure_snap_state_verified(&self) -> ProviderResult<()> {
+        match self.snap_attempt()? {
+            Some(attempt) if attempt.is_unfinished() => {
+                Err(ProviderError::UnverifiedSnapState { attempt: attempt.id().into() })
+            }
+            _ => Ok(()),
+        }
     }
 }
 
@@ -2270,7 +2270,10 @@ impl<TX: DbTxMut + DbTx, N: NodeTypes> StageCheckpointWriter for DatabaseProvide
         block_number: BlockNumber,
         drop_stage_checkpoint: bool,
     ) -> ProviderResult<()> {
-        self.ensure_snap_state_verified()?;
+        // Unwinding moves checkpoints back, which claims nothing about the downloaded state.
+        if !drop_stage_checkpoint {
+            self.ensure_snap_state_verified()?;
+        }
 
         // iterate over all existing stages in the table and update its progress.
         let mut cursor = self.tx.cursor_write::<tables::StageCheckpoints>()?;
@@ -4011,13 +4014,13 @@ mod tests {
     #[test]
     fn snap_attempt_guards_finish_checkpoint_writers() {
         use alloy_eips::BlockNumHash;
-        use reth_db_api::models::{SnapAttempt, SnapAttemptId};
+        use reth_db_api::models::SnapAttempt;
 
         let factory = create_test_provider_factory();
         let provider = factory.database_provider_rw().unwrap();
         provider.update_pipeline_stages(5, false).unwrap();
         let mut attempt = SnapAttempt::start(
-            SnapAttemptId::FIRST,
+            None,
             BlockNumHash::new(10, B256::repeat_byte(1)),
             B256::repeat_byte(2),
         );
@@ -4025,11 +4028,20 @@ mod tests {
         provider.commit().unwrap();
 
         let provider = factory.database_provider_rw().unwrap();
-        assert!(provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(10)).is_err());
-        assert!(provider.update_pipeline_stages(10, false).is_err());
+        let refused = provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(10));
+        assert!(matches!(refused, Err(ProviderError::UnverifiedSnapState { attempt: 0 })));
+        let refused = provider.update_pipeline_stages(10, false);
+        assert!(matches!(refused, Err(ProviderError::UnverifiedSnapState { attempt: 0 })));
         for stage in [StageId::Finish, StageId::Headers] {
             assert_eq!(provider.get_stage_checkpoint(stage).unwrap().unwrap().block_number, 5);
         }
+
+        // Unwinding claims nothing about the downloaded state.
+        provider.update_pipeline_stages(4, true).unwrap();
+        assert_eq!(
+            provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap().block_number,
+            4
+        );
 
         // Header progress does not claim the downloaded state is complete.
         provider.save_stage_checkpoint(StageId::Headers, StageCheckpoint::new(10)).unwrap();

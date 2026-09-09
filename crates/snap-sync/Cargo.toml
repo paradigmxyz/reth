@@ -30,3 +30,5 @@ tokio-util.workspace = true
 alloy-consensus.workspace = true
 reth-db-api.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-trie-common.workspace = true
+revm.workspace = true
