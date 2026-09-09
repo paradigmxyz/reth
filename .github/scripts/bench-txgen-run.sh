@@ -180,6 +180,10 @@ call_reth_jit() {
 }
 
 cleanup() {
+  if [ -n "${TRIE_ORIGINAL_SCHEDSTATS:-}" ]; then
+    sudo sysctl -w "kernel.sched_schedstats=${TRIE_ORIGINAL_SCHEDSTATS}" || true
+    TRIE_ORIGINAL_SCHEDSTATS=
+  fi
   kill "${TAIL_PID:-}" 2>/dev/null || true
   if [ -n "${TRACY_PID:-}" ] && kill -0 "$TRACY_PID" 2>/dev/null; then
     echo "Stopping tracy-capture..."
@@ -220,6 +224,16 @@ cleanup() {
 TAIL_PID=
 TRACY_PID=
 trap cleanup EXIT
+
+# Enable runnable-queue accounting on both sides of an activity capture. Restore the
+# runner's original setting in cleanup, including failed benchmark runs.
+TRIE_ORIGINAL_SCHEDSTATS=
+if [[ "${BENCH_BASELINE_ARGS:-} ${BENCH_FEATURE_ARGS:-}" == *"engine::tree::activity=trace"* ]] &&
+   [ -r /proc/sys/kernel/sched_schedstats ]; then
+  TRIE_ORIGINAL_SCHEDSTATS="$(cat /proc/sys/kernel/sched_schedstats)"
+  sudo sysctl -w kernel.sched_schedstats=1
+  cat /proc/sys/kernel/sched_schedstats > "$OUTPUT_DIR/scheduler-stats.txt"
+fi
 
 sudo systemctl stop "$RETH_SCOPE" 2>/dev/null || true
 sudo systemctl reset-failed "$RETH_SCOPE" 2>/dev/null || true
