@@ -48,7 +48,7 @@ pub struct SnapWrite {
 
 impl SnapWrite {
     // What `attempt` currently accepts.
-    const fn of(attempt: &SnapAttempt) -> Self {
+    pub(crate) const fn of(attempt: &SnapAttempt) -> Self {
         Self { attempt: attempt.id(), state_version: attempt.state_version() }
     }
 
