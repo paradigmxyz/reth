@@ -6,7 +6,7 @@ use reth_ethereum_primitives::{
     Block, BlockBody, Receipt, Transaction as EthereumTransaction, TransactionSigned,
 };
 use reth_primitives_traits::RecoveredBlock;
-use reth_pureth_receipt::convert_receipts;
+use reth_pureth_receipt::{convert_receipts, ReceiptSnapshot};
 
 fn transaction(nonce: u64) -> TransactionSigned {
     TransactionSigned::new_unhashed(
@@ -25,6 +25,10 @@ fn receipt(cumulative_gas_used: u64, logs: Vec<Log>) -> Receipt {
 
 fn log(address: Address) -> Log {
     Log::new_unchecked(address, Vec::new(), Bytes::new())
+}
+
+fn log_with_data(address: Address, topics: Vec<B256>, data: &[u8]) -> Log {
+    Log::new_unchecked(address, topics, Bytes::copy_from_slice(data))
 }
 
 fn converted_receipts(addresses: &[&[Address]]) -> ReceiptsSsz {
@@ -48,6 +52,27 @@ fn converted_receipts(addresses: &[&[Address]]) -> ReceiptsSsz {
         .collect::<Vec<_>>();
 
     convert_receipts(&block, &receipts).unwrap()
+}
+
+fn converted_snapshot(addresses: &[&[Address]]) -> ReceiptSnapshot {
+    ReceiptSnapshot::build(converted_receipts(addresses)).unwrap()
+}
+
+fn reference_snapshot() -> ReceiptSnapshot {
+    let block = RecoveredBlock::try_new_unhashed(
+        Block {
+            header: Default::default(),
+            body: BlockBody { transactions: vec![transaction(0)], ..Default::default() },
+        },
+        vec![Address::repeat_byte(0x11)],
+    )
+    .unwrap();
+    let receipts = [receipt(
+        21_000,
+        vec![log_with_data(Address::repeat_byte(0x11), vec![B256::repeat_byte(0x22)], &[1, 2, 3])],
+    )];
+
+    ReceiptSnapshot::build(convert_receipts(&block, &receipts).unwrap()).unwrap()
 }
 
 #[test]
@@ -233,6 +258,97 @@ fn typed_resolution_reads_a_changed_address() {
 
     assert_eq!(resolve_receipt_log_address(&original_receipts, path).unwrap().0, original);
     assert_eq!(resolve_receipt_log_address(&changed_receipts, path).unwrap().0, changed);
+}
+
+#[test]
+fn proof_access_matches_the_frozen_branch() {
+    let snapshot = reference_snapshot();
+    let path = resolve(&parse_path("[0].logs[0].address").unwrap()).unwrap();
+    let proof = prove_receipt_log_address(&snapshot, path).unwrap();
+    let expected = crate::vector_records::load_proof_case(
+        include_bytes!("../test-data/fixtures/v0/singleton_baseline/fixture.json"),
+        include_bytes!("../test-data/fixtures/v0/singleton_baseline/proof.json"),
+    )
+    .unwrap();
+
+    assert_eq!(proof.address.as_slice(), expected.selected_address);
+    assert_eq!(proof.gindex, expected.gindex);
+    assert_eq!(proof.branch, expected.branch);
+    assert_eq!(proof.root, expected.root);
+    assert_eq!(
+        verify_receipt_log_address(
+            SCHEMA_ID,
+            &expected.proof.path,
+            proof.address.as_slice(),
+            &proof.branch,
+            proof.root,
+        ),
+        Ok(())
+    );
+}
+
+#[test]
+fn proof_access_uses_nonzero_receipt_and_log_indexes() {
+    let first = [Address::repeat_byte(0x21), Address::repeat_byte(0x22)];
+    let second = [Address::repeat_byte(0x23)];
+    let snapshot = converted_snapshot(&[&first, &second]);
+
+    for (path, expected_address, expected_gindex) in
+        [("[0].logs[1].address", first[1], 4640), ("[1].logs[0].address", second[0], 5184)]
+    {
+        let path = resolve(&parse_path(path).unwrap()).unwrap();
+        let proof = prove_receipt_log_address(&snapshot, path).unwrap();
+
+        assert_eq!(proof.address, expected_address);
+        assert_eq!(proof.gindex, expected_gindex);
+        assert_eq!(proof.root, snapshot.root());
+    }
+}
+
+#[test]
+fn proof_access_crosses_progressive_boundaries() {
+    let logs = (0..6).map(|index| Address::repeat_byte(0x21 + index)).collect::<Vec<_>>();
+    let log_snapshot = converted_snapshot(&[&logs]);
+    let receipts = (0..6).map(|index| vec![Address::repeat_byte(0x31 + index)]).collect::<Vec<_>>();
+    let receipt_slices = receipts.iter().map(Vec::as_slice).collect::<Vec<_>>();
+    let receipt_snapshot = converted_snapshot(&receipt_slices);
+
+    for (snapshot, path, expected_gindex) in [
+        (&log_snapshot, "[0].logs[5].address", 37_248),
+        (&receipt_snapshot, "[5].logs[0].address", 45_120),
+    ] {
+        let path = resolve(&parse_path(path).unwrap()).unwrap();
+        let proof = prove_receipt_log_address(snapshot, path).unwrap();
+
+        assert_eq!(proof.gindex, expected_gindex);
+        assert_eq!(proof.root, snapshot.root());
+    }
+}
+
+#[test]
+fn proof_access_rejects_out_of_bounds_paths() {
+    let empty = converted_snapshot(&[]);
+    let address = [Address::repeat_byte(0x21)];
+    let snapshot = converted_snapshot(&[&address]);
+    let first = resolve(&parse_path("[0].logs[0].address").unwrap()).unwrap();
+
+    assert_eq!(
+        prove_receipt_log_address(&empty, first),
+        Err(ProofAccessError::Resolution(ReceiptResolutionError::Bounds(
+            BoundsError::ReceiptOutOfBounds
+        )))
+    );
+
+    for (path, expected) in [
+        ("[1].logs[0].address", ReceiptResolutionError::Bounds(BoundsError::ReceiptOutOfBounds)),
+        ("[0].logs[1].address", ReceiptResolutionError::Bounds(BoundsError::LogOutOfBounds)),
+    ] {
+        let path = resolve(&parse_path(path).unwrap()).unwrap();
+        assert_eq!(
+            prove_receipt_log_address(&snapshot, path),
+            Err(ProofAccessError::Resolution(expected))
+        );
+    }
 }
 
 #[test]
