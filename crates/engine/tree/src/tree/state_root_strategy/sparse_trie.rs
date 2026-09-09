@@ -767,8 +767,6 @@ where
                 };
                 (address, root)
             })
-            .collect::<Vec<_>>()
-            .into_iter()
             .collect()
     }
 
