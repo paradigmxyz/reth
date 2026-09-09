@@ -711,8 +711,8 @@ where
     /// 2. all the storage updates are fully drained,
     /// 3. but the storage root hasn't been updated yet,
     ///
-    /// we trigger state root computation on a rayon pool.
-    fn compute_drained_storage_roots(&mut self) {
+    /// we trigger state root computation on a rayon pool and return the roots for promotion.
+    fn compute_drained_storage_roots(&mut self) -> B256Map<B256> {
         struct SendStorageTriePtr<S>(*mut RevealableSparseTrie<S>);
         // SAFETY: this wrapper only forwards the pointer across rayon; deref invariants are
         // documented at the use site below.
@@ -729,40 +729,45 @@ where
         }
 
         if tries_to_compute_roots.is_empty() {
-            return;
+            return B256Map::default();
         }
 
         let parent_span =
             debug_span!("compute_drained_storage_roots", n = tries_to_compute_roots.len());
         let new_epoch = self.new_epoch;
-        tries_to_compute_roots.into_par_iter().for_each(|(address, SendStorageTriePtr(trie))| {
-            let span = if tracing::enabled!(tracing::Level::TRACE) {
-                debug_span!(
-                    target: "engine::tree::payload_processor::sparse_trie",
-                    parent: &parent_span,
-                    "storage_root",
-                    ?address
-                )
-            } else {
-                debug_span!(
-                    target: "engine::tree::payload_processor::sparse_trie",
-                    parent: &parent_span,
-                    "storage_root",
-                )
-            };
-            let _enter = span.entered();
-            // SAFETY:
-            // - pointers are created from `storage_tries_mut().get_mut(address)` above;
-            // - `storage_updates` is a map, so addresses are unique;
-            // - we do not insert/remove entries between pointer collection and use, so pointers
-            //   stay valid and map reallocation cannot occur;
-            // - each pointer is consumed by at most one rayon task, so no aliasing mutable access.
-            unsafe {
-                (*trie)
-                    .root(new_epoch)
-                    .expect("updates are drained, trie should be revealed by now")
-            };
-        });
+        tries_to_compute_roots
+            .into_par_iter()
+            .map(|(address, SendStorageTriePtr(trie))| {
+                let span = if tracing::enabled!(tracing::Level::TRACE) {
+                    debug_span!(
+                        target: "engine::tree::payload_processor::sparse_trie",
+                        parent: &parent_span,
+                        "storage_root",
+                        ?address
+                    )
+                } else {
+                    debug_span!(
+                        target: "engine::tree::payload_processor::sparse_trie",
+                        parent: &parent_span,
+                        "storage_root",
+                    )
+                };
+                let _enter = span.entered();
+                // SAFETY:
+                // - pointers are created from `storage_tries_mut().get_mut(address)` above;
+                // - `storage_updates` is a map, so addresses are unique;
+                // - we do not insert/remove entries between pointer collection and use, so pointers
+                //   stay valid and map reallocation cannot occur;
+                // - each pointer is consumed by at most one rayon task, so no aliasing mutable
+                //   access.
+                let root = unsafe {
+                    (*trie)
+                        .root(new_epoch)
+                        .expect("updates are drained, trie should be revealed by now")
+                };
+                (address, root)
+            })
+            .collect()
     }
 
     /// Iterates through all storage tries for which all updates were processed, computes their
@@ -780,7 +785,9 @@ where
             return Ok(());
         }
 
-        self.compute_drained_storage_roots();
+        // Storage tries are not modified during promotion, so these roots remain valid for
+        // every account pass. Keep them local so later streamed updates cannot reuse stale roots.
+        let storage_roots = self.compute_drained_storage_roots();
 
         loop {
             let span = trace_span!("promote_updates", promoted = tracing::field::Empty).entered();
@@ -793,7 +800,7 @@ where
                         // If account has pending storage updates, it is still pending.
                         return true;
                     } else if let Some(account) = account.take() {
-                        let storage_root = self.trie.storage_root(addr, self.new_epoch).expect("updates are drained, storage trie should be revealed by now");
+                        let storage_root = storage_roots.get(addr).copied().or_else(|| self.trie.storage_root(addr, self.new_epoch)).expect("updates are drained, storage trie should be revealed by now");
                         let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
                         self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
                         num_promoted += 1;
@@ -822,7 +829,7 @@ where
 
                     (account, storage_root)
                 } else {
-                    (trie_account.map(Into::into), self.trie.storage_root(addr, self.new_epoch).expect("account had storage updates that were applied to its trie, storage root must be revealed by now"))
+                    (trie_account.map(Into::into), storage_roots.get(addr).copied().or_else(|| self.trie.storage_root(addr, self.new_epoch)).expect("account had storage updates that were applied to its trie, storage root must be revealed by now"))
                 };
 
                 let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
@@ -1212,6 +1219,161 @@ mod tests {
         assert_eq!(decoded.balance, U256::from(42));
         assert_eq!(decoded.storage_root, storage_root);
         assert_eq!(account_rlp_buf, encoded);
+    }
+
+    #[test]
+    fn promotion_preserves_roots_and_updates_across_streamed_batches() {
+        let runtime = reth_tasks::Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayManager::<reth_chain_state::EthPrimitives>::default()
+                .overlay_builder(anchor_hash),
+        );
+        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
+        let proof_worker_handle = ProofWorkerHandle::new(
+            &runtime,
+            ProofTaskCtx::new(state_provider_factory),
+            false,
+            proof_result_tx.clone(),
+        );
+
+        let default_trie = RevealableSparseTrie::<ArenaParallelSparseTrie>::revealed_empty();
+        let trie = SparseStateTrie::default()
+            .with_accounts_trie(default_trie.clone())
+            .with_default_storage_trie(default_trie)
+            .with_updates(true);
+
+        let parent_state_root = EMPTY_ROOT_HASH;
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (_cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
+        let mut task = SparseTrieCacheTask::new_with_trie(
+            &runtime,
+            updates_rx,
+            cancel_rx,
+            std::sync::mpsc::channel().0,
+            proof_worker_handle,
+            proof_result_tx,
+            proof_result_rx,
+            SparseTrieTaskMetrics::default(),
+            trie,
+            parent_state_root,
+            TrieNodeEpoch::UNMODIFIED,
+            1,
+        );
+
+        let a = B256::repeat_byte(0x11);
+        let b = B256::repeat_byte(0x22);
+        let c = B256::repeat_byte(0x55);
+        let slot = B256::repeat_byte(0x33);
+        let other_slot = B256::repeat_byte(0x44);
+        let account = Account { nonce: 1, balance: U256::from(10), bytecode_hash: None };
+        let mut expected_accounts = B256Map::default();
+        let mut expected_storage: B256Map<B256Map<U256>> = B256Map::default();
+
+        for round in 0..3 {
+            let mut state = HashedPostState::default();
+            match round {
+                0 => {
+                    state.accounts.insert(c, Some(account));
+                    for address in [a, b] {
+                        state.accounts.insert(address, Some(account));
+                        state
+                            .storages
+                            .entry(address)
+                            .or_default()
+                            .storage
+                            .extend([(slot, U256::from(1)), (other_slot, U256::from(2))]);
+                    }
+                }
+                1 => {
+                    // Storage-only update for a; b reuses a root cached in the previous pass.
+                    state.storages.entry(a).or_default().storage.insert(slot, U256::from(3));
+                    state.accounts.insert(b, Some(Account { nonce: 2, ..account }));
+                }
+                _ => {
+                    // A later value supersedes an update that has not been applied yet.
+                    let mut superseded = HashedPostState::default();
+                    superseded.storages.entry(b).or_default().storage.insert(slot, U256::from(99));
+                    task.on_hashed_state_update(superseded);
+                    state.storages.entry(b).or_default().storage.insert(slot, U256::from(4));
+                    state.accounts.insert(a, None);
+                    state.accounts.insert(c, None);
+                    state
+                        .storages
+                        .entry(a)
+                        .or_default()
+                        .storage
+                        .extend([(slot, U256::ZERO), (other_slot, U256::ZERO)]);
+                }
+            }
+            expected_accounts.extend(state.accounts.iter().map(|(&key, &value)| (key, value)));
+            for (&address, storage) in &state.storages {
+                let expected = expected_storage.entry(address).or_default();
+                for (&slot, &value) in &storage.storage {
+                    if value.is_zero() {
+                        expected.remove(&slot);
+                    } else {
+                        expected.insert(slot, value);
+                    }
+                }
+            }
+            task.on_hashed_state_update(state);
+            task.pending_updates = 1;
+            task.process_new_updates().unwrap();
+
+            // Build the expected account leaves independently of promotion, retaining the
+            // already-applied storage updates so we can also compare the collected trie updates.
+            let mut expected_trie = SparseStateTrie::default()
+                .with_accounts_trie(task.trie.trie_mut().clone())
+                .with_default_storage_trie(
+                    RevealableSparseTrie::<ArenaParallelSparseTrie>::revealed_empty(),
+                )
+                .with_updates(true);
+            expected_trie.storage_tries_mut().clone_from(task.trie.storage_tries_mut());
+            let mut leaves = B256Map::default();
+            let mut accounts = Vec::new();
+            for (&address, &account) in &expected_accounts {
+                let storage_root = reth_trie_common::root::storage_root_unsorted(
+                    expected_storage
+                        .get(&address)
+                        .into_iter()
+                        .flat_map(|storage| storage.iter())
+                        .map(|(&key, &value)| (key, value)),
+                );
+                if expected_storage.contains_key(&address) {
+                    assert_eq!(
+                        expected_trie.storage_root(&address, task.new_epoch),
+                        Some(storage_root)
+                    );
+                }
+                let value = account.map(|account| account.into_trie_account(storage_root));
+                leaves.insert(
+                    address,
+                    LeafUpdate::Changed(value.map(alloy_rlp::encode).unwrap_or_default()),
+                );
+                if let Some(value) = value {
+                    accounts.push((address, value));
+                }
+            }
+            expected_trie
+                .trie_mut()
+                .update_leaves(&mut leaves, |_, _| panic!("unexpected proof"))
+                .unwrap();
+            assert!(leaves.is_empty());
+            task.promote_pending_account_updates().unwrap();
+            assert!(task.pending_account_updates.is_empty());
+            assert!(task.account_updates.is_empty());
+            assert!(task.storage_updates.values().all(|updates| updates.is_empty()));
+            let actual = task.trie.root_with_updates(task.new_epoch).unwrap();
+            assert_eq!(actual.0, reth_trie_common::root::state_root_unsorted(accounts));
+            assert_eq!(actual, expected_trie.root_with_updates(task.new_epoch).unwrap());
+        }
+
+        drop(updates_tx);
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
     }
 
     #[test]
