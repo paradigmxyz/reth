@@ -692,12 +692,6 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     fn poll_disconnect(&mut self, cx: &mut Context<'_>) -> Poll<()> {
         debug_assert!(self.is_disconnecting(), "not disconnecting");
 
-        // Socket shutdown can remain pending if the peer stops reading. Release callers
-        // before flushing, including requests queued after the last receive-loop iteration.
-        self.inflight_requests.clear();
-        self.internal_request_rx.get_mut().close();
-        while let Poll::Ready(Some(_request)) = self.internal_request_rx.poll_next_unpin(cx) {}
-
         // try to close the flush out the remaining Disconnect message
         let _ = ready!(self.conn.poll_close_unpin(cx));
         self.emit_disconnect(cx)
@@ -1564,38 +1558,6 @@ mod tests {
         );
         let id = *session.inflight_requests.keys().next().expect("eth request tracked");
         (id, rx)
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn disconnect_releases_requests_before_session_is_dropped() {
-        let mut builder = SessionBuilder::default();
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let client = tokio::spawn(builder.with_client_stream(
-            listener.local_addr().unwrap(),
-            async move |client_stream| {
-                let _client_stream = client_stream;
-                std::future::pending::<()>().await;
-            },
-        ));
-        let (incoming, _) = listener.accept().await.unwrap();
-        let mut session = builder.connect_incoming(incoming).await;
-        let (_, mut inflight) = dispatch_block_bodies_request(&mut session);
-        let (requests, rx) = mpsc::channel(1);
-        session.internal_request_rx = ReceiverStream::new(rx).fuse();
-        let (response, mut queued) = oneshot::channel();
-        requests
-            .try_send(PeerRequest::GetBlockBodies { request: GetBlockBodies(Vec::new()), response })
-            .unwrap();
-
-        session.start_disconnect(DisconnectReason::UselessPeer).unwrap();
-        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
-        let _ = session.poll_disconnect(&mut cx);
-        // Request lifetimes must not depend on flushing the socket or dropping the session.
-        assert!(session.inflight_requests.is_empty());
-        assert!(requests.is_closed());
-        assert_eq!(inflight.try_recv().unwrap_err(), oneshot::error::TryRecvError::Closed);
-        assert_eq!(queued.try_recv().unwrap_err(), oneshot::error::TryRecvError::Closed);
-        client.abort();
     }
 
     #[tokio::test(flavor = "multi_thread")]
