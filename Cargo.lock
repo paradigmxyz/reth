@@ -10379,7 +10379,6 @@ dependencies = [
 name = "reth-rpc-server-types"
 version = "2.5.2"
 dependencies = [
- "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "jsonrpsee-core",
