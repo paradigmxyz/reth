@@ -712,12 +712,21 @@ where
     /// 3. but the storage root hasn't been updated yet,
     ///
     /// we trigger state root computation on a rayon pool.
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::critical",
+        skip_all,
+        name = "trie_compute_drained_storage_roots"
+    )]
     fn compute_drained_storage_roots(&mut self) {
         struct SendStorageTriePtr<S>(*mut RevealableSparseTrie<S>);
         // SAFETY: this wrapper only forwards the pointer across rayon; deref invariants are
         // documented at the use site below.
         unsafe impl<S: Send> Send for SendStorageTriePtr<S> {}
 
+        let prepare = debug_span!(target: "engine::tree::critical", "storage_root_prepare",
+            accounts = self.storage_updates.len())
+        .entered();
         let mut tries_to_compute_roots: Vec<(B256, SendStorageTriePtr<S>)> = Vec::new();
         for (address, updates) in &self.storage_updates {
             if updates.is_empty() &&
@@ -728,28 +737,22 @@ where
             }
         }
 
+        drop(prepare);
         if tries_to_compute_roots.is_empty() {
             return;
         }
 
-        let parent_span =
-            debug_span!("compute_drained_storage_roots", n = tries_to_compute_roots.len());
+        static NEXT_BATCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let batch = NEXT_BATCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let parent_span = debug_span!(target: "engine::tree::critical", "storage_root_batch",
+            batch, n = tries_to_compute_roots.len());
+        let _batch_guard = parent_span.enter();
+        let dispatched = Instant::now();
         let new_epoch = self.new_epoch;
         tries_to_compute_roots.into_par_iter().for_each(|(address, SendStorageTriePtr(trie))| {
-            let span = if tracing::enabled!(tracing::Level::TRACE) {
-                debug_span!(
-                    target: "engine::tree::payload_processor::sparse_trie",
-                    parent: &parent_span,
-                    "storage_root",
-                    ?address
-                )
-            } else {
-                debug_span!(
-                    target: "engine::tree::payload_processor::sparse_trie",
-                    parent: &parent_span,
-                    "storage_root",
-                )
-            };
+            let span = debug_span!(target: "engine::tree::critical", parent: &parent_span,
+                "storage_root_job", batch, queue_us = dispatched.elapsed().as_micros() as u64,
+                ?address);
             let _enter = span.entered();
             // SAFETY:
             // - pointers are created from `storage_tries_mut().get_mut(address)` above;

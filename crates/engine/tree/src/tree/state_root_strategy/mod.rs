@@ -1138,7 +1138,13 @@ where
         _hashed_state: &LazyHashedPostState,
     ) -> ProviderResult<StateRootJobOutcome> {
         if self.timeout.is_none() {
-            return match self.handle.state_root() {
+            let outcome = {
+                let _wait = tracing::debug_span!(target: "engine::tree::critical",
+                    "np_wait_sparse_root")
+                .entered();
+                self.handle.state_root()
+            };
+            return match outcome {
                 Ok(outcome) => self.verified_sparse_outcome(block, &output, outcome),
                 Err(err) => {
                     debug!(target: "engine::tree::state_root_strategy", %err, "State root task failed, falling back to serial root");

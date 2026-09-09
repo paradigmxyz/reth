@@ -2323,7 +2323,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
     fn update_subtrie_hashes(&mut self, new_epoch: TrieNodeEpoch) {
-        trace!(target: TRACE_TARGET, "Updating subtrie hashes");
+        let _hash = tracing::debug_span!(target: "engine::tree::critical", "hash_subtries",
+            cached = self.upper_arena[self.root].is_cached(), upper_nodes = self.upper_arena.len())
+        .entered();
 
         // Only descend if the root is a branch; otherwise there are no subtries.
         if !matches!(&self.upper_arena[self.root], ArenaSparseNode::Branch(_)) {
@@ -2331,6 +2333,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
         }
 
         // Count total dirty leaves across all subtries to make one global parallelism decision.
+        let prepare =
+            tracing::debug_span!(target: "engine::tree::critical", "hash_subtries_prepare",
+            dirty_leaves = tracing::field::Empty, subtries = tracing::field::Empty)
+            .entered();
         let mut total_dirty_leaves: u64 = 0;
         let mut taken: Vec<(Index, Box<ArenaSparseSubtrie>)> = Vec::new();
         for (idx, node) in &mut self.upper_arena {
@@ -2346,6 +2352,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
             };
             taken.push((idx, subtrie));
         }
+
+        prepare.record("dirty_leaves", total_dirty_leaves);
+        prepare.record("subtries", taken.len());
+        drop(prepare);
 
         // Hash taken subtries in parallel if total dirty leaves meet the threshold.
         if !taken.is_empty() {
