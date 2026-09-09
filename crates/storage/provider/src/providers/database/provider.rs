@@ -5001,11 +5001,11 @@ mod tests {
                 .upsert(
                     address,
                     &Account {
-                        #[cfg(feature = "account-ext")]
-                        extension: Default::default(),
                         nonce: 0,
                         balance: U256::ZERO,
                         bytecode_hash: None,
+                        #[cfg(feature = "account-ext")]
+                        extension: Default::default(),
                     },
                 )
                 .unwrap();
@@ -5021,18 +5021,18 @@ mod tests {
             address,
             (
                 Some(Account {
-                    #[cfg(feature = "account-ext")]
-                    extension: Default::default(),
                     nonce: 0,
                     balance: U256::ZERO,
                     bytecode_hash: None,
-                }),
-                Some(Account {
                     #[cfg(feature = "account-ext")]
                     extension: Default::default(),
+                }),
+                Some(Account {
                     nonce: 1,
                     balance: U256::ZERO,
                     bytecode_hash: None,
+                    #[cfg(feature = "account-ext")]
+                    extension: Default::default(),
                 }),
                 storage_map,
             ),
@@ -5044,11 +5044,11 @@ mod tests {
             address,
             (
                 Some(Some(Account {
-                    #[cfg(feature = "account-ext")]
-                    extension: Default::default(),
                     nonce: 0,
                     balance: U256::ZERO,
                     bytecode_hash: None,
+                    #[cfg(feature = "account-ext")]
+                    extension: Default::default(),
                 })),
                 vec![StorageEntry { key: slot_key, value: U256::ZERO }],
             ),
@@ -5645,11 +5645,11 @@ mod tests {
                 .upsert(
                     hashed_address,
                     &Account {
-                        #[cfg(feature = "account-ext")]
-                        extension: Default::default(),
                         nonce: 0,
                         balance: U256::ZERO,
                         bytecode_hash: None,
+                        #[cfg(feature = "account-ext")]
+                        extension: Default::default(),
                     },
                 )
                 .unwrap();

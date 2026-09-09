@@ -1425,11 +1425,11 @@ mod tests {
             info: Some(
                 // non-empty account
                 Account {
-                    #[cfg(feature = "account-ext")]
-                    extension: Default::default(),
                     nonce: 100,
                     balance: U256::ZERO,
                     bytecode_hash: Some(KECCAK_EMPTY),
+                    #[cfg(feature = "account-ext")]
+                    extension: Default::default(),
                 },
             ),
             proof: vec![],
@@ -1522,11 +1522,11 @@ mod tests {
         let existing_acc = AccountProof {
             address: Address::random(),
             info: Some(Account {
-                #[cfg(feature = "account-ext")]
-                extension: Default::default(),
                 nonce: 42,
                 balance: U256::from(100),
                 bytecode_hash: Some(KECCAK_EMPTY),
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
             }),
             proof: vec![],
             storage_root: B256::random(),

@@ -1246,21 +1246,21 @@ mod tests {
                 (
                     first_hash,
                     Account {
-                        #[cfg(feature = "account-ext")]
-                        extension: Default::default(),
                         nonce: 1,
                         balance: U256::from(2),
                         bytecode_hash: Some(code_hash),
+                        #[cfg(feature = "account-ext")]
+                        extension: Default::default(),
                     },
                 ),
                 (
                     second_hash,
                     Account {
-                        #[cfg(feature = "account-ext")]
-                        extension: Default::default(),
                         nonce: 3,
                         balance: U256::from(4),
                         bytecode_hash: None,
+                        #[cfg(feature = "account-ext")]
+                        extension: Default::default(),
                     },
                 ),
             ],
@@ -1314,11 +1314,11 @@ mod tests {
             vec![(
                 hash,
                 Account {
-                    #[cfg(feature = "account-ext")]
-                    extension: Default::default(),
                     nonce: 1,
                     balance: U256::from(2),
                     bytecode_hash: None,
+                    #[cfg(feature = "account-ext")]
+                    extension: Default::default(),
                 },
             )],
             RangeEnd::Exhausted,

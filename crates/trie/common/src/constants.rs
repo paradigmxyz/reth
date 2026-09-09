@@ -12,12 +12,12 @@ mod tests {
     #[test]
     fn account_rlp_max_size() {
         let account = TrieAccount {
-            #[cfg(feature = "account-ext")]
-            extension: Default::default(),
             nonce: u64::MAX,
             balance: U256::MAX,
             storage_root: B256::from_slice(&[u8::MAX; 32]),
             code_hash: B256::from_slice(&[u8::MAX; 32]),
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
         let mut encoded = Vec::new();
         account.encode(&mut encoded);

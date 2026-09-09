@@ -1006,13 +1006,13 @@ mod tests {
             .state_present_account_info(
                 polluted_address,
                 AccountInfo {
-                    #[cfg(feature = "account-ext")]
-                    extension: Default::default(),
                     balance: U256::from(1337),
                     nonce: 7,
                     code_hash: KECCAK_EMPTY,
                     code: None,
                     account_id: None,
+                    #[cfg(feature = "account-ext")]
+                    extension: Default::default(),
                 },
             )
             .build();

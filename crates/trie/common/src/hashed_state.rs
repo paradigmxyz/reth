@@ -850,13 +850,13 @@ mod tests {
 
         // Create a mock account info object.
         let account_info = AccountInfo {
-            #[cfg(feature = "account-ext")]
-            extension: Default::default(),
             balance: U256::from(123),
             nonce: 42,
             code_hash: B256::random(),
             code: Some(Bytecode::new_raw(Bytes::from(vec![1, 2]))),
             account_id: None,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
 
         let mut storage = StorageWithOriginalValues::default();
@@ -958,13 +958,13 @@ mod tests {
         let address_2 = Address::random();
 
         let account_info_1 = AccountInfo {
-            #[cfg(feature = "account-ext")]
-            extension: Default::default(),
             balance: U256::from(1000),
             nonce: 1,
             code_hash: B256::random(),
             code: None,
             account_id: None,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
 
         // Create hashed accounts with addresses.
@@ -1283,11 +1283,11 @@ mod tests {
     fn test_hashed_post_state_sorted_disjointed_merge_batch() {
         fn account(nonce: u64) -> Account {
             Account {
-                #[cfg(feature = "account-ext")]
-                extension: Default::default(),
                 nonce,
                 balance: U256::ZERO,
                 bytecode_hash: None,
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
             }
         }
 
@@ -1372,11 +1372,11 @@ mod tests {
     fn test_hashed_post_state_sorted_disjointed_merge_batch_removes_overlapping_batch_key() {
         fn account(nonce: u64) -> Account {
             Account {
-                #[cfg(feature = "account-ext")]
-                extension: Default::default(),
                 nonce,
                 balance: U256::ZERO,
                 bytecode_hash: None,
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
             }
         }
 
@@ -1404,11 +1404,11 @@ mod tests {
     fn test_hashed_post_state_sorted_disjointed_merge_batch_keeps_equal_overlaps() {
         fn account(nonce: u64) -> Account {
             Account {
-                #[cfg(feature = "account-ext")]
-                extension: Default::default(),
                 nonce,
                 balance: U256::ZERO,
                 bytecode_hash: None,
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
             }
         }
 
@@ -1570,11 +1570,11 @@ mod tests {
                 (
                     addr1,
                     Some(Account {
-                        #[cfg(feature = "account-ext")]
-                        extension: Default::default(),
                         nonce: 1,
                         balance: U256::from(100),
                         bytecode_hash: None,
+                        #[cfg(feature = "account-ext")]
+                        extension: Default::default(),
                     }),
                 ),
                 (addr2, None),

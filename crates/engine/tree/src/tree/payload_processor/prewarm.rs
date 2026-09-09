@@ -928,11 +928,11 @@ mod tests {
             .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::from(10)));
         let fields = BalAccountStateFields::from_changes(&changes);
         let account = fields.into_account(Some(Account {
-            #[cfg(feature = "account-ext")]
-            extension: Default::default(),
             balance: U256::from(1),
             nonce: 3,
             bytecode_hash: Some(B256::repeat_byte(0xaa)),
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         }));
 
         assert_eq!(account.balance, U256::from(10));

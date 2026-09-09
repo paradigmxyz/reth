@@ -656,11 +656,11 @@ mod tests {
         let addr5 = Address::with_last_byte(5);
 
         let account = Account {
-            #[cfg(feature = "account-ext")]
-            extension: Default::default(),
             nonce: 1,
             balance: U256::from(100),
             bytecode_hash: None,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
 
         // Build changesets: blocks 0-4 have 1 change each, block 5 has 4 changes, block 6 has 1

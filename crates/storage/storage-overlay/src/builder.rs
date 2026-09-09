@@ -932,13 +932,13 @@ mod tests {
         let code = Bytecode::new_raw(vec![0x60, 0x00].into());
         let code_hash = code.hash_slow();
         let account = AccountInfo {
-            #[cfg(feature = "account-ext")]
-            extension: Default::default(),
             nonce: 4,
             balance: U256::from(5),
             code_hash,
             code: Some(code.clone()),
             account_id: AccountId::new(6),
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
         let state = BundleState::builder(0..=0)
             .state_present_account_info(address, account.clone())

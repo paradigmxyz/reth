@@ -654,8 +654,6 @@ mod tests {
     fn storage_root_merkle_checkpoint_roundtrip() {
         let mut rng = rand::rng();
         let checkpoint = StorageRootMerkleCheckpoint {
-            #[cfg(feature = "account-ext")]
-            account_extension: vec![0xa0].into_iter().chain([0x42; 32]).collect::<Vec<_>>().into(),
             last_storage_key: rng.random(),
             walker_stack: vec![StoredSubNode {
                 key: B256::random_with(&mut rng).to_vec(),
@@ -666,6 +664,8 @@ mod tests {
             account_nonce: 0,
             account_balance: U256::ZERO,
             account_bytecode_hash: B256::ZERO,
+            #[cfg(feature = "account-ext")]
+            account_extension: vec![0xa0].into_iter().chain([0x42; 32]).collect::<Vec<_>>().into(),
         };
 
         let mut buf = Vec::new();
@@ -680,8 +680,6 @@ mod tests {
 
         // Create a storage root checkpoint
         let storage_checkpoint = StorageRootMerkleCheckpoint {
-            #[cfg(feature = "account-ext")]
-            account_extension: vec![0xa0].into_iter().chain([0x42; 32]).collect::<Vec<_>>().into(),
             last_storage_key: rng.random(),
             walker_stack: vec![StoredSubNode {
                 key: B256::random_with(&mut rng).to_vec(),
@@ -694,6 +692,8 @@ mod tests {
             account_bytecode_hash: b256!(
                 "0x0fffffffffffffffffffffffffffffff0fffffffffffffffffffffffffffffff"
             ),
+            #[cfg(feature = "account-ext")]
+            account_extension: vec![0xa0].into_iter().chain([0x42; 32]).collect::<Vec<_>>().into(),
         };
 
         // Create a merkle checkpoint with the storage root checkpoint

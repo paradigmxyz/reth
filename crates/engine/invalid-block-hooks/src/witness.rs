@@ -448,22 +448,22 @@ mod tests {
 
             let bundle_account = BundleAccount {
                 info: Some(AccountInfo {
-                    #[cfg(feature = "account-ext")]
-                    extension: Default::default(),
                     balance: account.balance,
                     nonce: account.nonce,
                     code_hash: account.bytecode_hash.unwrap_or_default(),
                     code: None,
                     account_id: None,
-                }),
-                original_info: (i == 0).then(|| AccountInfo {
                     #[cfg(feature = "account-ext")]
                     extension: Default::default(),
+                }),
+                original_info: (i == 0).then(|| AccountInfo {
                     balance: account.balance.checked_div(U256::from(2)).unwrap_or(U256::ZERO),
                     nonce: 0,
                     code_hash: account.bytecode_hash.unwrap_or_default(),
                     code: None,
                     account_id: None,
+                    #[cfg(feature = "account-ext")]
+                    extension: Default::default(),
                 }),
                 storage,
                 status: AccountStatus::default(),

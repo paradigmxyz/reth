@@ -904,12 +904,12 @@ mod tests {
     #[cfg(not(feature = "account-ext"))]
     fn trie_account(storage_root: B256, code_hash: B256) -> TrieAccount {
         TrieAccount {
-            #[cfg(feature = "account-ext")]
-            extension: Default::default(),
             nonce: 7,
             balance: U256::from(42),
             storage_root,
             code_hash,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         }
     }
 

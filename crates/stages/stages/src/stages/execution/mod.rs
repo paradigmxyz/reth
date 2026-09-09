@@ -1047,11 +1047,11 @@ mod tests {
             .put::<tables::PlainAccountState>(
                 acc1,
                 Account {
-                    #[cfg(feature = "account-ext")]
-                    extension: Default::default(),
                     nonce: 0,
                     balance: U256::ZERO,
                     bytecode_hash: Some(code_hash),
+                    #[cfg(feature = "account-ext")]
+                    extension: Default::default(),
                 },
             )
             .unwrap();
@@ -1059,11 +1059,11 @@ mod tests {
             .put::<tables::PlainAccountState>(
                 acc2,
                 Account {
-                    #[cfg(feature = "account-ext")]
-                    extension: Default::default(),
                     nonce: 0,
                     balance,
                     bytecode_hash: None,
+                    #[cfg(feature = "account-ext")]
+                    extension: Default::default(),
                 },
             )
             .unwrap();
@@ -1118,27 +1118,27 @@ mod tests {
                 // check post state
                 let account1 = address!("0x1000000000000000000000000000000000000000");
                 let account1_info = Account {
-                    #[cfg(feature = "account-ext")]
-                    extension: Default::default(),
                     balance: U256::ZERO,
                     nonce: 0x00,
                     bytecode_hash: Some(code_hash),
+                    #[cfg(feature = "account-ext")]
+                    extension: Default::default(),
                 };
                 let account2 = address!("0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba");
                 let account2_info = Account {
-                    #[cfg(feature = "account-ext")]
-                    extension: Default::default(),
                     balance: U256::from(0x1bc16d674ece94bau128),
                     nonce: 0x00,
                     bytecode_hash: None,
+                    #[cfg(feature = "account-ext")]
+                    extension: Default::default(),
                 };
                 let account3 = address!("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b");
                 let account3_info = Account {
-                    #[cfg(feature = "account-ext")]
-                    extension: Default::default(),
                     balance: U256::from(0x3635c9adc5de996b46u128),
                     nonce: 0x01,
                     bytecode_hash: None,
+                    #[cfg(feature = "account-ext")]
+                    extension: Default::default(),
                 };
 
                 // assert accounts
@@ -1212,19 +1212,19 @@ mod tests {
         let db_tx = provider.tx_ref();
         let acc1 = address!("0x1000000000000000000000000000000000000000");
         let acc1_info = Account {
-            #[cfg(feature = "account-ext")]
-            extension: Default::default(),
             nonce: 0,
             balance: U256::ZERO,
             bytecode_hash: Some(code_hash),
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
         let acc2 = address!("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b");
         let acc2_info = Account {
-            #[cfg(feature = "account-ext")]
-            extension: Default::default(),
             nonce: 0,
             balance,
             bytecode_hash: None,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
 
         db_tx.put::<tables::PlainAccountState>(acc1, acc1_info.clone()).unwrap();
@@ -1404,18 +1404,18 @@ mod tests {
 
         // pre state
         let caller_info = Account {
-            #[cfg(feature = "account-ext")]
-            extension: Default::default(),
             nonce: 0,
             balance,
             bytecode_hash: None,
-        };
-        let destroyed_info = Account {
             #[cfg(feature = "account-ext")]
             extension: Default::default(),
+        };
+        let destroyed_info = Account {
             nonce: 0,
             balance: U256::ZERO,
             bytecode_hash: Some(code_hash),
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
 
         // set account
@@ -1475,21 +1475,21 @@ mod tests {
                 (
                     beneficiary_address,
                     Account {
-                        #[cfg(feature = "account-ext")]
-                        extension: Default::default(),
                         nonce: 0,
                         balance: U256::from(0x1bc16d674eca30a0u64),
-                        bytecode_hash: None
+                        bytecode_hash: None,
+                        #[cfg(feature = "account-ext")]
+                        extension: Default::default(),
                     }
                 ),
                 (
                     caller_address,
                     Account {
-                        #[cfg(feature = "account-ext")]
-                        extension: Default::default(),
                         nonce: 1,
                         balance: U256::from(0xde0b6b3a761cf60u64),
-                        bytecode_hash: None
+                        bytecode_hash: None,
+                        #[cfg(feature = "account-ext")]
+                        extension: Default::default(),
                     }
                 )
             ]

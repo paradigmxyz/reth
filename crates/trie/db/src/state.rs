@@ -385,11 +385,11 @@ mod tests {
         hashed_state.accounts.insert(
             B256::from(U256::from(1)),
             Some(Account {
-                #[cfg(feature = "account-ext")]
-                extension: Default::default(),
                 nonce: 1,
                 balance: U256::from(10),
                 bytecode_hash: None,
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
             }),
         );
         hashed_state.accounts.insert(B256::from(U256::from(2)), None);

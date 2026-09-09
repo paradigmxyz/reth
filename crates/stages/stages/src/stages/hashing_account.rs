@@ -461,11 +461,11 @@ mod tests {
                     while let Some((address, account)) = acc_cursor.next()? {
                         let Account { nonce, balance, .. } = account;
                         let old_acc = Account {
-                            #[cfg(feature = "account-ext")]
-                            extension: Default::default(),
                             nonce: nonce - 1,
                             balance: balance - U256::from(1),
                             bytecode_hash: None,
+                            #[cfg(feature = "account-ext")]
+                            extension: Default::default(),
                         };
                         let hashed_addr = keccak256(address);
                         if let Some((_, acc)) = hashed_acc_cursor.seek_exact(hashed_addr)? {

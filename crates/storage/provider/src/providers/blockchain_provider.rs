@@ -2877,11 +2877,11 @@ mod tests {
         (
             Address::random(),
             Account {
-                #[cfg(feature = "account-ext")]
-                extension: Default::default(),
                 nonce,
                 balance: U256::from(nonce),
                 bytecode_hash: None,
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
             },
         )
     }

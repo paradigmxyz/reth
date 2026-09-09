@@ -1388,13 +1388,13 @@ mod tests {
 
                 let mut account = revm::state::Account::default();
                 account.info = AccountInfo {
-                    #[cfg(feature = "account-ext")]
-                    extension: Default::default(),
                     balance: U256::from(rng.random::<u64>()),
                     nonce: rng.random::<u64>(),
                     code_hash: KECCAK_EMPTY,
                     code: Some(Default::default()),
                     account_id: None,
+                    #[cfg(feature = "account-ext")]
+                    extension: Default::default(),
                 };
                 account.storage = storage;
                 account.status = AccountStatus::Touched;

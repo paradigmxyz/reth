@@ -333,12 +333,12 @@ mod tests {
 
     fn account(nonce: u64) -> TrieAccount {
         TrieAccount {
-            #[cfg(feature = "account-ext")]
-            extension: Default::default(),
             nonce,
             balance: U256::from(1),
             storage_root: EMPTY_ROOT_HASH,
             code_hash: KECCAK256_EMPTY,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         }
     }
 

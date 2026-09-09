@@ -563,11 +563,11 @@ mod tests {
         let addr2 = Address::with_last_byte(2);
 
         let account = Account {
-            #[cfg(feature = "account-ext")]
-            extension: Default::default(),
             nonce: 1,
             balance: U256::from(100),
             bytecode_hash: None,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
 
         // Create storage entries

@@ -37,13 +37,13 @@ mod tests {
         storage.insert(B256::from([0x01; 32]), B256::from([0x02; 32]));
 
         let genesis_account = GenesisAccount {
-            #[cfg(feature = "account-ext")]
-            extension: Default::default(),
             nonce: Some(10),
             balance: U256::from(1000),
             code: Some(Bytes::from(vec![0x60, 0x61])),
             storage: Some(storage),
             private_key: None,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
 
         // Convert the GenesisAccount to a TrieAccount
@@ -63,11 +63,11 @@ mod tests {
         // Check that the Account converts to the same TrieAccount
         assert_eq!(
             Account {
-                #[cfg(feature = "account-ext")]
-                extension: Default::default(),
                 nonce: 10,
                 balance: U256::from(1000),
-                bytecode_hash: Some(keccak256([0x60, 0x61]))
+                bytecode_hash: Some(keccak256([0x60, 0x61])),
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
             }
             .into_trie_account(expected_storage_root),
             trie_account
@@ -80,13 +80,13 @@ mod tests {
         let storage = BTreeMap::from([(B256::from([0x01; 32]), B256::from([0x00; 32]))]);
 
         let genesis_account = GenesisAccount {
-            #[cfg(feature = "account-ext")]
-            extension: Default::default(),
             nonce: Some(3),
             balance: U256::from(300),
             code: None,
             storage: Some(storage),
             private_key: None,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
 
         // Convert the GenesisAccount to a TrieAccount

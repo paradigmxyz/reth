@@ -310,13 +310,13 @@ mod tests {
     fn database_state_provider_maps_empty_code_hash() {
         let address = Address::repeat_byte(0x01);
         let account = AccountInfo {
-            #[cfg(feature = "account-ext")]
-            extension: Default::default(),
             nonce: 7,
             balance: U256::from(42),
             code_hash: KECCAK_EMPTY,
             code: None,
             account_id: None,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
         let db = CountingDatabaseRef::new(address, Some(account), Bytecode::default());
         let provider = DatabaseStateProvider::new(db);
@@ -324,11 +324,11 @@ mod tests {
         assert_eq!(
             provider.basic_account(&address).unwrap(),
             Some(Account {
-                #[cfg(feature = "account-ext")]
-                extension: Default::default(),
                 nonce: 7,
                 balance: U256::from(42),
-                bytecode_hash: None
+                bytecode_hash: None,
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
             })
         );
     }
@@ -339,13 +339,13 @@ mod tests {
         let code_hash = B256::repeat_byte(0x42);
         let bytecode = Bytecode::new_raw(Bytes::from_static(&[0x60, 0x00]));
         let account = AccountInfo {
-            #[cfg(feature = "account-ext")]
-            extension: Default::default(),
             nonce: 7,
             balance: U256::from(42),
             code_hash,
             code: Some(bytecode.clone()),
             account_id: None,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
         let db = CountingDatabaseRef::new(address, Some(account), bytecode.clone());
         let provider = DatabaseStateProvider::new(db);
@@ -353,11 +353,11 @@ mod tests {
         assert_eq!(
             provider.basic_account(&address).unwrap(),
             Some(Account {
-                #[cfg(feature = "account-ext")]
-                extension: Default::default(),
                 nonce: 7,
                 balance: U256::from(42),
-                bytecode_hash: Some(code_hash)
+                bytecode_hash: Some(code_hash),
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
             })
         );
         assert_eq!(
@@ -406,13 +406,13 @@ mod tests {
         let code_hash = B256::repeat_byte(0x42);
         let bytecode = Bytecode::new_raw(Bytes::from_static(&[0x60, 0x00]));
         let account = AccountInfo {
-            #[cfg(feature = "account-ext")]
-            extension: Default::default(),
             nonce: 7,
             balance: U256::from(42),
             code_hash,
             code: Some(bytecode.clone()),
             account_id: None,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
         let db = CountingDatabaseRef::new(address, Some(account), bytecode.clone());
         let account_reads = db.account_reads.clone();
@@ -423,21 +423,21 @@ mod tests {
         assert_eq!(
             provider.basic_account(&address).unwrap(),
             Some(Account {
-                #[cfg(feature = "account-ext")]
-                extension: Default::default(),
                 nonce: 7,
                 balance: U256::from(42),
-                bytecode_hash: Some(code_hash)
+                bytecode_hash: Some(code_hash),
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
             })
         );
         assert_eq!(
             provider.basic_account(&address).unwrap(),
             Some(Account {
-                #[cfg(feature = "account-ext")]
-                extension: Default::default(),
                 nonce: 7,
                 balance: U256::from(42),
-                bytecode_hash: Some(code_hash)
+                bytecode_hash: Some(code_hash),
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
             })
         );
         assert_eq!(account_reads.load(Ordering::Relaxed), 1);

@@ -165,11 +165,11 @@ fn test_empty_account() {
             Address::random(),
             (
                 Account {
-                    #[cfg(feature = "account-ext")]
-                    extension: Default::default(),
                     nonce: 0,
                     balance: U256::from(0),
                     bytecode_hash: None,
+                    #[cfg(feature = "account-ext")]
+                    extension: Default::default(),
                 },
                 BTreeMap::from([(B256::with_last_byte(0x4), U256::from(12))]),
             ),
@@ -178,11 +178,11 @@ fn test_empty_account() {
             Address::random(),
             (
                 Account {
-                    #[cfg(feature = "account-ext")]
-                    extension: Default::default(),
                     nonce: 0,
                     balance: U256::from(0),
                     bytecode_hash: None,
+                    #[cfg(feature = "account-ext")]
+                    extension: Default::default(),
                 },
                 BTreeMap::default(),
             ),
@@ -191,11 +191,11 @@ fn test_empty_account() {
             Address::random(),
             (
                 Account {
-                    #[cfg(feature = "account-ext")]
-                    extension: Default::default(),
                     nonce: 155,
                     balance: U256::from(414241124u32),
                     bytecode_hash: Some(keccak256("test")),
+                    #[cfg(feature = "account-ext")]
+                    extension: Default::default(),
                 },
                 BTreeMap::from([
                     (B256::ZERO, U256::from(3)),
@@ -216,11 +216,11 @@ fn test_empty_storage_root() {
     let address = Address::random();
     let code = "el buen fla";
     let account = Account {
-        #[cfg(feature = "account-ext")]
-        extension: Default::default(),
         nonce: 155,
         balance: U256::from(414241124u32),
         bytecode_hash: Some(keccak256(code)),
+        #[cfg(feature = "account-ext")]
+        extension: Default::default(),
     };
     insert_account(tx.tx_ref(), address, account, &Default::default());
     tx.commit().unwrap();
@@ -388,11 +388,11 @@ fn test_storage_root() {
 
     let code = "el buen fla";
     let account = Account {
-        #[cfg(feature = "account-ext")]
-        extension: Default::default(),
         nonce: 155,
         balance: U256::from(414241124u32),
         bytecode_hash: Some(keccak256(code)),
+        #[cfg(feature = "account-ext")]
+        extension: Default::default(),
     };
 
     insert_account(tx.tx_ref(), address, account, &storage);
@@ -547,11 +547,11 @@ fn account_and_storage_trie() {
     // Insert first account
     let key1 = b256!("0xb000000000000000000000000000000000000000000000000000000000000000");
     let account1 = Account {
-        #[cfg(feature = "account-ext")]
-        extension: Default::default(),
         nonce: 0,
         balance: U256::from(3).mul(ether),
         bytecode_hash: None,
+        #[cfg(feature = "account-ext")]
+        extension: Default::default(),
     };
     hashed_account_cursor.upsert(key1, &account1).unwrap();
     hash_builder.add_leaf(Nibbles::unpack(key1), &encode_account(&account1, None));
@@ -572,11 +572,11 @@ fn account_and_storage_trie() {
     assert_eq!(key3[1], 0x41);
     let code_hash = b256!("0x5be74cad16203c4905c068b012a2e9fb6d19d036c410f16fd177f337541440dd");
     let account3 = Account {
-        #[cfg(feature = "account-ext")]
-        extension: Default::default(),
         nonce: 0,
         balance: U256::from(2).mul(ether),
         bytecode_hash: Some(code_hash),
+        #[cfg(feature = "account-ext")]
+        extension: Default::default(),
     };
     hashed_account_cursor.upsert(key3, &account3).unwrap();
     for (hashed_slot, value) in storage {
@@ -661,11 +661,11 @@ fn account_and_storage_trie() {
     let key4b = keccak256(address4b);
     assert_eq!(key4b.0[0], key4a.0[0]);
     let account4b = Account {
-        #[cfg(feature = "account-ext")]
-        extension: Default::default(),
         nonce: 0,
         balance: U256::from(5).mul(ether),
         bytecode_hash: None,
+        #[cfg(feature = "account-ext")]
+        extension: Default::default(),
     };
     hashed_account_cursor.upsert(key4b, &account4b).unwrap();
 
@@ -953,11 +953,11 @@ fn extension_node_trie<N: ProviderNodeTypes>(
     tx: &DatabaseProviderRW<Arc<TempDatabase<DatabaseEnv>>, N>,
 ) -> B256 {
     let a = Account {
-        #[cfg(feature = "account-ext")]
-        extension: Default::default(),
         nonce: 0,
         balance: U256::from(1u64),
         bytecode_hash: Some(B256::random()),
+        #[cfg(feature = "account-ext")]
+        extension: Default::default(),
     };
     let val = encode_account(&a, None);
 

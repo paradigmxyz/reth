@@ -1826,11 +1826,11 @@ mod tests {
 
         let address = alloy_primitives::Address::with_last_byte(1);
         let account = reth_primitives_traits::Account {
-            #[cfg(feature = "account-ext")]
-            extension: Default::default(),
             nonce: 1,
             balance: U256::from(1000),
             bytecode_hash: None,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
         let slot = U256::from(0x42);
         let slot_b256 = B256::from(slot);
@@ -1915,11 +1915,11 @@ mod tests {
 
         let address = alloy_primitives::Address::with_last_byte(1);
         let account = reth_primitives_traits::Account {
-            #[cfg(feature = "account-ext")]
-            extension: Default::default(),
             nonce: 1,
             balance: U256::from(1000),
             bytecode_hash: None,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
         let slot = U256::from(0x42);
 
@@ -2016,11 +2016,11 @@ mod tests {
 
         let address = alloy_primitives::Address::with_last_byte(1);
         let account = reth_primitives_traits::Account {
-            #[cfg(feature = "account-ext")]
-            extension: Default::default(),
             nonce: 1,
             balance: U256::from(1000),
             bytecode_hash: None,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
         let slot = U256::from(0x42);
 
