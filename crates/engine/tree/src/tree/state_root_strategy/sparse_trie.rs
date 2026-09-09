@@ -1252,6 +1252,20 @@ mod tests {
             }
         }
 
+        fn targets(task: &SparseTrieCacheTask) -> Vec<(B256, B256, ProofV2TargetParent)> {
+            let mut targets: Vec<_> = task
+                .pending_targets
+                .targets
+                .storage_targets
+                .iter()
+                .flat_map(|(address, targets)| {
+                    targets.iter().map(|target| (*address, target.key(), target.parent))
+                })
+                .collect();
+            targets.sort_unstable();
+            targets
+        }
+
         let runtime = Runtime::test();
         for new in [false, true] {
             let mut parallel = task(&runtime);
@@ -1293,16 +1307,8 @@ mod tests {
                 assert_eq!(parallel.fetched_storage_targets, serial.fetched_storage_targets);
                 assert_eq!(parallel.storage_cache_hits, serial.storage_cache_hits);
                 assert_eq!(parallel.storage_cache_misses, serial.storage_cache_misses);
-                for task in [&mut parallel, &mut serial] {
-                    for targets in task.pending_targets.targets.storage_targets.values_mut() {
-                        targets.sort_unstable_by_key(|target| (target.key(), target.parent));
-                    }
-                }
                 assert_eq!(parallel.pending_targets.len, serial.pending_targets.len);
-                assert_eq!(
-                    parallel.pending_targets.targets.storage_targets,
-                    serial.pending_targets.targets.storage_targets
-                );
+                assert_eq!(targets(&parallel), targets(&serial));
 
                 if pass == 1 {
                     // Retry while still blind first, then reveal and supersede pending values.
