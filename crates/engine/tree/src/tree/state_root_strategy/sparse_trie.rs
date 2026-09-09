@@ -271,8 +271,11 @@ where
         // marker means they died without finishing the stream.
         while !self.finished_state_updates {
             let mut t = Instant::now();
+            let wait = tracing::trace_span!(target: "engine::tree::critical", "trie_wait_stream")
+                .entered();
             crossbeam_channel::select_biased! {
                 recv(self.updates) -> message => {
+                    drop(wait);
                     let wake = Instant::now();
                     total_idle_time += wake.duration_since(idle_start);
                     self.metrics
@@ -288,6 +291,7 @@ where
                     self.pending_updates += 1;
                 }
                 recv(self.proof_result_rx) -> message => {
+                    drop(wait);
                     let wake = Instant::now();
                     total_idle_time += wake.duration_since(idle_start);
                     self.metrics
@@ -313,8 +317,11 @@ where
         // are ignored: with all updates known, prefetching has nothing left to help.
         while !done {
             let mut t = Instant::now();
+            let wait = tracing::trace_span!(target: "engine::tree::critical", "trie_wait_proofs")
+                .entered();
             crossbeam_channel::select_biased! {
                 recv(self.proof_result_rx) -> message => {
+                    drop(wait);
                     let wake = Instant::now();
                     total_idle_time += wake.duration_since(idle_start);
                     self.metrics
@@ -382,6 +389,12 @@ where
 
     /// Handles a received proof result: coalesces everything already queued, reveals the
     /// proof in the trie, and records timing metrics.
+    #[tracing::instrument(
+        level = "trace",
+        target = "engine::tree::critical",
+        skip_all,
+        name = "trie_on_proof_results"
+    )]
     fn on_proof_results(
         &mut self,
         message: ProofResultMessage,
@@ -408,6 +421,12 @@ where
     ///
     /// Messages queued after the finish marker are best-effort hints and are not actionable.
     /// Returns `true` once the finish marker was received and all pending trie work is done.
+    #[tracing::instrument(
+        level = "trace",
+        target = "engine::tree::critical",
+        skip_all,
+        name = "trie_make_progress"
+    )]
     fn make_progress(&mut self) -> Result<bool, StateRootTaskError> {
         let updates_queued = !self.finished_state_updates && !self.updates.is_empty();
 
@@ -453,10 +472,12 @@ where
                 None
             }
             SparseTrieTaskMessage::HashedState(hashed_state) => {
+                tracing::trace!(target: "engine::tree::critical", phase = "trie_state_update_received");
                 self.on_hashed_state_update(hashed_state);
                 None
             }
             SparseTrieTaskMessage::FinishedStateUpdates => {
+                tracing::trace!(target: "engine::tree::critical", phase = "trie_state_stream_finished");
                 let hashed_state = Arc::new(core::mem::take(&mut self.final_hashed_state));
                 let _ = self.final_hashed_state_tx.take().unwrap().send(Arc::clone(&hashed_state));
                 self.finished_state_updates = true;
@@ -625,7 +646,10 @@ where
             if new { &mut self.new_storage_updates } else { &mut self.storage_updates };
 
         // Process all storage updates, skipping tries with no pending updates.
-        let span = trace_span!("process_storage_leaf_updates").entered();
+        let span = trace_span!(target: "engine::tree::critical", "process_storage_leaf_updates", new, attempted = tracing::field::Empty, applied = tracing::field::Empty, tries = tracing::field::Empty).entered();
+        let mut attempted = 0usize;
+        let mut applied = 0usize;
+        let mut tries = 0usize;
         for (address, updates) in storage_updates {
             if updates.is_empty() {
                 continue;
@@ -650,6 +674,9 @@ where
                 }
             })?;
             let updates_len_after = updates.len();
+            attempted += updates_len_before;
+            applied += updates_len_before - updates_len_after;
+            tries += 1;
             self.storage_cache_hits += (updates_len_before - updates_len_after) as u64;
             self.storage_cache_misses += updates_len_after as u64;
 
@@ -658,6 +685,9 @@ where
             }
         }
 
+        span.record("attempted", attempted);
+        span.record("applied", applied);
+        span.record("tries", tries);
         drop(span);
 
         // Process account trie updates and fill the account targets.
@@ -679,6 +709,7 @@ where
             if new { &mut self.new_account_updates } else { &mut self.account_updates };
 
         let updates_len_before = account_updates.len();
+        let span = trace_span!(target: "engine::tree::critical", "process_account_leaf_updates_batch", new, attempted = updates_len_before, applied = tracing::field::Empty).entered();
 
         self.trie.trie_mut().update_leaves(account_updates, |target, parent| {
             match self.fetched_account_targets.entry(target) {
@@ -698,6 +729,7 @@ where
         })?;
 
         let updates_len_after = account_updates.len();
+        span.record("applied", updates_len_before - updates_len_after);
         self.account_cache_hits += (updates_len_before - updates_len_after) as u64;
         self.account_cache_misses += updates_len_after as u64;
 
@@ -712,6 +744,12 @@ where
     /// 3. but the storage root hasn't been updated yet,
     ///
     /// we trigger state root computation on a rayon pool.
+    #[tracing::instrument(
+        level = "trace",
+        target = "engine::tree::critical",
+        skip_all,
+        name = "trie_compute_drained_storage_roots"
+    )]
     fn compute_drained_storage_roots(&mut self) {
         struct SendStorageTriePtr<S>(*mut RevealableSparseTrie<S>);
         // SAFETY: this wrapper only forwards the pointer across rayon; deref invariants are
@@ -768,10 +806,11 @@ where
     /// Iterates through all storage tries for which all updates were processed, computes their
     /// storage roots, and promotes corresponding pending account updates into proper leaf updates
     /// for accounts trie.
-    #[instrument(
+    #[tracing::instrument(
         level = "trace",
-        target = "engine::tree::payload_processor::sparse_trie",
-        skip_all
+        target = "engine::tree::critical",
+        skip_all,
+        name = "trie_promote_pending_account_updates"
     )]
     fn promote_pending_account_updates(&mut self) -> SparseTrieResult<()> {
         self.process_leaf_updates(false)?;
@@ -783,7 +822,7 @@ where
         self.compute_drained_storage_roots();
 
         loop {
-            let span = trace_span!("promote_updates", promoted = tracing::field::Empty).entered();
+            let span = trace_span!(target: "engine::tree::critical", "promote_updates", pending = self.pending_account_updates.len(), promoted = tracing::field::Empty).entered();
             // Now handle pending account updates that can be upgraded to a proper update.
             let account_rlp_buf = &mut self.account_rlp_buf;
             let mut num_promoted = 0;
@@ -846,12 +885,19 @@ where
         Ok(())
     }
 
+    #[tracing::instrument(
+        level = "trace",
+        target = "engine::tree::critical",
+        skip_all,
+        name = "trie_dispatch_pending_targets"
+    )]
     fn dispatch_pending_targets(&mut self) -> Result<(), StateRootTaskError> {
         if self.pending_targets.is_empty() {
             return Ok(())
         }
 
         let _span = trace_span!("dispatch_pending_targets").entered();
+        tracing::trace!(target: "engine::tree::critical", phase = "trie_proof_targets_ready", targets = self.pending_targets.len());
         let (targets, chunking_length) = self.pending_targets.take();
         let mut dispatch_error = None;
         dispatch_with_chunking(
