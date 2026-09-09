@@ -115,8 +115,8 @@ pub mod tx_fetcher {
     /// Maximum number of peers remembered as candidates for a single hash. The first eager
     /// sources are retained while later announcements replace the oldest fallback sources.
     ///
-    /// Default is 16 peers.
-    pub const MAX_COUNT_CANDIDATE_PEERS_PER_HASH: usize = 16;
+    /// Default is 8 peers.
+    pub const MAX_COUNT_CANDIDATE_PEERS_PER_HASH: usize = 8;
 
     /// Maximum fetch attempts for a single hash, independent of candidate storage capacity.
     pub const MAX_FETCH_ATTEMPTS_PER_HASH: usize = 16;
@@ -125,7 +125,7 @@ pub mod tx_fetcher {
     /// the hash queued once one of these failed to deliver it, which keeps late announcements
     /// cheap while a hash is not given up on when its first announcers fail.
     ///
-    /// Default is half of [`MAX_COUNT_CANDIDATE_PEERS_PER_HASH`], so 8 peers.
+    /// Default is half of [`MAX_COUNT_CANDIDATE_PEERS_PER_HASH`], so 4 peers.
     pub const MAX_COUNT_EAGER_CANDIDATE_PEERS_PER_HASH: usize =
         MAX_COUNT_CANDIDATE_PEERS_PER_HASH / 2;
 
