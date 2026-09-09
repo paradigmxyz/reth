@@ -1138,7 +1138,7 @@ where
         _hashed_state: &LazyHashedPostState,
     ) -> ProviderResult<StateRootJobOutcome> {
         if self.timeout.is_none() {
-            return match tracing::trace_span!(target: "engine::tree::critical", "np_wait_sparse_root").in_scope(|| self.handle.state_root()) {
+            return match tracing::trace_span!(target: "engine::tree::critical", "np_wait_sparse_root").in_scope(|| { let _activity = reth_trie_sparse::activity::ActivityGuard::new("engine_root_wait"); self.handle.state_root() }) {
                 Ok(outcome) => self.verified_sparse_outcome(block, &output, outcome),
                 Err(err) => {
                     debug!(target: "engine::tree::state_root_strategy", %err, "State root task failed, falling back to serial root");
@@ -1151,8 +1151,11 @@ where
         let task_rx = self.handle.take_state_root_rx();
         let fallback_rx =
             match tracing::trace_span!(target: "engine::tree::critical", "np_wait_sparse_root")
-                .in_scope(|| task_rx.recv_timeout(timeout))
-            {
+                .in_scope(|| {
+                    let _activity =
+                        reth_trie_sparse::activity::ActivityGuard::new("engine_root_wait");
+                    task_rx.recv_timeout(timeout)
+                }) {
                 Ok(Ok(outcome)) => return self.verified_sparse_outcome(block, &output, outcome),
                 Ok(Err(err)) => {
                     debug!(target: "engine::tree::state_root_strategy", %err, "State root task failed, falling back to serial root");

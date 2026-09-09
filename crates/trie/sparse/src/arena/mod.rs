@@ -2266,9 +2266,22 @@ impl SparseTrie for ArenaParallelSparseTrie {
             use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 
             let parent_span = tracing::Span::current();
+            #[cfg(feature = "metrics")]
+            let batch = crate::activity::ActivityGuard::new("reveal_subtrie_batch");
+            #[cfg(feature = "metrics")]
+            let batch_id = batch.id();
+            #[cfg(feature = "metrics")]
+            let submitted = std::time::Instant::now();
             let results: Vec<SparseTrieResult<()>> = taken
                 .par_iter_mut()
                 .map(|(_, subtrie, node_vec)| {
+                    #[cfg(feature = "metrics")]
+                    let _job = crate::activity::ActivityGuard::job(
+                        "reveal_subtrie_job",
+                        batch_id,
+                        node_vec.len(),
+                        submitted.elapsed(),
+                    );
                     let _guard = parent_span.enter();
                     subtrie.reveal_nodes(node_vec)
                 })
@@ -2323,6 +2336,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
     fn update_subtrie_hashes(&mut self, new_epoch: TrieNodeEpoch) {
+        #[cfg(feature = "metrics")]
+        let _activity = crate::activity::ActivityGuard::new("hash_subtries");
+
         trace!(target: TRACE_TARGET, "Updating subtrie hashes");
 
         // Only descend if the root is a branch; otherwise there are no subtries.
@@ -2358,9 +2374,22 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
                 let parent_span = tracing::Span::current();
+                #[cfg(feature = "metrics")]
+                let submitted = std::time::Instant::now();
+                #[cfg(feature = "metrics")]
+                let batch = crate::activity::ActivityGuard::new("hash_subtrie_batch");
+                #[cfg(feature = "metrics")]
+                let batch_id = batch.id();
                 taken = taken
                     .into_par_iter()
                     .map(|(idx, mut subtrie)| {
+                        #[cfg(feature = "metrics")]
+                        let _job = crate::activity::ActivityGuard::job(
+                            "hash_subtrie_job",
+                            batch_id,
+                            subtrie.num_dirty_leaves as usize,
+                            submitted.elapsed(),
+                        );
                         let _guard = parent_span.enter();
                         subtrie.update_cached_rlp(new_epoch);
                         (idx, subtrie)
@@ -2610,14 +2639,23 @@ impl SparseTrie for ArenaParallelSparseTrie {
         updates: &mut B256Map<LeafUpdate>,
         mut proof_required_fn: impl FnMut(B256, ProofV2TargetParent),
     ) -> SparseTrieResult<()> {
+        #[cfg(feature = "metrics")]
+        let _activity = crate::activity::ActivityGuard::new("apply_leaves");
+
         if updates.is_empty() {
             return Ok(());
         }
 
+        #[cfg(feature = "metrics")]
+        let sorting = crate::activity::ActivityGuard::new("leaf_sort");
         // Drain and sort updates lexicographically by nibbles path.
         let mut sorted: Vec<_> =
             updates.drain().map(|(key, update)| (key, Nibbles::unpack(key), update)).collect();
         sorted.sort_unstable_by_key(|entry| entry.1);
+        #[cfg(feature = "metrics")]
+        drop(sorting);
+        #[cfg(feature = "metrics")]
+        let traversal = crate::activity::ActivityGuard::new("leaf_traversal");
 
         let threshold = self.parallelism_thresholds.min_updates;
         let parallelize_distributed_updates = sorted.len() >= threshold.saturating_mul(4);
@@ -2817,6 +2855,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
             return Ok(());
         }
 
+        #[cfg(feature = "metrics")]
+        drop(traversal);
         // Apply updates to taken subtries, in parallel if more than one.
         if taken.len() == 1 {
             let (_, ref mut subtrie, ref range) = taken[0];
@@ -2825,12 +2865,27 @@ impl SparseTrie for ArenaParallelSparseTrie {
             use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 
             let parent_span = tracing::Span::current();
+            #[cfg(feature = "metrics")]
+            let batch = crate::activity::ActivityGuard::new("apply_subtrie_batch");
+            #[cfg(feature = "metrics")]
+            let batch_id = batch.id();
+            #[cfg(feature = "metrics")]
+            let submitted = std::time::Instant::now();
             taken.par_iter_mut().for_each(|(_, subtrie, range)| {
+                #[cfg(feature = "metrics")]
+                let _job = crate::activity::ActivityGuard::job(
+                    "apply_subtrie_job",
+                    batch_id,
+                    range.len(),
+                    submitted.elapsed(),
+                );
                 let _guard = parent_span.enter();
                 subtrie.update_leaves(&sorted[range.clone()]);
             });
         }
 
+        #[cfg(feature = "metrics")]
+        let _restore = crate::activity::ActivityGuard::new("leaf_restore");
         // Collect subtrie paths before consuming `taken`, then restore subtries and
         // process required proofs.
         let taken_paths: Vec<Nibbles> = taken.iter().map(|(_, s, _)| s.path).collect();
