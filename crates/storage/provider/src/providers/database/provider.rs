@@ -1,6 +1,5 @@
 use super::SaveBlocksInput;
 use crate::{
-    changesets_utils::StorageRevertsIter,
     providers::{
         database::{chain::ChainStorage, metrics, DatabaseProviderMetrics},
         rocksdb::{PendingRocksDBBatches, RocksDBProvider, RocksDBWriteCtx},
@@ -73,7 +72,7 @@ use reth_trie::{
 };
 use reth_trie_db::{DatabaseStorageTrieCursor, TrieTableAdapter};
 use revm::database::states::{
-    PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
+    PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, RevertToSlot, StateChangeset,
 };
 use smallvec::SmallVec;
 use std::{
@@ -2576,24 +2575,21 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     // storage state has to be taken from the database and written to storage
                     // history. See [StorageWipe::Primary] for more details.
                     //
-                    // TODO(mediocregopher): This could be rewritten in a way which doesn't
-                    // require collecting wiped entries into a Vec like this, see
-                    // `write_storage_trie_changesets`.
-                    let mut wiped_storage = Vec::new();
-                    if wiped {
+                    let mut wiped_storage = if wiped {
                         tracing::trace!(?address, "Wiping storage");
-                        if let Some((_, entry)) = storages_cursor.seek_exact(address)? {
-                            wiped_storage.push((entry.key, entry.value));
-                            while let Some(entry) = storages_cursor.next_dup_val()? {
-                                wiped_storage.push((entry.key, entry.value))
-                            }
-                        }
-                    }
+                        storages_cursor.seek_exact(address)?.map(|(_, entry)| entry)
+                    } else {
+                        None
+                    };
 
                     tracing::trace!(?address, ?storage, "Writing storage reverts");
-                    for (key, value) in StorageRevertsIter::new(storage, wiped_storage) {
-                        changeset.push(StorageBeforeTx { address, key, value });
-                    }
+                    append_storage_reverts(&mut changeset, address, storage, || {
+                        let entry = wiped_storage.take();
+                        if entry.is_some() {
+                            wiped_storage = storages_cursor.next_dup_val()?;
+                        }
+                        Ok(entry)
+                    })?;
                 }
 
                 let mut storage_changesets_writer =
@@ -3123,6 +3119,53 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         }
         Ok(())
     }
+}
+
+fn append_storage_reverts<F>(
+    changeset: &mut Vec<StorageBeforeTx>,
+    address: Address,
+    storage: impl IntoIterator<Item = (B256, RevertToSlot)>,
+    mut next_wiped: F,
+) -> ProviderResult<()>
+where
+    F: FnMut() -> ProviderResult<Option<StorageEntry>>,
+{
+    let mut storage = storage.into_iter().peekable();
+    let mut wiped = next_wiped()?;
+
+    while let (Some(revert), Some(wiped_entry)) = (storage.peek(), wiped.as_ref()) {
+        match revert.0.cmp(&wiped_entry.key) {
+            Ordering::Less => {
+                let (key, revert) = storage.next().expect("peeked revert exists");
+                changeset.push(StorageBeforeTx { address, key, value: revert.to_previous_value() });
+            }
+            Ordering::Greater => {
+                let StorageEntry { key, value } = wiped.take().expect("peeked wiped exists");
+                changeset.push(StorageBeforeTx { address, key, value });
+                wiped = next_wiped()?;
+            }
+            Ordering::Equal => {
+                let (key, revert) = storage.next().expect("peeked revert exists");
+                let wiped_entry = wiped.take().expect("peeked wiped exists");
+                let value = match revert {
+                    RevertToSlot::Some(value) => value,
+                    RevertToSlot::Destroyed => wiped_entry.value,
+                };
+                changeset.push(StorageBeforeTx { address, key, value });
+                wiped = next_wiped()?;
+            }
+        }
+    }
+
+    for (key, revert) in storage {
+        changeset.push(StorageBeforeTx { address, key, value: revert.to_previous_value() });
+    }
+    while let Some(StorageEntry { key, value }) = wiped {
+        changeset.push(StorageBeforeTx { address, key, value });
+        wiped = next_wiped()?;
+    }
+
+    Ok(())
 }
 
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider<TX, N> {
@@ -3958,18 +4001,27 @@ mod tests {
         U256,
     };
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
-    use reth_db_api::models::StorageSettings;
+    use reth_db_api::{cursor::DbDupCursorRW, models::StorageSettings};
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
     use reth_primitives_traits::SealedBlock;
-    use reth_storage_api::{MetadataProvider, MetadataWriter};
+    use reth_storage_api::{MetadataProvider, MetadataWriter, StateWriteConfig, StateWriter};
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
         HashedPostState, KeccakKeyHasher, Nibbles, SortedTrieData, StoredNibbles,
         StoredNibblesSubKey,
     };
-    use revm::{database::BundleState, state::AccountInfo};
-    use std::{sync::mpsc, time::Duration};
+    use revm::{
+        database::{
+            states::{PlainStateReverts, PlainStorageRevert},
+            BundleState,
+        },
+        state::AccountInfo,
+    };
+    use std::{
+        sync::mpsc,
+        time::{Duration, Instant},
+    };
 
     /// Seeds block zero through the writer core because [`SaveBlocksInput`] only describes
     /// advancing an existing persistence frontier.
@@ -4001,6 +4053,91 @@ mod tests {
         let end = 9u64;
         let result = provider.receipts_by_block_range(start..=end).unwrap();
         assert_eq!(result, Vec::<Vec<reth_ethereum_primitives::Receipt>>::new());
+    }
+
+    #[test]
+    fn streams_wiped_storage_reverts_in_sorted_order() {
+        let address = Address::with_last_byte(1);
+        let storage = vec![
+            (B256::with_last_byte(2), RevertToSlot::Some(U256::from(20))),
+            (B256::with_last_byte(3), RevertToSlot::Destroyed),
+            (B256::with_last_byte(4), RevertToSlot::Some(U256::from(40))),
+        ];
+        let mut wiped = vec![
+            StorageEntry { key: B256::with_last_byte(1), value: U256::from(10) },
+            StorageEntry { key: B256::with_last_byte(2), value: U256::from(200) },
+            StorageEntry { key: B256::with_last_byte(3), value: U256::from(30) },
+        ]
+        .into_iter();
+        let mut changeset = Vec::new();
+
+        append_storage_reverts(&mut changeset, address, storage, || Ok(wiped.next())).unwrap();
+
+        assert_eq!(
+            changeset,
+            vec![
+                StorageBeforeTx { address, key: B256::with_last_byte(1), value: U256::from(10) },
+                StorageBeforeTx { address, key: B256::with_last_byte(2), value: U256::from(20) },
+                StorageBeforeTx { address, key: B256::with_last_byte(3), value: U256::from(30) },
+                StorageBeforeTx { address, key: B256::with_last_byte(4), value: U256::from(40) },
+            ]
+        );
+    }
+
+    #[test]
+    #[ignore = "benchmark"]
+    fn benchmark_write_wiped_storage_reverts() {
+        const SAMPLES: usize = 5;
+
+        for slot_count in [10_000, 100_000] {
+            let mut samples = Vec::with_capacity(SAMPLES);
+            for _ in 0..SAMPLES {
+                let factory = create_test_provider_factory();
+                let provider = factory.provider_rw().unwrap();
+                let address = Address::with_last_byte(1);
+                let mut storage =
+                    provider.tx_ref().cursor_dup_write::<tables::PlainStorageState>().unwrap();
+
+                for slot in 0..slot_count {
+                    storage
+                        .append_dup(
+                            address,
+                            StorageEntry {
+                                key: B256::from(U256::from(slot).to_be_bytes()),
+                                value: U256::from(slot),
+                            },
+                        )
+                        .unwrap();
+                }
+
+                let reverts = PlainStateReverts {
+                    accounts: vec![vec![]],
+                    storage: vec![vec![PlainStorageRevert {
+                        address,
+                        wiped: true,
+                        storage_revert: vec![],
+                    }]],
+                };
+                let start = Instant::now();
+                provider
+                    .write_state_reverts(
+                        reverts,
+                        1,
+                        StateWriteConfig {
+                            write_receipts: false,
+                            write_account_changesets: false,
+                            write_storage_changesets: true,
+                        },
+                    )
+                    .unwrap();
+                samples.push(start.elapsed());
+            }
+            samples.sort_unstable();
+            eprintln!(
+                "write_state_reverts wipe of {slot_count} storage slots: median {:?} (min {:?}, max {:?})",
+                samples[SAMPLES / 2], samples[0], samples[SAMPLES - 1],
+            );
+        }
     }
 
     #[test]
