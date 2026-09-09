@@ -43,10 +43,11 @@ impl PayloadTypes for BbPayloadTypes {
     type ExecutionData = BigBlockData<ExecutionData>;
     type BuiltPayload = <EthPayloadTypes as PayloadTypes>::BuiltPayload;
     type PayloadAttributes = <EthPayloadTypes as PayloadTypes>::PayloadAttributes;
-    type Primitives = EthPrimitives;
 
     fn block_to_payload(
-        _block: SealedBlock<<Self::Primitives as reth_node_api::NodePrimitives>::Block>,
+        _block: SealedBlock<
+                <<Self::BuiltPayload as reth_node_api::BuiltPayload>::Primitives as reth_node_api::NodePrimitives>::Block,
+            >,
         _bal: Option<Bytes>,
     ) -> Self::ExecutionData {
         unreachable!()

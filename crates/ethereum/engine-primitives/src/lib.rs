@@ -39,17 +39,20 @@ impl<T> PayloadTypes for EthEngineTypes<T>
 where
     T: PayloadTypes<
         ExecutionData = ExecutionData,
-        Primitives: NodePrimitives<Block = reth_ethereum_primitives::Block>,
+        BuiltPayload: BuiltPayload<
+            Primitives: NodePrimitives<Block = reth_ethereum_primitives::Block>,
+        >,
     >,
     ExecutionData: From<T::BuiltPayload>,
 {
     type ExecutionData = T::ExecutionData;
     type BuiltPayload = T::BuiltPayload;
     type PayloadAttributes = T::PayloadAttributes;
-    type Primitives = T::Primitives;
 
     fn block_to_payload(
-        block: SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
+        block: SealedBlock<
+            <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
+        >,
         bal: Option<Bytes>,
     ) -> Self::ExecutionData {
         T::block_to_payload(block, bal)
@@ -85,10 +88,11 @@ impl PayloadTypes for EthPayloadTypes {
     type BuiltPayload = EthBuiltPayload;
     type PayloadAttributes = EthPayloadAttributes;
     type ExecutionData = ExecutionData;
-    type Primitives = reth_ethereum_primitives::EthPrimitives;
 
     fn block_to_payload(
-        block: SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
+        block: SealedBlock<
+            <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
+        >,
         bal: Option<Bytes>,
     ) -> Self::ExecutionData {
         let (payload, sidecar) = ExecutionPayload::from_block_unchecked_with_extras(

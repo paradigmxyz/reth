@@ -193,13 +193,7 @@ pub trait Executor<DB: Database>: Sized {
 /// ```
 #[derive(derive_more::Debug)]
 #[non_exhaustive]
-pub struct BlockAssemblerInput<
-    'a,
-    'b,
-    F: BlockExecutorFactory,
-    H = Header,
-    E = reth_primitives_traits::EmptyAccountExtension,
-> {
+pub struct BlockAssemblerInput<'a, 'b, F: BlockExecutorFactory, H = Header> {
     /// Configuration of EVM used when executing the block.
     ///
     /// Contains context relevant to EVM such as [`revm::context::BlockEnv`].
@@ -217,14 +211,14 @@ pub struct BlockAssemblerInput<
     pub bundle_state: &'a BundleState,
     /// Provider with access to state.
     #[debug(skip)]
-    pub state_provider: &'b dyn StateProvider<AccountExtension = E>,
+    pub state_provider: &'b dyn StateProvider,
     /// State root for this block.
     pub state_root: B256,
     /// Block access list hash (EIP-7928, Amsterdam).
     pub block_access_list_hash: Option<B256>,
 }
 
-impl<'a, 'b, F: BlockExecutorFactory, H, E> BlockAssemblerInput<'a, 'b, F, H, E> {
+impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
     /// Creates a new [`BlockAssemblerInput`].
     #[expect(clippy::too_many_arguments)]
     pub fn new(
@@ -237,7 +231,7 @@ impl<'a, 'b, F: BlockExecutorFactory, H, E> BlockAssemblerInput<'a, 'b, F, H, E>
         transactions: Vec<F::Transaction>,
         output: &'b BlockExecutionResult<F::Receipt>,
         bundle_state: &'a BundleState,
-        state_provider: &'b dyn StateProvider<AccountExtension = E>,
+        state_provider: &'b dyn StateProvider,
         state_root: B256,
         block_access_list_hash: Option<B256>,
     ) -> Self {
@@ -298,15 +292,14 @@ impl<'a, 'b, F: BlockExecutorFactory, H, E> BlockAssemblerInput<'a, 'b, F, H, E>
 /// - [`BlockExecutor`]: Executes transactions and produces results
 /// - [`BlockBuilder`]: Orchestrates the entire process and calls the assembler
 #[auto_impl::auto_impl(&, Arc)]
-pub trait BlockAssembler<F: BlockExecutorFactory, E = reth_primitives_traits::EmptyAccountExtension>
-{
+pub trait BlockAssembler<F: BlockExecutorFactory> {
     /// The block type produced by the assembler.
     type Block: Block;
 
     /// Builds a block. see [`BlockAssemblerInput`] documentation for more details.
     fn assemble_block(
         &self,
-        input: BlockAssemblerInput<'_, '_, F, <Self::Block as Block>::Header, E>,
+        input: BlockAssemblerInput<'_, '_, F, <Self::Block as Block>::Header>,
     ) -> Result<Self::Block, BlockExecutionError>;
 }
 
@@ -316,7 +309,7 @@ pub struct BlockBuilderOutcome<N: NodePrimitives> {
     /// Result of block execution.
     pub execution_result: BlockExecutionResult<N::Receipt>,
     /// Hashed state after execution.
-    pub hashed_state: HashedPostState<N::AccountExtension>,
+    pub hashed_state: HashedPostState,
     /// Trie updates collected during state root calculation.
     pub trie_updates: TrieUpdates,
     /// The built block.
@@ -381,9 +374,7 @@ pub trait BlockBuilder {
     /// directly, skipping the expensive computation (e.g. when using the sparse trie pipeline).
     fn finish(
         self,
-        state_provider: impl StateProvider<
-            AccountExtension = <Self::Primitives as NodePrimitives>::AccountExtension,
-        >,
+        state_provider: impl StateProvider,
         state_root_precomputed: Option<(B256, TrieUpdates)>,
     ) -> Result<BlockBuilderOutcome<Self::Primitives>, BlockExecutionError>;
 
@@ -478,7 +469,7 @@ where
         Receipt = N::Receipt,
     >,
     DB: Database + 'a,
-    Builder: BlockAssembler<F, N::AccountExtension, Block = N::Block>,
+    Builder: BlockAssembler<F, Block = N::Block>,
     N: NodePrimitives,
 {
     type Primitives = N;
@@ -510,7 +501,7 @@ where
 
     fn finish(
         self,
-        state: impl StateProvider<AccountExtension = N::AccountExtension>,
+        state: impl StateProvider,
         state_root_precomputed: Option<(B256, TrieUpdates)>,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
         let (evm, result) = self.executor.finish()?;
@@ -521,7 +512,7 @@ where
 
         let block_access_list = db.take_built_alloy_bal();
         if block_access_list.is_some() {
-            reth_storage_api::ensure_no_account_extensions::<N::AccountExtension>("BAL")
+            reth_storage_api::ensure_no_account_extensions("BAL")
                 .map_err(BlockExecutionError::other)?;
         }
         let block_access_list_hash =
@@ -612,6 +603,10 @@ where
             .map_err(BlockExecutionError::other)?;
 
         let has_bal = block.header().block_access_list_hash().is_some();
+        if has_bal {
+            reth_storage_api::ensure_no_account_extensions("BAL")
+                .map_err(BlockExecutionError::other)?;
+        }
 
         if has_bal {
             executor.evm_mut().db_mut().bal_state.bal_builder = Some(Bal::new());

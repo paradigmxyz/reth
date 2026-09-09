@@ -1,3 +1,6 @@
+// Accounts are only Copy when account-ext is disabled.
+#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+
 //! Module that interacts with MDBX.
 
 use crate::{
@@ -1382,7 +1385,7 @@ mod tests {
         DatabaseError::Write(err) if *err == DatabaseWriteError {
             info: Error::KeyMismatch.into(),
             operation: DatabaseWriteOperation::CursorAppendDup,
-            table_name: AccountChangeSets::<reth_primitives_traits::EmptyAccountExtension>::NAME,
+            table_name: AccountChangeSets::NAME,
             key: transition_id.encode().into(),
         }));
         assert!(matches!(
@@ -1398,7 +1401,7 @@ mod tests {
             DatabaseError::Write(err) if *err == DatabaseWriteError {
                 info: Error::KeyMismatch.into(),
                 operation: DatabaseWriteOperation::CursorAppend,
-                table_name: AccountChangeSets::<reth_primitives_traits::EmptyAccountExtension>::NAME,
+                table_name: AccountChangeSets::NAME,
                 key: (transition_id - 1).encode().into(),
             }
         ));
@@ -1416,10 +1419,11 @@ mod tests {
         let path = tempdir.path();
 
         let value = Account {
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
             nonce: 18446744073709551615,
             bytecode_hash: Some(B256::random()),
             balance: U256::MAX,
-            extension: Default::default(),
         };
         let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047")
             .expect(ERROR_ETH_ADDRESS);
@@ -1429,7 +1433,7 @@ mod tests {
 
             // PUT
             let result = env.update(|tx| {
-                tx.put::<PlainAccountState>(key, value).expect(ERROR_PUT);
+                tx.put::<PlainAccountState>(key, value.clone()).expect(ERROR_PUT);
                 200
             });
             assert_eq!(result.expect(ERROR_RETURN_VALUE), 200);

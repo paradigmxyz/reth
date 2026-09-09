@@ -1,3 +1,6 @@
+// Accounts are only Copy when account-ext is disabled.
+#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+
 use crate::{
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
     utils::{extend_sorted_vec, kway_merge_disjoint_sorted, kway_merge_sorted},
@@ -12,7 +15,7 @@ use alloy_primitives::{
 use itertools::Itertools;
 #[cfg(feature = "rayon")]
 pub use rayon::*;
-use reth_primitives_traits::{Account, AccountExtension, EmptyAccountExtension};
+use reth_primitives_traits::Account;
 
 #[cfg(feature = "rayon")]
 use rayon::prelude::{FromParallelIterator, IntoParallelIterator, ParallelIterator};
@@ -23,21 +26,14 @@ use revm::database::BundleAccount;
 /// hash maps.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(
-    feature = "serde",
-    serde(bound(
-        serialize = "E: serde::Serialize + Default + PartialEq",
-        deserialize = "E: serde::Deserialize<'de> + Default"
-    ))
-)]
-pub struct HashedPostState<E = EmptyAccountExtension> {
+pub struct HashedPostState {
     /// Mapping of hashed address to account info, `None` if destroyed.
-    pub accounts: B256Map<Option<Account<E>>>,
+    pub accounts: B256Map<Option<Account>>,
     /// Mapping of hashed address to hashed storage.
     pub storages: B256Map<HashedStorage>,
 }
 
-impl<E: AccountExtension> HashedPostState<E> {
+impl HashedPostState {
     /// Create new instance of [`HashedPostState`].
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
@@ -85,7 +81,7 @@ impl<E: AccountExtension> HashedPostState<E> {
     /// Set account entries on hashed state.
     pub fn with_accounts(
         mut self,
-        accounts: impl IntoIterator<Item = (B256, Option<Account<E>>)>,
+        accounts: impl IntoIterator<Item = (B256, Option<Account>)>,
     ) -> Self {
         self.accounts = HashMap::from_iter(accounts);
         self
@@ -176,7 +172,7 @@ impl<E: AccountExtension> HashedPostState<E> {
     /// Returns an iterator that yields chunks of the specified size.
     ///
     /// See [`ChunkedHashedPostState`] for more information.
-    pub fn chunks(self, size: usize) -> ChunkedHashedPostState<E> {
+    pub fn chunks(self, size: usize) -> ChunkedHashedPostState {
         ChunkedHashedPostState::new(self, size)
     }
 
@@ -233,7 +229,7 @@ impl<E: AccountExtension> HashedPostState<E> {
     /// Extend this hashed post state with sorted data, converting directly into the unsorted
     /// `HashMap` representation. This is more efficient than first converting to `HashedPostState`
     /// and then extending, as it avoids creating intermediate `HashMap` allocations.
-    pub fn extend_from_sorted(&mut self, sorted: &HashedPostStateSorted<E>) {
+    pub fn extend_from_sorted(&mut self, sorted: &HashedPostStateSorted) {
         // Reserve capacity for accounts
         self.accounts.reserve(sorted.accounts.len());
 
@@ -261,7 +257,7 @@ impl<E: AccountExtension> HashedPostState<E> {
     }
 
     /// Converts hashed post state into [`HashedPostStateSorted`].
-    pub fn into_sorted(self) -> HashedPostStateSorted<E> {
+    pub fn into_sorted(self) -> HashedPostStateSorted {
         let mut accounts: Vec<_> = self.accounts.into_iter().collect();
         accounts.sort_unstable_by_key(|(address, _)| *address);
 
@@ -276,7 +272,7 @@ impl<E: AccountExtension> HashedPostState<E> {
 
     /// Creates a sorted copy without consuming self.
     /// More efficient than `.clone().into_sorted()` as it avoids cloning `HashMap` metadata.
-    pub fn clone_into_sorted(&self) -> HashedPostStateSorted<E> {
+    pub fn clone_into_sorted(&self) -> HashedPostStateSorted {
         let mut accounts: Vec<_> = self.accounts.iter().map(|(&k, v)| (k, v.clone())).collect();
         accounts.sort_unstable_by_key(|(address, _)| *address);
 
@@ -296,9 +292,7 @@ impl<E: AccountExtension> HashedPostState<E> {
     }
 }
 
-impl<E: AccountExtension> FromIterator<(B256, Option<Account<E>>, Option<HashedStorage>)>
-    for HashedPostState<E>
-{
+impl FromIterator<(B256, Option<Account>, Option<HashedStorage>)> for HashedPostState {
     /// Constructs a [`HashedPostState`] from an iterator of tuples containing:
     /// - Hashed address (B256)
     /// - Optional account info (`None` indicates destroyed account)
@@ -314,7 +308,7 @@ impl<E: AccountExtension> FromIterator<(B256, Option<Account<E>>, Option<HashedS
     ///   `Some(empty_storage)`. This ensures the storage map only contains meaningful entries.
     ///
     /// Use `(!storage.is_empty()).then_some(storage)` to convert empty storage to `None`.
-    fn from_iter<T: IntoIterator<Item = (B256, Option<Account<E>>, Option<HashedStorage>)>>(
+    fn from_iter<T: IntoIterator<Item = (B256, Option<Account>, Option<HashedStorage>)>>(
         iter: T,
     ) -> Self {
         let iter = iter.into_iter();
@@ -333,9 +327,7 @@ impl<E: AccountExtension> FromIterator<(B256, Option<Account<E>>, Option<HashedS
 }
 
 #[cfg(feature = "rayon")]
-impl<E: AccountExtension> FromParallelIterator<(B256, Option<Account<E>>, Option<HashedStorage>)>
-    for HashedPostState<E>
-{
+impl FromParallelIterator<(B256, Option<Account>, Option<HashedStorage>)> for HashedPostState {
     /// Parallel version of [`FromIterator`] for constructing [`HashedPostState`] from a parallel
     /// iterator.
     ///
@@ -349,7 +341,7 @@ impl<E: AccountExtension> FromParallelIterator<(B256, Option<Account<E>>, Option
     /// - The [`HashedStorage`] **must not be empty**. Empty storage should be `None`.
     fn from_par_iter<I>(par_iter: I) -> Self
     where
-        I: IntoParallelIterator<Item = (B256, Option<Account<E>>, Option<HashedStorage>)>,
+        I: IntoParallelIterator<Item = (B256, Option<Account>, Option<HashedStorage>)>,
     {
         let vec: Vec<_> = par_iter.into_par_iter().collect();
         vec.into_iter().collect()
@@ -432,31 +424,24 @@ impl HashedStorage {
 /// Sorted hashed post state optimized for iterating during state trie calculation.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(
-    feature = "serde",
-    serde(bound(
-        serialize = "E: serde::Serialize + Default + PartialEq",
-        deserialize = "E: serde::Deserialize<'de> + Default"
-    ))
-)]
-pub struct HashedPostStateSorted<E = EmptyAccountExtension> {
+pub struct HashedPostStateSorted {
     /// Sorted collection of account updates. `None` indicates a destroyed account.
-    pub accounts: Vec<(B256, Option<Account<E>>)>,
+    pub accounts: Vec<(B256, Option<Account>)>,
     /// Map of hashed addresses to their sorted storage updates.
     pub storages: B256Map<HashedStorageSorted>,
 }
 
-impl<E: AccountExtension> HashedPostStateSorted<E> {
+impl HashedPostStateSorted {
     /// Create new instance of [`HashedPostStateSorted`]
     pub const fn new(
-        accounts: Vec<(B256, Option<Account<E>>)>,
+        accounts: Vec<(B256, Option<Account>)>,
         storages: B256Map<HashedStorageSorted>,
     ) -> Self {
         Self { accounts, storages }
     }
 
     /// Returns reference to hashed accounts.
-    pub const fn accounts(&self) -> &Vec<(B256, Option<Account<E>>)> {
+    pub const fn accounts(&self) -> &Vec<(B256, Option<Account>)> {
         &self.accounts
     }
 
@@ -674,7 +659,7 @@ impl<E: AccountExtension> HashedPostStateSorted<E> {
     }
 }
 
-impl<E> AsRef<Self> for HashedPostStateSorted<E> {
+impl AsRef<Self> for HashedPostStateSorted {
     fn as_ref(&self) -> &Self {
         self
     }
@@ -731,8 +716,8 @@ impl From<HashedStorageSorted> for HashedStorage {
     }
 }
 
-impl<E: AccountExtension> From<HashedPostStateSorted<E>> for HashedPostState<E> {
-    fn from(sorted: HashedPostStateSorted<E>) -> Self {
+impl From<HashedPostStateSorted> for HashedPostState {
+    fn from(sorted: HashedPostStateSorted) -> Self {
         let mut accounts =
             B256Map::with_capacity_and_hasher(sorted.accounts.len(), Default::default());
 
@@ -757,8 +742,8 @@ impl<E: AccountExtension> From<HashedPostStateSorted<E>> for HashedPostState<E> 
 ///
 /// Storage updates for each account are yielded before its account update.
 #[derive(Debug)]
-pub struct ChunkedHashedPostState<E = EmptyAccountExtension> {
-    flattened: alloc::vec::IntoIter<(B256, FlattenedHashedPostStateItem<E>)>,
+pub struct ChunkedHashedPostState {
+    flattened: alloc::vec::IntoIter<(B256, FlattenedHashedPostStateItem)>,
     size: usize,
 }
 
@@ -771,12 +756,12 @@ enum FlattenedStateOrder {
 }
 
 #[derive(Debug)]
-enum FlattenedHashedPostStateItem<E = EmptyAccountExtension> {
-    Account(Option<Account<E>>),
+enum FlattenedHashedPostStateItem {
+    Account(Option<Account>),
     StorageUpdate { slot: B256, value: U256 },
 }
 
-impl<E> FlattenedHashedPostStateItem<E> {
+impl FlattenedHashedPostStateItem {
     const fn order(&self) -> FlattenedStateOrder {
         match self {
             Self::StorageUpdate { slot, .. } => FlattenedStateOrder::StorageUpdate(*slot),
@@ -785,8 +770,8 @@ impl<E> FlattenedHashedPostStateItem<E> {
     }
 }
 
-impl<E: AccountExtension> ChunkedHashedPostState<E> {
-    fn new(hashed_post_state: HashedPostState<E>, size: usize) -> Self {
+impl ChunkedHashedPostState {
+    fn new(hashed_post_state: HashedPostState, size: usize) -> Self {
         let flattened = hashed_post_state
             .storages
             .into_iter()
@@ -807,8 +792,8 @@ impl<E: AccountExtension> ChunkedHashedPostState<E> {
     }
 }
 
-impl<E: AccountExtension> Iterator for ChunkedHashedPostState<E> {
-    type Item = HashedPostState<E>;
+impl Iterator for ChunkedHashedPostState {
+    type Item = HashedPostState;
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut chunk = HashedPostState::default();
@@ -849,9 +834,8 @@ mod tests {
 
     fn bundle_hashed_storage(account: &BundleAccount) -> Option<HashedStorage> {
         let address = Address::ZERO;
-        let mut state = HashedPostState::<EmptyAccountExtension>::from_bundle_state::<
-            KeccakKeyHasher,
-        >([(&address, account)]);
+        let mut state =
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>([(&address, account)]);
         state.storages.remove(&keccak256(address))
     }
 
@@ -866,11 +850,13 @@ mod tests {
 
         // Create a mock account info object.
         let account_info = AccountInfo {
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
             balance: U256::from(123),
             nonce: 42,
             code_hash: B256::random(),
             code: Some(Bytecode::new_raw(Bytes::from(vec![1, 2]))),
-            ..Default::default()
+            account_id: None,
         };
 
         let mut storage = StorageWithOriginalValues::default();
@@ -891,8 +877,7 @@ mod tests {
         let state = vec![(&address, &account)];
 
         // Convert the bundle state into a hashed post state.
-        let hashed_state =
-            HashedPostState::<EmptyAccountExtension>::from_bundle_state::<KeccakKeyHasher>(state);
+        let hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(state);
 
         // Validate the hashed post state.
         assert_eq!(hashed_state.accounts.len(), 1);
@@ -973,11 +958,13 @@ mod tests {
         let address_2 = Address::random();
 
         let account_info_1 = AccountInfo {
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
             balance: U256::from(1000),
             nonce: 1,
             code_hash: B256::random(),
             code: None,
-            ..Default::default()
+            account_id: None,
         };
 
         // Create hashed accounts with addresses.
@@ -985,8 +972,7 @@ mod tests {
         let account_2 = (keccak256(address_2), None);
 
         // Add accounts to the hashed post state.
-        let hashed_state = HashedPostState::<EmptyAccountExtension>::default()
-            .with_accounts(vec![account_1, account_2]);
+        let hashed_state = HashedPostState::default().with_accounts(vec![account_1, account_2]);
 
         // Validate the hashed post state.
         assert_eq!(hashed_state.accounts.len(), 2);
@@ -1004,8 +990,7 @@ mod tests {
         let storage_2 = (keccak256(address_2), HashedStorage::default());
 
         // Add storages to the hashed post state.
-        let hashed_state = HashedPostState::<EmptyAccountExtension>::default()
-            .with_storages(vec![storage_1, storage_2]);
+        let hashed_state = HashedPostState::default().with_storages(vec![storage_1, storage_2]);
 
         // Validate the hashed post state.
         assert_eq!(hashed_state.storages.len(), 2);
@@ -1016,11 +1001,11 @@ mod tests {
     #[test]
     fn test_hashed_post_state_is_empty() {
         // Create an empty hashed post state and validate it's empty.
-        let empty_state = HashedPostState::<EmptyAccountExtension>::default();
+        let empty_state = HashedPostState::default();
         assert!(empty_state.is_empty());
 
         // Add an account and validate the state is no longer empty.
-        let non_empty_state = HashedPostState::<EmptyAccountExtension>::default()
+        let non_empty_state = HashedPostState::default()
             .with_accounts(vec![(keccak256(Address::random()), Some(Account::default()))]);
         assert!(!non_empty_state.is_empty());
     }
@@ -1045,7 +1030,7 @@ mod tests {
 
     #[test]
     fn test_multi_proof_targets_difference_empty_state() {
-        let state = HashedPostState::<EmptyAccountExtension>::default();
+        let state = HashedPostState::default();
         let excluded = MultiProofTargets::default();
 
         let targets = state.multi_proof_targets_difference(&excluded);
@@ -1128,7 +1113,7 @@ mod tests {
 
     #[test]
     fn test_multi_proof_targets_difference_mixed_excluded_state() {
-        let mut state = HashedPostState::<EmptyAccountExtension>::default();
+        let mut state = HashedPostState::default();
         let mut excluded = MultiProofTargets::default();
 
         let addr1 = B256::random();
@@ -1157,7 +1142,7 @@ mod tests {
 
     #[test]
     fn test_multi_proof_targets_difference_unmodified_account_with_storage() {
-        let mut state = HashedPostState::<EmptyAccountExtension>::default();
+        let mut state = HashedPostState::default();
         let excluded = MultiProofTargets::default();
 
         let addr = B256::random();
@@ -1188,7 +1173,7 @@ mod tests {
     #[test]
     fn test_hashed_post_state_sorted_extend_ref() {
         // Test extending accounts
-        let mut state1: HashedPostStateSorted = HashedPostStateSorted {
+        let mut state1 = HashedPostStateSorted {
             accounts: vec![
                 (B256::from([1; 32]), Some(Account::default())),
                 (B256::from([3; 32]), Some(Account::default())),
@@ -1214,7 +1199,7 @@ mod tests {
         assert_eq!(state1.accounts[0].0, B256::from([1; 32]));
         assert_eq!(state1.accounts[1].0, B256::from([2; 32]));
         assert_eq!(state1.accounts[2].0, B256::from([3; 32]));
-        assert_eq!(state1.accounts[2].1.unwrap().nonce, 1); // Should have state2's value
+        assert_eq!(state1.accounts[2].1.as_ref().unwrap().nonce, 1); // Should have state2's value
         assert_eq!(state1.accounts[3].0, B256::from([4; 32]));
         assert_eq!(state1.accounts[4].0, B256::from([5; 32]));
         assert_eq!(state1.accounts[4].1, None);
@@ -1265,7 +1250,7 @@ mod tests {
         let addr1 = B256::random();
         let addr2 = B256::random();
 
-        let mut state = HashedPostState::<EmptyAccountExtension>::default();
+        let mut state = HashedPostState::default();
         state.accounts.insert(addr1, Some(Default::default()));
 
         let mut sorted_state = HashedPostStateSorted::default();
@@ -1283,7 +1268,7 @@ mod tests {
     fn test_hashed_post_state_extend_from_sorted_with_destroyed_accounts() {
         let addr1 = B256::random();
 
-        let mut state = HashedPostState::<EmptyAccountExtension>::default();
+        let mut state = HashedPostState::default();
 
         let mut sorted_state = HashedPostStateSorted::default();
         sorted_state.accounts.push((addr1, None));
@@ -1297,7 +1282,13 @@ mod tests {
     #[test]
     fn test_hashed_post_state_sorted_disjointed_merge_batch() {
         fn account(nonce: u64) -> Account {
-            Account { nonce, ..Default::default() }
+            Account {
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
+                nonce,
+                balance: U256::ZERO,
+                bytecode_hash: None,
+            }
         }
 
         let kept_account = B256::with_last_byte(1);
@@ -1306,7 +1297,7 @@ mod tests {
         let slot1 = B256::with_last_byte(11);
         let slot2 = B256::with_last_byte(12);
 
-        let older = HashedPostStateSorted::<EmptyAccountExtension>::new(
+        let older = HashedPostStateSorted::new(
             vec![(kept_account, Some(account(1))), (removed_account, Some(account(10)))],
             B256Map::from_iter([(
                 kept_storage,
@@ -1356,7 +1347,7 @@ mod tests {
         let storage = B256::with_last_byte(2);
         let slot = B256::with_last_byte(3);
         let empty_storage = B256::with_last_byte(4);
-        let older = HashedPostStateSorted::<EmptyAccountExtension>::new(
+        let older = HashedPostStateSorted::new(
             vec![(address, Some(Account { nonce: 1, ..Default::default() }))],
             B256Map::from_iter([
                 (storage, HashedStorageSorted { storage_slots: vec![(slot, U256::from(1))] }),
@@ -1380,7 +1371,13 @@ mod tests {
     #[test]
     fn test_hashed_post_state_sorted_disjointed_merge_batch_removes_overlapping_batch_key() {
         fn account(nonce: u64) -> Account {
-            Account { nonce, ..Default::default() }
+            Account {
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
+                nonce,
+                balance: U256::ZERO,
+                bytecode_hash: None,
+            }
         }
 
         let overlapping_account = B256::with_last_byte(21);
@@ -1406,7 +1403,13 @@ mod tests {
     #[test]
     fn test_hashed_post_state_sorted_disjointed_merge_batch_keeps_equal_overlaps() {
         fn account(nonce: u64) -> Account {
-            Account { nonce, ..Default::default() }
+            Account {
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
+                nonce,
+                balance: U256::ZERO,
+                bytecode_hash: None,
+            }
         }
 
         let address = B256::with_last_byte(21);
@@ -1415,7 +1418,7 @@ mod tests {
         let deleted_storage = B256::with_last_byte(25);
         let slot = B256::with_last_byte(23);
         let deleted_slot = B256::with_last_byte(26);
-        let batch = HashedPostStateSorted::<EmptyAccountExtension>::new(
+        let batch = HashedPostStateSorted::new(
             vec![(address, Some(account(1))), (deleted_address, None)],
             B256Map::from_iter([
                 (storage, HashedStorageSorted { storage_slots: vec![(slot, U256::from(1))] }),
@@ -1455,7 +1458,7 @@ mod tests {
         let storage = B256::with_last_byte(31);
         let slot = B256::with_last_byte(32);
 
-        let batch = HashedPostStateSorted::<EmptyAccountExtension>::new(
+        let batch = HashedPostStateSorted::new(
             vec![],
             B256Map::from_iter([(
                 storage,
@@ -1505,7 +1508,7 @@ mod tests {
         let slot2 = B256::from([2; 32]);
         let slot3 = B256::from([3; 32]);
 
-        let state: HashedPostState = HashedPostState {
+        let state = HashedPostState {
             accounts: B256Map::from_iter([(addr1, None), (addr2, None), (addr4, None)]),
             storages: B256Map::from_iter([
                 (
@@ -1562,9 +1565,18 @@ mod tests {
         let slot2 = B256::from([2; 32]);
         let slot3 = B256::from([3; 32]);
 
-        let state: HashedPostState = HashedPostState {
+        let state = HashedPostState {
             accounts: B256Map::from_iter([
-                (addr1, Some(Account { nonce: 1, balance: U256::from(100), ..Default::default() })),
+                (
+                    addr1,
+                    Some(Account {
+                        #[cfg(feature = "account-ext")]
+                        extension: Default::default(),
+                        nonce: 1,
+                        balance: U256::from(100),
+                        bytecode_hash: None,
+                    }),
+                ),
                 (addr2, None),
                 (addr3, Some(Account::default())),
             ]),
@@ -1625,14 +1637,13 @@ pub mod serde_bincode_compat {
     use alloc::{borrow::Cow, vec::Vec};
     use alloy_primitives::{map::B256Map, B256, U256};
     use core::fmt;
-    use reth_primitives_traits::{AccountExtension, EmptyAccountExtension};
     use serde::{
         de::{Error as _, SeqAccess, Visitor},
         Deserialize, Deserializer, Serialize, Serializer,
     };
     use serde_with::{DeserializeAs, SerializeAs};
 
-    /// Bincode-compatible [`super::HashedPostState<E>`] serde implementation.
+    /// Bincode-compatible [`super::HashedPostState`] serde implementation.
     ///
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
     /// ```rust
@@ -1648,14 +1659,13 @@ pub mod serde_bincode_compat {
     /// }
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
-    #[serde(bound = "")]
-    pub struct HashedPostState<'a, E: AccountExtension = EmptyAccountExtension> {
-        accounts: Cow<'a, B256Map<Option<Account<E>>>>,
+    pub struct HashedPostState<'a> {
+        accounts: Cow<'a, B256Map<Option<Account>>>,
         storages: B256Map<HashedStorage<'a>>,
     }
 
-    impl<'a, E: AccountExtension> From<&'a super::HashedPostState<E>> for HashedPostState<'a, E> {
-        fn from(value: &'a super::HashedPostState<E>) -> Self {
+    impl<'a> From<&'a super::HashedPostState> for HashedPostState<'a> {
+        fn from(value: &'a super::HashedPostState) -> Self {
             Self {
                 accounts: Cow::Borrowed(&value.accounts),
                 storages: value.storages.iter().map(|(k, v)| (*k, v.into())).collect(),
@@ -1663,8 +1673,8 @@ pub mod serde_bincode_compat {
         }
     }
 
-    impl<'a, E: AccountExtension> From<HashedPostState<'a, E>> for super::HashedPostState<E> {
-        fn from(value: HashedPostState<'a, E>) -> Self {
+    impl<'a> From<HashedPostState<'a>> for super::HashedPostState {
+        fn from(value: HashedPostState<'a>) -> Self {
             Self {
                 accounts: value.accounts.into_owned(),
                 storages: value.storages.into_iter().map(|(k, v)| (k, v.into())).collect(),
@@ -1672,9 +1682,9 @@ pub mod serde_bincode_compat {
         }
     }
 
-    impl<E: AccountExtension> SerializeAs<super::HashedPostState<E>> for HashedPostState<'_, E> {
+    impl SerializeAs<super::HashedPostState> for HashedPostState<'_> {
         fn serialize_as<S>(
-            source: &super::HashedPostState<E>,
+            source: &super::HashedPostState,
             serializer: S,
         ) -> Result<S::Ok, S::Error>
         where
@@ -1684,10 +1694,8 @@ pub mod serde_bincode_compat {
         }
     }
 
-    impl<'de, E: AccountExtension> DeserializeAs<'de, super::HashedPostState<E>>
-        for HashedPostState<'de, E>
-    {
-        fn deserialize_as<D>(deserializer: D) -> Result<super::HashedPostState<E>, D::Error>
+    impl<'de> DeserializeAs<'de, super::HashedPostState> for HashedPostState<'de> {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::HashedPostState, D::Error>
         where
             D: Deserializer<'de>,
         {
@@ -1745,7 +1753,7 @@ pub mod serde_bincode_compat {
         }
     }
 
-    /// Bincode-compatible [`super::HashedPostStateSorted<E>`] serde implementation.
+    /// Bincode-compatible [`super::HashedPostStateSorted`] serde implementation.
     ///
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
     /// ```rust
@@ -1761,16 +1769,13 @@ pub mod serde_bincode_compat {
     /// }
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
-    #[serde(bound = "")]
-    pub struct HashedPostStateSorted<'a, E: AccountExtension = EmptyAccountExtension> {
-        accounts: Cow<'a, [(B256, Option<Account<E>>)]>,
+    pub struct HashedPostStateSorted<'a> {
+        accounts: Cow<'a, [(B256, Option<Account>)]>,
         storages: B256Map<HashedStorageSorted<'a>>,
     }
 
-    impl<'a, E: AccountExtension> From<&'a super::HashedPostStateSorted<E>>
-        for HashedPostStateSorted<'a, E>
-    {
-        fn from(value: &'a super::HashedPostStateSorted<E>) -> Self {
+    impl<'a> From<&'a super::HashedPostStateSorted> for HashedPostStateSorted<'a> {
+        fn from(value: &'a super::HashedPostStateSorted) -> Self {
             Self {
                 accounts: Cow::Borrowed(&value.accounts),
                 storages: value.storages.iter().map(|(k, v)| (*k, v.into())).collect(),
@@ -1778,10 +1783,8 @@ pub mod serde_bincode_compat {
         }
     }
 
-    impl<'a, E: AccountExtension> From<HashedPostStateSorted<'a, E>>
-        for super::HashedPostStateSorted<E>
-    {
-        fn from(value: HashedPostStateSorted<'a, E>) -> Self {
+    impl<'a> From<HashedPostStateSorted<'a>> for super::HashedPostStateSorted {
+        fn from(value: HashedPostStateSorted<'a>) -> Self {
             Self {
                 accounts: value.accounts.into_owned(),
                 storages: value.storages.into_iter().map(|(k, v)| (k, v.into())).collect(),
@@ -1789,11 +1792,9 @@ pub mod serde_bincode_compat {
         }
     }
 
-    impl<E: AccountExtension> SerializeAs<super::HashedPostStateSorted<E>>
-        for HashedPostStateSorted<'_, E>
-    {
+    impl SerializeAs<super::HashedPostStateSorted> for HashedPostStateSorted<'_> {
         fn serialize_as<S>(
-            source: &super::HashedPostStateSorted<E>,
+            source: &super::HashedPostStateSorted,
             serializer: S,
         ) -> Result<S::Ok, S::Error>
         where
@@ -1803,10 +1804,8 @@ pub mod serde_bincode_compat {
         }
     }
 
-    impl<'de, E: AccountExtension> DeserializeAs<'de, super::HashedPostStateSorted<E>>
-        for HashedPostStateSorted<'de, E>
-    {
-        fn deserialize_as<D>(deserializer: D) -> Result<super::HashedPostStateSorted<E>, D::Error>
+    impl<'de> DeserializeAs<'de, super::HashedPostStateSorted> for HashedPostStateSorted<'de> {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::HashedPostStateSorted, D::Error>
         where
             D: Deserializer<'de>,
         {

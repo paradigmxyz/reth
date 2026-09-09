@@ -226,7 +226,6 @@ impl<N: NodeTypesWithDB> ChecksumViewer<'_, N> {
 
 impl<N: ProviderNodeTypes> TableViewer<(u64, Duration)> for ChecksumViewer<'_, N> {
     type Error = eyre::Report;
-    type AccountExtension = reth_primitives_traits::AccountExtensionTy<N::Primitives>;
 
     fn view<T: Table>(&self) -> Result<(u64, Duration), Self::Error> {
         let provider =

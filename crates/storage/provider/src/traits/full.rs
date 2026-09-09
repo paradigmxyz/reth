@@ -9,7 +9,6 @@ use reth_chain_state::{
     CanonStateSubscriptions, ForkChoiceSubscriptions, PersistedBlockSubscriptions,
 };
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
-use reth_primitives_traits::AccountExtensionTy;
 use reth_storage_api::{
     HistoryReader, NodePrimitivesProvider, StorageChangeSetReader, StorageSettingsCache,
 };
@@ -22,7 +21,7 @@ pub trait FullProvider<N: NodeTypesWithDB>:
         Provider: BlockReader
                       + StageCheckpointReader
                       + PruneCheckpointReader
-                      + ChangeSetReader<AccountExtension = AccountExtensionTy<N::Primitives>>
+                      + ChangeSetReader
                       + StorageChangeSetReader
                       + StorageSettingsCache
                       + HistoryReader
@@ -36,11 +35,11 @@ pub trait FullProvider<N: NodeTypesWithDB>:
         Receipt = ReceiptTy<N>,
         Header = HeaderTy<N>,
     > + BalProvider
-    + StateProviderFactory<AccountExtension = AccountExtensionTy<N::Primitives>>
+    + StateProviderFactory
     + StateRangeProviderFactory
     + StateReader
     + ChainSpecProvider<ChainSpec = N::ChainSpec>
-    + ChangeSetReader<AccountExtension = AccountExtensionTy<N::Primitives>>
+    + ChangeSetReader
     + StorageChangeSetReader
     + CanonStateSubscriptions
     + ForkChoiceSubscriptions<Header = HeaderTy<N>>
@@ -60,7 +59,7 @@ impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
             Provider: BlockReader
                           + StageCheckpointReader
                           + PruneCheckpointReader
-                          + ChangeSetReader<AccountExtension = AccountExtensionTy<N::Primitives>>
+                          + ChangeSetReader
                           + StorageChangeSetReader
                           + StorageSettingsCache
                           + HistoryReader
@@ -74,11 +73,11 @@ impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
             Receipt = ReceiptTy<N>,
             Header = HeaderTy<N>,
         > + BalProvider
-        + StateProviderFactory<AccountExtension = AccountExtensionTy<N::Primitives>>
+        + StateProviderFactory
         + StateRangeProviderFactory
         + StateReader
         + ChainSpecProvider<ChainSpec = N::ChainSpec>
-        + ChangeSetReader<AccountExtension = AccountExtensionTy<N::Primitives>>
+        + ChangeSetReader
         + StorageChangeSetReader
         + CanonStateSubscriptions
         + ForkChoiceSubscriptions<Header = HeaderTy<N>>

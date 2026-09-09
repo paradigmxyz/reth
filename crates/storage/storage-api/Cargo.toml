@@ -90,3 +90,10 @@ serde-bincode-compat = [
     "alloy-eips/serde-bincode-compat",
     "alloy-consensus/serde-bincode-compat",
 ]
+account-ext = [
+    "reth-chainspec/account-ext",
+    "reth-db-api?/account-ext",
+    "reth-db-models/account-ext",
+    "reth-execution-types/account-ext",
+    "reth-storage-errors/account-ext",
+]

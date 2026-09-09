@@ -124,12 +124,7 @@ where
             // Use the provider-based collection that can read from static files.
             collect_account_history_indices(provider, range.clone(), &self.etl_config)?
         } else {
-            collect_history_indices::<
-                _,
-                tables::AccountChangeSets<Provider::AccountExtension>,
-                tables::AccountsHistory,
-                _,
-            >(
+            collect_history_indices::<_, tables::AccountChangeSets, tables::AccountsHistory, _>(
                 provider,
                 range.clone(),
                 ShardedKey::new,

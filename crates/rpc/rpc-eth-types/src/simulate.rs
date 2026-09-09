@@ -20,8 +20,7 @@ use reth_evm::{
     Evm, HaltReasonFor,
 };
 use reth_primitives_traits::{
-    AccountExtensionTy, BlockBody as _, BlockTy, NodePrimitives, Recovered, RecoveredBlock,
-    SealedHeader,
+    BlockBody as _, BlockTy, NodePrimitives, Recovered, RecoveredBlock, SealedHeader,
 };
 use reth_rpc_convert::{RpcBlock, RpcConvert, RpcTxReq};
 use reth_rpc_server_types::result::{block_id_to_str, rpc_err};
@@ -313,7 +312,7 @@ pub fn apply_precompile_overrides(
 #[expect(clippy::type_complexity)]
 pub fn execute_transactions<S, T>(
     mut builder: S,
-    state_provider: impl StateProvider<AccountExtension = AccountExtensionTy<S::Primitives>>,
+    state_provider: impl StateProvider,
     calls: Vec<RpcTxReq<T::Network>>,
     remaining_call_gas_limit: &mut Option<u64>,
     chain_id: u64,
@@ -412,12 +411,7 @@ where
     let result = if compute_state_root {
         builder.finish(state_provider, None)?
     } else {
-        builder.finish(
-            NoopProvider::<reth_chainspec::ChainSpec, S::Primitives>::new(
-                reth_chainspec::MAINNET.clone(),
-            ),
-            None,
-        )?
+        builder.finish(NoopProvider::default(), None)?
     };
 
     Ok((result, results))

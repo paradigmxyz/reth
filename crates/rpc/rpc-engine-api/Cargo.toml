@@ -58,3 +58,6 @@ reth-node-ethereum.workspace = true
 reth-tasks = { workspace = true, features = ["test-utils"] }
 
 assert_matches.workspace = true
+
+[features]
+account-ext = ["reth-rpc-api/account-ext"]

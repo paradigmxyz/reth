@@ -22,3 +22,6 @@ tokio-stream = { workspace = true, features = ["sync"] }
 
 # misc
 tracing.workspace = true
+
+[features]
+account-ext = ["reth-payload-primitives/account-ext"]

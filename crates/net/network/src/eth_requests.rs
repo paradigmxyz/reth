@@ -479,11 +479,12 @@ where
         response: oneshot::Sender<RequestResult<SnapResponse>>,
     ) {
         self.metrics.snap_requests_received_total.increment(1);
-
-        if let Err(error) =
-            reth_storage_api::ensure_no_account_extensions::<C::AccountExtension>("snap")
+        if reth_primitives_traits::Account::EXTENSIONS_ENABLED &&
+            matches!(
+                &request,
+                SnapProtocolMessage::GetAccountRange(_) | SnapProtocolMessage::GetStorageRanges(_)
+            )
         {
-            tracing::warn!(target: "net::snap", %error, "rejecting snap request");
             let _ = response.send(Err(RequestError::UnsupportedCapability));
             return;
         }
@@ -1245,19 +1246,21 @@ mod tests {
                 (
                     first_hash,
                     Account {
+                        #[cfg(feature = "account-ext")]
+                        extension: Default::default(),
                         nonce: 1,
                         balance: U256::from(2),
                         bytecode_hash: Some(code_hash),
-                        ..Default::default()
                     },
                 ),
                 (
                     second_hash,
                     Account {
+                        #[cfg(feature = "account-ext")]
+                        extension: Default::default(),
                         nonce: 3,
                         balance: U256::from(4),
                         bytecode_hash: None,
-                        ..Default::default()
                     },
                 ),
             ],
@@ -1311,10 +1314,11 @@ mod tests {
             vec![(
                 hash,
                 Account {
+                    #[cfg(feature = "account-ext")]
+                    extension: Default::default(),
                     nonce: 1,
                     balance: U256::from(2),
                     bytecode_hash: None,
-                    ..Default::default()
                 },
             )],
             RangeEnd::Exhausted,

@@ -1,10 +1,13 @@
+// Accounts are only Copy when account-ext is disabled.
+#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+
 use crate::proof_task::StorageProofResultMessage;
 use alloy_primitives::{map::B256Map, B256};
 use alloy_rlp::Encodable;
 use core::cell::RefCell;
 use crossbeam_channel::Receiver as CrossbeamReceiver;
 use reth_execution_errors::trie::StateProofError;
-use reth_primitives_traits::{dashmap::DashMap, Account, AccountExtension, EmptyAccountExtension};
+use reth_primitives_traits::{dashmap::DashMap, Account};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     hashed_cursor::HashedStorageCursor,
@@ -48,15 +51,11 @@ impl ValueEncoderStats {
 }
 
 /// Returned from [`AsyncAccountValueEncoder`], used to track an async storage root calculation.
-pub(crate) enum AsyncAccountDeferredValueEncoder<
-    TC,
-    HC,
-    E: AccountExtension = EmptyAccountExtension,
-> {
+pub(crate) enum AsyncAccountDeferredValueEncoder<TC, HC> {
     /// A storage proof job was dispatched to the worker pool.
     Dispatched {
         hashed_address: B256,
-        account: Account<E>,
+        account: Account,
         /// The receiver for the storage proof result. This is an `Option` so that `encode` can
         /// take ownership of the receiver, preventing the `Drop` impl from trying to receive on
         /// it again.
@@ -73,19 +72,19 @@ pub(crate) enum AsyncAccountDeferredValueEncoder<
         cached_storage_roots: Arc<DashMap<B256, B256>>,
     },
     /// The storage root was found in cache.
-    FromCache { account: Account<E>, root: B256 },
+    FromCache { account: Account, root: B256 },
     /// Synchronous storage root computation.
     Sync {
         /// Shared storage proof calculator for computing storage roots.
         storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
         hashed_address: B256,
-        account: Account<E>,
+        account: Account,
         /// Cache to store computed storage roots for future reuse.
         cached_storage_roots: Arc<DashMap<B256, B256>>,
     },
 }
 
-impl<TC, HC, E: AccountExtension> Drop for AsyncAccountDeferredValueEncoder<TC, HC, E> {
+impl<TC, HC> Drop for AsyncAccountDeferredValueEncoder<TC, HC> {
     fn drop(&mut self) {
         // If this is a Dispatched encoder that was never consumed via encode(), we need to
         // receive the storage proof result to avoid losing it.
@@ -126,8 +125,7 @@ impl<TC, HC, E: AccountExtension> Drop for AsyncAccountDeferredValueEncoder<TC, 
     }
 }
 
-impl<TC, HC, E: AccountExtension> DeferredValueEncoder
-    for AsyncAccountDeferredValueEncoder<TC, HC, E>
+impl<TC, HC> DeferredValueEncoder for AsyncAccountDeferredValueEncoder<TC, HC>
 where
     TC: TrieStorageCursor,
     HC: HashedStorageCursor<Value = alloy_primitives::U256>,
@@ -215,7 +213,7 @@ where
 /// For accounts without pre-dispatched proofs or cached roots, uses a shared
 /// [`StorageProofCalculator`] to compute storage roots synchronously, reusing cursors across
 /// multiple accounts.
-pub(crate) struct AsyncAccountValueEncoder<TC, HC, E = EmptyAccountExtension> {
+pub(crate) struct AsyncAccountValueEncoder<TC, HC> {
     /// Storage proof jobs which were dispatched ahead of time.
     dispatched: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
     /// Storage roots which have already been computed. This can be used only if a storage proof
@@ -229,10 +227,9 @@ pub(crate) struct AsyncAccountValueEncoder<TC, HC, E = EmptyAccountExtension> {
     storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
     /// Shared stats for tracking wait time and variant counts.
     stats: Rc<RefCell<ValueEncoderStats>>,
-    account_extension: core::marker::PhantomData<E>,
 }
 
-impl<TC, HC, E> AsyncAccountValueEncoder<TC, HC, E> {
+impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
     /// Initializes a [`Self`] using a storage proof calculator which will be reused to calculate
     /// storage roots synchronously.
     ///
@@ -251,7 +248,6 @@ impl<TC, HC, E> AsyncAccountValueEncoder<TC, HC, E> {
             storage_proof_results: Default::default(),
             storage_calculator,
             stats: Default::default(),
-            account_extension: core::marker::PhantomData,
         }
     }
 
@@ -296,13 +292,13 @@ impl<TC, HC, E> AsyncAccountValueEncoder<TC, HC, E> {
     }
 }
 
-impl<TC, HC, E: AccountExtension> LeafValueEncoder for AsyncAccountValueEncoder<TC, HC, E>
+impl<TC, HC> LeafValueEncoder for AsyncAccountValueEncoder<TC, HC>
 where
     TC: TrieStorageCursor,
     HC: HashedStorageCursor<Value = alloy_primitives::U256>,
 {
-    type Value = Account<E>;
-    type DeferredEncoder = AsyncAccountDeferredValueEncoder<TC, HC, E>;
+    type Value = Account;
+    type DeferredEncoder = AsyncAccountDeferredValueEncoder<TC, HC>;
 
     fn deferred_encoder(
         &mut self,

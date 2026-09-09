@@ -11,7 +11,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use alloy_trie::EMPTY_ROOT_HASH;
-    use reth_primitives_traits::{Account, EmptyAccountExtension};
+    use reth_primitives_traits::Account;
 
     #[test]
     fn test_from_genesis_account_with_default_values() {
@@ -27,12 +27,7 @@ mod tests {
         assert_eq!(trie_account.code_hash, KECCAK_EMPTY);
 
         // Check that the default Account converts to the same TrieAccount
-        assert_eq!(
-            alloy_rlp::encode(
-                Account::<EmptyAccountExtension>::default().into_trie_account(EMPTY_ROOT_HASH),
-            ),
-            alloy_rlp::encode(trie_account),
-        );
+        assert_eq!(Account::default().into_trie_account(EMPTY_ROOT_HASH), trie_account);
     }
 
     #[test]
@@ -42,6 +37,8 @@ mod tests {
         storage.insert(B256::from([0x01; 32]), B256::from([0x02; 32]));
 
         let genesis_account = GenesisAccount {
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
             nonce: Some(10),
             balance: U256::from(1000),
             code: Some(Bytes::from(vec![0x60, 0x61])),
@@ -65,16 +62,15 @@ mod tests {
 
         // Check that the Account converts to the same TrieAccount
         assert_eq!(
-            alloy_rlp::encode(
-                Account::<EmptyAccountExtension> {
-                    nonce: 10,
-                    balance: U256::from(1000),
-                    bytecode_hash: Some(keccak256([0x60, 0x61])),
-                    ..Default::default()
-                }
-                .into_trie_account(expected_storage_root)
-            ),
-            alloy_rlp::encode(trie_account),
+            Account {
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
+                nonce: 10,
+                balance: U256::from(1000),
+                bytecode_hash: Some(keccak256([0x60, 0x61]))
+            }
+            .into_trie_account(expected_storage_root),
+            trie_account
         );
     }
 
@@ -84,6 +80,8 @@ mod tests {
         let storage = BTreeMap::from([(B256::from([0x01; 32]), B256::from([0x00; 32]))]);
 
         let genesis_account = GenesisAccount {
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
             nonce: Some(3),
             balance: U256::from(300),
             code: None,

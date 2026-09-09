@@ -1,8 +1,4 @@
 //! Ethereum meta crate that provides access to commonly used reth dependencies.
-//!
-//! Enable `account-ext` to select a custom `NodePrimitives::AccountExtension`.
-//! This also enables revm's ThinArc-backed execution payload; without it, only
-//! `EmptyAccountExtension` satisfies the account-extension capability bound.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",

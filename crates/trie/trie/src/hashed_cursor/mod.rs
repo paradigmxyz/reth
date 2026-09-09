@@ -1,5 +1,5 @@
 use alloy_primitives::{keccak256, Address, B256, U256};
-use reth_primitives_traits::{Account, AccountExtension};
+use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::HashedPostState;
 use revm::database::BundleAccount;
@@ -24,10 +24,8 @@ pub use metrics::{HashedCursorMetricsCache, InstrumentedHashedCursor};
 /// The factory trait for creating cursors over the hashed state.
 #[auto_impl::auto_impl(&)]
 pub trait HashedCursorFactory {
-    /// Chain-specific account data returned by account cursors.
-    type AccountExtension: AccountExtension;
     /// The hashed account cursor type.
-    type AccountCursor<'a>: HashedCursor<Value = Account<Self::AccountExtension>>
+    type AccountCursor<'a>: HashedCursor<Value = Account>
     where
         Self: 'a;
     /// The hashed storage cursor type.
@@ -85,10 +83,10 @@ pub trait HashedStorageCursor: HashedCursor {
 /// Accounts absent from the bundle pre-state are skipped because they cannot have parent storage.
 /// Final bundle values take precedence so that destroy-then-recreate transitions retain storage
 /// written by the recreated account.
-pub fn zero_destroyed_account_storage<'a, E>(
+pub fn zero_destroyed_account_storage<'a>(
     cursor_factory: &impl HashedCursorFactory,
     accounts: impl IntoIterator<Item = (&'a Address, &'a BundleAccount)>,
-    hashed_state: &mut HashedPostState<E>,
+    hashed_state: &mut HashedPostState,
 ) -> Result<(), DatabaseError> {
     let mut destroyed_accounts = accounts
         .into_iter()
@@ -123,13 +121,10 @@ mod tests {
     fn zero_destroyed_storage_skips_new_accounts() {
         let address = Address::with_last_byte(1);
         let account = BundleAccount::new(None, None, Default::default(), AccountStatus::Destroyed);
-        let mut hashed_state =
-            HashedPostState::<reth_primitives_traits::EmptyAccountExtension>::default();
+        let mut hashed_state = HashedPostState::default();
 
         zero_destroyed_account_storage(
-            &mock::MockHashedCursorFactory::<
-                reth_primitives_traits::EmptyAccountExtension,
-            >::default(),
+            &mock::MockHashedCursorFactory::default(),
             [(&address, &account)],
             &mut hashed_state,
         )

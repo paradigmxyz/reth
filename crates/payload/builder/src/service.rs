@@ -15,10 +15,7 @@ use reth_chain_state::CanonStateNotification;
 use reth_execution_cache::SavedCache;
 use reth_payload_builder_primitives::{Events, PayloadBuilderError, PayloadEvents};
 use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind, PayloadTypes};
-use reth_primitives_traits::{
-    AccountExtension, AccountExtensionTy, EmptyAccountExtension, FastInstant as Instant,
-    NodePrimitives,
-};
+use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_trie_parallel::state_root_task::PayloadStateRootHandle;
 use std::{
     future::Future,
@@ -128,7 +125,7 @@ impl<T: PayloadTypes> PayloadBuilderHandle<T> {
     /// Returns a receiver that will receive the payload id.
     pub fn send_new_payload(
         &self,
-        input: BuildNewPayload<T::PayloadAttributes, AccountExtensionTy<T::Primitives>>,
+        input: BuildNewPayload<T::PayloadAttributes>,
     ) -> Receiver<Result<PayloadId, PayloadBuilderError>> {
         let (tx, rx) = oneshot::channel();
         let span = debug_span!(parent: Span::current(), "payload_job");
@@ -251,10 +248,7 @@ impl<Gen, St, T> PayloadBuilderService<Gen, St, T>
 where
     T: PayloadTypes,
     Gen: PayloadJobGenerator,
-    Gen::Job: PayloadJob<
-        PayloadAttributes = T::PayloadAttributes,
-        Primitives: NodePrimitives<AccountExtension = AccountExtensionTy<T::Primitives>>,
-    >,
+    Gen::Job: PayloadJob<PayloadAttributes = T::PayloadAttributes>,
     <Gen::Job as PayloadJob>::BuiltPayload: Into<T::BuiltPayload>,
 {
     /// Creates a new payload builder service and returns the [`PayloadBuilderHandle`] to interact
@@ -404,10 +398,7 @@ where
     Gen: PayloadJobGenerator + Unpin + 'static,
     <Gen as PayloadJobGenerator>::Job: Unpin + 'static,
     St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
-    Gen::Job: PayloadJob<
-        PayloadAttributes = T::PayloadAttributes,
-        Primitives: NodePrimitives<AccountExtension = AccountExtensionTy<T::Primitives>>,
-    >,
+    Gen::Job: PayloadJob<PayloadAttributes = T::PayloadAttributes>,
     <Gen::Job as PayloadJob>::BuiltPayload: Into<T::BuiltPayload>,
 {
     type Output = ();
@@ -548,7 +539,7 @@ pub enum PayloadServiceCommand<T: PayloadTypes> {
     /// Carries the caller's [`Span`] so the service can parent payload-building work under the
     /// originating Engine API trace.
     BuildNewPayload(
-        Box<BuildNewPayload<T::PayloadAttributes, AccountExtensionTy<T::Primitives>>>,
+        Box<BuildNewPayload<T::PayloadAttributes>>,
         Span,
         oneshot::Sender<Result<PayloadId, PayloadBuilderError>>,
     ),
@@ -568,16 +559,16 @@ pub enum PayloadServiceCommand<T: PayloadTypes> {
 
 /// A request to build a new payload.
 #[derive(Debug)]
-pub struct BuildNewPayload<T, E: AccountExtension = EmptyAccountExtension> {
+pub struct BuildNewPayload<T> {
     /// The attributes for the new payload
     pub attributes: T,
     /// The parent hash of the new payload
     pub parent_hash: B256,
     /// Resources loaned to the payload builder for this job.
-    pub resources: PayloadBuilderResources<E>,
+    pub resources: PayloadBuilderResources,
 }
 
-impl<T: PayloadAttributes, E: AccountExtension> BuildNewPayload<T, E> {
+impl<T: PayloadAttributes> BuildNewPayload<T> {
     /// Returns the payload id for the new payload.
     pub fn payload_id(&self) -> PayloadId {
         self.attributes.payload_id(&self.parent_hash)
@@ -586,22 +577,22 @@ impl<T: PayloadAttributes, E: AccountExtension> BuildNewPayload<T, E> {
 
 /// Resources loaned to a payload builder job by the engine.
 #[derive(Debug, Default)]
-pub struct PayloadBuilderResources<E: AccountExtension = EmptyAccountExtension> {
+pub struct PayloadBuilderResources {
     /// Optional execution cache to use for the payload.
     ///
     /// Only provided if `--engine.share-execution-cache-with-payload-builder` is enabled.
-    execution_cache: Option<SavedCache<E>>,
+    execution_cache: Option<SavedCache>,
     /// Optional handle to a background state-root task.
-    state_root_handle: Option<PayloadStateRootHandle<E>>,
+    state_root_handle: Option<PayloadStateRootHandle>,
     /// Lifecycle leases retained by the service or by detached payload build tasks.
     leases: Vec<PayloadBuilderLease>,
 }
 
-impl<E: AccountExtension> PayloadBuilderResources<E> {
+impl PayloadBuilderResources {
     /// Creates a new payload builder resource bundle.
     pub const fn new(
-        execution_cache: Option<SavedCache<E>>,
-        state_root_handle: Option<PayloadStateRootHandle<E>>,
+        execution_cache: Option<SavedCache>,
+        state_root_handle: Option<PayloadStateRootHandle>,
     ) -> Self {
         Self { execution_cache, state_root_handle, leases: Vec::new() }
     }
@@ -613,22 +604,22 @@ impl<E: AccountExtension> PayloadBuilderResources<E> {
     }
 
     /// Returns the loaned execution cache, if any.
-    pub const fn execution_cache(&self) -> Option<&SavedCache<E>> {
+    pub const fn execution_cache(&self) -> Option<&SavedCache> {
         self.execution_cache.as_ref()
     }
 
     /// Takes the loaned execution cache, if any.
-    pub const fn take_execution_cache(&mut self) -> Option<SavedCache<E>> {
+    pub const fn take_execution_cache(&mut self) -> Option<SavedCache> {
         self.execution_cache.take()
     }
 
     /// Returns the loaned state-root task handle, if any.
-    pub const fn state_root_handle(&self) -> Option<&PayloadStateRootHandle<E>> {
+    pub const fn state_root_handle(&self) -> Option<&PayloadStateRootHandle> {
         self.state_root_handle.as_ref()
     }
 
     /// Takes the loaned state-root task handle, if any.
-    pub const fn take_state_root_handle(&mut self) -> Option<PayloadStateRootHandle<E>> {
+    pub const fn take_state_root_handle(&mut self) -> Option<PayloadStateRootHandle> {
         self.state_root_handle.take()
     }
 

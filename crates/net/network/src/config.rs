@@ -563,6 +563,10 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     ///
     /// Default off: snap/2 is only negotiated with peers when explicitly enabled.
     pub const fn with_snap(mut self, snap_enabled: bool) -> Self {
+        assert!(
+            !snap_enabled || !reth_primitives_traits::Account::EXTENSIONS_ENABLED,
+            "snap does not support account extensions"
+        );
         self.snap_enabled = snap_enabled;
         self
     }
@@ -704,6 +708,10 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         let mut hello_message =
             hello_message.unwrap_or_else(|| HelloMessage::builder(peer_id).build());
         hello_message.port = listener_addr.port();
+        assert!(
+            !snap_enabled || !reth_primitives_traits::Account::EXTENSIONS_ENABLED,
+            "snap does not support account extensions"
+        );
         hello_message = hello_message.with_snap(snap_enabled);
 
         // set the status

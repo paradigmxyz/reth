@@ -473,7 +473,7 @@ impl ExtendedAccount {
     /// Create new instance of extended account
     pub fn new(nonce: u64, balance: U256) -> Self {
         Self {
-            account: Account { nonce, balance, bytecode_hash: None, ..Default::default() },
+            account: Account { nonce, balance, ..Default::default() },
             bytecode: None,
             storage: Default::default(),
         }
@@ -1018,12 +1018,6 @@ where
             Some(block) => Ok(Some(block.into_header())),
         }
     }
-}
-
-impl<T: NodePrimitives, ChainSpec> reth_storage_api::AccountExtensionProvider
-    for MockEthProvider<T, ChainSpec>
-{
-    type AccountExtension = reth_primitives_traits::EmptyAccountExtension;
 }
 
 impl<T: NodePrimitives, ChainSpec: Send + Sync> AccountReader for MockEthProvider<T, ChainSpec> {

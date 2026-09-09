@@ -4,27 +4,26 @@ use crate::{
     HashedPostState, HashedPostStateSorted,
 };
 use alloc::sync::Arc;
-use reth_primitives_traits::{AccountExtension, EmptyAccountExtension};
 
 /// Inputs for trie-related computations.
 #[derive(Default, Debug, Clone)]
-pub struct TrieInput<E = EmptyAccountExtension> {
+pub struct TrieInput {
     /// The collection of cached in-memory intermediate trie nodes that
     /// can be reused for computation.
     pub nodes: TrieUpdates,
     /// The in-memory overlay hashed state.
-    pub state: HashedPostState<E>,
+    pub state: HashedPostState,
     /// The collection of prefix sets for the computation. Since the prefix sets _always_
     /// invalidate the in-memory nodes, not all keys from `self.state` might be present here,
     /// if we have cached nodes for them.
     pub prefix_sets: TriePrefixSetsMut,
 }
 
-impl<E: AccountExtension> TrieInput<E> {
+impl TrieInput {
     /// Create new trie input.
     pub const fn new(
         nodes: TrieUpdates,
-        state: HashedPostState<E>,
+        state: HashedPostState,
         prefix_sets: TriePrefixSetsMut,
     ) -> Self {
         Self { nodes, state, prefix_sets }
@@ -32,7 +31,7 @@ impl<E: AccountExtension> TrieInput<E> {
 
     /// Create new trie input from in-memory state. The prefix sets will be constructed and
     /// set automatically.
-    pub fn from_state(state: HashedPostState<E>) -> Self {
+    pub fn from_state(state: HashedPostState) -> Self {
         let prefix_sets = state.construct_prefix_sets();
         Self { nodes: TrieUpdates::default(), state, prefix_sets }
     }
@@ -40,7 +39,7 @@ impl<E: AccountExtension> TrieInput<E> {
     /// Create new trie input from the provided blocks, from oldest to newest. See the documentation
     /// for [`Self::extend_with_blocks`] for details.
     pub fn from_blocks<'a>(
-        blocks: impl IntoIterator<Item = (&'a HashedPostState<E>, &'a TrieUpdates)>,
+        blocks: impl IntoIterator<Item = (&'a HashedPostState, &'a TrieUpdates)>,
     ) -> Self {
         let mut input = Self::default();
         input.extend_with_blocks(blocks);
@@ -50,7 +49,7 @@ impl<E: AccountExtension> TrieInput<E> {
     /// Create new trie input from the provided sorted blocks, from oldest to newest.
     /// Converts sorted types to unsorted for aggregation.
     pub fn from_blocks_sorted<'a>(
-        blocks: impl IntoIterator<Item = (&'a HashedPostStateSorted<E>, &'a TrieUpdatesSorted)>,
+        blocks: impl IntoIterator<Item = (&'a HashedPostStateSorted, &'a TrieUpdatesSorted)>,
     ) -> Self {
         let mut input = Self::default();
         for (hashed_state, trie_updates) in blocks {
@@ -64,7 +63,7 @@ impl<E: AccountExtension> TrieInput<E> {
     /// Extend the trie input with the provided blocks, from oldest to newest.
     pub fn extend_with_blocks<'a>(
         &mut self,
-        blocks: impl IntoIterator<Item = (&'a HashedPostState<E>, &'a TrieUpdates)>,
+        blocks: impl IntoIterator<Item = (&'a HashedPostState, &'a TrieUpdates)>,
     ) {
         for (hashed_state, trie_updates) in blocks {
             self.append_cached_ref(trie_updates, hashed_state);
@@ -82,7 +81,7 @@ impl<E: AccountExtension> TrieInput<E> {
     }
 
     /// Prepend state to the input and extend the prefix sets.
-    pub fn prepend(&mut self, mut state: HashedPostState<E>) {
+    pub fn prepend(&mut self, mut state: HashedPostState) {
         self.prefix_sets.extend(state.construct_prefix_sets());
         core::mem::swap(&mut self.state, &mut state);
         self.state.extend(state);
@@ -90,7 +89,7 @@ impl<E: AccountExtension> TrieInput<E> {
 
     /// Prepend intermediate nodes and state to the input.
     /// Prefix sets for incoming state will be ignored.
-    pub fn prepend_cached(&mut self, mut nodes: TrieUpdates, mut state: HashedPostState<E>) {
+    pub fn prepend_cached(&mut self, mut nodes: TrieUpdates, mut state: HashedPostState) {
         core::mem::swap(&mut self.nodes, &mut nodes);
         self.nodes.extend(nodes);
         core::mem::swap(&mut self.state, &mut state);
@@ -98,27 +97,27 @@ impl<E: AccountExtension> TrieInput<E> {
     }
 
     /// Append state to the input and extend the prefix sets.
-    pub fn append(&mut self, state: HashedPostState<E>) {
+    pub fn append(&mut self, state: HashedPostState) {
         self.prefix_sets.extend(state.construct_prefix_sets());
         self.state.extend(state);
     }
 
     /// Append state to the input by reference and extend the prefix sets.
-    pub fn append_ref(&mut self, state: &HashedPostState<E>) {
+    pub fn append_ref(&mut self, state: &HashedPostState) {
         self.prefix_sets.extend(state.construct_prefix_sets());
         self.state.extend_ref(state);
     }
 
     /// Append intermediate nodes and state to the input.
     /// Prefix sets for incoming state will be ignored.
-    pub fn append_cached(&mut self, nodes: TrieUpdates, state: HashedPostState<E>) {
+    pub fn append_cached(&mut self, nodes: TrieUpdates, state: HashedPostState) {
         self.nodes.extend(nodes);
         self.state.extend(state);
     }
 
     /// Append intermediate nodes and state to the input by reference.
     /// Prefix sets for incoming state will be ignored.
-    pub fn append_cached_ref(&mut self, nodes: &TrieUpdates, state: &HashedPostState<E>) {
+    pub fn append_cached_ref(&mut self, nodes: &TrieUpdates, state: &HashedPostState) {
         self.nodes.extend_ref(nodes);
         self.state.extend_ref(state);
     }
@@ -142,27 +141,27 @@ impl<E: AccountExtension> TrieInput<E> {
 /// This type holds sorted versions of trie data structures, which eliminates the need
 /// for expensive sorting operations during multiproof generation.
 #[derive(Default, Debug, Clone)]
-pub struct TrieInputSorted<E = EmptyAccountExtension> {
+pub struct TrieInputSorted {
     /// Sorted cached in-memory intermediate trie nodes.
     pub nodes: Arc<TrieUpdatesSorted>,
     /// Sorted in-memory overlay hashed state.
-    pub state: Arc<HashedPostStateSorted<E>>,
+    pub state: Arc<HashedPostStateSorted>,
     /// Prefix sets for computation.
     pub prefix_sets: TriePrefixSetsMut,
 }
 
-impl<E: AccountExtension> TrieInputSorted<E> {
+impl TrieInputSorted {
     /// Create new sorted trie input.
     pub const fn new(
         nodes: Arc<TrieUpdatesSorted>,
-        state: Arc<HashedPostStateSorted<E>>,
+        state: Arc<HashedPostStateSorted>,
         prefix_sets: TriePrefixSetsMut,
     ) -> Self {
         Self { nodes, state, prefix_sets }
     }
 
     /// Create from unsorted [`TrieInput`] by sorting.
-    pub fn from_unsorted(input: TrieInput<E>) -> Self {
+    pub fn from_unsorted(input: TrieInput) -> Self {
         Self {
             nodes: Arc::new(input.nodes.into_sorted()),
             state: Arc::new(input.state.into_sorted()),

@@ -35,6 +35,7 @@ bytes.workspace = true
 modular-bitfield.workspace = true
 
 [features]
+account-ext = ["reth-codecs?/account-ext", "reth-trie-common/account-ext"]
 default = ["std"]
 std = [
     "alloy-primitives/std",

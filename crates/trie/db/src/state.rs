@@ -5,7 +5,6 @@ use reth_db_api::{
     transaction::DbTx,
 };
 use reth_execution_errors::StateRootError;
-use reth_primitives_traits::{AccountExtension, EmptyAccountExtension};
 use reth_storage_api::{ChangeSetReader, DBProvider, StorageChangeSetReader, StorageSettingsCache};
 use reth_storage_errors::provider::ProviderError;
 use reth_trie::{
@@ -20,10 +19,7 @@ use std::{
 use tracing::{debug, instrument};
 
 /// Extends [`StateRoot`] with operations specific for working with a database transaction.
-pub trait DatabaseStateRoot<'a, TX, E = EmptyAccountExtension>: Sized
-where
-    E: AccountExtension,
-{
+pub trait DatabaseStateRoot<'a, TX>: Sized {
     /// Create a new [`StateRoot`] instance.
     fn from_tx(tx: &'a TX) -> Self;
 
@@ -83,7 +79,7 @@ where
                  + StorageSettingsCache
                  + DBProvider<Tx = TX>),
         range: RangeInclusive<BlockNumber>,
-    ) -> Result<StateRootProgress<E>, StateRootError>;
+    ) -> Result<StateRootProgress, StateRootError>;
 
     /// Calculate the state root for this [`HashedPostStateSorted`].
     /// Internally, this method retrieves prefixsets and uses them
@@ -106,12 +102,7 @@ where
     /// let mut hashed_state = HashedPostState::default();
     /// hashed_state.accounts.insert(
     ///     [0x11; 32].into(),
-    ///     Some(Account {
-    ///         nonce: 1,
-    ///         balance: U256::from(10),
-    ///         bytecode_hash: None,
-    ///         ..Default::default()
-    ///     }),
+    ///     Some(Account { nonce: 1, balance: U256::from(10), bytecode_hash: None }),
     /// );
     ///
     /// // Calculate the state root
@@ -125,46 +116,41 @@ where
     /// # Returns
     ///
     /// The state root for this [`HashedPostStateSorted`].
-    fn overlay_root(
-        tx: &'a TX,
-        post_state: &HashedPostStateSorted<E>,
-    ) -> Result<B256, StateRootError>;
+    fn overlay_root(tx: &'a TX, post_state: &HashedPostStateSorted)
+        -> Result<B256, StateRootError>;
 
     /// Calculates the state root for this [`HashedPostStateSorted`] and returns it alongside trie
     /// updates. See [`Self::overlay_root`] for more info.
     fn overlay_root_with_updates(
         tx: &'a TX,
-        post_state: &HashedPostStateSorted<E>,
+        post_state: &HashedPostStateSorted,
     ) -> Result<(B256, TrieUpdates), StateRootError>;
 
     /// Calculates the state root for provided [`HashedPostStateSorted`] using cached intermediate
     /// nodes.
-    fn overlay_root_from_nodes(
-        tx: &'a TX,
-        input: TrieInputSorted<E>,
-    ) -> Result<B256, StateRootError>;
+    fn overlay_root_from_nodes(tx: &'a TX, input: TrieInputSorted) -> Result<B256, StateRootError>;
 
     /// Calculates the state root and trie updates for provided [`HashedPostStateSorted`] using
     /// cached intermediate nodes.
     fn overlay_root_from_nodes_with_updates(
         tx: &'a TX,
-        input: TrieInputSorted<E>,
+        input: TrieInputSorted,
     ) -> Result<(B256, TrieUpdates), StateRootError>;
 }
 
 /// Extends [`HashedPostStateSorted`] with operations specific for working with a database
 /// transaction.
-pub trait DatabaseHashedPostState<E: AccountExtension = EmptyAccountExtension>: Sized {
+pub trait DatabaseHashedPostState: Sized {
     /// Initializes [`HashedPostStateSorted`] from reverts. Iterates over state reverts in the
     /// specified range and aggregates them into sorted hashed state.
     fn from_reverts(
-        provider: &(impl ChangeSetReader<AccountExtension = E> + StorageChangeSetReader),
+        provider: &(impl ChangeSetReader + StorageChangeSetReader),
         range: impl RangeBounds<BlockNumber>,
-    ) -> Result<Self, ProviderError>;
+    ) -> Result<HashedPostStateSorted, ProviderError>;
 }
 
-impl<'a, TX: DbTx, A: crate::TrieTableAdapter, E: AccountExtension> DatabaseStateRoot<'a, TX, E>
-    for StateRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX, E>>
+impl<'a, TX: DbTx, A: crate::TrieTableAdapter> DatabaseStateRoot<'a, TX>
+    for StateRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>
 {
     fn from_tx(tx: &'a TX) -> Self {
         Self::new(DatabaseTrieCursorFactory::new(tx), DatabaseHashedCursorFactory::new(tx))
@@ -210,14 +196,14 @@ impl<'a, TX: DbTx, A: crate::TrieTableAdapter, E: AccountExtension> DatabaseStat
                  + StorageSettingsCache
                  + DBProvider<Tx = TX>),
         range: RangeInclusive<BlockNumber>,
-    ) -> Result<StateRootProgress<E>, StateRootError> {
+    ) -> Result<StateRootProgress, StateRootError> {
         debug!(target: "trie::loader", ?range, "incremental state root with progress");
         Self::incremental_root_calculator(provider, range)?.root_with_progress()
     }
 
     fn overlay_root(
         tx: &'a TX,
-        post_state: &HashedPostStateSorted<E>,
+        post_state: &HashedPostStateSorted,
     ) -> Result<B256, StateRootError> {
         let prefix_sets = post_state.construct_prefix_sets().freeze();
         StateRoot::new(
@@ -230,7 +216,7 @@ impl<'a, TX: DbTx, A: crate::TrieTableAdapter, E: AccountExtension> DatabaseStat
 
     fn overlay_root_with_updates(
         tx: &'a TX,
-        post_state: &HashedPostStateSorted<E>,
+        post_state: &HashedPostStateSorted,
     ) -> Result<(B256, TrieUpdates), StateRootError> {
         let prefix_sets = post_state.construct_prefix_sets().freeze();
         StateRoot::new(
@@ -241,10 +227,7 @@ impl<'a, TX: DbTx, A: crate::TrieTableAdapter, E: AccountExtension> DatabaseStat
         .root_with_updates()
     }
 
-    fn overlay_root_from_nodes(
-        tx: &'a TX,
-        input: TrieInputSorted<E>,
-    ) -> Result<B256, StateRootError> {
+    fn overlay_root_from_nodes(tx: &'a TX, input: TrieInputSorted) -> Result<B256, StateRootError> {
         StateRoot::new(
             InMemoryTrieCursorFactory::new(
                 DatabaseTrieCursorFactory::<_, A>::new(tx),
@@ -261,7 +244,7 @@ impl<'a, TX: DbTx, A: crate::TrieTableAdapter, E: AccountExtension> DatabaseStat
 
     fn overlay_root_from_nodes_with_updates(
         tx: &'a TX,
-        input: TrieInputSorted<E>,
+        input: TrieInputSorted,
     ) -> Result<(B256, TrieUpdates), StateRootError> {
         StateRoot::new(
             InMemoryTrieCursorFactory::new(
@@ -278,7 +261,7 @@ impl<'a, TX: DbTx, A: crate::TrieTableAdapter, E: AccountExtension> DatabaseStat
     }
 }
 
-impl<E: AccountExtension> DatabaseHashedPostState<E> for HashedPostStateSorted<E> {
+impl DatabaseHashedPostState for HashedPostStateSorted {
     /// Builds a sorted hashed post-state from reverts.
     ///
     /// Reads MDBX data directly into Vecs, using `HashSet`s only to track seen keys.
@@ -290,7 +273,7 @@ impl<E: AccountExtension> DatabaseHashedPostState<E> for HashedPostStateSorted<E
     /// - Returns keys already ordered for trie iteration.
     #[instrument(target = "trie::db", skip(provider), fields(range))]
     fn from_reverts(
-        provider: &(impl ChangeSetReader<AccountExtension = E> + StorageChangeSetReader),
+        provider: &(impl ChangeSetReader + StorageChangeSetReader),
         range: impl RangeBounds<BlockNumber>,
     ) -> Result<Self, ProviderError> {
         // Extract concrete start/end values to use for both account and storage changesets.
@@ -402,10 +385,11 @@ mod tests {
         hashed_state.accounts.insert(
             B256::from(U256::from(1)),
             Some(Account {
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
                 nonce: 1,
                 balance: U256::from(10),
                 bytecode_hash: None,
-                ..Default::default()
             }),
         );
         hashed_state.accounts.insert(B256::from(U256::from(2)), None);
@@ -520,7 +504,7 @@ mod tests {
         assert_eq!(sorted.accounts.len(), 2);
         let hashed_addr1 = keccak256(address1);
         let account1 = sorted.accounts.iter().find(|(addr, _)| *addr == hashed_addr1).unwrap();
-        assert_eq!(account1.1.unwrap().nonce, 1);
+        assert_eq!(account1.1.as_ref().unwrap().nonce, 1);
 
         // Ordering guarantees - accounts sorted by hashed address
         assert!(sorted.accounts.windows(2).all(|w| w[0].0 <= w[1].0));
@@ -643,7 +627,7 @@ mod tests {
         let hashed_addr2 = keccak256(address2);
 
         let account1 = sorted.accounts.iter().find(|(addr, _)| *addr == hashed_addr1).unwrap();
-        assert_eq!(account1.1.unwrap().nonce, 1);
+        assert_eq!(account1.1.as_ref().unwrap().nonce, 1);
 
         let account2 = sorted.accounts.iter().find(|(addr, _)| *addr == hashed_addr2).unwrap();
         assert!(account2.1.is_none());
@@ -736,11 +720,11 @@ mod tests {
 
         let account1 =
             sorted.accounts.iter().find(|(addr, _)| *addr == expected_hashed_addr1).unwrap();
-        assert_eq!(account1.1.unwrap().nonce, 10);
+        assert_eq!(account1.1.as_ref().unwrap().nonce, 10);
 
         let account2 =
             sorted.accounts.iter().find(|(addr, _)| *addr == expected_hashed_addr2).unwrap();
-        assert_eq!(account2.1.unwrap().nonce, 20);
+        assert_eq!(account2.1.as_ref().unwrap().nonce, 20);
 
         assert!(sorted.accounts.windows(2).all(|w| w[0].0 <= w[1].0));
 

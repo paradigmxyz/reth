@@ -11,7 +11,7 @@ use alloy_serde::JsonStorageKey;
 use futures::Future;
 use reth_errors::RethError;
 use reth_evm::{ConfigureEvm, EvmEnvFor};
-use reth_primitives_traits::{AccountExtensionTy, BlockTy, RecoveredBlock, SealedHeaderFor};
+use reth_primitives_traits::{BlockTy, RecoveredBlock, SealedHeaderFor};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     error::{FromEvmError, IntoEthApiError},
@@ -181,7 +181,10 @@ pub trait EthState: LoadState + SpawnBlocking {
                 let proof = state
                     .proof(Default::default(), address, &storage_keys)
                     .map_err(Self::Error::from_eth_err)?;
-                Ok(proof.into_eip1186_response(keys))
+                proof
+                    .into_eip1186_response(keys)
+                    .map_err(RethError::other)
+                    .map_err(Self::Error::from_eth_err)
             })
             .await
         })
@@ -237,7 +240,10 @@ pub trait EthState: LoadState + SpawnBlocking {
                             .map_err(Self::Error::from_eth_err)?;
                         let storage_keys =
                             slots.into_iter().map(JsonStorageKey::from).collect::<Vec<_>>();
-                        Ok(proof.into_eip1186_response(storage_keys))
+                        proof
+                            .into_eip1186_response(storage_keys)
+                            .map_err(RethError::other)
+                            .map_err(Self::Error::from_eth_err)
                     })
                     .collect::<Result<Vec<_>, Self::Error>>()
             })
@@ -262,23 +268,13 @@ pub trait EthState: LoadState + SpawnBlocking {
                 let account = state.basic_account(&address).map_err(Self::Error::from_eth_err)?;
                 let Some(account) = account else { return Ok(None) };
 
-                let balance = account.balance;
-                let nonce = account.nonce;
-                let code_hash = account.bytecode_hash.unwrap_or(KECCAK_EMPTY);
-
                 // Provide a default `HashedStorage` value in order to
                 // get the storage root hash of the current state.
                 let storage_root = state
                     .storage_root(address, Default::default())
                     .map_err(Self::Error::from_eth_err)?;
 
-                Ok(Some(Account {
-                    balance,
-                    nonce,
-                    code_hash,
-                    storage_root,
-                    extension: Default::default(),
-                }))
+                Ok(Some(account.into_trie_account(storage_root)))
             })
             .await
         }
@@ -325,10 +321,7 @@ pub trait LoadState:
     > + RpcNodeCoreExt
 {
     /// Returns the state at the given block number
-    fn state_at_hash(
-        &self,
-        block_hash: B256,
-    ) -> Result<StateProviderBox<AccountExtensionTy<Self::Primitives>>, Self::Error> {
+    fn state_at_hash(&self, block_hash: B256) -> Result<StateProviderBox, Self::Error> {
         self.provider().history_by_block_hash(block_hash).map_err(Self::Error::from_eth_err)
     }
 
@@ -339,9 +332,7 @@ pub trait LoadState:
     fn state_at_block_id(
         &self,
         at: BlockId,
-    ) -> impl Future<
-        Output = Result<StateProviderBox<AccountExtensionTy<Self::Primitives>>, Self::Error>,
-    > + Send
+    ) -> impl Future<Output = Result<StateProviderBox, Self::Error>> + Send
     where
         Self: SpawnBlocking,
     {
@@ -357,9 +348,7 @@ pub trait LoadState:
     }
 
     /// Returns the _latest_ state
-    fn latest_state(
-        &self,
-    ) -> Result<StateProviderBox<AccountExtensionTy<Self::Primitives>>, Self::Error> {
+    fn latest_state(&self) -> Result<StateProviderBox, Self::Error> {
         self.provider().latest().map_err(Self::Error::from_eth_err)
     }
 
@@ -369,9 +358,7 @@ pub trait LoadState:
     fn state_at_block_id_or_latest(
         &self,
         block_id: Option<BlockId>,
-    ) -> impl Future<
-        Output = Result<StateProviderBox<AccountExtensionTy<Self::Primitives>>, Self::Error>,
-    > + Send
+    ) -> impl Future<Output = Result<StateProviderBox, Self::Error>> + Send
     where
         Self: SpawnBlocking,
     {

@@ -117,10 +117,11 @@ impl PayloadTypes for CustomEngineTypes {
     type ExecutionData = ExecutionData;
     type BuiltPayload = EthBuiltPayload;
     type PayloadAttributes = CustomPayloadAttributes;
-    type Primitives = EthPrimitives;
 
     fn block_to_payload(
-        block: SealedBlock<<Self::Primitives as reth_ethereum::node::api::NodePrimitives>::Block>,
+        block: SealedBlock<
+                <<Self::BuiltPayload as reth_ethereum::node::api::BuiltPayload>::Primitives as reth_ethereum::node::api::NodePrimitives>::Block,
+            >,
         _bal: Option<Bytes>,
     ) -> ExecutionData {
         let (payload, sidecar) =
@@ -323,9 +324,7 @@ pub struct CustomPayloadBuilder<Pool, Client, Evm> {
 
 impl<Pool, Client, Evm> PayloadBuilder for CustomPayloadBuilder<Pool, Client, Evm>
 where
-    Client: StateProviderFactory<AccountExtension = reth_ethereum::primitives::EmptyAccountExtension>
-        + ChainSpecProvider<ChainSpec = ChainSpec>
-        + Clone,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> + Clone,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     Evm: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
 {

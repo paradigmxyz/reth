@@ -1,9 +1,7 @@
 use crate::primitives::alloy_primitives::{BlockNumber, StorageKey, StorageValue};
 use alloy_primitives::{Address, B256, U256};
 use core::ops::{Deref, DerefMut};
-use reth_primitives_traits::{
-    Account, AccountExtension, Bytecode as RethBytecode, EmptyAccountExtension,
-};
+use reth_primitives_traits::Account;
 use reth_storage_api::{AccountReader, BlockHashReader, BytecodeReader, StateProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
@@ -12,23 +10,20 @@ use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
 ///
 /// This serves as the data layer for [`Database`].
 pub trait EvmStateProvider {
-    /// Chain-specific account data passed through to the EVM.
-    type AccountExtension: AccountExtension;
-
     /// Get basic account information.
     ///
     /// Returns [`None`] if the account doesn't exist.
-    fn basic_account(
-        &self,
-        address: &Address,
-    ) -> ProviderResult<Option<Account<Self::AccountExtension>>>;
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>>;
 
     /// Get the hash of the block with the given number. Returns [`None`] if no block with this
     /// number exists.
     fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>>;
 
     /// Get account code by hash.
-    fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<RethBytecode>>;
+    fn bytecode_by_hash(
+        &self,
+        code_hash: &B256,
+    ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>>;
 
     /// Get storage of the given account.
     fn storage(
@@ -40,12 +35,7 @@ pub trait EvmStateProvider {
 
 // Blanket implementation of EvmStateProvider for any type that implements StateProvider.
 impl<T: StateProvider> EvmStateProvider for T {
-    type AccountExtension = T::AccountExtension;
-
-    fn basic_account(
-        &self,
-        address: &Address,
-    ) -> ProviderResult<Option<Account<Self::AccountExtension>>> {
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         <T as AccountReader>::basic_account(self, address)
     }
 
@@ -53,7 +43,10 @@ impl<T: StateProvider> EvmStateProvider for T {
         <T as BlockHashReader>::block_hash(self, number)
     }
 
-    fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<RethBytecode>> {
+    fn bytecode_by_hash(
+        &self,
+        code_hash: &B256,
+    ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>> {
         <T as BytecodeReader>::bytecode_by_hash(self, code_hash)
     }
 
@@ -187,15 +180,12 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
 /// distinguish missing bytecode from the database's default bytecode and wraps whatever the
 /// database returns in `Some`.
 #[derive(Clone)]
-pub struct DatabaseStateProvider<DB, E = EmptyAccountExtension>(
-    pub DB,
-    core::marker::PhantomData<E>,
-);
+pub struct DatabaseStateProvider<DB>(pub DB);
 
-impl<DB, E> DatabaseStateProvider<DB, E> {
+impl<DB> DatabaseStateProvider<DB> {
     /// Create a new database-backed state reader.
     pub const fn new(db: DB) -> Self {
-        Self(db, core::marker::PhantomData)
+        Self(db)
     }
 
     /// Consume self and return the inner database.
@@ -209,42 +199,36 @@ impl<DB, E> DatabaseStateProvider<DB, E> {
     }
 }
 
-impl<DB, E> core::fmt::Debug for DatabaseStateProvider<DB, E> {
+impl<DB> core::fmt::Debug for DatabaseStateProvider<DB> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("DatabaseStateProvider").finish_non_exhaustive()
     }
 }
 
-impl<DB, E: AccountExtension> reth_storage_api::AccountExtensionProvider
-    for DatabaseStateProvider<DB, E>
+impl<DB> AccountReader for DatabaseStateProvider<DB>
 where
     DB: DatabaseRef<Error = ProviderError>,
 {
-    type AccountExtension = E;
-}
-
-impl<DB, E: AccountExtension> AccountReader for DatabaseStateProvider<DB, E>
-where
-    DB: DatabaseRef<Error = ProviderError>,
-{
-    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account<E>>> {
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         Ok(self.0.basic_ref(*address)?.map(Into::into))
     }
 }
 
-impl<DB, E> BytecodeReader for DatabaseStateProvider<DB, E>
+impl<DB> BytecodeReader for DatabaseStateProvider<DB>
 where
     DB: DatabaseRef<Error = ProviderError>,
 {
-    fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<RethBytecode>> {
-        Ok(Some(RethBytecode(self.0.code_by_hash_ref(*code_hash)?)))
+    fn bytecode_by_hash(
+        &self,
+        code_hash: &B256,
+    ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>> {
+        Ok(Some(reth_primitives_traits::Bytecode(self.0.code_by_hash_ref(*code_hash)?)))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    type DatabaseStateProvider<DB> = super::DatabaseStateProvider<DB, EmptyAccountExtension>;
     use crate::cached::CachedReads;
     use alloy_consensus::constants::KECCAK_EMPTY;
     use alloy_primitives::Bytes;
@@ -326,11 +310,13 @@ mod tests {
     fn database_state_provider_maps_empty_code_hash() {
         let address = Address::repeat_byte(0x01);
         let account = AccountInfo {
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
             nonce: 7,
             balance: U256::from(42),
             code_hash: KECCAK_EMPTY,
             code: None,
-            ..Default::default()
+            account_id: None,
         };
         let db = CountingDatabaseRef::new(address, Some(account), Bytecode::default());
         let provider = DatabaseStateProvider::new(db);
@@ -338,10 +324,11 @@ mod tests {
         assert_eq!(
             provider.basic_account(&address).unwrap(),
             Some(Account {
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
                 nonce: 7,
                 balance: U256::from(42),
-                bytecode_hash: None,
-                ..Default::default()
+                bytecode_hash: None
             })
         );
     }
@@ -352,11 +339,13 @@ mod tests {
         let code_hash = B256::repeat_byte(0x42);
         let bytecode = Bytecode::new_raw(Bytes::from_static(&[0x60, 0x00]));
         let account = AccountInfo {
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
             nonce: 7,
             balance: U256::from(42),
             code_hash,
             code: Some(bytecode.clone()),
-            ..Default::default()
+            account_id: None,
         };
         let db = CountingDatabaseRef::new(address, Some(account), bytecode.clone());
         let provider = DatabaseStateProvider::new(db);
@@ -364,13 +353,17 @@ mod tests {
         assert_eq!(
             provider.basic_account(&address).unwrap(),
             Some(Account {
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
                 nonce: 7,
                 balance: U256::from(42),
-                bytecode_hash: Some(code_hash),
-                ..Default::default()
+                bytecode_hash: Some(code_hash)
             })
         );
-        assert_eq!(provider.bytecode_by_hash(&code_hash).unwrap(), Some(RethBytecode(bytecode)));
+        assert_eq!(
+            provider.bytecode_by_hash(&code_hash).unwrap(),
+            Some(reth_primitives_traits::Bytecode(bytecode))
+        );
     }
 
     #[test]
@@ -382,7 +375,7 @@ mod tests {
 
         assert_eq!(
             provider.bytecode_by_hash(&unknown_hash).unwrap(),
-            Some(RethBytecode(Bytecode::default()))
+            Some(reth_primitives_traits::Bytecode(Bytecode::default()))
         );
     }
 
@@ -413,11 +406,13 @@ mod tests {
         let code_hash = B256::repeat_byte(0x42);
         let bytecode = Bytecode::new_raw(Bytes::from_static(&[0x60, 0x00]));
         let account = AccountInfo {
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
             nonce: 7,
             balance: U256::from(42),
             code_hash,
             code: Some(bytecode.clone()),
-            ..Default::default()
+            account_id: None,
         };
         let db = CountingDatabaseRef::new(address, Some(account), bytecode.clone());
         let account_reads = db.account_reads.clone();
@@ -428,28 +423,33 @@ mod tests {
         assert_eq!(
             provider.basic_account(&address).unwrap(),
             Some(Account {
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
                 nonce: 7,
                 balance: U256::from(42),
-                bytecode_hash: Some(code_hash),
-                ..Default::default()
+                bytecode_hash: Some(code_hash)
             })
         );
         assert_eq!(
             provider.basic_account(&address).unwrap(),
             Some(Account {
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
                 nonce: 7,
                 balance: U256::from(42),
-                bytecode_hash: Some(code_hash),
-                ..Default::default()
+                bytecode_hash: Some(code_hash)
             })
         );
         assert_eq!(account_reads.load(Ordering::Relaxed), 1);
 
         assert_eq!(
             provider.bytecode_by_hash(&code_hash).unwrap(),
-            Some(RethBytecode(bytecode.clone()))
+            Some(reth_primitives_traits::Bytecode(bytecode.clone()))
         );
-        assert_eq!(provider.bytecode_by_hash(&code_hash).unwrap(), Some(RethBytecode(bytecode)));
+        assert_eq!(
+            provider.bytecode_by_hash(&code_hash).unwrap(),
+            Some(reth_primitives_traits::Bytecode(bytecode))
+        );
         assert_eq!(bytecode_reads.load(Ordering::Relaxed), 1);
     }
 }

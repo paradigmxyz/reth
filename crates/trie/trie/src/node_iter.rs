@@ -123,13 +123,11 @@ where
     ///
     /// If `metrics` feature is enabled, it also updates the metrics.
     fn seek_hashed_entry(&mut self, key: B256) -> Result<Option<(B256, H::Value)>, DatabaseError> {
-        if let Some((last_key, last_value)) = self.last_next_result.clone() &&
-            last_key == key
+        if let Some((last_key, _)) = self.last_next_result.as_ref() &&
+            *last_key == key
         {
             trace!(target: "trie::node_iter", seek_key = ?key, "reusing result from last next() call instead of seeking");
-            self.last_next_result = None; // Consume the cached value
-
-            let result = Some((last_key, last_value));
+            let result = self.last_next_result.take();
             self.last_seeked_hashed_entry =
                 Some(SeekedHashedEntry { seeked_key: key, result: result.clone() });
 
@@ -140,11 +138,11 @@ where
             .last_seeked_hashed_entry
             .as_ref()
             .filter(|entry| entry.seeked_key == key)
-            .and_then(|entry| entry.result.clone())
+            .map(|entry| entry.result.clone())
         {
             #[cfg(feature = "metrics")]
             self.metrics.inc_leaf_nodes_same_seeked();
-            return Ok(Some(entry));
+            return Ok(entry);
         }
 
         trace!(target: "trie::node_iter", ?key, "performing hashed cursor seek");
@@ -387,7 +385,7 @@ mod tests {
         fn empty_leaf_rlp_for_key(key: Nibbles) -> RlpNode {
             RlpNode::from_rlp(&alloy_rlp::encode(LeafNode::new(
                 key,
-                alloy_rlp::encode(TrieAccount::<()>::default()),
+                alloy_rlp::encode(TrieAccount::default()),
             )))
         }
 
@@ -409,14 +407,13 @@ mod tests {
         let account_3 = b256!("0x0000000000000000000000000000000000000000000000000000000000000100");
         let account_4 = b256!("0x0000000000000000000000000000000000000000000000000000000000000101");
         let account_5 = b256!("0x0000000000000000000000000000000000000000000000000000000000000110");
-        let empty_account = Account::default();
 
         let hash_builder_branch_nodes = get_hash_builder_branch_nodes(vec![
-            (Nibbles::unpack(account_1), empty_account),
-            (Nibbles::unpack(account_2), empty_account),
-            (Nibbles::unpack(account_3), empty_account),
-            (Nibbles::unpack(account_4), empty_account),
-            (Nibbles::unpack(account_5), empty_account),
+            (Nibbles::unpack(account_1), Account::default()),
+            (Nibbles::unpack(account_2), Account::default()),
+            (Nibbles::unpack(account_3), Account::default()),
+            (Nibbles::unpack(account_4), Account::default()),
+            (Nibbles::unpack(account_5), Account::default()),
         ]);
 
         let branch_node_1_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
@@ -481,11 +478,11 @@ mod tests {
 
         let hashed_cursor_factory = MockHashedCursorFactory::new(
             BTreeMap::from([
-                (account_1, empty_account),
-                (account_2, empty_account),
-                (account_3, empty_account),
-                (account_4, empty_account),
-                (account_5, empty_account),
+                (account_1, Account::default()),
+                (account_2, Account::default()),
+                (account_3, Account::default()),
+                (account_4, Account::default()),
+                (account_5, Account::default()),
             ]),
             B256Map::default(),
         );

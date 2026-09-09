@@ -33,10 +33,7 @@ impl<T> BlockExecutionOutput<T> {
     }
 
     /// Get account if account is known.
-    pub fn account<E: reth_primitives_traits::AccountExtension>(
-        &self,
-        address: &Address,
-    ) -> Option<Option<Account<E>>> {
+    pub fn account(&self, address: &Address) -> Option<Option<Account>> {
         self.state.account(address).map(|a| a.info.as_ref().map(Into::into))
     }
 

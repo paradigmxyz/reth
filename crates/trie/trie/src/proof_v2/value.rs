@@ -109,12 +109,12 @@ impl<T, H> SyncAccountValueEncoder<T, H> {
 
 /// The deferred encoder for an account value with synchronous storage root calculation.
 #[derive(Debug, Clone)]
-pub struct SyncAccountDeferredValueEncoder<T, H: HashedCursorFactory> {
+pub struct SyncAccountDeferredValueEncoder<T, H> {
     trie_cursor_factory: Rc<T>,
     hashed_cursor_factory: Rc<H>,
     storage_prefix_sets: Rc<B256Map<PrefixSet>>,
     hashed_address: B256,
-    account: Account<H::AccountExtension>,
+    account: Account,
 }
 
 impl<T, H> DeferredValueEncoder for SyncAccountDeferredValueEncoder<T, H>
@@ -148,7 +148,7 @@ where
     T: TrieCursorFactory,
     H: HashedCursorFactory,
 {
-    type Value = Account<H::AccountExtension>;
+    type Value = Account;
     type DeferredEncoder = SyncAccountDeferredValueEncoder<T, H>;
 
     fn deferred_encoder(

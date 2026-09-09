@@ -28,14 +28,14 @@ use tracing::{debug, debug_span, instrument};
 
 /// Contains the trie and hashed-state data required to initialize an overlay state provider.
 #[derive(Debug, Clone)]
-pub struct StateTrieOverlay<E = reth_primitives_traits::EmptyAccountExtension> {
-    input: TrieInputSorted<E>,
+pub struct StateTrieOverlay {
+    input: TrieInputSorted,
     /// Whether construction was skipped because a reused sparse trie covers this range.
     skipped_for_reused_sparse_trie: bool,
 }
 
-impl<E: reth_primitives_traits::AccountExtension> StateTrieOverlay<E> {
-    pub(crate) const fn new(input: TrieInputSorted<E>) -> Self {
+impl StateTrieOverlay {
+    pub(crate) const fn new(input: TrieInputSorted) -> Self {
         Self { input, skipped_for_reused_sparse_trie: false }
     }
 
@@ -44,12 +44,12 @@ impl<E: reth_primitives_traits::AccountExtension> StateTrieOverlay<E> {
     }
 
     /// Returns the trie input represented by this overlay.
-    pub const fn input(&self) -> &TrieInputSorted<E> {
+    pub const fn input(&self) -> &TrieInputSorted {
         &self.input
     }
 
     /// Consumes the overlay and returns its trie input.
-    pub fn into_input(self) -> TrieInputSorted<E> {
+    pub fn into_input(self) -> TrieInputSorted {
         self.input
     }
 
@@ -404,11 +404,11 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         &self,
         provider: &Provider,
         trie_changesets: bool,
-    ) -> ProviderResult<StateTrieOverlay<N::AccountExtension>>
+    ) -> ProviderResult<StateTrieOverlay>
     where
         Provider: StageCheckpointReader
             + PruneCheckpointReader
-            + ChangeSetReader<AccountExtension = N::AccountExtension>
+            + ChangeSetReader
             + StorageChangeSetReader
             + DBProvider
             + BlockNumReader
@@ -438,9 +438,9 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         state_trie_tip_block: BlockNumHash,
         finish_tip_block: BlockNumHash,
         trie_changesets: bool,
-    ) -> ProviderResult<StateTrieOverlay<N::AccountExtension>>
+    ) -> ProviderResult<StateTrieOverlay>
     where
-        Provider: ChangeSetReader<AccountExtension = N::AccountExtension>
+        Provider: ChangeSetReader
             + StorageChangeSetReader
             + DBProvider
             + BlockNumReader
@@ -599,7 +599,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     where
         Provider: StageCheckpointReader
             + PruneCheckpointReader
-            + ChangeSetReader<AccountExtension = N::AccountExtension>
+            + ChangeSetReader
             + StorageChangeSetReader
             + DBProvider
             + BlockNumReader,
@@ -622,7 +622,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         finish_tip_block: BlockNumHash,
     ) -> ProviderResult<(Arc<ExecutionOverlay>, Option<BlockNumber>)>
     where
-        Provider: ChangeSetReader<AccountExtension = N::AccountExtension>
+        Provider: ChangeSetReader
             + StorageChangeSetReader
             + DBProvider
             + BlockNumReader
@@ -640,12 +640,10 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     }
 
     /// Resolves the effective overlay (trie updates, hashed state).
-    #[expect(clippy::type_complexity)]
     fn resolve_state_trie_overlays(
         &self,
         anchor_hash: BlockHash,
-    ) -> ProviderResult<(Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted<N::AccountExtension>>)>
-    {
+    ) -> ProviderResult<(Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>)> {
         if anchor_hash == self.parent_hash {
             Ok((Arc::new(TrieUpdatesSorted::default()), Arc::new(HashedPostStateSorted::default())))
         } else {
@@ -933,14 +931,15 @@ mod tests {
         let value = U256::from(3);
         let code = Bytecode::new_raw(vec![0x60, 0x00].into());
         let code_hash = code.hash_slow();
-        let mut account = AccountInfo {
+        let account = AccountInfo {
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
             nonce: 4,
             balance: U256::from(5),
             code_hash,
             code: Some(code.clone()),
-            ..Default::default()
+            account_id: AccountId::new(6),
         };
-        account.account_id = AccountId::new(6);
         let state = BundleState::builder(0..=0)
             .state_present_account_info(address, account.clone())
             .state_storage(address, HashMap::from_iter([(slot, (U256::ZERO, value))]))

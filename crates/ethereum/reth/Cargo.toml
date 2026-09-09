@@ -52,7 +52,38 @@ alloy-rpc-types-eth = { workspace = true, optional = true }
 alloy-rpc-types-engine = { workspace = true, optional = true }
 
 [features]
-account-ext = ["reth-primitives-traits/account-ext"]
+account-ext = [
+    "reth-codecs?/account-ext",
+    "reth-node-builder?/account-ext",
+    "reth-node-ethereum?/account-ext",
+    "reth-revm?/account-ext",
+    "reth-trie?/account-ext",
+    "reth-chainspec/account-ext",
+    "reth-consensus?/account-ext",
+    "reth-consensus-common?/account-ext",
+    "reth-db?/account-ext",
+    "reth-engine-local?/account-ext",
+    "reth-eth-wire?/account-ext",
+    "reth-ethereum-cli?/account-ext",
+    "reth-ethereum-consensus?/account-ext",
+    "reth-ethereum-primitives/account-ext",
+    "reth-evm?/account-ext",
+    "reth-evm-ethereum?/account-ext",
+    "reth-exex?/account-ext",
+    "reth-network?/account-ext",
+    "reth-node-api?/account-ext",
+    "reth-node-core?/account-ext",
+    "reth-provider?/account-ext",
+    "reth-rpc?/account-ext",
+    "reth-rpc-api?/account-ext",
+    "reth-rpc-builder?/account-ext",
+    "reth-rpc-eth-types?/account-ext",
+    "reth-storage-api?/account-ext",
+    "reth-transaction-pool?/account-ext",
+    "reth-trie-db?/account-ext",
+    "reth-network-api?/account-ext",
+    "reth-tasks?/account-ext",
+]
 default = ["std"]
 std = [
     "reth-chainspec/std",

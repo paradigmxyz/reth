@@ -42,3 +42,4 @@ tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "time",
 [features]
 rayon = ["dep:rayon", "dep:crossbeam-utils", "pin-project"]
 test-utils = []
+account-ext = ["reth-metrics/account-ext"]

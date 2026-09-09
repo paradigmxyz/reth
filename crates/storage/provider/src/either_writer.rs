@@ -1,7 +1,6 @@
 //! Generic reader and writer abstractions for interacting with either database tables or static
 //! files.
 
-use reth_primitives_traits::AccountExtensionTy;
 use std::{
     collections::BTreeSet,
     marker::PhantomData,
@@ -139,12 +138,9 @@ impl<'a> EitherWriter<'a, (), ()> {
     pub fn new_account_changesets<P>(
         provider: &'a P,
         block_number: BlockNumber,
-    ) -> ProviderResult<DupEitherWriterTy<'a, P, tables::AccountChangeSets<P::AccountExtension>>>
+    ) -> ProviderResult<DupEitherWriterTy<'a, P, tables::AccountChangeSets>>
     where
-        P: DBProvider<AccountExtension = AccountExtensionTy<P::Primitives>>
-            + NodePrimitivesProvider
-            + StorageSettingsCache
-            + StaticFileProviderFactory,
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
         P::Tx: DbTxMut,
     {
         if provider.cached_storage_settings().storage_v2 {
@@ -154,9 +150,7 @@ impl<'a> EitherWriter<'a, (), ()> {
             ))
         } else {
             Ok(EitherWriter::Database(
-                provider
-                    .tx_ref()
-                    .cursor_dup_write::<tables::AccountChangeSets<P::AccountExtension>>()?,
+                provider.tx_ref().cursor_dup_write::<tables::AccountChangeSets>()?,
             ))
         }
     }
@@ -614,7 +608,7 @@ where
 
 impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>
 where
-    CURSOR: DbDupCursorRW<tables::AccountChangeSets<N::AccountExtension>>,
+    CURSOR: DbDupCursorRW<tables::AccountChangeSets>,
 {
     /// Append account changeset for a block.
     ///
@@ -622,7 +616,7 @@ where
     pub fn append_account_changeset(
         &mut self,
         block_number: BlockNumber,
-        mut changeset: Vec<AccountBeforeTx<N::AccountExtension>>,
+        mut changeset: Vec<AccountBeforeTx>,
     ) -> ProviderResult<()> {
         // First sort the changesets
         changeset.par_sort_by_key(|a| a.address);
@@ -772,21 +766,16 @@ impl<'a> EitherReader<'a, (), ()> {
     /// Creates a new [`EitherReader`] for account changesets based on storage settings.
     pub fn new_account_changesets<P>(
         provider: &P,
-    ) -> ProviderResult<DupEitherReaderTy<'a, P, tables::AccountChangeSets<P::AccountExtension>>>
+    ) -> ProviderResult<DupEitherReaderTy<'a, P, tables::AccountChangeSets>>
     where
-        P: DBProvider<AccountExtension = AccountExtensionTy<P::Primitives>>
-            + NodePrimitivesProvider
-            + StorageSettingsCache
-            + StaticFileProviderFactory,
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
         P::Tx: DbTx,
     {
         if EitherWriterDestination::account_changesets(provider).is_static_file() {
             Ok(EitherReader::StaticFile(provider.static_file_provider(), PhantomData))
         } else {
             Ok(EitherReader::Database(
-                provider
-                    .tx_ref()
-                    .cursor_dup_read::<tables::AccountChangeSets<P::AccountExtension>>()?,
+                provider.tx_ref().cursor_dup_read::<tables::AccountChangeSets>()?,
                 PhantomData,
             ))
         }
@@ -937,7 +926,7 @@ where
 
 impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
 where
-    CURSOR: DbCursorRO<tables::AccountChangeSets<N::AccountExtension>>,
+    CURSOR: DbCursorRO<tables::AccountChangeSets>,
 {
     /// Iterate over account changesets and return all account address that were changed.
     pub fn changed_accounts_with_range(

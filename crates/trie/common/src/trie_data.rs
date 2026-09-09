@@ -9,7 +9,7 @@ use crate::{
 };
 use alloc::sync::Arc;
 use core::fmt;
-use reth_primitives_traits::{sync::OnceLock, AccountExtension, EmptyAccountExtension};
+use reth_primitives_traits::sync::OnceLock;
 
 /// Container for sorted trie data: hashed state and trie updates.
 ///
@@ -17,18 +17,17 @@ use reth_primitives_traits::{sync::OnceLock, AccountExtension, EmptyAccountExten
 /// for convenient passing and storage.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(bound = ""))]
-pub struct SortedTrieData<E: AccountExtension = EmptyAccountExtension> {
+pub struct SortedTrieData {
     /// Sorted hashed post-state produced by execution.
-    pub hashed_state: Arc<HashedPostStateSorted<E>>,
+    pub hashed_state: Arc<HashedPostStateSorted>,
     /// Sorted trie updates produced by state root computation.
     pub trie_updates: Arc<TrieUpdatesSorted>,
 }
 
-impl<E: AccountExtension> SortedTrieData<E> {
+impl SortedTrieData {
     /// Creates a new [`SortedTrieData`] with the given values.
     pub const fn new(
-        hashed_state: Arc<HashedPostStateSorted<E>>,
+        hashed_state: Arc<HashedPostStateSorted>,
         trie_updates: Arc<TrieUpdatesSorted>,
     ) -> Self {
         Self { hashed_state, trie_updates }
@@ -37,15 +36,15 @@ impl<E: AccountExtension> SortedTrieData<E> {
 
 /// Container for sorted trie data.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ComputedTrieData<E: AccountExtension = EmptyAccountExtension> {
+pub struct ComputedTrieData {
     /// Sorted trie data: hashed state and trie updates.
-    pub sorted: SortedTrieData<E>,
+    pub sorted: SortedTrieData,
 }
 
-impl<E: AccountExtension> ComputedTrieData<E> {
+impl ComputedTrieData {
     /// Construct sorted trie data for one block.
     pub const fn new(
-        hashed_state: Arc<HashedPostStateSorted<E>>,
+        hashed_state: Arc<HashedPostStateSorted>,
         trie_updates: Arc<TrieUpdatesSorted>,
     ) -> Self {
         Self { sorted: SortedTrieData::new(hashed_state, trie_updates) }
@@ -64,22 +63,22 @@ impl<E: AccountExtension> ComputedTrieData<E> {
 /// or `trie_updates()`, and results are cached for subsequent calls.
 ///
 /// Cloning is cheap (Arc clone) and clones share the cached state.
-pub struct LazyTrieData<E: AccountExtension = EmptyAccountExtension> {
+pub struct LazyTrieData {
     /// Cached sorted trie data, computed on first access.
-    data: Arc<OnceLock<ComputedTrieData<E>>>,
+    data: Arc<OnceLock<ComputedTrieData>>,
     // /// Optional deferred computation function.
     // compute: Option<Arc<dyn Fn() -> SortedTrieData + Send + Sync>>,
     /// Lazy mode.
-    mode: LazyTrieDataMode<E>,
+    mode: LazyTrieDataMode,
 }
 
-impl<E: AccountExtension> Clone for LazyTrieData<E> {
+impl Clone for LazyTrieData {
     fn clone(&self) -> Self {
         Self { data: Arc::clone(&self.data), mode: self.mode.clone() }
     }
 }
 
-impl<E: AccountExtension> fmt::Debug for LazyTrieData<E> {
+impl fmt::Debug for LazyTrieData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("LazyTrieData")
             .field("data", &if self.data.get().is_some() { "initialized" } else { "pending" })
@@ -87,17 +86,17 @@ impl<E: AccountExtension> fmt::Debug for LazyTrieData<E> {
     }
 }
 
-impl<E: AccountExtension> PartialEq for LazyTrieData<E> {
+impl PartialEq for LazyTrieData {
     fn eq(&self, other: &Self) -> bool {
         self.get() == other.get()
     }
 }
 
-impl<E: AccountExtension> Eq for LazyTrieData<E> {}
+impl Eq for LazyTrieData {}
 
-impl<E: AccountExtension> LazyTrieData<E> {
+impl LazyTrieData {
     /// Creates a new [`LazyTrieData`] that is already initialized with the given values.
-    pub fn ready(sorted: ComputedTrieData<E>) -> Self {
+    pub fn ready(sorted: ComputedTrieData) -> Self {
         Self { data: Arc::new(OnceLock::from(sorted)), mode: LazyTrieDataMode::Ready }
     }
 
@@ -105,7 +104,7 @@ impl<E: AccountExtension> LazyTrieData<E> {
     ///
     /// The computation will run on the first call to `get()`, `hashed_state()`,
     /// or `trie_updates()`. Results are cached for subsequent calls.
-    pub fn deferred(compute: impl Fn() -> ComputedTrieData<E> + Send + Sync + 'static) -> Self {
+    pub fn deferred(compute: impl Fn() -> ComputedTrieData + Send + Sync + 'static) -> Self {
         Self {
             data: Arc::new(OnceLock::new()),
             mode: LazyTrieDataMode::Deferred(Arc::new(compute)),
@@ -115,9 +114,9 @@ impl<E: AccountExtension> LazyTrieData<E> {
     /// Creates a new [`LazyTrieData`] with a spawned task to compute sorted trie data.
     #[cfg(feature = "std")]
     pub fn pending(
-        hashed_state: Arc<HashedPostState<E>>,
+        hashed_state: Arc<HashedPostState>,
         trie_updates: Arc<TrieUpdates>,
-    ) -> (Self, LazyTrieDataProducer<E>) {
+    ) -> (Self, LazyTrieDataProducer) {
         let value = Arc::new(OnceLock::new());
         (
             Self { data: Arc::clone(&value), mode: LazyTrieDataMode::Pending },
@@ -130,7 +129,7 @@ impl<E: AccountExtension> LazyTrieData<E> {
     /// # Panics
     ///
     /// Panics if in ready state, but value has not been initialized.
-    pub fn get(&self) -> &ComputedTrieData<E> {
+    pub fn get(&self) -> &ComputedTrieData {
         match &self.mode {
             LazyTrieDataMode::Ready => self.data.get().expect("LazyTrieData must be initialized"),
             LazyTrieDataMode::Deferred(compute) => self.data.get_or_init(|| compute.as_ref()()),
@@ -142,7 +141,7 @@ impl<E: AccountExtension> LazyTrieData<E> {
     /// Returns a clone of the hashed state Arc.
     ///
     /// If not initialized, computes from the deferred source or panics.
-    pub fn hashed_state(&self) -> Arc<HashedPostStateSorted<E>> {
+    pub fn hashed_state(&self) -> Arc<HashedPostStateSorted> {
         Arc::clone(&self.get().sorted.hashed_state)
     }
 
@@ -156,13 +155,13 @@ impl<E: AccountExtension> LazyTrieData<E> {
     /// Returns a clone of the [`SortedTrieData`].
     ///
     /// If not initialized, computes from the deferred source or panics.
-    pub fn sorted_trie_data(&self) -> SortedTrieData<E> {
+    pub fn sorted_trie_data(&self) -> SortedTrieData {
         self.get().sorted.clone()
     }
 }
 
 #[cfg(feature = "serde")]
-impl<E: AccountExtension> serde::Serialize for LazyTrieData<E> {
+impl serde::Serialize for LazyTrieData {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -172,7 +171,7 @@ impl<E: AccountExtension> serde::Serialize for LazyTrieData<E> {
 }
 
 #[cfg(feature = "serde")]
-impl<'de, E: AccountExtension> serde::Deserialize<'de> for LazyTrieData<E> {
+impl<'de> serde::Deserialize<'de> for LazyTrieData {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -183,14 +182,14 @@ impl<'de, E: AccountExtension> serde::Deserialize<'de> for LazyTrieData<E> {
 }
 
 #[derive(Clone)]
-enum LazyTrieDataMode<E: AccountExtension> {
+enum LazyTrieDataMode {
     Ready,
-    Deferred(Arc<dyn Fn() -> ComputedTrieData<E> + Send + Sync>),
+    Deferred(Arc<dyn Fn() -> ComputedTrieData + Send + Sync>),
     #[cfg(feature = "std")]
     Pending,
 }
 
-impl<E: AccountExtension> fmt::Debug for LazyTrieDataMode<E> {
+impl fmt::Debug for LazyTrieDataMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Ready => write!(f, "Ready"),
@@ -203,22 +202,22 @@ impl<E: AccountExtension> fmt::Debug for LazyTrieDataMode<E> {
 
 /// Producer consumed by a spawned task to compute sorted trie data for a [`LazyTrieData`] handle.
 #[must_use = "LazyTrieDataProducer must be consumed with compute_and_publish to wake trie data waiters"]
-pub struct LazyTrieDataProducer<E: AccountExtension = EmptyAccountExtension> {
+pub struct LazyTrieDataProducer {
     /// Shared result initialized exactly once by this producer.
-    value: Arc<OnceLock<ComputedTrieData<E>>>,
+    value: Arc<OnceLock<ComputedTrieData>>,
     /// Unsorted inputs consumed when the producer computes trie data.
-    inputs: PendingInputs<E>,
+    inputs: PendingInputs,
 }
 
-impl<E: AccountExtension> fmt::Debug for LazyTrieDataProducer<E> {
+impl fmt::Debug for LazyTrieDataProducer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("LazyTrieDataProducer").field("inputs", &self.inputs).finish_non_exhaustive()
     }
 }
 
-impl<E: AccountExtension> LazyTrieDataProducer<E> {
+impl LazyTrieDataProducer {
     /// Computes sorted trie data, publishes it to waiters, and returns it to the task owner.
-    pub fn compute_and_publish(self) -> ComputedTrieData<E> {
+    pub fn compute_and_publish(self) -> ComputedTrieData {
         let Self { value, inputs } = self;
         let computed = Self::sort(inputs.hashed_state, inputs.trie_updates);
         let _ = value.set(computed.clone());
@@ -227,9 +226,9 @@ impl<E: AccountExtension> LazyTrieDataProducer<E> {
 
     /// Sorts block execution outputs.
     pub fn sort(
-        hashed_state: Arc<HashedPostState<E>>,
+        hashed_state: Arc<HashedPostState>,
         trie_updates: Arc<TrieUpdates>,
-    ) -> ComputedTrieData<E> {
+    ) -> ComputedTrieData {
         #[cfg(feature = "rayon")]
         let (sorted_hashed_state, sorted_trie_updates) = rayon::join(
             || match Arc::try_unwrap(hashed_state) {
@@ -260,9 +259,9 @@ impl<E: AccountExtension> LazyTrieDataProducer<E> {
 
 /// Inputs kept while a deferred trie computation is pending.
 #[derive(Clone, Debug)]
-struct PendingInputs<E: AccountExtension> {
+struct PendingInputs {
     /// Unsorted hashed post-state from execution.
-    hashed_state: Arc<HashedPostState<E>>,
+    hashed_state: Arc<HashedPostState>,
     /// Unsorted trie updates from state root computation.
     trie_updates: Arc<TrieUpdates>,
 }
@@ -280,26 +279,22 @@ mod tests {
     };
 
     fn empty_pending() -> (LazyTrieData, LazyTrieDataProducer) {
-        LazyTrieData::<EmptyAccountExtension>::pending(
-            Arc::new(HashedPostState::<EmptyAccountExtension>::default()),
+        LazyTrieData::pending(
+            Arc::new(HashedPostState::default()),
             Arc::new(TrieUpdates::default()),
         )
     }
 
     #[test]
     fn test_lazy_ready_is_initialized() {
-        let lazy = LazyTrieData::<EmptyAccountExtension>::ready(ComputedTrieData::<
-            EmptyAccountExtension,
-        >::default());
+        let lazy = LazyTrieData::ready(ComputedTrieData::default());
         let _ = lazy.hashed_state();
         let _ = lazy.trie_updates();
     }
 
     #[test]
     fn test_lazy_clone_shares_state() {
-        let lazy1 = LazyTrieData::<EmptyAccountExtension>::ready(ComputedTrieData::<
-            EmptyAccountExtension,
-        >::default());
+        let lazy1 = LazyTrieData::ready(ComputedTrieData::default());
         let lazy2 = lazy1.clone();
 
         // Both point to the same data
@@ -309,17 +304,15 @@ mod tests {
 
     #[test]
     fn test_lazy_deferred() {
-        let lazy = LazyTrieData::<EmptyAccountExtension>::deferred(
-            ComputedTrieData::<EmptyAccountExtension>::default,
-        );
+        let lazy = LazyTrieData::deferred(ComputedTrieData::default);
         assert!(lazy.hashed_state().is_empty());
         assert!(lazy.trie_updates().is_empty());
     }
 
     #[test]
     fn ready_returns_immediately() {
-        let bundle = ComputedTrieData::<EmptyAccountExtension>::default();
-        let deferred = LazyTrieData::<EmptyAccountExtension>::ready(bundle.clone());
+        let bundle = ComputedTrieData::default();
+        let deferred = LazyTrieData::ready(bundle.clone());
 
         let result = deferred.get();
 
@@ -376,17 +369,15 @@ mod tests {
     fn sorts_non_empty_inputs() {
         let hashed_address = B256::with_last_byte(1);
         let hashed_slot = B256::with_last_byte(2);
-        let hashed_state = HashedPostState::<EmptyAccountExtension>::default()
-            .with_accounts([(hashed_address, Some(Account::<EmptyAccountExtension>::default()))])
+        let hashed_state = HashedPostState::default()
+            .with_accounts([(hashed_address, Some(Account::default()))])
             .with_storages([(
                 hashed_address,
                 HashedStorage::from_iter([(hashed_slot, U256::from(1))]),
             )]);
 
-        let (deferred, task) = LazyTrieData::<EmptyAccountExtension>::pending(
-            Arc::new(hashed_state),
-            Arc::new(TrieUpdates::default()),
-        );
+        let (deferred, task) =
+            LazyTrieData::pending(Arc::new(hashed_state), Arc::new(TrieUpdates::default()));
         let _ = task.compute_and_publish();
         let result = deferred.get().clone();
 
@@ -398,10 +389,9 @@ mod tests {
     fn wait_does_not_block_after_first_compute() {
         let mut accounts = B256Map::default();
         for i in 0..100 {
-            accounts
-                .insert(B256::with_last_byte(i), Some(Account::<EmptyAccountExtension>::default()));
+            accounts.insert(B256::with_last_byte(i), Some(Account::default()));
         }
-        let (deferred, task) = LazyTrieData::<EmptyAccountExtension>::pending(
+        let (deferred, task) = LazyTrieData::pending(
             Arc::new(HashedPostState { accounts, storages: Default::default() }),
             Arc::new(TrieUpdates::default()),
         );

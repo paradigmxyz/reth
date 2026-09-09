@@ -1,3 +1,5 @@
+// Accounts are only Copy when account-ext is disabled.
+#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
 #![allow(missing_docs)]
 
 use alloy_primitives::{B256, U256};
@@ -5,7 +7,7 @@ use proptest::prelude::*;
 use proptest_arbitrary_interop::arb;
 use reth_db::{tables, test_utils::create_test_rw_db};
 use reth_db_api::{database::Database, transaction::DbTxMut};
-use reth_primitives_traits::{Account, EmptyAccountExtension, StorageEntry};
+use reth_primitives_traits::{Account, StorageEntry};
 use reth_trie::{
     hashed_cursor::{
         HashedCursor, HashedCursorFactory, HashedPostStateCursorFactory, HashedStorageCursor,
@@ -16,7 +18,7 @@ use reth_trie_db::DatabaseHashedCursorFactory;
 use std::collections::BTreeMap;
 
 fn assert_account_cursor_order(
-    factory: &impl HashedCursorFactory<AccountExtension = EmptyAccountExtension>,
+    factory: &impl HashedCursorFactory,
     mut expected: impl Iterator<Item = (B256, Account)>,
 ) {
     let mut cursor = factory.hashed_account_cursor().unwrap();
@@ -57,9 +59,9 @@ fn post_state_only_accounts() {
     let accounts =
         (1..11).map(|key| (B256::with_last_byte(key), Account::default())).collect::<Vec<_>>();
 
-    let mut hashed_post_state = HashedPostState::<EmptyAccountExtension>::default();
+    let mut hashed_post_state = HashedPostState::default();
     for (hashed_address, account) in &accounts {
-        hashed_post_state.accounts.insert(*hashed_address, Some(*account));
+        hashed_post_state.accounts.insert(*hashed_address, Some(account.clone()));
     }
 
     let db = create_test_rw_db();
@@ -78,12 +80,12 @@ fn db_only_accounts() {
     let db = create_test_rw_db();
     db.update(|tx| {
         for (key, account) in &accounts {
-            tx.put::<tables::HashedAccounts>(*key, *account).unwrap();
+            tx.put::<tables::HashedAccounts>(*key, account.clone()).unwrap();
         }
     })
     .unwrap();
 
-    let sorted_post_state = HashedPostState::<EmptyAccountExtension>::default().into_sorted();
+    let sorted_post_state = HashedPostState::default().into_sorted();
     let tx = db.tx().unwrap();
     let factory = HashedPostStateCursorFactory::new(
         DatabaseHashedCursorFactory::new(&tx),
@@ -101,14 +103,14 @@ fn account_cursor_correct_order() {
     let db = create_test_rw_db();
     db.update(|tx| {
         for (key, account) in accounts.iter().filter(|x| x.0[31].is_multiple_of(2)) {
-            tx.put::<tables::HashedAccounts>(*key, *account).unwrap();
+            tx.put::<tables::HashedAccounts>(*key, account.clone()).unwrap();
         }
     })
     .unwrap();
 
-    let mut hashed_post_state = HashedPostState::<EmptyAccountExtension>::default();
+    let mut hashed_post_state = HashedPostState::default();
     for (hashed_address, account) in accounts.iter().filter(|x| !x.0[31].is_multiple_of(2)) {
-        hashed_post_state.accounts.insert(*hashed_address, Some(*account));
+        hashed_post_state.accounts.insert(*hashed_address, Some(account.clone()));
     }
 
     let sorted = hashed_post_state.into_sorted();
@@ -128,7 +130,7 @@ fn removed_accounts_are_discarded() {
     let db = create_test_rw_db();
     db.update(|tx| {
         for (key, account) in accounts.iter().filter(|x| x.0[31].is_multiple_of(2)) {
-            tx.put::<tables::HashedAccounts>(*key, *account).unwrap();
+            tx.put::<tables::HashedAccounts>(*key, account.clone()).unwrap();
         }
     })
     .unwrap();
@@ -137,7 +139,7 @@ fn removed_accounts_are_discarded() {
     for (hashed_address, account) in accounts.iter().filter(|x| !x.0[31].is_multiple_of(2)) {
         hashed_post_state.accounts.insert(
             *hashed_address,
-            if removed_keys.contains(hashed_address) { None } else { Some(*account) },
+            if removed_keys.contains(hashed_address) { None } else { Some(account.clone()) },
         );
     }
 
@@ -165,7 +167,7 @@ fn post_state_accounts_take_precedence() {
 
     let mut hashed_post_state = HashedPostState::default();
     for (hashed_address, account) in &accounts {
-        hashed_post_state.accounts.insert(*hashed_address, Some(*account));
+        hashed_post_state.accounts.insert(*hashed_address, Some(account.clone()));
     }
 
     let sorted = hashed_post_state.into_sorted();
@@ -180,21 +182,21 @@ fn fuzz_hashed_account_cursor() {
             let db = create_test_rw_db();
             db.update(|tx| {
                 for (key, account) in &db_accounts {
-                    tx.put::<tables::HashedAccounts>(*key, *account).unwrap();
+                    tx.put::<tables::HashedAccounts>(*key, account.clone()).unwrap();
                 }
             })
             .unwrap();
 
             let mut hashed_post_state = HashedPostState::default();
             for (hashed_address, account) in &post_state_accounts {
-                hashed_post_state.accounts.insert(*hashed_address, *account);
+                hashed_post_state.accounts.insert(*hashed_address, account.clone());
             }
 
             let mut expected = db_accounts;
             // overwrite or remove accounts from the expected result
             for (key, account) in &post_state_accounts {
                 if let Some(account) = account {
-                    expected.insert(*key, *account);
+                    expected.insert(*key, account.clone());
                 } else {
                     expected.remove(key);
                 }
@@ -216,7 +218,7 @@ fn storage_is_empty() {
 
     // empty from the get go
     {
-        let sorted = HashedPostState::<EmptyAccountExtension>::default().into_sorted();
+        let sorted = HashedPostState::default().into_sorted();
         let tx = db.tx().unwrap();
         let factory =
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(&tx), &sorted);
@@ -237,7 +239,7 @@ fn storage_is_empty() {
 
     // not empty
     {
-        let sorted = HashedPostState::<EmptyAccountExtension>::default().into_sorted();
+        let sorted = HashedPostState::default().into_sorted();
         let tx = db.tx().unwrap();
         let factory =
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(&tx), &sorted);
@@ -250,7 +252,7 @@ fn storage_is_empty() {
         let mut hashed_storage = HashedStorage::default();
         hashed_storage.storage.insert(B256::with_last_byte(0), U256::ZERO);
 
-        let mut hashed_post_state = HashedPostState::<EmptyAccountExtension>::default();
+        let mut hashed_post_state = HashedPostState::default();
         hashed_post_state.storages.insert(address, hashed_storage);
 
         let sorted = hashed_post_state.into_sorted();
@@ -286,7 +288,7 @@ fn storage_cursor_correct_order() {
         hashed_storage.storage.insert(*slot, *value);
     }
 
-    let mut hashed_post_state = HashedPostState::<EmptyAccountExtension>::default();
+    let mut hashed_post_state = HashedPostState::default();
     hashed_post_state.storages.insert(address, hashed_storage);
 
     let sorted = hashed_post_state.into_sorted();
@@ -325,7 +327,7 @@ fn zero_value_storage_entries_are_discarded() {
         hashed_storage.storage.insert(*slot, *value);
     }
 
-    let mut hashed_post_state = HashedPostState::<EmptyAccountExtension>::default();
+    let mut hashed_post_state = HashedPostState::default();
     hashed_post_state.storages.insert(address, hashed_storage);
 
     let sorted = hashed_post_state.into_sorted();
@@ -362,7 +364,7 @@ fn post_state_storages_take_precedence() {
         hashed_storage.storage.insert(*slot, *value);
     }
 
-    let mut hashed_post_state = HashedPostState::<EmptyAccountExtension>::default();
+    let mut hashed_post_state = HashedPostState::default();
     hashed_post_state.storages.insert(address, hashed_storage);
 
     let sorted = hashed_post_state.into_sorted();
@@ -391,7 +393,7 @@ fn fuzz_hashed_storage_cursor() {
         })
         .unwrap();
 
-        let mut hashed_post_state = HashedPostState::<EmptyAccountExtension>::default();
+        let mut hashed_post_state = HashedPostState::default();
 
         for (address, storage) in &post_state_storages {
             let mut hashed_storage = HashedStorage::default();
@@ -451,7 +453,7 @@ fn all_storage_slots_deleted_exact_keys() {
         hashed_storage.storage.insert(*key, U256::ZERO); // Zero value = deletion
     }
 
-    let mut hashed_post_state = HashedPostState::<EmptyAccountExtension>::default();
+    let mut hashed_post_state = HashedPostState::default();
     hashed_post_state.storages.insert(address, hashed_storage);
 
     let sorted = hashed_post_state.into_sorted();

@@ -346,7 +346,7 @@ mod tests {
 
     #[test]
     fn noop_provider_returns_empty_results() {
-        let provider: crate::noop::NoopProvider = Default::default();
+        let provider = crate::noop::NoopProvider::default();
         let hashes = [B256::random(), B256::random()];
 
         assert_eq!(provider.get_bals_by_hashes(&hashes).unwrap(), vec![None, None]);

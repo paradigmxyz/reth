@@ -16,9 +16,7 @@ use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutionOutput},
     ConfigureEvm, Evm, EvmEnvFor, NextBlockEnvAttributes,
 };
-use reth_primitives_traits::{
-    transaction::error::InvalidTransactionError, AccountExtensionTy, HeaderTy, SealedHeader,
-};
+use reth_primitives_traits::{transaction::error::InvalidTransactionError, HeaderTy, SealedHeader};
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_types::{
@@ -110,15 +108,9 @@ pub trait LoadPendingBlock:
     }
 
     /// Returns a [`StateProviderBox`] on a mem-pool built pending block overlaying latest.
-    #[expect(clippy::type_complexity)]
     fn local_pending_state(
         &self,
-    ) -> impl Future<
-        Output = Result<
-            Option<StateProviderBox<AccountExtensionTy<Self::Primitives>>>,
-            Self::Error,
-        >,
-    > + Send
+    ) -> impl Future<Output = Result<Option<StateProviderBox>, Self::Error>> + Send
     where
         Self: SpawnBlocking,
     {
@@ -134,8 +126,7 @@ pub trait LoadPendingBlock:
 
             let state = BlockState::from(pending_block);
 
-            Ok(Some(Box::new(state.state_provider(latest_historical))
-                as StateProviderBox<AccountExtensionTy<Self::Primitives>>))
+            Ok(Some(Box::new(state.state_provider(latest_historical)) as StateProviderBox))
         }
     }
 
@@ -437,14 +428,7 @@ pub trait LoadPendingBlock:
         }
 
         let BlockBuilderOutcome { execution_result, block, hashed_state, trie_updates, .. } =
-            builder
-                .finish(
-                    NoopProvider::<reth_chainspec::ChainSpec, Self::Primitives>::new(
-                        reth_chainspec::MAINNET.clone(),
-                    ),
-                    None,
-                )
-                .map_err(Self::Error::from_eth_err)?;
+            builder.finish(NoopProvider::default(), None).map_err(Self::Error::from_eth_err)?;
 
         let execution_outcome =
             BlockExecutionOutput { state: db.take_bundle(), result: execution_result };

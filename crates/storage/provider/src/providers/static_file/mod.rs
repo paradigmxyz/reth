@@ -725,10 +725,11 @@ mod tests {
                 .map(|address| AccountBeforeTx {
                     address,
                     info: Some(Account {
+                        #[cfg(feature = "account-ext")]
+                        extension: Default::default(),
                         nonce: block_num,
                         balance: U256::from(block_num * 1000),
                         bytecode_hash: None,
-                        extension: Default::default(),
                     }),
                 })
                 .collect()
@@ -816,10 +817,11 @@ mod tests {
                     vec![AccountBeforeTx {
                         address: other_address,
                         info: Some(Account {
+                            #[cfg(feature = "account-ext")]
+                            extension: Default::default(),
                             nonce: 0,
                             balance: U256::ZERO,
                             bytecode_hash: None,
-                            ..Default::default()
                         }),
                     }],
                     1,
@@ -832,10 +834,11 @@ mod tests {
                     vec![AccountBeforeTx {
                         address: test_address,
                         info: Some(Account {
+                            #[cfg(feature = "account-ext")]
+                            extension: Default::default(),
                             nonce: 1,
                             balance: U256::from(1000),
                             bytecode_hash: None,
-                            extension: Default::default(),
                         }),
                     }],
                     2,
@@ -915,10 +918,11 @@ mod tests {
                     changeset.push(AccountBeforeTx {
                         address,
                         info: Some(Account {
+                            #[cfg(feature = "account-ext")]
+                            extension: Default::default(),
                             nonce: block_num,
                             balance: U256::from(block_num * 1000 + i as u64),
                             bytecode_hash: None,
-                            extension: Default::default(),
                         }),
                     });
                 }
@@ -1033,10 +1037,11 @@ mod tests {
                 .map(|addr| AccountBeforeTx {
                     address: *addr,
                     info: Some(Account {
+                        #[cfg(feature = "account-ext")]
+                        extension: Default::default(),
                         nonce: 1,
                         balance: U256::from(1000),
                         bytecode_hash: None,
-                        extension: Default::default(),
                     }),
                 })
                 .collect();

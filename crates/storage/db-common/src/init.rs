@@ -1,3 +1,6 @@
+// Accounts are only Copy when account-ext is disabled.
+#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+
 //! Reth genesis initialization utility functions.
 
 use alloy_consensus::BlockHeader;
@@ -361,7 +364,7 @@ where
         + AsRef<Provider>,
 {
     let capacity = alloc.size_hint().1.unwrap_or(0);
-    let mut state_init: BundleStateInit<Provider::AccountExtension> =
+    let mut state_init: BundleStateInit =
         AddressMap::with_capacity_and_hasher(capacity, Default::default());
     let mut reverts_init: AddressMap<_> =
         AddressMap::with_capacity_and_hasher(capacity, Default::default());
@@ -412,14 +415,14 @@ where
                     nonce: account.nonce.unwrap_or_default(),
                     balance: account.balance,
                     bytecode_hash,
-                    extension: Default::default(),
+                    #[cfg(feature = "account-ext")]
+                    extension: account.extension.clone(),
                 }),
                 storage,
             ),
         );
     }
-    let all_reverts_init: RevertsInit<Provider::AccountExtension> =
-        HashMap::from_iter([(block, reverts_init)]);
+    let all_reverts_init: RevertsInit = HashMap::from_iter([(block, reverts_init)]);
 
     let execution_outcome = ExecutionOutcome::new_init(
         state_init,
@@ -450,17 +453,7 @@ where
     Provider: DBProvider<Tx: DbTxMut> + HashingWriter,
 {
     // insert and hash accounts to hashing table
-    let alloc_accounts = alloc.clone().map(|(addr, account)| {
-        (
-            *addr,
-            Some(Account {
-                nonce: account.nonce.unwrap_or_default(),
-                balance: account.balance,
-                bytecode_hash: account.code.as_ref().map(alloy_primitives::keccak256),
-                extension: Provider::AccountExtension::default(),
-            }),
-        )
-    });
+    let alloc_accounts = alloc.clone().map(|(addr, account)| (*addr, Some(Account::from(account))));
     provider.insert_account_for_hashing(alloc_accounts)?;
 
     trace!(target: "reth::cli", "Inserted account hashes");
@@ -746,11 +739,13 @@ where
             seen_bytecodes = B256Set::default();
         }
 
-        write_account_to_db::<
-            _,
-            <PF::ProviderRW as reth_provider::AccountExtensionProvider>::AccountExtension,
-        >(
-            provider_rw.tx_ref(), &address, &account, block, &history_list, &mut seen_bytecodes
+        write_account_to_db(
+            provider_rw.tx_ref(),
+            &address,
+            &account,
+            block,
+            &history_list,
+            &mut seen_bytecodes,
         )?;
 
         total_accounts += 1;
@@ -983,7 +978,7 @@ where
 /// `StorageChangeSets` receive data in sorted order within each account). For `HashedAccounts`
 /// and `HashedStorages`, insertion order is unsorted (keccak scrambles address order), so we
 /// use `put`/`upsert` which do a full B-tree lookup.
-fn write_account_to_db<TX: DbTxMut, E: reth_primitives_traits::AccountExtension>(
+fn write_account_to_db<TX: DbTxMut>(
     tx: &TX,
     address: &Address,
     genesis_account: &GenesisAccount,
@@ -1007,19 +1002,20 @@ fn write_account_to_db<TX: DbTxMut, E: reth_primitives_traits::AccountExtension>
         nonce: genesis_account.nonce.unwrap_or_default(),
         balance: genesis_account.balance,
         bytecode_hash,
-        extension: Default::default(),
+        #[cfg(feature = "account-ext")]
+        extension: genesis_account.extension.clone(),
     };
 
     let hashed_address = keccak256(address);
 
     // plain state — sorted by address (ETL order), use append
-    tx.put::<tables::PlainAccountState<E>>(*address, account.clone())?;
+    tx.put::<tables::PlainAccountState>(*address, account.clone())?;
 
     // hashed state — unsorted (keccak scrambles order), must use put
-    tx.put::<tables::HashedAccounts<E>>(hashed_address, account)?;
+    tx.put::<tables::HashedAccounts>(hashed_address, account)?;
 
     // account changeset — DupSort keyed by block, subkey sorted by address (ETL order)
-    let mut acct_cs_cursor = tx.cursor_dup_write::<tables::AccountChangeSets<E>>()?;
+    let mut acct_cs_cursor = tx.cursor_dup_write::<tables::AccountChangeSets>()?;
     acct_cs_cursor.append_dup(block, AccountBeforeTx { address: *address, info: None })?;
 
     // account history
@@ -1096,13 +1092,14 @@ where
         nonce: genesis_account.nonce.unwrap_or_default(),
         balance: genesis_account.balance,
         bytecode_hash,
-        extension: Default::default(),
+        #[cfg(feature = "account-ext")]
+        extension: genesis_account.extension.clone(),
     };
 
     let hashed_address = keccak256(address);
     let (account_changeset_writer, storage_changeset_writer) = changeset_writers;
 
-    tx.put::<tables::HashedAccounts<N::AccountExtension>>(hashed_address, account)?;
+    tx.put::<tables::HashedAccounts>(hashed_address, account)?;
     account_changeset_writer
         .append_account_changeset_entry(AccountBeforeTx { address: *address, info: None })?;
     history_batch

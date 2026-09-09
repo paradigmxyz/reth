@@ -30,8 +30,8 @@ use reth_trie::{
     Nibbles,
 };
 use reth_trie_db::{
-    DatabaseHashedCursorFactoryTy, DatabaseStateRoot, DatabaseStateRootTy,
-    DatabaseTrieCursorFactory, StorageTrieEntryLike, TrieTableAdapter,
+    DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseTrieCursorFactory,
+    StorageTrieEntryLike, TrieTableAdapter,
 };
 use std::{
     net::SocketAddr,
@@ -121,14 +121,12 @@ fn verify_only<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
     let mut tx = db.tx()?;
     tx.disable_long_read_transaction_safety();
 
-    reth_trie_db::with_adapter!(tool.provider_factory, |A| do_verify_only::<_, A, N>(&tx))
+    reth_trie_db::with_adapter!(tool.provider_factory, |A| do_verify_only::<_, A>(&tx))
 }
 
-fn do_verify_only<TX: DbTx, A: TrieTableAdapter, N: ProviderNodeTypes>(
-    tx: &TX,
-) -> eyre::Result<()> {
+fn do_verify_only<TX: DbTx, A: TrieTableAdapter>(tx: &TX) -> eyre::Result<()> {
     // Create the verifier
-    let hashed_cursor_factory = DatabaseHashedCursorFactoryTy::<_, N::Primitives>::new(tx);
+    let hashed_cursor_factory = DatabaseHashedCursorFactory::new(tx);
     let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
     let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory)?;
 
@@ -221,7 +219,7 @@ fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()>
     verify_checkpoints(provider_rw.as_ref())?;
 
     let inconsistent_nodes = reth_trie_db::with_adapter!(tool.provider_factory, |A| {
-        do_verify_and_repair::<A, N>(&mut provider_rw, finish_checkpoint.block_number)?
+        do_verify_and_repair::<_, A>(&mut provider_rw, finish_checkpoint.block_number)?
     });
 
     if inconsistent_nodes == 0 {
@@ -234,7 +232,7 @@ fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()>
     Ok(())
 }
 
-fn do_verify_and_repair<A: TrieTableAdapter, N: ProviderNodeTypes>(
+fn do_verify_and_repair<N: ProviderNodeTypes, A: TrieTableAdapter>(
     provider_rw: &mut reth_provider::DatabaseProviderRW<N::DB, N>,
     block_number: u64,
 ) -> eyre::Result<usize>
@@ -250,7 +248,7 @@ where
     // Create the cursor factories. These cannot accept the `&mut` tx above because they
     // require it to be AsRef.
     let tx = provider_rw.tx_ref();
-    let hashed_cursor_factory = DatabaseHashedCursorFactoryTy::<_, N::Primitives>::new(tx);
+    let hashed_cursor_factory = DatabaseHashedCursorFactory::new(tx);
     let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
 
     // Create the verifier
@@ -342,19 +340,24 @@ where
     if inconsistent_nodes > 0 {
         // Refuse to commit repaired trie tables unless they reproduce the canonical tip state
         // root.
-        verify_repaired_state_root::<A, N>(provider_rw, block_number)?;
+        verify_repaired_state_root::<_, A>(provider_rw, block_number)?;
     }
 
     Ok(inconsistent_nodes as usize)
 }
 
-fn verify_repaired_state_root<A: TrieTableAdapter, N: ProviderNodeTypes>(
+fn verify_repaired_state_root<N: ProviderNodeTypes, A: TrieTableAdapter>(
     provider_rw: &reth_provider::DatabaseProviderRW<N::DB, N>,
     block_number: u64,
 ) -> eyre::Result<()>
 where
     <N::DB as reth_db_api::database::Database>::TXMut: DbTxMut + DbTx,
 {
+    type DbStateRoot<'a, TX, A> = reth_trie::StateRoot<
+        DatabaseTrieCursorFactory<&'a TX, A>,
+        DatabaseHashedCursorFactory<&'a TX>,
+    >;
+
     let expected_state_root = provider_rw
         .header_by_number(block_number)?
         .ok_or_else(|| {
@@ -362,8 +365,7 @@ where
         })?
         .state_root();
 
-    let computed_state_root =
-        DatabaseStateRootTy::<_, A, N::Primitives>::from_tx(provider_rw.tx_ref()).root()?;
+    let computed_state_root = DbStateRoot::<_, A>::from_tx(provider_rw.tx_ref()).root()?;
 
     if computed_state_root != expected_state_root {
         return Err(eyre::eyre!(

@@ -2,7 +2,6 @@
 //! methods.
 
 use core::fmt;
-use reth_primitives_traits::AccountExtensionTy;
 
 use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace};
 use crate::{
@@ -198,10 +197,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     if this.provider().chain_spec().is_amsterdam_active_at_timestamp(
                         evm_env.block_env.timestamp().saturating_to(),
                     ) {
-                        reth_storage_api::ensure_no_account_extensions::<
-                            AccountExtensionTy<Self::Primitives>,
-                        >("BAL")
-                        .map_err(Self::Error::from_eth_err)?;
+                        reth_storage_api::ensure_no_account_extensions("BAL")
+                            .map_err(Self::Error::from_eth_err)?;
                         db.bal_state = BalState::new().with_bal_builder();
                     }
 
@@ -623,12 +620,7 @@ pub trait Call:
         f: F,
     ) -> impl Future<Output = Result<R, Self::Error>> + Send
     where
-        F: FnOnce(
-                Self,
-                StateCacheDb<AccountExtensionTy<Self::Primitives>>,
-            ) -> Result<R, Self::Error>
-            + Send
-            + 'static,
+        F: FnOnce(Self, StateCacheDb) -> Result<R, Self::Error> + Send + 'static,
         R: Send + 'static,
     {
         let at = at.into();
@@ -664,7 +656,7 @@ pub trait Call:
     where
         Self: LoadPendingBlock,
         F: FnOnce(
-                &mut StateCacheDb<AccountExtensionTy<Self::Primitives>>,
+                &mut StateCacheDb,
                 EvmEnvFor<Self::Evm>,
                 TxEnvFor<Self::Evm>,
             ) -> Result<R, Self::Error>
@@ -706,7 +698,7 @@ pub trait Call:
         F: FnOnce(
                 TransactionInfo,
                 ResultAndState<HaltReasonFor<Self::Evm>>,
-                StateCacheDb<AccountExtensionTy<Self::Primitives>>,
+                StateCacheDb,
             ) -> Result<R, Self::Error>
             + Send
             + 'static,

@@ -71,7 +71,7 @@ impl Command {
         let entries = tool.provider_factory.db_ref().view(|tx| {
             let (account, walker_entries) = if use_hashed_state {
                 let hashed_address = keccak256(address);
-                let account = tx.get::<tables::HashedAccountsTy<N::Primitives>>(hashed_address)?;
+                let account = tx.get::<tables::HashedAccounts>(hashed_address)?;
                 let mut cursor = tx.cursor_dup_read::<tables::HashedStorages>()?;
                 let walker = cursor.walk_dup(Some(hashed_address), None)?;
                 let mut entries = Vec::new();
@@ -97,7 +97,7 @@ impl Command {
                 (account, entries)
             } else {
                 // Get account info
-                let account = tx.get::<tables::PlainAccountStateTy<N::Primitives>>(address)?;
+                let account = tx.get::<tables::PlainAccountState>(address)?;
                 // Get storage entries
                 let mut cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
                 let walker = cursor.walk_dup(Some(address), None)?;
@@ -393,11 +393,11 @@ impl Command {
         Ok(())
     }
 
-    fn print_results<E: reth_primitives_traits::AccountExtension>(
+    fn print_results(
         &self,
         address: Address,
         block: Option<BlockNumber>,
-        account: Option<reth_primitives_traits::Account<E>>,
+        account: Option<reth_primitives_traits::Account>,
         storage: &[(alloy_primitives::B256, U256)],
     ) {
         match self.format {

@@ -15,3 +15,6 @@ eyre.workspace = true
 
 [lints]
 workspace = true
+
+[features]
+account-ext = ["reth-ethereum/account-ext"]

@@ -13,7 +13,7 @@ use reth_trie_common::{updates::TrieUpdates, ExecutionWitnessMode, HashedPostSta
 /// Debug rpc interface.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "debug"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "debug"))]
-pub trait DebugApi<TxReq: RpcObject, E: reth_primitives_traits::AccountExtension> {
+pub trait DebugApi<TxReq: RpcObject> {
     /// Returns an RLP-encoded header.
     #[method(name = "getRawHeader")]
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes>;
@@ -354,7 +354,7 @@ pub trait DebugApi<TxReq: RpcObject, E: reth_primitives_traits::AccountExtension
     #[method(name = "stateRootWithUpdates")]
     async fn debug_state_root_with_updates(
         &self,
-        hashed_state: HashedPostState<E>,
+        hashed_state: HashedPostState,
         block_id: Option<BlockId>,
     ) -> RpcResult<(B256, TrieUpdates)>;
 

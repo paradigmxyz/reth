@@ -20,7 +20,6 @@ use jsonrpsee::{
 };
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_network_peers::NodeRecord;
-use reth_primitives_traits::EmptyAccountExtension;
 use reth_rpc_api::{
     clients::{AdminApiClient, EthApiClient},
     DebugApiClient, EthCallBundleApiClient, EthFilterApiClient, NetApiClient, OtterscanClient,
@@ -477,26 +476,13 @@ where
 {
     let block_id = BlockId::Number(BlockNumberOrTag::default());
 
-    DebugApiClient::<TransactionRequest, EmptyAccountExtension>::raw_header(client, block_id)
-        .await
-        .unwrap_err();
-    DebugApiClient::<TransactionRequest, EmptyAccountExtension>::raw_block(client, block_id)
-        .await
-        .unwrap_err();
-    DebugApiClient::<TransactionRequest, EmptyAccountExtension>::raw_transaction(
-        client,
-        B256::default(),
-    )
-    .await
-    .unwrap();
-    DebugApiClient::<TransactionRequest, EmptyAccountExtension>::raw_receipts(client, block_id)
-        .await
-        .unwrap_err();
-    DebugApiClient::<TransactionRequest, EmptyAccountExtension>::bad_blocks(client).await.unwrap();
-    DebugApiClient::<TransactionRequest, EmptyAccountExtension>::debug_clear_txpool(client)
-        .await
-        .unwrap();
-    DebugApiClient::<TransactionRequest, EmptyAccountExtension>::debug_account_at(
+    DebugApiClient::<TransactionRequest>::raw_header(client, block_id).await.unwrap_err();
+    DebugApiClient::<TransactionRequest>::raw_block(client, block_id).await.unwrap_err();
+    DebugApiClient::<TransactionRequest>::raw_transaction(client, B256::default()).await.unwrap();
+    DebugApiClient::<TransactionRequest>::raw_receipts(client, block_id).await.unwrap_err();
+    DebugApiClient::<TransactionRequest>::bad_blocks(client).await.unwrap();
+    DebugApiClient::<TransactionRequest>::debug_clear_txpool(client).await.unwrap();
+    DebugApiClient::<TransactionRequest>::debug_account_at(
         client,
         block_id,
         Index::default(),
@@ -504,7 +490,7 @@ where
     )
     .await
     .unwrap_err();
-    DebugApiClient::<TransactionRequest, EmptyAccountExtension>::debug_account_info_at(
+    DebugApiClient::<TransactionRequest>::debug_account_info_at(
         client,
         block_id,
         Index::default(),
@@ -520,15 +506,13 @@ where
         BlockId::hash_canonical(B256::ZERO),
     ] {
         let err =
-            DebugApiClient::<TransactionRequest, EmptyAccountExtension>::debug_execution_witness(
-                client, block_id, None,
-            )
-            .await
-            .unwrap_err();
+            DebugApiClient::<TransactionRequest>::debug_execution_witness(client, block_id, None)
+                .await
+                .unwrap_err();
         assert!(!is_invalid_params(&err));
     }
 
-    let err = DebugApiClient::<TransactionRequest, EmptyAccountExtension>::debug_execution_witness_by_block_hash(
+    let err = DebugApiClient::<TransactionRequest>::debug_execution_witness_by_block_hash(
         client,
         B256::ZERO,
         Some(Default::default()),
@@ -1821,9 +1805,7 @@ async fn test_debug_db_get() {
     ];
 
     for key in valid_test_cases {
-        DebugApiClient::<(), EmptyAccountExtension>::debug_db_get(&client, key.into())
-            .await
-            .unwrap();
+        DebugApiClient::<()>::debug_db_get(&client, key.into()).await.unwrap();
     }
 
     // Invalid test cases
@@ -1849,9 +1831,7 @@ async fn test_debug_db_get() {
     };
 
     for (key, expected) in test_cases {
-        let err = DebugApiClient::<(), EmptyAccountExtension>::debug_db_get(&client, key.into())
-            .await
-            .unwrap_err();
+        let err = DebugApiClient::<()>::debug_db_get(&client, key.into()).await.unwrap_err();
         assert!(match_error_msg(err, expected.into()));
     }
 }

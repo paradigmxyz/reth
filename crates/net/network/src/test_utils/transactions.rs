@@ -31,7 +31,7 @@ use tracing::trace;
 pub async fn new_tx_manager(
 ) -> (TransactionsManager<TestPool, EthNetworkPrimitives>, NetworkManager<EthNetworkPrimitives>) {
     let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-    let client = NoopProvider::<reth_chainspec::ChainSpec>::default();
+    let client = NoopProvider::default();
 
     let config = NetworkConfigBuilder::new(secret_key, Runtime::test())
         // let OS choose port

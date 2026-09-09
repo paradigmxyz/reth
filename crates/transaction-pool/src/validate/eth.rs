@@ -12,6 +12,7 @@ use crate::{
     Address, EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig,
     TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
+
 use alloy_consensus::{
     constants::{
         EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
@@ -28,8 +29,8 @@ use alloy_rlp::Encodable;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_primitives_traits::{
-    transaction::error::InvalidTransactionError, Account, AccountExtension, AccountExtensionTy,
-    BlockTy, EmptyAccountExtension, GotExpected, HeaderTy, SealedBlock,
+    transaction::error::InvalidTransactionError, Account, BlockTy, GotExpected, HeaderTy,
+    SealedBlock,
 };
 use reth_storage_api::{
     errors::ProviderError, AccountInfoReader, BlockReaderIdExt, BytecodeReader, StateProviderBox,
@@ -58,12 +59,8 @@ pub type StatelessValidationFn<T> =
 ///
 /// Receives the transaction origin, a reference to the transaction, and an account state reader.
 /// Returns `Ok(())` if the transaction passes or `Err` to reject it.
-pub type StatefulValidationFn<T, E = EmptyAccountExtension> = Arc<
-    dyn Fn(
-            TransactionOrigin,
-            &T,
-            &dyn AccountInfoReader<AccountExtension = E>,
-        ) -> Result<(), InvalidPoolTransactionError>
+pub type StatefulValidationFn<T> = Arc<
+    dyn Fn(TransactionOrigin, &T, &dyn AccountInfoReader) -> Result<(), InvalidPoolTransactionError>
         + Send
         + Sync,
 >;
@@ -82,7 +79,7 @@ pub type StatefulValidationFn<T, E = EmptyAccountExtension> = Arc<
 /// - Maximum gas limit
 ///
 /// And adheres to the configured [`LocalTransactionConfig`].
-pub struct EthTransactionValidator<Client, T, Evm: ConfigureEvm> {
+pub struct EthTransactionValidator<Client, T, Evm> {
     /// This type fetches account info from the db
     client: Client,
     /// The chain ID transactions must use.
@@ -132,11 +129,10 @@ pub struct EthTransactionValidator<Client, T, Evm: ConfigureEvm> {
     additional_stateless_validation: Option<StatelessValidationFn<T>>,
     /// Optional additional stateful validation check applied at the end of
     /// [`validate_stateful`](Self::validate_stateful).
-    additional_stateful_validation:
-        Option<StatefulValidationFn<T, AccountExtensionTy<Evm::Primitives>>>,
+    additional_stateful_validation: Option<StatefulValidationFn<T>>,
 }
 
-impl<Client, Tx, Evm: ConfigureEvm> fmt::Debug for EthTransactionValidator<Client, Tx, Evm> {
+impl<Client, Tx, Evm> fmt::Debug for EthTransactionValidator<Client, Tx, Evm> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("EthTransactionValidator")
             .field("fork_tracker", &self.fork_tracker)
@@ -163,7 +159,7 @@ impl<Client, Tx, Evm: ConfigureEvm> fmt::Debug for EthTransactionValidator<Clien
     }
 }
 
-impl<Client, Tx, Evm: ConfigureEvm> EthTransactionValidator<Client, Tx, Evm> {
+impl<Client, Tx, Evm> EthTransactionValidator<Client, Tx, Evm> {
     /// Returns the configured chain spec
     pub fn chain_spec(&self) -> Arc<Client::ChainSpec>
     where
@@ -327,7 +323,7 @@ impl<Client, Tx, Evm: ConfigureEvm> EthTransactionValidator<Client, Tx, Evm> {
         F: Fn(
                 TransactionOrigin,
                 &Tx,
-                &dyn AccountInfoReader<AccountExtension = AccountExtensionTy<Evm::Primitives>>,
+                &dyn AccountInfoReader,
             ) -> Result<(), InvalidPoolTransactionError>
             + Send
             + Sync
@@ -342,10 +338,7 @@ impl<Client, Tx, Evm: ConfigureEvm> EthTransactionValidator<Client, Tx, Evm> {
     /// This is useful when the same hook is shared across multiple validators, avoiding an extra
     /// allocation compared to
     /// [`set_additional_stateful_validation`](Self::set_additional_stateful_validation).
-    pub fn set_additional_stateful_validation_fn(
-        &mut self,
-        f: StatefulValidationFn<Tx, AccountExtensionTy<Evm::Primitives>>,
-    ) {
+    pub fn set_additional_stateful_validation_fn(&mut self, f: StatefulValidationFn<Tx>) {
         self.additional_stateful_validation = Some(f);
     }
 
@@ -355,7 +348,7 @@ impl<Client, Tx, Evm: ConfigureEvm> EthTransactionValidator<Client, Tx, Evm> {
     /// Passing `None` removes any previously configured check.
     pub fn set_additional_stateful_validation_fn_opt(
         &mut self,
-        f: Option<StatefulValidationFn<Tx, AccountExtensionTy<Evm::Primitives>>>,
+        f: Option<StatefulValidationFn<Tx>>,
     ) {
         self.additional_stateful_validation = f;
     }
@@ -363,8 +356,7 @@ impl<Client, Tx, Evm: ConfigureEvm> EthTransactionValidator<Client, Tx, Evm> {
 
 impl<Client, Tx, Evm> EthTransactionValidator<Client, Tx, Evm>
 where
-    Client: ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
-        + StateProviderFactory<AccountExtension = AccountExtensionTy<Evm::Primitives>>,
+    Client: ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks> + StateProviderFactory,
     Tx: EthPoolTransaction,
     Evm: ConfigureEvm,
 {
@@ -381,7 +373,7 @@ where
         origin: TransactionOrigin,
         transaction: Tx,
     ) -> TransactionValidationOutcome<Tx> {
-        let mut state: Option<StateProviderBox<AccountExtensionTy<Evm::Primitives>>> = None;
+        let mut state: Option<StateProviderBox> = None;
         self.validate_one_with_provider(origin, transaction, &mut state, || self.client.latest())
     }
 
@@ -395,22 +387,10 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
-        state: &mut Option<
-            Box<
-                dyn AccountInfoReader<AccountExtension = AccountExtensionTy<Evm::Primitives>>
-                    + Send,
-            >,
-        >,
+        state: &mut Option<Box<dyn AccountInfoReader + Send>>,
     ) -> TransactionValidationOutcome<Tx> {
         self.validate_one_with_provider(origin, transaction, state, || {
-            self.client.latest().map(|state| {
-                Box::new(state)
-                    as Box<
-                        dyn AccountInfoReader<
-                                AccountExtension = AccountExtensionTy<Evm::Primitives>,
-                            > + Send,
-                    >
-            })
+            self.client.latest().map(|state| Box::new(state) as Box<dyn AccountInfoReader + Send>)
         })
     }
 
@@ -425,7 +405,7 @@ where
         state_provider: F,
     ) -> TransactionValidationOutcome<Tx>
     where
-        P: AccountInfoReader<AccountExtension = AccountExtensionTy<Evm::Primitives>>,
+        P: AccountInfoReader,
         F: FnOnce() -> Result<P, ProviderError>,
     {
         match self.validate_stateless(origin, &transaction) {
@@ -460,7 +440,7 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
-        state: impl AccountInfoReader<AccountExtension = AccountExtensionTy<Evm::Primitives>>,
+        state: impl AccountInfoReader,
     ) -> TransactionValidationOutcome<Tx> {
         if let Err(err) = self.validate_stateless(origin, &transaction) {
             return TransactionValidationOutcome::Invalid(transaction, err);
@@ -677,7 +657,7 @@ where
         state: P,
     ) -> TransactionValidationOutcome<Tx>
     where
-        P: AccountInfoReader<AccountExtension = AccountExtensionTy<Evm::Primitives>>,
+        P: AccountInfoReader,
     {
         // Use provider to get account info
         let account = match state.basic_account(transaction.sender_ref()) {
@@ -742,7 +722,7 @@ where
     pub fn validate_sender_bytecode(
         &self,
         transaction: &Tx,
-        sender: &Account<impl AccountExtension>,
+        sender: &Account,
         state: impl BytecodeReader,
     ) -> Result<Result<(), InvalidPoolTransactionError>, TransactionValidationOutcome<Tx>> {
         // Unless Prague is active, the signer account shouldn't have bytecode.
@@ -779,7 +759,7 @@ where
     pub fn validate_sender_nonce(
         &self,
         transaction: &Tx,
-        sender: &Account<impl AccountExtension>,
+        sender: &Account,
     ) -> Result<(), InvalidPoolTransactionError> {
         let tx_nonce = transaction.nonce();
 
@@ -797,7 +777,7 @@ where
     pub fn validate_sender_balance(
         &self,
         transaction: &Tx,
-        sender: &Account<impl AccountExtension>,
+        sender: &Account,
     ) -> Result<(), InvalidPoolTransactionError> {
         let cost = transaction.cost();
 
@@ -893,7 +873,7 @@ where
         &self,
         transactions: impl IntoIterator<Item = (TransactionOrigin, Tx)>,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
-        let mut provider: Option<StateProviderBox<AccountExtensionTy<Evm::Primitives>>> = None;
+        let mut provider: Option<StateProviderBox> = None;
         transactions
             .into_iter()
             .map(|(origin, tx)| {
@@ -908,7 +888,7 @@ where
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = Tx> + Send,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
-        let mut provider: Option<StateProviderBox<AccountExtensionTy<Evm::Primitives>>> = None;
+        let mut provider: Option<StateProviderBox> = None;
         transactions
             .into_iter()
             .map(|tx| {
@@ -1000,8 +980,7 @@ where
 
 impl<Client, Tx, Evm> TransactionValidator for EthTransactionValidator<Client, Tx, Evm>
 where
-    Client: ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
-        + StateProviderFactory<AccountExtension = AccountExtensionTy<Evm::Primitives>>,
+    Client: ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks> + StateProviderFactory,
     Tx: EthPoolTransaction,
     Evm: ConfigureEvm,
 {
@@ -1100,7 +1079,7 @@ pub struct EthTransactionValidatorBuilder<Client, Evm> {
     eip7594: bool,
 }
 
-impl<Client, Evm: ConfigureEvm> EthTransactionValidatorBuilder<Client, Evm> {
+impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
     /// Creates a new builder for the given client and EVM config
     ///
     /// By default this assumes the network is on the `Prague` hardfork and the following

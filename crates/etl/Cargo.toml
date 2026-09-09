@@ -17,3 +17,6 @@ rayon.workspace = true
 
 [dev-dependencies]
 alloy-primitives = { workspace = true, features = ["getrandom"] }
+
+[features]
+account-ext = ["reth-db-api/account-ext"]

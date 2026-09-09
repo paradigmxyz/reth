@@ -1,9 +1,13 @@
+// Accounts are only Copy when account-ext is disabled.
+#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+
 //! Merkle trie proofs.
 
 use crate::{
     BranchNodeMasks, BranchNodeMasksMap, Nibbles, ProofTrieNodeV2, TrieAccount, TrieNodeV2,
 };
 use alloc::{borrow::Cow, collections::VecDeque, vec::Vec};
+#[cfg(feature = "eip1186")]
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
     keccak256,
@@ -18,7 +22,7 @@ use alloy_trie::{
 };
 use derive_more::{Deref, DerefMut, IntoIterator};
 use itertools::Itertools;
-use reth_primitives_traits::{Account, AccountExtension, EmptyAccountExtension};
+use reth_primitives_traits::Account;
 
 /// Proof targets map.
 #[derive(Deref, DerefMut, IntoIterator, Clone, PartialEq, Eq, Default, Debug)]
@@ -228,15 +232,6 @@ impl MultiProof {
         address: Address,
         slots: &[B256],
     ) -> Result<AccountProof, alloy_rlp::Error> {
-        self.account_proof_with_extension(address, slots)
-    }
-
-    /// Construct an account proof, decoding chain-specific account fields.
-    pub fn account_proof_with_extension<E: AccountExtension>(
-        &self,
-        address: Address,
-        slots: &[B256],
-    ) -> Result<AccountProof<E>, alloy_rlp::Error> {
         let hashed_address = keccak256(address);
         let nibbles = Nibbles::unpack(hashed_address);
 
@@ -254,13 +249,8 @@ impl MultiProof {
                 let TrieNode::Leaf(leaf) = TrieNode::decode(&mut &last[..])? &&
                 nibbles.ends_with(&leaf.key)
             {
-                let account = TrieAccount::<E>::decode(&mut &leaf.value[..])?;
-                break 'info Some(Account {
-                    balance: account.balance,
-                    nonce: account.nonce,
-                    bytecode_hash: (account.code_hash != KECCAK_EMPTY).then_some(account.code_hash),
-                    extension: account.extension,
-                })
+                let account = TrieAccount::decode(&mut &leaf.value[..])?;
+                break 'info Some(Account::from(account))
             }
             None
         };
@@ -368,15 +358,6 @@ impl DecodedMultiProof {
         address: Address,
         slots: &[B256],
     ) -> Result<DecodedAccountProof, alloy_rlp::Error> {
-        self.account_proof_with_extension(address, slots)
-    }
-
-    /// Construct an account proof, decoding chain-specific account fields.
-    pub fn account_proof_with_extension<E: AccountExtension>(
-        &self,
-        address: Address,
-        slots: &[B256],
-    ) -> Result<DecodedAccountProof<E>, alloy_rlp::Error> {
         let hashed_address = keccak256(address);
         let nibbles = Nibbles::unpack(hashed_address);
 
@@ -393,13 +374,8 @@ impl DecodedMultiProof {
             if let Some(TrieNode::Leaf(leaf)) = proof.last() &&
                 nibbles.ends_with(&leaf.key)
             {
-                let account = TrieAccount::<E>::decode(&mut &leaf.value[..])?;
-                break 'info Some(Account {
-                    balance: account.balance,
-                    nonce: account.nonce,
-                    bytecode_hash: (account.code_hash != KECCAK_EMPTY).then_some(account.code_hash),
-                    extension: account.extension,
-                })
+                let account = TrieAccount::decode(&mut &leaf.value[..])?;
+                break 'info Some(Account::from(account))
             }
             None
         };
@@ -494,15 +470,6 @@ impl DecodedMultiProofV2 {
         address: Address,
         slots: &[B256],
     ) -> Result<AccountProof, alloy_rlp::Error> {
-        self.account_proof_with_extension(address, slots)
-    }
-
-    /// Construct an account proof, decoding chain-specific account fields.
-    pub fn account_proof_with_extension<E: AccountExtension>(
-        &self,
-        address: Address,
-        slots: &[B256],
-    ) -> Result<AccountProof<E>, alloy_rlp::Error> {
         let hashed_address = keccak256(address);
         let nibbles = Nibbles::unpack(hashed_address);
         let account_nodes = matching_v2_proof_nodes(&self.account_proofs, &nibbles);
@@ -512,17 +479,9 @@ impl DecodedMultiProofV2 {
                 account_nodes.clone().last() &&
                 nibbles.ends_with(&leaf.key)
             {
-                let account = TrieAccount::<E>::decode(&mut &leaf.value[..])?;
-                break 'account (
-                    Some(Account {
-                        balance: account.balance,
-                        nonce: account.nonce,
-                        bytecode_hash: (account.code_hash != KECCAK_EMPTY)
-                            .then_some(account.code_hash),
-                        extension: account.extension,
-                    }),
-                    account.storage_root,
-                )
+                let account = TrieAccount::decode(&mut &leaf.value[..])?;
+                let storage_root = account.storage_root;
+                break 'account (Some(Account::from(account)), storage_root)
             }
             (None, EMPTY_ROOT_HASH)
         };
@@ -564,14 +523,6 @@ impl DecodedMultiProofV2 {
         state_root: B256,
         witness: &B256Map<impl AsRef<[u8]>>,
     ) -> Result<Self, alloy_rlp::Error> {
-        Self::from_witness_with_extension::<EmptyAccountExtension>(state_root, witness)
-    }
-
-    /// Builds a decoded multiproof while decoding chain-specific account fields.
-    pub fn from_witness_with_extension<E: AccountExtension>(
-        state_root: B256,
-        witness: &B256Map<impl AsRef<[u8]>>,
-    ) -> Result<Self, alloy_rlp::Error> {
         let mut account_nodes: Vec<(Nibbles, TrieNode, Option<BranchNodeMasks>)> = Vec::new();
         let mut storage_nodes: B256Map<Vec<(Nibbles, TrieNode, Option<BranchNodeMasks>)>> =
             B256Map::default();
@@ -607,7 +558,7 @@ impl DecodedMultiProofV2 {
                         let mut full_path = path;
                         full_path.extend(&leaf.key);
                         let hashed_address = B256::from_slice(&full_path.pack());
-                        let account = TrieAccount::<E>::decode(&mut &leaf.value[..])?;
+                        let account = TrieAccount::decode(&mut &leaf.value[..])?;
                         if account.storage_root != EMPTY_ROOT_HASH {
                             queue.push_back((
                                 account.storage_root,
@@ -834,18 +785,11 @@ impl TryFrom<StorageMultiProof> for DecodedStorageMultiProof {
 #[derive(Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "serde"), serde(rename_all = "camelCase"))]
-#[cfg_attr(
-    any(test, feature = "serde"),
-    serde(bound(
-        serialize = "E: serde::Serialize + Default + PartialEq",
-        deserialize = "E: serde::Deserialize<'de> + Default"
-    ))
-)]
-pub struct AccountProof<E = EmptyAccountExtension> {
+pub struct AccountProof {
     /// The address associated with the account.
     pub address: Address,
     /// Account info, if any.
-    pub info: Option<Account<E>>,
+    pub info: Option<Account>,
     /// Array of rlp-serialized merkle trie nodes which starting from the root node and
     /// following the path of the hashed address as key.
     pub proof: Vec<Bytes>,
@@ -872,7 +816,7 @@ fn normalize_eip1186_empty_trie_proof(proof: Vec<Bytes>) -> Vec<Bytes> {
 }
 
 #[cfg(feature = "eip1186")]
-impl<E: AccountExtension> AccountProof<E> {
+impl AccountProof {
     /// Convert into an EIP-1186 account proof response.
     ///
     /// For non-existent accounts, this returns `KECCAK_EMPTY` for `codeHash` and
@@ -883,7 +827,7 @@ impl<E: AccountExtension> AccountProof<E> {
     pub fn into_eip1186_response(
         self,
         slots: Vec<alloy_serde::JsonStorageKey>,
-    ) -> alloy_rpc_types_eth::EIP1186AccountProofResponse {
+    ) -> Result<alloy_rpc_types_eth::EIP1186AccountProofResponse, alloy_rlp::Error> {
         self.into_eip1186_response_with(slots, false)
     }
 
@@ -901,7 +845,10 @@ impl<E: AccountExtension> AccountProof<E> {
         self,
         slots: Vec<alloy_serde::JsonStorageKey>,
         zero_empty_account: bool,
-    ) -> alloy_rpc_types_eth::EIP1186AccountProofResponse {
+    ) -> Result<alloy_rpc_types_eth::EIP1186AccountProofResponse, alloy_rlp::Error> {
+        if self.info.as_ref().is_some_and(Account::has_extension) {
+            return Err(alloy_rlp::Error::Custom("EIP-1186 cannot represent account extensions"));
+        }
         let is_non_existent = self.info.is_none();
         let info = self.info.unwrap_or_default();
         let (code_hash, storage_hash) = if is_non_existent && zero_empty_account {
@@ -909,7 +856,7 @@ impl<E: AccountExtension> AccountProof<E> {
         } else {
             (info.get_bytecode_hash(), self.storage_root)
         };
-        alloy_rpc_types_eth::EIP1186AccountProofResponse {
+        Ok(alloy_rpc_types_eth::EIP1186AccountProofResponse {
             address: self.address,
             balance: info.balance,
             code_hash,
@@ -924,7 +871,7 @@ impl<E: AccountExtension> AccountProof<E> {
                     Some(proof.into_eip1186_proof(*input_slot))
                 })
                 .collect(),
-        }
+        })
     }
 
     /// Converts an
@@ -966,7 +913,8 @@ impl<E: AccountExtension> AccountProof<E> {
                     nonce,
                     balance,
                     bytecode_hash: code_hash.into(),
-                    ..Default::default()
+                    #[cfg(feature = "account-ext")]
+                    extension: Default::default(),
                 }),
             )
         };
@@ -982,13 +930,13 @@ impl From<alloy_rpc_types_eth::EIP1186AccountProofResponse> for AccountProof {
     }
 }
 
-impl<E: AccountExtension> Default for AccountProof<E> {
+impl Default for AccountProof {
     fn default() -> Self {
         Self::new(Address::default())
     }
 }
 
-impl<E: AccountExtension> AccountProof<E> {
+impl AccountProof {
     /// Create new account proof entity.
     pub const fn new(address: Address) -> Self {
         Self {
@@ -1022,11 +970,11 @@ impl<E: AccountExtension> AccountProof<E> {
 
 /// The merkle proof with the relevant account info.
 #[derive(Clone, PartialEq, Eq, Debug)]
-pub struct DecodedAccountProof<E = EmptyAccountExtension> {
+pub struct DecodedAccountProof {
     /// The address associated with the account.
     pub address: Address,
     /// Account info.
-    pub info: Option<Account<E>>,
+    pub info: Option<Account>,
     /// Array of merkle trie nodes which starting from the root node and following the path of the
     /// hashed address as key.
     pub proof: Vec<TrieNode>,
@@ -1036,13 +984,13 @@ pub struct DecodedAccountProof<E = EmptyAccountExtension> {
     pub storage_proofs: Vec<DecodedStorageProof>,
 }
 
-impl<E: AccountExtension> Default for DecodedAccountProof<E> {
+impl Default for DecodedAccountProof {
     fn default() -> Self {
         Self::new(Address::default())
     }
 }
 
-impl<E: AccountExtension> DecodedAccountProof<E> {
+impl DecodedAccountProof {
     /// Create new account proof entity.
     pub const fn new(address: Address) -> Self {
         Self {
@@ -1263,7 +1211,7 @@ mod tests {
             &mut witness,
             LeafNode::new(
                 leaf_key,
-                alloy_rlp::encode(TrieAccount::<()> {
+                alloy_rlp::encode(TrieAccount {
                     storage_root: storage_root.as_hash().expect("storage root is hashed"),
                     ..Default::default()
                 }),
@@ -1271,7 +1219,7 @@ mod tests {
         );
         let account_leaf_1 = insert_node(
             &mut witness,
-            LeafNode::new(leaf_key, alloy_rlp::encode(TrieAccount::<()>::default())),
+            LeafNode::new(leaf_key, alloy_rlp::encode(TrieAccount::default())),
         );
         let state_root = insert_node(
             &mut witness,
@@ -1476,20 +1424,26 @@ mod tests {
             address: Address::random(),
             info: Some(
                 // non-empty account
-                Account { nonce: 100, bytecode_hash: Some(KECCAK_EMPTY), ..Default::default() },
+                Account {
+                    #[cfg(feature = "account-ext")]
+                    extension: Default::default(),
+                    nonce: 100,
+                    balance: U256::ZERO,
+                    bytecode_hash: Some(KECCAK_EMPTY),
+                },
             ),
             proof: vec![],
             storage_root: B256::ZERO,
             storage_proofs: vec![],
         };
 
-        let rpc_proof = acc.clone().into_eip1186_response(Vec::new());
+        let rpc_proof = acc.clone().into_eip1186_response(Vec::new()).unwrap();
         let inverse: AccountProof = rpc_proof.into();
         assert_eq!(acc, inverse);
 
         // make account empty
         acc.info.as_mut().unwrap().nonce = 0;
-        let rpc_proof = acc.clone().into_eip1186_response(Vec::new());
+        let rpc_proof = acc.clone().into_eip1186_response(Vec::new()).unwrap();
         let inverse: AccountProof = rpc_proof.into();
         acc.info.take();
         acc.storage_root = EMPTY_ROOT_HASH;
@@ -1541,7 +1495,7 @@ mod tests {
     #[cfg(feature = "eip1186")]
     fn into_eip1186_response_zero_empty_account() {
         // Non-existent account (info = None)
-        let acc: AccountProof = AccountProof {
+        let acc = AccountProof {
             address: Address::random(),
             info: None,
             proof: vec![],
@@ -1550,34 +1504,36 @@ mod tests {
         };
 
         // Default behavior: KECCAK_EMPTY / EMPTY_ROOT_HASH
-        let rpc_default = acc.clone().into_eip1186_response(Vec::new());
+        let rpc_default = acc.clone().into_eip1186_response(Vec::new()).unwrap();
         assert_eq!(rpc_default.code_hash, KECCAK_EMPTY);
         assert_eq!(rpc_default.storage_hash, EMPTY_ROOT_HASH);
 
         // zero_empty_account = false: same as default
-        let rpc_compat_off = acc.clone().into_eip1186_response_with(Vec::new(), false);
+        let rpc_compat_off = acc.clone().into_eip1186_response_with(Vec::new(), false).unwrap();
         assert_eq!(rpc_compat_off.code_hash, KECCAK_EMPTY);
         assert_eq!(rpc_compat_off.storage_hash, EMPTY_ROOT_HASH);
 
         // zero_empty_account = true: B256::ZERO (geth-compat)
-        let rpc_compat_on = acc.into_eip1186_response_with(Vec::new(), true);
+        let rpc_compat_on = acc.into_eip1186_response_with(Vec::new(), true).unwrap();
         assert_eq!(rpc_compat_on.code_hash, B256::ZERO);
         assert_eq!(rpc_compat_on.storage_hash, B256::ZERO);
 
         // Existing account should NOT be affected by zero_empty_account
-        let existing_acc: AccountProof = AccountProof {
+        let existing_acc = AccountProof {
             address: Address::random(),
             info: Some(Account {
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
                 nonce: 42,
                 balance: U256::from(100),
                 bytecode_hash: Some(KECCAK_EMPTY),
-                ..Default::default()
             }),
             proof: vec![],
             storage_root: B256::random(),
             storage_proofs: vec![],
         };
-        let rpc_existing = existing_acc.clone().into_eip1186_response_with(Vec::new(), true);
+        let rpc_existing =
+            existing_acc.clone().into_eip1186_response_with(Vec::new(), true).unwrap();
         assert_eq!(rpc_existing.code_hash, KECCAK_EMPTY);
         assert_eq!(rpc_existing.storage_hash, existing_acc.storage_root);
     }
@@ -1641,7 +1597,7 @@ mod tests {
         let sentinel = || vec![Bytes::from([EMPTY_STRING_CODE])];
 
         // Empty account trie + empty storage trie: both proofs are the lone `0x80` sentinel.
-        let account: AccountProof = AccountProof {
+        let account = AccountProof {
             address: Address::ZERO,
             info: None,
             proof: sentinel(),
@@ -1649,7 +1605,8 @@ mod tests {
             storage_proofs: vec![StorageProof::new(slot).with_proof(sentinel())],
         };
 
-        let resp = account.into_eip1186_response(vec![alloy_serde::JsonStorageKey::from(slot)]);
+        let resp =
+            account.into_eip1186_response(vec![alloy_serde::JsonStorageKey::from(slot)]).unwrap();
 
         assert!(
             resp.account_proof.is_empty(),
@@ -1672,7 +1629,7 @@ mod tests {
         let multi = vec![Bytes::from([0x01, 0x02]), Bytes::from([0x03])];
         let single_non_sentinel = vec![Bytes::from([0xf8, 0x44])];
 
-        let account: AccountProof = AccountProof {
+        let account = AccountProof {
             address: Address::ZERO,
             info: None,
             proof: multi.clone(),
@@ -1682,9 +1639,9 @@ mod tests {
             ],
         };
 
-        let resp = account.into_eip1186_response(vec![alloy_serde::JsonStorageKey::from(
-            B256::with_last_byte(1),
-        )]);
+        let resp = account
+            .into_eip1186_response(vec![alloy_serde::JsonStorageKey::from(B256::with_last_byte(1))])
+            .unwrap();
 
         assert_eq!(resp.account_proof, multi);
         assert_eq!(resp.storage_proof[0].proof, single_non_sentinel);

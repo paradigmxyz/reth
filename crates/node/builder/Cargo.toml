@@ -94,7 +94,17 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 reth-evm-ethereum = { workspace = true, features = ["test-utils"] }
 
 [features]
-account-ext = ["reth-primitives-traits/account-ext"]
+account-ext = [
+    "reth-db-common/account-ext",
+    "reth-downloaders/account-ext",
+    "reth-engine-util/account-ext",
+    "reth-invalid-block-hooks/account-ext",
+    "reth-node-ethstats/account-ext",
+    "reth-node-events/account-ext",
+    "reth-rpc-builder/account-ext",
+    "reth-consensus-debug-client/account-ext",
+    "reth-node-metrics/account-ext",
+]
 default = []
 js-tracer = [
     "reth-rpc/js-tracer",

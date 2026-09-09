@@ -1358,7 +1358,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// Returns the current number of changesets in the file, if any.
     pub fn append_account_changeset(
         &mut self,
-        mut changeset: Vec<AccountBeforeTx<N::AccountExtension>>,
+        mut changeset: Vec<AccountBeforeTx>,
         block_number: u64,
     ) -> ProviderResult<()> {
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::AccountChangeSets);
@@ -1405,7 +1405,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// [`Self::begin_account_changeset`] must be called first.
     pub fn append_account_changeset_entry(
         &mut self,
-        change: AccountBeforeTx<N::AccountExtension>,
+        change: AccountBeforeTx,
     ) -> ProviderResult<()> {
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::AccountChangeSets);
         if self.current_changeset_offset.is_none() {

@@ -26,3 +26,4 @@ std = [
     "alloy-rpc-types-engine/std",
     "reth-primitives-traits/std",
 ]
+account-ext = ["reth-primitives-traits/account-ext"]

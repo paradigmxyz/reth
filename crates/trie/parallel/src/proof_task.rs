@@ -47,7 +47,7 @@ use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor, InstrumentedHashedCursor},
     proof_v2,
     trie_cursor::{InstrumentedTrieCursor, TrieCursorFactory, TrieStorageCursor},
-    DecodedMultiProofV2, MultiProofTargetsV2, ProofTrieNodeV2, ProofV2Target,
+    DecodedMultiProofV2, HashedPostState, MultiProofTargetsV2, ProofTrieNodeV2, ProofV2Target,
 };
 use std::{
     cell::RefCell,
@@ -72,7 +72,6 @@ type V2AccountProofCalculator<'a, Provider> = proof_v2::ProofCalculator<
     AsyncAccountValueEncoder<
         InstrumentedTrieCursor<'a, <Provider as TrieCursorFactory>::StorageTrieCursor<'a>>,
         InstrumentedHashedCursor<'a, <Provider as HashedCursorFactory>::StorageCursor<'a>>,
-        <Provider as HashedCursorFactory>::AccountExtension,
     >,
 >;
 
@@ -244,6 +243,7 @@ impl ProofWorkerHandle {
                             "storage worker {worker_id}: {error}"
                         ))),
                         elapsed: Duration::ZERO,
+                        state: Default::default(),
                     });
                 }
             });
@@ -290,6 +290,7 @@ impl ProofWorkerHandle {
                             "account worker {worker_id}: {error}"
                         ))),
                         elapsed: Duration::ZERO,
+                        state: Default::default(),
                     });
                 }
             });
@@ -373,12 +374,13 @@ impl ProofWorkerHandle {
                     ProviderError::other(std::io::Error::other("account workers unavailable"));
 
                 let AccountWorkerJob::AccountMultiproof { input } = err.0;
-                let ProofResultContext { sender: result_tx, start_time: start } =
+                let ProofResultContext { sender: result_tx, state, start_time: start } =
                     input.into_proof_result_sender();
 
                 let _ = result_tx.send(ProofResultMessage {
                     result: Err(StateRootTaskError::ProofDispatch(error.clone())),
                     elapsed: start.elapsed(),
+                    state,
                 });
 
                 error
@@ -507,6 +509,8 @@ pub struct ProofResultMessage {
     pub result: Result<DecodedMultiProofV2, StateRootTaskError>,
     /// Time taken for the entire proof calculation (from dispatch to completion)
     pub elapsed: Duration,
+    /// Original state update that triggered this proof
+    pub state: HashedPostState,
 }
 
 /// Context for sending proof calculation results back to `SparseTrieCacheTask`.
@@ -517,14 +521,20 @@ pub struct ProofResultMessage {
 pub struct ProofResultContext {
     /// Channel sender for result delivery
     pub sender: ProofResultSender,
+    /// Original state update that triggered this proof
+    pub state: HashedPostState,
     /// Calculation start time for measuring elapsed duration
     pub start_time: Instant,
 }
 
 impl ProofResultContext {
     /// Creates a new proof result context.
-    pub const fn new(sender: ProofResultSender, start_time: Instant) -> Self {
-        Self { sender, start_time }
+    pub const fn new(
+        sender: ProofResultSender,
+        state: HashedPostState,
+        start_time: Instant,
+    ) -> Self {
+        Self { sender, state, start_time }
     }
 }
 
@@ -901,7 +911,6 @@ where
                         '_,
                         <Factory::Provider as HashedCursorFactory>::StorageCursor<'_>,
                     >,
-                    <Factory::Provider as HashedCursorFactory>::AccountExtension,
                 >,
             >::new(instrumented_account_trie_cursor, instrumented_account_hashed_cursor);
         let v2_storage_calculator =
@@ -1001,12 +1010,11 @@ where
         let storage_proof_receivers =
             dispatch_v2_storage_proofs(&self.storage_work_tx, &account_targets, storage_targets)?;
 
-        let mut value_encoder: AsyncAccountValueEncoder<_, _, Provider::AccountExtension> =
-            AsyncAccountValueEncoder::new(
-                storage_proof_receivers,
-                self.cached_storage_roots.clone(),
-                v2_storage_calculator,
-            );
+        let mut value_encoder = AsyncAccountValueEncoder::new(
+            storage_proof_receivers,
+            self.cached_storage_roots.clone(),
+            v2_storage_calculator,
+        );
 
         let account_proofs =
             v2_account_calculator.proof(&mut value_encoder, &mut account_targets)?;
@@ -1043,14 +1051,15 @@ where
             Err(e) => (Err(e), ValueEncoderStats::default()),
         };
 
-        let ProofResultContext { sender: result_tx, start_time: start } = proof_result_sender;
+        let ProofResultContext { sender: result_tx, state, start_time: start } =
+            proof_result_sender;
 
         let proof_elapsed = proof_start.elapsed();
         let total_elapsed = start.elapsed();
         *account_proofs_processed += 1;
 
         // Send result to SparseTrieCacheTask
-        if result_tx.send(ProofResultMessage { result, elapsed: total_elapsed }).is_err() {
+        if result_tx.send(ProofResultMessage { result, elapsed: total_elapsed, state }).is_err() {
             trace!(
                 target: "trie::proof_task",
                 worker_id=self.worker_id,

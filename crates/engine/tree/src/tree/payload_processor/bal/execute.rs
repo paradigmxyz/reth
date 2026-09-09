@@ -63,9 +63,7 @@ where
     MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync + 'a,
     ReceiptTy<Evm::Primitives>: Clone,
 {
-    reth_provider::ensure_no_account_extensions::<
-        reth_primitives_traits::AccountExtensionTy<Evm::Primitives>,
-    >("BAL")?;
+    reth_provider::ensure_no_account_extensions("BAL")?;
     let worker_pool = runtime.bal_streaming_pool();
     let worker_count = worker_pool.current_num_threads().max(1).min(transaction_count);
 
@@ -373,31 +371,37 @@ mod tests {
         db.insert_account_info(
             BEACON_ROOTS_ADDRESS,
             AccountInfo {
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
                 balance: U256::ZERO,
                 nonce: 1,
                 code_hash: keccak256(BEACON_ROOTS_CODE.clone()),
                 code: Some(Bytecode::new_raw(BEACON_ROOTS_CODE.clone())),
-                ..Default::default()
+                account_id: None,
             },
         );
         db.insert_account_info(
             WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS,
             AccountInfo {
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
                 balance: U256::ZERO,
                 nonce: 1,
                 code_hash: keccak256(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone()),
                 code: Some(Bytecode::new_raw(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone())),
-                ..Default::default()
+                account_id: None,
             },
         );
         db.insert_account_info(
             HISTORY_STORAGE_ADDRESS,
             AccountInfo {
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
                 balance: U256::ZERO,
                 nonce: 1,
                 code_hash: keccak256(HISTORY_STORAGE_CODE.clone()),
                 code: Some(Bytecode::new_raw(HISTORY_STORAGE_CODE.clone())),
-                ..Default::default()
+                account_id: None,
             },
         );
         db
@@ -583,11 +587,13 @@ mod tests {
         db.insert_account_info(
             addr,
             AccountInfo {
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
                 nonce: 0,
                 balance,
                 code_hash: B256::ZERO,
                 code: None,
-                ..Default::default()
+                account_id: None,
             },
         );
     }
@@ -698,21 +704,25 @@ mod tests {
                 db.insert_account_info(
                     alice,
                     AccountInfo {
+                        #[cfg(feature = "account-ext")]
+                        extension: Default::default(),
                         nonce: 0,
                         balance: sender_balance,
                         code_hash: B256::ZERO,
                         code: None,
-                        ..Default::default()
+                        account_id: None,
                     },
                 );
                 db.insert_account_info(
                     bob,
                     AccountInfo {
+                        #[cfg(feature = "account-ext")]
+                        extension: Default::default(),
                         nonce: 0,
                         balance: sender_balance,
                         code_hash: B256::ZERO,
                         code: None,
-                        ..Default::default()
+                        account_id: None,
                     },
                 );
                 db
@@ -1016,11 +1026,13 @@ mod tests {
         db.insert_account_info(
             revert_contract,
             AccountInfo {
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
                 nonce: 1,
                 balance: U256::ZERO,
                 code_hash,
                 code: Some(Bytecode::new_raw(revert_code)),
-                ..Default::default()
+                account_id: None,
             },
         );
 
@@ -1073,11 +1085,13 @@ mod tests {
         db.insert_account_info(
             sstore_contract,
             AccountInfo {
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
                 nonce: 1,
                 balance: U256::ZERO,
                 code_hash,
                 code: Some(Bytecode::new_raw(sstore_code)),
-                ..Default::default()
+                account_id: None,
             },
         );
 

@@ -102,9 +102,11 @@ impl<Eth, Evm, Payload: PayloadTypes> TestingApi<Eth, Evm, Payload> {
 
 impl<Eth, Evm, Payload> TestingApi<Eth, Evm, Payload>
 where
-    Payload: PayloadTypes<ExecutionData = ExecutionData, Primitives = Evm::Primitives>,
+    Payload: PayloadTypes<
+        ExecutionData = ExecutionData,
+        BuiltPayload: BuiltPayload<Primitives = Evm::Primitives>,
+    >,
     Eth: Call<
-        Primitives = Evm::Primitives,
         Provider: BlockReader<Header = HeaderTy<Evm::Primitives>>
                       + BlockReaderIdExt<Header = HeaderTy<Evm::Primitives>>
                       + ChainSpecProvider<ChainSpec: EthereumHardforks>,
@@ -137,9 +139,7 @@ where
                 let is_osaka =
                     chain_spec.is_osaka_active_at_timestamp(request.payload_attributes.timestamp);
                 if is_amsterdam {
-                    reth_storage_api::ensure_no_account_extensions::<
-                        reth_primitives_traits::AccountExtensionTy<Evm::Primitives>,
-                    >("BAL")?;
+                    reth_storage_api::ensure_no_account_extensions("BAL")?;
                 }
                 let mut db = State::builder()
                     .with_bundle_update()
@@ -405,9 +405,11 @@ where
 #[async_trait]
 impl<Eth, Evm, Payload> TestingApiServer for TestingApi<Eth, Evm, Payload>
 where
-    Payload: PayloadTypes<ExecutionData = ExecutionData, Primitives = Evm::Primitives>,
+    Payload: PayloadTypes<
+        ExecutionData = ExecutionData,
+        BuiltPayload: BuiltPayload<Primitives = Evm::Primitives>,
+    >,
     Eth: Call<
-        Primitives = Evm::Primitives,
         Provider: BlockReader<Header = HeaderTy<Evm::Primitives>>
                       + BlockReaderIdExt<Header = HeaderTy<Evm::Primitives>>
                       + ChainSpecProvider<ChainSpec: EthereumHardforks>,

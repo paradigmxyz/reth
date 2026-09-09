@@ -44,10 +44,11 @@ mod tests {
                 AccountBeforeTx {
                     address,
                     info: Some(Account {
+                        #[cfg(feature = "account-ext")]
+                        extension: Default::default(),
                         nonce: block_num,
                         balance: U256::from(block_num * 1000 + i as u64),
                         bytecode_hash: None,
-                        extension: Default::default(),
                     }),
                 }
             })

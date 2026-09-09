@@ -67,7 +67,7 @@ rand.workspace = true
 serde.workspace = true
 
 [features]
-account-ext = ["reth-primitives-traits/account-ext"]
+account-ext = ["reth-metrics?/account-ext", "reth-trie-sparse/account-ext"]
 metrics = ["reth-metrics", "dep:metrics"]
 serde = [
     "alloy-primitives/serde",

@@ -1,3 +1,6 @@
+// Accounts are only Copy when account-ext is disabled.
+#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+
 use crate::{
     db_ext::DbTxPruneExt,
     segments::{
@@ -204,9 +207,8 @@ impl AccountHistory {
         // `max_reorg_depth`, so no OOM is expected here.
         let mut last_changeset_pruned_block = None;
         let mut highest_deleted_accounts = FxHashMap::default();
-        let (pruned_changesets, done) = provider
-            .tx_ref()
-            .prune_table_with_range::<tables::AccountChangeSets<Provider::AccountExtension>>(
+        let (pruned_changesets, done) =
+            provider.tx_ref().prune_table_with_range::<tables::AccountChangeSets>(
                 range,
                 &mut limiter,
                 |_| false,
@@ -654,25 +656,26 @@ mod tests {
         let addr5 = Address::with_last_byte(5);
 
         let account = Account {
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
             nonce: 1,
             balance: U256::from(100),
             bytecode_hash: None,
-            ..Default::default()
         };
 
         // Build changesets: blocks 0-4 have 1 change each, block 5 has 4 changes, block 6 has 1
         let changesets: Vec<ChangeSet> = vec![
-            vec![(addr1, account, vec![])], // block 0
-            vec![(addr1, account, vec![])], // block 1
-            vec![(addr1, account, vec![])], // block 2
-            vec![(addr1, account, vec![])], // block 3
-            vec![(addr1, account, vec![])], // block 4
+            vec![(addr1, account.clone(), vec![])], // block 0
+            vec![(addr1, account.clone(), vec![])], // block 1
+            vec![(addr1, account.clone(), vec![])], // block 2
+            vec![(addr1, account.clone(), vec![])], // block 3
+            vec![(addr1, account.clone(), vec![])], // block 4
             // block 5: 4 different account changes (sorted by address for consistency)
             vec![
-                (addr1, account, vec![]),
-                (addr2, account, vec![]),
-                (addr3, account, vec![]),
-                (addr4, account, vec![]),
+                (addr1, account.clone(), vec![]),
+                (addr2, account.clone(), vec![]),
+                (addr3, account.clone(), vec![]),
+                (addr4, account.clone(), vec![]),
             ],
             vec![(addr5, account, vec![])], // block 6
         ];

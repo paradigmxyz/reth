@@ -32,8 +32,7 @@ pub fn compute_block_trie_changesets<Provider, StateTrieProvider>(
 ) -> Result<TrieUpdatesSorted, ProviderError>
 where
     Provider: ChangeSetReader + StorageChangeSetReader + BlockNumReader,
-    StateTrieProvider:
-        TrieCursorFactory + HashedCursorFactory<AccountExtension = Provider::AccountExtension>,
+    StateTrieProvider: TrieCursorFactory + HashedCursorFactory,
 {
     let db_tip_block = provider.best_block_number()?;
     compute_range_trie_changesets(
@@ -61,8 +60,7 @@ pub fn compute_range_trie_changesets<Provider, StateTrieProvider>(
 ) -> Result<TrieUpdatesSorted, ProviderError>
 where
     Provider: ChangeSetReader + StorageChangeSetReader + BlockNumReader,
-    StateTrieProvider:
-        TrieCursorFactory + HashedCursorFactory<AccountExtension = Provider::AccountExtension>,
+    StateTrieProvider: TrieCursorFactory + HashedCursorFactory,
 {
     let start_block = *range.start();
     let end_block = *range.end();

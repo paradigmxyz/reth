@@ -9,7 +9,8 @@ use reth_trie_common::{
 };
 
 /// A type that can compute the state root of a given post state.
-pub trait StateRootProvider: crate::AccountExtensionProvider {
+#[auto_impl::auto_impl(&, Box, Arc)]
+pub trait StateRootProvider {
     /// Returns the state root of the execution state on top of the current state.
     ///
     /// # Note
@@ -17,60 +18,27 @@ pub trait StateRootProvider: crate::AccountExtensionProvider {
     /// It is recommended to provide a different implementation from
     /// `state_root_with_updates` since it affects the memory usage during state root
     /// computation.
-    fn state_root(
-        &self,
-        hashed_state: HashedPostState<Self::AccountExtension>,
-    ) -> ProviderResult<B256>;
+    fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256>;
 
     /// Returns the state root of the `HashedPostState` on top of the current state but reuses the
     /// intermediate nodes to speed up the computation. It's up to the caller to construct the
     /// prefix sets and inform the provider of the trie paths that have changes.
-    fn state_root_from_nodes(
-        &self,
-        input: TrieInput<Self::AccountExtension>,
-    ) -> ProviderResult<B256>;
+    fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256>;
 
     /// Returns the state root of the `HashedPostState` on top of the current state with trie
     /// updates to be committed to the database.
     fn state_root_with_updates(
         &self,
-        hashed_state: HashedPostState<Self::AccountExtension>,
+        hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)>;
 
     /// Returns state root and trie updates.
     /// See [`StateRootProvider::state_root_from_nodes`] for more info.
     fn state_root_from_nodes_with_updates(
         &self,
-        input: TrieInput<Self::AccountExtension>,
+        input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)>;
 }
-
-crate::macros::auto_impl_provider_refs!(T: StateRootProvider {
-    fn state_root(
-        &self,
-        hashed_state: HashedPostState<Self::AccountExtension>,
-    ) -> ProviderResult<B256> {
-        T::state_root(&**self, hashed_state)
-    }
-    fn state_root_from_nodes(
-        &self,
-        input: TrieInput<Self::AccountExtension>,
-    ) -> ProviderResult<B256> {
-        T::state_root_from_nodes(&**self, input)
-    }
-    fn state_root_with_updates(
-        &self,
-        hashed_state: HashedPostState<Self::AccountExtension>,
-    ) -> ProviderResult<(B256, TrieUpdates)> {
-        T::state_root_with_updates(&**self, hashed_state)
-    }
-    fn state_root_from_nodes_with_updates(
-        &self,
-        input: TrieInput<Self::AccountExtension>,
-    ) -> ProviderResult<(B256, TrieUpdates)> {
-        T::state_root_from_nodes_with_updates(&**self, input)
-    }
-});
 
 /// A type that can compute the storage root for a given account.
 #[auto_impl::auto_impl(&, Box, Arc)]
@@ -175,72 +143,40 @@ pub type StorageRangeResult = ProviderResult<Option<RangeResponse<(B256, U256)>>
 pub type StateRangeView = Box<dyn StateRangeProvider + Send + 'static>;
 
 /// A type that can generate state proof on top of a given post state.
-pub trait StateProofProvider: crate::AccountExtensionProvider {
+#[auto_impl::auto_impl(&, Box, Arc)]
+pub trait StateProofProvider {
     /// Get account and storage proofs of target keys in the `HashedPostState`
     /// on top of the current state.
     fn proof(
         &self,
-        input: TrieInput<Self::AccountExtension>,
+        input: TrieInput,
         address: Address,
         slots: &[B256],
-    ) -> ProviderResult<AccountProof<Self::AccountExtension>>;
+    ) -> ProviderResult<AccountProof>;
 
     /// Generate [`MultiProof`] for target hashed account and corresponding
     /// hashed storage slot keys.
     fn multiproof(
         &self,
-        input: TrieInput<Self::AccountExtension>,
+        input: TrieInput,
         targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof>;
 
     /// Generate a V2 decoded multiproof for target hashed accounts and storage slots.
     fn multiproof_v2(
         &self,
-        input: TrieInput<Self::AccountExtension>,
+        input: TrieInput,
         targets: MultiProofTargetsV2,
     ) -> ProviderResult<DecodedMultiProofV2>;
 
     /// Get trie witness for provided state using the given witness generation mode.
     fn witness(
         &self,
-        input: TrieInput<Self::AccountExtension>,
-        target: HashedPostState<Self::AccountExtension>,
+        input: TrieInput,
+        target: HashedPostState,
         mode: ExecutionWitnessMode,
     ) -> ProviderResult<Vec<Bytes>>;
 }
-
-crate::macros::auto_impl_provider_refs!(T: StateProofProvider {
-    fn proof(
-        &self,
-        input: TrieInput<Self::AccountExtension>,
-        address: Address,
-        slots: &[B256],
-    ) -> ProviderResult<AccountProof<Self::AccountExtension>> {
-        T::proof(&**self, input, address, slots)
-    }
-    fn multiproof(
-        &self,
-        input: TrieInput<Self::AccountExtension>,
-        targets: MultiProofTargets,
-    ) -> ProviderResult<MultiProof> {
-        T::multiproof(&**self, input, targets)
-    }
-    fn multiproof_v2(
-        &self,
-        input: TrieInput<Self::AccountExtension>,
-        targets: MultiProofTargetsV2,
-    ) -> ProviderResult<DecodedMultiProofV2> {
-        T::multiproof_v2(&**self, input, targets)
-    }
-    fn witness(
-        &self,
-        input: TrieInput<Self::AccountExtension>,
-        target: HashedPostState<Self::AccountExtension>,
-        mode: ExecutionWitnessMode,
-    ) -> ProviderResult<Vec<Bytes>> {
-        T::witness(&**self, input, target, mode)
-    }
-});
 
 /// Trie Writer
 #[auto_impl::auto_impl(&, Arc, Box)]

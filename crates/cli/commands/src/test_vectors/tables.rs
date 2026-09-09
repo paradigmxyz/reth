@@ -14,7 +14,6 @@ use reth_db_api::{
 };
 use reth_ethereum_primitives::TransactionSigned;
 use reth_fs_util as fs;
-use reth_primitives_traits::EmptyAccountExtension;
 use std::collections::HashSet;
 use tracing::error;
 
@@ -77,7 +76,7 @@ pub fn generate_vectors(mut tables: Vec<String>) -> Result<()> {
         (TransactionHashNumbers, PER_TABLE, TABLE),
         (Transactions<TransactionSigned>, 100, TABLE),
         (PlainStorageState, PER_TABLE, DUPSORT),
-        (PlainAccountState<EmptyAccountExtension>, PER_TABLE, TABLE)
+        (PlainAccountState, PER_TABLE, TABLE)
     ]);
 
     Ok(())

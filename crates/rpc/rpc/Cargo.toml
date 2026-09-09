@@ -108,3 +108,4 @@ js-tracer = [
     "reth-rpc-eth-types/js-tracer",
     "reth-rpc-eth-api/js-tracer",
 ]
+account-ext = ["reth-consensus-common/account-ext", "reth-rpc-engine-api/account-ext"]

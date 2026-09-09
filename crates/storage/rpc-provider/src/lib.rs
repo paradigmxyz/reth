@@ -41,9 +41,7 @@ use reth_errors::{ProviderError, ProviderResult};
 use reth_node_types::{
     Block, BlockBody, BlockTy, HeaderTy, NodeTypes, PrimitivesTy, ReceiptTy, TxTy,
 };
-use reth_primitives_traits::{
-    Account, AccountExtensionTy, Bytecode, EmptyAccountExtension, RecoveredBlock, SealedHeader,
-};
+use reth_primitives_traits::{Account, Bytecode, RecoveredBlock, SealedHeader};
 use reth_provider::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BytecodeReader,
     CanonChainTracker, CanonStateNotification, CanonStateNotifications, CanonStateSubscriptions,
@@ -148,18 +146,6 @@ where
     chain_spec: Arc<Node::ChainSpec>,
     /// Converts RPC responses to primitive types.
     converter: Arc<DynRpcConverter<Node, N>>,
-}
-
-impl<P, Node: NodeTypes, N: Network> reth_provider::AccountExtensionProvider
-    for RpcBlockchainProvider<P, Node, N>
-{
-    type AccountExtension = EmptyAccountExtension;
-}
-
-impl<P, Node: NodeTypes, N> reth_provider::AccountExtensionProvider
-    for RpcBlockchainStateProvider<P, Node, N>
-{
-    type AccountExtension = EmptyAccountExtension;
 }
 
 impl<P, Node: NodeTypes, N: Network> std::fmt::Debug for RpcBlockchainProvider<P, Node, N> {
@@ -1036,10 +1022,29 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
         P: Provider<N> + Clone + 'static,
         N: Network,
     {
-        // Ethereum account RPC responses have no chain-specific payload to decode.
-        reth_storage_api::ensure_no_account_extensions::<AccountExtensionTy<Node::Primitives>>(
-            "Ethereum account RPC",
-        )?;
+        if Account::EXTENSIONS_ENABLED {
+            // Balance/nonce/code RPCs cannot carry the payload or distinguish extension-only
+            // accounts.
+            return self.block_on_async(async {
+                let account: Option<alloy_consensus::TrieAccount> = self
+                    .provider
+                    .raw_request("eth_getAccount".into(), (address, self.block_id))
+                    .await
+                    .map_err(ProviderError::other)?;
+                if let Some(account) = &account &&
+                    account.code_hash != KECCAK_EMPTY
+                {
+                    let code = self
+                        .provider
+                        .get_code_at(address)
+                        .block_id(self.block_id)
+                        .await
+                        .map_err(ProviderError::other)?;
+                    self.code_store.insert(account.code_hash, Bytecode::new_raw(code));
+                }
+                Ok(account.map(Account::from))
+            });
+        }
         let account_info = self.block_on_async(async {
             // Get account info in a single RPC call using `eth_getAccountInfo`
             if self.reth_rpc_support {
@@ -1084,6 +1089,7 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
                 balance: account_info.balance,
                 nonce: account_info.nonce,
                 bytecode_hash,
+                #[cfg(feature = "account-ext")]
                 extension: Default::default(),
             }))
         }

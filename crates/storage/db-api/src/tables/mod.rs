@@ -30,9 +30,7 @@ use crate::{
 use alloy_consensus::Header;
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
-use reth_primitives_traits::{
-    Account, AccountExtension, AccountExtensionTy, Bytecode, EmptyAccountExtension, StorageEntry,
-};
+use reth_primitives_traits::{Account, Bytecode, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
 use reth_trie_common::{
@@ -61,13 +59,11 @@ pub enum TableType {
 ///     table::{DupSort, Table},
 ///     TableViewer, Tables,
 /// };
-/// use reth_primitives_traits::EmptyAccountExtension;
 ///
 /// struct MyTableViewer;
 ///
 /// impl TableViewer<()> for MyTableViewer {
 ///     type Error = &'static str;
-///     type AccountExtension = EmptyAccountExtension;
 ///
 ///     fn view<T: Table>(&self) -> Result<(), Self::Error> {
 ///         // operate on table in a generic way
@@ -88,9 +84,6 @@ pub enum TableType {
 pub trait TableViewer<R> {
     /// The error type returned by the viewer.
     type Error;
-
-    /// Account extension used when viewing an account table.
-    type AccountExtension: AccountExtension;
 
     /// Calls `view` with the correct table type.
     fn view_rt(&self, table: Tables) -> Result<R, Self::Error> {
@@ -124,27 +117,11 @@ macro_rules! tables {
     (@bool) => { false };
     (@bool $($t:tt)+) => { true };
 
-    (@view PlainAccountState $v:ident $viewer:ident $result:ident) => {
-        $v.view::<PlainAccountState<<$viewer as $crate::TableViewer<$result>>::AccountExtension>>()
-    };
-    (@view HashedAccounts $v:ident $viewer:ident $result:ident) => {
-        $v.view::<HashedAccounts<<$viewer as $crate::TableViewer<$result>>::AccountExtension>>()
-    };
-    (@view AccountChangeSets $v:ident $viewer:ident $result:ident $_subkey:ty) => {
-        $v.view_dupsort::<AccountChangeSets<<$viewer as $crate::TableViewer<$result>>::AccountExtension>>()
-    };
-    (@view $name:ident $v:ident $viewer:ident $result:ident) => { $v.view::<$name>() };
-    (@view $name:ident $v:ident $viewer:ident $result:ident $_subkey:ty) => { $v.view_dupsort::<$name>() };
+    (@view $name:ident $v:ident) => { $v.view::<$name>() };
+    (@view $name:ident $v:ident $_subkey:ty) => { $v.view_dupsort::<$name>() };
 
     (@value_doc $key:ty, $value:ty) => {
         concat!("[`", stringify!($value), "`]")
-    };
-    (@dupsort $name:ident $(<$($generic:ident),*>)?, $value:ty;) => {};
-    (@dupsort $name:ident $(<$($generic:ident),*>)?, $value:ty; $subkey:ty) => {
-        impl$(<$($generic),*>)? DupSort for $name$(<$($generic),*>)?
-        where $value: $crate::table::Value + 'static $($(, $generic: Send + Sync)*)? {
-            type SubKey = $subkey;
-        }
     };
     // Don't generate links if we have generics
     (@value_doc $key:ty, $value:ty, $($generic:ident),*) => {
@@ -184,7 +161,11 @@ macro_rules! tables {
                 type Value = $value;
             }
 
-            tables!(@dupsort $name$(<$($generic),*>)?, $value; $($subkey)?);
+            $(
+                impl DupSort for $name {
+                    type SubKey = $subkey;
+                }
+            )?
         )*
 
         // Tables enum.
@@ -239,7 +220,7 @@ macro_rules! tables {
             {
                 match self {
                     $(
-                        Self::$name => tables!(@view $name visitor T R $($subkey)?),
+                        Self::$name => tables!(@view $name visitor $($subkey)?),
                     )*
                 }
             }
@@ -419,9 +400,9 @@ tables! {
     }
 
     /// Stores the current state of an [`Account`].
-    table PlainAccountState<E = EmptyAccountExtension> {
+    table PlainAccountState {
         type Key = Address;
-        type Value = Account<E>;
+        type Value = Account;
     }
 
     /// Stores the current value of a storage key.
@@ -474,9 +455,9 @@ tables! {
     /// Stores the state of an account before a certain transaction changed it.
     /// Change on state can be: account is created, selfdestructed, touched while empty
     /// or changed balance,nonce.
-    table AccountChangeSets<E = EmptyAccountExtension> {
+    table AccountChangeSets {
         type Key = BlockNumber;
-        type Value = AccountBeforeTx<E>;
+        type Value = AccountBeforeTx;
         type SubKey = Address;
     }
 
@@ -493,9 +474,9 @@ tables! {
     /// This table is in preparation for merklization and calculation of state root.
     /// We are saving whole account data as it is needed for partial update when
     /// part of storage is changed. Benefit for merklization is that hashed addresses are sorted.
-    table HashedAccounts<E = EmptyAccountExtension> {
+    table HashedAccounts {
         type Key = B256;
-        type Value = Account<E>;
+        type Value = Account;
     }
 
     /// Stores the current storage values indexed with `keccak256Address` and
@@ -631,15 +612,6 @@ impl Decode for ChainStateKey {
 
 // Alias types.
 
-/// Plain account state table configured for a node's account extension.
-pub type PlainAccountStateTy<N> = PlainAccountState<AccountExtensionTy<N>>;
-
-/// Hashed account state table configured for a node's account extension.
-pub type HashedAccountsTy<N> = HashedAccounts<AccountExtensionTy<N>>;
-
-/// Account changesets table configured for a node's account extension.
-pub type AccountChangeSetsTy<N> = AccountChangeSets<AccountExtensionTy<N>>;
-
 /// List with transaction numbers.
 pub type BlockNumberList = IntegerList;
 
@@ -649,7 +621,6 @@ pub type StageId = String;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_ethereum_primitives::EthPrimitives;
     use std::str::FromStr;
 
     #[test]
@@ -659,17 +630,5 @@ mod tests {
             assert_eq!(table.to_string(), table.name());
             assert_eq!(Tables::from_str(table.name()).unwrap(), *table);
         }
-    }
-
-    #[test]
-    fn node_account_table_views_reuse_canonical_tables() {
-        assert_eq!(
-            <PlainAccountStateTy<EthPrimitives> as Table>::NAME,
-            <PlainAccountState as Table>::NAME
-        );
-        assert_eq!(
-            <HashedAccountsTy<EthPrimitives> as Table>::NAME,
-            <HashedAccounts as Table>::NAME
-        );
     }
 }

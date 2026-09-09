@@ -9,11 +9,10 @@ use metrics::{Counter, Gauge, Histogram};
 use parking_lot::Once;
 use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
-use reth_primitives_traits::{Account, AccountExtension, Bytecode, EmptyAccountExtension};
+use reth_primitives_traits::{Account, Bytecode};
 use reth_provider::{
-    AccountExtensionProvider, AccountReader, BlockHashReader, BytecodeReader,
-    HashedPostStateProvider, StateProofProvider, StateProvider, StateRootProvider,
-    StorageRootProvider,
+    AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
+    StateProvider, StateRootProvider, StorageRootProvider,
 };
 use reth_revm::db::BundleState;
 use reth_trie::{
@@ -74,6 +73,9 @@ const CODE_CACHE_ENTRY_SIZE: usize =
 const STORAGE_CACHE_ENTRY_SIZE: usize =
     fixed_cache_entry_size::<(Address, StorageKey), StorageValue>();
 
+/// Size in bytes of a single account cache entry.
+const ACCOUNT_CACHE_ENTRY_SIZE: usize = fixed_cache_entry_size::<Address, Option<Account>>();
+
 /// Cache configuration with epoch tracking enabled for O(1) cache invalidation.
 struct EpochCacheConfig;
 impl CacheConfig for EpochCacheConfig {
@@ -95,12 +97,12 @@ type FixedCache<K, V, H = DefaultHashBuilder> = fixed_cache::Cache<K, V, H, Epoc
 /// [`CachedStateMetrics`] is provided. Slow-block [`CacheStats`] are controlled separately by
 /// [`Self::new_with_mode`].
 #[derive(Debug)]
-pub struct CachedStateProvider<S: AccountExtensionProvider> {
+pub struct CachedStateProvider<S> {
     /// The state provider
     state_provider: S,
 
     /// The caches used for the provider
-    caches: ExecutionCache<S::AccountExtension>,
+    caches: ExecutionCache,
 
     /// Optional immutable txpool-prewarm snapshot consulted before the regular execution cache.
     txpool_snapshot: Option<TxPoolPrewarmCacheSnapshot>,
@@ -122,12 +124,12 @@ pub struct CachedStateProvider<S: AccountExtensionProvider> {
     cache_stats: Option<Arc<CacheStats>>,
 }
 
-impl<S: AccountExtensionProvider> CachedStateProvider<S> {
+impl<S> CachedStateProvider<S> {
     /// Creates a new [`CachedStateProvider`] from an [`ExecutionCache`], state provider, and
     /// optional [`CachedStateMetrics`].
     pub const fn new(
         state_provider: S,
-        caches: ExecutionCache<S::AccountExtension>,
+        caches: ExecutionCache,
         metrics: Option<CachedStateMetrics>,
     ) -> Self {
         Self::new_with_mode(state_provider, caches, CacheFillMode::LookupOnly, metrics, None)
@@ -136,10 +138,7 @@ impl<S: AccountExtensionProvider> CachedStateProvider<S> {
     /// Creates a cache-filling [`CachedStateProvider`].
     ///
     /// Doesn't accept metrics because prewarming path does not need to report hit/misses.
-    pub const fn new_prewarm(
-        state_provider: S,
-        caches: ExecutionCache<S::AccountExtension>,
-    ) -> Self {
+    pub const fn new_prewarm(state_provider: S, caches: ExecutionCache) -> Self {
         Self::new_with_mode(state_provider, caches, CacheFillMode::FillOnMiss, None, None)
     }
 
@@ -147,7 +146,7 @@ impl<S: AccountExtensionProvider> CachedStateProvider<S> {
     /// block-local cache stats.
     pub const fn new_with_mode(
         state_provider: S,
-        caches: ExecutionCache<S::AccountExtension>,
+        caches: ExecutionCache,
         fill_mode: CacheFillMode,
         metrics: Option<CachedStateMetrics>,
         cache_stats: Option<Arc<CacheStats>>,
@@ -286,7 +285,7 @@ impl<S: AccountExtensionProvider> CachedStateProvider<S> {
     }
 }
 
-impl<S: AccountExtensionProvider> Drop for CachedStateProvider<S> {
+impl<S> Drop for CachedStateProvider<S> {
     fn drop(&mut self) {
         self.flush_buffered_metrics();
     }
@@ -845,15 +844,8 @@ impl<K: PartialEq, V> StatsHandler<K, V> for CacheStatsHandler {
     }
 }
 
-impl<S: AccountExtensionProvider> AccountExtensionProvider for CachedStateProvider<S> {
-    type AccountExtension = S::AccountExtension;
-}
-
 impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
-    fn basic_account(
-        &self,
-        address: &Address,
-    ) -> ProviderResult<Option<Account<S::AccountExtension>>> {
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         if let Some(snapshot) = &self.txpool_snapshot {
             if let Some(account) = snapshot.account(address) {
                 self.record_txpool_account_hit();
@@ -931,7 +923,7 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
     }
 }
 
-impl<S: BytecodeReader + AccountExtensionProvider> BytecodeReader for CachedStateProvider<S> {
+impl<S: BytecodeReader> BytecodeReader for CachedStateProvider<S> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         if let Some(snapshot) = &self.txpool_snapshot {
             if let Some(code) = snapshot.bytecode(code_hash) {
@@ -965,27 +957,24 @@ impl<S: BytecodeReader + AccountExtensionProvider> BytecodeReader for CachedStat
 }
 
 impl<S: StateRootProvider> StateRootProvider for CachedStateProvider<S> {
-    fn state_root(
-        &self,
-        hashed_state: HashedPostState<S::AccountExtension>,
-    ) -> ProviderResult<B256> {
+    fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         self.state_provider.state_root(hashed_state)
     }
 
-    fn state_root_from_nodes(&self, input: TrieInput<S::AccountExtension>) -> ProviderResult<B256> {
+    fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256> {
         self.state_provider.state_root_from_nodes(input)
     }
 
     fn state_root_with_updates(
         &self,
-        hashed_state: HashedPostState<S::AccountExtension>,
+        hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         self.state_provider.state_root_with_updates(hashed_state)
     }
 
     fn state_root_from_nodes_with_updates(
         &self,
-        input: TrieInput<S::AccountExtension>,
+        input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         self.state_provider.state_root_from_nodes_with_updates(input)
     }
@@ -994,16 +983,16 @@ impl<S: StateRootProvider> StateRootProvider for CachedStateProvider<S> {
 impl<S: StateProofProvider> StateProofProvider for CachedStateProvider<S> {
     fn proof(
         &self,
-        input: TrieInput<S::AccountExtension>,
+        input: TrieInput,
         address: Address,
         slots: &[B256],
-    ) -> ProviderResult<AccountProof<S::AccountExtension>> {
+    ) -> ProviderResult<AccountProof> {
         self.state_provider.proof(input, address, slots)
     }
 
     fn multiproof(
         &self,
-        input: TrieInput<S::AccountExtension>,
+        input: TrieInput,
         targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
         self.state_provider.multiproof(input, targets)
@@ -1011,7 +1000,7 @@ impl<S: StateProofProvider> StateProofProvider for CachedStateProvider<S> {
 
     fn multiproof_v2(
         &self,
-        input: TrieInput<S::AccountExtension>,
+        input: TrieInput,
         targets: reth_trie::MultiProofTargetsV2,
     ) -> ProviderResult<reth_trie::DecodedMultiProofV2> {
         self.state_provider.multiproof_v2(input, targets)
@@ -1019,17 +1008,15 @@ impl<S: StateProofProvider> StateProofProvider for CachedStateProvider<S> {
 
     fn witness(
         &self,
-        input: TrieInput<S::AccountExtension>,
-        target: HashedPostState<S::AccountExtension>,
+        input: TrieInput,
+        target: HashedPostState,
         mode: reth_trie::ExecutionWitnessMode,
     ) -> ProviderResult<Vec<alloy_primitives::Bytes>> {
         self.state_provider.witness(input, target, mode)
     }
 }
 
-impl<S: StorageRootProvider + AccountExtensionProvider> StorageRootProvider
-    for CachedStateProvider<S>
-{
+impl<S: StorageRootProvider> StorageRootProvider for CachedStateProvider<S> {
     fn storage_root(
         &self,
         address: Address,
@@ -1057,7 +1044,7 @@ impl<S: StorageRootProvider + AccountExtensionProvider> StorageRootProvider
     }
 }
 
-impl<S: BlockHashReader + AccountExtensionProvider> BlockHashReader for CachedStateProvider<S> {
+impl<S: BlockHashReader> BlockHashReader for CachedStateProvider<S> {
     fn block_hash(&self, number: alloy_primitives::BlockNumber) -> ProviderResult<Option<B256>> {
         self.state_provider.block_hash(number)
     }
@@ -1075,7 +1062,7 @@ impl<S: HashedPostStateProvider> HashedPostStateProvider for CachedStateProvider
     fn hashed_post_state(
         &self,
         bundle_state: &reth_revm::db::BundleState,
-    ) -> ProviderResult<HashedPostState<S::AccountExtension>> {
+    ) -> ProviderResult<HashedPostState> {
         self.state_provider.hashed_post_state(bundle_state)
     }
 }
@@ -1091,13 +1078,11 @@ impl<S: HashedPostStateProvider> HashedPostStateProvider for CachedStateProvider
 /// Since EIP-6780, SELFDESTRUCT only works within the same transaction where the
 /// contract was created, so we don't need to handle clearing the storage.
 #[derive(Debug, Clone)]
-pub struct ExecutionCache<Ext: AccountExtension = EmptyAccountExtension>(
-    Arc<ExecutionCacheInner<Ext>>,
-);
+pub struct ExecutionCache(Arc<ExecutionCacheInner>);
 
 /// Inner state of the [`ExecutionCache`], wrapped in a single [`Arc`].
 #[derive(Debug)]
-struct ExecutionCacheInner<Ext: AccountExtension> {
+struct ExecutionCacheInner {
     /// Cache for contract bytecode, keyed by code hash.
     code_cache: FixedCache<B256, Option<Bytecode>, FbBuildHasher<32>>,
 
@@ -1105,7 +1090,7 @@ struct ExecutionCacheInner<Ext: AccountExtension> {
     storage_cache: FixedCache<(Address, StorageKey), StorageValue>,
 
     /// Cache for basic account information (nonce, balance, code hash).
-    account_cache: FixedCache<Address, Option<Account<Ext>>, FbBuildHasher<20>>,
+    account_cache: FixedCache<Address, Option<Account>, FbBuildHasher<20>>,
 
     /// Stats handler for the code cache (shared with the cache via [`Stats`]).
     code_stats: Arc<CacheStatsHandler>,
@@ -1120,9 +1105,7 @@ struct ExecutionCacheInner<Ext: AccountExtension> {
     selfdestruct_encountered: Once,
 }
 
-impl<Ext: AccountExtension> ExecutionCache<Ext> {
-    const ACCOUNT_CACHE_ENTRY_SIZE: usize =
-        fixed_cache_entry_size::<Address, Option<Account<Ext>>>();
+impl ExecutionCache {
     /// Minimum cache size required when epochs are enabled.
     /// With EPOCHS=true, fixed-cache requires 12 bottom bits to be zero (2 needed + 10 epoch).
     const MIN_CACHE_SIZE_WITH_EPOCHS: usize = 1 << 12; // 4096
@@ -1151,8 +1134,7 @@ impl<Ext: AccountExtension> ExecutionCache<Ext> {
 
         let code_capacity = Self::bytes_to_entries(code_cache_size, CODE_CACHE_ENTRY_SIZE);
         let storage_capacity = Self::bytes_to_entries(storage_cache_size, STORAGE_CACHE_ENTRY_SIZE);
-        let account_capacity =
-            Self::bytes_to_entries(account_cache_size, Self::ACCOUNT_CACHE_ENTRY_SIZE);
+        let account_capacity = Self::bytes_to_entries(account_cache_size, ACCOUNT_CACHE_ENTRY_SIZE);
 
         let code_stats = Arc::new(CacheStatsHandler::new(code_capacity));
         let storage_stats = Arc::new(CacheStatsHandler::new(storage_capacity));
@@ -1220,8 +1202,8 @@ impl<Ext: AccountExtension> ExecutionCache<Ext> {
     pub fn get_or_try_insert_account_with<E>(
         &self,
         address: Address,
-        f: impl FnOnce() -> Result<Option<Account<Ext>>, E>,
-    ) -> Result<CachedStatus<Option<Account<Ext>>>, E> {
+        f: impl FnOnce() -> Result<Option<Account>, E>,
+    ) -> Result<CachedStatus<Option<Account>>, E> {
         let mut miss = false;
         let result = self.0.account_cache.get_or_try_insert_with(address, |_| {
             miss = true;
@@ -1246,7 +1228,7 @@ impl<Ext: AccountExtension> ExecutionCache<Ext> {
     }
 
     /// Insert account into cache.
-    pub fn insert_account(&self, address: Address, account: Option<Account<Ext>>) {
+    pub fn insert_account(&self, address: Address, account: Option<Account>) {
         self.0.account_cache.insert(address, account);
     }
 
@@ -1378,17 +1360,17 @@ impl<Ext: AccountExtension> ExecutionCache<Ext> {
 /// A saved cache that has been used for executing a specific block, which has been updated for its
 /// execution.
 #[derive(Debug, Clone)]
-pub struct SavedCache<Ext: AccountExtension = EmptyAccountExtension> {
+pub struct SavedCache {
     /// The hash of the block these caches were used to execute.
     hash: B256,
 
     /// The caches used for the provider.
-    caches: ExecutionCache<Ext>,
+    caches: ExecutionCache,
 }
 
-impl<Ext: AccountExtension> SavedCache<Ext> {
+impl SavedCache {
     /// Creates a new instance with the internals
-    pub const fn new(hash: B256, caches: ExecutionCache<Ext>) -> Self {
+    pub const fn new(hash: B256, caches: ExecutionCache) -> Self {
         Self { hash, caches }
     }
 
@@ -1408,7 +1390,7 @@ impl<Ext: AccountExtension> SavedCache<Ext> {
     }
 
     /// Returns the [`ExecutionCache`] belonging to the tracked hash.
-    pub const fn cache(&self) -> &ExecutionCache<Ext> {
+    pub const fn cache(&self) -> &ExecutionCache {
         &self.caches
     }
 
@@ -1428,9 +1410,9 @@ impl<Ext: AccountExtension> SavedCache<Ext> {
 }
 
 #[cfg(any(test, feature = "test-utils"))]
-impl<Ext: AccountExtension> SavedCache<Ext> {
+impl SavedCache {
     /// Clones the cache handle that acts as the availability guard.
-    pub fn clone_guard_for_test(&self) -> ExecutionCache<Ext> {
+    pub fn clone_guard_for_test(&self) -> ExecutionCache {
         self.caches.clone()
     }
 }
@@ -1452,7 +1434,7 @@ mod tests {
         let provider = MockEthProvider::default();
         provider.extend_accounts(vec![(address, account)]);
 
-        let caches = ExecutionCache::<EmptyAccountExtension>::new(1000);
+        let caches = ExecutionCache::new(1000);
         let state_provider = CachedStateProvider::new(
             provider,
             caches,
@@ -1475,7 +1457,7 @@ mod tests {
         let provider = MockEthProvider::default();
         provider.extend_accounts(vec![(address, account)]);
 
-        let caches = ExecutionCache::<EmptyAccountExtension>::new(1000);
+        let caches = ExecutionCache::new(1000);
         let state_provider = CachedStateProvider::new(
             provider,
             caches,
@@ -1493,7 +1475,7 @@ mod tests {
         let storage_key = StorageKey::random();
         let storage_value = U256::from(1);
 
-        let caches = ExecutionCache::<EmptyAccountExtension>::new(1000);
+        let caches = ExecutionCache::new(1000);
         caches.insert_storage(address, storage_key, Some(storage_value));
 
         let result = caches
@@ -1506,7 +1488,7 @@ mod tests {
         let address = Address::random();
         let storage_key = StorageKey::random();
 
-        let caches = ExecutionCache::<EmptyAccountExtension>::new(1000);
+        let caches = ExecutionCache::new(1000);
         caches.insert_storage(address, storage_key, None);
 
         let result = caches
@@ -1516,7 +1498,7 @@ mod tests {
 
     #[test]
     fn test_saved_cache_is_available() {
-        let execution_cache = ExecutionCache::<EmptyAccountExtension>::new(1000);
+        let execution_cache = ExecutionCache::new(1000);
         let cache = SavedCache::new(B256::ZERO, execution_cache);
 
         assert!(cache.is_available(), "Cache should be available initially");
@@ -1528,7 +1510,7 @@ mod tests {
 
     #[test]
     fn test_saved_cache_multiple_references() {
-        let execution_cache = ExecutionCache::<EmptyAccountExtension>::new(1000);
+        let execution_cache = ExecutionCache::new(1000);
         let cache = SavedCache::new(B256::from([2u8; 32]), execution_cache);
 
         let cache1 = cache.clone_guard_for_test();
@@ -1549,7 +1531,7 @@ mod tests {
 
     #[test]
     fn test_insert_state_destroyed_account_with_code_clears_cache() {
-        let caches = ExecutionCache::<EmptyAccountExtension>::new(1000);
+        let caches = ExecutionCache::new(1000);
 
         // Pre-populate caches with some data
         let addr1 = Address::random();
@@ -1570,11 +1552,13 @@ mod tests {
                 Address::random(),
                 BundleAccount::new(
                     Some(AccountInfo {
+                        #[cfg(feature = "account-ext")]
+                        extension: Default::default(),
                         balance: U256::ZERO,
                         nonce: 1,
                         code_hash: B256::random(), // Non-empty code hash
                         code: None,
-                        ..Default::default()
+                        account_id: None,
                     }),
                     None, // Destroyed, so no current info
                     Default::default(),
@@ -1599,7 +1583,7 @@ mod tests {
 
     #[test]
     fn test_insert_state_destroyed_account_without_code_removes_only_account() {
-        let caches = ExecutionCache::<EmptyAccountExtension>::new(1000);
+        let caches = ExecutionCache::new(1000);
 
         // Pre-populate caches with some data
         let addr1 = Address::random();
@@ -1615,11 +1599,13 @@ mod tests {
                 addr1,
                 BundleAccount::new(
                     Some(AccountInfo {
+                        #[cfg(feature = "account-ext")]
+                        extension: Default::default(),
                         balance: U256::from(100),
                         nonce: 1,
                         code_hash: alloy_primitives::KECCAK256_EMPTY, // Empty code hash = EOA
                         code: None,
-                        ..Default::default()
+                        account_id: None,
                     }),
                     None, // Destroyed
                     Default::default(),
@@ -1643,7 +1629,7 @@ mod tests {
 
     #[test]
     fn test_insert_state_destroyed_account_no_original_info_removes_only_account() {
-        let caches = ExecutionCache::<EmptyAccountExtension>::new(1000);
+        let caches = ExecutionCache::new(1000);
 
         // Pre-populate caches
         let addr1 = Address::random();
@@ -1678,7 +1664,7 @@ mod tests {
 
     #[test]
     fn test_insert_state_destroyed_uncached_account_keeps_size_zero() {
-        let caches = ExecutionCache::<EmptyAccountExtension>::new(1000);
+        let caches = ExecutionCache::new(1000);
         assert_eq!(caches.0.account_stats.size(), 0);
 
         let addr = Address::random();
@@ -1709,10 +1695,7 @@ mod tests {
         let total_cache_size = 4 * 1024 * 1024 * 1024; // 4 GB
         let code_budget = (total_cache_size * 556) / 10000; // 228 MB
 
-        let capacity = ExecutionCache::<EmptyAccountExtension>::bytes_to_entries(
-            code_budget,
-            CODE_CACHE_ENTRY_SIZE,
-        );
+        let capacity = ExecutionCache::bytes_to_entries(code_budget, CODE_CACHE_ENTRY_SIZE);
 
         // With ESTIMATED_AVG_CODE_SIZE (8 KiB) we expect 16384 entries.
         // If someone accidentally reverts to MAX_CODE_SIZE (48 KiB), this would drop to 4096.

@@ -128,8 +128,7 @@ impl Command {
         let provider = factory.provider()?.disable_long_read_transaction_safety();
         let sf_provider = factory.static_file_provider();
 
-        let mut cursor =
-            provider.tx_ref().cursor_read::<tables::AccountChangeSetsTy<N::Primitives>>()?;
+        let mut cursor = provider.tx_ref().cursor_read::<tables::AccountChangeSets>()?;
 
         let first_block = provider
             .get_prune_checkpoint(PruneSegment::AccountHistory)?

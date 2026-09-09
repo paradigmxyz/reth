@@ -58,7 +58,8 @@ pub struct PersistenceFrontiers {
 }
 
 /// Block Writer
-pub trait BlockWriter: crate::AccountExtensionProvider {
+#[auto_impl::auto_impl(&, Arc, Box)]
+pub trait BlockWriter {
     /// The body this writer can write.
     type Block: Block;
     /// The receipt type for [`ExecutionOutcome`].
@@ -110,37 +111,6 @@ pub trait BlockWriter: crate::AccountExtensionProvider {
         &self,
         blocks: Vec<RecoveredBlock<Self::Block>>,
         execution_outcome: &ExecutionOutcome<Self::Receipt>,
-        hashed_state: HashedPostStateSorted<Self::AccountExtension>,
+        hashed_state: HashedPostStateSorted,
     ) -> ProviderResult<()>;
 }
-
-crate::macros::auto_impl_provider_refs!(T: BlockWriter {
-    type Block = T::Block;
-    type Receipt = T::Receipt;
-    fn insert_block(
-        &self,
-        block: &RecoveredBlock<Self::Block>,
-    ) -> ProviderResult<StoredBlockBodyIndices> {
-        T::insert_block(&**self, block)
-    }
-    fn append_block_bodies(
-        &self,
-        bodies: Vec<(BlockNumber, Option<&<Self::Block as Block>::Body>)>,
-    ) -> ProviderResult<()> {
-        T::append_block_bodies(&**self, bodies)
-    }
-    fn remove_blocks_above(&self, block: BlockNumber) -> ProviderResult<()> {
-        T::remove_blocks_above(&**self, block)
-    }
-    fn remove_bodies_above(&self, block: BlockNumber) -> ProviderResult<()> {
-        T::remove_bodies_above(&**self, block)
-    }
-    fn append_blocks_with_state(
-        &self,
-        blocks: Vec<RecoveredBlock<Self::Block>>,
-        execution_outcome: &ExecutionOutcome<Self::Receipt>,
-        hashed_state: HashedPostStateSorted<Self::AccountExtension>,
-    ) -> ProviderResult<()> {
-        T::append_blocks_with_state(&**self, blocks, execution_outcome, hashed_state)
-    }
-});

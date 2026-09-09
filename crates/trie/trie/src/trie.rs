@@ -29,7 +29,7 @@ use crate::metrics::{StateRootMetrics, TrieRootMetrics};
 
 /// `StateRoot` is used to compute the root node of a state trie.
 #[derive(Debug)]
-pub struct StateRoot<T, H: HashedCursorFactory> {
+pub struct StateRoot<T, H> {
     /// The factory for trie cursors.
     pub trie_cursor_factory: T,
     /// The factory for hashed cursors.
@@ -39,7 +39,7 @@ pub struct StateRoot<T, H: HashedCursorFactory> {
     /// Whether every child under a branch whose path matches the prefix set should be walked.
     walk_all_changed_branch_children: bool,
     /// Previous intermediate state.
-    previous_state: Option<IntermediateStateRootState<H::AccountExtension>>,
+    previous_state: Option<IntermediateStateRootState>,
     /// The number of updates after which the intermediate progress should be returned.
     threshold: u64,
     #[cfg(feature = "metrics")]
@@ -47,7 +47,7 @@ pub struct StateRoot<T, H: HashedCursorFactory> {
     metrics: StateRootMetrics,
 }
 
-impl<T, H: HashedCursorFactory> StateRoot<T, H> {
+impl<T, H> StateRoot<T, H> {
     /// Creates [`StateRoot`] with `trie_cursor_factory` and `hashed_cursor_factory`. All other
     /// parameters are set to reasonable defaults.
     ///
@@ -91,19 +91,13 @@ impl<T, H: HashedCursorFactory> StateRoot<T, H> {
     }
 
     /// Set the previously recorded intermediate state.
-    pub fn with_intermediate_state(
-        mut self,
-        state: Option<IntermediateStateRootState<H::AccountExtension>>,
-    ) -> Self {
+    pub fn with_intermediate_state(mut self, state: Option<IntermediateStateRootState>) -> Self {
         self.previous_state = state;
         self
     }
 
     /// Set the hashed cursor factory.
-    pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> StateRoot<T, HF>
-    where
-        HF: HashedCursorFactory<AccountExtension = H::AccountExtension>,
-    {
+    pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> StateRoot<T, HF> {
         StateRoot {
             trie_cursor_factory: self.trie_cursor_factory,
             hashed_cursor_factory,
@@ -170,16 +164,11 @@ where
     /// # Returns
     ///
     /// The intermediate progress of state root computation.
-    pub fn root_with_progress(
-        self,
-    ) -> Result<StateRootProgress<H::AccountExtension>, StateRootError> {
+    pub fn root_with_progress(self) -> Result<StateRootProgress, StateRootError> {
         self.calculate(true)
     }
 
-    fn calculate(
-        self,
-        retain_updates: bool,
-    ) -> Result<StateRootProgress<H::AccountExtension>, StateRootError> {
+    fn calculate(self, retain_updates: bool) -> Result<StateRootProgress, StateRootError> {
         trace!(target: "trie::state_root", "calculating state root");
         let mut tracker = TrieTracker::default();
 
@@ -430,17 +419,16 @@ impl StateRootContext {
 
     /// Creates a [`StateRootProgress`] when the threshold is hit, from the state of the current
     /// [`TrieNodeIter`], [`HashBuilder`], last hashed key and any storage root intermediate state.
-    fn create_progress_state<C, H, K, E>(
+    fn create_progress_state<C, H, K>(
         mut self,
         account_node_iter: TrieNodeIter<C, H, K>,
         hash_builder: HashBuilder,
         last_hashed_key: B256,
-        storage_state: Option<IntermediateStorageRootState<E>>,
-    ) -> StateRootProgress<E>
+        storage_state: Option<IntermediateStorageRootState>,
+    ) -> StateRootProgress
     where
         C: TrieCursor,
-        H: HashedCursor<Value = Account<E>>,
-        E: reth_primitives_traits::AccountExtension,
+        H: HashedCursor,
         K: AsRef<AddedRemovedKeys>,
     {
         let (walker_stack, walker_deleted_keys) = account_node_iter.walker.split();
@@ -483,14 +471,14 @@ impl StateRootContext {
     ///
     /// Returns an [`IntermediateStorageRootState`] if the calculation needs to be resumed later, or
     /// `None` if the storage root was successfully computed and added to the trie.
-    fn process_storage_root_result<E: reth_primitives_traits::AccountExtension>(
+    fn process_storage_root_result(
         &mut self,
         storage_result: StorageRootProgress,
         hashed_address: B256,
-        account: Account<E>,
+        account: Account,
         hash_builder: &mut HashBuilder,
         retain_updates: bool,
-    ) -> Result<Option<IntermediateStorageRootState<E>>, StateRootError> {
+    ) -> Result<Option<IntermediateStorageRootState>, StateRootError> {
         match storage_result {
             StorageRootProgress::Complete(storage_root, storage_slots_walked, updates) => {
                 // Storage root completed

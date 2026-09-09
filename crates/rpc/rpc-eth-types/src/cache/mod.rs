@@ -255,9 +255,7 @@ impl<N: NodePrimitives> EthStateCache<N> {
         let _ = self.to_service.send(CacheAction::GetBal { block_hash, response_tx });
         let maybe_bal = rx.await.map_err(|_| CacheServiceUnavailable)??;
         if maybe_bal.is_some() {
-            reth_storage_api::ensure_no_account_extensions::<
-                reth_primitives_traits::AccountExtensionTy<N>,
-            >("BAL")?;
+            reth_storage_api::ensure_no_account_extensions("BAL")?;
         }
         Ok(maybe_bal.map(|cached| cached.0))
     }

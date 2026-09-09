@@ -71,7 +71,7 @@ pub(crate) fn compute_block_trie_updates<N, Provider>(
 ) -> ProviderResult<TrieUpdatesSorted>
 where
     N: NodePrimitives,
-    Provider: DBProvider<AccountExtension = N::AccountExtension>
+    Provider: DBProvider
         + ChangeSetReader
         + StorageChangeSetReader
         + PruneCheckpointReader
@@ -91,7 +91,7 @@ fn compute_block_trie_updates_inner<N, Provider, A>(
 ) -> ProviderResult<TrieUpdatesSorted>
 where
     N: NodePrimitives,
-    Provider: DBProvider<AccountExtension = N::AccountExtension>
+    Provider: DBProvider
         + ChangeSetReader
         + StorageChangeSetReader
         + PruneCheckpointReader
@@ -221,7 +221,7 @@ impl ChangesetCache {
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
         N: NodePrimitives,
-        P: DBProvider<AccountExtension = N::AccountExtension>
+        P: DBProvider
             + ChangeSetReader
             + StorageChangeSetReader
             + StageCheckpointReader
@@ -274,7 +274,7 @@ impl ChangesetCache {
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
         N: NodePrimitives,
-        P: DBProvider<AccountExtension = N::AccountExtension>
+        P: DBProvider
             + ChangeSetReader
             + StorageChangeSetReader
             + StageCheckpointReader
@@ -629,7 +629,7 @@ mod tests {
         tables,
         transaction::DbTxMut,
     };
-    use reth_primitives_traits::{Account, EmptyAccountExtension, StorageEntry};
+    use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{
         test_utils::create_test_provider_factory, StaticFileProviderFactory, StaticFileSegment,
         StaticFileWriter,
@@ -695,7 +695,7 @@ mod tests {
         range: RangeInclusive<BlockNumber>,
     ) -> TrieUpdatesSorted
     where
-        Provider: DBProvider<AccountExtension = EmptyAccountExtension>
+        Provider: DBProvider
             + ChangeSetReader
             + StorageChangeSetReader
             + BlockNumReader
@@ -714,7 +714,7 @@ mod tests {
         block_number: BlockNumber,
     ) -> TrieUpdatesSorted
     where
-        Provider: DBProvider<AccountExtension = EmptyAccountExtension>
+        Provider: DBProvider
             + ChangeSetReader
             + StorageChangeSetReader
             + BlockNumReader
@@ -730,7 +730,7 @@ mod tests {
         block_number: BlockNumber,
     ) -> TrieUpdatesSorted
     where
-        Provider: DBProvider<AccountExtension = EmptyAccountExtension>
+        Provider: DBProvider
             + ChangeSetReader
             + StorageChangeSetReader
             + BlockNumReader
@@ -782,7 +782,7 @@ mod tests {
 
     fn seed_tip_trie_tables<Provider, A>(provider: &Provider)
     where
-        Provider: DBProvider<AccountExtension = EmptyAccountExtension> + TrieWriter,
+        Provider: DBProvider + TrieWriter,
         A: TrieTableAdapter,
     {
         type DbStateRoot<'a, TX, A> =

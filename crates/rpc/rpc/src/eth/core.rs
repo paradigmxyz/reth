@@ -606,7 +606,7 @@ mod tests {
                 Transaction = reth_ethereum_primitives::TransactionSigned,
             > + BlockReader
             + ChainSpecProvider<ChainSpec = ChainSpec>
-            + StateProviderFactory<AccountExtension = reth_primitives_traits::EmptyAccountExtension>
+            + StateProviderFactory
             + CanonStateSubscriptions<Primitives = reth_ethereum_primitives::EthPrimitives>
             + StageCheckpointReader
             + PruneCheckpointReader

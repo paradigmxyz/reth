@@ -1,3 +1,6 @@
+// Accounts are only Copy when account-ext is disabled.
+#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+
 use crate::{
     traits::SparseTrie as SparseTrieTrait, ArenaParallelSparseTrie, RevealableSparseTrie,
     TrieNodeEpoch,
@@ -577,46 +580,6 @@ mod tests {
         TrieAccount, TrieMask, TrieNodeV2,
     };
 
-    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-    struct TestExtension(u64);
-
-    impl alloy_trie::TrieAccountExtension for TestExtension {
-        fn payload_length(&self) -> usize {
-            alloy_rlp::Encodable::length(&self.0)
-        }
-
-        fn encode_payload(&self, out: &mut dyn alloy_rlp::BufMut) {
-            alloy_rlp::Encodable::encode(&self.0, out);
-        }
-
-        fn decode_payload(payload: &mut &[u8]) -> alloy_rlp::Result<Self> {
-            alloy_rlp::Decodable::decode(payload).map(Self)
-        }
-    }
-
-    #[test]
-    fn sparse_trie_preserves_extended_account_leaf() {
-        let hashed_address = B256::with_last_byte(1);
-        let path = Nibbles::unpack(hashed_address);
-        let account = TrieAccount { extension: TestExtension(42), ..Default::default() };
-        let encoded_account = alloy_rlp::encode(account);
-        let mut builder =
-            HashBuilder::default().with_proof_retainer(ProofRetainer::from_iter([path]));
-        builder.add_leaf(path, &encoded_account);
-        let root = builder.root();
-
-        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
-        sparse
-            .reveal_multiproof(MultiProof {
-                account_subtree: builder.take_proof_nodes(),
-                ..Default::default()
-            })
-            .unwrap();
-
-        assert_eq!(sparse.root(epoch(0)).unwrap(), root);
-        assert_eq!(sparse.get_account_value(&hashed_address), Some(&encoded_account),);
-    }
-
     const fn epoch(value: u64) -> TrieNodeEpoch {
         TrieNodeEpoch::new(value)
     }
@@ -643,7 +606,7 @@ mod tests {
         let full_path_0 = leaf_key([0x0], 64);
         let _full_path_1 = leaf_key([0x1], 64);
 
-        let leaf_value = alloy_rlp::encode(TrieAccount::<()>::default());
+        let leaf_value = alloy_rlp::encode(TrieAccount::default());
         // Leaf key is 63 nibbles (suffix after 1-nibble node path)
         let leaf_1 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
             leaf_key([], 63),
@@ -700,7 +663,7 @@ mod tests {
         // Full 64-nibble path
         let full_path_0 = leaf_key([0x0], 64);
 
-        let leaf_value = alloy_rlp::encode(TrieAccount::<()>::default());
+        let leaf_value = alloy_rlp::encode(TrieAccount::default());
         let leaf_1 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
             leaf_key([], 63),
             leaf_value.clone(),
@@ -780,7 +743,7 @@ mod tests {
         let old_account_path = leaf_key([0x1], 64);
         let storage_path = leaf_key([0x0], 64);
 
-        let leaf_value = alloy_rlp::encode(TrieAccount::<()>::default());
+        let leaf_value = alloy_rlp::encode(TrieAccount::default());
         let leaf_0 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
             leaf_key([], 63),
             leaf_value.clone(),
@@ -856,7 +819,7 @@ mod tests {
             .unwrap();
         assert!(storage_updates.is_empty());
 
-        let trie_account: TrieAccount = TrieAccount {
+        let trie_account = TrieAccount {
             storage_root: sparse.storage_root(&account, epoch(10)).unwrap(),
             ..Default::default()
         };
@@ -898,7 +861,7 @@ mod tests {
         // Full 64-nibble path
         let full_path_0 = leaf_key([0x0], 64);
 
-        let leaf_value = alloy_rlp::encode(TrieAccount::<()>::default());
+        let leaf_value = alloy_rlp::encode(TrieAccount::default());
         let leaf_1_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), leaf_value.clone()));
         let leaf_2_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), leaf_value.clone()));
 
@@ -1057,18 +1020,16 @@ mod tests {
 
         let address_1 = b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
         let address_path_1 = Nibbles::unpack(address_1);
-        let account_1: Account =
-            Account::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap();
-        let mut trie_account_1 = account_1.into_trie_account(storage_root);
+        let account_1 = Account::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap();
+        let mut trie_account_1 = account_1.clone().into_trie_account(storage_root);
         let address_2 = b256!("0x1100000000000000000000000000000000000000000000000000000000000000");
         let address_path_2 = Nibbles::unpack(address_2);
-        let account_2: Account =
-            Account::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap();
+        let account_2 = Account::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap();
         let trie_account_2 = account_2.into_trie_account(EMPTY_ROOT_HASH);
 
         let mut hash_builder = HashBuilder::default()
             .with_proof_retainer(ProofRetainer::from_iter([address_path_1, address_path_2]));
-        hash_builder.add_leaf(address_path_1, &alloy_rlp::encode(trie_account_1));
+        hash_builder.add_leaf(address_path_1, &alloy_rlp::encode(trie_account_1.clone()));
         hash_builder.add_leaf(address_path_2, &alloy_rlp::encode(trie_account_2));
 
         let root = hash_builder.root();

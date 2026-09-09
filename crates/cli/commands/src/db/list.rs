@@ -95,7 +95,6 @@ struct ListTableViewer<'a, N: NodeTypes> {
 
 impl<N: NodeTypes> TableViewer<()> for ListTableViewer<'_, N> {
     type Error = eyre::Report;
-    type AccountExtension = reth_primitives_traits::AccountExtensionTy<N::Primitives>;
 
     fn view<T: Table>(&self) -> Result<(), Self::Error> {
         self.tool.provider_factory.db_ref().view(|tx| {

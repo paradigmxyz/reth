@@ -129,7 +129,7 @@ pub enum ProviderError {
     #[error("this provider does not support this request")]
     UnsupportedProvider,
 
-    /// The requested operation does not support chain-specific account extensions.
+    /// The requested protocol cannot carry account extension payloads.
     #[error("{0} does not support account extensions")]
     AccountExtensionsUnsupported(&'static str),
     /// Static File is not found at specified path.

@@ -153,3 +153,9 @@ test-utils = [
     "reth-trie/test-utils",
     "reth-evm/test-utils",
 ]
+account-ext = [
+    "reth-eth-wire/account-ext",
+    "reth-transaction-pool/account-ext",
+    "reth-discv5/account-ext",
+    "reth-network-api/account-ext",
+]

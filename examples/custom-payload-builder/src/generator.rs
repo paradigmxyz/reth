@@ -9,9 +9,7 @@ use reth_ethereum::{
     provider::{BlockReaderIdExt, BlockSource, StateProviderFactory},
     tasks::Runtime,
 };
-use reth_payload_builder::{
-    BuildNewPayload, PayloadBuilderError, PayloadId, PayloadJob, PayloadJobGenerator,
-};
+use reth_payload_builder::{BuildNewPayload, PayloadBuilderError, PayloadId, PayloadJobGenerator};
 use std::sync::Arc;
 
 /// The generator type that creates new jobs that builds empty blocks.
@@ -61,10 +59,7 @@ where
     /// `engine_forkchoiceUpdatedV1`
     fn new_payload_job(
         &self,
-        input: BuildNewPayload<
-            Builder::Attributes,
-            reth_ethereum::primitives::AccountExtensionTy<<Self::Job as PayloadJob>::Primitives>,
-        >,
+        input: BuildNewPayload<Builder::Attributes>,
         id: PayloadId,
     ) -> Result<Self::Job, PayloadBuilderError> {
         let parent_block = if input.parent_hash.is_zero() {

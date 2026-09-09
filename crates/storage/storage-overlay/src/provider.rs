@@ -1,3 +1,6 @@
+// Accounts are only Copy when account-ext is disabled.
+#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+
 use crate::{database_state_frontiers, ExecutionOverlay, OverlayBuilder, StateTrieOverlay};
 use alloy_primitives::{Address, BlockHash, BlockNumber, B256, U256};
 use metrics::{Counter, Histogram};
@@ -56,7 +59,7 @@ pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
     ///
     /// Under partial persistence the overlay depends on both durable frontiers, so both hashes are
     /// part of the cache key.
-    state_trie_overlay_cache: StateTrieOverlayCache<N::AccountExtension>,
+    state_trie_overlay_cache: StateTrieOverlayCache,
     /// Metrics for provider factory operations.
     metrics: OverlayStateProviderFactoryMetrics,
 }
@@ -86,8 +89,7 @@ impl<F, N> DatabaseProviderROFactory for OverlayStateProviderFactory<F, N>
 where
     N: NodePrimitives,
     F: DatabaseProviderFactory,
-    F::Provider: reth_storage_api::AccountExtensionProvider<AccountExtension = N::AccountExtension>
-        + StageCheckpointReader
+    F::Provider: StageCheckpointReader
         + PruneCheckpointReader
         + BlockNumReader
         + ChangeSetReader
@@ -127,10 +129,10 @@ where
 pub struct OverlayStateProvider<Provider, N: NodePrimitives = EthPrimitives> {
     provider: Provider,
     overlay_builder: Option<OverlayBuilder<N>>,
-    state_trie_overlay_cache: StateTrieOverlayCache<N::AccountExtension>,
+    state_trie_overlay_cache: StateTrieOverlayCache,
     metrics: OverlayStateProviderFactoryMetrics,
-    state_trie_overlay: OnceCell<StateTrieOverlay<N::AccountExtension>>,
-    state_trie_overlay_with_trie_changesets: OnceCell<StateTrieOverlay<N::AccountExtension>>,
+    state_trie_overlay: OnceCell<StateTrieOverlay>,
+    state_trie_overlay_with_trie_changesets: OnceCell<StateTrieOverlay>,
     execution_overlay: OnceCell<CachedExecutionOverlay>,
     is_v2: bool,
 }
@@ -154,7 +156,7 @@ impl<Provider, N: NodePrimitives> OverlayStateProvider<OwnedProvider<Provider>, 
     const fn new_with_caches(
         provider: Provider,
         overlay_builder: OverlayBuilder<N>,
-        state_trie_overlay_cache: StateTrieOverlayCache<N::AccountExtension>,
+        state_trie_overlay_cache: StateTrieOverlayCache,
         metrics: OverlayStateProviderFactoryMetrics,
         is_v2: bool,
     ) -> Self {
@@ -213,7 +215,7 @@ impl<'a, Provider, N: NodePrimitives> OverlayStateProvider<&'a Provider, N> {
 
     pub(crate) fn new_with_state_trie(
         provider: &'a Provider,
-        state_trie_overlay: StateTrieOverlay<N::AccountExtension>,
+        state_trie_overlay: StateTrieOverlay,
         is_v2: bool,
     ) -> Self {
         Self {
@@ -238,16 +240,13 @@ where
         &self.provider
     }
 
-    fn state_trie_overlay(
-        &self,
-        trie_changesets: bool,
-    ) -> ProviderResult<&StateTrieOverlay<N::AccountExtension>>
+    fn state_trie_overlay(&self, trie_changesets: bool) -> ProviderResult<&StateTrieOverlay>
     where
         Provider::Target: StageCheckpointReader
             + PruneCheckpointReader
             + ChangeSetReader
             + StorageChangeSetReader
-            + DBProvider<AccountExtension = N::AccountExtension>
+            + DBProvider
             + BlockNumReader
             + StorageSettingsCache,
     {
@@ -285,10 +284,7 @@ where
         Ok(state_trie_overlay.get().expect("state trie overlay was just initialized"))
     }
 
-    const fn state_trie_overlay_mut(
-        &self,
-        trie_changesets: bool,
-    ) -> &OnceCell<StateTrieOverlay<N::AccountExtension>> {
+    const fn state_trie_overlay_mut(&self, trie_changesets: bool) -> &OnceCell<StateTrieOverlay> {
         if trie_changesets {
             &self.state_trie_overlay_with_trie_changesets
         } else {
@@ -298,15 +294,15 @@ where
 
     fn build_overlay(
         &self,
-        input: TrieInputSorted<N::AccountExtension>,
+        input: TrieInputSorted,
         trie_changesets: bool,
-    ) -> ProviderResult<TrieInputSorted<N::AccountExtension>>
+    ) -> ProviderResult<TrieInputSorted>
     where
         Provider::Target: StageCheckpointReader
             + PruneCheckpointReader
             + ChangeSetReader
             + StorageChangeSetReader
-            + DBProvider<AccountExtension = N::AccountExtension>
+            + DBProvider
             + BlockNumReader
             + StorageSettingsCache,
     {
@@ -338,7 +334,7 @@ where
             + PruneCheckpointReader
             + ChangeSetReader
             + StorageChangeSetReader
-            + DBProvider<AccountExtension = N::AccountExtension>
+            + DBProvider
             + BlockNumReader,
     {
         if let Some(overlay) = self.execution_overlay.get() {
@@ -404,19 +400,10 @@ where
     }
 }
 
-impl<Provider, N: NodePrimitives> reth_storage_api::AccountExtensionProvider
-    for OverlayStateProvider<Provider, N>
-where
-    Provider: Deref,
-    Provider::Target: DBProvider<AccountExtension = N::AccountExtension>,
-{
-    type AccountExtension = N::AccountExtension;
-}
-
 impl<Provider, N: NodePrimitives> AccountReader for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider<AccountExtension = N::AccountExtension>
+    Provider::Target: DBProvider
         + HistoryReader
         + StorageSettingsCache
         + StageCheckpointReader
@@ -425,10 +412,7 @@ where
         + StorageChangeSetReader
         + BlockNumReader,
 {
-    fn basic_account(
-        &self,
-        address: &Address,
-    ) -> ProviderResult<Option<Account<N::AccountExtension>>> {
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         let (overlay, historical_fallback) = self.execution_overlay()?;
         if let Some(account) = overlay.accounts().get(address) {
             return Ok(account.as_ref().map(Account::from))
@@ -462,20 +446,17 @@ where
     Provider: Deref,
     Provider::Target: DBProvider + StorageSettingsCache,
 {
-    fn basic_account_from_db(
-        &self,
-        address: &Address,
-    ) -> ProviderResult<Option<Account<N::AccountExtension>>> {
+    fn basic_account_from_db(&self, address: &Address) -> ProviderResult<Option<Account>> {
         if self.provider().cached_storage_settings().use_hashed_state() {
             let hashed_address = alloy_primitives::keccak256(address);
             self.provider()
                 .tx()
-                .get_by_encoded_key::<tables::HashedAccounts<N::AccountExtension>>(&hashed_address)
+                .get_by_encoded_key::<tables::HashedAccounts>(&hashed_address)
                 .map_err(Into::into)
         } else {
             self.provider()
                 .tx()
-                .get_by_encoded_key::<tables::PlainAccountState<N::AccountExtension>>(address)
+                .get_by_encoded_key::<tables::PlainAccountState>(address)
                 .map_err(Into::into)
         }
     }
@@ -485,7 +466,7 @@ impl<Provider, N: NodePrimitives> BlockHashReader for OverlayStateProvider<Provi
 where
     Provider: Deref,
     Provider::Target: BlockHashReader
-        + DBProvider<AccountExtension = N::AccountExtension>
+        + DBProvider
         + Sized
         + StageCheckpointReader
         + PruneCheckpointReader
@@ -523,7 +504,7 @@ where
 impl<Provider, N: NodePrimitives> BytecodeReader for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider<AccountExtension = N::AccountExtension>
+    Provider::Target: DBProvider
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -545,7 +526,7 @@ where
 impl<Provider, N: NodePrimitives> StateRootProvider for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider<AccountExtension = N::AccountExtension>
+    Provider::Target: DBProvider
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -553,42 +534,36 @@ where
         + BlockNumReader
         + StorageSettingsCache,
 {
-    fn state_root(
-        &self,
-        hashed_state: HashedPostState<N::AccountExtension>,
-    ) -> ProviderResult<B256> {
+    fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
             let input = self.build_overlay(
                 TrieInputSorted::from_unsorted(TrieInput::from_state(hashed_state)),
                 false,
             )?;
-            Ok(<DbStateRoot<'_, _, A, N::AccountExtension>>::overlay_root_from_nodes(
+            Ok(<DbStateRoot<'_, _, A>>::overlay_root_from_nodes(self.provider().tx(), input)?)
+        })
+    }
+
+    fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256> {
+        reth_trie_db::with_adapter!(self.provider(), |A| {
+            let input = self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
+            Ok(<DbStateRoot<'_, _, A> as DatabaseStateRoot<_>>::overlay_root_from_nodes(
                 self.provider().tx(),
                 input,
             )?)
         })
     }
 
-    fn state_root_from_nodes(&self, input: TrieInput<N::AccountExtension>) -> ProviderResult<B256> {
-        reth_trie_db::with_adapter!(self.provider(), |A| {
-            let input = self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
-            Ok(<DbStateRoot<'_, _, A, N::AccountExtension> as DatabaseStateRoot<
-                _,
-                N::AccountExtension,
-            >>::overlay_root_from_nodes(self.provider().tx(), input)?)
-        })
-    }
-
     fn state_root_with_updates(
         &self,
-        hashed_state: HashedPostState<N::AccountExtension>,
+        hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
             let input = self.build_overlay(
                 TrieInputSorted::from_unsorted(TrieInput::from_state(hashed_state)),
                 true,
             )?;
-            Ok(<DbStateRoot<'_, _, A, N::AccountExtension>>::overlay_root_from_nodes_with_updates(
+            Ok(<DbStateRoot<'_, _, A>>::overlay_root_from_nodes_with_updates(
                 self.provider().tx(),
                 input,
             )?)
@@ -597,14 +572,16 @@ where
 
     fn state_root_from_nodes_with_updates(
         &self,
-        input: TrieInput<N::AccountExtension>,
+        input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
             let input = self.build_overlay(TrieInputSorted::from_unsorted(input), true)?;
-            Ok(<DbStateRoot<'_, _, A, N::AccountExtension> as DatabaseStateRoot<
-                _,
-                N::AccountExtension,
-            >>::overlay_root_from_nodes_with_updates(self.provider().tx(), input)?)
+            Ok(
+                <DbStateRoot<'_, _, A> as DatabaseStateRoot<_>>::overlay_root_from_nodes_with_updates(
+                    self.provider().tx(),
+                    input,
+                )?,
+            )
         })
     }
 }
@@ -612,7 +589,7 @@ where
 impl<Provider, N: NodePrimitives> StorageRootProvider for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider<AccountExtension = N::AccountExtension>
+    Provider::Target: DBProvider
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -642,12 +619,8 @@ where
                 .cloned()
                 .unwrap_or_default()
                 .into();
-            <DbStorageRoot<'_, _, A, N::AccountExtension>>::overlay_root(
-                self.provider().tx(),
-                address,
-                hashed_storage,
-            )
-            .map_err(|err| ProviderError::Database(err.into()))
+            <DbStorageRoot<'_, _, A>>::overlay_root(self.provider().tx(), address, hashed_storage)
+                .map_err(|err| ProviderError::Database(err.into()))
         })
     }
 
@@ -674,7 +647,7 @@ where
                 .cloned()
                 .unwrap_or_default()
                 .into();
-            <DbStorageProof<'_, _, A, N::AccountExtension>>::overlay_storage_proof(
+            <DbStorageProof<'_, _, A>>::overlay_storage_proof(
                 self.provider().tx(),
                 address,
                 slot,
@@ -707,7 +680,7 @@ where
                 .cloned()
                 .unwrap_or_default()
                 .into();
-            <DbStorageProof<'_, _, A, N::AccountExtension>>::overlay_storage_multiproof(
+            <DbStorageProof<'_, _, A>>::overlay_storage_multiproof(
                 self.provider().tx(),
                 address,
                 slots,
@@ -721,7 +694,7 @@ where
 impl<Provider, N: NodePrimitives> StateProofProvider for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider<AccountExtension = N::AccountExtension>
+    Provider::Target: DBProvider
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -731,10 +704,10 @@ where
 {
     fn proof(
         &self,
-        input: TrieInput<N::AccountExtension>,
+        input: TrieInput,
         address: Address,
         slots: &[B256],
-    ) -> ProviderResult<AccountProof<N::AccountExtension>> {
+    ) -> ProviderResult<AccountProof> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
             let TrieInputSorted { nodes, state, prefix_sets } =
                 self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
@@ -743,17 +716,14 @@ where
                 Arc::unwrap_or_clone(state).into(),
                 prefix_sets,
             );
-            let proof = <DbProof<'_, _, A, N::AccountExtension> as DatabaseProof<
-                '_,
-                N::AccountExtension,
-            >>::from_tx(self.provider().tx());
+            let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.provider().tx());
             proof.overlay_account_proof(input, address, slots).map_err(ProviderError::from)
         })
     }
 
     fn multiproof(
         &self,
-        input: TrieInput<N::AccountExtension>,
+        input: TrieInput,
         targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
@@ -764,17 +734,14 @@ where
                 Arc::unwrap_or_clone(state).into(),
                 prefix_sets,
             );
-            let proof = <DbProof<'_, _, A, N::AccountExtension> as DatabaseProof<
-                '_,
-                N::AccountExtension,
-            >>::from_tx(self.provider().tx());
+            let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.provider().tx());
             proof.overlay_multiproof(input, targets).map_err(ProviderError::from)
         })
     }
 
     fn multiproof_v2(
         &self,
-        input: TrieInput<N::AccountExtension>,
+        input: TrieInput,
         targets: MultiProofTargetsV2,
     ) -> ProviderResult<DecodedMultiProofV2> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
@@ -785,18 +752,15 @@ where
                 Arc::unwrap_or_clone(state).into(),
                 prefix_sets,
             );
-            let proof = <DbProof<'_, _, A, N::AccountExtension> as DatabaseProof<
-                '_,
-                N::AccountExtension,
-            >>::from_tx(self.provider().tx());
+            let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.provider().tx());
             proof.overlay_multiproof_v2(input, targets).map_err(ProviderError::from)
         })
     }
 
     fn witness(
         &self,
-        input: TrieInput<N::AccountExtension>,
-        target: HashedPostState<N::AccountExtension>,
+        input: TrieInput,
+        target: HashedPostState,
         mode: ExecutionWitnessMode,
     ) -> ProviderResult<Vec<alloy_primitives::Bytes>> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
@@ -828,7 +792,7 @@ where
 impl<Provider, N: NodePrimitives> HashedPostStateProvider for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider<AccountExtension = N::AccountExtension>
+    Provider::Target: DBProvider
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -839,7 +803,7 @@ where
     fn hashed_post_state(
         &self,
         bundle_state: &revm::database::BundleState,
-    ) -> ProviderResult<HashedPostState<N::AccountExtension>> {
+    ) -> ProviderResult<HashedPostState> {
         let mut hashed_state =
             HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state());
         if !bundle_state
@@ -866,7 +830,7 @@ where
 impl<Provider, N: NodePrimitives> StateProvider for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider<AccountExtension = N::AccountExtension>
+    Provider::Target: DBProvider
         + HistoryReader
         + BlockHashReader
         + StorageSettingsCache
@@ -946,7 +910,7 @@ where
 impl<Provider, N: NodePrimitives> TrieCursorFactory for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider<AccountExtension = N::AccountExtension>
+    Provider::Target: DBProvider
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -1001,7 +965,7 @@ where
 impl<Provider, N: NodePrimitives> HashedCursorFactory for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider<AccountExtension = N::AccountExtension>
+    Provider::Target: DBProvider
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -1009,25 +973,18 @@ where
         + BlockNumReader
         + StorageSettingsCache,
 {
-    type AccountExtension = N::AccountExtension;
     type AccountCursor<'a>
         = <HashedPostStateCursorFactory<
-        DatabaseHashedCursorFactory<
-            &'a <Provider::Target as DbTxProvider>::Tx,
-            N::AccountExtension,
-        >,
-        &'a Arc<HashedPostStateSorted<N::AccountExtension>>,
+        DatabaseHashedCursorFactory<&'a <Provider::Target as DbTxProvider>::Tx>,
+        &'a Arc<HashedPostStateSorted>,
     > as HashedCursorFactory>::AccountCursor<'a>
     where
         Self: 'a;
 
     type StorageCursor<'a>
         = <HashedPostStateCursorFactory<
-        DatabaseHashedCursorFactory<
-            &'a <Provider::Target as DbTxProvider>::Tx,
-            N::AccountExtension,
-        >,
-        &'a Arc<HashedPostStateSorted<N::AccountExtension>>,
+        DatabaseHashedCursorFactory<&'a <Provider::Target as DbTxProvider>::Tx>,
+        &'a Arc<HashedPostStateSorted>,
     > as HashedCursorFactory>::StorageCursor<'a>
     where
         Self: 'a;
@@ -1066,7 +1023,7 @@ pub(crate) struct OverlayStateProviderFactoryMetrics {
     state_trie_overlay_cache_misses: Counter,
 }
 
-type StateTrieOverlayCache<E> = Arc<DashMap<(BlockHash, BlockHash, bool), StateTrieOverlay<E>>>;
+type StateTrieOverlayCache = Arc<DashMap<(BlockHash, BlockHash, bool), StateTrieOverlay>>;
 
 #[derive(Clone, Debug)]
 struct CachedExecutionOverlay {
@@ -1081,17 +1038,17 @@ struct HistoricalFallback {
     storage_history_block_number: Option<BlockNumber>,
 }
 
-type DbStateRoot<'a, TX, A, E> =
-    StateRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX, E>>;
-type DbStorageRoot<'a, TX, A, E> =
-    StorageRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX, E>>;
-type DbStorageProof<'a, TX, A, E> = TrieStorageProof<
+type DbStateRoot<'a, TX, A> =
+    StateRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
+type DbStorageRoot<'a, TX, A> =
+    StorageRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
+type DbStorageProof<'a, TX, A> = TrieStorageProof<
     'static,
     DatabaseTrieCursorFactory<&'a TX, A>,
-    DatabaseHashedCursorFactory<&'a TX, E>,
+    DatabaseHashedCursorFactory<&'a TX>,
 >;
-type DbProof<'a, TX, A, E> =
-    Proof<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX, E>>;
+type DbProof<'a, TX, A> =
+    Proof<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
 
 #[doc(hidden)]
 #[derive(Debug)]
@@ -1405,7 +1362,10 @@ mod tests {
             .unwrap();
         provider_rw
             .tx_ref()
-            .put::<tables::AccountChangeSets>(2, AccountBeforeTx { address, info: Some(account) })
+            .put::<tables::AccountChangeSets>(
+                2,
+                AccountBeforeTx { address, info: Some(account.clone()) },
+            )
             .unwrap();
         provider_rw
             .tx_ref()

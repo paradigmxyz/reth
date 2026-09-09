@@ -83,7 +83,7 @@ impl<'a, R> From<&'a ExecutionOutcome<R>> for WriteStateInput<'a, R> {
 }
 
 /// A trait specifically for writing state changes or reverts
-pub trait StateWriter: crate::AccountExtensionProvider {
+pub trait StateWriter {
     /// Receipt type included into [`ExecutionOutcome`].
     type Receipt: 'static;
 
@@ -113,10 +113,7 @@ pub trait StateWriter: crate::AccountExtensionProvider {
     fn write_state_changes(&self, changes: StateChangeset) -> ProviderResult<()>;
 
     /// Writes the hashed state changes to the database
-    fn write_hashed_state(
-        &self,
-        hashed_state: &HashedPostStateSorted<Self::AccountExtension>,
-    ) -> ProviderResult<()>;
+    fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()>;
 
     /// Remove the block range of state above the given block. The state of the passed block is not
     /// removed.

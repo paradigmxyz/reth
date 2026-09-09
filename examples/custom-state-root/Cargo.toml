@@ -22,3 +22,6 @@ alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-network.workspace = true
 alloy-rpc-types-engine.workspace = true
+
+[features]
+account-ext = ["reth-engine-tree/account-ext", "reth-ethereum/account-ext"]

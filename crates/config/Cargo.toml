@@ -41,6 +41,7 @@ serde = [
     "alloy-primitives/serde",
     "url/serde",
 ]
+account-ext = ["reth-prune-types/account-ext", "reth-static-file-types/account-ext"]
 
 [dev-dependencies]
 tempfile.workspace = true

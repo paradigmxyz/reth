@@ -4,12 +4,12 @@ use crate::{
     updates::{StorageTrieUpdates, TrieUpdates},
 };
 use alloy_primitives::B256;
-use reth_primitives_traits::{Account, EmptyAccountExtension};
+use reth_primitives_traits::Account;
 use reth_stages_types::MerkleCheckpoint;
 
 /// The progress of the state root computation.
 #[derive(Debug)]
-pub enum StateRootProgress<E = EmptyAccountExtension> {
+pub enum StateRootProgress {
     /// The complete state root computation with updates, the total number of entries walked, and
     /// the computed root.
     Complete(B256, usize, TrieUpdates),
@@ -17,29 +17,29 @@ pub enum StateRootProgress<E = EmptyAccountExtension> {
     /// Contains the walker stack, the hash builder, and the trie updates.
     ///
     /// Also contains any progress in an inner storage root computation.
-    Progress(Box<IntermediateStateRootState<E>>, usize, TrieUpdates),
+    Progress(Box<IntermediateStateRootState>, usize, TrieUpdates),
 }
 
 /// The intermediate state of the state root computation.
 #[derive(Debug)]
-pub struct IntermediateStateRootState<E = EmptyAccountExtension> {
+pub struct IntermediateStateRootState {
     /// The intermediate account root state.
     pub account_root_state: IntermediateRootState,
     /// The intermediate storage root state with account data.
-    pub storage_root_state: Option<IntermediateStorageRootState<E>>,
+    pub storage_root_state: Option<IntermediateStorageRootState>,
 }
 
 /// The intermediate state of a storage root computation along with the account.
 #[derive(Debug)]
-pub struct IntermediateStorageRootState<E = EmptyAccountExtension> {
+pub struct IntermediateStorageRootState {
     /// The intermediate storage trie state.
     pub state: IntermediateRootState,
     /// The account for which the storage root is being computed.
-    pub account: Account<E>,
+    pub account: Account,
 }
 
-impl<E> From<MerkleCheckpoint<E>> for IntermediateStateRootState<E> {
-    fn from(value: MerkleCheckpoint<E>) -> Self {
+impl From<MerkleCheckpoint> for IntermediateStateRootState {
+    fn from(value: MerkleCheckpoint) -> Self {
         Self {
             account_root_state: IntermediateRootState {
                 hash_builder: HashBuilder::from(value.state),
@@ -61,6 +61,7 @@ impl<E> From<MerkleCheckpoint<E>> for IntermediateStateRootState<E> {
                         nonce: checkpoint.account_nonce,
                         balance: checkpoint.account_balance,
                         bytecode_hash: Some(checkpoint.account_bytecode_hash),
+                        #[cfg(feature = "account-ext")]
                         extension: checkpoint.account_extension,
                     },
                 }

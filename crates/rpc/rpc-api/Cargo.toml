@@ -14,7 +14,6 @@ workspace = true
 [dependencies]
 # reth
 reth-rpc-eth-api.workspace = true
-reth-primitives-traits = { workspace = true, features = ["serde"] }
 reth-engine-primitives.workspace = true
 reth-network-peers.workspace = true
 reth-trie-common = { workspace = true, features = ["serde"] }
@@ -48,6 +47,7 @@ client = [
     "jsonrpsee/async-client",
     "reth-rpc-eth-api/client",
 ]
+account-ext = ["reth-rpc-eth-api/account-ext"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

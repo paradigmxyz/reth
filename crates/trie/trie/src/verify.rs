@@ -35,16 +35,16 @@ enum BranchNode {
 ///   started. In other words, if the current storage account is not equal to the previous, the
 ///   previous has no more nodes.
 #[derive(Debug)]
-struct StateRootBranchNodesIter<H: HashedCursorFactory> {
+struct StateRootBranchNodesIter<H> {
     hashed_cursor_factory: H,
     account_nodes: Vec<(Nibbles, BranchNodeCompact)>,
     storage_tries: Vec<(B256, Vec<(Nibbles, BranchNodeCompact)>)>,
     curr_storage: Option<(B256, Vec<(Nibbles, BranchNodeCompact)>)>,
-    intermediate_state: Option<Box<IntermediateStateRootState<H::AccountExtension>>>,
+    intermediate_state: Option<Box<IntermediateStateRootState>>,
     complete: bool,
 }
 
-impl<H: HashedCursorFactory> StateRootBranchNodesIter<H> {
+impl<H> StateRootBranchNodesIter<H> {
     fn new(hashed_cursor_factory: H) -> Self {
         Self {
             hashed_cursor_factory,
@@ -301,7 +301,7 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
 /// database tables as the source of truth. This will iteratively recompute the entire trie based
 /// on the hashed state, and produce any discovered [`Output`]s via the `next` method.
 #[derive(Debug)]
-pub struct Verifier<'a, T: TrieCursorFactory, H: HashedCursorFactory> {
+pub struct Verifier<'a, T: TrieCursorFactory, H> {
     trie_cursor_factory: &'a T,
     hashed_cursor_factory: H,
     branch_node_iter: StateRootBranchNodesIter<H>,
@@ -541,10 +541,11 @@ mod tests {
         accounts.insert(
             addr1,
             Account {
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
                 nonce: 1,
                 balance: U256::from(1000),
                 bytecode_hash: Some(keccak256(b"code1")),
-                ..Default::default()
             },
         );
 
@@ -611,10 +612,11 @@ mod tests {
             accounts.insert(
                 addr,
                 Account {
+                    #[cfg(feature = "account-ext")]
+                    extension: Default::default(),
                     nonce: i as u64,
                     balance: U256::from(i as u64 * 1000),
                     bytecode_hash: (i == 2).then(|| keccak256([i])),
-                    ..Default::default()
                 },
             );
 

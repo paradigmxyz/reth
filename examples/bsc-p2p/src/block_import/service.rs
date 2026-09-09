@@ -9,7 +9,7 @@ use reth_network::{
     message::NewBlockMessage,
 };
 use reth_network_api::PeerId;
-use reth_payload_primitives::{EngineApiMessageVersion, PayloadTypes};
+use reth_payload_primitives::{BuiltPayload, EngineApiMessageVersion, PayloadTypes};
 use reth_primitives_traits::{AlloyBlockHeader, Block, NodePrimitives};
 use reth_provider::{BlockHashReader, BlockNumReader};
 use std::{
@@ -21,7 +21,8 @@ use std::{
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 /// The block type for a given engine
-pub type BscBlock<T> = <<T as PayloadTypes>::Primitives as NodePrimitives>::Block;
+pub type BscBlock<T> =
+    <<<T as PayloadTypes>::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block;
 
 /// Network message containing a new block
 pub(crate) type BlockMsg<T> = NewBlockMessage<NewBlock<BscBlock<T>>>;

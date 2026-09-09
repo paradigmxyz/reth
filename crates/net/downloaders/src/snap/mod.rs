@@ -1,3 +1,6 @@
+// Accounts are only Copy when account-ext is disabled.
+#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+
 //! Downloads and verifies snap/2 ranges against
 //! [EIP-8189](https://eips.ethereum.org/EIPS/eip-8189) pivot state roots.
 //!
@@ -330,11 +333,12 @@ mod tests {
 
     fn account(nonce: u64) -> TrieAccount {
         TrieAccount {
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
             nonce,
             balance: U256::from(1),
             storage_root: EMPTY_ROOT_HASH,
             code_hash: KECCAK256_EMPTY,
-            extension: (),
         }
     }
 
@@ -543,7 +547,7 @@ mod tests {
             outcome,
             AccountRangeOutcome::Verified(VerifiedAccountRange {
                 state_root: root_hash,
-                accounts: vec![accounts[0]],
+                accounts: vec![accounts[0].clone()],
                 has_more: false,
                 next: Some(key(4)),
             })
@@ -684,7 +688,7 @@ mod tests {
             outcome,
             AccountRangeOutcome::Verified(VerifiedAccountRange {
                 state_root: root_hash,
-                accounts: vec![accounts[0]],
+                accounts: vec![accounts[0].clone()],
                 has_more: false,
                 next: Some(key(9)),
             })
@@ -711,7 +715,7 @@ mod tests {
             outcome,
             AccountRangeOutcome::Verified(VerifiedAccountRange {
                 state_root: root_hash,
-                accounts: vec![accounts[0]],
+                accounts: vec![accounts[0].clone()],
                 has_more: true,
                 next: Some(key(3)),
             })

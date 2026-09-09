@@ -46,6 +46,33 @@ fn convert_to_proof<'a>(path: impl IntoIterator<Item = &'a str>) -> Vec<Bytes> {
 }
 
 #[test]
+#[cfg(feature = "account-ext")]
+fn extension_only_genesis_account_proof() {
+    let target = Address::with_last_byte(1);
+    let extension =
+        reth_primitives_traits::AccountExtension::from(alloy_rlp::encode(B256::repeat_byte(0x42)));
+    let mut spec = ChainSpec::default();
+    spec.genesis.alloc.entry(target).or_default().extension = extension.clone();
+    let expected_root =
+        reth_chainspec::make_genesis_header(&spec.genesis, &spec.hardforks).state_root;
+    let factory = create_test_provider_factory();
+    let root = insert_genesis(&factory, Arc::new(spec)).unwrap();
+    assert_eq!(root, expected_root);
+
+    let provider = factory.provider().unwrap();
+    reth_trie_db::with_adapter!(provider, |A| {
+        let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(provider.tx_ref())
+            .account_proof(target, &[])
+            .unwrap();
+        let account = proof.info.as_ref().unwrap();
+        assert_eq!(account.extension, extension);
+        assert!(!account.is_empty());
+        assert_eq!(proof.verify(root), Ok(()));
+        assert!(proof.into_eip1186_response(Vec::new()).is_err());
+    });
+}
+
+#[test]
 fn testspec_proofs() {
     // Create test database and insert genesis accounts.
     let factory = create_test_provider_factory();
@@ -286,10 +313,11 @@ fn holesky_deposit_contract_proof() {
     let expected = AccountProof {
         address: target,
         info: Some(Account {
+#[cfg(feature = "account-ext")]
+extension: Default::default(),
             balance: U256::ZERO,
             nonce: 0,
-            bytecode_hash: Some(b256!("0x2034f79e0e33b0ae6bef948532021baceb116adf2616478703bec6b17329f1cc")),
-            extension: Default::default(),
+            bytecode_hash: Some(b256!("0x2034f79e0e33b0ae6bef948532021baceb116adf2616478703bec6b17329f1cc"))
         }),
         storage_root: b256!("0x556a482068355939c95a3412bdb21213a301483edb1b64402fb66ac9f3583599"),
         proof: convert_to_proof([

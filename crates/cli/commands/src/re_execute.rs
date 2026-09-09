@@ -412,7 +412,7 @@ where
     for (i, block_reverts) in bundle.reverts.iter().rev().enumerate() {
         let block_number = last_block - i as u64;
 
-        let mut cs_accounts: HashMap<Address, Option<Account<P::AccountExtension>>> = provider
+        let mut cs_accounts: HashMap<Address, Option<Account>> = provider
             .account_block_changeset(block_number)?
             .into_iter()
             .map(|cs| (cs.address, cs.info))

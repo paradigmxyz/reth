@@ -106,7 +106,12 @@ rand.workspace = true
 rand_08.workspace = true
 
 [features]
-account-ext = ["reth-primitives-traits/account-ext"]
+account-ext = [
+    "reth-evm/account-ext",
+    "reth-payload-builder/account-ext",
+    "reth-stages?/account-ext",
+    "reth-stages-api/account-ext",
+]
 test-utils = [
     "reth-chain-state/test-utils",
     "reth-chainspec/test-utils",

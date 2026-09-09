@@ -7,8 +7,7 @@ use revm::{database::State, state::bal::Bal as RevmBal, Database};
 use std::sync::Arc;
 
 /// Helper alias type for the state's [`State`]
-pub type StateCacheDb<E = reth_primitives_traits::EmptyAccountExtension> =
-    State<StateProviderDatabase<StateProviderBox<E>>>;
+pub type StateCacheDb = State<StateProviderDatabase<StateProviderBox>>;
 
 /// Attaches `bal` to the database, positioned at the state right before the transaction at
 /// `tx_index`.

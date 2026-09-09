@@ -1,3 +1,6 @@
+// Accounts are only Copy when account-ext is disabled.
+#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+
 use super::{DatabaseProviderRO, ProviderFactory, ProviderNodeTypes};
 use crate::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut},
@@ -17,8 +20,7 @@ use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_node_types::{BlockTy, HeaderTy, ReceiptTy, TxTy};
 use reth_primitives_traits::{
-    AccountExtensionTy, BlockBody, RecoveredBlock, SealedHeader, SealedOrRecoveredBlock,
-    StorageEntry,
+    BlockBody, RecoveredBlock, SealedHeader, SealedOrRecoveredBlock, StorageEntry,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -1263,15 +1265,11 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> reth_storage_api::AccountExtensionProvider for ConsistentProvider<N> {
-    type AccountExtension = AccountExtensionTy<N::Primitives>;
-}
-
 impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
     fn account_block_changeset(
         &self,
         block_number: BlockNumber,
-    ) -> ProviderResult<Vec<AccountBeforeTx<AccountExtensionTy<N::Primitives>>>> {
+    ) -> ProviderResult<Vec<AccountBeforeTx>> {
         if let Some(state) =
             self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
         {
@@ -1315,7 +1313,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
         &self,
         block_number: BlockNumber,
         address: Address,
-    ) -> ProviderResult<Option<AccountBeforeTx<AccountExtensionTy<N::Primitives>>>> {
+    ) -> ProviderResult<Option<AccountBeforeTx>> {
         if let Some(state) =
             self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
         {
@@ -1359,8 +1357,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
     fn account_changesets_range(
         &self,
         range: impl core::ops::RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx<AccountExtensionTy<N::Primitives>>)>>
-    {
+    ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
         let range = to_range(range);
         let mut changesets = Vec::new();
         let database_start = range.start;
@@ -1430,7 +1427,7 @@ mod tests {
     use reth_db_api::models::AccountBeforeTx;
     use reth_ethereum_primitives::Block;
     use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, ExecutionOutcome};
-    use reth_primitives_traits::{Account, EmptyAccountExtension, RecoveredBlock, SealedBlock};
+    use reth_primitives_traits::{RecoveredBlock, SealedBlock};
     use reth_storage_api::{BlockReader, BlockSource, ChangeSetReader, StateReader};
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_eoa_accounts, BlockRangeParams,
@@ -1724,9 +1721,9 @@ mod tests {
         let (in_memory_changesets, in_memory_state) = random_changeset_range(
             &mut rng,
             &in_memory_blocks,
-            database_state
-                .iter()
-                .map(|(address, (account, storage))| (*address, (*account, storage.clone()))),
+            database_state.iter().map(|(address, (account, storage))| {
+                (*address, (account.clone(), storage.clone()))
+            }),
             0..0,
             0..0,
         );
@@ -1746,7 +1743,7 @@ mod tests {
                     }),
                     database_changesets.iter().map(|block_changesets| {
                         block_changesets.iter().map(|(address, account, _)| {
-                            (*address, Some(Some((*account).into())), [])
+                            (*address, Some(Some((account.clone()).into())), [])
                         })
                     }),
                     Vec::new(),
@@ -1777,7 +1774,7 @@ mod tests {
                                     (address, None, Some(account.into()), Default::default())
                                 }),
                                 [in_memory_changesets.iter().map(|(address, account, _)| {
-                                    (*address, Some(Some((*account).into())), Vec::new())
+                                    (*address, Some(Some((account.clone()).into())), Vec::new())
                                 })],
                                 [],
                             ),
@@ -1828,11 +1825,12 @@ mod tests {
         use std::collections::HashMap;
 
         let address = alloy_primitives::Address::with_last_byte(1);
-        let account = Account::<EmptyAccountExtension> {
+        let account = reth_primitives_traits::Account {
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
             nonce: 1,
             balance: U256::from(1000),
             bytecode_hash: None,
-            extension: Default::default(),
         };
         let slot = U256::from(0x42);
         let slot_b256 = B256::from(slot);
@@ -1855,14 +1853,18 @@ mod tests {
                 .collect(),
             &ExecutionOutcome {
                 bundle: BundleState::new(
-                    [(address, None, Some(account.into()), {
+                    [(address, None, Some(account.clone().into()), {
                         let mut s = HashMap::default();
                         s.insert(slot, (U256::ZERO, U256::from(100)));
                         s
                     })],
                     [
                         Vec::new(),
-                        vec![(address, Some(Some(account.into())), vec![(slot, U256::ZERO)])],
+                        vec![(
+                            address,
+                            Some(Some(account.clone().into())),
+                            vec![(slot, U256::ZERO)],
+                        )],
                     ],
                     [],
                 ),
@@ -1912,11 +1914,12 @@ mod tests {
         let (database_blocks, in_memory_blocks) = random_blocks(&mut rng, 1, 1, None, None, 0..1);
 
         let address = alloy_primitives::Address::with_last_byte(1);
-        let account = Account::<EmptyAccountExtension> {
+        let account = reth_primitives_traits::Account {
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
             nonce: 1,
             balance: U256::from(1000),
             bytecode_hash: None,
-            extension: Default::default(),
         };
         let slot = U256::from(0x42);
 
@@ -1928,12 +1931,12 @@ mod tests {
                 .collect(),
             &ExecutionOutcome {
                 bundle: BundleState::new(
-                    [(address, None, Some(account.into()), {
+                    [(address, None, Some(account.clone().into()), {
                         let mut s = HashMap::default();
                         s.insert(slot, (U256::ZERO, U256::from(100)));
                         s
                     })],
-                    [[(address, Some(Some(account.into())), vec![(slot, U256::ZERO)])]],
+                    [[(address, Some(Some(account.clone().into())), vec![(slot, U256::ZERO)])]],
                     [],
                 ),
                 first_block: 0,
@@ -1955,7 +1958,7 @@ mod tests {
                 )),
                 execution_output: Arc::new(BlockExecutionOutput {
                     state: BundleState::new(
-                        [(address, None, Some(account.into()), {
+                        [(address, None, Some(account.clone().into()), {
                             let mut s = HashMap::default();
                             s.insert(slot, (U256::from(100), U256::from(200)));
                             s
@@ -2012,11 +2015,12 @@ mod tests {
         let (database_blocks, in_memory_blocks) = random_blocks(&mut rng, 2, 1, None, None, 0..1);
 
         let address = alloy_primitives::Address::with_last_byte(1);
-        let account = Account::<EmptyAccountExtension> {
+        let account = reth_primitives_traits::Account {
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
             nonce: 1,
             balance: U256::from(1000),
             bytecode_hash: None,
-            extension: Default::default(),
         };
         let slot = U256::from(0x42);
 
@@ -2028,13 +2032,17 @@ mod tests {
                 .collect(),
             &ExecutionOutcome {
                 bundle: BundleState::new(
-                    [(address, None, Some(account.into()), {
+                    [(address, None, Some(account.clone().into()), {
                         let mut s = HashMap::default();
                         s.insert(slot, (U256::ZERO, U256::from(100)));
                         s
                     })],
                     vec![
-                        vec![(address, Some(Some(account.into())), vec![(slot, U256::ZERO)])],
+                        vec![(
+                            address,
+                            Some(Some(account.clone().into())),
+                            vec![(slot, U256::ZERO)],
+                        )],
                         vec![],
                     ],
                     [],
@@ -2058,7 +2066,7 @@ mod tests {
                 )),
                 execution_output: Arc::new(BlockExecutionOutput {
                     state: BundleState::new(
-                        [(address, None, Some(account.into()), {
+                        [(address, None, Some(account.clone().into()), {
                             let mut s = HashMap::default();
                             s.insert(slot, (U256::from(100), U256::from(200)));
                             s

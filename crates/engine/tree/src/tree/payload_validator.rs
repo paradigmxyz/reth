@@ -118,7 +118,6 @@ use alloy_primitives::{
     map::{AddressMap, B256Set},
     B256,
 };
-use reth_primitives_traits::AccountExtensionTy;
 use reth_tasks::LazyHandle;
 
 use crate::tree::{
@@ -145,7 +144,8 @@ use reth_execution_cache::{CacheFillMode, CacheStats};
 use reth_network_p2p::full_block::SealedBlockWithAccessList;
 use reth_payload_builder::{PayloadBuilderLease, PayloadBuilderResources};
 use reth_payload_primitives::{
-    BuiltPayloadExecutedBlock, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
+    BuiltPayload, BuiltPayloadExecutedBlock, InvalidPayloadAttributesError, NewPayloadError,
+    PayloadTypes,
 };
 use reth_primitives_traits::{
     AlloyBlockHeader, BlockBody, BlockTy, FastInstant as Instant, GotExpected, NodePrimitives,
@@ -314,21 +314,21 @@ where
                           + BlockHashReader
                           + StageCheckpointReader
                           + PruneCheckpointReader
-                          + ChangeSetReader<AccountExtension = N::AccountExtension>
+                          + ChangeSetReader
                           + StorageChangeSetReader
                           + StorageSettingsCache
                           + HistoryReader
                           + 'static,
         > + BlockReader<Header = N::BlockHeader>
-        + ChangeSetReader<AccountExtension = N::AccountExtension>
-        + StateProviderFactory<AccountExtension = N::AccountExtension>
+        + ChangeSetReader
+        + StateProviderFactory
         + StateReader
         + Clone
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
             Provider: TrieCursorFactory
                           + HashedCursorFactory
-                          + HashedPostStateProvider<AccountExtension = N::AccountExtension>
+                          + HashedPostStateProvider
                           + StateRootProvider
                           + StateProvider
                           + Send,
@@ -398,7 +398,7 @@ where
 
     /// Converts a [`BlockOrPayload`] to a recovered block.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
-    pub fn convert_to_block<T: PayloadTypes<Primitives = N>>(
+    pub fn convert_to_block<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
         input: BlockOrPayload<T>,
     ) -> Result<SealedBlock<N::Block>, NewPayloadError>
@@ -412,7 +412,7 @@ where
     }
 
     /// Returns EVM environment for the given payload or block.
-    pub fn evm_env_for<T: PayloadTypes<Primitives = N>>(
+    pub fn evm_env_for<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
         input: &BlockOrPayload<T>,
     ) -> Result<EvmEnvFor<Evm>, Evm::Error>
@@ -427,7 +427,7 @@ where
     }
 
     /// Returns [`ExecutableTxIterator`] for the given payload or block.
-    pub fn tx_iterator_for<'a, T: PayloadTypes<Primitives = N>>(
+    pub fn tx_iterator_for<'a, T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &'a self,
         input: &'a BlockOrPayload<T>,
     ) -> Result<impl ExecutableTxIterator<Evm>, NewPayloadError>
@@ -452,7 +452,7 @@ where
     }
 
     /// Returns a [`ExecutionCtxFor`] for the given payload or block.
-    pub fn execution_ctx_for<'a, T: PayloadTypes<Primitives = N>>(
+    pub fn execution_ctx_for<'a, T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
         input: &'a BlockOrPayload<T>,
     ) -> Result<ExecutionCtxFor<'a, Evm>, Evm::Error>
@@ -482,7 +482,7 @@ where
             type_name = ?input.type_name(),
         )
     )]
-    pub fn validate_block_with_state<T: PayloadTypes<Primitives = N>>(
+    pub fn validate_block_with_state<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &mut self,
         input: BlockOrPayload<T>,
         mut ctx: TreeCtx<'_, N>,
@@ -677,45 +677,44 @@ where
         //
         // The second parameter `instrument_state_provider` controls whether we should
         // instrument the state provider with metrics.
-        let make_state_provider =
-            |fill_on_miss: bool| -> ProviderResult<StateProviderBox<N::AccountExtension>> {
-                let provider = state_provider_factory.database_provider_ro()?;
-                let mut provider = if let Some((caches, cache_metrics)) = &execution_cache {
-                    let fill_mode = if fill_on_miss {
-                        CacheFillMode::FillOnMiss
-                    } else {
-                        CacheFillMode::LookupOnly
-                    };
-                    Box::new(
-                        CachedStateProvider::new_with_mode(
-                            provider,
-                            caches.clone(),
-                            fill_mode,
-                            cache_metrics.clone(),
-                            cache_stats.clone(),
-                        )
-                        .with_txpool_snapshot(txpool_snapshot.clone()),
-                    ) as StateProviderBox<N::AccountExtension>
+        let make_state_provider = |fill_on_miss: bool| -> ProviderResult<StateProviderBox> {
+            let provider = state_provider_factory.database_provider_ro()?;
+            let mut provider = if let Some((caches, cache_metrics)) = &execution_cache {
+                let fill_mode = if fill_on_miss {
+                    CacheFillMode::FillOnMiss
                 } else {
-                    Box::new(provider) as StateProviderBox<N::AccountExtension>
+                    CacheFillMode::LookupOnly
                 };
-
-                if instrument_state_provider {
-                    let stats = state_provider_stats
-                        .as_ref()
-                        .expect("instrumented state provider requires shared stats");
-                    let metrics = state_provider_metrics
-                        .as_ref()
-                        .expect("instrumented state provider requires metrics");
-                    provider = Box::new(InstrumentedStateProvider::with_stats(
+                Box::new(
+                    CachedStateProvider::new_with_mode(
                         provider,
-                        metrics.clone(),
-                        Arc::clone(stats),
-                    ));
-                }
-
-                Ok(provider)
+                        caches.clone(),
+                        fill_mode,
+                        cache_metrics.clone(),
+                        cache_stats.clone(),
+                    )
+                    .with_txpool_snapshot(txpool_snapshot.clone()),
+                ) as StateProviderBox
+            } else {
+                Box::new(provider) as StateProviderBox
             };
+
+            if instrument_state_provider {
+                let stats = state_provider_stats
+                    .as_ref()
+                    .expect("instrumented state provider requires shared stats");
+                let metrics = state_provider_metrics
+                    .as_ref()
+                    .expect("instrumented state provider requires metrics");
+                provider = Box::new(InstrumentedStateProvider::with_stats(
+                    provider,
+                    metrics.clone(),
+                    Arc::clone(stats),
+                ));
+            }
+
+            Ok(provider)
+        };
 
         // Execute the block and handle any execution errors.
         // The receipt root task is spawned before execution and receives receipts incrementally
@@ -759,7 +758,7 @@ where
         // (keccak256 hashing of all changed addresses and storage slots).
         let hashed_state_output = output.clone();
         let mut hashed_state_rx = state_root_job.take_hashed_state_rx();
-        let mut hashed_state: LazyHashedPostState<N::AccountExtension> =
+        let mut hashed_state: LazyHashedPostState =
             self.runtime.spawn_blocking_named("hash-post-state", move || {
                 let _span = debug_span!(
                     target: "engine::tree::payload_validator",
@@ -930,7 +929,7 @@ where
         parent: SealedHeader<N::BlockHeader>,
     ) -> LazyHandle<Result<SealedBlock<N::Block>, InsertPayloadError<N::Block>>>
     where
-        T: PayloadTypes<Primitives = N>,
+        T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
         V: PayloadValidator<T, Block = N::Block> + Clone,
     {
         let input = input.clone();
@@ -1006,7 +1005,7 @@ where
         state_provider: S,
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
-        handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt, N::AccountExtension>,
+        handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
         state_hook: Option<Box<dyn OnStateHook + 'static>>,
     ) -> Result<
         (
@@ -1021,7 +1020,7 @@ where
         S: StateProvider + Send,
         Err: core::error::Error + Send + Sync + 'static,
         V: PayloadValidator<T, Block = N::Block>,
-        T: PayloadTypes<Primitives = N>,
+        T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         debug!(target: "engine::tree::payload_validator", "Executing block");
@@ -1117,9 +1116,7 @@ where
     fn bal_path_eligible(&self, bal: Option<&DecodedBal>) -> Result<bool, InsertBlockErrorKind> {
         let has_bal = bal.is_some();
         if has_bal {
-            reth_provider::ensure_no_account_extensions::<AccountExtensionTy<Evm::Primitives>>(
-                "BAL",
-            )?;
+            reth_provider::ensure_no_account_extensions("BAL")?;
         }
         let parallel_execution = has_bal && !self.config.disable_bal_parallel_execution();
         if parallel_execution && self.config.disable_bal_parallel_state_root() {
@@ -1147,7 +1144,7 @@ where
         &self,
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
-        handle: &PayloadHandle<Tx, Err, N::Receipt, N::AccountExtension>,
+        handle: &PayloadHandle<Tx, Err, N::Receipt>,
         make_state_provider: &MakeStateProvider,
     ) -> Result<
         (
@@ -1161,9 +1158,9 @@ where
     where
         Tx: ExecutableTxFor<Evm> + Send,
         Err: core::error::Error + Send + Sync + 'static,
-        MakeStateProvider: Fn(bool) -> ProviderResult<StateProviderBox<N::AccountExtension>> + Sync,
+        MakeStateProvider: Fn(bool) -> ProviderResult<StateProviderBox> + Sync,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
-        T: PayloadTypes<Primitives = N>,
+        T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
         V: PayloadValidator<T, Block = N::Block>,
     {
         debug!(target: "engine::tree::payload_validator", "Executing block via BAL path");
@@ -1327,7 +1324,7 @@ where
     ///
     /// The `hashed_state` handle wraps the background hashed post state computation.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
-    fn validate_post_execution<T: PayloadTypes<Primitives = N>>(
+    fn validate_post_execution<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &mut self,
         block: &RecoveredBlock<N::Block>,
         parent_block: &SealedHeader<N::BlockHeader>,
@@ -1399,15 +1396,14 @@ where
         env: ExecutionEnv<Evm>,
         txs: T,
         state_provider_factory: OverlayStateProviderFactory<P, N>,
-        hint_stream: Option<StateRootHintStream<N::AccountExtension>>,
-        hashed_update_stream: Option<StateRootUpdateStream<N::AccountExtension>>,
+        hint_stream: Option<StateRootHintStream>,
+        hashed_update_stream: Option<StateRootUpdateStream>,
         parallel_bal_execution: bool,
     ) -> Result<
         PayloadHandle<
             impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
             impl core::error::Error + Send + Sync + 'static + use<N, P, Evm, V, T>,
             N::Receipt,
-            N::AccountExtension,
         >,
         InsertBlockErrorKind,
     > {
@@ -1469,7 +1465,7 @@ where
         parent_header: &N::BlockHeader,
         timestamp: u64,
         state: &mut EngineApiTreeState<N>,
-    ) -> Option<PayloadStateRootHandle<N::AccountExtension>> {
+    ) -> Option<PayloadStateRootHandle> {
         let state_provider_factory = match self.overlay_state_provider_factory(parent_hash, state) {
             Ok(Some(state_provider_factory)) => state_provider_factory,
             Ok(None) => return None,
@@ -1522,7 +1518,7 @@ where
         &self,
         block: Arc<RecoveredBlock<N::Block>>,
         execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
-        hashed_state: LazyHashedPostState<N::AccountExtension>,
+        hashed_state: LazyHashedPostState,
         trie_output: Arc<TrieUpdates>,
     ) -> ExecutedBlock<N> {
         // Create deferred handle and task that owns the unsorted inputs.
@@ -1728,7 +1724,7 @@ where
 /// This provides the necessary functions for validating/executing payloads/blocks.
 pub trait EngineValidator<
     Types: PayloadTypes,
-    N: NodePrimitives = <Types as PayloadTypes>::Primitives,
+    N: NodePrimitives = <<Types as PayloadTypes>::BuiltPayload as BuiltPayload>::Primitives,
 >: Send + Sync + 'static
 {
     /// Validates the payload attributes with respect to the header.
@@ -1796,7 +1792,7 @@ pub trait EngineValidator<
         parent_header: &N::BlockHeader,
         timestamp: u64,
         state: &mut EngineApiTreeState<N>,
-    ) -> PayloadBuilderResources<N::AccountExtension>;
+    ) -> PayloadBuilderResources;
 }
 
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
@@ -1806,21 +1802,21 @@ where
                           + BlockHashReader
                           + StageCheckpointReader
                           + PruneCheckpointReader
-                          + ChangeSetReader<AccountExtension = N::AccountExtension>
+                          + ChangeSetReader
                           + StorageChangeSetReader
                           + StorageSettingsCache
                           + HistoryReader
                           + 'static,
         > + BlockReader<Header = N::BlockHeader>
-        + StateProviderFactory<AccountExtension = N::AccountExtension>
+        + StateProviderFactory
         + StateReader
-        + ChangeSetReader<AccountExtension = N::AccountExtension>
+        + ChangeSetReader
         + Clone
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
             Provider: TrieCursorFactory
                           + HashedCursorFactory
-                          + HashedPostStateProvider<AccountExtension = N::AccountExtension>
+                          + HashedPostStateProvider
                           + StateRootProvider
                           + StateProvider
                           + Send,
@@ -1829,7 +1825,7 @@ where
     N: NodePrimitives,
     V: PayloadValidator<Types, Block = N::Block> + Clone,
     Evm: ConfigureEngineEvm<Types::ExecutionData, Primitives = N> + 'static,
-    Types: PayloadTypes<Primitives = N>,
+    Types: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
 {
     fn validate_payload_attributes_against_header(
         &self,
@@ -1937,7 +1933,7 @@ where
         parent_header: &N::BlockHeader,
         timestamp: u64,
         state: &mut EngineApiTreeState<N>,
-    ) -> PayloadBuilderResources<N::AccountExtension> {
+    ) -> PayloadBuilderResources {
         let execution_cache = self
             .config
             .share_execution_cache_with_payload_builder()
@@ -1996,7 +1992,7 @@ pub enum BlockOrPayload<T: PayloadTypes> {
     /// Payload.
     Payload(T::ExecutionData),
     /// Block with optional access list data, e.g. downloaded from the network.
-    Block(SealedBlockWithAccessList<BlockTy<T::Primitives>>),
+    Block(SealedBlockWithAccessList<BlockTy<<T::BuiltPayload as BuiltPayload>::Primitives>>),
 }
 
 impl<T: PayloadTypes> BlockOrPayload<T> {

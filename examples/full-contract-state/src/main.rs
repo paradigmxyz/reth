@@ -27,11 +27,11 @@ use std::str::FromStr;
 
 /// Represents the complete state of a contract including account info, bytecode, and storage
 #[derive(Debug, Clone)]
-pub struct ContractState<E = reth_ethereum::primitives::EmptyAccountExtension> {
+pub struct ContractState {
     /// The address of the contract
     pub address: Address,
     /// Basic account information (balance, nonce, code hash)
-    pub account: Account<E>,
+    pub account: Account,
     /// Contract bytecode (None if not a contract or doesn't exist)
     pub bytecode: Option<Bytecode>,
     /// All storage slots for the contract
@@ -41,9 +41,9 @@ pub struct ContractState<E = reth_ethereum::primitives::EmptyAccountExtension> {
 /// Extract the full state of a specific contract
 pub fn extract_contract_state<P: DBProvider>(
     provider: &P,
-    state_provider: &dyn StateProvider<AccountExtension = P::AccountExtension>,
+    state_provider: &dyn StateProvider,
     contract_address: Address,
-) -> ProviderResult<Option<ContractState<P::AccountExtension>>> {
+) -> ProviderResult<Option<ContractState>> {
     let account = state_provider.basic_account(&contract_address)?;
     let Some(account) = account else {
         return Ok(None);

@@ -2,7 +2,6 @@
 
 use alloy_primitives::{Address, StorageKey};
 use reth_execution_cache::{CachedStateProvider, ExecutionCache, TxPoolPrewarmCacheSnapshot};
-use reth_primitives_traits::{AccountExtension, EmptyAccountExtension};
 use reth_provider::{
     AccountReader, BytecodeReader, ProviderResult, StateProvider, StateProviderBox,
 };
@@ -18,8 +17,7 @@ use tracing::trace;
 
 /// Builds a fresh `StateProviderBox` over the block's parent state. Type-erased so the pool is not
 /// generic over the provider factory; each worker builds its own per block.
-pub type BuildProviderFn<Ext = EmptyAccountExtension> =
-    dyn Fn() -> ProviderResult<StateProviderBox<Ext>> + Send + Sync;
+pub type BuildProviderFn = dyn Fn() -> ProviderResult<StateProviderBox> + Send + Sync;
 
 /// A single warm request: a whole account (basic account + its bytecode) followed by a batch of
 /// its storage slots, or a batch of storage slots on their own.
@@ -30,11 +28,11 @@ enum PrewarmTarget {
 
 /// A message in a worker's queue. The per-block lifecycle is explicit and ordered (the queue is
 /// FIFO): one `BeginBlock`, then the worker's share of `Warm`s, then one `EndBlock`.
-enum PrewarmMsg<Ext: AccountExtension> {
+enum PrewarmMsg {
     /// Open a read txn for the new block: build a provider over the parent state and hold it.
     BeginBlock {
-        build: Arc<BuildProviderFn<Ext>>,
-        caches: ExecutionCache<Ext>,
+        build: Arc<BuildProviderFn>,
+        caches: ExecutionCache,
         txpool_snapshot: Option<TxPoolPrewarmCacheSnapshot>,
     },
     /// Warm one target into the held provider's cache. Ignored if no provider is held.
@@ -45,22 +43,22 @@ enum PrewarmMsg<Ext: AccountExtension> {
 
 /// Long-lived pool of blocking threads that warm the BAL read-set into the shared execution cache.
 #[derive(Debug)]
-pub struct BalPrewarmPool<Ext: AccountExtension = EmptyAccountExtension> {
+pub struct BalPrewarmPool {
     /// One queue per worker. `BeginBlock`/`EndBlock` are broadcast to all; `Warm`s round-robin.
-    workers: Vec<crossbeam_channel::Sender<PrewarmMsg<Ext>>>,
+    workers: Vec<crossbeam_channel::Sender<PrewarmMsg>>,
     /// Round-robin cursor for distributing warm requests across workers.
     next: AtomicUsize,
     _handles: Vec<JoinHandle<()>>,
 }
 
-impl<Ext: AccountExtension> BalPrewarmPool<Ext> {
+impl BalPrewarmPool {
     /// Spawns `num_threads` long-lived blocking worker threads. Owned by the
     /// [`PayloadProcessor`](super::PayloadProcessor); the threads exit when the pool is dropped.
     pub fn new(num_threads: usize) -> Arc<Self> {
         let mut workers = Vec::with_capacity(num_threads);
         let mut handles = Vec::with_capacity(num_threads);
         for i in 0..num_threads {
-            let (tx, rx) = crossbeam_channel::unbounded::<PrewarmMsg<Ext>>();
+            let (tx, rx) = crossbeam_channel::unbounded::<PrewarmMsg>();
             workers.push(tx);
             handles.push(
                 std::thread::Builder::new()
@@ -77,8 +75,8 @@ impl<Ext: AccountExtension> BalPrewarmPool<Ext> {
     /// own read txn over the parent state. Pair with [`end_block`](Self::end_block).
     pub fn begin_block(
         &self,
-        build: Arc<BuildProviderFn<Ext>>,
-        caches: ExecutionCache<Ext>,
+        build: Arc<BuildProviderFn>,
+        caches: ExecutionCache,
         txpool_snapshot: Option<TxPoolPrewarmCacheSnapshot>,
     ) {
         for worker in &self.workers {
@@ -160,10 +158,10 @@ pub const DEFAULT_BAL_PREWARM_THREADS: usize = 128;
 /// the workers on blocks whose read-set is concentrated in a few accounts.
 const WARM_BATCH_SIZE: usize = 8;
 
-fn prewarm_loop<Ext: AccountExtension>(rx: crossbeam_channel::Receiver<PrewarmMsg<Ext>>) {
+fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
     // The provider (and its MDBX read txn) held for the current block, between `BeginBlock` and
     // `EndBlock`. `None` while idle, so no read txn is pinned across the inter-block gap.
-    let mut provider: Option<CachedStateProvider<StateProviderBox<Ext>>> = None;
+    let mut provider: Option<CachedStateProvider<StateProviderBox>> = None;
 
     // Blocks when idle; the channel disconnects (and the loop ends) when the pool is dropped.
     while let Ok(msg) = rx.recv() {

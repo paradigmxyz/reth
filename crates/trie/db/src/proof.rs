@@ -2,7 +2,6 @@ use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, TrieTableAda
 use alloy_primitives::{keccak256, map::HashMap, Address, B256};
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::StateProofError;
-use reth_primitives_traits::{AccountExtension, EmptyAccountExtension};
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
     proof::{Proof, StorageProof},
@@ -12,10 +11,7 @@ use reth_trie::{
 };
 
 /// Extends [`Proof`] with operations specific for working with a database transaction.
-pub trait DatabaseProof<'a, E = EmptyAccountExtension>
-where
-    E: AccountExtension,
-{
+pub trait DatabaseProof<'a> {
     /// Associated type for the database transaction.
     type Tx;
 
@@ -25,28 +21,28 @@ where
     /// Generates the state proof for target account based on [`TrieInput`].
     fn overlay_account_proof(
         &self,
-        input: TrieInput<E>,
+        input: TrieInput,
         address: Address,
         slots: &[B256],
-    ) -> Result<AccountProof<E>, StateProofError>;
+    ) -> Result<AccountProof, StateProofError>;
 
     /// Generates the state [`MultiProof`] for target hashed account and storage keys.
     fn overlay_multiproof(
         &self,
-        input: TrieInput<E>,
+        input: TrieInput,
         targets: MultiProofTargets,
     ) -> Result<MultiProof, StateProofError>;
 
     /// Generates a V2 decoded state multiproof for target hashed accounts and storage keys.
     fn overlay_multiproof_v2(
         &self,
-        input: TrieInput<E>,
+        input: TrieInput,
         targets: MultiProofTargetsV2,
     ) -> Result<DecodedMultiProofV2, StateProofError>;
 }
 
-impl<'a, TX: DbTx, A: TrieTableAdapter, E: AccountExtension> DatabaseProof<'a, E>
-    for Proof<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX, E>>
+impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseProof<'a>
+    for Proof<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>
 {
     type Tx = TX;
 
@@ -55,10 +51,10 @@ impl<'a, TX: DbTx, A: TrieTableAdapter, E: AccountExtension> DatabaseProof<'a, E
     }
     fn overlay_account_proof(
         &self,
-        input: TrieInput<E>,
+        input: TrieInput,
         address: Address,
         slots: &[B256],
-    ) -> Result<AccountProof<E>, StateProofError> {
+    ) -> Result<AccountProof, StateProofError> {
         let nodes_sorted = input.nodes.into_sorted();
         let state_sorted = input.state.into_sorted();
         Proof::new(
@@ -71,7 +67,7 @@ impl<'a, TX: DbTx, A: TrieTableAdapter, E: AccountExtension> DatabaseProof<'a, E
 
     fn overlay_multiproof(
         &self,
-        input: TrieInput<E>,
+        input: TrieInput,
         targets: MultiProofTargets,
     ) -> Result<MultiProof, StateProofError> {
         let nodes_sorted = input.nodes.into_sorted();
@@ -86,7 +82,7 @@ impl<'a, TX: DbTx, A: TrieTableAdapter, E: AccountExtension> DatabaseProof<'a, E
 
     fn overlay_multiproof_v2(
         &self,
-        input: TrieInput<E>,
+        input: TrieInput,
         targets: MultiProofTargetsV2,
     ) -> Result<DecodedMultiProofV2, StateProofError> {
         let nodes_sorted = input.nodes.into_sorted();
@@ -122,11 +118,11 @@ pub trait DatabaseStorageProof<'a, TX> {
     ) -> Result<StorageMultiProof, StateProofError>;
 }
 
-impl<'a, TX: DbTx, A: TrieTableAdapter, E: AccountExtension> DatabaseStorageProof<'a, TX>
+impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStorageProof<'a, TX>
     for StorageProof<
         'static,
         DatabaseTrieCursorFactory<&'a TX, A>,
-        DatabaseHashedCursorFactory<&'a TX, E>,
+        DatabaseHashedCursorFactory<&'a TX>,
     >
 {
     fn from_tx(tx: &'a TX, address: Address) -> Self {
@@ -145,11 +141,10 @@ impl<'a, TX: DbTx, A: TrieTableAdapter, E: AccountExtension> DatabaseStorageProo
     ) -> Result<reth_trie::StorageProof, StateProofError> {
         let hashed_address = keccak256(address);
         let prefix_set = storage.construct_prefix_set();
-        let state_sorted =
-            HashedPostStateSorted::<reth_primitives_traits::EmptyAccountExtension>::new(
-                Default::default(),
-                HashMap::from_iter([(hashed_address, storage.into_sorted())]),
-            );
+        let state_sorted = HashedPostStateSorted::new(
+            Default::default(),
+            HashMap::from_iter([(hashed_address, storage.into_sorted())]),
+        );
         StorageProof::new(
             DatabaseTrieCursorFactory::<_, A>::new(tx),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
@@ -168,11 +163,10 @@ impl<'a, TX: DbTx, A: TrieTableAdapter, E: AccountExtension> DatabaseStorageProo
         let hashed_address = keccak256(address);
         let targets = slots.iter().map(keccak256).collect();
         let prefix_set = storage.construct_prefix_set();
-        let state_sorted =
-            HashedPostStateSorted::<reth_primitives_traits::EmptyAccountExtension>::new(
-                Default::default(),
-                HashMap::from_iter([(hashed_address, storage.into_sorted())]),
-            );
+        let state_sorted = HashedPostStateSorted::new(
+            Default::default(),
+            HashMap::from_iter([(hashed_address, storage.into_sorted())]),
+        );
         StorageProof::new(
             DatabaseTrieCursorFactory::<_, A>::new(tx),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),

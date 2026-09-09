@@ -1872,7 +1872,6 @@ mod tests {
     use alloy_rlp::Decodable;
     use alloy_trie::proof::AddedRemovedKeys;
     use itertools::Itertools;
-    use reth_primitives_traits::EmptyAccountExtension;
     use reth_trie_common::{
         prefix_set::{PrefixSet, PrefixSetMut},
         updates::TrieUpdatesSorted,
@@ -2136,11 +2135,9 @@ mod tests {
         ]);
         let harness = ProofTestHarness::new(storage.clone());
         let hashed_address = harness.hashed_address();
-        let post_state = HashedPostState::<EmptyAccountExtension>::from_hashed_storage(
-            hashed_address,
-            HashedStorage::from_iter(storage),
-        )
-        .into_sorted();
+        let post_state =
+            HashedPostState::from_hashed_storage(hashed_address, HashedStorage::from_iter(storage))
+                .into_sorted();
         let trie_updates = TrieUpdatesSorted::default();
         let trie_cursor = InMemoryTrieCursor::new_storage(
             NoopStorageTrieCursor::default(),

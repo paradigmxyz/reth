@@ -13,7 +13,7 @@ use std::ops::{Bound, RangeBounds};
 ///
 /// This iterator fetches changesets block by block to avoid loading everything into memory.
 #[derive(Debug)]
-pub struct StaticFileAccountChangesetWalker<P: ChangeSetReader> {
+pub struct StaticFileAccountChangesetWalker<P> {
     /// Static file provider
     provider: P,
     /// End block (exclusive). `None` means iterate until exhausted.
@@ -21,12 +21,12 @@ pub struct StaticFileAccountChangesetWalker<P: ChangeSetReader> {
     /// Current block being processed
     current_block: BlockNumber,
     /// Changesets for current block
-    current_changesets: Vec<AccountBeforeTx<P::AccountExtension>>,
+    current_changesets: Vec<AccountBeforeTx>,
     /// Index within current block's changesets
     changeset_index: usize,
 }
 
-impl<P: ChangeSetReader> StaticFileAccountChangesetWalker<P> {
+impl<P> StaticFileAccountChangesetWalker<P> {
     /// Create a new static file changeset walker.
     ///
     /// Accepts any range type that implements `RangeBounds<BlockNumber>`, including:
@@ -62,7 +62,7 @@ impl<P> Iterator for StaticFileAccountChangesetWalker<P>
 where
     P: ChangeSetReader,
 {
-    type Item = ProviderResult<(BlockNumber, AccountBeforeTx<P::AccountExtension>)>;
+    type Item = ProviderResult<(BlockNumber, AccountBeforeTx)>;
 
     fn next(&mut self) -> Option<Self::Item> {
         // Yield remaining changesets from current block

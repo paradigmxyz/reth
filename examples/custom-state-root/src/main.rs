@@ -82,7 +82,7 @@ where
     fn prepare_payload_builder(
         &self,
         ctx: PayloadStateRootJobContext<'_, N, P>,
-    ) -> ProviderResult<Option<PayloadStateRootHandle<N::AccountExtension>>> {
+    ) -> ProviderResult<Option<PayloadStateRootHandle>> {
         if ctx.timestamp() < self.activation_timestamp {
             return self.default.prepare_payload_builder(ctx)
         }
@@ -107,8 +107,8 @@ where
         &mut self,
         _block: &RecoveredBlock<N::Block>,
         _output: Arc<BlockExecutionOutput<N::Receipt>>,
-        _hashed_state: &LazyHashedPostState<N::AccountExtension>,
-    ) -> ProviderResult<StateRootJobOutcome<N::AccountExtension>> {
+        _hashed_state: &LazyHashedPostState,
+    ) -> ProviderResult<StateRootJobOutcome> {
         Ok(StateRootJobOutcome::new(B256::ZERO, Arc::new(TrieUpdates::default())))
     }
 }

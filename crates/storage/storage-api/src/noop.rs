@@ -98,7 +98,7 @@ impl NoopProvider {
 
 impl Default for NoopProvider {
     fn default() -> Self {
-        Self::new(MAINNET.clone())
+        Self::mainnet()
     }
 }
 
@@ -397,15 +397,8 @@ impl<C: Send + Sync, N: NodePrimitives> HeaderProvider for NoopProvider<C, N> {
     }
 }
 
-impl<C: Send + Sync, N: NodePrimitives> crate::AccountExtensionProvider for NoopProvider<C, N> {
-    type AccountExtension = N::AccountExtension;
-}
-
 impl<C: Send + Sync, N: NodePrimitives> AccountReader for NoopProvider<C, N> {
-    fn basic_account(
-        &self,
-        _address: &Address,
-    ) -> ProviderResult<Option<Account<Self::AccountExtension>>> {
+    fn basic_account(&self, _address: &Address) -> ProviderResult<Option<Account>> {
         Ok(None)
     }
 }
@@ -414,7 +407,7 @@ impl<C: Send + Sync, N: NodePrimitives> ChangeSetReader for NoopProvider<C, N> {
     fn account_block_changeset(
         &self,
         _block_number: BlockNumber,
-    ) -> ProviderResult<Vec<AccountBeforeTx<N::AccountExtension>>> {
+    ) -> ProviderResult<Vec<AccountBeforeTx>> {
         Ok(Vec::default())
     }
 
@@ -422,14 +415,14 @@ impl<C: Send + Sync, N: NodePrimitives> ChangeSetReader for NoopProvider<C, N> {
         &self,
         _block_number: BlockNumber,
         _address: Address,
-    ) -> ProviderResult<Option<AccountBeforeTx<N::AccountExtension>>> {
+    ) -> ProviderResult<Option<AccountBeforeTx>> {
         Ok(None)
     }
 
     fn account_changesets_range(
         &self,
         _range: impl core::ops::RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx<N::AccountExtension>)>> {
+    ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
         Ok(Vec::default())
     }
 }
@@ -487,27 +480,24 @@ impl<C: Send + Sync, N: NodePrimitives> StorageChangeSetReader for NoopProvider<
 }
 
 impl<C: Send + Sync, N: NodePrimitives> StateRootProvider for NoopProvider<C, N> {
-    fn state_root(&self, _state: HashedPostState<N::AccountExtension>) -> ProviderResult<B256> {
+    fn state_root(&self, _state: HashedPostState) -> ProviderResult<B256> {
         Ok(B256::default())
     }
 
-    fn state_root_from_nodes(
-        &self,
-        _input: TrieInput<N::AccountExtension>,
-    ) -> ProviderResult<B256> {
+    fn state_root_from_nodes(&self, _input: TrieInput) -> ProviderResult<B256> {
         Ok(B256::default())
     }
 
     fn state_root_with_updates(
         &self,
-        _state: HashedPostState<N::AccountExtension>,
+        _state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         Ok((B256::default(), TrieUpdates::default()))
     }
 
     fn state_root_from_nodes_with_updates(
         &self,
-        _input: TrieInput<N::AccountExtension>,
+        _input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         Ok((B256::default(), TrieUpdates::default()))
     }
@@ -544,16 +534,16 @@ impl<C: Send + Sync, N: NodePrimitives> StorageRootProvider for NoopProvider<C, 
 impl<C: Send + Sync, N: NodePrimitives> StateProofProvider for NoopProvider<C, N> {
     fn proof(
         &self,
-        _input: TrieInput<N::AccountExtension>,
+        _input: TrieInput,
         address: Address,
         _slots: &[B256],
-    ) -> ProviderResult<AccountProof<N::AccountExtension>> {
+    ) -> ProviderResult<AccountProof> {
         Ok(AccountProof::new(address))
     }
 
     fn multiproof(
         &self,
-        _input: TrieInput<N::AccountExtension>,
+        _input: TrieInput,
         _targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
         Ok(MultiProof::default())
@@ -561,7 +551,7 @@ impl<C: Send + Sync, N: NodePrimitives> StateProofProvider for NoopProvider<C, N
 
     fn multiproof_v2(
         &self,
-        _input: TrieInput<N::AccountExtension>,
+        _input: TrieInput,
         _targets: MultiProofTargetsV2,
     ) -> ProviderResult<DecodedMultiProofV2> {
         Ok(DecodedMultiProofV2::default())
@@ -569,8 +559,8 @@ impl<C: Send + Sync, N: NodePrimitives> StateProofProvider for NoopProvider<C, N
 
     fn witness(
         &self,
-        _input: TrieInput<N::AccountExtension>,
-        _target: HashedPostState<N::AccountExtension>,
+        _input: TrieInput,
+        _target: HashedPostState,
         _mode: ExecutionWitnessMode,
     ) -> ProviderResult<Vec<Bytes>> {
         Ok(Vec::default())
@@ -581,7 +571,7 @@ impl<C: Send + Sync, N: NodePrimitives> HashedPostStateProvider for NoopProvider
     fn hashed_post_state(
         &self,
         _bundle_state: &revm::database::BundleState,
-    ) -> ProviderResult<HashedPostState<N::AccountExtension>> {
+    ) -> ProviderResult<HashedPostState> {
         Ok(HashedPostState::default())
     }
 }
@@ -614,14 +604,14 @@ impl<C: Send + Sync, N: NodePrimitives> BytecodeReader for NoopProvider<C, N> {
 }
 
 impl<C: Send + Sync + 'static, N: NodePrimitives> StateProviderFactory for NoopProvider<C, N> {
-    fn latest(&self) -> ProviderResult<StateProviderBox<N::AccountExtension>> {
+    fn latest(&self) -> ProviderResult<StateProviderBox> {
         Ok(Box::new(self.clone()))
     }
 
     fn state_by_block_number_or_tag(
         &self,
         number_or_tag: BlockNumberOrTag,
-    ) -> ProviderResult<StateProviderBox<N::AccountExtension>> {
+    ) -> ProviderResult<StateProviderBox> {
         match number_or_tag {
             BlockNumberOrTag::Latest => self.latest(),
             BlockNumberOrTag::Finalized => {
@@ -646,39 +636,27 @@ impl<C: Send + Sync + 'static, N: NodePrimitives> StateProviderFactory for NoopP
         }
     }
 
-    fn history_by_block_number(
-        &self,
-        _block: BlockNumber,
-    ) -> ProviderResult<StateProviderBox<N::AccountExtension>> {
+    fn history_by_block_number(&self, _block: BlockNumber) -> ProviderResult<StateProviderBox> {
         Ok(Box::new(self.clone()))
     }
 
-    fn history_by_block_hash(
-        &self,
-        _block: BlockHash,
-    ) -> ProviderResult<StateProviderBox<N::AccountExtension>> {
+    fn history_by_block_hash(&self, _block: BlockHash) -> ProviderResult<StateProviderBox> {
         Ok(Box::new(self.clone()))
     }
 
-    fn state_by_block_hash(
-        &self,
-        _block: BlockHash,
-    ) -> ProviderResult<StateProviderBox<N::AccountExtension>> {
+    fn state_by_block_hash(&self, _block: BlockHash) -> ProviderResult<StateProviderBox> {
         Ok(Box::new(self.clone()))
     }
 
-    fn pending(&self) -> ProviderResult<StateProviderBox<N::AccountExtension>> {
+    fn pending(&self) -> ProviderResult<StateProviderBox> {
         Ok(Box::new(self.clone()))
     }
 
-    fn pending_state_by_hash(
-        &self,
-        _block_hash: B256,
-    ) -> ProviderResult<Option<StateProviderBox<N::AccountExtension>>> {
+    fn pending_state_by_hash(&self, _block_hash: B256) -> ProviderResult<Option<StateProviderBox>> {
         Ok(Some(Box::new(self.clone())))
     }
 
-    fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox<N::AccountExtension>>> {
+    fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox>> {
         Ok(Some(Box::new(self.clone())))
     }
 }

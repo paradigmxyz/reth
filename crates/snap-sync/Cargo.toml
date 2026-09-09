@@ -29,3 +29,6 @@ tokio-util.workspace = true
 [dev-dependencies]
 alloy-consensus.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
+
+[features]
+account-ext = ["reth-storage-api/account-ext"]

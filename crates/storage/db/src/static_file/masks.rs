@@ -4,7 +4,7 @@ use crate::{
     HeaderTerminalDifficulties,
 };
 use alloy_primitives::{Address, BlockHash};
-use reth_db_api::{models::StorageBeforeTx, table::Table};
+use reth_db_api::{models::StorageBeforeTx, table::Table, AccountChangeSets};
 
 // HEADER MASKS
 add_static_file_mask! {
@@ -52,7 +52,7 @@ add_static_file_mask! {
 // ACCOUNT CHANGESET MASKS
 add_static_file_mask! {
     #[doc = "Mask for selecting a single changeset from `AccountChangesets` static file segment"]
-    AccountChangesetMask<C>, C, 0b1
+    AccountChangesetMask, <AccountChangeSets as Table>::Value, 0b1
 }
 
 // STORAGE CHANGESET MASKS

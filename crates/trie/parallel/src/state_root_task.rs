@@ -10,7 +10,6 @@
 use crate::error::StateRootTaskError;
 use alloy_evm::block::OnStateHook;
 use alloy_primitives::{keccak256, map::B256Map, B256};
-use reth_primitives_traits::{AccountExtension, EmptyAccountExtension};
 use reth_trie::{
     updates::TrieUpdates, HashedPostState, HashedStorage, MultiProofTargetsV2, ProofV2Target,
 };
@@ -20,13 +19,13 @@ use tracing::trace;
 
 /// Messages used internally by the multi proof task.
 #[derive(Debug)]
-pub enum StateRootMessage<E: AccountExtension = EmptyAccountExtension> {
+pub enum StateRootMessage {
     /// Prefetch proof targets
     PrefetchProofs(MultiProofTargetsV2),
     /// New state update from transaction execution.
     StateUpdate(EvmState),
     /// Pre-hashed state update from BAL conversion that can be applied directly without proofs.
-    HashedStateUpdate(HashedPostState<E>),
+    HashedStateUpdate(HashedPostState),
     /// Signals state update stream end.
     ///
     /// This is triggered by block execution, indicating that no additional state updates are
@@ -37,13 +36,13 @@ pub enum StateRootMessage<E: AccountExtension = EmptyAccountExtension> {
 /// Outcome of the state root computation, including the state root itself with
 /// the trie updates.
 #[derive(Debug, Clone)]
-pub struct StateRootComputeOutcome<E: AccountExtension = EmptyAccountExtension> {
+pub struct StateRootComputeOutcome {
     /// The state root.
     pub state_root: B256,
     /// The trie updates.
     pub trie_updates: Arc<TrieUpdates>,
     /// Hashed post state produced while computing the state root.
-    pub hashed_state: Arc<HashedPostState<E>>,
+    pub hashed_state: Arc<HashedPostState>,
 }
 
 /// Handle to a background sparse trie state root computation.
@@ -54,39 +53,39 @@ pub struct StateRootComputeOutcome<E: AccountExtension = EmptyAccountExtension> 
 ///
 /// Created by the engine's state-root strategy.
 #[derive(Debug)]
-pub struct StateRootHandle<E: AccountExtension = EmptyAccountExtension> {
+pub struct StateRootHandle {
     /// The state root that the cached sparse trie is anchored at (parent block's state root).
     cached_trie_state_root: B256,
     /// Best-effort hint capability, taken once by prewarm wiring.
-    hint: Option<StateRootHintStream<E>>,
+    hint: Option<StateRootHintStream>,
     /// The single authoritative update capability.
     ///
     /// Taken exactly once, either as an execution hook (serial execution) or as a hashed
     /// update stream (parallel BAL streaming), so per block exactly one producer can finish
     /// the update stream. Only producers hold update senders: once the taken capabilities are
     /// dropped or finished, the update channel closes and the task knows producers are done.
-    authoritative: Option<StateRootUpdateStream<E>>,
+    authoritative: Option<StateRootUpdateStream>,
     /// Guard whose drop cancels the state-root task if it is still running.
     cancel_guard: StateRootTaskCancelGuard,
     /// Receiver for the final state root result.
     state_root_rx:
-        Option<std::sync::mpsc::Receiver<Result<StateRootComputeOutcome<E>, StateRootTaskError>>>,
+        Option<std::sync::mpsc::Receiver<Result<StateRootComputeOutcome, StateRootTaskError>>>,
     /// Receiver for the hashed post state.
-    hashed_state_rx: Option<std::sync::mpsc::Receiver<Arc<HashedPostState<E>>>>,
+    hashed_state_rx: Option<std::sync::mpsc::Receiver<Arc<HashedPostState>>>,
 }
 
-impl<E: AccountExtension> StateRootHandle<E> {
+impl StateRootHandle {
     /// Creates a new [`StateRootHandle`].
     pub fn new(
         cached_trie_state_root: B256,
-        updates_tx: crossbeam_channel::Sender<StateRootMessage<E>>,
+        updates_tx: crossbeam_channel::Sender<StateRootMessage>,
         cancel_guard: StateRootTaskCancelGuard,
         state_root_rx: std::sync::mpsc::Receiver<
-            Result<StateRootComputeOutcome<E>, StateRootTaskError>,
+            Result<StateRootComputeOutcome, StateRootTaskError>,
         >,
-        hashed_state_rx: std::sync::mpsc::Receiver<Arc<HashedPostState<E>>>,
+        hashed_state_rx: std::sync::mpsc::Receiver<Arc<HashedPostState>>,
     ) -> Self {
-        let sink: Arc<dyn StateRootSink<E>> = Arc::new(SparseTrieStateRootSink::new(updates_tx));
+        let sink: Arc<dyn StateRootSink> = Arc::new(SparseTrieStateRootSink::new(updates_tx));
         Self {
             cached_trie_state_root,
             hint: Some(StateRootHintStream::new(Arc::clone(&sink))),
@@ -107,7 +106,7 @@ impl<E: AccountExtension> StateRootHandle<E> {
     /// # Panics
     ///
     /// If called more than once.
-    pub const fn take_hint_stream(&mut self) -> StateRootHintStream<E> {
+    pub const fn take_hint_stream(&mut self) -> StateRootHintStream {
         self.hint.take().expect("hint stream already taken")
     }
 
@@ -119,7 +118,7 @@ impl<E: AccountExtension> StateRootHandle<E> {
     /// # Panics
     ///
     /// If the authoritative capability was already taken in either form.
-    pub fn take_execution_hook(&mut self) -> StateRootUpdateHook<E> {
+    pub fn take_execution_hook(&mut self) -> StateRootUpdateHook {
         self.take_hashed_update_stream().into_state_hook()
     }
 
@@ -132,7 +131,7 @@ impl<E: AccountExtension> StateRootHandle<E> {
     /// # Panics
     ///
     /// If the authoritative capability was already taken in either form.
-    pub const fn take_hashed_update_stream(&mut self) -> StateRootUpdateStream<E> {
+    pub const fn take_hashed_update_stream(&mut self) -> StateRootUpdateStream {
         self.authoritative.take().expect("authoritative update capability already taken")
     }
 
@@ -141,7 +140,7 @@ impl<E: AccountExtension> StateRootHandle<E> {
     /// # Panics
     ///
     /// If called more than once.
-    pub fn state_root(&mut self) -> Result<StateRootComputeOutcome<E>, StateRootTaskError> {
+    pub fn state_root(&mut self) -> Result<StateRootComputeOutcome, StateRootTaskError> {
         self.state_root_rx
             .take()
             .expect("state_root already taken")
@@ -156,7 +155,7 @@ impl<E: AccountExtension> StateRootHandle<E> {
     /// If called more than once.
     pub const fn take_state_root_rx(
         &mut self,
-    ) -> std::sync::mpsc::Receiver<Result<StateRootComputeOutcome<E>, StateRootTaskError>> {
+    ) -> std::sync::mpsc::Receiver<Result<StateRootComputeOutcome, StateRootTaskError>> {
         self.state_root_rx.take().expect("state_root already taken")
     }
 
@@ -167,7 +166,7 @@ impl<E: AccountExtension> StateRootHandle<E> {
     /// If called more than once.
     pub const fn take_hashed_state_rx(
         &mut self,
-    ) -> std::sync::mpsc::Receiver<Arc<HashedPostState<E>>> {
+    ) -> std::sync::mpsc::Receiver<Arc<HashedPostState>> {
         self.hashed_state_rx.take().expect("hashed_state already taken")
     }
 
@@ -175,7 +174,7 @@ impl<E: AccountExtension> StateRootHandle<E> {
     ///
     /// The payload builder only executes transactions, so the handle carries the execution
     /// hook; the hint capability is dropped here.
-    pub fn into_payload_state_root_handle(mut self) -> PayloadStateRootHandle<E> {
+    pub fn into_payload_state_root_handle(mut self) -> PayloadStateRootHandle {
         let hook = self.take_execution_hook();
         PayloadStateRootHandle {
             name: "sparse-trie",
@@ -204,18 +203,18 @@ impl StateRootTaskCancelGuard {
 }
 
 /// Opaque state-root task handle passed to payload builders.
-pub struct PayloadStateRootHandle<E: AccountExtension = EmptyAccountExtension> {
+pub struct PayloadStateRootHandle {
     name: &'static str,
     /// Execution hook that streams per-transaction updates; taken once when building starts.
-    hook: Option<StateRootUpdateHook<E>>,
+    hook: Option<StateRootUpdateHook>,
     /// Cancels the backing task when the handle is dropped without consuming the result.
     cancel_guard: Option<StateRootTaskCancelGuard>,
     state_root_rx:
-        Option<std::sync::mpsc::Receiver<Result<StateRootComputeOutcome<E>, StateRootTaskError>>>,
-    hashed_state_rx: Option<std::sync::mpsc::Receiver<Arc<HashedPostState<E>>>>,
+        Option<std::sync::mpsc::Receiver<Result<StateRootComputeOutcome, StateRootTaskError>>>,
+    hashed_state_rx: Option<std::sync::mpsc::Receiver<Arc<HashedPostState>>>,
 }
 
-impl<E: AccountExtension> fmt::Debug for PayloadStateRootHandle<E> {
+impl fmt::Debug for PayloadStateRootHandle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PayloadStateRootHandle")
             .field("name", &self.name)
@@ -227,18 +226,18 @@ impl<E: AccountExtension> fmt::Debug for PayloadStateRootHandle<E> {
     }
 }
 
-impl<E: AccountExtension> PayloadStateRootHandle<E> {
+impl PayloadStateRootHandle {
     /// Creates an opaque payload state-root handle.
     ///
     /// Tasks with a drop-to-cancel guard should attach it via the `StateRootHandle`
     /// conversion; handles created here rely on their own task lifecycle.
     pub const fn new(
         name: &'static str,
-        hook: Option<StateRootUpdateHook<E>>,
+        hook: Option<StateRootUpdateHook>,
         state_root_rx: std::sync::mpsc::Receiver<
-            Result<StateRootComputeOutcome<E>, StateRootTaskError>,
+            Result<StateRootComputeOutcome, StateRootTaskError>,
         >,
-        hashed_state_rx: Option<std::sync::mpsc::Receiver<Arc<HashedPostState<E>>>>,
+        hashed_state_rx: Option<std::sync::mpsc::Receiver<Arc<HashedPostState>>>,
     ) -> Self {
         Self { name, hook, cancel_guard: None, state_root_rx: Some(state_root_rx), hashed_state_rx }
     }
@@ -253,7 +252,7 @@ impl<E: AccountExtension> PayloadStateRootHandle<E> {
     /// # Panics
     ///
     /// If the handle was created without an execution hook, or the hook was already taken.
-    pub const fn take_state_hook(&mut self) -> StateRootUpdateHook<E> {
+    pub const fn take_state_hook(&mut self) -> StateRootUpdateHook {
         self.hook.take().expect("payload state root task missing execution hook")
     }
 
@@ -262,7 +261,7 @@ impl<E: AccountExtension> PayloadStateRootHandle<E> {
     /// # Panics
     ///
     /// If called more than once.
-    pub fn state_root(&mut self) -> Result<StateRootComputeOutcome<E>, StateRootTaskError> {
+    pub fn state_root(&mut self) -> Result<StateRootComputeOutcome, StateRootTaskError> {
         self.state_root_rx
             .take()
             .expect("state_root already taken")
@@ -279,7 +278,7 @@ impl<E: AccountExtension> PayloadStateRootHandle<E> {
     /// If called more than once.
     pub const fn take_state_root_rx(
         &mut self,
-    ) -> std::sync::mpsc::Receiver<Result<StateRootComputeOutcome<E>, StateRootTaskError>> {
+    ) -> std::sync::mpsc::Receiver<Result<StateRootComputeOutcome, StateRootTaskError>> {
         self.state_root_rx.take().expect("state_root already taken")
     }
 
@@ -287,7 +286,7 @@ impl<E: AccountExtension> PayloadStateRootHandle<E> {
     /// yet.
     pub const fn try_take_hashed_state_rx(
         &mut self,
-    ) -> Option<std::sync::mpsc::Receiver<Arc<HashedPostState<E>>>> {
+    ) -> Option<std::sync::mpsc::Receiver<Arc<HashedPostState>>> {
         self.hashed_state_rx.take()
     }
 }
@@ -336,9 +335,7 @@ impl From<StateAccessHint> for MultiProofTargetsV2 {
 }
 
 /// Semantic update stream consumed by state-root tasks.
-pub trait StateRootSink<E: AccountExtension = EmptyAccountExtension>:
-    Send + Sync + 'static
-{
+pub trait StateRootSink: Send + Sync + 'static {
     /// Best-effort access hint from transaction prewarming.
     fn on_access_hint(&self, _hint: StateAccessHint) {}
 
@@ -346,7 +343,7 @@ pub trait StateRootSink<E: AccountExtension = EmptyAccountExtension>:
     fn on_state_update(&self, state: EvmState);
 
     /// Authoritative pre-hashed state update, currently used by BAL streaming.
-    fn on_hashed_state_update(&self, state: HashedPostState<E>);
+    fn on_hashed_state_update(&self, state: HashedPostState);
 
     /// Signals that no more authoritative state updates are expected.
     fn on_updates_finished(&self);
@@ -354,19 +351,19 @@ pub trait StateRootSink<E: AccountExtension = EmptyAccountExtension>:
 
 /// Hint-only view of a state-root stream.
 #[derive(Clone)]
-pub struct StateRootHintStream<E: AccountExtension = EmptyAccountExtension> {
-    inner: Arc<dyn StateRootSink<E>>,
+pub struct StateRootHintStream {
+    inner: Arc<dyn StateRootSink>,
 }
 
-impl<E: AccountExtension> fmt::Debug for StateRootHintStream<E> {
+impl fmt::Debug for StateRootHintStream {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("StateRootHintStream").finish_non_exhaustive()
     }
 }
 
-impl<E: AccountExtension> StateRootHintStream<E> {
+impl StateRootHintStream {
     /// Creates a new hint stream view.
-    pub fn new(inner: Arc<dyn StateRootSink<E>>) -> Self {
+    pub fn new(inner: Arc<dyn StateRootSink>) -> Self {
         Self { inner }
     }
 
@@ -387,24 +384,24 @@ impl<E: AccountExtension> StateRootHintStream<E> {
 /// Dropping the stream without calling [`Self::finish`] (for example when a producer dies)
 /// deliberately does not finish it: an unfinished stream means the updates are incomplete,
 /// and the task must not compute a root from them.
-pub struct StateRootUpdateStream<E: AccountExtension = EmptyAccountExtension> {
-    inner: Arc<dyn StateRootSink<E>>,
+pub struct StateRootUpdateStream {
+    inner: Arc<dyn StateRootSink>,
 }
 
-impl<E: AccountExtension> fmt::Debug for StateRootUpdateStream<E> {
+impl fmt::Debug for StateRootUpdateStream {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("StateRootUpdateStream").finish_non_exhaustive()
     }
 }
 
-impl<E: AccountExtension> StateRootUpdateStream<E> {
+impl StateRootUpdateStream {
     /// Creates a new authoritative update stream backed by the given sink.
-    pub fn new(inner: Arc<dyn StateRootSink<E>>) -> Self {
+    pub fn new(inner: Arc<dyn StateRootSink>) -> Self {
         Self { inner }
     }
 
     /// Emits an authoritative pre-hashed state update.
-    pub fn on_hashed_state_update(&self, state: HashedPostState<E>) {
+    pub fn on_hashed_state_update(&self, state: HashedPostState) {
         self.inner.on_hashed_state_update(state);
     }
 
@@ -417,7 +414,7 @@ impl<E: AccountExtension> StateRootUpdateStream<E> {
     ///
     /// See [`StateRootUpdateHook`] for why the hook finishes on drop while the bare stream
     /// does not, and how a panic during execution is excluded from that.
-    pub fn into_state_hook(self) -> StateRootUpdateHook<E> {
+    pub fn into_state_hook(self) -> StateRootUpdateHook {
         StateRootUpdateHook { inner: self.inner }
     }
 }
@@ -434,23 +431,23 @@ impl<E: AccountExtension> StateRootUpdateStream<E> {
 /// computing a root from incomplete updates. Execution that fails by returning an error still
 /// drops the hook normally and finishes the stream; the caller abandons the result in that
 /// case, and the stored trie is rejected by the anchor check on the next block.
-pub struct StateRootUpdateHook<E: AccountExtension = EmptyAccountExtension> {
-    inner: Arc<dyn StateRootSink<E>>,
+pub struct StateRootUpdateHook {
+    inner: Arc<dyn StateRootSink>,
 }
 
-impl<E: AccountExtension> fmt::Debug for StateRootUpdateHook<E> {
+impl fmt::Debug for StateRootUpdateHook {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("StateRootUpdateHook").finish_non_exhaustive()
     }
 }
 
-impl<E: AccountExtension> OnStateHook for StateRootUpdateHook<E> {
+impl OnStateHook for StateRootUpdateHook {
     fn on_state(&mut self, state: EvmState) {
         self.inner.on_state_update(state);
     }
 }
 
-impl<E: AccountExtension> Drop for StateRootUpdateHook<E> {
+impl Drop for StateRootUpdateHook {
     fn drop(&mut self) {
         // A drop during a panic unwind means execution died mid-block. Leave the stream
         // unfinished so the task fails instead of computing a root from partial updates.
@@ -462,17 +459,17 @@ impl<E: AccountExtension> Drop for StateRootUpdateHook<E> {
 }
 
 #[derive(Debug, Clone)]
-struct SparseTrieStateRootSink<E: AccountExtension = EmptyAccountExtension> {
-    sender: crossbeam_channel::Sender<StateRootMessage<E>>,
+struct SparseTrieStateRootSink {
+    sender: crossbeam_channel::Sender<StateRootMessage>,
 }
 
-impl<E: AccountExtension> SparseTrieStateRootSink<E> {
-    const fn new(sender: crossbeam_channel::Sender<StateRootMessage<E>>) -> Self {
+impl SparseTrieStateRootSink {
+    const fn new(sender: crossbeam_channel::Sender<StateRootMessage>) -> Self {
         Self { sender }
     }
 }
 
-impl<E: AccountExtension> StateRootSink<E> for SparseTrieStateRootSink<E> {
+impl StateRootSink for SparseTrieStateRootSink {
     fn on_access_hint(&self, hint: StateAccessHint) {
         let _ = self.sender.send(StateRootMessage::PrefetchProofs(hint.into()));
     }
@@ -481,7 +478,7 @@ impl<E: AccountExtension> StateRootSink<E> for SparseTrieStateRootSink<E> {
         let _ = self.sender.send(StateRootMessage::StateUpdate(state));
     }
 
-    fn on_hashed_state_update(&self, state: HashedPostState<E>) {
+    fn on_hashed_state_update(&self, state: HashedPostState) {
         let _ = self.sender.send(StateRootMessage::HashedStateUpdate(state));
     }
 
@@ -491,7 +488,7 @@ impl<E: AccountExtension> StateRootSink<E> for SparseTrieStateRootSink<E> {
 }
 
 /// Converts [`EvmState`] to [`HashedPostState`] by keccak256-hashing addresses and storage slots.
-pub fn evm_state_to_hashed_post_state<E: AccountExtension>(update: EvmState) -> HashedPostState<E> {
+pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
     let mut hashed_state = HashedPostState::with_capacity(update.len());
 
     for (address, account) in update {
@@ -546,9 +543,8 @@ mod tests {
             EvmStorageSlot::new_changed(U256::ZERO, U256::from(2), TransactionId::ZERO),
         );
 
-        let hashed_state = evm_state_to_hashed_post_state::<EmptyAccountExtension>(
-            EvmState::from_iter([(address, account)]),
-        );
+        let hashed_state =
+            evm_state_to_hashed_post_state(EvmState::from_iter([(address, account)]));
         let hashed_address = keccak256(address);
 
         assert_eq!(hashed_state.accounts.get(&hashed_address), Some(&None));
@@ -569,9 +565,8 @@ mod tests {
             EvmStorageSlot::new_changed(U256::ZERO, U256::from(2), TransactionId::ZERO),
         );
 
-        let hashed_state = evm_state_to_hashed_post_state::<EmptyAccountExtension>(
-            EvmState::from_iter([(address, account)]),
-        );
+        let hashed_state =
+            evm_state_to_hashed_post_state(EvmState::from_iter([(address, account)]));
         let hashed_address = keccak256(address);
 
         assert_eq!(hashed_state.accounts.get(&hashed_address), Some(&None));
@@ -686,7 +681,7 @@ mod tests {
         let (cancel_guard, _cancel_rx) = StateRootTaskCancelGuard::channel();
         let (_state_root_tx, state_root_rx) = std::sync::mpsc::channel();
         let (_hashed_state_tx, hashed_state_rx) = std::sync::mpsc::channel();
-        let mut handle = StateRootHandle::<EmptyAccountExtension>::new(
+        let mut handle = StateRootHandle::new(
             B256::ZERO,
             updates_tx,
             cancel_guard,
@@ -709,12 +704,8 @@ mod tests {
 
         let (state_root_tx, state_root_rx) = std::sync::mpsc::channel();
         let (hashed_state_tx, hashed_state_rx) = std::sync::mpsc::channel();
-        let mut handle = PayloadStateRootHandle::<EmptyAccountExtension>::new(
-            "test",
-            Some(hook),
-            state_root_rx,
-            Some(hashed_state_rx),
-        );
+        let mut handle =
+            PayloadStateRootHandle::new("test", Some(hook), state_root_rx, Some(hashed_state_rx));
 
         assert_eq!(handle.name(), "test");
 
@@ -745,8 +736,7 @@ mod tests {
     #[should_panic(expected = "state_root already taken")]
     fn payload_state_root_receiver_can_only_be_taken_once() {
         let (_state_root_tx, state_root_rx) = std::sync::mpsc::channel();
-        let mut handle =
-            PayloadStateRootHandle::<EmptyAccountExtension>::new("test", None, state_root_rx, None);
+        let mut handle = PayloadStateRootHandle::new("test", None, state_root_rx, None);
 
         let _state_root_rx = handle.take_state_root_rx();
         let _ = handle.take_state_root_rx();
@@ -758,7 +748,7 @@ mod tests {
         let (cancel_guard, cancel_rx) = StateRootTaskCancelGuard::channel();
         let (_state_root_tx, state_root_rx) = std::sync::mpsc::channel();
         let (_hashed_state_tx, hashed_state_rx) = std::sync::mpsc::channel();
-        let mut handle = StateRootHandle::<EmptyAccountExtension>::new(
+        let mut handle = StateRootHandle::new(
             B256::ZERO,
             updates_tx,
             cancel_guard,

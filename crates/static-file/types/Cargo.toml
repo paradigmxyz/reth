@@ -42,3 +42,4 @@ std = [
     "tracing?/std",
 ]
 clap = ["dep:clap"]
+account-ext = ["reth-stages-types/account-ext"]
