@@ -40,7 +40,7 @@ use reth_transaction_pool::{
 };
 use revm::context_interface::{Block as _, Cfg as _};
 use std::sync::Arc;
-use tracing::{debug, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 mod config;
 pub use config::*;
@@ -375,6 +375,14 @@ where
             tx.effective_tip_per_gas(base_fee).map(U256::from)
         };
         let tx_hash = *tx.tx_hash();
+        let is_eip8141 = tx.is_eip8141();
+        if is_eip8141 {
+            info!(
+                target: "reth::eip8141::payload",
+                ?tx_hash,
+                "executing EIP-8141 transaction for payload"
+            );
+        }
 
         let mut tx_regular_gas_used = 0;
         let gas_output = match builder.execute_transaction_with_result_closure(tx, |result| {
@@ -421,6 +429,16 @@ where
             // this is an error that we should treat as fatal for this attempt
             Err(err) => return Err(PayloadBuilderError::evm(err)),
         };
+        if is_eip8141 {
+            info!(
+                target: "reth::eip8141::payload",
+                ?tx_hash,
+                tx_gas_used = gas_output.tx_gas_used(),
+                regular_gas_used = tx_regular_gas_used,
+                state_gas_used = gas_output.state_gas_used(),
+                "executed EIP-8141 transaction for payload"
+            );
+        }
 
         // add to the total blob gas used if the transaction successfully executed
         if let Some(blob_count) = tx_blob_count {

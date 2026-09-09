@@ -45,7 +45,7 @@ use std::{
     ops::Bound::{Excluded, Unbounded},
     sync::Arc,
 };
-use tracing::{trace, warn};
+use tracing::{info, trace, warn};
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 // TODO: Inlined diagram due to a bug in aquamarine library, should become an include when it's
@@ -840,12 +840,21 @@ impl<T: TransactionOrdering> TxPool<T> {
                         *transaction.hash(),
                         PoolErrorKind::ReplacementUnderpriced,
                     )),
-                    InsertErr::FramePolicy { transaction, reason } => Err(PoolError::new(
-                        *transaction.hash(),
-                        PoolErrorKind::InvalidTransaction(
-                            Eip8141PoolTransactionError::PublicMempoolPolicy(reason).into(),
-                        ),
-                    )),
+                    InsertErr::FramePolicy { transaction, reason } => {
+                        info!(
+                            target: "reth::eip8141::pool",
+                            tx_hash = ?transaction.hash(),
+                            sender = ?transaction.sender(),
+                            reason,
+                            "rejected EIP-8141 transaction during pool reservation"
+                        );
+                        Err(PoolError::new(
+                            *transaction.hash(),
+                            PoolErrorKind::InvalidTransaction(
+                                Eip8141PoolTransactionError::PublicMempoolPolicy(reason).into(),
+                            ),
+                        ))
+                    }
                     InsertErr::FeeCapBelowMinimumProtocolFeeCap { transaction, fee_cap } => {
                         Err(PoolError::new(
                             *transaction.hash(),
@@ -2125,6 +2134,16 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 .as_ref()
                 .filter(|existing| existing.transaction.frame_validation().is_some())
                 .map(|existing| *existing.hash());
+            info!(
+                target: "reth::eip8141::pool",
+                tx_hash = ?transaction.hash(),
+                sender = ?metadata.sender,
+                payer = ?metadata.payer,
+                max_cost = ?metadata.max_cost,
+                ordinary_payer_cost = ?ordinary_payer_cost,
+                replaces = ?replaces,
+                "reserving EIP-8141 public-pool payer capacity"
+            );
             self.frame_reservations
                 .replace(
                     *transaction.hash(),
@@ -2137,6 +2156,13 @@ impl<T: PoolTransaction> AllTransactions<T> {
                     transaction: Arc::clone(&transaction),
                     reason,
                 })?;
+            info!(
+                target: "reth::eip8141::pool",
+                tx_hash = ?transaction.hash(),
+                payer = ?metadata.payer,
+                max_cost = ?metadata.max_cost,
+                "reserved EIP-8141 public-pool payer capacity"
+            );
         } else {
             let usage = self.frame_reservations.payer_usage(&transaction.sender());
             if usage.frame_count != 0 {

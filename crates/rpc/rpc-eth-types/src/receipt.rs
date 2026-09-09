@@ -79,6 +79,19 @@ impl<ChainSpec> EthReceiptConverter<ChainSpec> {
         Self {
             chain_spec,
             build_rpc_receipt: |receipt: Receipt, next_log_index, meta: TransactionMeta| {
+                if let Some(frame_receipt) = receipt.as_eip8141() {
+                    tracing::info!(
+                        target: "reth::eip8141::receipt",
+                        tx_hash = ?meta.tx_hash,
+                        block_hash = ?meta.block_hash,
+                        block_number = meta.block_number,
+                        transaction_index = meta.index,
+                        payer = ?frame_receipt.payer,
+                        frame_count = frame_receipt.frame_receipts.len(),
+                        cumulative_gas_used = frame_receipt.cumulative_gas_used,
+                        "converting EIP-8141 receipt for RPC"
+                    );
+                }
                 let mut log_index = next_log_index;
                 ReceiptEnvelope::from(receipt).map_logs(|log| {
                     let idx = log_index;
