@@ -246,6 +246,7 @@ sparse_trie_tests! {
     test_update_leaves_removal_branch_collapse_blinded_sibling,
     test_update_leaves_subtrie_collapse_requests_proof,
     test_update_leaves_multiple_keys_same_blinded_node,
+    test_update_leaves_blinded_groups_match_individual_updates,
     test_update_leaves_touched_fully_revealed,
     test_update_leaves_touched_blinded_requests_proof,
     test_update_leaves_touched_nonexistent_key,
