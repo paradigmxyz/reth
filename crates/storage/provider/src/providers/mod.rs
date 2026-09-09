@@ -15,10 +15,7 @@ pub use static_file::{
 
 mod state;
 pub use state::{
-    historical::{
-        compute_history_rank, history_info, needs_prev_shard_check, HistoricalStateProvider,
-        HistoricalStateProviderRef, HistoryInfo, LowestAvailableBlocks,
-    },
+    historical::{compute_history_rank, history_info, needs_prev_shard_check, HistoryInfo},
     latest::{LatestStateProvider, LatestStateProviderRef},
 };
 

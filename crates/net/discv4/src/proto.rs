@@ -155,6 +155,11 @@ impl Message {
             return Err(DecodePacketError::HashMismatch)
         }
 
+        // Resolve the message type before recovering the public key: recovery is by far the most
+        // expensive step of decoding, and a packet we have no handler for is rejected either way.
+        let message_id =
+            MessageId::from_u8(packet[97]).map_err(DecodePacketError::UnknownMessage)?;
+
         let signature = &packet[32..96];
         let recovery_id = RecoveryId::try_from(packet[96] as i32)?;
         let recoverable_sig = RecoverableSignature::from_compact(signature, recovery_id)?;
@@ -165,10 +170,9 @@ impl Message {
         let pk = SECP256K1.recover_ecdsa(&msg, &recoverable_sig)?;
         let node_id = pk2id(&pk);
 
-        let msg_type = packet[97];
         let payload = &mut &packet[98..];
 
-        let msg = match MessageId::from_u8(msg_type).map_err(DecodePacketError::UnknownMessage)? {
+        let msg = match message_id {
             MessageId::Ping => Self::Ping(Ping::decode(payload)?),
             MessageId::Pong => Self::Pong(Pong::decode(payload)?),
             MessageId::FindNode => Self::FindNode(FindNode::decode(payload)?),

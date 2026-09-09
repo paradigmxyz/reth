@@ -29,7 +29,10 @@ use reth_primitives_traits::Recovered;
 use reth_revm::{
     cancelled::CancelOnDrop,
     database::StateProviderDatabase,
-    db::{bal::EvmDatabaseError, State},
+    db::{
+        bal::{BalState, EvmDatabaseError},
+        State,
+    },
 };
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
@@ -190,6 +193,13 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                     let chain_id = evm_env.cfg_env.chain_id;
 
+                    // Each simulated block needs its own BAL, including when crossing Amsterdam.
+                    if this.provider().chain_spec().is_amsterdam_active_at_timestamp(
+                        evm_env.block_env.timestamp().saturating_to(),
+                    ) {
+                        db.bal_state = BalState::new().with_bal_builder();
+                    }
+
                     let ctx = this
                         .evm_config()
                         .context_for_next_block(&parent, attributes)
@@ -202,6 +212,12 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         }
                     };
 
+                    // EIP-7708 already emits transfer logs: https://eips.ethereum.org/EIPS/eip-7708
+                    let trace_transfers = trace_transfers &&
+                        (!Cfg::spec(&evm_env.cfg_env)
+                            .into()
+                            .is_enabled_in(revm::primitives::hardfork::SpecId::AMSTERDAM) ||
+                            evm_env.cfg_env.is_eip7708_disabled());
                     let (result, results) = if trace_transfers {
                         // prepare inspector to capture transfer inside the evm so they are recorded
                         // and included in logs
