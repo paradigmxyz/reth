@@ -328,8 +328,7 @@ impl ArenaCursor {
                 _ => unreachable!("unexpected node type on stack: {:?}", arena[head_idx]),
             };
 
-            let mut head_branch_logical_path = head.path;
-            head_branch_logical_path.extend(&head_branch.short_key);
+            let head_branch_logical_path = logical_branch_path(arena, head);
 
             // If full_path doesn't extend past the branch's logical path, the target is at or
             // within the branch's short_key — treat as diverged.
@@ -351,8 +350,8 @@ impl ArenaCursor {
                 }
                 ArenaSparseNodeBranchChild::Revealed(child_idx) => {
                     let child_idx = *child_idx;
-                    head_branch_logical_path.push_unchecked(child_nibble);
-                    self.push(arena, child_idx, head_branch_logical_path);
+                    let path = self.child_path(arena, child_nibble);
+                    self.push(arena, child_idx, path);
                 }
             }
         }
