@@ -185,6 +185,10 @@ impl reth_codecs::Compact for StorageRootMerkleCheckpoint {
         len += 32;
         #[cfg(feature = "account-ext")]
         {
+            let extension_len = u32::try_from(self.account_extension.len())
+                .expect("account extension exceeds compact encoding limit");
+            buf.put_u32(extension_len);
+            len += 4;
             buf.put_slice(&self.account_extension);
             len += self.account_extension.len();
         }
@@ -215,9 +219,11 @@ impl reth_codecs::Compact for StorageRootMerkleCheckpoint {
         let account_bytecode_hash = B256::from_slice(&buf[..32]);
         buf.advance(32);
         #[cfg(feature = "account-ext")]
-        let account_extension = AccountExtension::copy_from_slice(buf);
+        let account_extension_len = buf.get_u32() as usize;
         #[cfg(feature = "account-ext")]
-        let buf = &[];
+        let account_extension = AccountExtension::copy_from_slice(&buf[..account_extension_len]);
+        #[cfg(feature = "account-ext")]
+        let buf = &buf[account_extension_len..];
 
         (
             Self {
@@ -670,8 +676,11 @@ mod tests {
 
         let mut buf = Vec::new();
         let encoded = checkpoint.to_compact(&mut buf);
-        let (decoded, _) = StorageRootMerkleCheckpoint::from_compact(&buf, encoded);
+        assert_eq!(encoded, buf.len());
+        buf.extend_from_slice(&[0x12, 0x34]);
+        let (decoded, rest) = StorageRootMerkleCheckpoint::from_compact(&buf, encoded);
         assert_eq!(decoded, checkpoint);
+        assert_eq!(rest, &[0x12, 0x34]);
     }
 
     #[test]
