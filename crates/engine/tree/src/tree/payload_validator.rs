@@ -491,6 +491,14 @@ where
         V: PayloadValidator<T, Block = N::Block> + Clone,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
+        // Downloaded blocks may have a BAL hash in their header even when the sidecar is absent.
+        // Keep this in lockstep with the predicate that enables serial BAL building.
+        if input.has_block_access_list() &&
+            let Err(error) = reth_provider::ensure_no_account_extensions("BAL")
+        {
+            return Err(InsertBlockError::new(self.convert_to_block(input)?, error.into()).into())
+        }
+
         let parent_hash = input.parent_hash();
         let _txpool_pause = self.txpool_prewarm.as_ref().map(txpool_prewarm::Handle::pause);
         let txpool_snapshot =
@@ -1115,9 +1123,6 @@ where
     //     empirically once workers are parallel; meaningless while the commit loop is sequential.
     fn bal_path_eligible(&self, bal: Option<&DecodedBal>) -> Result<bool, InsertBlockErrorKind> {
         let has_bal = bal.is_some();
-        if has_bal {
-            reth_provider::ensure_no_account_extensions("BAL")?;
-        }
         let parallel_execution = has_bal && !self.config.disable_bal_parallel_execution();
         if parallel_execution && self.config.disable_bal_parallel_state_root() {
             return Err(InsertBlockErrorKind::Other(

@@ -707,9 +707,9 @@ alloy-tx-macros = { git = "https://github.com/alloy-rs/alloy", rev = "513147d" }
 alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "513147d" }
 alloy-rpc-types-eth = { git = "https://github.com/alloy-rs/alloy", rev = "513147d" }
 alloy-trie = { git = "https://github.com/alloy-rs/trie", rev = "30d6e84aa756ac70d61b7b7ccb7dba5924a88cb8" }
-reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "6a0e2d7" }
-reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "6a0e2d7" }
-reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "6a0e2d7" }
+reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "ba95f09" }
+reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "ba95f09" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "ba95f09" }
 revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "bfedf45e1697ba75863055b8639937674b2c8b66" }
 revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "bfedf45e1697ba75863055b8639937674b2c8b66" }
 revm-state = { git = "https://github.com/bluealloy/revm", rev = "bfedf45e1697ba75863055b8639937674b2c8b66" }

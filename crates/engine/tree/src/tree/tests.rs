@@ -477,14 +477,13 @@ impl ValidatorTestHarness {
     /// Call `validate_block_with_state` directly with block
     fn validate_block_direct(
         &mut self,
-        block: SealedBlock<Block>,
+        block: impl Into<SealedBlockWithAccessList<Block>>,
     ) -> ValidationOutcome<EthPrimitives> {
         let ctx = TreeCtx::new(
             &mut self.harness.tree.state,
             &self.harness.tree.canonical_in_memory_state,
         );
-        let result =
-            self.validator.validate_block(SealedBlockWithAccessList::from_block(block), ctx);
+        let result = self.validator.validate_block(block.into(), ctx);
         self.metrics.record_validation(result.is_ok());
         result
     }
@@ -2206,6 +2205,23 @@ fn test_validate_block_multiple_scenarios() {
         total_calls >= 2,
         "At least invalid block validations should have executed (got {})",
         total_calls
+    );
+}
+
+#[cfg(feature = "account-ext")]
+#[test]
+fn downloaded_block_with_bal_hash_requires_extensions_disabled() {
+    let mut test_harness = ValidatorTestHarness::new(MAINNET.clone());
+    let mut block_factory = TestBlockFactory::new(MAINNET.as_ref().clone());
+    let mut block = block_factory.create_valid_block(MAINNET.genesis_hash()).unseal();
+    block.header.block_access_list_hash = Some(B256::ZERO);
+    let block = SealedBlockWithAccessList::from_block(block.seal_slow());
+
+    assert!(block.data().is_none());
+    let error = test_harness.validate_block_direct(block).unwrap_err();
+    assert!(
+        error.to_string().contains("BAL does not support account extensions"),
+        "unexpected error: {error:?}"
     );
 }
 
