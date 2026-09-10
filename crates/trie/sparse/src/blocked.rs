@@ -29,17 +29,17 @@ impl BlockedLeafUpdates {
     }
 
     /// Returns the number of blocked updates.
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.entries.len()
     }
 
     /// Returns `true` if no update is blocked.
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
     /// Returns `true` if at least one blocked update can be applied again.
-    pub fn has_retryable(&self) -> bool {
+    pub const fn has_retryable(&self) -> bool {
         self.num_retryable > 0
     }
 
@@ -111,6 +111,7 @@ impl BlockedLeafUpdates {
             let mut entries = mem::take(&mut self.entries);
             let mut kept = mem::take(&mut self.scratch);
             kept.clear();
+            #[expect(clippy::iter_with_drain, reason = "retain the scratch buffer allocation")]
             for entry in entries.drain(..) {
                 match entry.blocked_on {
                     BlockedOn::Retryable => {
@@ -124,7 +125,7 @@ impl BlockedLeafUpdates {
             self.num_retryable = 0;
         }
 
-        batch.sort_unstable_by(|(left, ..), (right, ..)| left.cmp(right));
+        batch.sort_unstable_by_key(|&(key, ..)| key);
         for (key, path, _) in batch.iter_mut() {
             *path = Nibbles::unpack(key);
         }
@@ -137,7 +138,7 @@ impl BlockedLeafUpdates {
     pub(crate) fn block(
         &mut self,
         batch: &mut [(B256, Nibbles, LeafUpdate)],
-        indices: &mut Vec<(u32, BlockedOn)>,
+        indices: &mut [(u32, BlockedOn)],
     ) {
         if indices.is_empty() {
             return
@@ -150,6 +151,7 @@ impl BlockedLeafUpdates {
         merged.clear();
         merged.reserve(entries.len() + indices.len());
 
+        #[expect(clippy::iter_with_drain, reason = "retain the scratch buffer allocation")]
         let mut blocked = entries.drain(..).peekable();
         let mut last_index = None;
         for &(index, blocked_on) in indices.iter() {
@@ -255,11 +257,7 @@ mod tests {
         ];
         blocked.block(
             &mut batch,
-            &mut vec![
-                (0, BlockedOn::Reveal(2)),
-                (1, BlockedOn::Reveal(2)),
-                (2, BlockedOn::Retryable),
-            ],
+            &mut [(0, BlockedOn::Reveal(2)), (1, BlockedOn::Reveal(2)), (2, BlockedOn::Retryable)],
         );
         assert_eq!(blocked.len(), 3);
         assert!(blocked.has_retryable());
@@ -286,7 +284,7 @@ mod tests {
     fn newer_changed_update_replaces_the_blocked_one() {
         let mut blocked = BlockedLeafUpdates::new();
         let mut batch = vec![(key(0x11), Nibbles::unpack(key(0x11)), LeafUpdate::Changed(vec![1]))];
-        blocked.block(&mut batch, &mut vec![(0, BlockedOn::Reveal(2))]);
+        blocked.block(&mut batch, &mut [(0, BlockedOn::Reveal(2))]);
 
         let mut updates = B256Map::from_iter([(key(0x11), LeafUpdate::Touched)]);
         blocked.take_batch(&mut updates, &mut batch);
