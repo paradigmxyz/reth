@@ -6,6 +6,9 @@ use core::{
 };
 use reth_trie_common::RlpNode;
 
+/// Bits per word of a [`BlindedMarks`] bitmap.
+const WORD_BITS: usize = u64::BITS as usize;
+
 /// A reference to a node inside a [`NodeArena`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(super) struct Index(u32);
@@ -53,6 +56,17 @@ impl NodeArena {
         idx
     }
 
+    /// Removes the node at `idx` without recycling its slot.
+    ///
+    /// For an arena that is being emptied into a fresh one — pruning and compaction both do that
+    /// and then drop the source — maintaining the free list is wasted work. [`Self::len`] is no
+    /// longer accurate afterwards.
+    pub(super) fn drain_node(&mut self, idx: Index) -> ArenaSparseNode {
+        let node = core::mem::replace(&mut self.nodes[idx.get()], ArenaSparseNode::Free);
+        debug_assert!(!matches!(node, ArenaSparseNode::Free), "drained a free arena slot");
+        node
+    }
+
     /// Removes the node at `idx`, returning it if the slot was occupied.
     pub(super) fn remove(&mut self, idx: Index) -> Option<ArenaSparseNode> {
         let slot = self.nodes.get_mut(idx.get())?;
@@ -80,11 +94,6 @@ impl NodeArena {
     /// Returns the number of occupied slots.
     pub(super) const fn len(&self) -> usize {
         self.nodes.len() - self.free.len()
-    }
-
-    /// Returns `true` if the arena holds no occupied slots.
-    pub(super) const fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 
     /// Iterates over the occupied slots.
@@ -136,6 +145,54 @@ impl NodeArena {
         self.blinded_free.push(slot);
         core::mem::take(&mut self.blinded[slot as usize])
     }
+
+    /// Releases the node vector's unused capacity.
+    pub(super) fn shrink_nodes_to_fit(&mut self) {
+        self.nodes.shrink_to_fit();
+    }
+
+    /// Takes over `src`'s side table of blinded children, so that blinded [`BranchChild`]s copied
+    /// out of `src` stay valid without their RLP being moved one slot at a time.
+    ///
+    /// The copy must record every child it carries over in the returned marks and finish with
+    /// [`Self::sweep_blinded`], which turns the slots left behind into free ones.
+    pub(super) fn adopt_blinded(&mut self, src: &mut Self) -> BlindedMarks {
+        debug_assert!(self.blinded.is_empty(), "adopting into a non-empty side table");
+        self.blinded = core::mem::take(&mut src.blinded);
+        self.blinded_free = core::mem::take(&mut src.blinded_free);
+        BlindedMarks { words: alloc::vec![0; self.blinded.len().div_ceil(WORD_BITS)] }
+    }
+
+    /// Rebuilds the free list of the side table adopted by [`Self::adopt_blinded`] from the slots
+    /// `marks` records as still referenced, and drops its unreferenced tail.
+    pub(super) fn sweep_blinded(&mut self, marks: BlindedMarks) {
+        let words = marks.words;
+        let live = words
+            .iter()
+            .rposition(|word| *word != 0)
+            .map_or(0, |idx| idx * WORD_BITS + WORD_BITS - words[idx].leading_zeros() as usize);
+        debug_assert!(live <= self.blinded.len(), "marked slot outside the side table");
+        self.blinded.truncate(live);
+        self.blinded_free.clear();
+
+        // Push high to low so that `insert_blinded` hands the lowest slot out first and the tail
+        // of the table keeps draining.
+        let word_count = live.div_ceil(WORD_BITS);
+        for (idx, word) in words[..word_count].iter().enumerate().rev() {
+            // The last word covers only the slots below `live`.
+            let covered = if idx + 1 == word_count && live % WORD_BITS != 0 {
+                (1 << (live % WORD_BITS)) - 1
+            } else {
+                u64::MAX
+            };
+            let mut unmarked = !word & covered;
+            while unmarked != 0 {
+                let bit = u64::BITS - 1 - unmarked.leading_zeros();
+                unmarked ^= 1 << bit;
+                self.blinded_free.push(idx as u32 * u64::BITS + bit);
+            }
+        }
+    }
 }
 
 impl IndexOps<Index> for NodeArena {
@@ -155,6 +212,29 @@ impl IndexMut<Index> for NodeArena {
         let node = &mut self.nodes[idx.get()];
         debug_assert!(!matches!(node, ArenaSparseNode::Free), "indexed a free arena slot");
         node
+    }
+}
+
+/// The slots of a side table of blinded children that a copy into a fresh arena carried over.
+///
+/// See [`NodeArena::adopt_blinded`].
+pub(super) struct BlindedMarks {
+    words: Vec<u64>,
+}
+
+impl BlindedMarks {
+    /// Records that `child`'s slot is still referenced.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `child` is revealed.
+    pub(super) fn mark(&mut self, child: BranchChild) {
+        let slot = child.blinded_slot().expect("child is revealed") as usize;
+        let idx = slot / WORD_BITS;
+        if idx >= self.words.len() {
+            self.words.resize(idx + 1, 0);
+        }
+        self.words[idx] |= 1 << (slot % WORD_BITS);
     }
 }
 
@@ -253,5 +333,36 @@ mod tests {
         let other = RlpNode::word_rlp(&B256::repeat_byte(2));
         assert_eq!(arena.insert_blinded(other.clone()), child, "the freed slot is reused");
         assert_eq!(arena.blinded(child), &other);
+    }
+
+    #[test]
+    fn sweeping_an_adopted_table_keeps_marked_slots() {
+        let mut src = NodeArena::new();
+        // More than one word of the mark bitmap.
+        let children: Vec<_> = (0..200u8)
+            .map(|byte| src.insert_blinded(RlpNode::word_rlp(&B256::repeat_byte(byte))))
+            .collect();
+
+        let mut dst = NodeArena::new();
+        let mut marks = dst.adopt_blinded(&mut src);
+        for child in children.iter().step_by(3) {
+            marks.mark(*child);
+        }
+        dst.sweep_blinded(marks);
+
+        let last_marked = (children.len() - 1) / 3 * 3;
+        assert_eq!(dst.blinded.len(), last_marked + 1, "the unmarked tail is dropped");
+
+        // Every unmarked slot below the tail is handed out again, lowest first.
+        let expected: Vec<u32> = (0..=last_marked as u32).filter(|slot| slot % 3 != 0).collect();
+        let handed_out: Vec<u32> = expected
+            .iter()
+            .map(|_| dst.insert_blinded(RlpNode::default()).blinded_slot().unwrap())
+            .collect();
+        assert_eq!(handed_out, expected);
+
+        for (byte, child) in (0..200u8).step_by(3).zip(children.iter().step_by(3)) {
+            assert_eq!(dst.blinded(*child), &RlpNode::word_rlp(&B256::repeat_byte(byte)));
+        }
     }
 }
