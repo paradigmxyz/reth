@@ -600,30 +600,13 @@ where
     ) -> ProviderResult<B256> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
             let hashed_address = alloy_primitives::keccak256(address);
-            let mut input = self.build_overlay(
+            let input = self.build_overlay(
                 TrieInputSorted::from_unsorted(TrieInput::from_state(
                     HashedPostState::from_hashed_storage(hashed_address, hashed_storage),
                 )),
                 false,
             )?;
-            <DbStorageRoot<'_, _, A>>::from_tx(self.provider().tx(), address)
-                .with_trie_cursor_factory(InMemoryTrieCursorFactory::new(
-                    DatabaseTrieCursorFactory::<_, A>::new(self.provider().tx()),
-                    input.nodes.as_ref(),
-                ))
-                .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
-                    DatabaseHashedCursorFactory::new(self.provider().tx()),
-                    input.state.as_ref(),
-                ))
-                .with_prefix_set(
-                    input
-                        .prefix_sets
-                        .storage_prefix_sets
-                        .remove(&hashed_address)
-                        .unwrap_or_default()
-                        .freeze(),
-                )
-                .root()
+            <DbStorageRoot<'_, _, A>>::overlay_root(self.provider().tx(), address, input)
                 .map_err(|err| ProviderError::Database(err.into()))
         })
     }
