@@ -1636,7 +1636,7 @@ mod tests {
                     .map(|change| (keccak256(change.address), change.delta))
                     .collect(),
             });
-            stream.on_update_schedule(BlockUpdateSchedule {
+            stream.on_update_schedule(Arc::new(BlockUpdateSchedule {
                 accounts: changes.iter().map(|change| keccak256(change.address)).collect(),
                 storages: changes
                     .iter()
@@ -1648,7 +1648,7 @@ mod tests {
                         )
                     })
                     .collect(),
-            });
+            }));
             for change in &changes {
                 stream.on_hashed_state_update(hashed_storages(change));
             }

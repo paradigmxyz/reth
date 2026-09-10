@@ -23,7 +23,7 @@ use crate::tree::{
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::keccak256;
+use alloy_primitives::{keccak256, map::B256Map};
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
@@ -388,19 +388,26 @@ where
 
                 // The account changes and the keys go out before any storage value: neither
                 // needs a state read, and together they are all the task needs to start
-                // fetching the block's proofs.
-                if !ctx.disable_bal_parallel_state_root {
+                // fetching the block's proofs. The values then read their keys back out of the
+                // schedule, so a block is hashed exactly once.
+                let schedule = (!ctx.disable_bal_parallel_state_root).then(|| {
                     let schedule_start = Instant::now();
                     let (schedule, accounts) = bal_block_updates(stream_bal.as_bal());
+                    let schedule = Arc::new(schedule);
                     ctx.metrics.bal_account_deltas.record(accounts.deltas.len() as f64);
                     ctx.metrics.bal_account_values.record(accounts.values.len() as f64);
                     hashed_update_stream.on_account_updates(accounts);
-                    hashed_update_stream.on_update_schedule(schedule);
+                    hashed_update_stream.on_update_schedule(Arc::clone(&schedule));
                     ctx.metrics.bal_update_schedule_duration.record(schedule_start.elapsed());
-                }
+                    schedule
+                });
 
                 stream_bal.as_bal().par_iter().for_each(|account_changes| {
-                    ctx.send_bal_hashed_storage(account_changes, &hashed_update_stream);
+                    ctx.send_bal_hashed_storage(
+                        account_changes,
+                        schedule.as_deref(),
+                        &hashed_update_stream,
+                    );
                 });
 
                 hashed_update_stream.finish();
@@ -660,23 +667,36 @@ where
     ///
     /// The account's own fields travel with [`bal_block_updates`] instead, which needs no state
     /// read and can therefore go out for the whole block at once, before this.
+    ///
+    /// The storage keys come from `schedule` when it holds them, which is the same list in the
+    /// same order, so a block that sent a schedule hashes them once rather than twice.
     fn send_bal_hashed_storage(
         &self,
         account_changes: &alloy_eip7928::AccountChanges,
+        schedule: Option<&BlockUpdateSchedule>,
         hashed_update_stream: &StateRootUpdateStream,
     ) {
         if self.disable_bal_parallel_state_root || account_changes.storage_changes.is_empty() {
             return;
         }
 
+        let hashed_address = keccak256(account_changes.address);
+        // Consumed in lock step with the values, both walking `storage_post_states`.
+        let mut scheduled_slots = schedule
+            .and_then(|schedule| schedule.storages.get(&hashed_address))
+            .map(|slots| slots.iter());
         let storage_map = reth_trie::HashedStorage::from_iter(
-            account_changes
-                .storage_post_states()
-                .map(|(slot, value)| (keccak256(slot.to_be_bytes::<32>()), value)),
+            account_changes.storage_post_states().map(|(slot, value)| {
+                let hashed_slot = scheduled_slots
+                    .as_mut()
+                    .and_then(|slots| slots.next().copied())
+                    .unwrap_or_else(|| keccak256(slot.to_be_bytes::<32>()));
+                (hashed_slot, value)
+            }),
         );
 
         let mut hashed_state = reth_trie::HashedPostState::default();
-        hashed_state.storages.insert(keccak256(account_changes.address), storage_map);
+        hashed_state.storages.insert(hashed_address, storage_map);
         hashed_update_stream.on_hashed_state_update(hashed_state);
     }
 }
@@ -716,6 +736,9 @@ const fn bal_account_changes_state_root(account_changes: &alloy_eip7928::Account
 /// whose final value depends on the parent state from the leaves it reveals anyway - which is
 /// what used to make the last addresses of a block reach the task late, one parent-account read
 /// at a time.
+///
+/// The storage values are sent with the keys hashed here, so the whole block is hashed exactly
+/// once.
 fn bal_block_updates(
     bal: &[alloy_eip7928::AccountChanges],
 ) -> (BlockUpdateSchedule, BlockAccountUpdates) {
@@ -733,7 +756,7 @@ fn bal_block_updates(
 
     let mut schedule = BlockUpdateSchedule {
         accounts: Vec::with_capacity(entries.len()),
-        storages: Default::default(),
+        storages: B256Map::with_capacity_and_hasher(entries.len(), Default::default()),
     };
     let mut accounts = BlockAccountUpdates::default();
     accounts.deltas.reserve(entries.len());
@@ -775,7 +798,7 @@ mod tests {
         AccountChanges, BalanceChange, BlockAccessIndex, CodeChange, NonceChange, SlotChanges,
         StorageChange,
     };
-    use alloy_primitives::{address, bytes, map::B256Map, B256, U256};
+    use alloy_primitives::{address, bytes, B256, U256};
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm::{execute::WithTxEnv, TxEnvFor};
@@ -903,6 +926,69 @@ mod tests {
 
         assert!(bal_account_changes_state_root(&changes));
         assert!(delta.needs_parent_account());
+    }
+
+    #[test]
+    fn bal_values_reuse_the_hashed_keys_of_the_schedule() {
+        type Collected = Arc<std::sync::Mutex<Vec<reth_trie::HashedPostState>>>;
+
+        struct CollectingSink(Collected);
+
+        impl super::super::StateRootSink for CollectingSink {
+            fn on_state_update(&self, _state: revm::state::EvmState) {}
+
+            fn on_hashed_state_update(&self, state: reth_trie::HashedPostState) {
+                self.0.lock().unwrap().push(state);
+            }
+
+            fn on_updates_finished(&self) {}
+        }
+
+        // Two slots, so a schedule consumed out of step pairs a value with the wrong key.
+        let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
+            .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::from(10)))
+            .with_nonce_change(NonceChange::new(BlockAccessIndex::new(1), 7))
+            .with_code_change(CodeChange::new(BlockAccessIndex::new(1), bytes!("6001600155")))
+            .with_storage_change(SlotChanges::new(
+                U256::from(9),
+                vec![StorageChange::new(BlockAccessIndex::new(0), U256::from(2))],
+            ))
+            .with_storage_change(SlotChanges::new(
+                U256::from(1),
+                vec![StorageChange::new(BlockAccessIndex::new(1), U256::from(3))],
+            ));
+
+        let ctx = PrewarmContext {
+            env: ExecutionEnv::test_default(),
+            evm_config: EthEvmConfig::new(Arc::new(ChainSpec::default())),
+            saved_cache: None,
+            provider: OverlayStateProviderFactory::new(
+                MockEthProvider::default(),
+                OverlayManager::default().overlay_builder(B256::ZERO),
+            ),
+            bal_prewarm_pool: None,
+            metrics: PrewarmMetrics::default(),
+            cache_metrics: None,
+            cache_state_metrics: None,
+            terminate_execution: Arc::new(AtomicBool::new(false)),
+            executed_tx_index: Arc::new(AtomicUsize::new(0)),
+            precompile_cache_disabled: false,
+            precompile_cache_map: PrecompileCacheMap::default(),
+            disable_bal_parallel_state_root: false,
+            disable_bal_batch_io: false,
+        };
+
+        let collected = Collected::default();
+        let stream = StateRootUpdateStream::new(Arc::new(CollectingSink(Arc::clone(&collected))));
+        let (schedule, _) = bal_block_updates(std::slice::from_ref(&changes));
+
+        ctx.send_bal_hashed_storage(&changes, Some(&schedule), &stream);
+        let with_schedule = core::mem::take(&mut *collected.lock().unwrap());
+        ctx.send_bal_hashed_storage(&changes, None, &stream);
+        let without_schedule = core::mem::take(&mut *collected.lock().unwrap());
+
+        assert_eq!(with_schedule.len(), 1, "the account's storage goes out as one update");
+        assert_eq!(with_schedule, without_schedule);
     }
 
     #[test]

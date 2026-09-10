@@ -24,7 +24,7 @@ pub enum StateRootMessage {
     /// Prefetch proof targets
     PrefetchProofs(MultiProofTargetsV2),
     /// The keys the block will change, sent once before the values.
-    UpdateSchedule(BlockUpdateSchedule),
+    UpdateSchedule(Arc<BlockUpdateSchedule>),
     /// The block's account changes, sent once, as values or as deltas over the parent state.
     AccountUpdates(BlockAccountUpdates),
     /// New state update from transaction execution.
@@ -47,6 +47,9 @@ pub enum StateRootMessage {
 ///
 /// The schedule carries no values, so a task may treat it as a prefetch: an entry that never
 /// receives a value only costs the proof it fetched.
+///
+/// It is shared rather than handed over so that the producer of the values can look its own
+/// hashed keys up here instead of hashing them a second time.
 #[derive(Debug, Default)]
 pub struct BlockUpdateSchedule {
     /// Hashed addresses of the accounts the block changes.
@@ -422,7 +425,7 @@ pub trait StateRootSink: Send + Sync + 'static {
     fn on_access_hint(&self, _hint: StateAccessHint) {}
 
     /// The keys the block will change, known before their values.
-    fn on_update_schedule(&self, _schedule: BlockUpdateSchedule) {}
+    fn on_update_schedule(&self, _schedule: Arc<BlockUpdateSchedule>) {}
 
     /// Authoritative account changes for the whole block, as values or as deltas over the
     /// parent state.
@@ -495,7 +498,7 @@ impl StateRootUpdateStream {
     /// goes through the update capability rather than the hint capability: both reach the task
     /// through one channel, and the producer of the values is the only one that can order
     /// itself against them.
-    pub fn on_update_schedule(&self, schedule: BlockUpdateSchedule) {
+    pub fn on_update_schedule(&self, schedule: Arc<BlockUpdateSchedule>) {
         self.inner.on_update_schedule(schedule);
     }
 
@@ -582,7 +585,7 @@ impl StateRootSink for SparseTrieStateRootSink {
         let _ = self.sender.send(StateRootMessage::PrefetchProofs(hint.into()));
     }
 
-    fn on_update_schedule(&self, schedule: BlockUpdateSchedule) {
+    fn on_update_schedule(&self, schedule: Arc<BlockUpdateSchedule>) {
         let _ = self.sender.send(StateRootMessage::UpdateSchedule(schedule));
     }
 
