@@ -762,6 +762,7 @@ mod tests {
                 count,
                 bal,
                 true,
+                Default::default(),
             );
             let mut indices = Vec::new();
             for _ in 0..count {
@@ -794,6 +795,7 @@ mod tests {
                 count,
                 bal,
                 false,
+                Default::default(),
             );
             let mut results = Vec::new();
             loop {
@@ -834,6 +836,7 @@ mod tests {
                 count,
                 bal,
                 false,
+                Default::default(),
             );
             let handle = super::PayloadHandle {
                 prewarm_handle: super::CacheTaskHandle::<()> {
