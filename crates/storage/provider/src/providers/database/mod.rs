@@ -463,11 +463,22 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         Ok(Box::new(LatestStateProvider::new(self.database_provider_ro()?)))
     }
 
-    /// Asserts that the static files and database are consistent. If not,
-    /// returns [`ProviderError::MustUnwind`] with the appropriate unwind
-    /// target. May also return any [`ProviderError`] that
-    /// [`Self::check_consistency`] may return.
+    /// Refuses a database a snap attempt has written into, even once verified.
+    ///
+    /// Run before [`Self::check_consistency`], which may heal or unwind that state.
+    pub fn ensure_no_snap_attempt(&self) -> ProviderResult<()> {
+        match self.snap_attempt()? {
+            Some(attempt) => {
+                Err(ProviderError::UnavailableSnapState { attempt: attempt.id().into() })
+            }
+            None => Ok(()),
+        }
+    }
+
+    /// Asserts that the static files and database are consistent, returning
+    /// [`ProviderError::MustUnwind`] otherwise. Snap state is refused first.
     pub fn assert_consistent(self) -> ProviderResult<Self> {
+        self.ensure_no_snap_attempt()?;
         let (rocksdb_unwind, static_file_unwind) = self.check_consistency()?;
 
         let source = match (rocksdb_unwind, static_file_unwind) {
@@ -1004,10 +1015,13 @@ mod tests {
     use super::*;
     use crate::{
         providers::{StaticFileProvider, StaticFileWriter},
-        test_utils::{blocks::TEST_BLOCK, create_test_provider_factory, MockNodeTypesWithDB},
+        test_utils::{
+            blocks::TEST_BLOCK, create_test_provider_factory, MockNodeTypes, MockNodeTypesWithDB,
+        },
         BlockHashReader, BlockNumReader, BlockWriter, DBProvider, HeaderSyncGapProvider,
-        TransactionsProvider,
+        MetadataWriter, TransactionsProvider,
     };
+    use alloy_eips::BlockNumHash;
     use alloy_primitives::{TxNumber, B256};
     use assert_matches::assert_matches;
     use reth_chainspec::ChainSpecBuilder;
@@ -1015,7 +1029,7 @@ mod tests {
         mdbx::DatabaseArguments,
         test_utils::{create_test_rocksdb_dir, create_test_static_files_dir, ERROR_TEMPDIR},
     };
-    use reth_db_api::tables;
+    use reth_db_api::{models::SnapAttempt, tables};
     use reth_primitives_traits::SignerRecoverable;
     use reth_prune_types::{PruneMode, PruneModes};
     use reth_storage_errors::provider::ProviderError;
@@ -1068,6 +1082,62 @@ mod tests {
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw.block_hash(0).unwrap();
         provider.block_hash(0).unwrap();
+    }
+
+    #[test]
+    fn snap_state_is_refused_across_reopening() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().build());
+        let datadir = tempfile::TempDir::new().expect(ERROR_TEMPDIR);
+        let config = ReadOnlyConfig::from_datadir(datadir.path()).no_watch();
+        let open = || {
+            ProviderFactory::<MockNodeTypesWithDB<DatabaseEnv>>::new_with_database_path(
+                &config.db_dir,
+                chain_spec.clone(),
+                DatabaseArguments::new(Default::default()),
+                StaticFileProvider::read_write(&config.static_files_dir).unwrap(),
+                RocksDBProvider::builder(&config.rocksdb_dir)
+                    .with_default_tables()
+                    .build()
+                    .unwrap(),
+                reth_tasks::Runtime::test(),
+            )
+            .unwrap()
+        };
+        let open_read_only = || {
+            ProviderFactoryBuilder::<MockNodeTypes>::default().open_read_only(
+                chain_spec.clone(),
+                config.clone(),
+                reth_tasks::Runtime::test(),
+            )
+        };
+
+        // Ordinary startup is unaffected without an attempt.
+        open().assert_consistent().unwrap();
+        open_read_only().unwrap();
+
+        let unfinished = SnapAttempt::start(None, BlockNumHash::default(), B256::ZERO);
+        let mut verified = unfinished;
+        verified.verify();
+        let mut abandoned = unfinished;
+        abandoned.abandon();
+
+        // Verified state is refused too, since verifying does not hand it to the node.
+        for attempt in [unfinished, verified, abandoned] {
+            let factory = open();
+            let provider = factory.provider_rw().unwrap();
+            provider.write_snap_attempt(&attempt).unwrap();
+            provider.commit().unwrap();
+            drop(factory);
+
+            assert_matches!(
+                open().assert_consistent(),
+                Err(ProviderError::UnavailableSnapState { attempt: 0 })
+            );
+            assert_matches!(
+                open_read_only().unwrap_err().downcast_ref(),
+                Some(ProviderError::UnavailableSnapState { attempt: 0 })
+            );
+        }
     }
 
     #[test]
