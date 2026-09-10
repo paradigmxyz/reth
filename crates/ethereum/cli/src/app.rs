@@ -233,7 +233,13 @@ mod tests {
     use super::*;
     use crate::chainspec::EthereumChainSpecParser;
     use clap::Parser;
-    use reth_cli_commands::node::NoArgs;
+    use reth_cli_commands::{
+        common::{AccessRights, EnvironmentArgs},
+        node::NoArgs,
+        re_execute,
+    };
+    use reth_db::models::SnapAttempt;
+    use reth_provider::{MetadataWriter, ProviderError};
 
     #[test]
     fn test_cli_app_creation() {
@@ -276,13 +282,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn re_execute_refuses_snap_state() {
-        use reth_cli_commands::{
-            common::{AccessRights, EnvironmentArgs},
-            re_execute,
-        };
-        use reth_db::models::SnapAttempt;
-        use reth_provider::{MetadataWriter, ProviderError};
-
         let datadir = tempfile::tempdir().unwrap();
         let args = ["reth", "--chain", "dev", "--datadir", datadir.path().to_str().unwrap()];
         let env = || EnvironmentArgs::<EthereumChainSpecParser>::parse_from(args);

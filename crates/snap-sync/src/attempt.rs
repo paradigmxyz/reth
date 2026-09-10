@@ -4,8 +4,8 @@
 //! attempt produced it. Every write presents a [`SnapWrite`]; ones that no longer match are
 //! refused.
 //!
-//! A database hosts at most one attempt. Rows are never reclaimed, so once an attempt is abandoned
-//! the database must be dropped before snap sync or the node can use it again.
+//! Automatic cleanup of abandoned snap state is not yet supported. The database must be dropped
+//! before starting another attempt.
 
 use crate::{SnapGeneration, SnapSyncError};
 use reth_storage_api::{
