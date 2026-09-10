@@ -1,4 +1,7 @@
-use crate::{manager::OverlayCacheConfig, OverlayManager};
+use crate::{
+    manager::{OverlayCacheConfig, StateTrieOverlayError},
+    OverlayManager,
+};
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{
     map::{AddressMap, AddressSet, B256Map, U256Map},
@@ -477,14 +480,30 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                         )?;
                     retrieve_trie_reverts_duration = start.elapsed();
                     accumulated_reverts
+                } else if state_trie_tip_block == finish_tip_block {
+                    retrieve_trie_reverts_duration = Duration::ZERO;
+                    Arc::default()
                 } else {
                     // Revert prefixes describe changes since the anchor, not stale hashes in
                     // masked DB rows. Complete the trie at Finish before applying those prefixes.
                     let start = Instant::now();
+                    let finish_state = self
+                        .overlay_manager
+                        .block_state(finish_tip_block.hash)
+                        .ok_or_else(|| {
+                            ProviderError::other(StateTrieOverlayError {
+                                tip_hash: finish_tip_block.hash,
+                                anchor_hash: state_trie_tip_block.hash,
+                            })
+                        })?;
                     let (nodes, _) = self
                         .overlay_manager
-                        .overlay_builder(finish_tip_block.hash)
-                        .resolve_state_trie_overlays(state_trie_tip_block.hash)?;
+                        .overlay_for_parent(
+                            &finish_state,
+                            state_trie_tip_block.hash,
+                            OverlayCacheConfig::default(),
+                        )
+                        .map_err(ProviderError::other)?;
                     retrieve_trie_reverts_duration = start.elapsed();
                     nodes
                 };
