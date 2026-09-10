@@ -3095,15 +3095,15 @@ mod tests {
                         LeafUpdate::Changed(alloy_rlp::encode(key + 1)),
                     )
                 })
-                .collect::<Vec<_>>();
+                .collect::<alloy_primitives::map::B256Map<_>>();
             let mut samples = [Vec::new(), Vec::new(), Vec::new()];
             for iteration in 0..60 {
                 for offset in 0..3 {
                     let variant = (iteration + offset) % 3;
-                    let input = seed.clone();
+                    let mut input = seed.clone();
                     let start = std::time::Instant::now();
                     let result = if variant == 2 {
-                        let mut packed = input;
+                        let mut packed = input.drain().collect::<Vec<_>>();
                         packed.sort_unstable_by_key(|entry| entry.0);
                         packed
                             .into_iter()
@@ -3111,7 +3111,7 @@ mod tests {
                             .collect::<Vec<_>>()
                     } else {
                         let mut unpacked = input
-                            .into_iter()
+                            .drain()
                             .map(|(key, value)| (key, Nibbles::unpack(key), value))
                             .collect::<Vec<_>>();
                         if variant == 0 {
