@@ -1,6 +1,9 @@
 //! Fixtures shared by the crate's tests: headers, an account trie and a scripted snap client.
 
-use crate::{SnapGeneration, SnapPivotPolicy};
+use crate::{
+    accounts::{DEFAULT_RESPONSE_BYTES, MAX_HASH},
+    SnapGeneration, SnapPivotPolicy,
+};
 use alloy_consensus::Header;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{Bytes, B256, KECCAK256_EMPTY, U256};
@@ -21,7 +24,7 @@ use reth_provider::{
     test_utils::{create_test_provider_factory, MockEthProvider, MockNodeTypesWithDB},
     DatabaseProviderFactory, ProviderFactory,
 };
-use reth_storage_api::{DBProvider, MetadataWriter, StorageSettings};
+use reth_storage_api::{DBProvider, MetadataWriter, StorageSettings, StorageSettingsCache};
 use reth_tasks::Runtime;
 use reth_trie_common::{proof::ProofRetainer, HashBuilder, Nibbles, TrieAccount, EMPTY_ROOT_HASH};
 use std::{
@@ -81,6 +84,8 @@ pub(crate) fn hashed_factory() -> ProviderFactory<MockNodeTypesWithDB> {
     let provider = factory.database_provider_rw().unwrap();
     provider.write_storage_settings(StorageSettings::v2()).unwrap();
     provider.commit().unwrap();
+    // Writers consult the cache, not the table.
+    factory.set_storage_settings_cache(StorageSettings::v2());
     factory
 }
 
@@ -155,8 +160,8 @@ pub(crate) fn verified_range(
         request_id: 1,
         root_hash: state_root(accounts),
         starting_hash: origin,
-        limit_hash: B256::new([0xff; B256::len_bytes()]),
-        response_bytes: 512 * 1024,
+        limit_hash: MAX_HASH,
+        response_bytes: DEFAULT_RESPONSE_BYTES,
     };
     let downloader = AccountRangeDownloader::new(client, request, Runtime::test()).unwrap();
     match futures::executor::block_on(downloader).unwrap() {

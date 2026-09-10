@@ -15,7 +15,9 @@ use reth_storage_api::{
 /// state, bytecode and the attempt record commit together or not at all.
 pub trait SnapAttemptStore {
     /// Starts an attempt anchored to `generation`, superseding any already recorded.
-    fn start_snap_attempt(&self, generation: SnapGeneration) -> Result<SnapWrite, SnapSyncError>;
+    fn start_snap_attempt(&self, generation: SnapGeneration) -> Result<SnapWrite, SnapSyncError>
+    where
+        Self: MetadataWriter;
 
     /// Returns the write an unfinished attempt accepts, if one owns the persisted state.
     fn active_snap_write(&self) -> Result<Option<SnapWrite>, SnapSyncError>;
@@ -28,13 +30,19 @@ pub trait SnapAttemptStore {
         &self,
         write: SnapWrite,
         generation: SnapGeneration,
-    ) -> Result<SnapWrite, SnapSyncError>;
+    ) -> Result<SnapWrite, SnapSyncError>
+    where
+        Self: MetadataWriter;
 
     /// Marks the attempt's downloaded state verified.
-    fn verify_snap_attempt(&self, write: SnapWrite) -> Result<(), SnapSyncError>;
+    fn verify_snap_attempt(&self, write: SnapWrite) -> Result<(), SnapSyncError>
+    where
+        Self: MetadataWriter;
 
     /// Gives up on an unfinished attempt, refusing its outstanding writes.
-    fn abandon_snap_attempt(&self) -> Result<(), SnapSyncError>;
+    fn abandon_snap_attempt(&self) -> Result<(), SnapSyncError>
+    where
+        Self: MetadataWriter;
 }
 
 /// What a write presents to prove it belongs to the attempt owning the persisted state.
@@ -48,7 +56,7 @@ pub struct SnapWrite {
 
 impl SnapWrite {
     // What `attempt` currently accepts.
-    pub(crate) const fn of(attempt: &SnapAttempt) -> Self {
+    const fn of(attempt: &SnapAttempt) -> Self {
         Self { attempt: attempt.id(), state_version: attempt.state_version() }
     }
 
@@ -63,11 +71,11 @@ impl SnapWrite {
     }
 }
 
-impl<T> SnapAttemptStore for T
-where
-    T: MetadataProvider + MetadataWriter,
-{
-    fn start_snap_attempt(&self, generation: SnapGeneration) -> Result<SnapWrite, SnapSyncError> {
+impl<T: MetadataProvider> SnapAttemptStore for T {
+    fn start_snap_attempt(&self, generation: SnapGeneration) -> Result<SnapWrite, SnapSyncError>
+    where
+        Self: MetadataWriter,
+    {
         // Absent settings mean the legacy layout.
         if !self.storage_settings()?.unwrap_or_else(StorageSettings::v1).use_hashed_state() {
             return Err(SnapSyncError::UnsupportedStorage)
@@ -93,26 +101,34 @@ where
         }
         Ok(attempt)
     }
-
     fn advance_snap_pivot(
         &self,
         write: SnapWrite,
         generation: SnapGeneration,
-    ) -> Result<SnapWrite, SnapSyncError> {
+    ) -> Result<SnapWrite, SnapSyncError>
+    where
+        Self: MetadataWriter,
+    {
         let mut attempt = self.authorize_snap_write(write)?;
         attempt.re_anchor(generation.target(), generation.state_root());
         self.write_snap_attempt(&attempt)?;
         Ok(SnapWrite::of(&attempt))
     }
 
-    fn verify_snap_attempt(&self, write: SnapWrite) -> Result<(), SnapSyncError> {
+    fn verify_snap_attempt(&self, write: SnapWrite) -> Result<(), SnapSyncError>
+    where
+        Self: MetadataWriter,
+    {
         let mut attempt = self.authorize_snap_write(write)?;
         attempt.verify();
         self.write_snap_attempt(&attempt)?;
         Ok(())
     }
 
-    fn abandon_snap_attempt(&self) -> Result<(), SnapSyncError> {
+    fn abandon_snap_attempt(&self) -> Result<(), SnapSyncError>
+    where
+        Self: MetadataWriter,
+    {
         if let Some(mut attempt) = self.snap_attempt()? &&
             attempt.is_unfinished()
         {

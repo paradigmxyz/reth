@@ -1,47 +1,55 @@
-//! Persists downloaded account ranges with how far they take the coverage.
+//! Persists account ranges, their storage and code, and the coverage cursor in one transaction.
 //!
-//! Accounts land in the hashed state tables with their storage and code, through the writers
-//! execution uses. The coverage cursor commits in the same transaction, under the write of the
-//! attempt that owns it, so a response from a superseded attempt is refused before it changes
-//! anything, and committed progress never depends on work still pending.
+//! Each range replaces its key interval, and ranges commit in key order.
 
 use crate::{SnapAttemptStore, SnapSyncError, SnapWrite};
 use alloy_primitives::{
     map::{B256Map, B256Set},
     B256, KECCAK256_EMPTY,
 };
-use reth_db_api::{tables, transaction::DbTx};
+use reth_db_api::{
+    cursor::DbCursorRO,
+    tables,
+    transaction::{DbTx, DbTxMut},
+    RawKey, RawTable,
+};
 use reth_downloaders::snap::VerifiedAccountRange;
 use reth_primitives_traits::Account;
 use reth_storage_api::{DBProvider, MetadataProvider, MetadataWriter, SnapAttemptId, StateWriter};
 use reth_storage_errors::provider::ProviderError;
-use reth_trie_common::{HashedPostState, HashedStorage, EMPTY_ROOT_HASH};
+use reth_trie_common::{
+    root::storage_root_unsorted, HashedPostState, HashedStorage, EMPTY_ROOT_HASH,
+};
 use revm::{bytecode::Bytecode, database::states::StateChangeset};
 use serde::{Deserialize, Serialize};
+use std::ops::Bound;
 
 /// Persistence for the account ranges an attempt downloads.
 ///
 /// Blanket-implemented over the node's writers, so accounts, their dependencies and the coverage
 /// join the caller's transaction and commit together or not at all.
 pub trait SnapAccountStore {
-    /// Records that no account has been downloaded yet.
-    fn start_account_coverage(&self, write: SnapWrite) -> Result<AccountCoverage, SnapSyncError>;
+    /// Returns the coverage recorded for the attempt `write` belongs to, recording that no
+    /// account has been downloaded yet when there is none.
+    fn start_account_coverage(&self, write: SnapWrite) -> Result<AccountCoverage, SnapSyncError>
+    where
+        Self: MetadataWriter;
 
     /// Returns the coverage recorded for the attempt `write` belongs to, if any.
     fn account_coverage(&self, write: SnapWrite) -> Result<Option<AccountCoverage>, SnapSyncError>;
 
-    /// Persists `range`, requested from `origin`, with the storage and code its accounts need.
+    /// Persists `range` with its storage and code, replacing its key interval.
     ///
-    /// Every contract in the range must have its storage in `storages`, and every code hash must
-    /// be in `bytecodes` or already stored. The coverage moves to the key after the range.
+    /// Storage must match each account's root, and code must be supplied or already stored.
     fn commit_account_range(
         &self,
         write: SnapWrite,
-        origin: B256,
         range: &VerifiedAccountRange,
         storages: B256Map<HashedStorage>,
         bytecodes: Vec<(B256, Bytecode)>,
-    ) -> Result<AccountCoverage, SnapSyncError>;
+    ) -> Result<AccountCoverage, SnapSyncError>
+    where
+        Self: MetadataWriter + StateWriter + DBProvider<Tx: DbTxMut>;
 }
 
 /// How far the account key space has been downloaded.
@@ -83,39 +91,54 @@ struct StoredCoverage {
     coverage: AccountCoverage,
 }
 
-impl<T> SnapAccountStore for T
-where
-    T: MetadataProvider + MetadataWriter + StateWriter + DBProvider,
-{
-    fn start_account_coverage(&self, write: SnapWrite) -> Result<AccountCoverage, SnapSyncError> {
-        self.authorize_snap_write(write)?;
-        write_coverage(self, write.attempt(), AccountCoverage::START)?;
-        Ok(AccountCoverage::START)
+impl StoredCoverage {
+    fn encode(attempt: SnapAttemptId, coverage: AccountCoverage) -> Result<Vec<u8>, SnapSyncError> {
+        let stored = Self { version: COVERAGE_VERSION, attempt, coverage };
+        Ok(serde_json::to_vec(&stored).map_err(ProviderError::other)?)
+    }
+
+    // Checks the version first, so a record from another build is reported rather than misread.
+    fn decode(bytes: &[u8]) -> Result<Self, SnapSyncError> {
+        let value: serde_json::Value =
+            serde_json::from_slice(bytes).map_err(ProviderError::other)?;
+        let version = value.get("version").and_then(serde_json::Value::as_u64);
+        if version != Some(COVERAGE_VERSION as u64) {
+            return Err(SnapSyncError::UnsupportedCoverage { version })
+        }
+        Ok(serde_json::from_value(value).map_err(ProviderError::other)?)
+    }
+}
+
+impl<T: MetadataProvider> SnapAccountStore for T {
+    fn start_account_coverage(&self, write: SnapWrite) -> Result<AccountCoverage, SnapSyncError>
+    where
+        Self: MetadataWriter,
+    {
+        if let Some(coverage) = self.account_coverage(write)? {
+            return Ok(coverage)
+        }
+        let start = AccountCoverage::START;
+        self.write_metadata(COVERAGE_KEY, StoredCoverage::encode(write.attempt(), start)?)?;
+        Ok(start)
     }
 
     fn account_coverage(&self, write: SnapWrite) -> Result<Option<AccountCoverage>, SnapSyncError> {
         self.authorize_snap_write(write)?;
         let Some(bytes) = self.get_metadata(COVERAGE_KEY)? else { return Ok(None) };
-
-        let value: serde_json::Value =
-            serde_json::from_slice(&bytes).map_err(ProviderError::other)?;
-        let version = value.get("version").and_then(serde_json::Value::as_u64);
-        if version != Some(COVERAGE_VERSION as u64) {
-            return Err(SnapSyncError::UnsupportedCoverage { version })
-        }
-        let stored: StoredCoverage =
-            serde_json::from_slice(&bytes).map_err(ProviderError::other)?;
+        let stored = StoredCoverage::decode(&bytes)?;
         Ok((stored.attempt == write.attempt()).then_some(stored.coverage))
     }
 
     fn commit_account_range(
         &self,
         write: SnapWrite,
-        origin: B256,
         range: &VerifiedAccountRange,
         storages: B256Map<HashedStorage>,
         bytecodes: Vec<(B256, Bytecode)>,
-    ) -> Result<AccountCoverage, SnapSyncError> {
+    ) -> Result<AccountCoverage, SnapSyncError>
+    where
+        Self: MetadataWriter + StateWriter + DBProvider<Tx: DbTxMut>,
+    {
         let attempt = self.authorize_snap_write(write)?;
         if range.state_root() != attempt.state_root() {
             return Err(SnapSyncError::RootMismatch {
@@ -124,6 +147,7 @@ where
             })
         }
         let coverage = self.account_coverage(write)?.ok_or(SnapSyncError::NoCoverage)?;
+        let origin = range.origin();
         if coverage.next != Some(origin) {
             return Err(SnapSyncError::OutOfOrderRange { expected: coverage.next, got: origin })
         }
@@ -131,24 +155,58 @@ where
             return Err(SnapSyncError::NoProgress { origin })
         }
 
-        let supplied: B256Set = bytecodes.iter().map(|(hash, _)| *hash).collect();
+        // Code known to be available: supplied and hashed, or already in the table.
+        let mut available = B256Set::default();
+        for (hash, code) in &bytecodes {
+            let got = code.hash_slow();
+            if got != *hash {
+                return Err(SnapSyncError::CodeMismatch { expected: *hash, got })
+            }
+            available.insert(*hash);
+        }
         let mut contracts = B256Set::default();
         for (hash, account) in range.accounts() {
             if account.storage_root != EMPTY_ROOT_HASH {
-                if !storages.contains_key(hash) {
-                    return Err(SnapSyncError::MissingStorage { account: *hash })
+                let storage =
+                    storages.get(hash).ok_or(SnapSyncError::MissingStorage { account: *hash })?;
+                let got = storage_root_unsorted(
+                    storage.storage.iter().filter(|(_, v)| !v.is_zero()).map(|(k, v)| (*k, *v)),
+                );
+                if got != account.storage_root {
+                    return Err(SnapSyncError::StorageRootMismatch {
+                        account: *hash,
+                        expected: account.storage_root,
+                        got,
+                    })
                 }
                 contracts.insert(*hash);
             }
-            if account.code_hash != KECCAK256_EMPTY &&
-                !supplied.contains(&account.code_hash) &&
-                self.tx_ref().get::<tables::Bytecodes>(account.code_hash)?.is_none()
-            {
-                return Err(SnapSyncError::MissingCode { hash: account.code_hash })
+            if account.code_hash != KECCAK256_EMPTY && !available.contains(&account.code_hash) {
+                // Only presence matters, so the code is not decoded.
+                let key = RawKey::new(account.code_hash);
+                if self.tx_ref().get::<RawTable<tables::Bytecodes>>(key)?.is_none() {
+                    return Err(SnapSyncError::MissingCode { hash: account.code_hash })
+                }
+                available.insert(account.code_hash);
             }
         }
         if let Some(account) = storages.keys().find(|hash| !contracts.contains(*hash)) {
             return Err(SnapSyncError::UnexpectedStorage { account: *account })
+        }
+
+        // The range proves its interval holds only its accounts, so drop what an earlier
+        // attempt left there.
+        let interval =
+            (Bound::Included(origin), range.next().map_or(Bound::Unbounded, Bound::Excluded));
+        let mut accounts = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
+        let mut walker = accounts.walk_range(interval)?;
+        while walker.next().transpose()?.is_some() {
+            walker.delete_current()?;
+        }
+        let mut slots = self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
+        let mut walker = slots.walk_range(interval)?;
+        while walker.next().transpose()?.is_some() {
+            walker.delete_current()?;
         }
 
         let state = HashedPostState::default()
@@ -163,20 +221,9 @@ where
         self.write_state_changes(StateChangeset { contracts: bytecodes, ..Default::default() })?;
 
         let coverage = AccountCoverage { next: range.next() };
-        write_coverage(self, write.attempt(), coverage)?;
+        self.write_metadata(COVERAGE_KEY, StoredCoverage::encode(write.attempt(), coverage)?)?;
         Ok(coverage)
     }
-}
-
-fn write_coverage(
-    store: &impl MetadataWriter,
-    attempt: SnapAttemptId,
-    coverage: AccountCoverage,
-) -> Result<(), SnapSyncError> {
-    let stored = StoredCoverage { version: COVERAGE_VERSION, attempt, coverage };
-    store
-        .write_metadata(COVERAGE_KEY, serde_json::to_vec(&stored).map_err(ProviderError::other)?)?;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -187,11 +234,10 @@ mod tests {
         SnapGeneration,
     };
     use alloy_primitives::{Bytes, U256};
-    use reth_db_api::cursor::DbCursorRO;
     use reth_provider::{
         test_utils::MockNodeTypesWithDB, DatabaseProviderFactory, ProviderFactory,
     };
-    use reth_trie_common::{root::storage_root_unsorted, TrieAccount};
+    use reth_trie_common::TrieAccount;
 
     const FAR: B256 = B256::repeat_byte(0xaa);
     const SLOT: B256 = B256::repeat_byte(0x55);
@@ -257,8 +303,7 @@ mod tests {
         let (storages, bytecodes) = dependencies();
 
         let provider = factory.database_provider_rw().unwrap();
-        let coverage =
-            provider.commit_account_range(write, B256::ZERO, &range, storages, bytecodes).unwrap();
+        let coverage = provider.commit_account_range(write, &range, storages, bytecodes).unwrap();
         provider.commit().unwrap();
 
         assert!(coverage.is_complete());
@@ -275,7 +320,7 @@ mod tests {
         let (storages, bytecodes) = dependencies();
 
         let provider = factory.database_provider_rw().unwrap();
-        provider.commit_account_range(write, B256::ZERO, &range, storages, bytecodes).unwrap();
+        provider.commit_account_range(write, &range, storages, bytecodes).unwrap();
         drop(provider);
 
         let provider = factory.database_provider_rw().unwrap();
@@ -291,9 +336,8 @@ mod tests {
         let range = verified_range(&accounts, 0..1, B256::ZERO, &[key(1)]);
 
         let provider = factory.database_provider_rw().unwrap();
-        let coverage = provider
-            .commit_account_range(write, B256::ZERO, &range, Default::default(), Vec::new())
-            .unwrap();
+        let coverage =
+            provider.commit_account_range(write, &range, Default::default(), Vec::new()).unwrap();
 
         assert_eq!(coverage.next(), Some(key(2)));
         assert_eq!(stored_accounts(&provider), [key(1)]);
@@ -303,24 +347,19 @@ mod tests {
     fn a_proven_empty_tail_completes_the_coverage() {
         let accounts = vec![(key(1), account(1)), (key(2), account(2))];
         let (factory, write, _) = started(&accounts);
-        let range = verified_range(&accounts, 0..0, key(3), &[key(3)]);
-        assert!(range.accounts().is_empty());
+        let tail = verified_range(&accounts, 0..0, key(3), &[key(3)]);
+        assert!(tail.accounts().is_empty());
         let provider = factory.database_provider_rw().unwrap();
+        let coverage = AccountCoverage { next: Some(key(3)) };
         provider
             .write_metadata(
                 COVERAGE_KEY,
-                serde_json::to_vec(&StoredCoverage {
-                    version: COVERAGE_VERSION,
-                    attempt: write.attempt(),
-                    coverage: AccountCoverage { next: Some(key(3)) },
-                })
-                .unwrap(),
+                StoredCoverage::encode(write.attempt(), coverage).unwrap(),
             )
             .unwrap();
 
-        let coverage = provider
-            .commit_account_range(write, key(3), &range, Default::default(), Vec::new())
-            .unwrap();
+        let coverage =
+            provider.commit_account_range(write, &tail, Default::default(), Vec::new()).unwrap();
 
         assert!(coverage.is_complete());
         assert!(stored_accounts(&provider).is_empty());
@@ -332,21 +371,13 @@ mod tests {
         let (factory, write, _) = started(&accounts);
         let provider = factory.database_provider_rw().unwrap();
         let first = verified_range(&accounts, 0..1, B256::ZERO, &[key(1)]);
-        provider
-            .commit_account_range(write, B256::ZERO, &first, Default::default(), Vec::new())
-            .unwrap();
+        provider.commit_account_range(write, &first, Default::default(), Vec::new()).unwrap();
 
         // The same range again, and one skipping ahead of the cursor.
-        let duplicate = provider.commit_account_range(
-            write,
-            B256::ZERO,
-            &first,
-            Default::default(),
-            Vec::new(),
-        );
+        let duplicate =
+            provider.commit_account_range(write, &first, Default::default(), Vec::new());
         let skipped = verified_range(&accounts, 2..3, FAR, &[FAR]);
-        let ahead =
-            provider.commit_account_range(write, FAR, &skipped, Default::default(), Vec::new());
+        let ahead = provider.commit_account_range(write, &skipped, Default::default(), Vec::new());
 
         assert!(matches!(duplicate, Err(SnapSyncError::OutOfOrderRange { .. })));
         assert!(matches!(ahead, Err(SnapSyncError::OutOfOrderRange { .. })));
@@ -362,26 +393,50 @@ mod tests {
         let (storages, bytecodes) = dependencies();
         let provider = factory.database_provider_rw().unwrap();
 
-        let no_storage = provider.commit_account_range(
-            write,
-            B256::ZERO,
-            &range,
-            Default::default(),
-            bytecodes.clone(),
-        );
+        let no_storage =
+            provider.commit_account_range(write, &range, Default::default(), bytecodes.clone());
         assert!(
             matches!(no_storage, Err(SnapSyncError::MissingStorage { account }) if account == key(2))
         );
 
-        let no_code =
-            provider.commit_account_range(write, B256::ZERO, &range, storages, Vec::new());
+        let no_code = provider.commit_account_range(write, &range, storages, Vec::new());
         assert!(matches!(no_code, Err(SnapSyncError::MissingCode { .. })));
 
         let stray = B256Map::from_iter([(key(1), storage().1), (key(2), storage().1)]);
-        let unexpected = provider.commit_account_range(write, B256::ZERO, &range, stray, bytecodes);
+        let unexpected = provider.commit_account_range(write, &range, stray, bytecodes);
         assert!(
             matches!(unexpected, Err(SnapSyncError::UnexpectedStorage { account }) if account == key(1))
         );
+
+        assert_eq!(stored(&provider), (Vec::new(), false, false));
+        assert_eq!(provider.account_coverage(write).unwrap(), Some(AccountCoverage::START));
+    }
+
+    #[test]
+    fn storage_and_code_are_checked_against_what_the_account_commits_to() {
+        let accounts = accounts();
+        let (factory, write, _) = started(&accounts);
+        let range = verified_range(&accounts, 0..3, B256::ZERO, &[]);
+        let (storages, bytecodes) = dependencies();
+        let provider = factory.database_provider_rw().unwrap();
+
+        // A slot short of the storage root, as a partial download would be.
+        let partial = B256Map::from_iter([(key(2), HashedStorage::default())]);
+        let short = provider.commit_account_range(write, &range, partial, bytecodes.clone());
+        assert!(matches!(
+            short,
+            Err(SnapSyncError::StorageRootMismatch { account, expected, .. })
+                if account == key(2) && expected == storage().0
+        ));
+
+        // Code filed under a hash it does not hash to.
+        let other = Bytecode::new_raw(Bytes::from_static(&[0x60, 0x01]));
+        let relabelled = vec![(code().hash_slow(), other)];
+        let wrong = provider.commit_account_range(write, &range, storages, relabelled);
+        assert!(matches!(
+            wrong,
+            Err(SnapSyncError::CodeMismatch { expected, .. }) if expected == code().hash_slow()
+        ));
 
         assert_eq!(stored(&provider), (Vec::new(), false, false));
         assert_eq!(provider.account_coverage(write).unwrap(), Some(AccountCoverage::START));
@@ -401,10 +456,22 @@ mod tests {
             })
             .unwrap();
 
-        let coverage =
-            provider.commit_account_range(write, B256::ZERO, &range, storages, Vec::new()).unwrap();
+        let coverage = provider.commit_account_range(write, &range, storages, Vec::new()).unwrap();
 
         assert!(coverage.is_complete());
+    }
+
+    #[test]
+    fn starting_coverage_again_resumes_where_the_attempt_left_off() {
+        let accounts = accounts();
+        let (factory, write, _) = started(&accounts);
+        let range = verified_range(&accounts, 0..1, B256::ZERO, &[key(1)]);
+        let provider = factory.database_provider_rw().unwrap();
+        let committed =
+            provider.commit_account_range(write, &range, Default::default(), Vec::new()).unwrap();
+
+        assert_eq!(provider.start_account_coverage(write).unwrap(), committed);
+        assert_eq!(provider.account_coverage(write).unwrap(), Some(committed));
     }
 
     #[test]
@@ -416,8 +483,7 @@ mod tests {
         let provider = factory.database_provider_rw().unwrap();
         let current = provider.start_snap_attempt(generation).unwrap();
 
-        let refused =
-            provider.commit_account_range(replaced, B256::ZERO, &range, storages, bytecodes);
+        let refused = provider.commit_account_range(replaced, &range, storages, bytecodes);
 
         assert!(matches!(refused, Err(SnapSyncError::StaleWrite { .. })));
         assert_eq!(stored(&provider), (Vec::new(), false, false));
@@ -430,6 +496,31 @@ mod tests {
     }
 
     #[test]
+    fn a_new_attempt_replaces_what_an_earlier_one_left_in_the_interval() {
+        let earlier = accounts();
+        let (factory, write, _) = started(&earlier);
+        let (storages, bytecodes) = dependencies();
+        let provider = factory.database_provider_rw().unwrap();
+        let range = verified_range(&earlier, 0..3, B256::ZERO, &[]);
+        provider.commit_account_range(write, &range, storages, bytecodes).unwrap();
+        provider.commit().unwrap();
+
+        // At the new root the contract is gone and the first account changed.
+        let current = vec![(key(1), account(9)), (FAR, account(3))];
+        let provider = factory.database_provider_rw().unwrap();
+        let write = provider.start_snap_attempt(generation(2, state_root(&current))).unwrap();
+        provider.start_account_coverage(write).unwrap();
+        let range = verified_range(&current, 0..2, B256::ZERO, &[]);
+        let coverage =
+            provider.commit_account_range(write, &range, Default::default(), Vec::new()).unwrap();
+
+        assert!(coverage.is_complete());
+        assert_eq!(stored(&provider), (vec![key(1), FAR], false, true));
+        let first = provider.tx_ref().get::<tables::HashedAccounts>(key(1)).unwrap().unwrap();
+        assert_eq!(first.nonce, 9);
+    }
+
+    #[test]
     fn a_range_proved_against_another_root_is_refused() {
         let accounts = accounts();
         let (factory, write, _) = started(&accounts);
@@ -437,13 +528,7 @@ mod tests {
         let other = vec![(key(7), account(7))];
         let range = verified_range(&other, 0..1, B256::ZERO, &[]);
 
-        let refused = provider.commit_account_range(
-            write,
-            B256::ZERO,
-            &range,
-            Default::default(),
-            Vec::new(),
-        );
+        let refused = provider.commit_account_range(write, &range, Default::default(), Vec::new());
 
         assert!(matches!(refused, Err(SnapSyncError::RootMismatch { .. })));
         assert!(stored_accounts(&provider).is_empty());
@@ -458,13 +543,7 @@ mod tests {
         let range = verified_range(&accounts, 0..3, B256::ZERO, &[]);
 
         assert!(matches!(
-            provider.commit_account_range(
-                write,
-                B256::ZERO,
-                &range,
-                Default::default(),
-                Vec::new()
-            ),
+            provider.commit_account_range(write, &range, Default::default(), Vec::new()),
             Err(SnapSyncError::NoCoverage)
         ));
     }
@@ -475,9 +554,8 @@ mod tests {
         let (factory, write, _) = started(&accounts);
         let range = verified_range(&accounts, 0..1, B256::ZERO, &[key(1)]);
         let provider = factory.database_provider_rw().unwrap();
-        let coverage = provider
-            .commit_account_range(write, B256::ZERO, &range, Default::default(), Vec::new())
-            .unwrap();
+        let coverage =
+            provider.commit_account_range(write, &range, Default::default(), Vec::new()).unwrap();
         provider.commit().unwrap();
 
         let reopened = factory.database_provider_rw().unwrap();

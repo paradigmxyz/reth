@@ -11,7 +11,8 @@
 //!
 //! Downloaded state goes into the hashed state tables, owned by an attempt record that commits
 //! with it, along with how far the account key space has been downloaded. An account range only
-//! commits with its storage and code, so committed progress never depends on work still pending.
+//! commits with storage matching its accounts' roots and code matching their hashes, so committed
+//! progress never depends on work still pending.
 //!
 //! ```
 //! use reth_snap_sync::SnapPivotPolicy;

@@ -1,15 +1,15 @@
-//! Downloads account ranges in key order and commits each with its dependencies.
-//!
-//! Every request captures the attempt's write before it is sent, and the commit presents that
-//! write again. A response that arrives after the attempt was replaced or re-anchored is refused
-//! before it changes state, and the coverage stays where it was.
+//! Downloads account ranges in key order and commits each under the write it was fetched with.
 
-use crate::{AccountCoverage, SnapAccountStore, SnapSyncError, SnapWrite};
+use crate::{AccountCoverage, SnapAccountStore, SnapAttemptStore, SnapSyncError, SnapWrite};
 use alloy_primitives::{map::B256Map, B256};
+use reth_db_api::transaction::DbTxMut;
 use reth_downloaders::snap::{AccountRangeDownloader, AccountRangeOutcome, VerifiedAccountRange};
 use reth_eth_wire_types::snap::GetAccountRangeMessage;
 use reth_network_p2p::snap::client::SnapClient;
-use reth_storage_api::{DBProvider, DatabaseProviderFactory, MetadataProvider, SnapAttempt};
+use reth_network_peers::PeerId;
+use reth_storage_api::{
+    DBProvider, DatabaseProviderFactory, MetadataProvider, MetadataWriter, StateWriter,
+};
 use reth_storage_errors::provider::ProviderError;
 use reth_tasks::Runtime;
 use reth_trie_common::HashedStorage;
@@ -17,34 +17,35 @@ use revm::bytecode::Bytecode;
 use std::fmt;
 
 // Matches the soft response limit peers commonly serve.
-const DEFAULT_RESPONSE_BYTES: u64 = 512 * 1024;
+pub(crate) const DEFAULT_RESPONSE_BYTES: u64 = 512 * 1024;
 
 // Keeps account requests inclusive through the full trie keyspace.
-const MAX_HASH: B256 = B256::new([0xff; B256::len_bytes()]);
+pub(crate) const MAX_HASH: B256 = B256::new([0xff; B256::len_bytes()]);
 
 /// Downloads the account ranges an attempt still needs, one at a time in key order.
 ///
-/// [`Self::next`] fetches the range at the coverage cursor; the caller resolves its storage and
-/// code, then [`Self::commit`] persists everything and moves the cursor.
+/// [`Self::next`] fetches the range at the coverage cursor the store records; the caller resolves
+/// its storage and code, then [`Self::commit`] persists everything and moves the cursor.
 pub struct AccountRangeDownload<C, F> {
     client: C,
     factory: F,
     // Proof verification and commits run on the blocking pool.
     runtime: Runtime,
-    coverage: AccountCoverage,
+    // Coverage as last read from the store; none before the first request.
+    coverage: Option<AccountCoverage>,
     response_bytes: u64,
     // Distinguishes responses to reissued requests.
     request_id: u64,
 }
 
 impl<C, F> AccountRangeDownload<C, F> {
-    /// Creates a download continuing from `coverage`.
-    pub const fn new(client: C, factory: F, runtime: Runtime, coverage: AccountCoverage) -> Self {
+    /// Creates a download that continues from the coverage the store records.
+    pub const fn new(client: C, factory: F, runtime: Runtime) -> Self {
         Self {
             client,
             factory,
             runtime,
-            coverage,
+            coverage: None,
             response_bytes: DEFAULT_RESPONSE_BYTES,
             request_id: 0,
         }
@@ -56,8 +57,8 @@ impl<C, F> AccountRangeDownload<C, F> {
         self
     }
 
-    /// How far the download has got.
-    pub const fn coverage(&self) -> AccountCoverage {
+    /// How far the download has got, as last read from the store.
+    pub const fn coverage(&self) -> Option<AccountCoverage> {
         self.coverage
     }
 }
@@ -67,15 +68,16 @@ where
     C: SnapClient + Clone + Unpin,
     F: DatabaseProviderFactory + Clone + 'static,
     F::Provider: MetadataProvider,
-    F::ProviderRW: SnapAccountStore + DBProvider,
+    F::ProviderRW: MetadataProvider + MetadataWriter + StateWriter + DBProvider<Tx: DbTxMut>,
 {
     /// Fetches the range at the coverage cursor.
     ///
     /// `Ok(None)` once every account is downloaded. A failed request leaves the cursor where it
     /// was, so the download can be resumed from the persisted coverage.
     pub async fn next(&mut self) -> Result<Option<AccountRangeStep>, SnapSyncError> {
-        let Some(origin) = self.coverage.next() else { return Ok(None) };
-        let (write, root_hash) = self.active_write()?;
+        let (write, root_hash, coverage) = self.active_write()?;
+        self.coverage = Some(coverage);
+        let Some(origin) = coverage.next() else { return Ok(None) };
 
         self.request_id = self.request_id.wrapping_add(1);
         let request = GetAccountRangeMessage {
@@ -91,9 +93,11 @@ where
 
         Ok(Some(match downloader.await? {
             AccountRangeOutcome::Verified(range) => {
-                AccountRangeStep::Verified(VerifiedRange { origin, write, range })
+                AccountRangeStep::Verified(VerifiedRange { write, range })
             }
-            AccountRangeOutcome::Unavailable { .. } => AccountRangeStep::Unavailable { origin },
+            AccountRangeOutcome::Unavailable { peer_id } => {
+                AccountRangeStep::Unavailable { origin, peer_id }
+            }
         }))
     }
 
@@ -111,27 +115,26 @@ where
         let coverage = self
             .runtime
             .spawn_blocking(move || -> Result<AccountCoverage, SnapSyncError> {
-                let VerifiedRange { origin, write, range } = verified;
+                let VerifiedRange { write, range } = verified;
                 let provider = factory.database_provider_rw()?;
-                let coverage =
-                    provider.commit_account_range(write, origin, &range, storages, bytecodes)?;
+                let coverage = provider.commit_account_range(write, &range, storages, bytecodes)?;
                 provider.commit()?;
                 Ok(coverage)
             })
             .await
             .map_err(|error| SnapSyncError::Provider(ProviderError::other(error)))??;
-        self.coverage = coverage;
+        self.coverage = Some(coverage);
         Ok(coverage)
     }
 
-    // The write the attempt accepts right now, and the root to request against.
-    fn active_write(&self) -> Result<(SnapWrite, B256), SnapSyncError> {
+    // The write the attempt accepts right now, the root to request against, and the coverage the
+    // store records for it.
+    fn active_write(&self) -> Result<(SnapWrite, B256, AccountCoverage), SnapSyncError> {
         let provider = self.factory.database_provider_ro()?;
-        let attempt = provider
-            .snap_attempt()?
-            .filter(SnapAttempt::is_unfinished)
-            .ok_or(SnapSyncError::NoAttempt)?;
-        Ok((SnapWrite::of(&attempt), attempt.state_root()))
+        let write = provider.active_snap_write()?.ok_or(SnapSyncError::NoAttempt)?;
+        let root = provider.authorize_snap_write(write)?.state_root();
+        let coverage = provider.account_coverage(write)?.ok_or(SnapSyncError::NoCoverage)?;
+        Ok((write, root, coverage))
     }
 }
 
@@ -150,10 +153,12 @@ impl<C, F> fmt::Debug for AccountRangeDownload<C, F> {
 pub enum AccountRangeStep {
     /// A range authenticated against the pivot root, waiting for its dependencies.
     Verified(VerifiedRange),
-    /// No peer served the range, so the cursor stays at `origin`.
+    /// The peer did not serve the range, so the cursor stays at `origin`.
     Unavailable {
         /// Key the range was requested from.
         origin: B256,
+        /// Peer that answered without the state, so the retry can go elsewhere.
+        peer_id: PeerId,
     },
 }
 
@@ -163,7 +168,6 @@ pub enum AccountRangeStep {
 /// attempt that was active when it was requested, never a later one.
 #[derive(Debug)]
 pub struct VerifiedRange {
-    origin: B256,
     write: SnapWrite,
     range: VerifiedAccountRange,
 }
@@ -171,7 +175,7 @@ pub struct VerifiedRange {
 impl VerifiedRange {
     /// Key the range was requested from.
     pub const fn origin(&self) -> B256 {
-        self.origin
+        self.range.origin()
     }
 
     /// The accounts, whose storage and code the commit needs.
@@ -183,17 +187,17 @@ impl VerifiedRange {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        test_utils::{
-            account, account_range, generation, hashed_factory, key, state_root, ScriptedSnapClient,
-        },
-        SnapAttemptStore,
+    use crate::test_utils::{
+        account, account_range, generation, hashed_factory, key, state_root, verified_range,
+        ScriptedSnapClient,
     };
     use reth_db_api::{cursor::DbCursorRO, tables, transaction::DbTx};
+    use reth_eth_wire_types::snap::AccountRangeMessage;
     use reth_network_p2p::{
         error::{PeerRequestResult, RequestError},
         snap::client::SnapResponse,
     };
+    use reth_network_peers::WithPeerId;
     use reth_provider::{test_utils::MockNodeTypesWithDB, ProviderFactory};
     use reth_trie_common::TrieAccount;
     use std::sync::Arc;
@@ -221,12 +225,7 @@ mod tests {
         factory: ProviderFactory<MockNodeTypesWithDB>,
     ) -> (Arc<ScriptedSnapClient>, Download) {
         let client = Arc::new(ScriptedSnapClient::new(responses));
-        let download = AccountRangeDownload::new(
-            Arc::clone(&client),
-            factory,
-            Runtime::test(),
-            AccountCoverage::START,
-        );
+        let download = AccountRangeDownload::new(Arc::clone(&client), factory, Runtime::test());
         (client, download)
     }
 
@@ -272,20 +271,29 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_unavailable_response_leaves_the_cursor_in_place() {
+    async fn an_unavailable_response_names_the_peer_and_leaves_the_cursor_in_place() {
         let accounts = accounts();
         let factory = started(&accounts);
-        let responses = [account_range(1, &[], 0..0, &[]), account_range(2, &accounts, 0..3, &[])];
+        let peer = PeerId::random();
+        let empty = AccountRangeMessage { request_id: 1, accounts: Vec::new(), proof: Vec::new() };
+        let responses = [
+            Ok(WithPeerId::new(peer, SnapResponse::AccountRange(empty))),
+            account_range(2, &accounts, 0..3, &[]),
+        ];
         let (client, mut download) = download(responses, factory.clone());
 
         let step = download.next().await.unwrap().unwrap();
 
-        assert!(matches!(step, AccountRangeStep::Unavailable { origin } if origin == B256::ZERO));
-        assert_eq!(download.coverage(), AccountCoverage::START);
+        assert!(matches!(
+            step,
+            AccountRangeStep::Unavailable { origin, peer_id }
+                if origin == B256::ZERO && peer_id == peer
+        ));
+        assert_eq!(download.coverage(), Some(AccountCoverage::START));
 
         let range = verified(&mut download).await;
         download.commit(range, Default::default(), Vec::new()).await.unwrap();
-        assert!(download.coverage().is_complete());
+        assert!(download.coverage().unwrap().is_complete());
         assert_eq!(*client.origins(), [B256::ZERO, B256::ZERO]);
     }
 
@@ -298,8 +306,30 @@ mod tests {
         let error = download.next().await.unwrap_err();
 
         assert!(matches!(error, SnapSyncError::Request(RequestError::UnsupportedCapability)));
-        assert_eq!(download.coverage(), AccountCoverage::START);
+        assert_eq!(download.coverage(), Some(AccountCoverage::START));
         assert!(stored_accounts(&factory).is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_download_continues_from_the_coverage_the_store_records() {
+        let accounts = accounts();
+        let factory = started(&accounts);
+        // A previous run committed the first account.
+        let provider = factory.database_provider_rw().unwrap();
+        let write = provider.active_snap_write().unwrap().unwrap();
+        let head = verified_range(&accounts, 0..1, B256::ZERO, &[key(1)]);
+        provider.commit_account_range(write, &head, Default::default(), Vec::new()).unwrap();
+        provider.commit().unwrap();
+        let (client, mut download) =
+            download([account_range(1, &accounts, 1..3, &[key(2), FAR])], factory.clone());
+
+        let rest = verified(&mut download).await;
+
+        assert_eq!(rest.origin(), key(2));
+        assert_eq!(*client.origins(), [key(2)]);
+        download.commit(rest, Default::default(), Vec::new()).await.unwrap();
+        assert!(download.coverage().unwrap().is_complete());
+        assert_eq!(stored_accounts(&factory), [key(1), key(2), FAR]);
     }
 
     #[tokio::test]
@@ -317,7 +347,7 @@ mod tests {
 
         assert!(matches!(error, SnapSyncError::StaleWrite { .. }));
         assert!(stored_accounts(&factory).is_empty());
-        assert_eq!(download.coverage(), AccountCoverage::START);
+        assert_eq!(download.coverage(), Some(AccountCoverage::START));
     }
 
     #[tokio::test]
@@ -332,7 +362,7 @@ mod tests {
 
         assert!(matches!(error, SnapSyncError::MissingCode { .. }));
         assert!(stored_accounts(&factory).is_empty());
-        assert_eq!(download.coverage(), AccountCoverage::START);
+        assert_eq!(download.coverage(), Some(AccountCoverage::START));
     }
 
     #[tokio::test]
@@ -341,14 +371,34 @@ mod tests {
 
         assert!(matches!(download.next().await, Err(SnapSyncError::NoAttempt)));
         assert!(client.origins().is_empty());
+        assert_eq!(download.coverage(), None);
+    }
+
+    #[tokio::test]
+    async fn nothing_is_requested_without_recorded_coverage() {
+        let factory = hashed_factory();
+        let provider = factory.database_provider_rw().unwrap();
+        provider.start_snap_attempt(generation(1, state_root(&accounts()))).unwrap();
+        provider.commit().unwrap();
+        let (client, mut download) = download([], factory);
+
+        assert!(matches!(download.next().await, Err(SnapSyncError::NoCoverage)));
+        assert!(client.origins().is_empty());
     }
 
     #[tokio::test]
     async fn a_complete_coverage_requests_nothing() {
-        let (client, mut download) = download([], hashed_factory());
-        download.coverage = AccountCoverage::COMPLETE;
+        let accounts = accounts();
+        let factory = started(&accounts);
+        let provider = factory.database_provider_rw().unwrap();
+        let write = provider.active_snap_write().unwrap().unwrap();
+        let whole = verified_range(&accounts, 0..3, B256::ZERO, &[]);
+        provider.commit_account_range(write, &whole, Default::default(), Vec::new()).unwrap();
+        provider.commit().unwrap();
+        let (client, mut download) = download([], factory);
 
         assert!(download.next().await.unwrap().is_none());
+        assert_eq!(download.coverage(), Some(AccountCoverage::COMPLETE));
         assert!(client.origins().is_empty());
     }
 }

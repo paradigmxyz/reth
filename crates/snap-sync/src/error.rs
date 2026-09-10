@@ -65,6 +65,16 @@ pub enum SnapSyncError {
         /// Hashed address of the account.
         account: B256,
     },
+    /// The storage supplied for an account does not hash to the root the account commits to.
+    #[error("storage supplied for {account} hashes to {got}, its account commits to {expected}")]
+    StorageRootMismatch {
+        /// Hashed address of the account.
+        account: B256,
+        /// Storage root the account commits to.
+        expected: B256,
+        /// Root of the supplied storage.
+        got: B256,
+    },
     /// Storage was supplied for an account that is not in the range or has none.
     #[error("storage supplied for {account}, which is not a contract in the range")]
     UnexpectedStorage {
@@ -76,6 +86,14 @@ pub enum SnapSyncError {
     MissingCode {
         /// Hash of the missing code.
         hash: B256,
+    },
+    /// Code was supplied under a hash it does not hash to.
+    #[error("code supplied as {expected} hashes to {got}")]
+    CodeMismatch {
+        /// Hash the code was supplied under.
+        expected: B256,
+        /// Hash of the supplied code.
+        got: B256,
     },
 }
 
