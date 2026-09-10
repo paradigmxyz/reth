@@ -119,6 +119,11 @@ pub struct TxPool<T: TransactionOrdering> {
     blob_pool: BlobTransactions<T::Transaction>,
     /// All transactions in the pool.
     all_transactions: AllTransactions<T::Transaction>,
+    /// The kind of the most recent canonical state update.
+    ///
+    /// Insertions only prefer the tracked sender state over the validation snapshot after a
+    /// commit, see `add_transaction`.
+    latest_update_kind: PoolUpdateKind,
     /// Transaction pool metrics
     metrics: TxPoolMetrics,
 }
@@ -138,6 +143,9 @@ impl<T: TransactionOrdering> TxPool<T> {
             blob_pool: Default::default(),
             all_transactions: AllTransactions::new(&config),
             config,
+            // Starts as a commit so racing insertions are ordered before the first canonical
+            // update.
+            latest_update_kind: PoolUpdateKind::Commit,
             metrics: Default::default(),
         }
     }
@@ -652,7 +660,9 @@ impl<T: TransactionOrdering> TxPool<T> {
         #[expect(clippy::iter_with_drain, reason = "retain the scratch buffer allocation")]
         self.process_updates(updates.drain(..), &mut outcome);
         self.all_transactions.update_buffer = updates;
-        // Track changed accounts after discards, which can remove sender info.
+        // Only now track the changed accounts: discarding a sender's last transaction removes its
+        // info, and the tracked nonce must outlive it so a stale validation result cannot regress
+        // it, see `add_transaction`.
         self.all_transactions.sender_info.extend(changed_senders);
         // update the metrics after the update
         self.update_size_metrics();
@@ -668,8 +678,12 @@ impl<T: TransactionOrdering> TxPool<T> {
         block_info: BlockInfo,
         mined_transactions: Vec<TxHash>,
         changed_senders: FxHashMap<SenderId, SenderInfo>,
-        _update_kind: PoolUpdateKind,
+        update_kind: PoolUpdateKind,
     ) -> OnNewCanonicalStateOutcome<T::Transaction> {
+        // Insertions consult this to decide whether the tracked sender state can be trusted over
+        // a validation snapshot, see `add_transaction`.
+        self.latest_update_kind = update_kind;
+
         // update block info
         let block_hash = block_info.last_seen_block_hash;
 
@@ -749,14 +763,19 @@ impl<T: TransactionOrdering> TxPool<T> {
             return Err(PoolError::new(*tx.hash(), PoolErrorKind::AlreadyImported))
         }
 
-        // Prefer newer tracked sender state.
-        if let Some(info) = self.all_transactions.sender_info.get(&tx.sender_id()) &&
+        // After a commit nonces only move forward, so a higher tracked nonce is newer than the
+        // validation snapshot and wins. After a reorg the tracked nonce could be the old chain's,
+        // so the snapshot is trusted as is until the next commit.
+        if self.latest_update_kind.is_commit() &&
+            let Some(info) = self.all_transactions.sender_info.get(&tx.sender_id()) &&
             info.state_nonce > on_chain_nonce
         {
             on_chain_nonce = info.state_nonce;
             on_chain_balance = info.balance;
         }
 
+        // Below the tracked nonce the transaction was validated against outdated state; inserted
+        // as pending it would shadow the sender's executable transactions in the payload builder.
         if tx.nonce() < on_chain_nonce {
             return Err(PoolError::new(
                 *tx.hash(),
@@ -1402,6 +1421,9 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     /// _All_ transaction in the pool sorted by their sender and nonce pair.
     txs: BTreeMap<TransactionId, PoolInternalTransaction<T>>,
     /// Contains the currently known information about the senders.
+    ///
+    /// Entries outlive a sender's transactions when an account update discards them, so a
+    /// validation result computed against older state cannot regress the tracked nonce.
     sender_info: FxHashMap<SenderId, SenderInfo>,
     /// Tracks the number of transactions by sender that are currently in the pool.
     tx_counter: FxHashMap<SenderId, usize>,
@@ -4269,6 +4291,162 @@ mod tests {
         ));
         assert!(!pool.contains(&stale_hash));
         assert_eq!(pool.all_transactions.sender_info[&sender].state_nonce, 1);
+    }
+
+    #[test]
+    fn stale_validation_trusted_between_reorg_and_commit() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let block_info = pool.block_info();
+
+        let template = MockTransaction::eip1559();
+        let first = f.validated(template.clone().with_nonce(0).rng_hash());
+        let sender = first.sender_id();
+        pool.add_transaction(first, U256::from(1_000), 0, None).unwrap();
+
+        let changed = |state_nonce| {
+            FxHashMap::from_iter([(sender, SenderInfo { state_nonce, balance: U256::from(1_000) })])
+        };
+
+        // After a reorg the tracked nonce is not preferred over the validation snapshot.
+        let outcome =
+            pool.on_canonical_state_change(block_info, vec![], changed(1), PoolUpdateKind::Reorg);
+        assert_eq!(outcome.discarded.len(), 1);
+        assert_eq!(pool.all_transactions.sender_info[&sender].state_nonce, 1);
+
+        let stale = f.validated(template.clone().with_nonce(0).rng_hash());
+        pool.add_transaction(stale, U256::from(1_000), 0, None).unwrap();
+        assert_eq!(pool.pending_pool.len(), 1);
+        assert_eq!(pool.all_transactions.sender_info[&sender].state_nonce, 0);
+
+        // The next commit discards the stale transaction and re-arms the check.
+        let outcome =
+            pool.on_canonical_state_change(block_info, vec![], changed(1), PoolUpdateKind::Commit);
+        assert_eq!(outcome.discarded.len(), 1);
+        assert_eq!(pool.all_transactions.sender_info[&sender].state_nonce, 1);
+
+        let stale = f.validated(template.with_nonce(0).rng_hash());
+        let err = pool.add_transaction(stale, U256::from(1_000), 0, None).unwrap_err();
+        assert!(matches!(
+            err.kind,
+            PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::Consensus(
+                InvalidTransactionError::NonceNotConsistent { tx: 0, state: 1 }
+            ))
+        ));
+        assert_eq!(pool.pending_pool.len(), 0);
+        assert_eq!(pool.all_transactions.sender_info[&sender].state_nonce, 1);
+    }
+
+    #[test]
+    fn reorg_reinjection_survives_stale_validation() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let block_info = pool.block_info();
+
+        let template = MockTransaction::eip1559();
+        let tx2 = f.validated(template.clone().with_nonce(2).rng_hash());
+        let sender = tx2.sender_id();
+        pool.add_transaction(tx2, U256::from(1_000), 2, None).unwrap();
+
+        // The reorg drops nonce 1 from the chain.
+        let changed = FxHashMap::from_iter([(
+            sender,
+            SenderInfo { state_nonce: 1, balance: U256::from(1_000) },
+        )]);
+        pool.on_canonical_state_change(block_info, vec![], changed, PoolUpdateKind::Reorg);
+        assert_eq!(pool.all_transactions.sender_info[&sender].state_nonce, 1);
+
+        // A result validated before the reorg still carries the old nonce and lands afterwards.
+        let stale = f.validated(template.clone().with_nonce(3).rng_hash());
+        pool.add_transaction(stale, U256::from(1_000), 2, None).unwrap();
+        assert_eq!(pool.all_transactions.sender_info[&sender].state_nonce, 2);
+
+        // Re-injecting nonce 1 must not be rejected against that nonce.
+        let reinjected = f.validated(template.with_nonce(1).rng_hash());
+        pool.add_transaction(reinjected, U256::from(1_000), 1, None).unwrap();
+        assert_eq!(pool.all_transactions.sender_info[&sender].state_nonce, 1);
+        assert_eq!(pool.pending_pool.len(), 3);
+    }
+
+    #[test]
+    fn stale_validation_resubmission_after_commit() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let block_info = pool.block_info();
+
+        let template = MockTransaction::eip1559();
+        let tx0 = template.clone().with_nonce(0).rng_hash();
+        let tx1 = template.clone().with_nonce(1).rng_hash();
+        let first = f.validated(tx0.clone());
+        let sender = first.sender_id();
+        pool.add_transaction(first, U256::from(1_000), 0, None).unwrap();
+        pool.add_transaction(f.validated(tx1.clone()), U256::from(1_000), 0, None).unwrap();
+        assert_eq!(pool.pending_pool.len(), 2);
+
+        // Nonce 0 is mined while resubmissions of both nonces are still being validated.
+        let changed = FxHashMap::from_iter([(
+            sender,
+            SenderInfo { state_nonce: 1, balance: U256::from(1_000) },
+        )]);
+        pool.on_canonical_state_change(
+            block_info,
+            vec![*tx0.get_hash()],
+            changed,
+            PoolUpdateKind::Commit,
+        );
+        assert_eq!(pool.pending_pool.len(), 1);
+
+        // The resubmitted mined nonce is rejected instead of shadowing nonce 1.
+        let retry = f.validated(template.with_nonce(0).rng_hash());
+        let err = pool.add_transaction(retry, U256::from(1_000), 0, None).unwrap_err();
+        assert!(matches!(
+            err.kind,
+            PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::Consensus(
+                InvalidTransactionError::NonceNotConsistent { tx: 0, state: 1 }
+            ))
+        ));
+
+        // The replacement of the executable nonce is accepted using the tracked nonce.
+        let replacement = f.validated(tx1.inc_price_by(10).rng_hash());
+        let added = pool.add_transaction(replacement, U256::from(1_000), 0, None).unwrap();
+        assert!(added.as_pending().is_some());
+        assert!(added.replaced().is_some());
+        assert_eq!(pool.pending_pool.len(), 1);
+        assert_eq!(pool.all_transactions.sender_info[&sender].state_nonce, 1);
+        let next =
+            pool.get_highest_consecutive_transaction_by_sender(sender.into_transaction_id(1));
+        assert_eq!(next.map(|tx| tx.nonce()), Some(1));
+    }
+
+    #[test]
+    fn stale_validation_uses_tracked_balance() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        // each transaction costs 1_500_000
+        let template = MockTransaction::eip1559().with_gas_price(50).with_gas_limit(30_000);
+        let first = f.validated(template.clone().with_nonce(0).rng_hash());
+        let sender = first.sender_id();
+        pool.add_transaction(first, U256::from(10_000_000), 0, None).unwrap();
+        assert_eq!(pool.pending_pool.len(), 1);
+
+        // The commit mines nonce 0 and drains the balance below the cost of the next transaction.
+        let changed = FxHashMap::from_iter([(
+            sender,
+            SenderInfo { state_nonce: 1, balance: U256::from(1_000) },
+        )]);
+        pool.update_accounts(changed);
+
+        // The stale snapshot still reports the old balance, the tracked balance applies.
+        let next = f.validated(template.with_nonce(1).rng_hash());
+        let id = *next.id();
+        pool.add_transaction(next, U256::from(10_000_000), 0, None).unwrap();
+        assert_eq!(pool.pending_pool.len(), 0);
+        assert_eq!(pool.queued_pool.len(), 1);
+        let state = pool.all_transactions.get(&id).unwrap().state;
+        assert!(state.contains(TxState::NO_NONCE_GAPS));
+        assert!(!state.contains(TxState::ENOUGH_BALANCE));
+        assert_eq!(pool.all_transactions.sender_info[&sender].balance, U256::from(1_000));
     }
 
     #[test]
