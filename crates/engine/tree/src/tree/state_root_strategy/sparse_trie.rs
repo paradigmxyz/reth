@@ -638,6 +638,13 @@ where
 
         // Process all storage updates, skipping tries with no pending updates.
         let span = trace_span!("process_storage_leaf_updates").entered();
+        let phase_wall_start = std::time::Instant::now();
+        let phase_cpu_start = reth_metrics::thread::ThreadResourceUsage::now();
+        let phase_jobs = storage_updates.values().filter(|updates| !updates.is_empty()).count();
+        let phase_leaves = storage_updates.values().map(|updates| updates.len()).sum::<usize>();
+        let phase_largest_job =
+            storage_updates.values().map(|updates| updates.len()).max().unwrap_or(0);
+
         for (address, updates) in storage_updates {
             if updates.is_empty() {
                 continue;
@@ -670,6 +677,11 @@ where
             }
         }
 
+        let phase_wall_us = phase_wall_start.elapsed().as_secs_f64() * 1e6;
+        let phase_cpu_us = phase_cpu_start
+            .elapsed()
+            .map(|usage| (usage.user_cpu_time + usage.system_cpu_time).as_secs_f64() * 1e6);
+        tracing::info!(target: "engine::tree::leaf_diagnostic", new, phase_jobs, phase_leaves, phase_largest_job, phase_wall_us, ?phase_cpu_us, "Storage leaf phase");
         drop(span);
 
         // Process account trie updates and fill the account targets.
