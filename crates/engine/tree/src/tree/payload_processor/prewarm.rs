@@ -12,8 +12,8 @@
 //! 3. When actual block execution happens, it benefits from the warmed cache
 
 use super::{
-    bal_prewarm_pool::BalPrewarmPool, BlockUpdateSchedule, StateRootHintStream,
-    StateRootUpdateStream,
+    bal_prewarm_pool::BalPrewarmPool, AccountDelta, BlockAccountUpdates, BlockUpdateSchedule,
+    StateRootHintStream, StateRootUpdateStream,
 };
 use crate::tree::{
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
@@ -23,14 +23,14 @@ use crate::tree::{
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::{keccak256, B256, U256};
+use alloy_primitives::keccak256;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
 use reth_metrics::Metrics;
-use reth_primitives_traits::{Account, FastInstant as Instant, NodePrimitives};
+use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
-    AccountReader, BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory,
+    BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory,
     DatabaseProviderROFactory, HistoryReader, PruneCheckpointReader, StageCheckpointReader,
     StateProviderBox, StorageChangeSetReader, StorageSettingsCache,
 };
@@ -384,29 +384,23 @@ where
                     "bal_hashed_state_stream",
                     bal_accounts = stream_bal.as_bal().len(),
                 );
-                let parent_span = branch_span.clone();
                 let _span = branch_span.entered();
 
-                // The keys go out before any value: they are all the task needs to start
-                // fetching the block's proofs, and they need no state reads to produce.
+                // The account changes and the keys go out before any storage value: neither
+                // needs a state read, and together they are all the task needs to start
+                // fetching the block's proofs.
                 if !ctx.disable_bal_parallel_state_root {
                     let schedule_start = Instant::now();
-                    hashed_update_stream
-                        .on_update_schedule(bal_update_schedule(stream_bal.as_bal()));
+                    let (schedule, accounts) = bal_block_updates(stream_bal.as_bal());
+                    ctx.metrics.bal_account_deltas.record(accounts.deltas.len() as f64);
+                    ctx.metrics.bal_account_values.record(accounts.values.len() as f64);
+                    hashed_update_stream.on_account_updates(accounts);
+                    hashed_update_stream.on_update_schedule(schedule);
                     ctx.metrics.bal_update_schedule_duration.record(schedule_start.elapsed());
                 }
 
                 stream_bal.as_bal().par_iter().for_each(|account_changes| {
-                    WorkerPool::with_worker_mut(|worker| {
-                        let provider =
-                            worker.get_or_init::<Option<Box<dyn AccountReader>>>(|| None);
-                        ctx.send_bal_hashed_state(
-                            &parent_span,
-                            provider,
-                            account_changes,
-                            &hashed_update_stream,
-                        );
-                    });
+                    ctx.send_bal_hashed_storage(account_changes, &hashed_update_stream);
                 });
 
                 hashed_update_stream.finish();
@@ -452,9 +446,6 @@ where
         stream_rx
             .blocking_recv()
             .expect("BAL hashed-state streaming task dropped without signaling completion");
-
-        // Drop the per-thread providers
-        executor.bal_streaming_pool().clear();
 
         let _ = actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
     }
@@ -664,154 +655,44 @@ where
         self.terminate_execution.store(true, Ordering::Relaxed);
     }
 
-    /// Hashes and streams a single BAL account's state to the state-root job's hashed-update
-    /// stream.
+    /// Hashes and streams a single BAL account's storage change set to the state-root job's
+    /// hashed-update stream.
     ///
-    /// For each changed account, storage slots are hashed and sent immediately, then the account
-    /// is sent as a separate update. The parent account is read only when the BAL did not provide
-    /// all account leaf fields needed for state-root computation.
-    ///
-    /// The `provider` is lazily initialized on first call and reused across accounts on the same
-    /// thread.
-    fn send_bal_hashed_state(
+    /// The account's own fields travel with [`bal_block_updates`] instead, which needs no state
+    /// read and can therefore go out for the whole block at once, before this.
+    fn send_bal_hashed_storage(
         &self,
-        parent_span: &Span,
-        provider: &mut Option<Box<dyn AccountReader>>,
         account_changes: &alloy_eip7928::AccountChanges,
         hashed_update_stream: &StateRootUpdateStream,
     ) {
-        if self.disable_bal_parallel_state_root {
-            return;
-        }
-        if !bal_account_changes_state_root(account_changes) {
+        if self.disable_bal_parallel_state_root || account_changes.storage_changes.is_empty() {
             return;
         }
 
-        let address = account_changes.address;
-        let mut hashed_address = None;
-        let account_fields = BalAccountStateFields::from_changes(account_changes);
-
-        // If there are any storage changes we can assume that the resulting account info will be
-        // non-empty, so the account will exist, and therefore we can pre-emptively send out storage
-        // changes to start processing them before potentially hitting the db in the next step.
-        if !account_changes.storage_changes.is_empty() {
-            let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
-            let storage_map = reth_trie::HashedStorage::from_iter(
-                account_changes
-                    .storage_post_states()
-                    .map(|(slot, value)| (keccak256(slot.to_be_bytes::<32>()), value)),
-            );
-
-            let mut hashed_state = reth_trie::HashedPostState::default();
-            hashed_state.storages.insert(hashed_address, storage_map);
-            hashed_update_stream.on_hashed_state_update(hashed_state);
-        }
-
-        let existing_account = if account_fields.needs_parent_account() {
-            if provider.is_none() {
-                let _span = debug_span!(
-                    target: "engine::tree::payload_processor::prewarm",
-                    parent: parent_span,
-                    "bal_hashed_state_provider_init",
-                    has_saved_cache = !self.disable_bal_batch_io && self.saved_cache.is_some(),
-                )
-                .entered();
-
-                let inner = match self.provider.database_provider_ro() {
-                    Ok(p) => p,
-                    Err(err) => {
-                        warn!(
-                            target: "engine::tree::payload_processor::prewarm",
-                            ?err,
-                            "Failed to build provider for BAL account reads"
-                        );
-                        return;
-                    }
-                };
-                let boxed: Box<dyn AccountReader> =
-                    match (self.disable_bal_batch_io, &self.saved_cache) {
-                        (false, Some(saved)) => {
-                            let caches = saved.cache().clone();
-                            Box::new(
-                                CachedStateProvider::new_prewarm(inner, caches)
-                                    .with_txpool_snapshot(self.env.txpool_snapshot.clone()),
-                            )
-                        }
-                        _ => Box::new(inner),
-                    };
-                *provider = Some(boxed);
-            }
-            let account_reader = provider.as_ref().expect("provider just initialized");
-            account_reader.basic_account(&address).ok().flatten()
-        } else {
-            None
-        };
-
-        let account = account_fields.into_account(existing_account);
-        let hashed_address = hashed_address.unwrap_or_else(|| keccak256(address));
-
-        // It is possible for the resulting account info to be empty. This can happen when, in the
-        // same block:
-        // * tx1: A new account is funded
-        // * tx2: CREATE2 is called on the new account, SELFDESTRUCT is called within the init code
-        //
-        // In this case the account will have only balance_changes, one for funding and the second
-        // setting balance back to zero. The resulting account is fully empty, we mark it as None
-        // with no storage changes to indicate that it should be deleted if nothing else.
-        //
-        // We assume that if the account info is all zero then it can't have storage, so we don't
-        // have to explicitly check for empty storage.
-        let account = (!account.is_empty()).then_some(account);
+        let storage_map = reth_trie::HashedStorage::from_iter(
+            account_changes
+                .storage_post_states()
+                .map(|(slot, value)| (keccak256(slot.to_be_bytes::<32>()), value)),
+        );
 
         let mut hashed_state = reth_trie::HashedPostState::default();
-        hashed_state.accounts.insert(hashed_address, account);
+        hashed_state.storages.insert(keccak256(account_changes.address), storage_map);
         hashed_update_stream.on_hashed_state_update(hashed_state);
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-struct BalAccountStateFields {
-    balance: Option<U256>,
-    nonce: Option<u64>,
-    code_hash: Option<B256>,
-}
-
-impl BalAccountStateFields {
-    fn from_changes(account_changes: &alloy_eip7928::AccountChanges) -> Self {
-        Self {
-            balance: account_changes.balance_post_state(),
-            nonce: account_changes.nonce_post_state(),
-            code_hash: account_changes.code_post_state().map(|code| {
-                if code.is_empty() {
-                    alloy_consensus::constants::KECCAK_EMPTY
-                } else {
-                    keccak256(code)
-                }
-            }),
-        }
-    }
-
-    const fn needs_parent_account(self) -> bool {
-        self.balance.is_none() || self.nonce.is_none() || self.code_hash.is_none()
-    }
-
-    fn into_account(self, existing_account: Option<Account>) -> Account {
-        let existing_account = existing_account.as_ref();
-        Account {
-            balance: self.balance.unwrap_or_else(|| {
-                existing_account
-                    .map(|account| account.balance)
-                    .unwrap_or(alloy_primitives::U256::ZERO)
-            }),
-            nonce: self
-                .nonce
-                .unwrap_or_else(|| existing_account.map(|account| account.nonce).unwrap_or(0)),
-            bytecode_hash: self.code_hash.or_else(|| {
-                existing_account
-                    .and_then(|account| account.bytecode_hash)
-                    .or(Some(alloy_consensus::constants::KECCAK_EMPTY))
-            }),
-        }
+/// Returns the account fields the block last wrote for this account.
+fn bal_account_delta(account_changes: &alloy_eip7928::AccountChanges) -> AccountDelta {
+    AccountDelta {
+        balance: account_changes.balance_post_state(),
+        nonce: account_changes.nonce_post_state(),
+        code_hash: account_changes.code_post_state().map(|code| {
+            if code.is_empty() {
+                alloy_consensus::constants::KECCAK_EMPTY
+            } else {
+                keccak256(code)
+            }
+        }),
     }
 }
 
@@ -826,13 +707,18 @@ const fn bal_account_changes_state_root(account_changes: &alloy_eip7928::Account
         !account_changes.code_changes.is_empty()
 }
 
-/// Builds the schedule of leaves a BAL-executed block changes.
+/// Builds everything a BAL-executed block's state root needs that is not a storage value: the
+/// keys of the leaves it changes, and the account changes themselves.
 ///
-/// This is the key half of what [`PrewarmContext::send_bal_hashed_state`] sends values for. The
-/// state-root task gets it first, so it can reveal those leaves and request the block's proofs
-/// while the values are still being produced - the account values in particular wait for parent
-/// state reads, which is what makes the last addresses of a block reach the task late.
-fn bal_update_schedule(bal: &[alloy_eip7928::AccountChanges]) -> BlockUpdateSchedule {
+/// Neither reads state, so this whole half of the update stream goes out in one pass, before
+/// [`PrewarmContext::send_bal_hashed_storage`] sends the first value. The state-root task can
+/// reveal the block's leaves and request its proofs right away, and it resolves the accounts
+/// whose final value depends on the parent state from the leaves it reveals anyway - which is
+/// what used to make the last addresses of a block reach the task late, one parent-account read
+/// at a time.
+fn bal_block_updates(
+    bal: &[alloy_eip7928::AccountChanges],
+) -> (BlockUpdateSchedule, BlockAccountUpdates) {
     let entries = bal
         .par_iter()
         .filter(|account_changes| bal_account_changes_state_root(account_changes))
@@ -841,7 +727,7 @@ fn bal_update_schedule(bal: &[alloy_eip7928::AccountChanges]) -> BlockUpdateSche
                 .storage_post_states()
                 .map(|(slot, _)| keccak256(slot.to_be_bytes::<32>()))
                 .collect::<Vec<_>>();
-            (keccak256(account_changes.address), slots)
+            (keccak256(account_changes.address), slots, bal_account_delta(account_changes))
         })
         .collect::<Vec<_>>();
 
@@ -849,14 +735,25 @@ fn bal_update_schedule(bal: &[alloy_eip7928::AccountChanges]) -> BlockUpdateSche
         accounts: Vec::with_capacity(entries.len()),
         storages: Default::default(),
     };
-    for (hashed_address, slots) in entries {
+    let mut accounts = BlockAccountUpdates::default();
+    accounts.deltas.reserve(entries.len());
+    for (hashed_address, slots, delta) in entries {
         schedule.accounts.push(hashed_address);
         if !slots.is_empty() {
             schedule.storages.insert(hashed_address, slots);
         }
+
+        if delta.needs_parent_account() {
+            accounts.deltas.push((hashed_address, delta));
+        } else {
+            // Every field is known, so the account does not depend on the parent state and the
+            // task can promote it without resolving its leaf first.
+            let account = delta.into_account(None);
+            accounts.values.push((hashed_address, (!account.is_empty()).then_some(account)));
+        }
     }
 
-    schedule
+    (schedule, accounts)
 }
 
 /// Returns [`MultiProofTargetsV2`] for withdrawal addresses.
@@ -878,11 +775,12 @@ mod tests {
         AccountChanges, BalanceChange, BlockAccessIndex, CodeChange, NonceChange, SlotChanges,
         StorageChange,
     };
-    use alloy_primitives::{address, bytes, map::B256Map};
+    use alloy_primitives::{address, bytes, map::B256Map, B256, U256};
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm::{execute::WithTxEnv, TxEnvFor};
     use reth_evm_ethereum::EthEvmConfig;
+    use reth_primitives_traits::Account;
     use reth_provider::test_utils::MockEthProvider;
     use reth_storage_overlay::OverlayManager;
 
@@ -931,7 +829,7 @@ mod tests {
             .with_storage_read(U256::from(1));
 
         assert!(!bal_account_changes_state_root(&changes));
-        assert!(bal_update_schedule(&[changes]).accounts.is_empty());
+        assert!(bal_block_updates(&[changes]).0.accounts.is_empty());
     }
 
     #[test]
@@ -950,7 +848,7 @@ mod tests {
             AccountChanges::new(address!("0000000000000000000000000000000000000002"))
                 .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::from(10)));
 
-        let schedule = bal_update_schedule(&[with_storage.clone(), balance_only.clone()]);
+        let (schedule, accounts) = bal_block_updates(&[with_storage.clone(), balance_only.clone()]);
 
         let hashed_with_storage = keccak256(with_storage.address);
         let hashed_balance_only = keccak256(balance_only.address);
@@ -964,6 +862,18 @@ mod tests {
                 vec![keccak256(U256::from(1).to_be_bytes::<32>())]
             )])
         );
+        // Neither account's final value is known without the parent state.
+        assert!(accounts.values.is_empty());
+        assert_eq!(
+            accounts.deltas,
+            vec![
+                (hashed_with_storage, AccountDelta::default()),
+                (
+                    hashed_balance_only,
+                    AccountDelta { balance: Some(U256::from(10)), ..Default::default() }
+                ),
+            ]
+        );
     }
 
     #[test]
@@ -972,10 +882,14 @@ mod tests {
             .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::from(10)))
             .with_nonce_change(NonceChange::new(BlockAccessIndex::new(1), 7))
             .with_code_change(CodeChange::new(BlockAccessIndex::new(1), bytes!("6001600155")));
-        let fields = BalAccountStateFields::from_changes(&changes);
+        let delta = bal_account_delta(&changes);
 
         assert!(bal_account_changes_state_root(&changes));
-        assert!(!fields.needs_parent_account());
+        assert!(!delta.needs_parent_account());
+        // So it is sent as a value, and the parent state cannot change it.
+        let (_, accounts) = bal_block_updates(&[changes]);
+        assert!(accounts.deltas.is_empty());
+        assert_eq!(accounts.values[0].1, Some(delta.into_account(None)));
     }
 
     #[test]
@@ -985,18 +899,18 @@ mod tests {
                 U256::from(1),
                 vec![StorageChange::new(BlockAccessIndex::new(1), U256::from(2))],
             ));
-        let fields = BalAccountStateFields::from_changes(&changes);
+        let delta = bal_account_delta(&changes);
 
         assert!(bal_account_changes_state_root(&changes));
-        assert!(fields.needs_parent_account());
+        assert!(delta.needs_parent_account());
     }
 
     #[test]
     fn bal_account_uses_existing_fields_only_when_missing() {
         let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
             .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::from(10)));
-        let fields = BalAccountStateFields::from_changes(&changes);
-        let account = fields.into_account(Some(Account {
+        let delta = bal_account_delta(&changes);
+        let account = delta.into_account(Some(Account {
             balance: U256::from(1),
             nonce: 3,
             bytecode_hash: Some(B256::repeat_byte(0xaa)),
@@ -1069,4 +983,8 @@ pub struct PrewarmMetrics {
     /// A histogram of the time spent building the BAL update schedule, which the hashed state
     /// updates wait for
     pub(crate) bal_update_schedule_duration: Histogram,
+    /// Number of BAL accounts sent as a delta over their parent state.
+    pub(crate) bal_account_deltas: Histogram,
+    /// Number of BAL accounts whose final value the access list fully determines.
+    pub(crate) bal_account_values: Histogram,
 }

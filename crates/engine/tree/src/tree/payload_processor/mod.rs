@@ -27,10 +27,10 @@ use reth_tasks::Runtime;
 pub use reth_trie_parallel::{
     error::StateRootTaskError,
     state_root_task::{
-        evm_state_to_hashed_post_state, BlockUpdateSchedule, PayloadStateRootHandle,
-        StateAccessHint, StateRootComputeOutcome, StateRootHandle, StateRootHintStream,
-        StateRootMessage, StateRootSink, StateRootTaskCancelGuard, StateRootUpdateHook,
-        StateRootUpdateStream,
+        evm_state_to_hashed_post_state, AccountDelta, BlockAccountUpdates, BlockUpdateSchedule,
+        PayloadStateRootHandle, StateAccessHint, StateRootComputeOutcome, StateRootHandle,
+        StateRootHintStream, StateRootMessage, StateRootSink, StateRootTaskCancelGuard,
+        StateRootUpdateHook, StateRootUpdateStream,
     },
 };
 use std::{

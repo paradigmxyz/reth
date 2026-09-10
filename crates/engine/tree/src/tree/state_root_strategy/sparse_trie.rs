@@ -7,7 +7,8 @@ use std::{
 };
 
 use super::{
-    evm_state_to_hashed_post_state, BlockUpdateSchedule, StateRootComputeOutcome, StateRootMessage,
+    evm_state_to_hashed_post_state, AccountDelta, BlockAccountUpdates, BlockUpdateSchedule,
+    StateRootComputeOutcome, StateRootMessage,
 };
 use alloy_primitives::{
     map::{hash_map::Entry, B256Map},
@@ -86,13 +87,7 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// Invariant: for each entry in `pending_account_updates` account must either be already
     /// revealed in the trie, have an entry in `account_updates`, or have a leaf update blocked
     /// inside the accounts trie.
-    ///
-    /// Values can be either of:
-    ///   - None: account had a storage update and is awaiting storage root calculation and/or
-    ///     account node reveal to complete.
-    ///   - Some(_): account was changed/destroyed and is awaiting storage root calculation/reveal
-    ///     to complete.
-    pending_account_updates: B256Map<Option<Option<Account>>>,
+    pending_account_updates: B256Map<PendingAccountUpdate>,
     /// Account leaf values the accounts trie reported while applying a [`LeafUpdate::Touched`]
     /// entry, so promotion does not have to walk the trie again for an account whose fields did
     /// not change.
@@ -129,6 +124,9 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// Number of times promotion had to read an account value back from the accounts trie
     /// because [`Self::existing_accounts`] held no report for it.
     account_value_fallbacks: u64,
+    /// Number of account values promotion assembled from an [`AccountDelta`] and the account's
+    /// parent leaf, rather than taking them from the producer.
+    assembled_account_values: u64,
     /// Pending proof targets queued for dispatch to proof workers.
     pending_targets: PendingTargets,
     /// Proof batches dispatched to workers and not yet received.
@@ -158,6 +156,12 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// final [`HashedPostState`] and share it with main engine thread without requiring any extra
     /// hashing work.
     final_hashed_state: HashedPostState,
+    /// The published [`Self::final_hashed_state`], once it is complete.
+    finalized_hashed_state: Option<Arc<HashedPostState>>,
+    /// Whether this block sent an [`AccountDelta`], whose value is only known once the
+    /// account's parent leaf is, which is what makes [`Self::final_hashed_state`] incomplete at
+    /// the end of the update stream.
+    has_account_deltas: bool,
 
     /// Metrics for the sparse trie.
     metrics: SparseTrieTaskMetrics,
@@ -220,6 +224,7 @@ where
             storage_cache_hits: 0,
             storage_cache_misses: 0,
             account_value_fallbacks: 0,
+            assembled_account_values: 0,
             pending_targets: Default::default(),
             in_flight_proof_batches: 0,
             storage: Default::default(),
@@ -229,6 +234,8 @@ where
             pending_updates: Default::default(),
             initial_updates_applied: false,
             final_hashed_state: Default::default(),
+            finalized_hashed_state: None,
+            has_account_deltas: false,
             metrics,
         }
     }
@@ -252,6 +259,9 @@ where
                 }
                 StateRootMessage::UpdateSchedule(schedule) => {
                     SparseTrieTaskMessage::UpdateSchedule(schedule)
+                }
+                StateRootMessage::AccountUpdates(updates) => {
+                    SparseTrieTaskMessage::AccountUpdates(updates)
                 }
                 StateRootMessage::StateUpdate(state) => {
                     let _span = trace_span!(target: "engine::tree::payload_processor::sparse_trie", "hashing_state_update", n = state.len()).entered();
@@ -324,7 +334,6 @@ where
         let mut total_idle_time = std::time::Duration::ZERO;
         let mut idle_start = Instant::now();
         let mut done = false;
-        let mut finalized_hashed_state = None;
 
         // Streaming phase: updates are still arriving. Ends when the finish marker is
         // processed. Only producers hold update senders, so the channel closing before the
@@ -342,9 +351,7 @@ where
                     let update = message.map_err(|_| StateRootTaskError::Other(
                         "updates channel disconnected before state root calculation".to_string(),
                     ))?;
-                    if let Some(hashed_state) = self.on_message(update) {
-                        finalized_hashed_state = Some(hashed_state);
-                    }
+                    self.on_message(update);
                     self.pending_updates += 1;
                 }
                 recv(self.proof_result_rx) -> message => {
@@ -422,6 +429,8 @@ where
             self.storage_in_flight, 0,
             "completion must wait for every checked out storage trie"
         );
+        // Every account is promoted by now, so the values assembled from deltas are all in.
+        self.publish_final_hashed_state();
         self.metrics.sparse_trie_idle_time_seconds.record(total_idle_time.as_secs_f64());
 
         debug!(target: "engine::root", "All proofs processed, ending calculation");
@@ -459,16 +468,22 @@ where
         self.metrics
             .sparse_trie_account_value_fallbacks
             .record(self.account_value_fallbacks as f64);
+        self.metrics
+            .sparse_trie_assembled_account_values
+            .record(self.assembled_account_values as f64);
         self.account_cache_hits = 0;
         self.account_cache_misses = 0;
         self.storage_cache_hits = 0;
         self.storage_cache_misses = 0;
         self.account_value_fallbacks = 0;
+        self.assembled_account_values = 0;
 
         Ok(StateRootComputeOutcome {
             state_root,
             trie_updates: Arc::new(trie_updates),
-            hashed_state: finalized_hashed_state
+            hashed_state: self
+                .finalized_hashed_state
+                .take()
                 .expect("finished state updates publish the hashed post state"),
         })
     }
@@ -564,27 +579,34 @@ where
     }
 
     /// Processes a [`SparseTrieTaskMessage`] from the hashing task.
-    fn on_message(&mut self, message: SparseTrieTaskMessage) -> Option<Arc<HashedPostState>> {
+    fn on_message(&mut self, message: SparseTrieTaskMessage) {
         match message {
-            SparseTrieTaskMessage::PrefetchProofs(targets) => {
-                self.on_prewarm_targets(targets);
-                None
-            }
-            SparseTrieTaskMessage::UpdateSchedule(schedule) => {
-                self.on_update_schedule(schedule);
-                None
-            }
+            SparseTrieTaskMessage::PrefetchProofs(targets) => self.on_prewarm_targets(targets),
+            SparseTrieTaskMessage::UpdateSchedule(schedule) => self.on_update_schedule(schedule),
+            SparseTrieTaskMessage::AccountUpdates(updates) => self.on_account_updates(updates),
             SparseTrieTaskMessage::HashedState(hashed_state) => {
-                self.on_hashed_state_update(hashed_state);
-                None
+                self.on_hashed_state_update(hashed_state)
             }
             SparseTrieTaskMessage::FinishedStateUpdates => {
-                let hashed_state = Arc::new(core::mem::take(&mut self.final_hashed_state));
-                let _ = self.final_hashed_state_tx.take().unwrap().send(Arc::clone(&hashed_state));
                 self.finished_state_updates = true;
-                Some(hashed_state)
+                if !self.has_account_deltas {
+                    self.publish_final_hashed_state();
+                }
             }
         }
+    }
+
+    /// Publishes the block's hashed post state to the engine.
+    ///
+    /// This happens at the end of the update stream for a block whose values all arrive as
+    /// values, and only once every account is promoted for a block whose values are assembled
+    /// from deltas: an assembled value is not known before its account's parent leaf is.
+    fn publish_final_hashed_state(&mut self) {
+        let Some(tx) = self.final_hashed_state_tx.take() else { return };
+
+        let hashed_state = Arc::new(core::mem::take(&mut self.final_hashed_state));
+        let _ = tx.send(Arc::clone(&hashed_state));
+        self.finalized_hashed_state = Some(hashed_state);
     }
 
     #[instrument(
@@ -656,6 +678,48 @@ where
         self.metrics.sparse_trie_scheduled_leaves.record(leaves as f64);
     }
 
+    /// Takes the block's account changes, as final values or as deltas over the parent state.
+    ///
+    /// A delta is resolved by [`Self::promote_account`], which reads the account's parent leaf
+    /// for its storage root anyway, so an assembled account waits for nothing a value does not
+    /// already wait for. The delta itself only reaches the accounts trie through that
+    /// promotion, so it is applied exactly once, and a value arriving later for the same
+    /// address replaces it.
+    #[instrument(
+        level = "trace",
+        target = "engine::tree::payload_processor::sparse_trie",
+        skip_all
+    )]
+    fn on_account_updates(&mut self, updates: BlockAccountUpdates) {
+        let BlockAccountUpdates { values, deltas } = updates;
+        self.new_account_updates.reserve(values.len() + deltas.len());
+        self.pending_account_updates.reserve(values.len() + deltas.len());
+        self.promotable_accounts.reserve(values.len() + deltas.len());
+        self.has_account_deltas |= !deltas.is_empty();
+
+        for (address, account) in values {
+            self.final_hashed_state.accounts.insert(address, account);
+            self.queue_account_update(address, PendingAccountUpdate::Value(account));
+        }
+        for (address, delta) in deltas {
+            self.queue_account_update(address, PendingAccountUpdate::Delta(delta));
+        }
+    }
+
+    /// Queues an account's own update for promotion, touching its leaf so the trie reveals it.
+    fn queue_account_update(&mut self, address: B256, update: PendingAccountUpdate) {
+        // This might overwrite an existing update, which is fine, because storage root from it
+        // is already tracked in the trie and can be easily fetched again.
+        self.new_account_updates.insert(address, LeafUpdate::Touched);
+
+        // Everything else can be promoted as soon as its storage trie is drained, so an entry
+        // that awaited a storage root or a parent leaf has to be queued again.
+        let previous = self.pending_account_updates.insert(address, update);
+        if !matches!(previous, Some(PendingAccountUpdate::Value(_))) {
+            self.promotable_accounts.push(address);
+        }
+    }
+
     /// Processes a hashed state update and encodes all state changes as trie updates.
     #[instrument(
         level = "trace",
@@ -685,27 +749,13 @@ where
             // Make sure account is tracked in `pending_account_updates` so that once storage root
             // is computed, it will be updated in the accounts trie.
             if let Entry::Vacant(entry) = self.pending_account_updates.entry(address) {
-                entry.insert(None);
+                entry.insert(PendingAccountUpdate::StorageOnly);
                 self.promotable_accounts.push(address);
             }
         }
 
         for (&address, &account) in &hashed_state_update.accounts {
-            // Track account as touched.
-            //
-            // This might overwrite an existing update, which is fine, because storage root from it
-            // is already tracked in the trie and can be easily fetched again.
-            self.new_account_updates.insert(address, LeafUpdate::Touched);
-
-            // Track account in `pending_account_updates` so that once storage root is computed,
-            // it will be updated in the accounts trie.
-            //
-            // A known account can be promoted as soon as its storage trie is drained, so an entry
-            // that only awaited a storage root has to be queued again.
-            if !matches!(self.pending_account_updates.insert(address, Some(account)), Some(Some(_)))
-            {
-                self.promotable_accounts.push(address);
-            }
+            self.queue_account_update(address, PendingAccountUpdate::Value(account));
         }
 
         self.final_hashed_state.extend(hashed_state_update);
@@ -1121,9 +1171,7 @@ where
     /// Returns whether the account was promoted. An account that is not ready stays pending and
     /// is queued again by whichever transition unblocks it, including the return of its trie.
     fn promote_account(&mut self, addr: B256) -> bool {
-        let Some(mut pending) = self.pending_account_updates.get(&addr).copied() else {
-            return false
-        };
+        let Some(pending) = self.pending_account_updates.get(&addr).copied() else { return false };
 
         // The root of a trie this block touched is only readable from its slot, and only while
         // no job owns it.
@@ -1148,7 +1196,7 @@ where
         };
 
         if let Some(storage_root) = updated_storage_root &&
-            let Some(account) = pending.take()
+            let PendingAccountUpdate::Value(account) = pending
         {
             self.write_account_leaf(addr, account, storage_root);
             return true;
@@ -1156,6 +1204,14 @@ where
 
         // Get the current account state either from the trie or from latest account
         // update, which the accounts trie may be holding on to until it is revealed.
+        //
+        // A buffered update is not looked at, because there is never one here: promotion runs
+        // after `process_new_updates` handed the whole buffer to the trie. One left in it would
+        // hide the account's own change from the read below.
+        debug_assert!(
+            !self.new_account_updates.contains_key(&addr),
+            "account {addr:?} has a buffered update that promotion would read past",
+        );
         let pending_update = match self.account_updates.get(&addr) {
             Some(update) => Some(update),
             None => self.trie.state_trie_ref().and_then(|trie| trie.blocked_updates().get(&addr)),
@@ -1177,13 +1233,25 @@ where
             },
         };
 
-        let (account, storage_root) = if let Some(account) = pending.take() {
-            // If account is Some(_) here it means it didn't have any storage updates
+        let (account, storage_root) = if let PendingAccountUpdate::Value(account) = pending {
+            // If account is a value here it means it didn't have any storage updates
             // and we can fetch the storage root directly from the account trie.
             //
             // If it did have storage updates, we would've had processed it above when iterating
             // over storage tries.
             (account, trie_account.map_or(EMPTY_ROOT_HASH, |account| account.storage_root))
+        } else if let PendingAccountUpdate::Delta(delta) = pending {
+            // The parent leaf is resolved above, so the fields the block did not write are
+            // known now. The assembled value is also this account's entry in the block's hashed
+            // post state, which the producer of a delta could not fill in either.
+            let account = delta.into_account(trie_account.map(Into::into));
+            let account = (!account.is_empty()).then_some(account);
+            self.final_hashed_state.accounts.insert(addr, account);
+            self.assembled_account_values += 1;
+
+            let storage_root = updated_storage_root
+                .unwrap_or_else(|| trie_account.map_or(EMPTY_ROOT_HASH, |a| a.storage_root));
+            (account, storage_root)
         } else {
             let storage_root = match updated_storage_root {
                 Some(storage_root) => Some(storage_root),
@@ -1230,8 +1298,10 @@ where
                 // A job owns the trie, or the trie still has leaf updates to apply.
                 Some(StorageSlot::InFlight(_)) => continue,
                 Some(StorageSlot::Idle(work)) if !work.is_drained() => continue,
+                // A delta is not promotable from its storage root alone: it also needs the
+                // account's parent leaf, which the assert below covers.
                 Some(StorageSlot::Idle(work)) => assert!(
-                    !(work.updated && pending.is_some()),
+                    !(work.updated && matches!(pending, PendingAccountUpdate::Value(_))),
                     "account {addr:?} could be promoted from its drained storage trie but was not queued",
                 ),
                 None => {}
@@ -1388,6 +1458,18 @@ where
 
         Ok(())
     }
+}
+
+/// What the sparse trie task still needs before it can write an address' account leaf.
+#[derive(Clone, Copy, Debug)]
+enum PendingAccountUpdate {
+    /// The account's own fields did not change; only its storage root has to be recomputed.
+    StorageOnly,
+    /// The account's final value, known by whoever produced the update. `None` deletes it.
+    Value(Option<Account>),
+    /// The fields the block wrote, to be applied over the account's parent leaf, which the
+    /// producer of the update could not read.
+    Delta(AccountDelta),
 }
 
 /// State of one address' storage trie in the sparse trie task.
@@ -1745,6 +1827,8 @@ pub(super) struct SparseTrieTaskMetrics {
     /// Number of account values promotion had to read back from the accounts trie because the
     /// trie never reported them while applying a touched update.
     pub(super) sparse_trie_account_value_fallbacks: Histogram,
+    /// Number of account values promotion assembled from a delta and the account's parent leaf.
+    pub(super) sparse_trie_assembled_account_values: Histogram,
     /// Number of account and storage leaves a block's update schedule seeded before its values.
     pub(super) sparse_trie_scheduled_leaves: Histogram,
 
@@ -1865,6 +1949,8 @@ enum SparseTrieTaskMessage {
     PrefetchProofs(MultiProofTargetsV2),
     /// The keys the block will change (passed through directly, they are already hashed).
     UpdateSchedule(BlockUpdateSchedule),
+    /// The block's account changes (passed through directly, they are already hashed).
+    AccountUpdates(BlockAccountUpdates),
     /// Signals that all state updates have been received.
     FinishedStateUpdates,
 }
@@ -2253,6 +2339,113 @@ mod tests {
         assert!(work.updated);
         assert!(work.trie.is_root_cached(), "a drained payload hashes its trie");
         assert!(!work.has_work(), "and hashes it only once");
+
+        drop(updates_tx);
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
+    }
+
+    #[test]
+    fn an_account_delta_resolves_from_its_leaf_and_publishes_the_hashed_state() {
+        let runtime = reth_tasks::Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayManager::<reth_chain_state::EthPrimitives>::default()
+                .overlay_builder(anchor_hash),
+        );
+        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
+        let proof_worker_handle = ProofWorkerHandle::new(
+            &runtime,
+            ProofTaskCtx::new(state_provider_factory),
+            false,
+            proof_result_tx.clone(),
+        );
+
+        let trie = SparseStateTrie::default()
+            .with_accounts_trie(
+                RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default()),
+            )
+            .with_default_storage_trie(RevealableSparseTrie::blind_from(
+                ArenaParallelSparseTrie::default(),
+            ))
+            .with_updates(true);
+
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (_cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
+        let (final_hashed_state_tx, final_hashed_state_rx) = std::sync::mpsc::channel();
+        let mut task = SparseTrieCacheTask::new_with_trie(
+            &runtime,
+            updates_rx,
+            cancel_rx,
+            final_hashed_state_tx,
+            proof_worker_handle,
+            proof_result_tx,
+            proof_result_rx,
+            SparseTrieTaskMetrics::default(),
+            trie,
+            EMPTY_ROOT_HASH,
+            TrieNodeEpoch::new(1),
+            1,
+        );
+
+        let address = B256::repeat_byte(0x11);
+        let parent = Account { balance: U256::from(100), nonce: 3, bytecode_hash: None };
+        let delta = AccountDelta { balance: Some(U256::from(250)), ..Default::default() };
+
+        task.on_message(SparseTrieTaskMessage::AccountUpdates(BlockAccountUpdates {
+            values: Vec::new(),
+            deltas: vec![(address, delta)],
+        }));
+        task.on_message(SparseTrieTaskMessage::FinishedStateUpdates);
+        assert!(
+            final_hashed_state_rx.try_recv().is_err(),
+            "the block's hashed state is incomplete while a delta is unresolved"
+        );
+
+        task.pending_updates = 1;
+        task.process_new_updates().unwrap();
+        task.promote_pending_account_updates().unwrap();
+        assert!(
+            task.pending_account_updates.contains_key(&address),
+            "a delta cannot be applied before its leaf is revealed"
+        );
+
+        task.on_proof_result(DecodedMultiProofV2 {
+            account_proofs: vec![ProofTrieNodeV2 {
+                path: Nibbles::default(),
+                node: TrieNodeV2::Leaf(LeafNode::new(
+                    Nibbles::unpack(address),
+                    alloy_rlp::encode(parent.into_trie_account(EMPTY_ROOT_HASH)),
+                )),
+                masks: None,
+            }],
+            storage_proofs: Default::default(),
+        })
+        .unwrap();
+        task.promote_pending_account_updates().unwrap();
+
+        // Only the balance moved; the nonce and the code hash come from the leaf.
+        let assembled = Account {
+            balance: U256::from(250),
+            nonce: 3,
+            bytecode_hash: Some(alloy_consensus::constants::KECCAK_EMPTY),
+        };
+        assert!(task.pending_account_updates.is_empty());
+        assert_eq!(
+            task.trie.get_account_value(&address),
+            Some(&alloy_rlp::encode(assembled.into_trie_account(EMPTY_ROOT_HASH)))
+        );
+        assert_eq!(task.final_hashed_state.accounts.get(&address), Some(&Some(assembled)));
+        assert_eq!(
+            task.account_value_fallbacks, 0,
+            "the leaf value was reported when the touch was applied"
+        );
+
+        task.publish_final_hashed_state();
+        let published = final_hashed_state_rx.try_recv().expect("hashed state is published");
+        assert_eq!(published.accounts.get(&address), Some(&Some(assembled)));
 
         drop(updates_tx);
         drop(task);
@@ -2788,7 +2981,7 @@ mod tests {
 
         task.finished_state_updates = true;
         task.account_updates.insert(account, LeafUpdate::Touched);
-        task.pending_account_updates.insert(account, None);
+        task.pending_account_updates.insert(account, PendingAccountUpdate::StorageOnly);
         task.fetched_account_targets.insert(account_target, ProofV2TargetParent::NONE);
 
         // A storage leaf that stayed blocked after its pass ran, so no pass is ready to run.
