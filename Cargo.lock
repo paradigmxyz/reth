@@ -122,7 +122,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=0902067#090206713b55bb6a5b6857dbf7ab29ed0f9ef5ad"
+source = "git+https://github.com/alloy-rs/alloy?rev=4d7989d#4d7989d9b88e26c68af177457e2c308b108fc3d8"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -149,7 +149,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus-any"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=0902067#090206713b55bb6a5b6857dbf7ab29ed0f9ef5ad"
+source = "git+https://github.com/alloy-rs/alloy?rev=4d7989d#4d7989d9b88e26c68af177457e2c308b108fc3d8"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -266,7 +266,7 @@ dependencies = [
 [[package]]
 name = "alloy-eips"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=0902067#090206713b55bb6a5b6857dbf7ab29ed0f9ef5ad"
+source = "git+https://github.com/alloy-rs/alloy?rev=4d7989d#4d7989d9b88e26c68af177457e2c308b108fc3d8"
 dependencies = [
  "alloy-eip2124",
  "alloy-eip2930",
@@ -311,7 +311,7 @@ dependencies = [
 [[package]]
 name = "alloy-genesis"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=0902067#090206713b55bb6a5b6857dbf7ab29ed0f9ef5ad"
+source = "git+https://github.com/alloy-rs/alloy?rev=4d7989d#4d7989d9b88e26c68af177457e2c308b108fc3d8"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -405,7 +405,7 @@ dependencies = [
 [[package]]
 name = "alloy-network-primitives"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=0902067#090206713b55bb6a5b6857dbf7ab29ed0f9ef5ad"
+source = "git+https://github.com/alloy-rs/alloy?rev=4d7989d#4d7989d9b88e26c68af177457e2c308b108fc3d8"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -692,7 +692,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-eth"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=0902067#090206713b55bb6a5b6857dbf7ab29ed0f9ef5ad"
+source = "git+https://github.com/alloy-rs/alloy?rev=4d7989d#4d7989d9b88e26c68af177457e2c308b108fc3d8"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -704,7 +704,7 @@ dependencies = [
  "alloy-sol-types",
  "alloy-trie",
  "arbitrary",
- "itertools 0.14.0",
+ "itertools 0.13.0",
  "serde",
  "serde_json",
  "serde_with",
@@ -755,7 +755,7 @@ dependencies = [
 [[package]]
 name = "alloy-serde"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=0902067#090206713b55bb6a5b6857dbf7ab29ed0f9ef5ad"
+source = "git+https://github.com/alloy-rs/alloy?rev=4d7989d#4d7989d9b88e26c68af177457e2c308b108fc3d8"
 dependencies = [
  "alloy-primitives",
  "arbitrary",
@@ -969,7 +969,7 @@ dependencies = [
 [[package]]
 name = "alloy-tx-macros"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=0902067#090206713b55bb6a5b6857dbf7ab29ed0f9ef5ad"
+source = "git+https://github.com/alloy-rs/alloy?rev=4d7989d#4d7989d9b88e26c68af177457e2c308b108fc3d8"
 dependencies = [
  "darling 0.23.0",
  "proc-macro2",
@@ -8106,7 +8106,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=7c96530#7c965302b2cd92fa88abb3bb4238de4eca97b99a"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=352e90b#352e90b863c63cbf2dd87a7f5db7c56db1a4d8f9"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -8126,7 +8126,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs-derive"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=7c96530#7c965302b2cd92fa88abb3bb4238de4eca97b99a"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=352e90b#352e90b863c63cbf2dd87a7f5db7c56db1a4d8f9"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9856,7 +9856,7 @@ dependencies = [
 [[package]]
 name = "reth-primitives-traits"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=7c96530#7c965302b2cd92fa88abb3bb4238de4eca97b99a"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=352e90b#352e90b863c63cbf2dd87a7f5db7c56db1a4d8f9"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -10961,7 +10961,7 @@ dependencies = [
 [[package]]
 name = "reth-zstd-compressors"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=7c96530#7c965302b2cd92fa88abb3bb4238de4eca97b99a"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=352e90b#352e90b863c63cbf2dd87a7f5db7c56db1a4d8f9"
 dependencies = [
  "zstd",
 ]
