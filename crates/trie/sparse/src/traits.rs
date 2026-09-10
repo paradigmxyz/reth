@@ -2,6 +2,7 @@
 
 use core::fmt::Debug;
 
+use crate::BlockedLeafUpdates;
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_primitives::{
     map::{B256Map, HashMap, HashSet},
@@ -223,12 +224,13 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
 
     /// Applies leaf updates to the sparse trie.
     ///
-    /// When a [`LeafUpdate::Changed`] is successfully applied, it is removed from the
-    /// given [`B256Map`]. If it could not be applied due to blinded nodes, it remains
-    /// in the map and the callback is invoked with the required proof target.
+    /// The given [`B256Map`] is drained: updates that could not be applied because they hit a
+    /// blinded node are moved into [`SparseTrie::blocked_updates`] and the callback is invoked
+    /// with the required proof target. An update for a key that is already blocked replaces the
+    /// blocked one.
     ///
-    /// Once that proof is calculated and revealed via [`SparseTrie::reveal_nodes`], the same
-    /// `updates` map can be reused to retry the update.
+    /// Once the proof is revealed via [`SparseTrie::reveal_nodes`], the affected blocked updates
+    /// are applied by the next call to this method, even when `updates` is empty.
     ///
     /// The callback receives `(key, parent)` where `key` is the full 32-byte hashed key
     /// (right-padded with zeros from the blinded path) and `parent` identifies the revealed logical
@@ -244,6 +246,9 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
         updates: &mut B256Map<LeafUpdate>,
         proof_required_fn: impl FnMut(B256, ProofV2TargetParent),
     ) -> SparseTrieResult<()>;
+
+    /// Returns the leaf updates that could not be applied yet because they hit a blinded node.
+    fn blocked_updates(&self) -> &BlockedLeafUpdates;
 }
 
 /// Tracks modifications to the sparse trie structure.

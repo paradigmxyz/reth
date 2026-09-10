@@ -512,10 +512,12 @@ pub(super) fn test_update_leaves_blinded_node_requests_proof<T: SparseTrie>(new_
     // The callback should have been invoked.
     assert!(!targets.is_empty(), "callback should be invoked for a blinded node");
 
-    // The key should remain in the updates map (not drained).
-    assert!(
-        !leaf_updates.is_empty(),
-        "key should remain in updates map when blinded node is encountered"
+    // The trie should have taken ownership of the update (not drained).
+    assert!(leaf_updates.is_empty(), "updates map should be drained");
+    assert_eq!(
+        trie.blocked_updates().len(),
+        1,
+        "key should be blocked in the trie when blinded node is encountered"
     );
 }
 
@@ -558,7 +560,7 @@ pub(super) fn test_update_leaves_retry_after_reveal<T: SparseTrie>(new_trie: fn(
     })
     .expect("update_leaves should succeed");
     assert!(!targets.is_empty(), "callback should fire for blinded node");
-    assert!(!leaf_updates.is_empty(), "key should remain in map after blinded hit");
+    assert_eq!(trie.blocked_updates().len(), 1, "key should be blocked after blinded hit");
 
     // Reveal the proof for the requested targets.
     let (mut proof_nodes, _) = harness.proof_v2(&mut targets);
@@ -621,7 +623,7 @@ pub(super) fn test_remove_leaf_blinded_sibling_requires_reveal<T: SparseTrie>(ne
     })
     .expect("update_leaves should succeed");
     assert!(!targets.is_empty(), "callback should fire for blinded sibling");
-    assert!(!leaf_updates.is_empty(), "key should remain in map after blinded hit");
+    assert_eq!(trie.blocked_updates().len(), 1, "key should be blocked after blinded hit");
 
     // Reveal the blinded sibling subtrie.
     let (mut proof_nodes, _) = harness.proof_v2(&mut targets);
@@ -690,8 +692,8 @@ pub(super) fn test_update_leaves_removal_branch_collapse_blinded_sibling<T: Spar
     // Callback should have fired for the blinded sibling path.
     assert!(!targets.is_empty(), "callback should fire for blinded sibling");
 
-    // Update should remain in the map (not drained).
-    assert!(!leaf_updates.is_empty(), "update should remain in map after blinded hit");
+    // Update should be blocked in the trie (not applied).
+    assert!(!trie.blocked_updates().is_empty(), "update should be blocked after blinded hit");
 
     // Leaf value should be preserved (atomic rollback).
     let value_after = trie.get_leaf_value(&revealed_path);
@@ -760,8 +762,8 @@ pub(super) fn test_update_leaves_subtrie_collapse_requests_proof<T: SparseTrie>(
         !targets.is_empty(),
         "callback should fire for blinded sibling during subtrie collapse"
     );
-    // At least one removal key should remain in the map for retry.
-    assert!(!leaf_updates.is_empty(), "removal keys should remain in map after blinded hit");
+    // At least one removal key should be blocked for retry.
+    assert!(!trie.blocked_updates().is_empty(), "removal keys should be blocked after blinded hit");
 }
 
 /// Multiple keys hitting the same blinded node each trigger a callback.
@@ -811,8 +813,8 @@ pub(super) fn test_update_leaves_multiple_keys_same_blinded_node<T: SparseTrie>(
 
     // Callback should fire for each key (3 invocations).
     assert_eq!(targets.len(), 3, "callback should fire once per key hitting the blinded node");
-    // All updates should remain in the map for retry.
-    assert_eq!(leaf_updates.len(), 3, "all keys should remain in map after blinded hit");
+    // All updates should be blocked for retry.
+    assert_eq!(trie.blocked_updates().len(), 3, "all keys should be blocked after blinded hit");
 }
 
 /// `LeafUpdate::Touched` on a fully revealed path should be a no-op.
@@ -892,8 +894,8 @@ pub(super) fn test_update_leaves_touched_blinded_requests_proof<T: SparseTrie>(
 
     // Callback should have been invoked for the blinded node.
     assert!(!targets.is_empty(), "callback should fire for Touched on blinded path");
-    // Key should remain in the updates map.
-    assert!(!leaf_updates.is_empty(), "Touched key should remain in map when blinded");
+    // Key should be blocked in the trie.
+    assert_eq!(trie.blocked_updates().len(), 1, "Touched key should be blocked when blinded");
     // Root should be unchanged (no mutation).
     assert_eq!(
         trie.root(epoch(0)),
@@ -1369,8 +1371,8 @@ pub(super) fn test_branch_collapse_multi_empty_subtries_blinded_remaining<T: Spa
 
     // Callback should fire for the blinded child at 0xd8.
     assert!(!targets.is_empty(), "callback should fire for blinded child during branch collapse");
-    // Removal keys should remain in the map for retry.
-    assert!(!leaf_updates.is_empty(), "removal keys should remain in map after blinded hit");
+    // Removal keys should be blocked for retry.
+    assert!(!trie.blocked_updates().is_empty(), "removal keys should be blocked after blinded hit");
 
     // Reveal the blinded subtrie.
     let (mut proof_nodes, _) = harness.proof_v2(&mut targets);
