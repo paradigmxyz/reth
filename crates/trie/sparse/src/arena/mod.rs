@@ -665,6 +665,8 @@ pub struct ArenaParallelSparseTrie {
     buffers: ArenaTrieBuffers,
     /// Thresholds controlling when parallelism is enabled for different operations.
     parallelism_thresholds: ArenaParallelismThresholds,
+    /// Conservative marker for pending lower-owned updates, avoiding clean collection scans.
+    subtrie_updates_pending: bool,
 }
 
 impl ArenaParallelSparseTrie {
@@ -2057,6 +2059,7 @@ impl Default for ArenaParallelSparseTrie {
             root,
             buffers: ArenaTrieBuffers::default(),
             parallelism_thresholds: ArenaParallelismThresholds::default(),
+            subtrie_updates_pending: false,
         }
     }
 }
@@ -2070,6 +2073,7 @@ impl ArenaParallelSparseTrie {
 
         if !subtrie.arena[subtrie.root].is_cached() {
             subtrie.update_cached_rlp(new_epoch);
+            self.subtrie_updates_pending |= self.buffers.updates.is_some();
         }
     }
 }
@@ -2135,6 +2139,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 *updates = None;
             }
         }
+        self.subtrie_updates_pending = false;
         reset(&mut self.buffers.updates, retain_updates);
         for (_, node) in &mut self.upper_arena {
             if let ArenaSparseNode::Subtrie(subtrie) = node {
@@ -2331,6 +2336,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         }
 
         let has_selected = !selected.is_empty();
+        self.subtrie_updates_pending |= has_selected && self.buffers.updates.is_some();
         if has_selected {
             if selected.len() == 1 ||
                 total_dirty_leaves < self.parallelism_thresholds.min_dirty_leaves
@@ -2395,6 +2401,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
             return Cow::Owned(SparseTrieUpdates::default());
         };
         let mut result = Cow::Borrowed(parent);
+        if !self.subtrie_updates_pending {
+            return result;
+        }
         for (_, node) in &self.upper_arena {
             let ArenaSparseNode::Subtrie(subtrie) = node else { continue };
             let Some(updates) = &subtrie.buffers.updates else { continue };
@@ -2417,12 +2426,14 @@ impl SparseTrie for ArenaParallelSparseTrie {
     }
 
     fn take_updates(&mut self) -> SparseTrieUpdates {
-        for (_, node) in &mut self.upper_arena {
-            if let ArenaSparseNode::Subtrie(subtrie) = node {
-                Self::merge_subtrie_updates(
-                    &mut self.buffers.updates,
-                    &mut subtrie.buffers.updates,
-                );
+        if mem::take(&mut self.subtrie_updates_pending) {
+            for (_, node) in &mut self.upper_arena {
+                if let ArenaSparseNode::Subtrie(subtrie) = node {
+                    Self::merge_subtrie_updates(
+                        &mut self.buffers.updates,
+                        &mut subtrie.buffers.updates,
+                    );
+                }
             }
         }
         match self.buffers.updates.take() {
@@ -2444,6 +2455,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
             .upper_arena
             .insert(ArenaSparseNode::EmptyRoot { state: ArenaSparseNodeState::Revealed });
         self.buffers.clear();
+        self.subtrie_updates_pending = false;
     }
 
     #[instrument(
@@ -2606,6 +2618,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
         if updates.is_empty() {
             return Ok(());
         }
+
+        self.subtrie_updates_pending |= self.buffers.updates.is_some();
 
         // Drain and sort updates lexicographically by nibbles path.
         let mut sorted: Vec<_> =
@@ -3167,6 +3181,17 @@ mod tests {
                     .is_some_and(|u| !u.updated_nodes.is_empty() || !u.removed_nodes.is_empty())
             })
         }));
+        let mut before_hash = retained.clone();
+        before_hash.take_updates();
+        let mut changes: B256Map<_> =
+            keys.iter().map(|key| (*key, LeafUpdate::Changed(vec![64]))).collect();
+        before_hash.update_leaves(&mut changes, |_, _| panic!("all paths are revealed")).unwrap();
+        before_hash.take_updates();
+        assert!(!before_hash.subtrie_updates_pending);
+        before_hash.root(epoch(101));
+        assert!(before_hash.subtrie_updates_pending);
+        assert!(!before_hash.take_updates().updated_nodes.is_empty());
+        assert!(!before_hash.subtrie_updates_pending);
         let mut toggled = retained.clone();
         toggled.set_updates(false);
         assert_eq!(toggled.take_updates(), Default::default());
