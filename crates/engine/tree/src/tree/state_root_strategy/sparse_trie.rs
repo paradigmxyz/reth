@@ -733,7 +733,7 @@ where
         let mut tries_to_compute_roots: Vec<(B256, SendStorageTriePtr<S>)> = Vec::new();
         for (address, updates) in &self.storage_updates {
             if updates.is_empty() &&
-                let Some(trie) = self.trie.storage_tries_mut().get_mut(address) &&
+                let Some(trie) = self.trie.storage_trie_entry_mut(address) &&
                 !trie.is_root_cached()
             {
                 tries_to_compute_roots.push((*address, SendStorageTriePtr(trie)));
@@ -764,7 +764,7 @@ where
             };
             let _enter = span.entered();
             // SAFETY:
-            // - pointers are created from `storage_tries_mut().get_mut(address)` above;
+            // - pointers are created from `storage_trie_entry_mut(address)` above;
             // - `storage_updates` is a map, so addresses are unique;
             // - we do not insert/remove entries between pointer collection and use, so pointers
             //   stay valid and map reallocation cannot occur;
