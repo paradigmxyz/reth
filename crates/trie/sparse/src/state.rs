@@ -3,7 +3,10 @@ use crate::{
     TrieNodeEpoch,
 };
 use alloc::vec::Vec;
-use alloy_primitives::{map::B256Map, B256};
+use alloy_primitives::{
+    map::{B256Map, B256Set},
+    B256,
+};
 use either::Either;
 use reth_execution_errors::{SparseStateTrieResult, SparseTrieErrorKind};
 use reth_trie_common::{
@@ -174,21 +177,34 @@ where
 
     /// Returns mutable reference to storage sparse trie if it was revealed.
     pub fn storage_trie_mut(&mut self, address: &B256) -> Option<&mut S> {
+        self.storage.update_candidates.insert(*address);
         self.storage.tries.get_mut(address).and_then(|e| e.as_revealed_mut())
     }
 
     /// Returns mutable reference to storage tries.
     pub const fn storage_tries_mut(&mut self) -> &mut B256Map<RevealableSparseTrie<S>> {
+        self.storage.scan_updates = true;
         &mut self.storage.tries
+    }
+
+    /// Returns mutable access to one storage trie while tracking possible persistence changes.
+    pub fn storage_trie_entry_mut(
+        &mut self,
+        address: &B256,
+    ) -> Option<&mut RevealableSparseTrie<S>> {
+        self.storage.update_candidates.insert(*address);
+        self.storage.tries.get_mut(address)
     }
 
     /// Takes the storage trie for the provided address.
     pub fn take_storage_trie(&mut self, address: &B256) -> Option<RevealableSparseTrie<S>> {
+        self.storage.update_candidates.remove(address);
         self.storage.tries.remove(address)
     }
 
     /// Takes the storage trie for the provided address, creating a blind one if it doesn't exist.
     pub fn take_or_create_storage_trie(&mut self, address: &B256) -> RevealableSparseTrie<S> {
+        self.storage.update_candidates.remove(address);
         self.storage.tries.remove(address).unwrap_or_else(|| {
             self.storage.cleared_tries.pop().unwrap_or_else(|| self.storage.default_trie.clone())
         })
@@ -196,6 +212,7 @@ where
 
     /// Inserts storage trie for the provided address.
     pub fn insert_storage_trie(&mut self, address: B256, storage_trie: RevealableSparseTrie<S>) {
+        self.storage.update_candidates.insert(address);
         self.storage.tries.insert(address, storage_trie);
     }
 
@@ -331,7 +348,7 @@ where
 
     /// Returns storage sparse trie root if the trie has been revealed.
     pub fn storage_root(&mut self, account: &B256, new_epoch: TrieNodeEpoch) -> Option<B256> {
-        self.storage.tries.get_mut(account).and_then(|trie| trie.root(new_epoch))
+        self.storage_trie_entry_mut(account).and_then(|trie| trie.root(new_epoch))
     }
 
     /// Returns mutable reference to the revealed account sparse trie.
@@ -379,21 +396,27 @@ where
     ///
     /// Panics if any of the storage tries are not revealed.
     pub fn storage_trie_updates(&mut self) -> B256Map<StorageTrieUpdates> {
+        if core::mem::take(&mut self.storage.scan_updates) {
+            self.storage.update_candidates.extend(self.storage.tries.keys().copied());
+        }
+        if self.storage.update_candidates.is_empty() {
+            return B256Map::default();
+        }
+        let tries = &mut self.storage.tries;
         self.storage
-            .tries
-            .iter_mut()
-            .filter_map(|(address, trie)| {
-                let trie = trie.as_revealed_mut().unwrap();
+            .update_candidates
+            .drain()
+            .filter_map(|address| {
+                let trie = tries.get_mut(&address)?.as_revealed_mut().unwrap();
                 if !trie.has_updates() {
-                    return None
+                    return None;
                 }
-
                 let updates = trie.take_updates();
                 let updates = StorageTrieUpdates {
                     storage_nodes: updates.updated_nodes,
                     removed_nodes: updates.removed_nodes,
                 };
-                (!updates.is_empty()).then_some((*address, updates))
+                (!updates.is_empty()).then_some((address, updates))
             })
             .collect()
     }
@@ -489,6 +512,11 @@ where
 struct StorageTries<S = ArenaParallelSparseTrie> {
     /// Sparse storage tries.
     tries: B256Map<RevealableSparseTrie<S>>,
+    /// Addresses exposed to mutation since the last collection. The trie-level pending-work
+    /// predicate is still checked before draining; proof revelation and hashing are included.
+    update_candidates: B256Set,
+    /// Unrestricted mutable map access requires one conservative scan at collection.
+    scan_updates: bool,
     /// Cleared storage tries, kept for re-use.
     cleared_tries: Vec<RevealableSparseTrie<S>>,
     /// A default cleared trie instance, which will be cloned when creating new tries.
@@ -534,6 +562,7 @@ impl<S: SparseTrieTrait> StorageTries<S> {
         let evicted = addresses_to_evict.len();
         self.cleared_tries.reserve(evicted);
         for address in addresses_to_evict {
+            self.update_candidates.remove(&address);
             if let Some(trie) = self.tries.remove(&address) {
                 self.cleared_tries.push(trie);
             }
@@ -547,6 +576,8 @@ impl<S: SparseTrieTrait> StorageTries<S> {
     /// Returns all fields to a cleared state, equivalent to the default state, keeping cleared
     /// collections for re-use later when possible.
     fn clear(&mut self) {
+        self.update_candidates.clear();
+        self.scan_updates = false;
         self.cleared_tries.extend(self.tries.drain().map(|(_, mut trie)| {
             trie.clear();
             trie
@@ -557,6 +588,7 @@ impl<S: SparseTrieTrait> StorageTries<S> {
 impl<S: SparseTrieTrait + Clone> StorageTries<S> {
     // Returns mutable reference to storage sparse trie, creating a blind one if it doesn't exist.
     fn get_or_create_trie_mut(&mut self, address: B256) -> &mut RevealableSparseTrie<S> {
+        self.update_candidates.insert(address);
         self.tries.entry(address).or_insert_with(|| {
             self.cleared_tries.pop().unwrap_or_else(|| self.default_trie.clone())
         })
@@ -973,6 +1005,126 @@ mod tests {
             .unwrap()
             .get_leaf_value(&full_path_0)
             .is_none());
+    }
+
+    #[test]
+    fn update_candidates_cover_ownership_and_unrestricted_mutation() {
+        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default().with_updates(true);
+        let address = B256::repeat_byte(1);
+        let mut trie = RevealableSparseTrie::<ArenaParallelSparseTrie>::revealed_empty();
+        trie.as_revealed_mut().unwrap().set_updates(true);
+        sparse.insert_storage_trie(address, trie);
+        let mutate = |trie: &mut ArenaParallelSparseTrie, value: u64| {
+            let mut updates = (0..32u64)
+                .map(|slot| {
+                    (
+                        alloy_primitives::keccak256(slot.to_be_bytes()),
+                        LeafUpdate::Changed(alloy_rlp::encode(value + slot)),
+                    )
+                })
+                .collect::<B256Map<_>>();
+            trie.update_leaves(&mut updates, |_, _| panic!("unexpected proof")).unwrap();
+            trie.root(epoch(value));
+        };
+        mutate(sparse.storage_trie_mut(&address).unwrap(), 1);
+        assert_eq!(sparse.storage_trie_updates().len(), 1);
+        assert!(sparse.storage.update_candidates.is_empty());
+        assert!(sparse.storage_trie_updates().is_empty());
+
+        let mut owned = sparse.take_storage_trie(&address).unwrap();
+        mutate(owned.as_revealed_mut().unwrap(), 2);
+        sparse.insert_storage_trie(address, owned);
+        assert_eq!(sparse.storage_trie_updates().len(), 1);
+
+        mutate(sparse.storage_tries_mut().get_mut(&address).unwrap().as_revealed_mut().unwrap(), 3);
+        assert!(sparse.storage.scan_updates);
+        assert_eq!(sparse.storage_trie_updates().len(), 1);
+        assert!(!sparse.storage.scan_updates);
+        assert!(sparse.storage_trie_updates().is_empty());
+
+        sparse.storage_trie_entry_mut(&address).unwrap().clear();
+        sparse.clear();
+        assert!(sparse.storage.update_candidates.is_empty());
+        assert!(sparse.storage_trie_updates().is_empty());
+    }
+
+    #[test]
+    #[ignore = "focused pending-update collection scaling benchmark"]
+    fn bench_candidate_collection_scaling() {
+        for cache_size in [64u64, 4096, 32768] {
+            for touched in [0u64, 1, 16] {
+                let mut samples = [Vec::new(), Vec::new()];
+                let mut tries = [
+                    SparseStateTrie::<ArenaParallelSparseTrie>::default(),
+                    SparseStateTrie::<ArenaParallelSparseTrie>::default(),
+                ];
+                for sparse in &mut tries {
+                    for account in 0..cache_size {
+                        let mut trie =
+                            RevealableSparseTrie::<ArenaParallelSparseTrie>::revealed_empty();
+                        trie.as_revealed_mut().unwrap().set_updates(true);
+                        sparse.insert_storage_trie(
+                            alloy_primitives::keccak256(account.to_be_bytes()),
+                            trie,
+                        );
+                    }
+                    assert!(sparse.storage_trie_updates().is_empty());
+                }
+                for iteration in 0..30 {
+                    for offset in 0..2 {
+                        let variant = (iteration + offset) % 2;
+                        let sparse = &mut tries[variant];
+                        for account in 0..touched {
+                            let address = alloy_primitives::keccak256(account.to_be_bytes());
+                            let trie = sparse.storage_trie_mut(&address).unwrap();
+                            let mut updates = (0..32u64)
+                                .map(|slot| {
+                                    (
+                                        alloy_primitives::keccak256(slot.to_be_bytes()),
+                                        LeafUpdate::Changed(alloy_rlp::encode(
+                                            iteration as u64 + slot + 1,
+                                        )),
+                                    )
+                                })
+                                .collect::<B256Map<_>>();
+                            trie.update_leaves(&mut updates, |_, _| panic!("unexpected proof"))
+                                .unwrap();
+                            trie.root(epoch(iteration as u64 + 1));
+                        }
+                        let start = std::time::Instant::now();
+                        let result = if variant == 1 {
+                            sparse.storage_trie_updates()
+                        } else {
+                            sparse
+                                .storage
+                                .tries
+                                .iter_mut()
+                                .filter_map(|(address, trie)| {
+                                    let trie = trie.as_revealed_mut().unwrap();
+                                    if !trie.has_updates() {
+                                        return None;
+                                    }
+                                    let updates = trie.take_updates();
+                                    let updates = StorageTrieUpdates {
+                                        storage_nodes: updates.updated_nodes,
+                                        removed_nodes: updates.removed_nodes,
+                                    };
+                                    (!updates.is_empty()).then_some((*address, updates))
+                                })
+                                .collect::<B256Map<_>>()
+                        };
+                        let elapsed = start.elapsed().as_secs_f64() * 1e6;
+                        assert_eq!(result.len(), touched as usize);
+                        sparse.storage.update_candidates.clear();
+                        if iteration >= 5 {
+                            samples[variant].push(elapsed);
+                        }
+                    }
+                }
+                let mean = |values: &[f64]| values.iter().sum::<f64>() / values.len() as f64;
+                eprintln!("collection_bench cache={cache_size} touched={touched} scan_us={:.3} candidates_us={:.3}", mean(&samples[0]), mean(&samples[1]));
+            }
+        }
     }
 
     #[test]
