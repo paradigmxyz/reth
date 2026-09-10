@@ -11,7 +11,10 @@
 //! 2. Prewarming tasks execute transactions in parallel using shared caches
 //! 3. When actual block execution happens, it benefits from the warmed cache
 
-use super::{bal_prewarm_pool::BalPrewarmPool, StateRootHintStream, StateRootUpdateStream};
+use super::{
+    bal_prewarm_pool::BalPrewarmPool, BlockUpdateSchedule, StateRootHintStream,
+    StateRootUpdateStream,
+};
 use crate::tree::{
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
@@ -384,6 +387,15 @@ where
                 let parent_span = branch_span.clone();
                 let _span = branch_span.entered();
 
+                // The keys go out before any value: they are all the task needs to start
+                // fetching the block's proofs, and they need no state reads to produce.
+                if !ctx.disable_bal_parallel_state_root {
+                    let schedule_start = Instant::now();
+                    hashed_update_stream
+                        .on_update_schedule(bal_update_schedule(stream_bal.as_bal()));
+                    ctx.metrics.bal_update_schedule_duration.record(schedule_start.elapsed());
+                }
+
                 stream_bal.as_bal().par_iter().for_each(|account_changes| {
                     WorkerPool::with_worker_mut(|worker| {
                         let provider =
@@ -671,13 +683,13 @@ where
         if self.disable_bal_parallel_state_root {
             return;
         }
+        if !bal_account_changes_state_root(account_changes) {
+            return;
+        }
+
         let address = account_changes.address;
         let mut hashed_address = None;
         let account_fields = BalAccountStateFields::from_changes(account_changes);
-
-        if !bal_account_changes_state_root(account_changes, account_fields) {
-            return;
-        }
 
         // If there are any storage changes we can assume that the resulting account info will be
         // non-empty, so the account will exist, and therefore we can pre-emptively send out storage
@@ -779,10 +791,6 @@ impl BalAccountStateFields {
         }
     }
 
-    const fn is_empty(self) -> bool {
-        self.balance.is_none() && self.nonce.is_none() && self.code_hash.is_none()
-    }
-
     const fn needs_parent_account(self) -> bool {
         self.balance.is_none() || self.nonce.is_none() || self.code_hash.is_none()
     }
@@ -807,11 +815,48 @@ impl BalAccountStateFields {
     }
 }
 
-const fn bal_account_changes_state_root(
-    account_changes: &alloy_eip7928::AccountChanges,
-    account_fields: BalAccountStateFields,
-) -> bool {
-    !account_fields.is_empty() || !account_changes.storage_changes.is_empty()
+/// Returns whether the account's changes can move the state root.
+///
+/// Read-only entries cannot, and neither can an account the list only names. Checked before the
+/// leaf fields are built, so a filtered-out account never pays for hashing its code.
+const fn bal_account_changes_state_root(account_changes: &alloy_eip7928::AccountChanges) -> bool {
+    !account_changes.storage_changes.is_empty() ||
+        !account_changes.balance_changes.is_empty() ||
+        !account_changes.nonce_changes.is_empty() ||
+        !account_changes.code_changes.is_empty()
+}
+
+/// Builds the schedule of leaves a BAL-executed block changes.
+///
+/// This is the key half of what [`PrewarmContext::send_bal_hashed_state`] sends values for. The
+/// state-root task gets it first, so it can reveal those leaves and request the block's proofs
+/// while the values are still being produced - the account values in particular wait for parent
+/// state reads, which is what makes the last addresses of a block reach the task late.
+fn bal_update_schedule(bal: &[alloy_eip7928::AccountChanges]) -> BlockUpdateSchedule {
+    let entries = bal
+        .par_iter()
+        .filter(|account_changes| bal_account_changes_state_root(account_changes))
+        .map(|account_changes| {
+            let slots = account_changes
+                .storage_post_states()
+                .map(|(slot, _)| keccak256(slot.to_be_bytes::<32>()))
+                .collect::<Vec<_>>();
+            (keccak256(account_changes.address), slots)
+        })
+        .collect::<Vec<_>>();
+
+    let mut schedule = BlockUpdateSchedule {
+        accounts: Vec::with_capacity(entries.len()),
+        storages: Default::default(),
+    };
+    for (hashed_address, slots) in entries {
+        schedule.accounts.push(hashed_address);
+        if !slots.is_empty() {
+            schedule.storages.insert(hashed_address, slots);
+        }
+    }
+
+    schedule
 }
 
 /// Returns [`MultiProofTargetsV2`] for withdrawal addresses.
@@ -833,7 +878,7 @@ mod tests {
         AccountChanges, BalanceChange, BlockAccessIndex, CodeChange, NonceChange, SlotChanges,
         StorageChange,
     };
-    use alloy_primitives::{address, bytes};
+    use alloy_primitives::{address, bytes, map::B256Map};
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm::{execute::WithTxEnv, TxEnvFor};
@@ -884,10 +929,41 @@ mod tests {
     fn bal_read_only_account_does_not_change_state_root() {
         let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
             .with_storage_read(U256::from(1));
-        let fields = BalAccountStateFields::from_changes(&changes);
 
-        assert!(fields.is_empty());
-        assert!(!bal_account_changes_state_root(&changes, fields));
+        assert!(!bal_account_changes_state_root(&changes));
+        assert!(bal_update_schedule(&[changes]).accounts.is_empty());
+    }
+
+    #[test]
+    fn bal_update_schedule_lists_changed_accounts_and_slots() {
+        let with_storage =
+            AccountChanges::new(address!("0000000000000000000000000000000000000001"))
+                .with_storage_change(SlotChanges::new(
+                    U256::from(1),
+                    vec![
+                        StorageChange::new(BlockAccessIndex::new(0), U256::from(2)),
+                        StorageChange::new(BlockAccessIndex::new(3), U256::from(9)),
+                    ],
+                ))
+                .with_storage_read(U256::from(7));
+        let balance_only =
+            AccountChanges::new(address!("0000000000000000000000000000000000000002"))
+                .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::from(10)));
+
+        let schedule = bal_update_schedule(&[with_storage.clone(), balance_only.clone()]);
+
+        let hashed_with_storage = keccak256(with_storage.address);
+        let hashed_balance_only = keccak256(balance_only.address);
+        assert_eq!(schedule.accounts, vec![hashed_with_storage, hashed_balance_only]);
+        // A slot appears once no matter how often the block writes it, and a read-only slot not
+        // at all.
+        assert_eq!(
+            schedule.storages,
+            B256Map::from_iter([(
+                hashed_with_storage,
+                vec![keccak256(U256::from(1).to_be_bytes::<32>())]
+            )])
+        );
     }
 
     #[test]
@@ -898,7 +974,7 @@ mod tests {
             .with_code_change(CodeChange::new(BlockAccessIndex::new(1), bytes!("6001600155")));
         let fields = BalAccountStateFields::from_changes(&changes);
 
-        assert!(bal_account_changes_state_root(&changes, fields));
+        assert!(bal_account_changes_state_root(&changes));
         assert!(!fields.needs_parent_account());
     }
 
@@ -911,7 +987,7 @@ mod tests {
             ));
         let fields = BalAccountStateFields::from_changes(&changes);
 
-        assert!(bal_account_changes_state_root(&changes, fields));
+        assert!(bal_account_changes_state_root(&changes));
         assert!(fields.needs_parent_account());
     }
 
@@ -990,4 +1066,7 @@ pub struct PrewarmMetrics {
     pub(crate) transaction_errors: Counter,
     /// A histogram of BAL slot iteration duration during prefetching
     pub(crate) bal_slot_iteration_duration: Histogram,
+    /// A histogram of the time spent building the BAL update schedule, which the hashed state
+    /// updates wait for
+    pub(crate) bal_update_schedule_duration: Histogram,
 }
