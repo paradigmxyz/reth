@@ -1319,7 +1319,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg_attr(feature = "account-ext", should_panic(expected = "UnsupportedCapability"))]
     async fn snap_account_range_response_skips_proof_for_exhausted_zero_origin_range() {
         let provider = MockEthProvider::default();
         let hash = B256::repeat_byte(0x01);
@@ -1355,8 +1354,12 @@ mod tests {
             response,
         );
 
-        let Ok(SnapResponse::AccountRange(AccountRangeMessage { accounts, proof, .. })) =
-            rx.await.unwrap()
+        let response = rx.await.unwrap();
+        if cfg!(feature = "account-ext") {
+            assert_eq!(response, Err(RequestError::UnsupportedCapability));
+            return;
+        }
+        let Ok(SnapResponse::AccountRange(AccountRangeMessage { accounts, proof, .. })) = response
         else {
             panic!("expected an account range response");
         };

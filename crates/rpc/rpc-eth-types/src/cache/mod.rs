@@ -1007,8 +1007,11 @@ mod tests {
         let block_hash = B256::repeat_byte(0x66);
 
         if cfg!(feature = "account-ext") {
-            assert!(cache.get_bal(block_hash).await.is_err());
-            assert_eq!(fetches.load(Ordering::SeqCst), 0);
+            assert!(matches!(
+                cache.get_bal(block_hash).await,
+                Err(ProviderError::AccountExtensionsUnsupported("BAL"))
+            ));
+            assert_eq!(fetches.load(Ordering::SeqCst), 1);
             return;
         }
 
@@ -1046,8 +1049,11 @@ mod tests {
         assert_eq!(bal_fetches.load(Ordering::SeqCst), 0);
 
         if cfg!(feature = "account-ext") {
-            assert!(cache.get_bal(block_hash).await.is_err());
-            assert_eq!(bal_fetches.load(Ordering::SeqCst), 0);
+            assert!(matches!(
+                cache.get_bal(block_hash).await,
+                Err(ProviderError::AccountExtensionsUnsupported("BAL"))
+            ));
+            assert_eq!(bal_fetches.load(Ordering::SeqCst), 1);
             return;
         }
 
@@ -1082,9 +1088,9 @@ mod tests {
         let (first, second) = tokio::join!(cache.get_bal(block_hash), cache.get_bal(block_hash));
 
         if cfg!(feature = "account-ext") {
-            assert!(first.is_err());
-            assert!(second.is_err());
-            assert_eq!(fetches.load(Ordering::SeqCst), 0);
+            assert!(matches!(first, Err(ProviderError::AccountExtensionsUnsupported("BAL"))));
+            assert!(matches!(second, Err(ProviderError::AccountExtensionsUnsupported("BAL"))));
+            assert_eq!(fetches.load(Ordering::SeqCst), 1);
             return;
         }
 
