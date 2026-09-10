@@ -122,7 +122,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=9ee4e28#9ee4e2852158811d06831cd926c6677ac7be5118"
+source = "git+https://github.com/alloy-rs/alloy?rev=0902067#090206713b55bb6a5b6857dbf7ab29ed0f9ef5ad"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -149,7 +149,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus-any"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=9ee4e28#9ee4e2852158811d06831cd926c6677ac7be5118"
+source = "git+https://github.com/alloy-rs/alloy?rev=0902067#090206713b55bb6a5b6857dbf7ab29ed0f9ef5ad"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -266,7 +266,7 @@ dependencies = [
 [[package]]
 name = "alloy-eips"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=9ee4e28#9ee4e2852158811d06831cd926c6677ac7be5118"
+source = "git+https://github.com/alloy-rs/alloy?rev=0902067#090206713b55bb6a5b6857dbf7ab29ed0f9ef5ad"
 dependencies = [
  "alloy-eip2124",
  "alloy-eip2930",
@@ -311,7 +311,7 @@ dependencies = [
 [[package]]
 name = "alloy-genesis"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=9ee4e28#9ee4e2852158811d06831cd926c6677ac7be5118"
+source = "git+https://github.com/alloy-rs/alloy?rev=0902067#090206713b55bb6a5b6857dbf7ab29ed0f9ef5ad"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -405,7 +405,7 @@ dependencies = [
 [[package]]
 name = "alloy-network-primitives"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=9ee4e28#9ee4e2852158811d06831cd926c6677ac7be5118"
+source = "git+https://github.com/alloy-rs/alloy?rev=0902067#090206713b55bb6a5b6857dbf7ab29ed0f9ef5ad"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -692,7 +692,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-eth"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=9ee4e28#9ee4e2852158811d06831cd926c6677ac7be5118"
+source = "git+https://github.com/alloy-rs/alloy?rev=0902067#090206713b55bb6a5b6857dbf7ab29ed0f9ef5ad"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -755,7 +755,7 @@ dependencies = [
 [[package]]
 name = "alloy-serde"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=9ee4e28#9ee4e2852158811d06831cd926c6677ac7be5118"
+source = "git+https://github.com/alloy-rs/alloy?rev=0902067#090206713b55bb6a5b6857dbf7ab29ed0f9ef5ad"
 dependencies = [
  "alloy-primitives",
  "arbitrary",
@@ -949,7 +949,7 @@ dependencies = [
 [[package]]
 name = "alloy-trie"
 version = "0.9.5"
-source = "git+https://github.com/alloy-rs/trie?rev=169955f63e97166c0c64e3510fdea9ded21c3d59#169955f63e97166c0c64e3510fdea9ded21c3d59"
+source = "git+https://github.com/alloy-rs/trie?rev=6c7689d57ce9df951eb8499146f6842a0dbf0120#6c7689d57ce9df951eb8499146f6842a0dbf0120"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -969,7 +969,7 @@ dependencies = [
 [[package]]
 name = "alloy-tx-macros"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=9ee4e28#9ee4e2852158811d06831cd926c6677ac7be5118"
+source = "git+https://github.com/alloy-rs/alloy?rev=0902067#090206713b55bb6a5b6857dbf7ab29ed0f9ef5ad"
 dependencies = [
  "darling 0.23.0",
  "proc-macro2",
@@ -8106,7 +8106,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=2ea7144#2ea7144297b0d9f1b221c4360c52b04a8a4dbdfb"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=7c96530#7c965302b2cd92fa88abb3bb4238de4eca97b99a"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -8126,7 +8126,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs-derive"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=2ea7144#2ea7144297b0d9f1b221c4360c52b04a8a4dbdfb"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=7c96530#7c965302b2cd92fa88abb3bb4238de4eca97b99a"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9856,7 +9856,7 @@ dependencies = [
 [[package]]
 name = "reth-primitives-traits"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=2ea7144#2ea7144297b0d9f1b221c4360c52b04a8a4dbdfb"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=7c96530#7c965302b2cd92fa88abb3bb4238de4eca97b99a"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -10961,7 +10961,7 @@ dependencies = [
 [[package]]
 name = "reth-zstd-compressors"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=2ea7144#2ea7144297b0d9f1b221c4360c52b04a8a4dbdfb"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=7c96530#7c965302b2cd92fa88abb3bb4238de4eca97b99a"
 dependencies = [
  "zstd",
 ]
@@ -10969,7 +10969,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "43.0.2"
-source = "git+https://github.com/bluealloy/revm?rev=5a0bc265b23cd2a12dbb4d45ac4bdb3a17a86769#5a0bc265b23cd2a12dbb4d45ac4bdb3a17a86769"
+source = "git+https://github.com/bluealloy/revm?rev=dbf8fb6985d04b355b99661eb0f194fafe6c8d43#dbf8fb6985d04b355b99661eb0f194fafe6c8d43"
 dependencies = [
  "revm-bytecode",
  "revm-context",
@@ -10987,7 +10987,7 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "43.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=5a0bc265b23cd2a12dbb4d45ac4bdb3a17a86769#5a0bc265b23cd2a12dbb4d45ac4bdb3a17a86769"
+source = "git+https://github.com/bluealloy/revm?rev=dbf8fb6985d04b355b99661eb0f194fafe6c8d43#dbf8fb6985d04b355b99661eb0f194fafe6c8d43"
 dependencies = [
  "bitvec",
  "paste",
@@ -10999,7 +10999,7 @@ dependencies = [
 [[package]]
 name = "revm-context"
 version = "43.0.2"
-source = "git+https://github.com/bluealloy/revm?rev=5a0bc265b23cd2a12dbb4d45ac4bdb3a17a86769#5a0bc265b23cd2a12dbb4d45ac4bdb3a17a86769"
+source = "git+https://github.com/bluealloy/revm?rev=dbf8fb6985d04b355b99661eb0f194fafe6c8d43#dbf8fb6985d04b355b99661eb0f194fafe6c8d43"
 dependencies = [
  "bitvec",
  "cfg-if",
@@ -11015,7 +11015,7 @@ dependencies = [
 [[package]]
 name = "revm-context-interface"
 version = "43.0.1"
-source = "git+https://github.com/bluealloy/revm?rev=5a0bc265b23cd2a12dbb4d45ac4bdb3a17a86769#5a0bc265b23cd2a12dbb4d45ac4bdb3a17a86769"
+source = "git+https://github.com/bluealloy/revm?rev=dbf8fb6985d04b355b99661eb0f194fafe6c8d43#dbf8fb6985d04b355b99661eb0f194fafe6c8d43"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -11030,7 +11030,7 @@ dependencies = [
 [[package]]
 name = "revm-database"
 version = "43.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=5a0bc265b23cd2a12dbb4d45ac4bdb3a17a86769#5a0bc265b23cd2a12dbb4d45ac4bdb3a17a86769"
+source = "git+https://github.com/bluealloy/revm?rev=dbf8fb6985d04b355b99661eb0f194fafe6c8d43#dbf8fb6985d04b355b99661eb0f194fafe6c8d43"
 dependencies = [
  "alloy-eips",
  "derive_more",
@@ -11045,7 +11045,7 @@ dependencies = [
 [[package]]
 name = "revm-database-interface"
 version = "43.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=5a0bc265b23cd2a12dbb4d45ac4bdb3a17a86769#5a0bc265b23cd2a12dbb4d45ac4bdb3a17a86769"
+source = "git+https://github.com/bluealloy/revm?rev=dbf8fb6985d04b355b99661eb0f194fafe6c8d43#dbf8fb6985d04b355b99661eb0f194fafe6c8d43"
 dependencies = [
  "auto_impl",
  "either",
@@ -11058,7 +11058,7 @@ dependencies = [
 [[package]]
 name = "revm-handler"
 version = "43.0.2"
-source = "git+https://github.com/bluealloy/revm?rev=5a0bc265b23cd2a12dbb4d45ac4bdb3a17a86769#5a0bc265b23cd2a12dbb4d45ac4bdb3a17a86769"
+source = "git+https://github.com/bluealloy/revm?rev=dbf8fb6985d04b355b99661eb0f194fafe6c8d43#dbf8fb6985d04b355b99661eb0f194fafe6c8d43"
 dependencies = [
  "auto_impl",
  "derive-where",
@@ -11076,7 +11076,7 @@ dependencies = [
 [[package]]
 name = "revm-inspector"
 version = "43.0.2"
-source = "git+https://github.com/bluealloy/revm?rev=5a0bc265b23cd2a12dbb4d45ac4bdb3a17a86769#5a0bc265b23cd2a12dbb4d45ac4bdb3a17a86769"
+source = "git+https://github.com/bluealloy/revm?rev=dbf8fb6985d04b355b99661eb0f194fafe6c8d43#dbf8fb6985d04b355b99661eb0f194fafe6c8d43"
 dependencies = [
  "auto_impl",
  "either",
@@ -11113,7 +11113,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "43.0.1"
-source = "git+https://github.com/bluealloy/revm?rev=5a0bc265b23cd2a12dbb4d45ac4bdb3a17a86769#5a0bc265b23cd2a12dbb4d45ac4bdb3a17a86769"
+source = "git+https://github.com/bluealloy/revm?rev=dbf8fb6985d04b355b99661eb0f194fafe6c8d43#dbf8fb6985d04b355b99661eb0f194fafe6c8d43"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -11125,7 +11125,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "43.0.2"
-source = "git+https://github.com/bluealloy/revm?rev=5a0bc265b23cd2a12dbb4d45ac4bdb3a17a86769#5a0bc265b23cd2a12dbb4d45ac4bdb3a17a86769"
+source = "git+https://github.com/bluealloy/revm?rev=dbf8fb6985d04b355b99661eb0f194fafe6c8d43#dbf8fb6985d04b355b99661eb0f194fafe6c8d43"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -11151,7 +11151,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "43.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=5a0bc265b23cd2a12dbb4d45ac4bdb3a17a86769#5a0bc265b23cd2a12dbb4d45ac4bdb3a17a86769"
+source = "git+https://github.com/bluealloy/revm?rev=dbf8fb6985d04b355b99661eb0f194fafe6c8d43#dbf8fb6985d04b355b99661eb0f194fafe6c8d43"
 dependencies = [
  "alloy-primitives",
  "once_cell",
@@ -11161,7 +11161,7 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "43.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=5a0bc265b23cd2a12dbb4d45ac4bdb3a17a86769#5a0bc265b23cd2a12dbb4d45ac4bdb3a17a86769"
+source = "git+https://github.com/bluealloy/revm?rev=dbf8fb6985d04b355b99661eb0f194fafe6c8d43#dbf8fb6985d04b355b99661eb0f194fafe6c8d43"
 dependencies = [
  "alloy-eip7928",
  "bitflags 2.13.1",

@@ -1911,17 +1911,20 @@ pub mod serde_bincode_compat {
 
     #[cfg(test)]
     mod tests {
+        #[cfg(not(feature = "account-ext"))]
+        use crate::hashed_state::{HashedPostState, HashedPostStateSorted};
         use crate::{
-            hashed_state::{
-                HashedPostState, HashedPostStateSorted, HashedStorage, HashedStorageSorted,
-            },
+            hashed_state::{HashedStorage, HashedStorageSorted},
             serde_bincode_compat,
         };
         use alloy_primitives::{B256, U256};
+        #[cfg(not(feature = "account-ext"))]
         use reth_primitives_traits::Account;
         use serde::{Deserialize, Serialize};
         use serde_with::serde_as;
 
+        // Bincode cannot delimit an account with an omitted extension field.
+        #[cfg(not(feature = "account-ext"))]
         #[test]
         fn test_hashed_post_state_bincode_roundtrip() {
             #[serde_as]
@@ -1967,6 +1970,8 @@ pub mod serde_bincode_compat {
             assert_eq!(decoded, data);
         }
 
+        // Bincode cannot delimit an account with an omitted extension field.
+        #[cfg(not(feature = "account-ext"))]
         #[test]
         fn test_hashed_post_state_sorted_bincode_roundtrip() {
             #[serde_as]

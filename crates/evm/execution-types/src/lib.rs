@@ -26,6 +26,9 @@ pub use execution_outcome::*;
 /// execution types require optional serialization for RPC compatibility. This module makes so that
 /// all fields are serialized.
 ///
+/// With `account-ext`, account-containing values require MessagePack instead of bincode,
+/// because empty account extensions are omitted.
+///
 /// Read more: <https://github.com/bincode-org/bincode/issues/326>
 #[cfg(feature = "serde-bincode-compat")]
 pub mod serde_bincode_compat {
