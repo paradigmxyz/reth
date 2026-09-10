@@ -22,7 +22,9 @@ use alloy_rlp::{encode_fixed_size, Decodable};
 use alloy_trie::EMPTY_ROOT_HASH;
 use reth_trie::test_utils::TrieTestHarness;
 use reth_trie_common::{Nibbles, ProofV2Target, TrieNodeV2};
-use reth_trie_sparse::{LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, TrieNodeEpoch};
+use reth_trie_sparse::{
+    LeafLookup, LeafLookupError, LeafUpdate, LeafUpdateEvent, SparseTrie, TrieNodeEpoch,
+};
 use std::{collections::BTreeMap, iter::once};
 
 mod find_leaf;
@@ -251,6 +253,7 @@ sparse_trie_tests! {
     test_update_leaves_touched_blinded_requests_proof,
     test_update_leaves_touched_nonexistent_key,
     test_update_leaves_touched_nonexistent_in_populated_trie,
+    test_update_leaves_reports_touched_values,
     test_update_leaves_multiple_mixed_updates,
     test_remove_leaf_marks_ancestors_dirty_unconditionally,
     test_orphaned_value_update_falls_through_to_full_insertion,

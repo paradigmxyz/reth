@@ -965,6 +965,78 @@ pub(super) fn test_update_leaves_touched_blinded_requests_proof<T: SparseTrie>(
     );
 }
 
+/// `update_leaves_with_events` reports the leaf value behind every applied `Touched` entry:
+/// the stored value for a revealed leaf, `None` for a revealed key without a leaf, and nothing
+/// at all while the key's path is still blinded.
+pub(super) fn test_update_leaves_reports_touched_values<T: SparseTrie>(new_trie: fn() -> T) {
+    // Two groups of 16 keys under different first nibbles, so revealing only group A leaves
+    // group B behind a blinded node.
+    let mut base_storage = BTreeMap::new();
+    let mut group_a_keys = Vec::new();
+    for i in 0u8..16 {
+        let mut key = B256::ZERO;
+        key.0[0] = 0x10 | i;
+        group_a_keys.push(key);
+        base_storage.insert(key, U256::from(i as u64 + 1));
+        let mut key = B256::ZERO;
+        key.0[0] = 0x20 | i;
+        base_storage.insert(key, U256::from(i as u64 + 100));
+    }
+
+    let harness = SuiteTestHarness::new(base_storage);
+    let mut trie: T = harness.init_trie_with_targets(&group_a_keys, false, new_trie);
+
+    let revealed = group_a_keys[3];
+    let absent = B256::with_last_byte(0x77);
+    let blinded = {
+        let mut key = B256::ZERO;
+        key.0[0] = 0x20;
+        key
+    };
+    let changed = group_a_keys[5];
+
+    let mut leaf_updates: B256Map<LeafUpdate> = [
+        (revealed, LeafUpdate::Touched),
+        (absent, LeafUpdate::Touched),
+        (blinded, LeafUpdate::Touched),
+        (changed, LeafUpdate::Changed(encode_fixed_size(&U256::from(999)).to_vec())),
+    ]
+    .into_iter()
+    .collect();
+
+    let mut targets: Vec<ProofV2Target> = Vec::new();
+    let mut touched: Vec<(B256, Option<Vec<u8>>)> = Vec::new();
+    trie.update_leaves_with_events(&mut leaf_updates, true, |event| match event {
+        LeafUpdateEvent::ProofRequired { key, parent } => {
+            targets.push(ProofV2Target::new(key).with_parent(parent));
+        }
+        LeafUpdateEvent::Touched { key, value } => touched.push((key, value.map(<[u8]>::to_vec))),
+    })
+    .expect("update_leaves should succeed");
+
+    touched.sort_unstable();
+    assert_eq!(
+        touched,
+        vec![(absent, None), (revealed, Some(encode_fixed_size(&U256::from(4)).to_vec()))],
+        "only applied touched entries are reported, the blinded one is not",
+    );
+    assert_eq!(targets.len(), 1, "only the blinded key needs a proof");
+
+    // Revealing the blinded subtrie lets the retry report its value.
+    let (mut proof_nodes, _) = harness.proof_v2(&mut targets);
+    trie.reveal_nodes(&mut proof_nodes).expect("reveal_nodes should succeed");
+
+    touched.clear();
+    trie.update_leaves_with_events(&mut leaf_updates, true, |event| {
+        if let LeafUpdateEvent::Touched { key, value } = event {
+            touched.push((key, value.map(<[u8]>::to_vec)));
+        }
+    })
+    .expect("update_leaves should succeed on retry");
+
+    assert_eq!(touched, vec![(blinded, Some(encode_fixed_size(&U256::from(100)).to_vec()))]);
+}
+
 /// Touched on a nonexistent key in an empty trie is drained silently.
 ///
 /// An empty (default) trie has an Empty root — all paths are accessible (no blinded nodes).

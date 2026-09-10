@@ -1,6 +1,6 @@
 use crate::{
-    ArenaParallelSparseTrie, BlockedLeafUpdates, LeafUpdate, SparseTrie as SparseTrieTrait,
-    SparseTrieUpdates, TrieNodeEpoch,
+    ArenaParallelSparseTrie, BlockedLeafUpdates, LeafUpdate, LeafUpdateEvent,
+    SparseTrie as SparseTrieTrait, SparseTrieUpdates, TrieNodeEpoch,
 };
 use alloc::{borrow::Cow, boxed::Box};
 use alloy_primitives::{map::B256Map, B256};
@@ -238,16 +238,38 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
         updates: &mut B256Map<LeafUpdate>,
         mut proof_required_fn: impl FnMut(B256, ProofV2TargetParent),
     ) -> SparseTrieResult<()> {
+        self.update_leaves_with_events(updates, false, |event| {
+            if let LeafUpdateEvent::ProofRequired { key, parent } = event {
+                proof_required_fn(key, parent)
+            }
+        })
+    }
+
+    /// [`Self::update_leaves`], reporting every applied [`LeafUpdate::Touched`] entry with the
+    /// leaf value found at its key when `report_touched` is set.
+    ///
+    /// A blind trie reveals nothing, so it never reports a touched value.
+    pub fn update_leaves_with_events(
+        &mut self,
+        updates: &mut B256Map<LeafUpdate>,
+        report_touched: bool,
+        mut event_fn: impl FnMut(LeafUpdateEvent<'_>),
+    ) -> SparseTrieResult<()> {
         match self {
             Self::Blind(_) => {
                 // Nothing is revealed - emit proof targets for all keys without a known parent.
                 for key in updates.keys() {
-                    proof_required_fn(*key, ProofV2TargetParent::NONE);
+                    event_fn(LeafUpdateEvent::ProofRequired {
+                        key: *key,
+                        parent: ProofV2TargetParent::NONE,
+                    });
                 }
                 // All updates remain in the map for retry after proofs are fetched
                 Ok(())
             }
-            Self::Revealed(trie) => trie.update_leaves(updates, proof_required_fn),
+            Self::Revealed(trie) => {
+                trie.update_leaves_with_events(updates, report_touched, event_fn)
+            }
         }
     }
 }
