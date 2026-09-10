@@ -1,8 +1,5 @@
 use alloy_consensus::TxType;
 pub use alloy_consensus::{EthereumReceipt, TxTy};
-use alloy_eips::eip2718::Encodable2718;
-use alloy_primitives::B256;
-use reth_primitives_traits::proofs::ordered_trie_root_with_encoder;
 
 /// Raw ethereum receipt.
 pub type Receipt<T = TxType> = EthereumReceipt<T>;
@@ -10,15 +7,6 @@ pub type Receipt<T = TxType> = EthereumReceipt<T>;
 #[cfg(feature = "rpc")]
 /// Receipt representation for RPC.
 pub type RpcReceipt<T = TxType> = EthereumReceipt<T, alloy_rpc_types_eth::Log>;
-
-/// Calculates the receipt root for a header for the reference type of [`Receipt`].
-///
-/// NOTE: Prefer `proofs::calculate_receipt_root` if you have log blooms memoized.
-pub fn calculate_receipt_root_no_memo<T: TxTy>(receipts: &[Receipt<T>]) -> B256 {
-    ordered_trie_root_with_encoder(receipts, |r, buf| {
-        alloy_consensus::TxReceipt::with_bloom_ref(r).encode_2718(buf)
-    })
-}
 
 #[cfg(test)]
 mod tests {

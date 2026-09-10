@@ -68,12 +68,12 @@ use alloy_eips::{
         env_settings::KzgSettings, BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1,
         BlobTransactionValidationError,
     },
-    eip7594::BlobTransactionSidecarVariant,
+    eip7594::{BlobCellMask, BlobTransactionSidecarVariant},
     eip7702::SignedAuthorization,
 };
 use alloy_primitives::{
     map::{AddressSet, B256Map},
-    Address, Bytes, TxHash, TxKind, B128, B256, U256,
+    Address, Bytes, TxHash, TxKind, B256, U256,
 };
 use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
@@ -755,7 +755,7 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     fn get_blobs_for_versioned_hashes_v4(
         &self,
         versioned_hashes: &[B256],
-        indices_bitarray: B128,
+        cell_mask: BlobCellMask,
     ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError>;
 
     /// Return whether each requested blob versioned hash is available.
@@ -2005,7 +2005,7 @@ mod tests {
         EthereumTxEnvelope, SignableTransaction, TxEip1559, TxEip2930, TxEip4844, TxEip7702,
         TxEnvelope, TxLegacy,
     };
-    use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, eip7594::BlobCellMask};
+    use alloy_eips::eip4844::DATA_GAS_PER_BLOB;
     use alloy_primitives::Signature;
 
     #[test]
