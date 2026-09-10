@@ -153,11 +153,9 @@ impl<Provider: DBProvider + StorageSettingsCache> StorageRootProvider
         hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
         reth_trie_db::with_adapter!(self.0, |A| {
-            let input = TrieInputSorted::from_unsorted(TrieInput::from_state(
-                HashedPostState::from_hashed_storage(
-                    alloy_primitives::keccak256(address),
-                    hashed_storage,
-                ),
+            let input = TrieInputSorted::from_state(HashedPostState::from_hashed_storage(
+                alloy_primitives::keccak256(address),
+                hashed_storage,
             ));
             <DbStorageRoot<'_, _, A>>::overlay_root(self.tx(), address, input)
                 .map_err(|err| ProviderError::Database(err.into()))
@@ -188,11 +186,9 @@ impl<Provider: DBProvider + StorageSettingsCache> StorageRootProvider
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof> {
         reth_trie_db::with_adapter!(self.0, |A| {
-            let input = TrieInputSorted::from_unsorted(TrieInput::from_state(
-                HashedPostState::from_hashed_storage(
-                    alloy_primitives::keccak256(address),
-                    hashed_storage,
-                ),
+            let input = TrieInputSorted::from_state(HashedPostState::from_hashed_storage(
+                alloy_primitives::keccak256(address),
+                hashed_storage,
             ));
             <DbStorageProof<'_, _, A>>::overlay_storage_multiproof(self.tx(), address, slots, input)
                 .map_err(ProviderError::from)
