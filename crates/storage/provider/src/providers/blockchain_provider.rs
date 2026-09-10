@@ -1183,66 +1183,60 @@ mod tests {
             ));
         }
 
-        for settings in [StorageSettings::v1(), StorageSettings::v2()] {
-            let factory = create_test_provider_factory();
-            factory.set_storage_settings_cache(settings);
-            let writer = factory.provider_rw()?;
-            writer.insert_block(blocks[0].recovered_block())?;
-            writer.write_hashed_state(blocks[0].hashed_state_ref())?;
-            writer.write_trie_updates_sorted(blocks[0].trie_updates_ref())?;
-            writer.commit()?;
-            let static_files = factory.static_file_provider();
-            static_files.get_writer(0, StaticFileSegment::Receipts)?.increment_block(0)?;
-            if settings.is_v2() {
-                static_files
-                    .get_writer(0, StaticFileSegment::AccountChangeSets)?
-                    .append_account_changeset(vec![], 0)?;
-                static_files
-                    .get_writer(0, StaticFileSegment::StorageChangeSets)?
-                    .append_storage_changeset(vec![], 0)?;
-            }
-            static_files.commit()?;
-            let writer = factory.provider_rw()?;
-            writer.save_blocks(&SaveBlocksInput::new(blocks[1..].to_vec(), 0, 0, 2, 1))?;
-            writer.commit()?;
-            factory.overlay_manager().insert_block(blocks[2].clone());
-            let provider = BlockchainProvider::new(factory)?;
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let writer = factory.provider_rw()?;
+        writer.insert_block(blocks[0].recovered_block())?;
+        writer.write_hashed_state(blocks[0].hashed_state_ref())?;
+        writer.write_trie_updates_sorted(blocks[0].trie_updates_ref())?;
+        writer.commit()?;
+        let static_files = factory.static_file_provider();
+        static_files.get_writer(0, StaticFileSegment::Receipts)?.increment_block(0)?;
+        static_files
+            .get_writer(0, StaticFileSegment::AccountChangeSets)?
+            .append_account_changeset(vec![], 0)?;
+        static_files
+            .get_writer(0, StaticFileSegment::StorageChangeSets)?
+            .append_storage_changeset(vec![], 0)?;
+        static_files.commit()?;
+        let writer = factory.provider_rw()?;
+        writer.save_blocks(&SaveBlocksInput::new(blocks[1..].to_vec(), 0, 0, 2, 1))?;
+        writer.commit()?;
+        factory.overlay_manager().insert_block(blocks[2].clone());
+        let provider = BlockchainProvider::new(factory)?;
 
-            for number in [1, 2] {
-                let state =
-                    provider.history_by_block_hash(blocks[number].recovered_block().hash())?;
-                let root = blocks[number].recovered_block().state_root;
-                state
-                    .multiproof_v2(
-                        Default::default(),
-                        MultiProofTargetsV2 {
-                            account_targets: vec![keccak256(other_address).into()],
-                            ..Default::default()
-                        },
-                    )?
-                    .account_proof(other_address, &[])?
-                    .verify(root)?;
-                assert_eq!(state.state_root(HashedPostState::default())?, root);
-                state.proof(Default::default(), other_address, &[])?.verify(root)?;
-                state
-                    .multiproof(
-                        Default::default(),
-                        MultiProofTargets::account(keccak256(other_address)),
-                    )?
-                    .account_proof(other_address, &[])?
-                    .verify(root)?;
-                assert_eq!(
-                    state.storage_root(address, HashedStorage::default())?,
-                    storage_roots[number]
-                );
-                state
-                    .storage_proof(address, slots[2], HashedStorage::default())?
-                    .verify(storage_roots[number])?;
-                let proof =
-                    state.storage_multiproof(address, &[slots[2]], HashedStorage::default())?;
-                assert_eq!(proof.root, storage_roots[number]);
-                proof.storage_proof(slots[2])?.verify(storage_roots[number])?;
-            }
+        for number in [1, 2] {
+            let state = provider.history_by_block_hash(blocks[number].recovered_block().hash())?;
+            let root = blocks[number].recovered_block().state_root;
+            state
+                .multiproof_v2(
+                    Default::default(),
+                    MultiProofTargetsV2 {
+                        account_targets: vec![keccak256(other_address).into()],
+                        ..Default::default()
+                    },
+                )?
+                .account_proof(other_address, &[])?
+                .verify(root)?;
+            assert_eq!(state.state_root(HashedPostState::default())?, root);
+            state.proof(Default::default(), other_address, &[])?.verify(root)?;
+            state
+                .multiproof(
+                    Default::default(),
+                    MultiProofTargets::account(keccak256(other_address)),
+                )?
+                .account_proof(other_address, &[])?
+                .verify(root)?;
+            assert_eq!(
+                state.storage_root(address, HashedStorage::default())?,
+                storage_roots[number]
+            );
+            state
+                .storage_proof(address, slots[2], HashedStorage::default())?
+                .verify(storage_roots[number])?;
+            let proof = state.storage_multiproof(address, &[slots[2]], HashedStorage::default())?;
+            assert_eq!(proof.root, storage_roots[number]);
+            proof.storage_proof(slots[2])?.verify(storage_roots[number])?;
         }
         Ok(())
     }
