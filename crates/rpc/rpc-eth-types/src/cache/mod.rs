@@ -1006,6 +1006,12 @@ mod tests {
         );
         let block_hash = B256::repeat_byte(0x66);
 
+        if cfg!(feature = "account-ext") {
+            assert!(cache.get_bal(block_hash).await.is_err());
+            assert_eq!(fetches.load(Ordering::SeqCst), 0);
+            return;
+        }
+
         assert!(cache.get_bal(block_hash).await.unwrap().is_some());
         assert!(cache.get_bal(block_hash).await.unwrap().is_some());
 
@@ -1039,6 +1045,12 @@ mod tests {
         assert!(bal.is_none());
         assert_eq!(bal_fetches.load(Ordering::SeqCst), 0);
 
+        if cfg!(feature = "account-ext") {
+            assert!(cache.get_bal(block_hash).await.is_err());
+            assert_eq!(bal_fetches.load(Ordering::SeqCst), 0);
+            return;
+        }
+
         assert!(cache.get_bal(block_hash).await.unwrap().is_some());
 
         let (_, bal) = cache
@@ -1068,6 +1080,13 @@ mod tests {
         let block_hash = B256::repeat_byte(0x77);
 
         let (first, second) = tokio::join!(cache.get_bal(block_hash), cache.get_bal(block_hash));
+
+        if cfg!(feature = "account-ext") {
+            assert!(first.is_err());
+            assert!(second.is_err());
+            assert_eq!(fetches.load(Ordering::SeqCst), 0);
+            return;
+        }
 
         assert!(first.unwrap().is_some());
         assert!(second.unwrap().is_some());

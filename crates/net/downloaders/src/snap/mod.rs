@@ -315,7 +315,8 @@ fn verify_proof(
         })
 }
 
-#[cfg(test)]
+// Snap account ranges cannot represent account extensions.
+#[cfg(all(test, not(feature = "account-ext")))]
 mod tests {
     use super::{request::MAX_RETRIES, test_utils::TestSnapClient, *};
     use alloy_primitives::{Bytes, KECCAK256_EMPTY, U256};

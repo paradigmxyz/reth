@@ -817,6 +817,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        feature = "account-ext",
+        should_panic(expected = "snap does not support account extensions")
+    )]
     fn test_snap_advertisement_when_enabled() {
         let config = builder().with_snap(true).build(NoopProvider::default());
         let snap_caps =

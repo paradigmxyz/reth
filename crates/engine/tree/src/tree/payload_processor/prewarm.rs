@@ -906,7 +906,7 @@ mod tests {
         let fields = BalAccountStateFields::from_changes(&changes);
 
         assert!(bal_account_changes_state_root(&changes, fields));
-        assert!(!fields.needs_parent_account());
+        assert_eq!(fields.needs_parent_account(), cfg!(feature = "account-ext"));
     }
 
     #[test]

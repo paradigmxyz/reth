@@ -1138,12 +1138,22 @@ mod tests {
         let handler = snap_handler(provider);
         let (response, rx) = oneshot::channel();
 
+        let unsupported = cfg!(feature = "account-ext") &&
+            matches!(
+                &request,
+                SnapProtocolMessage::GetAccountRange(_) | SnapProtocolMessage::GetStorageRanges(_)
+            );
+
         handler.on_snap_request(PeerId::default(), request, response);
 
-        assert_eq!(rx.await.unwrap(), Ok(expected));
+        assert_eq!(
+            rx.await.unwrap(),
+            if unsupported { Err(RequestError::UnsupportedCapability) } else { Ok(expected) }
+        );
     }
 
     #[tokio::test]
+    #[cfg_attr(feature = "account-ext", should_panic(expected = "UnsupportedCapability"))]
     async fn unavailable_snap_state_returns_empty_response() {
         let provider = MockEthProvider::default();
         let handler = snap_handler(provider.clone());
@@ -1172,6 +1182,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(feature = "account-ext", should_panic(expected = "UnsupportedCapability"))]
     async fn snap_requests_return_empty_responses_on_inconsistent_provider_results() {
         let missing_storage_root = MockEthProvider::default();
         missing_storage_root
@@ -1234,6 +1245,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(feature = "account-ext", should_panic(expected = "UnsupportedCapability"))]
     async fn snap_account_range_response_encodes_accounts_and_proof() {
         let provider = MockEthProvider::default();
         let first_hash = B256::repeat_byte(0x01);
@@ -1307,6 +1319,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(feature = "account-ext", should_panic(expected = "UnsupportedCapability"))]
     async fn snap_account_range_response_skips_proof_for_exhausted_zero_origin_range() {
         let provider = MockEthProvider::default();
         let hash = B256::repeat_byte(0x01);
@@ -1352,6 +1365,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(feature = "account-ext", should_panic(expected = "UnsupportedCapability"))]
     async fn snap_storage_range_response_encodes_values_and_proof() {
         let provider = MockEthProvider::default();
         let first_hash = B256::repeat_byte(0x01);
@@ -1395,6 +1409,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(feature = "account-ext", should_panic(expected = "UnsupportedCapability"))]
     async fn snap_storage_ranges_only_bound_the_first_account() {
         let provider = MockEthProvider::default();
         provider.push_snap_storage_range(Vec::new(), RangeEnd::Exhausted);
@@ -1475,6 +1490,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(feature = "account-ext", should_panic(expected = "UnsupportedCapability"))]
     async fn snap_storage_ranges_limit_account_lookups() {
         let provider = MockEthProvider::default();
         for _ in 0..=MAX_STORAGE_RANGE_ACCOUNTS_SERVE {
@@ -1508,6 +1524,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(feature = "account-ext", should_panic(expected = "UnsupportedCapability"))]
     async fn snap_storage_range_proves_finite_limit_from_zero_origin() {
         let provider = MockEthProvider::default();
         let hash = B256::repeat_byte(0x01);
@@ -1543,6 +1560,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(feature = "account-ext", should_panic(expected = "UnsupportedCapability"))]
     async fn snap_storage_ranges_are_entirely_empty_when_an_account_is_missing() {
         let provider = MockEthProvider::default();
         provider.push_missing_snap_storage_account();

@@ -331,7 +331,8 @@ impl BlockGasTracker {
     }
 }
 
-#[cfg(test)]
+// BAL execution is unavailable in account-extension builds.
+#[cfg(all(test, not(feature = "account-ext")))]
 mod tests {
     use super::*;
     use crate::tree::error::{InsertBlockErrorKind, InsertBlockValidationError};
