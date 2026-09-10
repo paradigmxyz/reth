@@ -1295,6 +1295,12 @@ mod tests {
     }
 
     fn with_storage_leaf_task(f: impl FnOnce(&mut SparseTrieCacheTask)) {
+        with_storage_leaf_task_impl::<ArenaParallelSparseTrie>(f);
+    }
+
+    fn with_storage_leaf_task_impl<S: SparseTrie + Default + Clone>(
+        f: impl FnOnce(&mut SparseTrieCacheTask<ArenaParallelSparseTrie, S>),
+    ) {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
         let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
@@ -1312,9 +1318,9 @@ mod tests {
         );
 
         let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
-        let trie = SparseStateTrie::default()
-            .with_accounts_trie(default_trie.clone())
-            .with_default_storage_trie(default_trie)
+        let trie = SparseStateTrie::<ArenaParallelSparseTrie, S>::default()
+            .with_accounts_trie(default_trie)
+            .with_default_storage_trie(RevealableSparseTrie::blind_from(S::default()))
             .with_updates(true);
 
         let parent_state_root = B256::from([0x55; 32]);
@@ -1339,6 +1345,107 @@ mod tests {
         drop(updates_tx);
         drop(task);
         drain_sparse_trie_tasks(&runtime);
+    }
+
+    #[test]
+    fn storage_leaf_error_restores_all_jobs_before_returning() {
+        with_storage_leaf_task_impl::<FailingStorageTrie>(|task| {
+            for index in 0..3u8 {
+                let address = B256::repeat_byte(index);
+                task.trie.insert_storage_trie(
+                    address,
+                    RevealableSparseTrie::Revealed(Box::new(FailingStorageTrie {
+                        fail: index == 1,
+                    })),
+                );
+                task.new_storage_updates.insert(
+                    address,
+                    (0..1024u64)
+                        .map(|key| (keccak256(key.to_be_bytes()), LeafUpdate::Touched))
+                        .collect(),
+                );
+            }
+            task.new_account_updates.insert(B256::ZERO, LeafUpdate::Touched);
+            assert!(task.process_leaf_updates(true).is_err());
+            assert_eq!(task.trie.storage_tries_mut().len(), 3);
+            assert_eq!(task.fetched_storage_targets.len(), 3);
+            assert_eq!(task.new_storage_updates[&B256::ZERO].len(), 0);
+            assert_eq!(task.new_storage_updates[&B256::repeat_byte(1)].len(), 1024);
+            assert_eq!(task.new_storage_updates[&B256::repeat_byte(2)].len(), 0);
+            assert_eq!(task.storage_cache_hits, 2048);
+            assert_eq!(task.new_account_updates.len(), 1);
+        });
+    }
+
+    #[derive(Debug, Default, Clone)]
+    struct FailingStorageTrie {
+        fail: bool,
+    }
+
+    impl SparseTrie for FailingStorageTrie {
+        fn update_leaves(
+            &mut self,
+            updates: &mut B256Map<LeafUpdate>,
+            mut proof: impl FnMut(B256, ProofV2TargetParent),
+        ) -> SparseTrieResult<()> {
+            if self.fail {
+                proof(B256::ZERO, ProofV2TargetParent::NONE);
+                return Err(SparseTrieErrorKind::Blind.into());
+            }
+            updates.clear();
+            Ok(())
+        }
+        fn set_root(
+            &mut self,
+            _: reth_trie_common::TrieNodeV2,
+            _: Option<reth_trie_common::BranchNodeMasks>,
+            _: bool,
+        ) -> SparseTrieResult<()> {
+            unreachable!("only leaf application is exercised")
+        }
+        fn set_updates(&mut self, _: bool) {
+            unreachable!("only leaf application is exercised")
+        }
+        fn reveal_nodes(
+            &mut self,
+            _: &mut [reth_trie_common::ProofTrieNodeV2],
+        ) -> SparseTrieResult<()> {
+            unreachable!("only leaf application is exercised")
+        }
+        fn root(&mut self, _: TrieNodeEpoch) -> B256 {
+            unreachable!("only leaf application is exercised")
+        }
+        fn is_root_cached(&self) -> bool {
+            unreachable!("only leaf application is exercised")
+        }
+        fn root_epoch(&self) -> Option<TrieNodeEpoch> {
+            unreachable!("only leaf application is exercised")
+        }
+        fn update_subtrie_hashes(&mut self, _: TrieNodeEpoch) {
+            unreachable!("only leaf application is exercised")
+        }
+        fn get_leaf_value(&self, _: &reth_trie_common::Nibbles) -> Option<&Vec<u8>> {
+            unreachable!("only leaf application is exercised")
+        }
+        fn find_leaf(
+            &self,
+            _: &reth_trie_common::Nibbles,
+            _: Option<&Vec<u8>>,
+        ) -> Result<reth_trie_sparse::LeafLookup, reth_trie_sparse::LeafLookupError> {
+            unreachable!("only leaf application is exercised")
+        }
+        fn updates_ref(&self) -> std::borrow::Cow<'_, reth_trie_sparse::SparseTrieUpdates> {
+            unreachable!("only leaf application is exercised")
+        }
+        fn take_updates(&mut self) -> reth_trie_sparse::SparseTrieUpdates {
+            unreachable!("only leaf application is exercised")
+        }
+        fn clear(&mut self) {
+            self.fail = false;
+        }
+        fn prune(&mut self, _: TrieNodeEpoch) -> usize {
+            unreachable!("only leaf application is exercised")
+        }
     }
 
     #[test]
