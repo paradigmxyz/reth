@@ -9,6 +9,7 @@ use reth_cli_util::{parse_duration_from_secs_or_ms, parsers::format_duration_as_
 use reth_engine_primitives::{
     TreeConfig, DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
     DEFAULT_NUM_STATE_MASKING_BLOCKS, DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
+    DEFAULT_SPARSE_TRIE_RETAIN_BLOCKS,
 };
 use std::{sync::OnceLock, time::Duration};
 
@@ -50,6 +51,7 @@ pub struct DefaultEngineValues {
     cache_metrics_disabled: bool,
     slow_block_threshold: Option<Duration>,
     disable_sparse_trie_cache_pruning: bool,
+    sparse_trie_retain_blocks: u64,
     state_root_task_timeout: Option<String>,
     share_execution_cache_with_payload_builder: bool,
     share_sparse_trie_with_payload_builder: bool,
@@ -222,6 +224,12 @@ impl DefaultEngineValues {
         self
     }
 
+    /// Set the default number of recent blocks whose trie nodes stay in the sparse trie cache
+    pub const fn with_sparse_trie_retain_blocks(mut self, v: u64) -> Self {
+        self.sparse_trie_retain_blocks = v;
+        self
+    }
+
     /// Set the default state root task timeout
     pub fn with_state_root_task_timeout(mut self, v: Option<String>) -> Self {
         self.state_root_task_timeout = v;
@@ -287,6 +295,7 @@ impl Default for DefaultEngineValues {
             cache_metrics_disabled: false,
             slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: false,
+            sparse_trie_retain_blocks: DEFAULT_SPARSE_TRIE_RETAIN_BLOCKS,
             state_root_task_timeout: Some("4s".to_string()),
             share_execution_cache_with_payload_builder: false,
             share_sparse_trie_with_payload_builder: false,
@@ -494,6 +503,12 @@ pub struct EngineArgs {
     #[arg(long = "engine.disable-sparse-trie-cache-pruning", default_value_t = DefaultEngineValues::get_global().disable_sparse_trie_cache_pruning)]
     pub disable_sparse_trie_cache_pruning: bool,
 
+    /// Keep trie nodes touched within this many recent blocks in the sparse trie cache even after
+    /// those blocks are persisted. The cache always keeps what the unpersisted in-memory chain
+    /// touched; a larger window needs fewer proofs per block at the cost of memory.
+    #[arg(long = "engine.sparse-trie-retain-blocks", default_value_t = DefaultEngineValues::get_global().sparse_trie_retain_blocks)]
+    pub sparse_trie_retain_blocks: u64,
+
     /// Configure the timeout for the state root task before spawning a sequential fallback.
     /// If the state root task takes longer than this, a sequential computation starts in
     /// parallel and whichever finishes first is used.
@@ -607,6 +622,7 @@ impl Default for EngineArgs {
             cache_metrics_disabled,
             slow_block_threshold,
             disable_sparse_trie_cache_pruning,
+            sparse_trie_retain_blocks,
             state_root_task_timeout,
             share_execution_cache_with_payload_builder,
             share_sparse_trie_with_payload_builder,
@@ -645,6 +661,7 @@ impl Default for EngineArgs {
             cache_metrics_disabled,
             slow_block_threshold,
             disable_sparse_trie_cache_pruning,
+            sparse_trie_retain_blocks,
             state_root_task_timeout: state_root_task_timeout
                 .as_deref()
                 .map(|s| humantime::parse_duration(s).expect("valid default duration")),
@@ -743,6 +760,7 @@ impl EngineArgs {
             .without_cache_metrics(self.cache_metrics_disabled)
             .with_slow_block_threshold(self.slow_block_threshold)
             .with_disable_sparse_trie_cache_pruning(self.disable_sparse_trie_cache_pruning)
+            .with_sparse_trie_retain_blocks(self.sparse_trie_retain_blocks)
             .with_state_root_task_timeout(self.state_root_task_timeout.filter(|d| !d.is_zero()))
             .with_share_execution_cache_with_payload_builder(
                 self.share_execution_cache_with_payload_builder,
@@ -907,6 +925,7 @@ mod tests {
             cache_metrics_disabled: true,
             slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: true,
+            sparse_trie_retain_blocks: 8,
             state_root_task_timeout: Some(Duration::from_secs(2)),
             share_execution_cache_with_payload_builder: false,
             share_sparse_trie_with_payload_builder: false,
@@ -953,6 +972,8 @@ mod tests {
             "4",
             "--engine.disable-cache-metrics",
             "--engine.disable-sparse-trie-cache-pruning",
+            "--engine.sparse-trie-retain-blocks",
+            "8",
             "--engine.state-root-task-timeout",
             "2s",
             "--engine.disable-bal-parallel-execution",
