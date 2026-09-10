@@ -374,21 +374,27 @@ where
 
     /// Returns storage trie updates for tries that have been revealed.
     ///
+    /// Tries that recorded nothing since the last call are skipped without taking their
+    /// updates, which keeps this cheap when many unchanged tries are retained across blocks.
+    ///
     /// Panics if any of the storage tries are not revealed.
     pub fn storage_trie_updates(&mut self) -> B256Map<StorageTrieUpdates> {
         self.storage
             .tries
             .iter_mut()
-            .map(|(address, trie)| {
+            .filter_map(|(address, trie)| {
                 let trie = trie.as_revealed_mut().unwrap();
+                if !trie.has_updates() {
+                    return None
+                }
+
                 let updates = trie.take_updates();
                 let updates = StorageTrieUpdates {
                     storage_nodes: updates.updated_nodes,
                     removed_nodes: updates.removed_nodes,
                 };
-                (*address, updates)
+                (!updates.is_empty()).then_some((*address, updates))
             })
-            .filter(|(_, updates)| !updates.is_empty())
             .collect()
     }
 
