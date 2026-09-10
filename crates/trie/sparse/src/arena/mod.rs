@@ -35,9 +35,10 @@ const UPPER_TRIE_MAX_DEPTH: usize = 2;
 /// traversal.
 fn compact_arena(arena: &mut NodeArena, root: &mut Index) {
     let mut new_arena = NodeArena::with_capacity(arena.len());
+    let mut marks = new_arena.adopt_blinded(arena);
     let mut queue = VecDeque::new();
 
-    let root_node = arena.remove(*root).expect("root exists");
+    let root_node = arena.drain_node(*root);
     let new_root = new_arena.insert(root_node);
     queue.push_back(new_root);
 
@@ -46,32 +47,39 @@ fn compact_arena(arena: &mut NodeArena, root: &mut Index) {
         // its Branch.children have not been rewritten yet — every Revealed(idx) here is
         // still an old-arena index, and the child is still present in `arena` because
         // only this parent's iteration can remove it (each child has exactly one parent).
-        let old_children: SmallVec<[(usize, BranchChild); 16]> = match &new_arena[new_idx] {
-            ArenaSparseNode::Branch(b) => b.children.iter().copied().enumerate().collect(),
+        let old_children: SmallVec<[(usize, Index); 16]> = match &new_arena[new_idx] {
+            ArenaSparseNode::Branch(b) => b
+                .children
+                .iter()
+                .enumerate()
+                .filter_map(|(pos, child)| match child.revealed_index() {
+                    Some(old_child_idx) => Some((pos, old_child_idx)),
+                    // A blinded child needs no rewrite, its slot survived the adoption.
+                    None => {
+                        marks.mark(*child);
+                        None
+                    }
+                })
+                .collect(),
             _ => continue,
         };
 
-        for (child_pos, old_child) in old_children {
-            let new_child = match old_child.revealed_index() {
-                Some(old_child_idx) => {
-                    let child_node = arena.remove(old_child_idx).expect("child exists");
-                    let new_child_idx = new_arena.insert(child_node);
-                    queue.push_back(new_child_idx);
-                    BranchChild::revealed(new_child_idx)
-                }
-                None => new_arena.insert_blinded(arena.take_blinded(old_child)),
-            };
+        for (child_pos, old_child_idx) in old_children {
+            let child_node = arena.drain_node(old_child_idx);
+            let new_child_idx = new_arena.insert(child_node);
+            queue.push_back(new_child_idx);
             let ArenaSparseNode::Branch(b) = &mut new_arena[new_idx] else { unreachable!() };
-            b.children[child_pos] = new_child;
+            b.children[child_pos] = BranchChild::revealed(new_child_idx);
         }
     }
 
     debug_assert!(
-        arena.is_empty(),
+        arena.iter().next().is_none(),
         "compact_arena: {} orphaned nodes remaining after BFS drain",
-        arena.len(),
+        arena.iter().count(),
     );
 
+    new_arena.sweep_blinded(marks);
     *arena = new_arena;
     *root = new_root;
 }
@@ -187,12 +195,14 @@ impl ArenaSparseSubtrie {
         }
 
         let old_count = self.arena.len();
-        // Do not reserve the old arena's size: discarded nodes should release their capacity.
-        let mut new_arena = NodeArena::new();
+        // Reserve an upper bound on the retained nodes and hand the excess back after the copy,
+        // so that copying never reallocates but discarded nodes still release their capacity.
+        let mut new_arena = NodeArena::with_capacity(old_count);
+        let mut marks = new_arena.adopt_blinded(&mut self.arena);
         let mut new_num_leaves = 0u64;
 
         // The subtrie root is retained by the owning upper trie.
-        let root_node = self.arena.remove(self.root).expect("root exists");
+        let root_node = self.arena.drain_node(self.root);
         let new_root = new_arena.insert(root_node);
         let mut stack = Vec::new();
         if let Some(frame) =
@@ -212,11 +222,8 @@ impl ArenaSparseSubtrie {
             child_path.push(nibble);
 
             let Some(old_child_idx) = child.revealed_index() else {
-                let new_child = new_arena.insert_blinded(self.arena.take_blinded(child));
-                let ArenaSparseNode::Branch(b) = &mut new_arena[parent_new_idx] else {
-                    unreachable!()
-                };
-                b.children[child_pos] = new_child;
+                // A blinded child needs no rewrite, its slot survived the adoption.
+                marks.mark(child);
                 continue;
             };
 
@@ -240,12 +247,13 @@ impl ArenaSparseSubtrie {
                     "pruning node",
                 );
                 let new_child = new_arena.insert_blinded(rlp_node);
+                marks.mark(new_child);
                 let ArenaSparseNode::Branch(b) = &mut new_arena[parent_new_idx] else {
                     unreachable!()
                 };
                 b.children[child_pos] = new_child;
             } else {
-                let child_node = self.arena.remove(old_child_idx).expect("child exists");
+                let child_node = self.arena.drain_node(old_child_idx);
                 let new_child_idx = new_arena.insert(child_node);
                 if let Some(frame) = prepare_retained_node(
                     &new_arena,
@@ -262,6 +270,8 @@ impl ArenaSparseSubtrie {
             }
         }
 
+        new_arena.sweep_blinded(marks);
+        new_arena.shrink_nodes_to_fit();
         let pruned = old_count - new_arena.len();
         self.num_leaves = new_num_leaves;
         self.num_dirty_leaves = 0;
