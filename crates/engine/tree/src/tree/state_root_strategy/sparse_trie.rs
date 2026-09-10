@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use super::{evm_state_to_hashed_post_state, StateRootComputeOutcome, StateRootMessage};
 use alloy_primitives::{
-    map::{hash_map::Entry, B256Map},
+    map::{hash_map::Entry, B256Map, B256Set},
     B256,
 };
 use alloy_rlp::{Decodable, Encodable};
@@ -68,6 +68,8 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     account_updates: B256Map<LeafUpdate>,
     /// Storage trie updates. hashed address -> slot -> update.
     storage_updates: B256Map<B256Map<LeafUpdate>>,
+    /// Storage tries whose pending leaves may progress after proof revelation or new writes.
+    ready_storage_updates: B256Set,
 
     /// Account updates that are buffered but were not yet applied to the trie.
     new_account_updates: B256Map<LeafUpdate>,
@@ -170,6 +172,7 @@ where
             max_targets_for_chunking: DEFAULT_MAX_TARGETS_FOR_CHUNKING,
             account_updates: Default::default(),
             storage_updates: Default::default(),
+            ready_storage_updates: Default::default(),
             new_account_updates: Default::default(),
             new_storage_updates: Default::default(),
             pending_account_updates: Default::default(),
@@ -556,6 +559,10 @@ where
     }
 
     fn on_proof_result(&mut self, result: DecodedMultiProofV2) -> Result<(), StateRootTaskError> {
+        // Account proofs are handled by the account retry/promotion loop. Storage revelation
+        // only changes the tries explicitly included in this multiproof, including sibling
+        // proofs requested by deletions and broadened targets.
+        self.ready_storage_updates.extend(result.storage_proofs.keys().copied());
         self.trie
             .reveal_decoded_multiproof_v2(result)
             .map_err(|e| StateRootTaskError::Other(format!("could not reveal multiproof: {e:?}")))
@@ -639,7 +646,7 @@ where
         // Process all storage updates, skipping tries with no pending updates.
         let span = trace_span!("process_storage_leaf_updates").entered();
         for (address, updates) in storage_updates {
-            if updates.is_empty() {
+            if updates.is_empty() || (!new && !self.ready_storage_updates.remove(address)) {
                 continue;
             }
             let _enter = trace_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage_trie_leaf_updates", a=%address).entered();
@@ -648,22 +655,34 @@ where
             let fetched = self.fetched_storage_targets.entry(*address).or_default();
             let mut targets = Vec::new();
 
-            let updates_len_before = updates.len();
-            trie.update_leaves(updates, |path, parent| match fetched.entry(path) {
-                Entry::Occupied(mut entry) => {
-                    if parent < *entry.get() {
+            loop {
+                let updates_len_before = updates.len();
+                trie.update_leaves(updates, |path, parent| match fetched.entry(path) {
+                    Entry::Occupied(mut entry) => {
+                        if parent < *entry.get() {
+                            entry.insert(parent);
+                            targets.push(ProofV2Target::new(path).with_parent(parent));
+                        }
+                    }
+                    Entry::Vacant(entry) => {
                         entry.insert(parent);
                         targets.push(ProofV2Target::new(path).with_parent(parent));
                     }
+                })?;
+                let updates_len_after = updates.len();
+                self.storage_cache_hits += (updates_len_before - updates_len_after) as u64;
+                self.storage_cache_misses += updates_len_after as u64;
+
+                if new && updates_len_after < updates_len_before {
+                    // A successful new write can unblock older pending deletions in this trie.
+                    self.ready_storage_updates.insert(*address);
                 }
-                Entry::Vacant(entry) => {
-                    entry.insert(parent);
-                    targets.push(ProofV2Target::new(path).with_parent(parent));
+                if updates_len_after == 0 || updates_len_after == updates_len_before {
+                    break;
                 }
-            })?;
-            let updates_len_after = updates.len();
-            self.storage_cache_hits += (updates_len_before - updates_len_after) as u64;
-            self.storage_cache_misses += updates_len_after as u64;
+                // A later leaf in this pass may have changed a sibling needed by an earlier
+                // deletion. Reach a fixed point before waiting for another external message.
+            }
 
             if !targets.is_empty() {
                 self.pending_targets.extend_storage_targets(address, targets);
@@ -1134,6 +1153,152 @@ mod tests {
         for task_name in ["trie-hashing", "storage-workers", "account-workers"] {
             runtime.spawn_blocking_named(task_name, || {}).get();
         }
+    }
+
+    fn storage_retry_task(runtime: &Runtime) -> SparseTrieCacheTask {
+        let provider_factory = create_test_provider_factory();
+        let anchor_hash = init_genesis(&provider_factory).unwrap();
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayManager::<reth_chain_state::EthPrimitives>::default()
+                .overlay_builder(anchor_hash),
+        );
+        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
+        let proof_worker_handle = ProofWorkerHandle::new(
+            runtime,
+            ProofTaskCtx::new(state_provider_factory),
+            false,
+            proof_result_tx.clone(),
+        );
+        let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+        let trie = SparseStateTrie::default()
+            .with_accounts_trie(default_trie.clone())
+            .with_default_storage_trie(default_trie)
+            .with_updates(true);
+        SparseTrieCacheTask::new_with_trie(
+            runtime,
+            crossbeam_channel::unbounded().1,
+            crossbeam_channel::bounded::<()>(0).1,
+            std::sync::mpsc::channel().0,
+            proof_worker_handle,
+            proof_result_tx,
+            proof_result_rx,
+            SparseTrieTaskMetrics::default(),
+            trie,
+            B256::ZERO,
+            TrieNodeEpoch::new(1),
+            1,
+        )
+    }
+
+    #[test]
+    fn storage_retries_require_relevant_proofs_and_keep_latest_values() {
+        let runtime = Runtime::test();
+        let mut task = storage_retry_task(&runtime);
+        let a = B256::repeat_byte(1);
+        let b = B256::repeat_byte(2);
+        let slot = B256::ZERO;
+        for address in [a, b] {
+            task.new_storage_updates
+                .entry(address)
+                .or_default()
+                .insert(slot, LeafUpdate::Changed(vec![1]));
+        }
+        task.pending_updates = 1;
+        task.process_new_updates().unwrap();
+        assert_eq!(task.storage_cache_misses, 2);
+        task.process_leaf_updates(false).unwrap();
+        assert_eq!(task.storage_cache_misses, 2, "no new proof means no retry");
+        task.on_proof_result(DecodedMultiProofV2 {
+            account_proofs: vec![reth_trie_common::ProofTrieNodeV2::empty()],
+            ..Default::default()
+        })
+        .unwrap();
+        task.process_leaf_updates(false).unwrap();
+        assert_eq!(task.storage_cache_misses, 2, "account proof cannot change storage topology");
+        task.on_proof_result(DecodedMultiProofV2 {
+            storage_proofs: std::iter::once((a, vec![reth_trie_common::ProofTrieNodeV2::empty()]))
+                .collect(),
+            ..Default::default()
+        })
+        .unwrap();
+        task.process_leaf_updates(false).unwrap();
+        assert!(task.storage_updates[&a].is_empty());
+        assert_eq!(task.storage_updates[&b].len(), 1);
+        assert_eq!(task.storage_cache_hits, 1);
+        assert_eq!(task.storage_cache_misses, 2, "unrelated pending trie was not attempted");
+        let mut latest = HashedPostState::default();
+        latest.storages.entry(b).or_default().storage.insert(slot, U256::from(7));
+        task.on_hashed_state_update(latest);
+        task.on_prewarm_targets(MultiProofTargetsV2 {
+            storage_targets: std::iter::once((b, vec![ProofV2Target::new(slot)])).collect(),
+            ..Default::default()
+        });
+        task.pending_updates = 1;
+        task.process_new_updates().unwrap();
+        task.on_proof_result(DecodedMultiProofV2 {
+            storage_proofs: std::iter::once((b, vec![reth_trie_common::ProofTrieNodeV2::empty()]))
+                .collect(),
+            ..Default::default()
+        })
+        .unwrap();
+        task.promote_pending_account_updates().unwrap();
+        assert!(task.storage_updates[&b].is_empty());
+        assert_eq!(
+            task.trie
+                .storage_trie_ref(&b)
+                .unwrap()
+                .get_leaf_value(&reth_trie_common::Nibbles::unpack(slot)),
+            Some(&vec![7])
+        );
+        assert!(task.pending_account_updates.is_empty());
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
+    }
+
+    #[test]
+    fn storage_deletion_rearms_for_sibling_proofs() {
+        use reth_trie::test_utils::TrieTestHarness;
+        let runtime = Runtime::test();
+        let mut task = storage_retry_task(&runtime);
+        let address = B256::repeat_byte(1);
+        let removed = B256::ZERO;
+        let survivor = B256::repeat_byte(0x10);
+        let harness =
+            TrieTestHarness::new([(removed, U256::from(1)), (survivor, U256::from(2))].into());
+        task.storage_updates
+            .entry(address)
+            .or_default()
+            .insert(removed, LeafUpdate::Changed(Vec::new()));
+        task.on_proof_result(DecodedMultiProofV2 {
+            storage_proofs: std::iter::once((address, vec![harness.root_node()])).collect(),
+            ..Default::default()
+        })
+        .unwrap();
+        let mut rounds = 0;
+        while !task.storage_updates[&address].is_empty() {
+            task.process_leaf_updates(false).unwrap();
+            if task.storage_updates[&address].is_empty() {
+                break;
+            }
+            rounds += 1;
+            assert!(rounds <= 4, "pending deletion did not progress");
+            let mut targets: Vec<_> = task.fetched_storage_targets[&address]
+                .iter()
+                .map(|(key, parent)| ProofV2Target::new(*key).with_parent(*parent))
+                .collect();
+            let (proof, _) = harness.proof_v2(&mut targets);
+            task.on_proof_result(DecodedMultiProofV2 {
+                storage_proofs: std::iter::once((address, proof)).collect(),
+                ..Default::default()
+            })
+            .unwrap();
+        }
+        assert!(rounds >= 2, "fixture must require a deletion-induced sibling proof");
+        let expected = harness.get_root_with_updates(&[(removed, U256::ZERO)].into()).0;
+        assert_eq!(task.trie.storage_root(&address, task.new_epoch), Some(expected));
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
     }
 
     #[test]
