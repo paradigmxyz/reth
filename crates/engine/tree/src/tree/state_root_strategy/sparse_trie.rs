@@ -1354,9 +1354,7 @@ mod tests {
                 let address = B256::repeat_byte(index);
                 task.trie.insert_storage_trie(
                     address,
-                    RevealableSparseTrie::Revealed(Box::new(FailingStorageTrie {
-                        fail: index == 1,
-                    })),
+                    RevealableSparseTrie::Revealed(Box::new(FailingStorageTrie::default())),
                 );
                 task.new_storage_updates.insert(
                     address,
