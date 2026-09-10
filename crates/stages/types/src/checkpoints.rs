@@ -185,10 +185,10 @@ impl reth_codecs::Compact for StorageRootMerkleCheckpoint {
         len += 32;
         #[cfg(feature = "account-ext")]
         if !self.account_extension.is_empty() {
-            let extension_len = u32::try_from(self.account_extension.len())
+            let extension_len = u16::try_from(self.account_extension.len())
                 .expect("account extension exceeds compact encoding limit");
-            buf.put_u32(extension_len);
-            len += 4;
+            buf.put_u16(extension_len);
+            len += 2;
             buf.put_slice(&self.account_extension);
             len += self.account_extension.len();
         }
@@ -222,7 +222,7 @@ impl reth_codecs::Compact for StorageRootMerkleCheckpoint {
         let (account_extension, buf) = if buf.is_empty() {
             (AccountExtension::default(), buf)
         } else {
-            let account_extension_len = buf.get_u32() as usize;
+            let account_extension_len = buf.get_u16() as usize;
             let account_extension =
                 AccountExtension::copy_from_slice(&buf[..account_extension_len]);
             (account_extension, &buf[account_extension_len..])
@@ -674,7 +674,7 @@ mod tests {
             account_balance: U256::ZERO,
             account_bytecode_hash: B256::ZERO,
             #[cfg(feature = "account-ext")]
-            account_extension: vec![0xa0].into_iter().chain([0x42; 32]).collect::<Vec<_>>().into(),
+            account_extension: vec![0x42; 32].into(),
         };
 
         let mut buf = Vec::new();
@@ -687,7 +687,7 @@ mod tests {
             empty_checkpoint.account_extension = Default::default();
             let mut empty_buf = Vec::new();
             let empty_encoded = empty_checkpoint.to_compact(&mut empty_buf);
-            assert_eq!(encoded, empty_encoded + 4 + checkpoint.account_extension.len());
+            assert_eq!(encoded, empty_encoded + 2 + checkpoint.account_extension.len());
             assert_eq!(empty_encoded, empty_buf.len());
         }
 
@@ -716,7 +716,7 @@ mod tests {
                 "0x0fffffffffffffffffffffffffffffff0fffffffffffffffffffffffffffffff"
             ),
             #[cfg(feature = "account-ext")]
-            account_extension: vec![0xa0].into_iter().chain([0x42; 32]).collect::<Vec<_>>().into(),
+            account_extension: vec![0x42; 32].into(),
         };
 
         // Create a merkle checkpoint with the storage root checkpoint

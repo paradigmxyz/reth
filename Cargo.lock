@@ -122,7 +122,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=714b25a2#714b25a281cee71430bd758b350c3b5e846b8906"
+source = "git+https://github.com/alloy-rs/alloy?rev=9ee4e28#9ee4e2852158811d06831cd926c6677ac7be5118"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -149,7 +149,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus-any"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=714b25a2#714b25a281cee71430bd758b350c3b5e846b8906"
+source = "git+https://github.com/alloy-rs/alloy?rev=9ee4e28#9ee4e2852158811d06831cd926c6677ac7be5118"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -266,7 +266,7 @@ dependencies = [
 [[package]]
 name = "alloy-eips"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=714b25a2#714b25a281cee71430bd758b350c3b5e846b8906"
+source = "git+https://github.com/alloy-rs/alloy?rev=9ee4e28#9ee4e2852158811d06831cd926c6677ac7be5118"
 dependencies = [
  "alloy-eip2124",
  "alloy-eip2930",
@@ -311,7 +311,7 @@ dependencies = [
 [[package]]
 name = "alloy-genesis"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=714b25a2#714b25a281cee71430bd758b350c3b5e846b8906"
+source = "git+https://github.com/alloy-rs/alloy?rev=9ee4e28#9ee4e2852158811d06831cd926c6677ac7be5118"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -405,7 +405,7 @@ dependencies = [
 [[package]]
 name = "alloy-network-primitives"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=714b25a2#714b25a281cee71430bd758b350c3b5e846b8906"
+source = "git+https://github.com/alloy-rs/alloy?rev=9ee4e28#9ee4e2852158811d06831cd926c6677ac7be5118"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -692,7 +692,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-eth"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=714b25a2#714b25a281cee71430bd758b350c3b5e846b8906"
+source = "git+https://github.com/alloy-rs/alloy?rev=9ee4e28#9ee4e2852158811d06831cd926c6677ac7be5118"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -704,7 +704,7 @@ dependencies = [
  "alloy-sol-types",
  "alloy-trie",
  "arbitrary",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "serde",
  "serde_json",
  "serde_with",
@@ -755,7 +755,7 @@ dependencies = [
 [[package]]
 name = "alloy-serde"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=714b25a2#714b25a281cee71430bd758b350c3b5e846b8906"
+source = "git+https://github.com/alloy-rs/alloy?rev=9ee4e28#9ee4e2852158811d06831cd926c6677ac7be5118"
 dependencies = [
  "alloy-primitives",
  "arbitrary",
@@ -949,7 +949,7 @@ dependencies = [
 [[package]]
 name = "alloy-trie"
 version = "0.9.5"
-source = "git+https://github.com/alloy-rs/trie?rev=288294aa3fbe9e699bb2d8bd966bb7ff3ec59882#288294aa3fbe9e699bb2d8bd966bb7ff3ec59882"
+source = "git+https://github.com/alloy-rs/trie?rev=169955f63e97166c0c64e3510fdea9ded21c3d59#169955f63e97166c0c64e3510fdea9ded21c3d59"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -969,7 +969,7 @@ dependencies = [
 [[package]]
 name = "alloy-tx-macros"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=714b25a2#714b25a281cee71430bd758b350c3b5e846b8906"
+source = "git+https://github.com/alloy-rs/alloy?rev=9ee4e28#9ee4e2852158811d06831cd926c6677ac7be5118"
 dependencies = [
  "darling 0.23.0",
  "proc-macro2",
@@ -1028,7 +1028,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1039,7 +1039,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3494,7 +3494,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5241,7 +5241,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6371,7 +6371,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -8106,7 +8106,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=5acdfd7#5acdfd7e0a6691439be732ab00bf689e995d455b"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=9fc19a1#9fc19a186fad31f9cfd605f934756a0c60f2139e"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -8126,7 +8126,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs-derive"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=5acdfd7#5acdfd7e0a6691439be732ab00bf689e995d455b"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=9fc19a1#9fc19a186fad31f9cfd605f934756a0c60f2139e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9855,7 +9855,7 @@ dependencies = [
 [[package]]
 name = "reth-primitives-traits"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=5acdfd7#5acdfd7e0a6691439be732ab00bf689e995d455b"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=9fc19a1#9fc19a186fad31f9cfd605f934756a0c60f2139e"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -10958,7 +10958,7 @@ dependencies = [
 [[package]]
 name = "reth-zstd-compressors"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=5acdfd7#5acdfd7e0a6691439be732ab00bf689e995d455b"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=9fc19a1#9fc19a186fad31f9cfd605f934756a0c60f2139e"
 dependencies = [
  "zstd",
 ]
@@ -10966,7 +10966,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "43.0.1"
-source = "git+https://github.com/bluealloy/revm?rev=a4a7ac21e2d2ae6d319af0cf5cc05101ccc34ba6#a4a7ac21e2d2ae6d319af0cf5cc05101ccc34ba6"
+source = "git+https://github.com/bluealloy/revm?rev=d21d6c08d59d513f2192a0160399979093d9deb2#d21d6c08d59d513f2192a0160399979093d9deb2"
 dependencies = [
  "revm-bytecode",
  "revm-context",
@@ -10984,7 +10984,7 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "43.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=a4a7ac21e2d2ae6d319af0cf5cc05101ccc34ba6#a4a7ac21e2d2ae6d319af0cf5cc05101ccc34ba6"
+source = "git+https://github.com/bluealloy/revm?rev=d21d6c08d59d513f2192a0160399979093d9deb2#d21d6c08d59d513f2192a0160399979093d9deb2"
 dependencies = [
  "bitvec",
  "paste",
@@ -10996,7 +10996,7 @@ dependencies = [
 [[package]]
 name = "revm-context"
 version = "43.0.2"
-source = "git+https://github.com/bluealloy/revm?rev=a4a7ac21e2d2ae6d319af0cf5cc05101ccc34ba6#a4a7ac21e2d2ae6d319af0cf5cc05101ccc34ba6"
+source = "git+https://github.com/bluealloy/revm?rev=d21d6c08d59d513f2192a0160399979093d9deb2#d21d6c08d59d513f2192a0160399979093d9deb2"
 dependencies = [
  "bitvec",
  "cfg-if",
@@ -11012,7 +11012,7 @@ dependencies = [
 [[package]]
 name = "revm-context-interface"
 version = "43.0.1"
-source = "git+https://github.com/bluealloy/revm?rev=a4a7ac21e2d2ae6d319af0cf5cc05101ccc34ba6#a4a7ac21e2d2ae6d319af0cf5cc05101ccc34ba6"
+source = "git+https://github.com/bluealloy/revm?rev=d21d6c08d59d513f2192a0160399979093d9deb2#d21d6c08d59d513f2192a0160399979093d9deb2"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -11027,7 +11027,7 @@ dependencies = [
 [[package]]
 name = "revm-database"
 version = "43.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=a4a7ac21e2d2ae6d319af0cf5cc05101ccc34ba6#a4a7ac21e2d2ae6d319af0cf5cc05101ccc34ba6"
+source = "git+https://github.com/bluealloy/revm?rev=d21d6c08d59d513f2192a0160399979093d9deb2#d21d6c08d59d513f2192a0160399979093d9deb2"
 dependencies = [
  "alloy-eips",
  "derive_more",
@@ -11042,7 +11042,7 @@ dependencies = [
 [[package]]
 name = "revm-database-interface"
 version = "43.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=a4a7ac21e2d2ae6d319af0cf5cc05101ccc34ba6#a4a7ac21e2d2ae6d319af0cf5cc05101ccc34ba6"
+source = "git+https://github.com/bluealloy/revm?rev=d21d6c08d59d513f2192a0160399979093d9deb2#d21d6c08d59d513f2192a0160399979093d9deb2"
 dependencies = [
  "auto_impl",
  "either",
@@ -11055,7 +11055,7 @@ dependencies = [
 [[package]]
 name = "revm-handler"
 version = "43.0.1"
-source = "git+https://github.com/bluealloy/revm?rev=a4a7ac21e2d2ae6d319af0cf5cc05101ccc34ba6#a4a7ac21e2d2ae6d319af0cf5cc05101ccc34ba6"
+source = "git+https://github.com/bluealloy/revm?rev=d21d6c08d59d513f2192a0160399979093d9deb2#d21d6c08d59d513f2192a0160399979093d9deb2"
 dependencies = [
  "auto_impl",
  "derive-where",
@@ -11073,7 +11073,7 @@ dependencies = [
 [[package]]
 name = "revm-inspector"
 version = "43.0.1"
-source = "git+https://github.com/bluealloy/revm?rev=a4a7ac21e2d2ae6d319af0cf5cc05101ccc34ba6#a4a7ac21e2d2ae6d319af0cf5cc05101ccc34ba6"
+source = "git+https://github.com/bluealloy/revm?rev=d21d6c08d59d513f2192a0160399979093d9deb2#d21d6c08d59d513f2192a0160399979093d9deb2"
 dependencies = [
  "auto_impl",
  "either",
@@ -11110,7 +11110,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "43.0.1"
-source = "git+https://github.com/bluealloy/revm?rev=a4a7ac21e2d2ae6d319af0cf5cc05101ccc34ba6#a4a7ac21e2d2ae6d319af0cf5cc05101ccc34ba6"
+source = "git+https://github.com/bluealloy/revm?rev=d21d6c08d59d513f2192a0160399979093d9deb2#d21d6c08d59d513f2192a0160399979093d9deb2"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -11122,7 +11122,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "43.0.2"
-source = "git+https://github.com/bluealloy/revm?rev=a4a7ac21e2d2ae6d319af0cf5cc05101ccc34ba6#a4a7ac21e2d2ae6d319af0cf5cc05101ccc34ba6"
+source = "git+https://github.com/bluealloy/revm?rev=d21d6c08d59d513f2192a0160399979093d9deb2#d21d6c08d59d513f2192a0160399979093d9deb2"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -11148,7 +11148,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "43.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=a4a7ac21e2d2ae6d319af0cf5cc05101ccc34ba6#a4a7ac21e2d2ae6d319af0cf5cc05101ccc34ba6"
+source = "git+https://github.com/bluealloy/revm?rev=d21d6c08d59d513f2192a0160399979093d9deb2#d21d6c08d59d513f2192a0160399979093d9deb2"
 dependencies = [
  "alloy-primitives",
  "once_cell",
@@ -11158,7 +11158,7 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "43.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=a4a7ac21e2d2ae6d319af0cf5cc05101ccc34ba6#a4a7ac21e2d2ae6d319af0cf5cc05101ccc34ba6"
+source = "git+https://github.com/bluealloy/revm?rev=d21d6c08d59d513f2192a0160399979093d9deb2#d21d6c08d59d513f2192a0160399979093d9deb2"
 dependencies = [
  "alloy-eip7928",
  "bitflags 2.13.1",
@@ -11529,7 +11529,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -11609,7 +11609,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs 1.0.7",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -12243,7 +12243,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -12502,7 +12502,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -13775,7 +13775,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

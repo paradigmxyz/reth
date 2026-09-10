@@ -49,8 +49,7 @@ fn convert_to_proof<'a>(path: impl IntoIterator<Item = &'a str>) -> Vec<Bytes> {
 #[cfg(feature = "account-ext")]
 fn extension_only_genesis_account_proof() {
     let target = Address::with_last_byte(1);
-    let extension =
-        reth_primitives_traits::AccountExtension::from(alloy_rlp::encode(B256::repeat_byte(0x42)));
+    let extension = reth_primitives_traits::AccountExtension::copy_from_slice(&[0x82, 0xaa]);
     let mut spec = ChainSpec::default();
     spec.genesis.alloc.entry(target).or_default().extension = extension.clone();
     spec.genesis.alloc.entry(Address::with_last_byte(3)).or_default().balance = U256::from(1);
