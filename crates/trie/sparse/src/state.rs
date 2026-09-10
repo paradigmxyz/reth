@@ -1076,7 +1076,6 @@ mod tests {
                 // An empty proof cannot reveal the newly created blind trie.
                 (missing, Vec::new()),
             ]),
-            ..Default::default()
         });
         assert!(result.is_err());
         assert_eq!(sparse.storage.tries.len(), 3);
@@ -1106,7 +1105,6 @@ mod tests {
                     )
                 })
                 .collect(),
-            ..Default::default()
         };
         targeted.reveal_decoded_multiproof_v2(proof.clone()).unwrap();
         scanning.reveal_decoded_multiproof_v2_scanning(proof).unwrap();
@@ -1165,7 +1163,6 @@ mod tests {
                             (alloy_primitives::keccak256(account.to_be_bytes()), vec![node])
                         })
                         .collect(),
-                    ..Default::default()
                 };
                 let mut scanning = Vec::new();
                 let mut targeted = Vec::new();
