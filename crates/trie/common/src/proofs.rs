@@ -891,15 +891,24 @@ impl AccountProof {
         } = proof;
         let storage_proofs = storage_proof.into_iter().map(Into::into).collect();
 
-        // EIP-1186's summary fields omit the extension. Recover it from the account leaf; the
-        // returned proof must still be verified against a trusted state root before use.
+        // EIP-1186's summary fields omit the extension. Recover it from an inclusion proof,
+        // checking the full address path so exclusion proofs cannot supply another account's
+        // extension. This does not authenticate the root; callers must still call `verify`.
         #[cfg(feature = "account-ext")]
         let extension = (|| {
+            let root = keccak256(account_proof.first()?);
             let TrieNode::Leaf(leaf) =
                 alloy_rlp::decode_exact::<TrieNode>(account_proof.last()?).ok()?
             else {
                 return None;
             };
+            verify_proof(
+                root,
+                Nibbles::unpack(keccak256(address)),
+                Some(leaf.value.clone()),
+                &account_proof,
+            )
+            .ok()?;
             Some(alloy_rlp::decode_exact::<TrieAccount>(&leaf.value).ok()?.extension)
         })()
         .unwrap_or_default();
