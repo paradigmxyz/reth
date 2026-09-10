@@ -91,6 +91,7 @@ members = [
     "crates/rpc/rpc-e2e-tests/",
     "crates/rpc/rpc-convert/",
     "crates/rpc/rpc/",
+    "crates/snap-sync/",
     "crates/stages/api/",
     "crates/stages/stages/",
     "crates/stages/types/",
@@ -409,6 +410,7 @@ reth-rpc-layer = { path = "crates/rpc/rpc-layer" }
 reth-rpc-server-types = { path = "crates/rpc/rpc-server-types" }
 reth-rpc-convert = { path = "crates/rpc/rpc-convert" }
 reth-rpc-traits = { version = "0.7.0", default-features = false }
+reth-snap-sync = { path = "crates/snap-sync" }
 reth-stages = { path = "crates/stages/stages" }
 reth-stages-api = { path = "crates/stages/api" }
 reth-stages-types = { path = "crates/stages/types", default-features = false }
@@ -442,7 +444,7 @@ alloy-sol-types = { version = "1.6.1", default-features = false }
 
 alloy-chains = { version = "0.2.33", default-features = false }
 alloy-eip2124 = { version = "0.2.0", default-features = false }
-alloy-eip7928 = { version = "0.4.8", default-features = false, features = ["rlp"] }
+alloy-eip7928 = { version = "0.4.9", default-features = false, features = ["rlp"] }
 alloy-evm = { version = "0.39.0", default-features = false }
 alloy-rlp = { version = "0.3.16", default-features = false, features = ["core-net"] }
 alloy-trie = { version = "0.9.4", default-features = false }

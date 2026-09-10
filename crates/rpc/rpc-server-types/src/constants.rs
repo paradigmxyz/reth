@@ -130,5 +130,5 @@ pub mod cache {
     pub const DEFAULT_CONCURRENT_DB_REQUESTS: usize = 512;
 
     /// Default maximum number of transaction hashes to cache for lookups.
-    pub const DEFAULT_MAX_CACHED_TX_HASHES: u32 = 30_000;
+    pub const DEFAULT_MAX_CACHED_TX_HASHES: u32 = 100_000;
 }

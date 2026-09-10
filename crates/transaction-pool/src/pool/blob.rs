@@ -225,7 +225,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
             .collect();
 
         // Update pending fees and reprioritize
-        self.pending_fees = pending_fees.clone();
+        self.pending_fees = *pending_fees;
         self.reprioritize();
 
         removed
@@ -662,7 +662,7 @@ mod tests {
             }
 
             // update fees and resort the pool
-            pool.pending_fees = ordering.network_fees.clone();
+            pool.pending_fees = ordering.network_fees;
             pool.reprioritize();
 
             // now iterate through the pool and make sure they're in the same order as the original

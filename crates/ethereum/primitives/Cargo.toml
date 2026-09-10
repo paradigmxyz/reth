@@ -28,6 +28,7 @@ arbitrary = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 
 [dev-dependencies]
+arbitrary.workspace = true
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 rand.workspace = true

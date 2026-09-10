@@ -249,9 +249,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-eip7928"
-version = "0.4.8"
+version = "0.4.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3fb59cca9e58f5c624becc3cffb32772dc278f31eeae4606844a88592e8d2672"
+checksum = "fdd59d7221d384c46771ffbf6f18f70aa7753326351277857016bed5127b888f"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -2476,7 +2476,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3466,7 +3466,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5198,7 +5198,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6310,7 +6310,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7354,7 +7354,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7745,7 +7745,11 @@ dependencies = [
  "alloy-rpc-types-eth",
  "aquamarine",
  "backon",
+ "blake3",
  "clap",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "reth-chainspec",
  "reth-cli-runner",
  "reth-cli-util",
@@ -8181,6 +8185,7 @@ name = "reth-db-api"
 version = "2.5.2"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
  "arbitrary",
  "arrayvec",
@@ -8258,6 +8263,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "assert_matches",
+ "codspeed-criterion-compat",
  "discv5",
  "enr",
  "itertools 0.14.0",
@@ -9564,6 +9570,7 @@ dependencies = [
  "alloy-network",
  "alloy-primitives",
  "alloy-provider",
+ "alloy-rlp",
  "alloy-rpc-types-beacon",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
@@ -9615,6 +9622,7 @@ dependencies = [
  "reth-testing-utils",
  "reth-tracing",
  "reth-transaction-pool",
+ "reth-trie-common",
  "revm",
  "serde",
  "serde_json",
@@ -10307,7 +10315,6 @@ dependencies = [
 name = "reth-rpc-server-types"
 version = "2.5.2"
 dependencies = [
- "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "jsonrpsee-core",
@@ -10330,6 +10337,25 @@ dependencies = [
  "alloy-signer",
  "reth-primitives-traits",
  "thiserror 2.0.20",
+]
+
+[[package]]
+name = "reth-snap-sync"
+version = "2.5.2"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eip7928",
+ "alloy-eips",
+ "alloy-primitives",
+ "reth-db-api",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-storage-api",
+ "reth-storage-errors",
+ "reth-trie-common",
+ "revm",
+ "thiserror 2.0.20",
+ "tokio-util",
 ]
 
 [[package]]
@@ -11438,7 +11464,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -11497,7 +11523,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs 0.26.11",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -11518,7 +11544,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs 1.0.9",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -12390,7 +12416,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -13611,7 +13637,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -74,12 +74,12 @@ use alloy_eips::{
         env_settings::KzgSettings, BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1,
         BlobTransactionValidationError,
     },
-    eip7594::BlobTransactionSidecarVariant,
+    eip7594::{BlobCellMask, BlobTransactionSidecarVariant},
     eip7702::SignedAuthorization,
 };
 use alloy_primitives::{
     map::{AddressSet, B256Map},
-    Address, Bytes, TxHash, TxKind, B128, B256, U256,
+    Address, Bytes, TxHash, TxKind, B256, U256,
 };
 use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
@@ -464,6 +464,16 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     /// Consumer: RPC
     fn all_transactions(&self) -> AllPoolTransactions<Self::Transaction>;
 
+    /// Returns all transactions of the given sender that are currently in the pool, grouped by
+    /// whether they are ready for inclusion in the next block or not.
+    ///
+    /// Both groups are collected from one snapshot of the pool, so a transaction that is moved
+    /// between sub-pools concurrently shows up in exactly one of them.
+    ///
+    /// Consumer: RPC
+    fn all_transactions_by_sender(&self, sender: Address)
+        -> AllPoolTransactions<Self::Transaction>;
+
     /// Returns the _hashes_ of all transactions regardless of whether they can be propagated or
     /// not.
     ///
@@ -751,7 +761,7 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     fn get_blobs_for_versioned_hashes_v4(
         &self,
         versioned_hashes: &[B256],
-        indices_bitarray: B128,
+        cell_mask: BlobCellMask,
     ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError>;
 
     /// Return whether each requested blob versioned hash is available.
@@ -1610,6 +1620,7 @@ pub trait EthPoolTransaction: PoolTransaction {
 ///
 /// - `cost`: Pre-calculated max cost (gas * price + value + blob costs)
 /// - `encoded_length`: Cached RLP encoding length for size limits
+/// - `in_memory_size`: Cached transaction size for subpool memory accounting
 /// - `blob_sidecar`: Blob data state (None/Missing/Present)
 /// - `blob_cell_availability`: Cached blob cell availability for eth/72 announcements
 ///
@@ -1628,6 +1639,11 @@ pub struct EthPooledTransaction<T = TransactionSigned> {
     /// This is the RLP length of the transaction, computed when the transaction is added to the
     /// pool.
     pub encoded_length: usize,
+
+    /// Cached in-memory size of `transaction`, excluding the blob sidecar.
+    ///
+    /// Must be updated if `transaction` is modified or replaced.
+    pub in_memory_size: usize,
 
     /// The blob side car for this transaction
     pub blob_sidecar: EthBlobTransactionSidecar,
@@ -1670,10 +1686,12 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
             blob_cell_availability = Some(BlobCellAvailability::full());
         }
 
+        let in_memory_size = transaction.size();
         Self {
             transaction,
             cost,
             encoded_length,
+            in_memory_size,
             blob_sidecar,
             blob_cell_availability,
             frame_validation: None,
@@ -1813,8 +1831,9 @@ impl<T: Typed2718> Typed2718 for EthPooledTransaction<T> {
 }
 
 impl<T: InMemorySize> InMemorySize for EthPooledTransaction<T> {
+    #[inline]
     fn size(&self) -> usize {
-        self.transaction.size() +
+        self.in_memory_size +
             self.frame_validation.as_ref().map_or(0, |metadata| {
                 // Admission metadata can exceed the wire payload for code/storage-heavy prefixes.
                 // Include its allocation in pool pressure accounting without changing encoded
@@ -2199,7 +2218,7 @@ mod tests {
         EthereumTxEnvelope, SignableTransaction, TxEip1559, TxEip2930, TxEip4844, TxEip7702,
         TxEnvelope, TxLegacy,
     };
-    use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, eip7594::BlobCellMask};
+    use alloy_eips::eip4844::DATA_GAS_PER_BLOB;
     use alloy_primitives::Signature;
 
     #[test]
