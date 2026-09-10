@@ -7935,6 +7935,7 @@ dependencies = [
  "alloy-signer",
  "alloy-signer-local",
  "derive_more",
+ "imbl",
  "metrics",
  "parking_lot",
  "pin-project",

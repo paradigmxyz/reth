@@ -39,6 +39,7 @@ tracing.workspace = true
 # misc
 derive_more.workspace = true
 metrics.workspace = true
+imbl.workspace = true
 parking_lot.workspace = true
 pin-project.workspace = true
 serde = { workspace = true, optional = true }
@@ -69,6 +70,7 @@ serde = [
     "reth-trie/serde",
     "revm/serde",
     "reth-storage-api/serde",
+    "imbl/serde",
 ]
 test-utils = [
     "alloy-primitives/getrandom",

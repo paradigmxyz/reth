@@ -4,7 +4,10 @@ use crate::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
     ChainInfoTracker, MemoryOverlayStateProvider,
 };
-use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
+use alloy_consensus::{
+    transaction::{TransactionMeta, TxHashRef},
+    BlockHeader,
+};
 use alloy_eips::{BlockHashOrNumber, BlockNumHash};
 use alloy_primitives::{map::B256Map, BlockNumber, TxHash, B256};
 use parking_lot::RwLock;
@@ -376,7 +379,9 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             // also shift the pending state if it exists
             self.inner.in_memory_state.pending.send_modify(|p| {
                 if let Some(p) = p.as_mut() {
-                    p.parent = blocks.get(&p.block_ref().recovered_block().parent_hash()).cloned();
+                    let parent =
+                        blocks.get(&p.block_ref().recovered_block().parent_hash()).cloned();
+                    *p = BlockState::with_parent(p.block(), parent);
                 }
             });
         }
@@ -571,14 +576,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 
     /// Returns [`SignedTransaction`] type for the given `TxHash` if found.
     pub fn transaction_by_hash(&self, hash: TxHash) -> Option<N::SignedTx> {
-        for block_state in self.canonical_chain() {
-            if let Some(tx) =
-                block_state.block_ref().recovered_block().body().transaction_by_hash(&hash)
-            {
-                return Some(tx.clone())
-            }
-        }
-        None
+        self.head_state()?.transaction_on_chain(hash)
     }
 
     /// Returns a tuple with [`SignedTransaction`] type and [`TransactionMeta`] for the
@@ -587,12 +585,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         &self,
         tx_hash: TxHash,
     ) -> Option<(N::SignedTx, TransactionMeta)> {
-        for block_state in self.canonical_chain() {
-            if let Some(indexed) = block_state.find_indexed(tx_hash) {
-                return Some((indexed.tx().clone(), indexed.meta()));
-            }
-        }
-        None
+        self.head_state()?.transaction_meta_on_chain(tx_hash)
     }
 }
 
@@ -604,6 +597,9 @@ pub struct BlockState<N: NodePrimitives = EthPrimitives> {
     block: ExecutedBlock<N>,
     /// The block's parent block if it exists.
     parent: Option<Arc<Self>>,
+    /// Transaction locations for this chain snapshot. Structural sharing keeps extending the
+    /// chain cheap and preserves lookups for readers holding an older head after a reorg.
+    transactions: imbl::HashMap<TxHash, (Arc<ExecutedBlock<N>>, usize)>,
 }
 
 impl<N: NodePrimitives> PartialEq for BlockState<N> {
@@ -614,13 +610,20 @@ impl<N: NodePrimitives> PartialEq for BlockState<N> {
 
 impl<N: NodePrimitives> BlockState<N> {
     /// [`BlockState`] constructor.
-    pub const fn new(block: ExecutedBlock<N>) -> Self {
-        Self { block, parent: None }
+    pub fn new(block: ExecutedBlock<N>) -> Self {
+        Self::with_parent(block, None)
     }
 
     /// [`BlockState`] constructor with parent.
-    pub const fn with_parent(block: ExecutedBlock<N>, parent: Option<Arc<Self>>) -> Self {
-        Self { block, parent }
+    pub fn with_parent(block: ExecutedBlock<N>, parent: Option<Arc<Self>>) -> Self {
+        let mut transactions = parent.as_ref().map(|p| p.transactions.clone()).unwrap_or_default();
+        if !block.recovered_block().body().transactions().is_empty() {
+            let indexed_block = Arc::new(block.clone());
+            for (index, tx) in block.recovered_block().body().transactions_iter().enumerate() {
+                transactions.insert(*tx.tx_hash(), (indexed_block.clone(), index));
+            }
+        }
+        Self { block, parent, transactions }
     }
 
     /// Returns the hash and block of the on disk block this state can be traced back to.
@@ -735,9 +738,8 @@ impl<N: NodePrimitives> BlockState<N> {
 
     /// Tries to find a transaction by [`TxHash`] in the chain ending at this block.
     pub fn transaction_on_chain(&self, hash: TxHash) -> Option<N::SignedTx> {
-        self.chain().find_map(|block_state| {
-            block_state.block_ref().recovered_block().body().transaction_by_hash(&hash).cloned()
-        })
+        let (block, index) = self.transaction_location_on_chain(hash)?;
+        block.recovered_block().body().transactions().get(index).cloned()
     }
 
     /// Tries to find a transaction with meta by [`TxHash`] in the chain ending at this block.
@@ -745,9 +747,27 @@ impl<N: NodePrimitives> BlockState<N> {
         &self,
         tx_hash: TxHash,
     ) -> Option<(N::SignedTx, TransactionMeta)> {
-        self.chain().find_map(|block_state| {
-            block_state.find_indexed(tx_hash).map(|indexed| (indexed.tx().clone(), indexed.meta()))
-        })
+        let (block, index) = self.transaction_location_on_chain(tx_hash)?;
+        let block = block.recovered_block();
+        let tx = block.body().transactions().get(index)?.clone();
+        let meta = TransactionMeta {
+            tx_hash,
+            index: index as u64,
+            block_hash: block.hash(),
+            block_number: block.number(),
+            base_fee: block.base_fee_per_gas(),
+            timestamp: block.timestamp(),
+            excess_blob_gas: block.excess_blob_gas(),
+        };
+        Some((tx, meta))
+    }
+
+    /// Returns the executed block and transaction index for a hash in this chain snapshot.
+    pub fn transaction_location_on_chain(
+        &self,
+        hash: TxHash,
+    ) -> Option<(&ExecutedBlock<N>, usize)> {
+        self.transactions.get(&hash).map(|(block, index)| (block.as_ref(), *index))
     }
 
     /// Finds a transaction by hash and returns it with its index and block context.
@@ -1049,7 +1069,7 @@ mod tests {
         for i in 1..=num_blocks {
             let mut state = create_mock_state(test_block_builder, i, parent_hash);
             if let Some(parent) = parent_state {
-                state.parent = Some(Arc::new(parent));
+                state = BlockState::with_parent(state.block(), Some(Arc::new(parent)));
             }
             parent_hash = state.hash();
             parent_state = Some(state.clone());
@@ -1192,6 +1212,94 @@ mod tests {
         ) -> ProviderResult<Vec<Bytes>> {
             Ok(Vec::default())
         }
+    }
+
+    fn indexed_test_block(number: u64, parent_hash: B256, nonces: &[u64]) -> ExecutedBlock {
+        use alloy_consensus::{Header, TxLegacy};
+        use alloy_primitives::{Signature, U256};
+        use reth_ethereum_primitives::{Block, BlockBody, Transaction, TransactionSigned};
+
+        let transactions = nonces
+            .iter()
+            .map(|&nonce| {
+                TransactionSigned::new_unhashed(
+                    Transaction::Legacy(TxLegacy { nonce, ..Default::default() }),
+                    Signature::new(U256::from(1), U256::from(1), false),
+                )
+            })
+            .collect::<Vec<_>>();
+        let transactions_root =
+            reth_primitives_traits::proofs::calculate_transaction_root(&transactions);
+        let block = Block {
+            header: Header { number, parent_hash, transactions_root, ..Default::default() },
+            body: BlockBody { transactions, ..Default::default() },
+        };
+        ExecutedBlock {
+            recovered_block: Arc::new(RecoveredBlock::new_unhashed(
+                block,
+                vec![Address::ZERO; nonces.len()],
+            )),
+            execution_output: Arc::new(BlockExecutionOutput {
+                result: BlockExecutionResult {
+                    receipts: nonces
+                        .iter()
+                        .map(|&nonce| Receipt { cumulative_gas_used: nonce, ..Default::default() })
+                        .collect(),
+                    ..Default::default()
+                },
+                state: Default::default(),
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn transaction_index_preserves_chain_snapshots() {
+        let state = CanonicalInMemoryState::empty();
+        let first = indexed_test_block(1, B256::ZERO, &[1, 2]);
+        let second = indexed_test_block(2, first.recovered_block().hash(), &[3, 4]);
+        let tx_hash = |block: &ExecutedBlock, index: usize| {
+            *block.recovered_block().body().transactions[index].tx_hash()
+        };
+        state.update_blocks(vec![first.clone(), second.clone()], vec![]);
+        let old_head = state.head_state().unwrap();
+        for block in [&first, &second] {
+            for (index, tx) in block.recovered_block().body().transactions.iter().enumerate() {
+                let (actual, meta) = state.transaction_by_hash_with_meta(*tx.tx_hash()).unwrap();
+                assert_eq!(actual, *tx);
+                assert_eq!(
+                    meta,
+                    block.recovered_block().find_indexed(*tx.tx_hash()).unwrap().meta()
+                );
+                let (found, location) =
+                    old_head.transaction_location_on_chain(*tx.tx_hash()).unwrap();
+                assert_eq!(location, index);
+                assert_eq!(found, block);
+            }
+        }
+        assert!(old_head.transaction_location_on_chain(B256::ZERO).is_none());
+
+        // A transaction can be re-included at a different position on the replacement branch.
+        let replacement = indexed_test_block(2, first.recovered_block().hash(), &[4, 5]);
+        state.update_blocks(vec![replacement.clone()], vec![second.clone()]);
+        let new_head = state.head_state().unwrap();
+        assert!(new_head.transaction_on_chain(tx_hash(&second, 0)).is_none());
+        assert_eq!(new_head.transaction_meta_on_chain(tx_hash(&second, 1)).unwrap().1.index, 0);
+        assert_eq!(old_head.transaction_meta_on_chain(tx_hash(&second, 1)).unwrap().1.index, 1);
+        assert!(old_head.transaction_on_chain(tx_hash(&replacement, 1)).is_none());
+
+        let pending = indexed_test_block(3, replacement.recovered_block().hash(), &[6]);
+        state.set_pending_block(pending.clone());
+        assert!(state.transaction_by_hash(tx_hash(&pending, 0)).is_none());
+        state.remove_persisted_blocks(first.recovered_block().num_hash());
+        assert!(state.transaction_by_hash(tx_hash(&first, 0)).is_none());
+        assert!(state.transaction_by_hash(tx_hash(&replacement, 0)).is_some());
+        assert!(state.pending_state().unwrap().transaction_on_chain(tx_hash(&first, 0)).is_none());
+        assert!(new_head.transaction_on_chain(tx_hash(&first, 0)).is_some());
+
+        state.clear_state();
+        assert!(state.transaction_by_hash(tx_hash(&replacement, 0)).is_none());
+        assert!(new_head.transaction_on_chain(tx_hash(&replacement, 0)).is_some());
     }
 
     #[test]
