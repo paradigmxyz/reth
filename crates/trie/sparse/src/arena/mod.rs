@@ -641,7 +641,7 @@ impl Default for ArenaParallelismThresholds {
 /// Root hash computation follows a bottom-up approach:
 ///
 /// 1. **[`SparseTrie::update_subtrie_hashes`]**: Hashes subtries in place in parallel (when dirty
-///    leaf count meets [`ArenaParallelismThresholds::min_dirty_leaves`]), merges their updates,
+///    leaf count meets [`ArenaParallelismThresholds::min_dirty_leaves`]), retaining their updates,
 ///    then walks dirty upper branches to hash any subtries with no dirty leaves serially.
 /// 2. **[`SparseTrie::root`]**: Calls `update_subtrie_hashes`, then RLP-encodes the full upper trie
 ///    depth-first to produce the root hash.
@@ -2062,7 +2062,7 @@ impl Default for ArenaParallelSparseTrie {
 }
 
 impl ArenaParallelSparseTrie {
-    /// Hashes a subtrie at `head_idx` and collects its update actions.
+    /// Hashes a subtrie at `head_idx`, retaining its persistence updates locally.
     fn update_upper_subtrie(&mut self, head_idx: Index, new_epoch: TrieNodeEpoch) {
         let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[head_idx] else {
             unreachable!()
@@ -2071,8 +2071,6 @@ impl ArenaParallelSparseTrie {
         if !subtrie.arena[subtrie.root].is_cached() {
             subtrie.update_cached_rlp(new_epoch);
         }
-
-        Self::merge_subtrie_updates(&mut self.buffers.updates, &mut subtrie.buffers.updates);
     }
 }
 
@@ -2130,10 +2128,18 @@ impl SparseTrie for ArenaParallelSparseTrie {
     }
 
     fn set_updates(&mut self, retain_updates: bool) {
-        if retain_updates {
-            self.buffers.updates.get_or_insert_with(SparseTrieUpdates::default).clear();
-        } else {
-            self.buffers.updates = None;
+        fn reset(updates: &mut Option<SparseTrieUpdates>, retain: bool) {
+            if retain {
+                updates.get_or_insert_with(SparseTrieUpdates::default).clear();
+            } else {
+                *updates = None;
+            }
+        }
+        reset(&mut self.buffers.updates, retain_updates);
+        for (_, node) in &mut self.upper_arena {
+            if let ArenaSparseNode::Subtrie(subtrie) = node {
+                reset(&mut subtrie.buffers.updates, retain_updates);
+            }
         }
     }
 
@@ -2343,18 +2349,16 @@ impl SparseTrie for ArenaParallelSparseTrie {
             }
         }
 
-        // Subtries own disjoint path prefixes, so their updates can be merged in arena order.
-        // Merge before the walk, which skips these now-cached subtries.
-        for subtrie in selected {
-            Self::merge_subtrie_updates(&mut self.buffers.updates, &mut subtrie.buffers.updates);
-        }
+        // End the disjoint arena borrows before walking upper nodes. Persistence updates
+        // remain with each subtrie until a complete view is requested or it is recycled.
+        drop(selected);
 
         if !has_selected && self.upper_arena[self.root].is_cached() {
             return;
         }
 
         // Deleting a clean leaf can dirty a subtrie without leaving any dirty leaves.
-        // Retain the dirty-branch walk to hash these subtries serially, including their updates.
+        // Retain the dirty-branch walk to hash these subtries serially.
         self.buffers.cursor.reset(&self.upper_arena, self.root, Nibbles::default());
 
         loop {
@@ -2387,13 +2391,40 @@ impl SparseTrie for ArenaParallelSparseTrie {
     }
 
     fn updates_ref(&self) -> Cow<'_, SparseTrieUpdates> {
-        self.buffers
-            .updates
-            .as_ref()
-            .map_or(Cow::Owned(SparseTrieUpdates::default()), Cow::Borrowed)
+        let Some(parent) = &self.buffers.updates else {
+            return Cow::Owned(SparseTrieUpdates::default());
+        };
+        let mut result = Cow::Borrowed(parent);
+        for (_, node) in &self.upper_arena {
+            let ArenaSparseNode::Subtrie(subtrie) = node else { continue };
+            let Some(updates) = &subtrie.buffers.updates else { continue };
+            if updates.updated_nodes.is_empty() && updates.removed_nodes.is_empty() {
+                continue;
+            }
+            // Active subtries have disjoint prefixes. Any parent entries for such a prefix
+            // predate its current owner; local operations supersede those historical entries.
+            let result = result.to_mut();
+            for (path, node) in &updates.updated_nodes {
+                result.removed_nodes.remove(path);
+                result.updated_nodes.insert(*path, node.clone());
+            }
+            for path in &updates.removed_nodes {
+                result.updated_nodes.remove(path);
+                result.removed_nodes.insert(*path);
+            }
+        }
+        result
     }
 
     fn take_updates(&mut self) -> SparseTrieUpdates {
+        for (_, node) in &mut self.upper_arena {
+            if let ArenaSparseNode::Subtrie(subtrie) = node {
+                Self::merge_subtrie_updates(
+                    &mut self.buffers.updates,
+                    &mut subtrie.buffers.updates,
+                );
+            }
+        }
         match self.buffers.updates.take() {
             Some(updates) => {
                 self.buffers.updates = Some(SparseTrieUpdates::with_capacity(
@@ -3075,6 +3106,76 @@ mod tests {
         harness.apply_changeset(changes);
         trie.prune(epoch(1));
         harness.assert_changes(&mut trie, initial);
+    }
+
+    #[test]
+    fn retained_updates_match_incremental_draining_across_ownership_changes() {
+        let keys: Vec<_> = (0u8..4)
+            .flat_map(|group| {
+                (0u8..16).map(move |leaf| {
+                    let mut key = B256::ZERO;
+                    key.0[0] = group;
+                    key.0[1] = (leaf / 4) * 16 + leaf % 4;
+                    key
+                })
+            })
+            .collect();
+        let mut retained = ArenaParallelSparseTrie::default();
+        retained.set_updates(true);
+        let mut drained = retained.clone();
+        let mut expected = Some(crate::SparseTrieUpdates::default());
+        // Collapse, re-expand, overwrite equal values, and remove whole owning subtries.
+        for (round, count) in [64, 1, 64, 64, 16, 0, 64].into_iter().enumerate() {
+            let updates: B256Map<_> = keys
+                .iter()
+                .enumerate()
+                .map(|(i, key)| {
+                    (
+                        *key,
+                        LeafUpdate::Changed(if i < count { vec![i as u8 + 1] } else { Vec::new() }),
+                    )
+                })
+                .collect();
+            for trie in [&mut retained, &mut drained] {
+                trie.update_leaves(&mut updates.clone(), |_, _| panic!("all paths are revealed"))
+                    .unwrap();
+            }
+            assert_eq!(retained.root(epoch(round as u64)), drained.root(epoch(round as u64)));
+            let expected_storage = keys
+                .iter()
+                .take(count)
+                .enumerate()
+                .map(|(i, key)| (*key, U256::from(i + 1)))
+                .collect();
+            assert_eq!(
+                retained.root(epoch(99)),
+                ArenaTrieTestHarness::new(expected_storage).original_root()
+            );
+            assert_eq!(retained.root_epoch(), drained.root_epoch());
+            ArenaParallelSparseTrie::merge_subtrie_updates(
+                &mut expected,
+                &mut Some(drained.take_updates()),
+            );
+            assert_eq!(*retained.updates_ref(), *expected.as_ref().unwrap());
+            assert_eq!(retained.root(epoch(99)), drained.root(epoch(99)));
+        }
+        assert!(retained.upper_arena.iter().any(|(_, node)| {
+            node.as_subtrie().is_some_and(|s| {
+                s.buffers
+                    .updates
+                    .as_ref()
+                    .is_some_and(|u| !u.updated_nodes.is_empty() || !u.removed_nodes.is_empty())
+            })
+        }));
+        let mut toggled = retained.clone();
+        toggled.set_updates(false);
+        assert_eq!(toggled.take_updates(), Default::default());
+        toggled.set_updates(true);
+        assert_eq!(*toggled.updates_ref(), Default::default());
+        retained.prune(epoch(100));
+        assert_eq!(retained.take_updates(), expected.unwrap());
+        assert_eq!(*retained.updates_ref(), Default::default());
+        assert_eq!(retained.take_updates(), Default::default());
     }
 
     use proptest::prelude::*;
