@@ -242,6 +242,7 @@ sparse_trie_tests! {
     test_remove_nonexistent_leaf_preserves_hashes,
     test_update_leaves_blinded_node_requests_proof,
     test_update_leaves_retry_after_reveal,
+    test_update_leaves_supersede_blocked_update,
     test_remove_leaf_blinded_sibling_requires_reveal,
     test_update_leaves_removal_branch_collapse_blinded_sibling,
     test_update_leaves_subtrie_collapse_requests_proof,

@@ -588,6 +588,67 @@ pub(super) fn test_update_leaves_retry_after_reveal<T: SparseTrie>(new_trie: fn(
     );
 }
 
+/// A newer update for a key that is already blocked must replace the blocked one, so the stale
+/// value can never be applied on top of it once the proof arrives.
+pub(super) fn test_update_leaves_supersede_blocked_update<T: SparseTrie>(new_trie: fn() -> T) {
+    // Two groups of 16 keys under different first nibbles, so branch children become hash nodes.
+    let mut base_storage = BTreeMap::new();
+
+    let mut group_a_keys = Vec::new();
+    for i in 0u8..16 {
+        let mut key = B256::ZERO;
+        key.0[0] = 0x10 | i;
+        group_a_keys.push(key);
+        base_storage.insert(key, U256::from(i as u64 + 1));
+    }
+
+    let mut group_b_keys = Vec::new();
+    for i in 0u8..16 {
+        let mut key = B256::ZERO;
+        key.0[0] = 0x20 | i;
+        group_b_keys.push(key);
+        base_storage.insert(key, U256::from(i as u64 + 100));
+    }
+
+    let harness = SuiteTestHarness::new(base_storage.clone());
+
+    // Reveal only group_a keys, leaving group_b's subtrie blinded.
+    let mut trie: T = harness.init_trie_with_targets(&group_a_keys, false, new_trie);
+
+    let target_key = group_b_keys[0];
+    let stale_value = U256::from(111);
+    let new_value = U256::from(999);
+
+    let mut leaf_updates =
+        SuiteTestHarness::leaf_updates(&BTreeMap::from([(target_key, stale_value)]));
+    let mut targets: Vec<ProofV2Target> = Vec::new();
+    trie.update_leaves(&mut leaf_updates, |key, parent| {
+        targets.push(ProofV2Target::new(key).with_parent(parent));
+    })
+    .expect("update_leaves should succeed");
+    assert_eq!(trie.blocked_updates().len(), 1, "the first update should be blocked");
+
+    // The newer value hits the same blinded node, so it takes the blocked entry's place.
+    let mut newer = SuiteTestHarness::leaf_updates(&BTreeMap::from([(target_key, new_value)]));
+    trie.update_leaves(&mut newer, |_, _| {}).expect("update_leaves should succeed");
+    assert!(newer.is_empty(), "the newer update should be taken over by the trie");
+    assert_eq!(trie.blocked_updates().len(), 1, "the key should be blocked exactly once");
+
+    let (mut proof_nodes, _) = harness.proof_v2(&mut targets);
+    trie.reveal_nodes(&mut proof_nodes).expect("reveal_nodes should succeed");
+    trie.update_leaves(&mut leaf_updates, |_, _| {}).expect("update_leaves should succeed");
+    assert!(trie.blocked_updates().is_empty(), "the update should be applied after the reveal");
+
+    let mut expected_storage = base_storage;
+    expected_storage.insert(target_key, new_value);
+    let expected_harness = SuiteTestHarness::new(expected_storage);
+    assert_eq!(
+        trie.root(epoch(0)),
+        expected_harness.original_root(),
+        "the newer value must win over the blocked one"
+    );
+}
+
 pub(super) fn test_remove_leaf_blinded_sibling_requires_reveal<T: SparseTrie>(new_trie: fn() -> T) {
     // Build a branch with two children: one revealed leaf at nibble 0x1, and a blinded
     // subtrie at nibble 0x2 (16 keys so it becomes a hash node > 32 bytes).
