@@ -3321,6 +3321,13 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
         if !slot.proofs.is_empty() {
             let nodes = mem::take(&mut slot.proofs);
+            // These nodes were marked revealed when they arrived, which missed the entries the
+            // returning pass blocked just now: it saw the subtrie as it was before them. Marking
+            // them again hands those entries to the job that reveals them, instead of leaving
+            // them waiting for a reveal that has already happened.
+            for node in &nodes {
+                self.blocked.mark_revealed(&node.path);
+            }
             let subtrie = self.check_out_subtrie(index, &path);
             return Some(self.new_subtrie_job(index, subtrie, nodes, report_touched, dirtied));
         }
@@ -3445,7 +3452,7 @@ mod tests {
     use alloy_primitives::{map::B256Map, B256, U256};
     use rand::{seq::SliceRandom, Rng, SeedableRng};
     use reth_trie::test_utils::TrieTestHarness;
-    use reth_trie_common::{Nibbles, ProofV2Target};
+    use reth_trie_common::{Nibbles, ProofV2Target, ProofV2TargetParent};
     use std::collections::BTreeMap;
     use tracing::{info, trace};
 
@@ -3552,10 +3559,20 @@ mod tests {
 
             // Reveal-update loop: call update_leaves, collect required proofs, fetch them,
             // reveal, and repeat until no more proofs are needed.
+            //
+            // With `deferred` the proofs are revealed while the round's jobs are still checked
+            // out, so their nodes are buffered for those prefixes and only reach the subtries
+            // through the follow-up jobs a restore asks for. Targets are requested at most once,
+            // as the sparse trie task does, so an update that is still blocked after the proof it
+            // asked for was revealed can never be applied.
             let mut reported_touched = B256Map::<Option<Vec<u8>>>::default();
             let mut jobs = Vec::new();
+            let mut fetched = B256Map::<ProofV2TargetParent>::default();
+            let mut targets: Vec<ProofV2Target> = Vec::new();
+            let mut rounds = 0;
             loop {
-                let mut targets: Vec<ProofV2Target> = Vec::new();
+                rounds += 1;
+                assert!(rounds < 100, "the reveal-update loop does not converge");
 
                 if deferred {
                     apst.update_leaves_deferred(
@@ -3565,7 +3582,6 @@ mod tests {
                         &mut jobs,
                     )
                     .expect("update_leaves should succeed");
-                    run_jobs(apst, &mut jobs, &mut targets, &mut reported_touched);
                 } else {
                     apst.update_leaves_with_events(&mut leaf_updates, true, |event| {
                         record_event(event, &mut targets, &mut reported_touched)
@@ -3573,19 +3589,38 @@ mod tests {
                     .expect("update_leaves should succeed");
                 }
 
-                if targets.is_empty() {
-                    break;
+                let mut batch = if deferred {
+                    take_new_targets(&mut targets, &mut fetched)
+                } else {
+                    core::mem::take(&mut targets)
+                };
+
+                if !batch.is_empty() {
+                    let (mut proof_nodes, _) = self.proof_v2(&mut batch);
+                    if deferred {
+                        apst.reveal_nodes_deferred(&mut proof_nodes, true, &mut jobs)
+                            .expect("reveal_nodes should succeed");
+                    } else {
+                        apst.reveal_nodes(&mut proof_nodes).expect("reveal_nodes should succeed");
+                    }
                 }
 
-                let (mut proof_nodes, _) = self.proof_v2(&mut targets);
-                if deferred {
-                    apst.reveal_nodes_deferred(&mut proof_nodes, true, &mut jobs)
-                        .expect("reveal_nodes should succeed");
-                    run_jobs(apst, &mut jobs, &mut targets, &mut reported_touched);
-                } else {
-                    apst.reveal_nodes(&mut proof_nodes).expect("reveal_nodes should succeed");
+                // Hand back all but half of the checked out subtries, so the rest stays out over
+                // the next round the way the jobs of one chunk come back while further proofs
+                // arrive for the prefixes still out.
+                let ran_jobs = !jobs.is_empty();
+                let keep = if batch.is_empty() { 0 } else { jobs.len() / 2 };
+                run_jobs(apst, &mut jobs, keep, &mut targets, &mut reported_touched);
+
+                if batch.is_empty() && !ran_jobs {
+                    break;
                 }
             }
+
+            assert!(
+                apst.blocked_updates().is_empty(),
+                "the reveal-update loop left updates that nothing can deliver",
+            );
 
             pretty_assertions::assert_eq!(
                 reported_touched,
@@ -3650,23 +3685,71 @@ mod tests {
         }
     }
 
-    /// Runs every checked out subtrie job and hands it back, following up on the jobs a restore
-    /// asks for.
+    /// Drains the targets whose proof is requested in this round.
+    ///
+    /// A key is requested again only for a broader parent, the way the sparse trie task's
+    /// `fetched_account_targets` does, and only every other target is answered right away, so a
+    /// subtrie ends up revealed for some of its keys while updates for the others are still
+    /// pending, which is what leaves a job in front of a blinded node.
+    fn take_new_targets(
+        targets: &mut Vec<ProofV2Target>,
+        fetched: &mut B256Map<ProofV2TargetParent>,
+    ) -> Vec<ProofV2Target> {
+        let mut request = |target: ProofV2Target, batch: &mut Vec<ProofV2Target>| match fetched
+            .entry(target.key())
+        {
+            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                if target.parent < *entry.get() {
+                    entry.insert(target.parent);
+                    batch.push(target);
+                }
+            }
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(target.parent);
+                batch.push(target);
+            }
+        };
+
+        let mut batch = Vec::new();
+        for (i, target) in core::mem::take(targets).into_iter().enumerate() {
+            if i % 2 == 1 {
+                targets.push(target);
+            } else {
+                request(target, &mut batch);
+            }
+        }
+
+        // Every target of this round was already answered, so the held back ones have to be
+        // requested now or the loop cannot make progress.
+        if batch.is_empty() {
+            for target in core::mem::take(targets) {
+                request(target, &mut batch);
+            }
+        }
+
+        batch
+    }
+
+    /// Runs the checked out subtrie jobs and hands them back, following up on the jobs a restore
+    /// asks for and leaving `keep` of them out for the caller's next round.
     fn run_jobs(
         apst: &mut ArenaParallelSparseTrie,
         jobs: &mut Vec<SparseSubtrieJob>,
+        keep: usize,
         targets: &mut Vec<ProofV2Target>,
         reported_touched: &mut B256Map<Option<Vec<u8>>>,
     ) {
-        while let Some(mut job) = jobs.pop() {
+        while jobs.len() > keep {
+            let mut job = jobs.pop().expect("more jobs than kept");
             job.run(epoch(0)).expect("subtrie job should succeed");
             if let Some(follow_up) = apst
                 .restore_subtrie_job(job, |event| record_event(event, targets, reported_touched))
             {
-                jobs.push(follow_up);
+                // A follow-up stays out with the kept jobs instead of running right away.
+                jobs.insert(0, follow_up);
             }
         }
-        assert_eq!(apst.subtries_in_flight(), 0, "every job hands its subtrie back");
+        assert_eq!(apst.subtries_in_flight(), keep, "only the kept jobs are still out");
     }
 
     #[test]
@@ -3734,6 +3817,75 @@ mod tests {
             (key(group, index), U256::from(value))
         });
         assert_eq!(trie.root(epoch(2)), reth_trie_common::root::storage_root_unsorted(expected));
+    }
+
+    #[test]
+    fn a_proof_buffered_while_a_job_runs_unblocks_what_the_job_blocked() {
+        // The keys branch on their first nibble at the root and on their second below it, so the
+        // node at [0, 1], which holds three of them, sits exactly on the subtrie boundary.
+        let key = |first: u8, second: u8, third: u8| {
+            let mut key = [0u8; 32];
+            key[0] = (first << 4) | second;
+            key[1] = third << 4;
+            B256::from(key)
+        };
+        let storage: BTreeMap<B256, U256> =
+            [key(0, 1, 1), key(0, 1, 2), key(0, 1, 3), key(0, 2, 0), key(1, 0, 0)]
+                .into_iter()
+                .enumerate()
+                .map(|(i, key)| (key, U256::from(i as u64 + 1)))
+                .collect();
+
+        let harness = ArenaTrieTestHarness::new(storage);
+        let mut trie = ArenaParallelSparseTrie::default().with_parallelism_thresholds(
+            ArenaParallelismThresholds {
+                min_deferred_batch: 1,
+                min_deferred_updates: 1,
+                min_deferred_nodes: 1,
+                ..Default::default()
+            },
+        );
+        let root_node = harness.root_node();
+        trie.set_root(root_node.node, root_node.masks, true).expect("set_root should succeed");
+
+        // Revealing the path to one leaf of the subtrie leaves its siblings blinded.
+        let (mut nodes, _) = harness.proof_v2(&mut [ProofV2Target::new(key(0, 1, 1))]);
+        trie.reveal_nodes(&mut nodes).expect("reveal_nodes should succeed");
+
+        // An update for a blinded sibling is checked out together with the subtrie, so the trie
+        // does not learn that the update needs a proof until the job hands the subtrie back.
+        let blinded = key(0, 1, 2);
+        let value = alloy_rlp::encode_fixed_size(&U256::from(42)).to_vec();
+        let mut jobs = Vec::new();
+        let mut updates = B256Map::from_iter([(blinded, LeafUpdate::Changed(value.clone()))]);
+        trie.update_leaves_deferred(&mut updates, true, |_| {}, &mut jobs)
+            .expect("update_leaves should succeed");
+        assert_eq!(jobs.len(), 1, "the subtrie is checked out for the update");
+
+        // The proof the update needs arrives while the job runs, so the trie can only buffer it.
+        let (mut nodes, _) = harness.proof_v2(&mut [ProofV2Target::new(blinded)]);
+        trie.reveal_nodes_deferred(&mut nodes, true, &mut jobs)
+            .expect("reveal_nodes should succeed");
+        assert_eq!(jobs.len(), 1, "a checked out subtrie cannot be checked out twice");
+
+        let mut targets = Vec::new();
+        let mut touched = B256Map::default();
+        run_jobs(&mut trie, &mut jobs, 0, &mut targets, &mut touched);
+
+        // Nothing is left that could deliver the update: its proof was fetched once and revealed
+        // by the follow-up job, so no further reveal can mark it applicable again.
+        trie.update_leaves(&mut B256Map::default(), |_, _| {
+            panic!("the proof for the blinded sibling was already revealed")
+        })
+        .expect("update_leaves should succeed");
+        assert!(trie.blocked_updates().is_empty(), "the buffered proof unblocked the update");
+        assert_eq!(trie.get_leaf_value(&Nibbles::unpack(blinded)), Some(&value));
+
+        let expected = harness
+            .storage()
+            .iter()
+            .map(|(&key, &value)| (key, if key == blinded { U256::from(42) } else { value }));
+        assert_eq!(trie.root(epoch(1)), reth_trie_common::root::storage_root_unsorted(expected));
     }
 
     use proptest::prelude::*;
