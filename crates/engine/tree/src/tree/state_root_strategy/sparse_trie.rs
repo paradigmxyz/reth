@@ -1414,21 +1414,28 @@ mod tests {
     #[test]
     fn storage_leaf_jobs_preserve_pending_values_and_deduplicate_proofs() {
         with_storage_leaf_task(|task| {
-            let slot = keccak256([1]);
+            let slot = keccak256(0u64.to_be_bytes());
             for index in 0..16u64 {
                 let address = keccak256(index.to_be_bytes());
-                task.new_storage_updates
-                    .entry(address)
-                    .or_default()
-                    .insert(slot, LeafUpdate::Changed(alloy_rlp::encode(1u64)));
+                task.new_storage_updates.insert(
+                    address,
+                    (0..256u64)
+                        .map(|key| {
+                            (
+                                keccak256(key.to_be_bytes()),
+                                LeafUpdate::Changed(alloy_rlp::encode(1u64)),
+                            )
+                        })
+                        .collect(),
+                );
             }
             task.pending_updates = 1;
             task.process_new_updates().unwrap();
-            assert_eq!(task.storage_cache_misses, 16);
-            assert_eq!(task.pending_targets.take().1, 16);
+            assert_eq!(task.storage_cache_misses, 4096);
+            assert_eq!(task.pending_targets.take().1, 4096);
             task.process_leaf_updates(false).unwrap();
             assert_eq!(task.pending_targets.take().1, 0);
-            assert_eq!(task.storage_cache_misses, 32);
+            assert_eq!(task.storage_cache_misses, 8192);
             let addresses = task.storage_updates.keys().copied().collect::<Vec<_>>();
             for address in &addresses {
                 let mut state = HashedPostState::default();
@@ -1454,7 +1461,10 @@ mod tests {
                 assert!(task.storage_updates[&address].is_empty());
                 assert_eq!(
                     task.trie.storage_root(&address, TrieNodeEpoch::UNMODIFIED).unwrap(),
-                    reth_trie_common::root::storage_root_unsorted([(slot, U256::from(2))])
+                    reth_trie_common::root::storage_root_unsorted((0..256u64).map(|key| (
+                        keccak256(key.to_be_bytes()),
+                        U256::from(if key == 0 { 2 } else { 1 })
+                    )))
                 );
             }
         });
