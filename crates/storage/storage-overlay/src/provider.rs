@@ -35,8 +35,9 @@ use reth_trie::{
 };
 use reth_trie_db::{
     DatabaseAccountTrieCursor, DatabaseHashedCursorFactory, DatabaseProof, DatabaseStateRoot,
-    DatabaseStorageRoot, DatabaseStorageTrieCursor, DatabaseTrieCursorFactory, LegacyKeyAdapter,
-    PackedAccountsTrie, PackedKeyAdapter, PackedStoragesTrie,
+    DatabaseStorageProof, DatabaseStorageRoot, DatabaseStorageTrieCursor,
+    DatabaseTrieCursorFactory, LegacyKeyAdapter, PackedAccountsTrie, PackedKeyAdapter,
+    PackedStoragesTrie,
 };
 use std::{cell::OnceCell, fmt, ops::Deref, sync::Arc, time::Instant};
 use tracing::instrument;
@@ -630,27 +631,18 @@ where
     ) -> ProviderResult<StorageMultiProof> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
             let hashed_address = alloy_primitives::keccak256(address);
-            let mut input = self.build_overlay(
+            let input = self.build_overlay(
                 TrieInputSorted::from_unsorted(TrieInput::from_state(
                     HashedPostState::from_hashed_storage(hashed_address, hashed_storage),
                 )),
                 false,
             )?;
-            TrieStorageProof::new_hashed(
-                InMemoryTrieCursorFactory::new(
-                    DatabaseTrieCursorFactory::<_, A>::new(self.provider().tx()),
-                    input.nodes.as_ref(),
-                ),
-                HashedPostStateCursorFactory::new(
-                    DatabaseHashedCursorFactory::new(self.provider().tx()),
-                    input.state.as_ref(),
-                ),
-                hashed_address,
+            <DbStorageProof<'_, _, A>>::overlay_storage_multiproof(
+                self.provider().tx(),
+                address,
+                slots,
+                input,
             )
-            .with_prefix_set_mut(
-                input.prefix_sets.storage_prefix_sets.remove(&hashed_address).unwrap_or_default(),
-            )
-            .storage_multiproof(slots.iter().map(alloy_primitives::keccak256).collect())
             .map_err(ProviderError::from)
         })
     }
@@ -1007,6 +999,11 @@ type DbStateRoot<'a, TX, A> =
     StateRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
 type DbStorageRoot<'a, TX, A> =
     StorageRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
+type DbStorageProof<'a, TX, A> = TrieStorageProof<
+    'static,
+    DatabaseTrieCursorFactory<&'a TX, A>,
+    DatabaseHashedCursorFactory<&'a TX>,
+>;
 type DbProof<'a, TX, A> =
     Proof<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
 

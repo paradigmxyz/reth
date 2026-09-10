@@ -188,13 +188,14 @@ impl<Provider: DBProvider + StorageSettingsCache> StorageRootProvider
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof> {
         reth_trie_db::with_adapter!(self.0, |A| {
-            <DbStorageProof<'_, _, A>>::overlay_storage_multiproof(
-                self.tx(),
-                address,
-                slots,
-                hashed_storage,
-            )
-            .map_err(ProviderError::from)
+            let input = TrieInputSorted::from_unsorted(TrieInput::from_state(
+                HashedPostState::from_hashed_storage(
+                    alloy_primitives::keccak256(address),
+                    hashed_storage,
+                ),
+            ));
+            <DbStorageProof<'_, _, A>>::overlay_storage_multiproof(self.tx(), address, slots, input)
+                .map_err(ProviderError::from)
         })
     }
 }
