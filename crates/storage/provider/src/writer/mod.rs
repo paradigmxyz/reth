@@ -1190,7 +1190,7 @@ mod tests {
         let input = TrieInputSorted::from_state(HashedPostState::from_hashed_storage(
             hashed_address,
             updated_storage.clone(),
-        ));
+        ).into_sorted());
         let storage_root = if is_v2 {
             TestStorageRoot::<_, _, PackedKeyAdapter>::overlay_root(
                 tx,
@@ -1205,7 +1205,7 @@ mod tests {
                 TrieInputSorted::from_state(HashedPostState::from_hashed_storage(
                     hashed_address,
                     updated_storage.clone(),
-                )),
+                ).into_sorted()),
             )
             .unwrap()
         };

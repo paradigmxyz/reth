@@ -533,7 +533,8 @@ where
 {
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
-            let input = self.build_overlay(TrieInputSorted::from_state(hashed_state), false)?;
+            let input =
+                self.build_overlay(TrieInputSorted::from_state(hashed_state.into_sorted()), false)?;
             Ok(<DbStateRoot<'_, _, A>>::overlay_root_from_nodes(self.provider().tx(), input)?)
         })
     }
@@ -553,7 +554,8 @@ where
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
-            let input = self.build_overlay(TrieInputSorted::from_state(hashed_state), true)?;
+            let input =
+                self.build_overlay(TrieInputSorted::from_state(hashed_state.into_sorted()), true)?;
             Ok(<DbStateRoot<'_, _, A>>::overlay_root_from_nodes_with_updates(
                 self.provider().tx(),
                 input,
@@ -596,10 +598,10 @@ where
         reth_trie_db::with_adapter!(self.provider(), |A| {
             let hashed_address = alloy_primitives::keccak256(address);
             let input = self.build_overlay(
-                TrieInputSorted::from_state(HashedPostState::from_hashed_storage(
-                    hashed_address,
-                    hashed_storage,
-                )),
+                TrieInputSorted::from_state(
+                    HashedPostState::from_hashed_storage(hashed_address, hashed_storage)
+                        .into_sorted(),
+                ),
                 false,
             )?;
             <DbStorageRoot<'_, _, A>>::overlay_root(self.provider().tx(), address, input)
@@ -627,10 +629,10 @@ where
         reth_trie_db::with_adapter!(self.provider(), |A| {
             let hashed_address = alloy_primitives::keccak256(address);
             let input = self.build_overlay(
-                TrieInputSorted::from_state(HashedPostState::from_hashed_storage(
-                    hashed_address,
-                    hashed_storage,
-                )),
+                TrieInputSorted::from_state(
+                    HashedPostState::from_hashed_storage(hashed_address, hashed_storage)
+                        .into_sorted(),
+                ),
                 false,
             )?;
             <DbStorageProof<'_, _, A>>::overlay_storage_multiproof(

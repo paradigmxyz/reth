@@ -160,11 +160,11 @@ impl TrieInputSorted {
         Self { nodes, state, prefix_sets }
     }
 
-    /// Create new sorted trie input from in-memory state. The prefix sets will be constructed and
-    /// set automatically.
-    pub fn from_state(state: HashedPostState) -> Self {
+    /// Create new sorted trie input from sorted in-memory state. The prefix sets will be
+    /// constructed and set automatically.
+    pub fn from_state(state: HashedPostStateSorted) -> Self {
         let prefix_sets = state.construct_prefix_sets();
-        Self { nodes: Default::default(), state: Arc::new(state.into_sorted()), prefix_sets }
+        Self { nodes: Default::default(), state: Arc::new(state), prefix_sets }
     }
 
     /// Create from unsorted [`TrieInput`] by sorting.
