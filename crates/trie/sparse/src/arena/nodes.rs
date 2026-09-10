@@ -233,34 +233,6 @@ impl ArenaSparseNode {
             _ => None,
         }
     }
-
-    /// Returns the branch data if this node (or its subtrie root) is a branch, or `None`.
-    pub(super) fn as_branch(&self) -> Option<&ArenaSparseNodeBranch> {
-        match self {
-            Self::Branch(b) => Some(b),
-            Self::Subtrie(s) => s.arena[s.root].as_branch(),
-            _ => None,
-        }
-    }
-
-    /// Returns `true` if this node should contribute a set bit in its parent's `hash_mask`.
-    ///
-    /// That is, if the node is a branch with no short key (no extension) whose cached
-    /// RLP is a hash (>= 32 bytes). Small branches whose RLP is embedded don't get a
-    /// `hash_mask` bit.
-    pub(super) fn hash_mask_bit(&self) -> bool {
-        self.as_branch().is_some_and(|b| {
-            b.short_key.is_empty() &&
-                b.state.cached_rlp_node().expect("branch's RlpNode must be cached").is_hash()
-        })
-    }
-
-    /// Returns `true` if this node should contribute a set bit in its parent's `tree_mask`.
-    ///
-    /// That is, if the node is a branch with any non-empty `branch_masks`.
-    pub(super) fn tree_mask_bit(&self) -> bool {
-        self.as_branch().is_some_and(|b| !b.branch_masks.is_empty())
-    }
 }
 
 impl ArenaSparseNode {

@@ -1010,7 +1010,7 @@ impl ArenaParallelSparseTrie {
                 return rlp_node
             }
             ArenaSparseNode::Leaf { .. } => {
-                return Self::encode_leaf(arena, root, rlp_buf, new_epoch);
+                return Self::encode_leaf(&mut arena[root], rlp_buf, new_epoch);
             }
             ArenaSparseNode::Branch(b) => {
                 if let ArenaSparseNodeState::Cached { rlp_node, .. } = &b.state {
@@ -1044,8 +1044,9 @@ impl ArenaParallelSparseTrie {
                         );
                     }
                     ArenaSparseNodeBranchChild::Revealed(index) => {
-                        if let ArenaSparseNode::Branch(branch) = &arena[index] &&
-                            !arena[index].is_cached()
+                        let child = &mut arena[index];
+                        if let ArenaSparseNode::Branch(branch) = child &&
+                            !matches!(branch.state, ArenaSparseNodeState::Cached { .. })
                         {
                             let mut path = frame.path;
                             path.push_unchecked(nibble);
@@ -1058,20 +1059,30 @@ impl ArenaParallelSparseTrie {
                             ));
                             continue;
                         }
-                        if matches!(arena[index], ArenaSparseNode::Leaf { .. }) {
-                            Self::encode_leaf(arena, index, rlp_buf, new_epoch);
-                        }
-                        let child = &arena[index];
+                        let encoded_leaf = matches!(child, ArenaSparseNode::Leaf { .. })
+                            .then(|| Self::encode_leaf(child, rlp_buf, new_epoch));
+                        let child = match child {
+                            ArenaSparseNode::Subtrie(subtrie) => &subtrie.arena[subtrie.root],
+                            child => child,
+                        };
                         let Some(ArenaSparseNodeState::Cached { rlp_node, epoch }) =
                             child.state_ref()
                         else {
                             panic!("child must be cached before consumption");
                         };
+                        let (hash_bit, tree_bit) = match child {
+                            ArenaSparseNode::Branch(branch) => (
+                                branch.short_key.is_empty() && rlp_node.is_hash(),
+                                !branch.branch_masks.is_empty(),
+                            ),
+                            ArenaSparseNode::Leaf { .. } => (false, false),
+                            _ => unreachable!("child must be a branch or leaf"),
+                        };
                         frame.consume(
-                            rlp_node.clone(),
+                            encoded_leaf.unwrap_or_else(|| rlp_node.clone()),
                             *epoch,
-                            child.hash_mask_bit(),
-                            child.tree_mask_bit(),
+                            hash_bit,
+                            tree_bit,
                             rlp_node_buf,
                             hash_buf,
                         );
@@ -1125,10 +1136,11 @@ impl ArenaParallelSparseTrie {
             rlp_node_buf.truncate(frame.results_start);
             hash_buf.truncate(frame.hashes_start);
             let Some(parent) = hash_stack.last_mut() else { return rlp_node };
+            let hash_bit = branch.short_key.is_empty() && rlp_node.is_hash();
             parent.consume(
-                rlp_node.clone(),
+                rlp_node,
                 node_epoch,
-                branch.short_key.is_empty() && rlp_node.is_hash(),
+                hash_bit,
                 !frame.masks.is_empty(),
                 rlp_node_buf,
                 hash_buf,
@@ -1262,12 +1274,11 @@ impl ArenaParallelSparseTrie {
     ///
     /// If the leaf is already cached, its existing `RlpNode` is reused.
     fn encode_leaf(
-        arena: &mut NodeArena,
-        idx: Index,
+        node: &mut ArenaSparseNode,
         rlp_buf: &mut Vec<u8>,
         new_epoch: TrieNodeEpoch,
     ) -> RlpNode {
-        let (key, value, state) = match &arena[idx] {
+        let (key, value, state) = match &*node {
             ArenaSparseNode::Leaf { key, value, state } => (key, value, state),
             _ => unreachable!("encode_leaf called on non-Leaf node"),
         };
@@ -1283,8 +1294,7 @@ impl ArenaParallelSparseTrie {
         rlp_buf.clear();
         let rlp_node = LeafNodeRef { key, value }.rlp(rlp_buf);
 
-        *arena[idx].state_mut() =
-            ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone(), epoch };
+        *node.state_mut() = ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone(), epoch };
         rlp_node
     }
 
