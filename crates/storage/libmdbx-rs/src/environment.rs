@@ -684,6 +684,7 @@ impl EnvironmentBuilder {
                     ))?;
                 }
                 for (opt, v) in [
+                    (ffi::MDBX_opt_prefault_write_enable, Some(0)),
                     (ffi::MDBX_opt_max_db, self.max_dbs),
                     (ffi::MDBX_opt_rp_augment_limit, self.rp_augment_limit),
                     (ffi::MDBX_opt_loose_limit, self.loose_limit),
