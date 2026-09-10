@@ -974,7 +974,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             trace!(target: "providers::static_file", ?segment, ?fixed_block_range, "Creating jar from scratch");
             let path = self.path.join(segment.filename(fixed_block_range));
             let jar = NippyJar::load(&path).map_err(ProviderError::other)?;
-            self.map.entry(key).insert(LoadedJar::new(jar)?).downgrade().into()
+            let loaded = LoadedJar::new(jar)?;
+            // The cache may have been populated since the initial miss, including by
+            // `update_index` publishing a newer snapshot while we loaded this jar without a lock.
+            // Preserve that entry instead of overwriting it with our potentially stale snapshot.
+            self.map.entry(key).or_insert(loaded).downgrade().into()
         };
 
         if let Some(metrics) = &self.metrics {
