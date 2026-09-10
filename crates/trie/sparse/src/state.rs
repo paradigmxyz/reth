@@ -80,6 +80,11 @@ impl<A, S> SparseStateTrie<A, S> {
         self
     }
 
+    /// Returns whether branch node updates and deletions are retained.
+    pub const fn retains_updates(&self) -> bool {
+        self.retain_updates
+    }
+
     /// Set the accounts trie to the given `RevealableSparseTrie`.
     pub fn set_accounts_trie(&mut self, trie: RevealableSparseTrie<A>) {
         self.state = trie;
@@ -110,6 +115,14 @@ impl<A, S> SparseStateTrie<A, S> {
     /// calculating the state root.
     pub fn take_deferred_drops(&mut self) -> DeferredDrops {
         core::mem::take(&mut self.deferred_drops)
+    }
+
+    /// Queues a proof node buffer for deferred dropping.
+    ///
+    /// Callers that reveal proof nodes into a storage trie taken out of this state trie should
+    /// hand the buffer back here so it is dropped with the rest of them.
+    pub fn defer_drop_proof_nodes(&mut self, nodes: Vec<ProofTrieNodeV2>) {
+        self.deferred_drops.proof_nodes_bufs.push(nodes);
     }
 }
 
