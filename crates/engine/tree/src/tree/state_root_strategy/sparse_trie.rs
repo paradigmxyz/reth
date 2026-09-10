@@ -770,9 +770,11 @@ where
             //   stay valid and map reallocation cannot occur;
             // - each pointer is consumed by at most one rayon task, so no aliasing mutable access.
             unsafe {
+                // Require more hashing work before nesting parallelism inside the outer batch.
                 (*trie)
-                    .root(new_epoch)
+                    .as_revealed_mut()
                     .expect("updates are drained, trie should be revealed by now")
+                    .root_with_hashing_threshold(new_epoch, Some(1024))
             };
         });
     }

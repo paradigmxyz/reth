@@ -132,6 +132,20 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// The root hash of the trie.
     fn root(&mut self, new_epoch: TrieNodeEpoch) -> B256;
 
+    /// Calculates the root with a per-call threshold for parallel lower-subtrie hashing.
+    ///
+    /// `None` requests serial hashing; `Some(n)` permits parallel hashing when the total
+    /// dirty leaf count reaches `n`. Implementations without parallel hashing may ignore
+    /// this hint. The trie's configured thresholds are unchanged.
+    fn root_with_hashing_threshold(
+        &mut self,
+        new_epoch: TrieNodeEpoch,
+        min_dirty_leaves: Option<u64>,
+    ) -> B256 {
+        let _ = min_dirty_leaves;
+        self.root(new_epoch)
+    }
+
     /// Returns true if the root node is cached and does not need any recomputation.
     fn is_root_cached(&self) -> bool;
 
