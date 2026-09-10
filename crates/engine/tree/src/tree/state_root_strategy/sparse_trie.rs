@@ -10,7 +10,7 @@ use alloy_primitives::{
 use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use metrics::{Gauge, Histogram};
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, FastInstant as Instant};
 use reth_tasks::Runtime;
@@ -638,37 +638,53 @@ where
 
         // Process all storage updates, skipping tries with no pending updates.
         let span = trace_span!("process_storage_leaf_updates").entered();
-        for (address, updates) in storage_updates {
-            if updates.is_empty() {
-                continue;
-            }
-            let _enter = trace_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage_trie_leaf_updates", a=%address).entered();
+        let mut jobs = storage_updates
+            .iter_mut()
+            .filter(|(_, updates)| !updates.is_empty())
+            .map(|(address, updates)| {
+                let trie = self.trie.take_or_create_storage_trie(address);
+                let fetched = self.fetched_storage_targets.remove(address).unwrap_or_default();
+                (*address, trie, fetched, updates, Vec::new(), 0, 0, Ok(()))
+            })
+            .collect::<Vec<_>>();
 
-            let trie = self.trie.get_or_create_storage_trie_mut(*address);
-            let fetched = self.fetched_storage_targets.entry(*address).or_default();
-            let mut targets = Vec::new();
-
-            let updates_len_before = updates.len();
-            trie.update_leaves(updates, |path, parent| match fetched.entry(path) {
-                Entry::Occupied(mut entry) => {
-                    if parent < *entry.get() {
+        jobs.par_iter_mut().for_each(
+            |(address, trie, fetched, updates, targets, hits, misses, result)| {
+                let _enter = trace_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage_trie_leaf_updates", a=%address).entered();
+                let updates_len_before = updates.len();
+                *result = trie.update_leaves(updates, |path, parent| match fetched.entry(path) {
+                    Entry::Occupied(mut entry) => {
+                        if parent < *entry.get() {
+                            entry.insert(parent);
+                            targets.push(ProofV2Target::new(path).with_parent(parent));
+                        }
+                    }
+                    Entry::Vacant(entry) => {
                         entry.insert(parent);
                         targets.push(ProofV2Target::new(path).with_parent(parent));
                     }
+                });
+                if result.is_ok() {
+                    *hits = (updates_len_before - updates.len()) as u64;
+                    *misses = updates.len() as u64;
                 }
-                Entry::Vacant(entry) => {
-                    entry.insert(parent);
-                    targets.push(ProofV2Target::new(path).with_parent(parent));
-                }
-            })?;
-            let updates_len_after = updates.len();
-            self.storage_cache_hits += (updates_len_before - updates_len_after) as u64;
-            self.storage_cache_misses += updates_len_after as u64;
+            },
+        );
 
+        // All synchronous jobs finish and restore their tries before an error can leave this phase.
+        // Each job owns its proof tracking and exclusively borrows its pending updates.
+        let mut result = Ok(());
+        for (address, trie, fetched, _, targets, hits, misses, job_result) in jobs {
+            self.trie.insert_storage_trie(address, trie);
+            self.fetched_storage_targets.insert(address, fetched);
+            self.storage_cache_hits += hits;
+            self.storage_cache_misses += misses;
             if !targets.is_empty() {
-                self.pending_targets.extend_storage_targets(address, targets);
+                self.pending_targets.extend_storage_targets(&address, targets);
             }
+            result = result.and(job_result);
         }
+        result?;
 
         drop(span);
 
@@ -1227,6 +1243,275 @@ mod tests {
         assert_eq!(decoded.balance, U256::from(42));
         assert_eq!(decoded.storage_root, storage_root);
         assert_eq!(account_rlp_buf, encoded);
+    }
+
+    fn with_storage_leaf_task(f: impl FnOnce(&mut SparseTrieCacheTask)) {
+        let runtime = reth_tasks::Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayManager::<reth_chain_state::EthPrimitives>::default()
+                .overlay_builder(anchor_hash),
+        );
+        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
+        let proof_worker_handle = ProofWorkerHandle::new(
+            &runtime,
+            ProofTaskCtx::new(state_provider_factory),
+            false,
+            proof_result_tx.clone(),
+        );
+
+        let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+        let trie = SparseStateTrie::default()
+            .with_accounts_trie(default_trie.clone())
+            .with_default_storage_trie(default_trie)
+            .with_updates(true);
+
+        let parent_state_root = B256::from([0x55; 32]);
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (_cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
+        let mut task = SparseTrieCacheTask::new_with_trie(
+            &runtime,
+            updates_rx,
+            cancel_rx,
+            std::sync::mpsc::channel().0,
+            proof_worker_handle,
+            proof_result_tx,
+            proof_result_rx,
+            SparseTrieTaskMetrics::default(),
+            trie,
+            parent_state_root,
+            TrieNodeEpoch::UNMODIFIED,
+            1,
+        );
+
+        f(&mut task);
+        drop(updates_tx);
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
+    }
+
+    #[test]
+    fn storage_leaf_jobs_match_serial_roots_and_updates() {
+        with_storage_leaf_task(|task| {
+            let mut reference = B256Map::default();
+            for index in 0..32u64 {
+                let address = keccak256(index.to_be_bytes());
+                let mut trie = RevealableSparseTrie::<ArenaParallelSparseTrie>::revealed_empty();
+                trie.as_revealed_mut().unwrap().set_updates(true);
+                reference.insert(address, trie.clone());
+                task.trie.insert_storage_trie(address, trie);
+                let count = if index == 0 { 1024 } else { 8 };
+                let updates = (0..count)
+                    .map(|slot: u64| {
+                        (
+                            keccak256(slot.to_be_bytes()),
+                            LeafUpdate::Changed(alloy_rlp::encode(slot + 1)),
+                        )
+                    })
+                    .collect::<B256Map<_>>();
+                let mut serial_updates = updates.clone();
+                reference
+                    .get_mut(&address)
+                    .unwrap()
+                    .update_leaves(&mut serial_updates, |_, _| panic!("unexpected proof"))
+                    .unwrap();
+                task.new_storage_updates.insert(address, updates);
+            }
+            task.process_leaf_updates(true).unwrap();
+            assert!(task.new_storage_updates.values().all(|updates| updates.is_empty()));
+            assert_eq!(task.storage_cache_hits, 1024 + 31 * 8);
+            assert_eq!(task.storage_cache_misses, 0);
+            for (address, serial) in &mut reference {
+                let parallel = task.trie.storage_tries_mut().get_mut(address).unwrap();
+                assert_eq!(
+                    parallel.root(TrieNodeEpoch::UNMODIFIED),
+                    serial.root(TrieNodeEpoch::UNMODIFIED)
+                );
+                let parallel = parallel.as_revealed_mut().unwrap();
+                let serial = serial.as_revealed_mut().unwrap();
+                assert_eq!(parallel.take_updates(), serial.take_updates());
+                assert_eq!(parallel.take_updates(), serial.take_updates());
+            }
+            task.process_leaf_updates(true).unwrap();
+            assert_eq!(task.storage_cache_hits, 1024 + 31 * 8);
+            for (address, serial) in &mut reference {
+                let updates = B256Map::from_iter([
+                    (keccak256(0u64.to_be_bytes()), LeafUpdate::Changed(Vec::new())),
+                    (keccak256(1u64.to_be_bytes()), LeafUpdate::Changed(alloy_rlp::encode(99u64))),
+                    (keccak256(2u64.to_be_bytes()), LeafUpdate::Touched),
+                ]);
+                serial
+                    .update_leaves(&mut updates.clone(), |_, _| panic!("unexpected proof"))
+                    .unwrap();
+                task.new_storage_updates.insert(*address, updates);
+            }
+            task.process_leaf_updates(true).unwrap();
+            for (address, serial) in &mut reference {
+                let parallel = task.trie.storage_tries_mut().get_mut(address).unwrap();
+                assert_eq!(
+                    parallel.root(TrieNodeEpoch::UNMODIFIED),
+                    serial.root(TrieNodeEpoch::UNMODIFIED)
+                );
+                assert_eq!(
+                    parallel.as_revealed_mut().unwrap().take_updates(),
+                    serial.as_revealed_mut().unwrap().take_updates()
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn storage_leaf_jobs_preserve_pending_values_and_deduplicate_proofs() {
+        with_storage_leaf_task(|task| {
+            let slot = keccak256([1]);
+            for index in 0..16u64 {
+                let address = keccak256(index.to_be_bytes());
+                task.new_storage_updates
+                    .entry(address)
+                    .or_default()
+                    .insert(slot, LeafUpdate::Changed(alloy_rlp::encode(1u64)));
+            }
+            task.pending_updates = 1;
+            task.process_new_updates().unwrap();
+            assert_eq!(task.storage_cache_misses, 16);
+            assert_eq!(task.pending_targets.take().1, 16);
+            task.process_leaf_updates(false).unwrap();
+            assert_eq!(task.pending_targets.take().1, 0);
+            assert_eq!(task.storage_cache_misses, 32);
+            let addresses = task.storage_updates.keys().copied().collect::<Vec<_>>();
+            for address in &addresses {
+                let mut state = HashedPostState::default();
+                let mut storage = reth_trie::HashedStorage::default();
+                storage.storage.insert(slot, U256::from(2));
+                state.storages.insert(*address, storage);
+                task.on_hashed_state_update(state);
+            }
+            task.pending_updates = 1;
+            task.process_new_updates().unwrap();
+            for address in &addresses {
+                assert_eq!(
+                    task.storage_updates[address][&slot],
+                    LeafUpdate::Changed(alloy_rlp::encode(2u64))
+                );
+                task.trie
+                    .get_or_create_storage_trie_mut(*address)
+                    .reveal_root(reth_trie_common::TrieNodeV2::EmptyRoot, None, true)
+                    .unwrap();
+            }
+            task.process_leaf_updates(false).unwrap();
+            for address in addresses {
+                assert!(task.storage_updates[&address].is_empty());
+                assert_eq!(
+                    task.trie.storage_root(&address, TrieNodeEpoch::UNMODIFIED).unwrap(),
+                    reth_trie_common::root::storage_root_unsorted([(slot, U256::from(2))])
+                );
+            }
+        });
+    }
+
+    #[test]
+    #[ignore = "focused storage-leaf scheduling benchmark"]
+    fn bench_storage_leaf_distributions() {
+        with_storage_leaf_task(|task| {
+            for (name, sizes) in [
+                ("tiny", vec![1; 4]),
+                ("many_small", vec![16; 256]),
+                ("dominant", vec![4096]),
+                ("mixed", std::iter::once(3072).chain(std::iter::repeat_n(8, 128)).collect()),
+            ] {
+                let seed = sizes
+                    .iter()
+                    .enumerate()
+                    .map(|(index, count)| {
+                        let address = keccak256(index.to_be_bytes());
+                        let updates = (0..*count)
+                            .map(|slot: u64| {
+                                (
+                                    keccak256(slot.to_be_bytes()),
+                                    LeafUpdate::Changed(alloy_rlp::encode(slot + 1)),
+                                )
+                            })
+                            .collect::<B256Map<_>>();
+                        (address, updates)
+                    })
+                    .collect::<B256Map<_>>();
+                let mut serial_times = Vec::new();
+                let mut parallel_times = Vec::new();
+                for iteration in 0..60 {
+                    // Alternate order; reset outside timing so both paths apply identical fresh
+                    // leaves.
+                    for parallel in [iteration % 2 == 0, iteration % 2 != 0] {
+                        task.new_storage_updates = seed.clone();
+                        task.trie.storage_tries_mut().clear();
+                        task.fetched_storage_targets.clear();
+                        for address in seed.keys() {
+                            task.trie.insert_storage_trie(
+                                *address,
+                                RevealableSparseTrie::revealed_empty(),
+                            );
+                            task.fetched_storage_targets.entry(*address).or_default();
+                        }
+                        let start = std::time::Instant::now();
+                        if parallel {
+                            task.process_leaf_updates(true).unwrap();
+                        } else {
+                            for (address, updates) in &mut task.new_storage_updates {
+                                let trie = task.trie.get_or_create_storage_trie_mut(*address);
+                                let fetched =
+                                    task.fetched_storage_targets.entry(*address).or_default();
+                                let mut targets = Vec::new();
+                                let before = updates.len();
+                                trie.update_leaves(updates, |path, parent| {
+                                    match fetched.entry(path) {
+                                        Entry::Occupied(mut entry) => {
+                                            if parent < *entry.get() {
+                                                entry.insert(parent);
+                                                targets.push(
+                                                    ProofV2Target::new(path).with_parent(parent),
+                                                );
+                                            }
+                                        }
+                                        Entry::Vacant(entry) => {
+                                            entry.insert(parent);
+                                            targets
+                                                .push(ProofV2Target::new(path).with_parent(parent));
+                                        }
+                                    }
+                                })
+                                .unwrap();
+                                task.storage_cache_hits += (before - updates.len()) as u64;
+                                task.storage_cache_misses += updates.len() as u64;
+                                if !targets.is_empty() {
+                                    task.pending_targets.extend_storage_targets(address, targets);
+                                }
+                            }
+                            task.process_account_leaf_updates(true).unwrap();
+                        }
+                        let elapsed = start.elapsed().as_secs_f64() * 1e6;
+                        if iteration >= 10 {
+                            if parallel {
+                                parallel_times.push(elapsed);
+                            } else {
+                                serial_times.push(elapsed);
+                            }
+                        }
+                        assert!(task
+                            .new_storage_updates
+                            .values()
+                            .all(|updates| updates.is_empty()));
+                    }
+                }
+                let mean = |values: &[f64]| values.iter().sum::<f64>() / values.len() as f64;
+                eprintln!(
+                    "storage_leaf_bench {name} threads={} serial_us={:.3} parallel_us={:.3}",
+                    rayon::current_num_threads(),
+                    mean(&serial_times),
+                    mean(&parallel_times)
+                );
+            }
+        });
     }
 
     #[test]
