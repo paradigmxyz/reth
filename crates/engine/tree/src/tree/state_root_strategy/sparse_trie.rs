@@ -806,6 +806,7 @@ where
             let StorageSlot::Idle(work) = slot else {
                 unreachable!("an idle slot is only checked out from here")
             };
+
             if inline_round || work.is_target_only() {
                 let output = work.run(new_epoch, retain_updates);
                 self.apply_storage_output(address, output)?;
@@ -1300,21 +1301,19 @@ where
                 account_targets.len().saturating_sub(MAX_STALLED_PROOF_TARGETS_TO_LOG);
             account_targets.truncate(MAX_STALLED_PROOF_TARGETS_TO_LOG);
 
-            let mut storage_targets = self
-                .storage
-                .iter()
-                .filter_map(|(address, slot)| match slot {
-                    StorageSlot::Idle(work) => Some((address, work)),
-                    StorageSlot::InFlight(_) => None,
-                })
-                .flat_map(|(address, work)| {
-                    work.pending
-                        .keys()
-                        .copied()
-                        .chain(work.trie.blocked_updates().keys())
-                        .map(move |target| (*address, target, work.fetched.get(&target).copied()))
-                })
-                .collect::<Vec<_>>();
+            let mut storage_targets =
+                self.storage
+                    .iter()
+                    .filter_map(|(address, slot)| match slot {
+                        StorageSlot::Idle(work) => Some((address, work)),
+                        StorageSlot::InFlight(_) => None,
+                    })
+                    .flat_map(|(address, work)| {
+                        work.pending.keys().copied().chain(work.trie.blocked_updates().keys()).map(
+                            move |target| (*address, target, work.fetched.get(&target).copied()),
+                        )
+                    })
+                    .collect::<Vec<_>>();
             storage_targets.sort_unstable();
             let storage_targets_truncated =
                 storage_targets.len().saturating_sub(MAX_STALLED_PROOF_TARGETS_TO_LOG);
